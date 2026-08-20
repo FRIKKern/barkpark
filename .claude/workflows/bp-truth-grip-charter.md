@@ -3071,3 +3071,158 @@ this wave):
 Backlog, named-not-built: `task-8b3de757996336f9` (pnpm/docker `verbRule` twin, broadened to the npm
 config long-tail — D137); `tgw4-absence-veto-stops-at-the-rerun-seam` (fail-closed refused-command
 read-contract gap). Both OPEN, pre-existing children.
+
+- **D142 — THE DONE SET IS TRUE: FALSE-DONE COUNT = 0 over the full 62-row done universe; zero
+  reopens warranted, none manufactured.** An independent GR112-style false-done audit re-derived the
+  live denominator (Postgres, not `child_count` 147), pinned against `origin/main` and ran two
+  100%-coverage mechanical sweeps plus a stratified judgment layer over every done row. **The true
+  done universe is 62, not 54:** the flat `parent_id == truth-grip-epic` filter drops 16 grandchildren
+  parented to `tgw1-workflow-gate-wiring` (itself done), of which **8 are done and are the
+  highest-stakes wave-2 grip-engine rows** (`tgw2-adjudicator`, `-grip-quote-safety`,
+  `-fold-reread-derived-level`, `-inloop-gate`, `-recipe-ledger`, `-l4-artifact-census`,
+  `-decide-survey-projection`, `-wild-bulk-fanout-floor`). Both sweeps had originally run against the
+  flat 54 and were re-run against the 8 to close the gap. `seal.mjs`'s own header (:50-52) already
+  documents this 16-row drop — the denominator correction is baked into the code under audit. SWEEP A
+  (SHA-ancestry via `git rev-list --count origin/main..<sha> | grep -qx 0`, never the `is-ancestor`
+  form the grip's own `screenCommand` refuses as a write shape): every cited PR merge commit resolves
+  to an ancestor of `origin/main`; non-ancestor branch-tip SHAs were squash-resolved before any verdict
+  (superseded-landed, TRUE — no manufactured reopen). SWEEP B (close-provenance from `doc.claim`, not
+  `bp task events` which carry no actor): provenance recovered for 61/62; the one null-claim row
+  (`tgw5-prescreen-verb`, carrying the `Historical completion reconciled` seal string) is EXCUSED —
+  its cited verb re-derives `ADMIT[0]/REFUSE[1]/exit 1/no-mutation` when RUN on `origin/main`. The seal
+  string appears in 7 rows, all with full N/N criteria and real file:line evidence — benign, not the
+  Felix fabrication shape. The content-close dependency graph is a clean DAG (no cycles). Reverse
+  direction measured: 0 shipped-but-open and 0 shipped-but-cancelled mislabels. *Why: a grip/guard fix
+  marked done but not landed would be the highest-stakes false-done — the correctness guard with a hole
+  nobody knows about. The audit proves that did not happen anywhere in the done set.*
+
+- **D143 — GUARD MUTATION IS THE TRUTH AUTHORITY, and the six highest-stakes guards are LIVE
+  (red-when-reverted), not dead lines present on main.** The vacuity defense holds: because the grip
+  suite is not CI-gated, guard-exists + test-reds-on-revert IS the L1 truth for a guard-fix row. Six
+  targeted mutation-reverts, each restored to green: `screen.mjs` `git --output` refusal (5 reds) and
+  the `go coverprofile` write-flag (5 reds); `rerun.mjs` `classifySafety` quote-blanking (2 reds);
+  `seal.mjs` `adjudicateCriterion` polarity/verdict veto (2 reds); `level.mjs` `deriveLevel`
+  compound-walk (2 reds) and the `GENERATED_ARTIFACT_PATTERNS` `_gen.go` L4 census entry (1 red). The
+  cited capabilities are present on `origin/main` (line-drifted from the closes, grep-verified — the
+  tree is ~187 commits past). *Why: Sweep A proves code LANDED, not that it DOES what the criterion
+  claims; mutation closes that gap for the rows where it matters most.*
+
+- **D144 — FINDING (NOT a false-done): the grip suite is 1-red on `origin/main` —
+  `adjudicate.test.mjs:418` (the D88 caller-boundary test) pins a since-corrected over-refusal.** The
+  test asserts `screenCommand("git -C tooling/grip show HEAD:README.md")` is REFUSED, but the tgw4
+  value-global fix (`GIT_VALUE_GLOBALS`/`dropValueGlobals`, `screen.mjs:437/444`) since taught the
+  parser that `-C <dir>` is a value-taking global, so that safe read is now correctly ADMITTED. The
+  guard got STRICTER-correct (still refuses `git merge-base --is-ancestor` and every write verb); it
+  merely stopped over-refusing one safe read, and the co-scoped test was never updated. This is a
+  test-hygiene defect, not a guard hole, so NO row was reopened. It is invisible because the suite is
+  not CI-gated, and it is a concrete PREREQUISITE for `tgw6-bl-grip-suite-has-no-ci` (D104/D128 forbid
+  advisory CI on a red main). Distinct from the D141 `inloop-gate` 22/23 reds. Filed as backlog
+  `tgw-bl-adjudicate-d88-stale-pin` (OPEN). *Why: the epic exists to make an undetected level-skip
+  impossible; an undetected red on main is exactly the shape it should surface.*
+
+### Wave 2026-08-18 — DONE-SET FALSE-DONE AUDIT (verify-heavy, READ-ONLY). Parent `truth-grip-epic`. Paper `truth-grip-done-set-audit-2026-08-18`. Referent `truth-grip-epic-doneset-audit-log`.
+
+No construction: the fence is a read-only ledger audit (`bp` + `git` reads on `origin/main`) plus
+reopen-stage writes and this charter note. NO code edits — the guard-mutation cohort was proven by
+revert-in-a-throwaway-worktree, never on main. Six verifiers ran both 100% sweeps over the full 62-row
+done universe, mutation-proved the six highest-stakes guards, recovered close provenance, and measured
+both directions.
+
+| Lane | Coverage | Verdict |
+|---|---|---|
+| Sweep A — SHA-ancestry | 62/62 done rows, all cited PRs resolved | 0 genuinely-absent; every landing an ancestor |
+| Sweep B — close provenance | 61/62 from `doc.claim`; 1 null-claim excused by re-derivation | 0 fabrication-shape matches |
+| Guard mutation | 6 highest-stakes guards reverted | all LIVE (red-when-reverted) |
+| Content-close DAG | 6 mass-close rows, transitive targets | clean DAG, no cycles, all targets done/present |
+| Reverse mirror | open + cancelled cohorts sampled | 0 shipped-but-open, 0 shipped-but-cancelled |
+
+**Whole-ledger trust verdict: the truth-grip done set is TRUE. False-done count = 0.**
+
+Reopens issued this wave: NONE (none warranted, none manufactured). Backlog, named-not-built:
+`tgw-bl-adjudicate-d88-stale-pin` (D144, the stale D88 test — blocks tgw6 grip-CI); the pre-existing
+`tgw6-bl-grip-suite-has-no-ci` (OPEN, D128 — its OPEN status is legitimate and now has a concrete
+prerequisite named). No build slices: the audit warrants zero reopens and the fence is read-only.
+
+### Wave 2026-08-18 — WAVE 15: TWO HONEST LOOSE ENDS (verify-heavy FIX wave). Parent `truth-grip-epic`. Paper `truth-grip-wave-15-2026-08-18`. Referent `truth-grip-epic-wave-15-log`.
+
+The done-set audit (D142, 62/62 true) left two offline-buildable, mutation-provable loose ends. Wave 15
+fixes BOTH in one worktree-isolated fence (`tooling/grip/`), two separate PRs, no publish-floor trip.
+Both fixes were IMPLEMENTED-AND-CERTIFIED in throwaway worktrees during verify; builders re-land them on
+fresh branches from clean origin/main. Re-smoked live on `origin/main` f3c4b6b04: D88 red, inloop-gate
+28/28 green, level.test 76/76 green, corpus {L1:32,L2:93,L3:380,L6:146}, no scaffy demotion on main.
+
+- **D145 — WAVE 15 IS A TWO-TARGET FIX WAVE, byte-disjoint, two PRs, worktree-isolated.** FIX 2 (D88
+  test split) lands first — trivial, greens the whole grip suite. FIX 1 (scaffy anchor) rides its own PR
+  behind the hand-run matrix. Files disjoint (`adjudicate.test.mjs` vs `level.mjs` + `level.test.mjs`),
+  no ordering dependency. All work in a worktree cut from CLEAN origin/main — the primary carries another
+  session's uncommitted cloud-build wave-2b work and is never touched. *Why: separation frees the
+  green-main/CI-prep unblock from FIX 1's risk review at zero cost.*
+
+- **D146 — #12181 SHIPS BY CLOSE+FRESH, superseding D140's amend routing; the ratified verdict + remedy
+  are preserved byte-for-byte.** D140's "the tgw12-s2 builder amends PR #12181" is a tactical filing
+  sentence (PR-routing), NOT a fact-authority invariant — the ratified content is the REQUEST-CHANGES
+  verdict + the anchor-and-assert remedy, satisfied by ANY PR that lands them. #12181's base is 28
+  commits stale and its branch belongs to the tgw12-s2 builder (Heggemsnes: no uninvited push). Close
+  #12181, cut fresh from clean origin/main, re-land the demotion + corrected anchor + ported tests.
+  `tgw13-s1` criterion 4 re-worded from "amend #12181" to "the fresh corrected PR" so the row stays
+  closeable. *Why: overriding a tactical routing clause preserves the invariant D140 protects; a
+  criterion pinned to a superseded mechanism is the false-done shape this epic refuses.*
+
+- **D147 — THE REMEDY IS NOT ONE LINE: the anchor must skip bp's value-taking globals per the arity
+  authority `internal/cli/globals.go` `valueFlags`.** D140 wrote "one line, byte-disjoint" — it lacked
+  the fact that a naive skip-set reintroduces the OPPOSITE over-refusal (fails to demote a genuine local
+  verb, reopening tgw3). Correct anchor: the first non-flag / non-value token after `bp` must
+  `=== "scaffy"`, consuming each value-global's value (13 keys: `-s/--server`, `--token`,
+  `-w/--workspace`, `-p/--project`, `-d/--dataset`, `-o/--output`, `--limit`, `--offset`, `--manifest`),
+  treating `--json` as BOOLEAN and inline `=` as self-contained only for long `--flag=value` (not short
+  `-o=json`). Verify proved 16/16 both directions and both traps avoided. *Why: the arity partition is
+  load-bearing in BOTH directions — only the exact valueFlags/boolFlags split is correct.*
+
+- **D148 — THE CORPUS IS BLIND to the over-refusal class; the hand-run bidirectional matrix is the SOLE
+  merge instrument (grip has no CI).** The class has ZERO corpus occurrences, so naive-indexOf and the
+  correct anchor give a bit-identical corpus distribution — the frozen snapshot cannot tell the fix from
+  the bug. The builder ports the two incidental-scaffy rows as durable guard tests in `level.test.mjs`
+  and co-edits the corpus pin from `{L1:32,L2:93,L3:380,L6:146}` to `{L1:32,L2:92,L3:381,L6:146}` (one
+  row moves: `bp scaffy run classify-block-type.scaffy …`). HIGH-FLIP-RISK: the level-classification
+  (reachability) judgment — a genuinely independent reviewer re-runs the full matrix before merge. *Why:
+  with no CI, the synthesized matrix is the only thing standing between the merge and a silent level-skip.*
+
+- **D149 — FIX 2 IS THE SOLE remaining suite-green prerequisite for tgw6 grip-CI; D141's inloop-gate red
+  has CLEARED.** D141 recorded `inloop-gate` 22/23 red at wave-13; #12179's literal re-pin (merged
+  04:28Z) took it to 28/28 GREEN on current main (re-run f3c4b6b04). `adjudicate.test.mjs` D88 (FIX 2)
+  is now the ONLY grip-suite red. FIX 2 splits the D88 loop — admit the `git -C … show` read (tgw4
+  correctly admits it), keep refusing `git merge-base` (broad `\bmerge\b` write regex, pinned as
+  intended-for-now; the merge-base over-refusal + `git grep -ln` false-refusal are filed for a later wave
+  as `pds-bl-grip-screen-refuses-honest-read-commands`, which truth-grip should ADOPT via `bp task stage`
+  since the epic owns `screen.mjs`) — greening the whole suite (708/707/1-skip). `tgw9-s1` (tgw6's other
+  dep) is done, so once FIX 2 merges tgw6 can proceed. `tgw13-s2` (wording-tolerant inloop-gate) remains
+  worthwhile anti-drift but is NOT a live red and NOT blocking. *Why: an undetected red on main is
+  exactly the shape this epic surfaces; naming the SINGLE blocker keeps the tgw6 unblock claim honest.*
+
+Wave roster (both round 1, dependency-free, opus — Fable capped until Aug 21):
+
+| PR | Slice | Task | Files | Gate |
+|---|---|---|---|---|
+| FIX 2 (first) | D88 adjudicate split | `tgw-bl-adjudicate-d88-stale-pin` | `tooling/grip/test/adjudicate.test.mjs` | `node --test tooling/grip/test/*.test.mjs` from repo root — expect 708/707/1-skip |
+| FIX 1 | scaffy subcommand anchor (close+fresh #12181) | `tgw13-s1-scaffy-subcommand-anchor` | `tooling/grip/level.mjs`, `tooling/grip/test/level.test.mjs` | `node --test tooling/grip/test/level.test.mjs` + hand-run 16-row bidirectional matrix |
+
+Merge-gated closes LEFT FOR THE LEAD (D40 content-on-main; re-claim lapsed epochs first): `tgw12-s0`
+idx 3 (READY NOW — #12179 merged + inloop-gate 28/28 green); `tgw12-s2` idx 5 + `tgw13-s1` idx 4 (after
+FIX 1's fresh PR merges + #12181 closed); `tgw-bl-adjudicate-d88-stale-pin` idx 2 (after FIX 2 merges).
+
+### Wave 2026-08-18 — WAVE 15 REVIEW: both loose ends corrected, mutation-re-proven, grip suite green on the combined merge. Grade A.
+
+Both slices landed exactly as briefed; the reviewer independently re-derived the HIGH-FLIP reachability
+judgment and re-ran every mutation probe on this worktree rather than trusting the builder's numbers.
+
+- **FIX 2 — `tgw-bl-adjudicate-d88-stale-pin`, final branch `loop-epic/fix-2-d88-adjudicate-boundary-test-split-0-r`.** Only `adjudicate.test.mjs` changed; `screen.mjs` byte-identical to origin/main. The single over-refusal loop is split into a READ half (`git -C tooling/grip show …` now `screenCommand().ok===true` and verdict `!== REJECTED`) and a WRITE half (`git merge-base --is-ancestor` still `.ok===false`, verdict `=== REJECTED`). Reviewer-run mutation: reverting `dropValueGlobals`→`rawArgv` in the git rule reds ONLY the READ half; dropping `merge` from the write-verb regex reds ONLY the WRITE half — each half pins a distinct real behavior, not a tautology. `node --test tooling/grip/test/adjudicate.test.mjs` → 37/37.
+
+- **FIX 1 — `tgw13-s1-scaffy-subcommand-anchor`, final branch `loop-epic/fix-1-scaffy-subcommand-anchor-close-fre-1-r`.** Re-lands the whole tgw3 demotion on top of a clean origin/main (which carried NO scaffy carve-out), with `isLocalScaffyInvocation` anchored to the subcommand position: `bp` via `headToken`, walk the remainder skipping each value-taking global WITH its value (13-key mirror of `globals.go` `valueFlags`), treat `--json`/inline-long as self-contained, and require the first non-flag token `=== "scaffy"`. Reviewer re-ran the full deriveLevel+checkCeiling matrix and the arity traps: all five URL-free local verbs derive L3 and refuse an L2 claim; remote (`pull`, `ls --remote`, any `-s https://…`) stay L2; loopback stays L3; both incidental-scaffy remote reads (`bp task get scaffy validate x.scaffy`, `bp search query scaffy validate`) stay L2 with checkCeiling admitting the L2 claim — the over-refusal is GONE. Mutation: reverting the anchor to `rest.indexOf("scaffy")` reds exactly ONE test (79/80). `node --test tooling/grip/test/level.test.mjs` → 80/80. Corpus pin moved one row `{…L2:93,L3:380…}`→`{…L2:92,L3:381…}` as designed.
+
+- **Combined merge (both -r branches, disjoint files):** `node --test tooling/grip/test/*.test.mjs` from repo root → 712 tests / 711 pass / 0 fail / 1 skip. The D88 red that FIX 1 alone leaves standing is closed by FIX 2 — together they deliver the wish's "grip suite green on main," the prerequisite tgw6 grip-CI (D149) was waiting on.
+
+- **Ledger:** both slice tasks left honestly `in_progress` with non-merge-gated criteria stamped and evidence bearing; merge-gated rows (`tgw13-s1` idx 4, `tgw-bl-adjudicate-d88-stale-pin` idx 2) left open for the lead. No ledger lies found; no fixes needed. No tasks outside the wave were touched.
+
+- **HIGH-FLIP handoff:** FIX 1's level-classification is a reachability/security judgment. The single wave-reviewer independently re-derived it and it holds — but a genuinely independent second reviewer re-running the matrix before merge is still warranted, per the flip-risk protocol.
+
+- **Next wave:** merge FIX 2 first (greens the suite), then FIX 1's fresh PR (the lead closes #12181 and cuts it — the branch belongs to the tgw12-s2 builder). Then the lead closes the merge-gated criteria named above. With the suite green on main, tgw6 grip-CI (D128) is unblocked — its remaining dep `tgw9-s1` is done. The merge-base over-refusal and `git grep -ln` false-refusal remain filed as `pds-bl-grip-screen-refuses-honest-read-commands` for truth-grip to adopt.

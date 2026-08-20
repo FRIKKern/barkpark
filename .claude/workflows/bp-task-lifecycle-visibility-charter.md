@@ -408,3 +408,60 @@ file). (3) Offline-buildable backlog as dedicated slices when a build wave has r
 `tlv-bl-tui-close-drift-resync-guidance` (Go, highest bar), `tlv-bl-js-vocab-generator` (build wave),
 `tlv-bl-task-board-columns-dead-code` (low-bar rehome). Wave paper:
 `task-lifecycle-visibility-wave-2026-08-18`.
+
+### Wave 2026-08-18 — done-set false-done audit (wave 7), Opus-only (Fable capped to Aug 21)
+
+A VERIFY-HEAVY AUDIT — not a build wave, not a reconcile wave. Wave 6 spent its judgment on the 17
+open rows and treated the ~24 done rows as settled background; this wave put the DONE set on trial.
+**VERDICT: 0 false-done across all 25 live-L1 done rows. Zero reopens; none manufactured. Stated even
+though it is zero.**
+
+**True denominator:** 25 done (44 children = 25 done / 16 open / 1 considering / 2 cancelled —
+re-derived twice from live L1; child_count is NOT the done count). Pinned snapshot
+origin/main = `e21bf409893d9de66542a31b06716e3c33d8f102` (== HEAD at audit time — verified live, not stale).
+
+**SWEEP A — SHA-ancestry at 100%.** All 15 merge-citing done rows resolve to a real `merge_commit_sha`
+on FRIKKern/barkpark, and every SHA is an ancestor of e21bf40 (`git merge-base --is-ancestor` RUN, never
+a PR-head shortcut). The four no-SHA "Historical completion reconciled from N/N" substrate rows
+(`tlv-s1..s4`) landed as the ADJACENT group **#4392–#4395** — NOT the survey brief's #5529–5533, which
+are later finishing-wave PRs — all ancestors with substance present on main (validation.ex 7-value vocab,
+emit.mjs LIFE_ORDER, status-vocab.test.ts). The three dup-PR pairs BOTH landed: the dup is a harmless
+empty re-merge sharing the primary's `headRefOid`, never a masked non-landing.
+
+**SWEEP B — engine-close provenance at 100%.** Recovered per-row from `doc.claim`, NOT from `bp task
+events` (which carries no worker/epoch/actor/closed_by on any event — a real ledger-observability gap,
+filed): 22 clean engine closes, 3 null-worker closes (`closed_by="None"`), 0 rows matching the
+fabrication shape (null-claim + boilerplate + 0/N + zero-evidence); all 25 carry `criteria_met == total`.
+The pre-#6420 close path stamped "None" six days BEFORE the sentinel guard (`448749cf18`, PDS-D290)
+landed 2026-07-28; the hole is closed on origin/main today.
+
+**Two-lane decision check (Paper/decision-existence, NOT ancestry).** D25 (this charter — advisory
+blocking FINAL), **D212** (`bp-studio-space-priority-charter.md:1751` — authorizes the spd-b24 verdict-close
+AND forwards the true-blocking successor), and D6 (axis-2 cancelled-strand deferral) were all git-shown REAL
+on origin/main and COVER their cited closes. The census's "phantom D212" flag was REFUTED — D212 exists and
+names spd-b24 explicitly.
+
+**Vacuous-green DISPROVEN by RUNNING the probes.** The one structural false-done candidate —
+`tlv-bl-js-vocab-drift-gate` — is a REAL guard: `status-manifest-check.sh` Part 5 reds on
+label/glyph/dropped-role/order drift across BOTH TS twins, with required roles derived DYNAMICALLY from the
+manifest (so a genuinely new state cannot be silently skipped). The Go empty-arg guard kills its mutant at
+`cli_test.go:298`; four Elixir guard suites red on mutation, including the claimable_statuses exemplar
+(`~w(open blocked)`→`~w(open)` reds 4 tests). The survey's "silently skips new states" concern belongs to
+`design/validate.mjs` `REQUIRED_LIFE` (a hardcoded 9-element literal) — a SEPARATE, still-vacuous gate,
+filed to backlog.
+
+**Trust verdict:** the done set of task-lifecycle-visibility-epic is TRUE, independently re-verified,
+false-done count **ZERO**. Where the ledger already read true, the audit manufactured no findings —
+already-honest-with-evidence is the A-grade for a ledger-truth epic auditing itself.
+
+**Build wave: EMPTY by design** (read-only fence, audit complete, zero false-done). Decide-phase products:
+this wave-log note + the trust-verdict Paper + the committed re-derivation ledger rows, all on ONE docs-only
+PR. **Backlog filed (published epic children, not this wave):** `tlv-bl-events-actor-attribution` (prio 2 —
+task events carry no close attribution; provenance recoverable only from `doc.claim`),
+`tlv-bl-validate-mjs-required-life-hardcoded` (prio 2 — make the design-token validator's hardcoded
+`REQUIRED_LIFE` manifest-driven), `tlv-bl-null-worker-close-path-audit` (prio 3 — regression-test the #6420
+sentinel guard + document the `worker=None`+epoch corner).
+
+**Next wave — dispatch order:** unchanged from wave 6 for the OPEN rows — after the Aug-21 Fable cap lifts,
+dispatch `tlv-s5` then `tlv-s8`; then the offline-buildable and the three new audit-filed backlog rows as a
+build wave has room. Wave paper: `task-lifecycle-visibility-donefalse-audit-2026-08-18`.

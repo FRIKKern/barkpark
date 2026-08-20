@@ -71,6 +71,41 @@ defmodule BarkparkWeb.SocialControllerTest do
            )
   end
 
+  # acpc-w1-sso-list-param-guard. NOT a vacuous green: the shared `setup`
+  # enables a real "google" provider row and the session state below MATCHES,
+  # so this request clears both cond arms and would reach
+  # Social.handle_callback/3 — whose own `when is_binary(code)` guard would
+  # raise BELOW the action frame (500). The action-head guard turns it into the
+  # same 400 the missing-param fallback clause already returned.
+  test "GET callback with a LIST-valued code is 400, not a 500", %{conn: conn} do
+    Application.put_env(:barkpark, :social_test, %{
+      "email" => "listy@example.com",
+      "sub" => "g-9",
+      "id" => "g-9"
+    })
+
+    conn =
+      conn
+      |> init_test_session(%{social_state: "s1"})
+      |> get("/v1/auth/social/google/callback?code[]=abc&state=s1")
+
+    assert json_response(conn, 400)
+    # Fail closed: no user was created and no session minted off the bad request.
+    refute Accounts.get_user_by_email("listy@example.com")
+  end
+
+  # The missing-param fallback clause (social_controller.ex callback/2 second
+  # head) is what the guarded head falls through to — pin it.
+  test "GET callback with no code at all is still 400", %{conn: conn} do
+    body =
+      conn
+      |> init_test_session(%{social_state: "s1"})
+      |> get("/v1/auth/social/google/callback?state=s1")
+      |> json_response(400)
+
+    assert body["error"] == "code and state are required"
+  end
+
   test "start for an unconfigured provider is 404", %{conn: conn} do
     assert conn |> get("/v1/auth/social/github/start") |> json_response(404)
   end

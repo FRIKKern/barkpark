@@ -1,5 +1,4 @@
 import { Command } from 'commander'
-import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import * as p from '@clack/prompts'
 import pc from 'picocolors'
@@ -10,6 +9,7 @@ import { detectPackageManager } from './pm.js'
 import { applyHostedDemo } from './hosted.js'
 import { runInstall } from './install.js'
 import { printNextSteps, runGitInit } from './post-install.js'
+import { cleanupPartialScaffold, ensureTargetEmpty } from './target-dir.js'
 
 interface CliFlags {
   template?: string
@@ -59,7 +59,7 @@ async function main(argv: string[]): Promise<number> {
   })
 
   const targetDir = path.resolve(process.cwd(), answers.projectName)
-  await ensureTargetEmpty(targetDir)
+  const targetState = await ensureTargetEmpty(targetDir)
 
   const pm = detectPackageManager()
 
@@ -79,6 +79,9 @@ async function main(argv: string[]): Promise<number> {
   } catch (err) {
     s.stop('Scaffold failed.')
     console.error(pc.red((err as Error).message))
+    // Best-effort: clear the half-copied tree so the immediate retry is not
+    // blocked by the not-empty guard. Never mask the original failure.
+    await cleanupPartialScaffold(targetState).catch(() => {})
     return 1
   }
   s.stop(
@@ -127,21 +130,6 @@ async function main(argv: string[]): Promise<number> {
   })
 
   return 0
-}
-
-async function ensureTargetEmpty(targetDir: string): Promise<void> {
-  try {
-    const entries = await fs.readdir(targetDir)
-    if (entries.length > 0) {
-      throw new Error(`Target directory "${targetDir}" is not empty.`)
-    }
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') return
-    if (code === 'ENOTDIR')
-      throw new Error(`Target path "${targetDir}" exists and is not a directory.`)
-    throw err
-  }
 }
 
 main(process.argv)

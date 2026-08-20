@@ -1709,6 +1709,21 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.gauge_list_email_html(b)}
   end
 
+  # scaffy:add-block-type Route MARK:ex-compose-route
+  # `route` (sport track, 2026-08-17): encoded polyline in `polyline` → a
+  # self-contained SVG track shape + meta row (DataViz.route_html/2 — no map
+  # tiles, no JS, so reader and email render the identical figure; the article
+  # variant reads the accent token, email carries literal hex). TUI twin:
+  # internal/pdrender/route.go rasterises the same polyline through the braille
+  # canvas.
+  def compose_block(%{"type" => "route"} = b, :article) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.route_html(b, :article)}
+  end
+
+  def compose_block(%{"type" => "route"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.route_html(b, :email)}
+  end
+
   # Unknown / unregistered block type — degrade gracefully instead of crashing
   # every render surface (Studio paper view crash-loop, Bulldocs ingest 500,
   # every body_html rebuild 500, public /papers reader). Papers are schemaless,
@@ -1743,15 +1758,31 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     if method == "" and path == "" do
       ""
     else
-      method_class = "bp-api-endpoint__method--" <> String.downcase(method)
-
       head =
         ~s(<div class="bp-api-endpoint__head">) <>
-          ~s(<span class="bp-api-endpoint__method #{method_class}">#{Util.escape_html(method)}</span>) <>
+          ~s(<span class="#{api_endpoint_method_class(method)}">#{Util.escape_html(method)}</span>) <>
           ~s(<code class="bp-api-endpoint__path">#{Util.escape_html(path)}</code>) <>
           ~s(</div>)
 
       ~s(<div class="bp-api-endpoint">) <> head <> api_endpoint_params_html(b) <> ~s(</div>)
+    end
+  end
+
+  # Fail-closed class for the method badge. `method` is user-controlled, so the
+  # modifier token is a lowercase [a-z0-9-] slug (never plain-escaped — that
+  # would leak &quot;-laden junk into the class attribute). The hyphen is kept
+  # so real IANA methods (VERSION-CONTROL, BASELINE-CONTROL) survive as
+  # version-control / baseline-control. Every stripped char just vanishes, so a
+  # `"><img …>` breakout collapses to an inert token and cannot escape the
+  # attribute. An empty slug (blank/all-stripped method) omits the modifier —
+  # base class only. Byte-identical to the old `--<downcase>` form for every
+  # legit HTTP method (POST → bp-api-endpoint__method--post).
+  defp api_endpoint_method_class(method) do
+    slug = method |> String.downcase() |> String.replace(~r/[^a-z0-9-]/, "")
+
+    case slug do
+      "" -> "bp-api-endpoint__method"
+      s -> "bp-api-endpoint__method bp-api-endpoint__method--" <> s
     end
   end
 

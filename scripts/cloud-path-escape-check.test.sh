@@ -409,10 +409,9 @@ PY
   # else in this harness catches either — both are proven below. Adding a
   # second post-verdict job is supposed to cost a human naming it right here.
   #
-  # TRANSITIONAL: "" is in the roster only because PR #10155, which adds
-  # report-main-failure, has not merged yet. The PR that merges it must drop
-  # the "" alternative, at which point deleting the reporter reds the ratchet
-  # directly instead of only in the mutation matrix below.
+  # The roster is now EXACT: report-main-failure ships in this workflow, so the
+  # empty alternative that covered its absence is gone (PR #10155). Deleting the
+  # reporter now reds this ratchet directly, not only via the mutation matrix.
   #
   # ONE ENCODING OF THE ROSTER, consulted by the live assertion below AND by the
   # mutation matrix's pin_reds. It used to be written twice, and the second copy
@@ -423,7 +422,7 @@ PY
   # there is nothing left to keep in sync.
   post_verdict_roster_ok() {
     case "$1" in
-      "" | "report-main-failure") return 0 ;;
+      "report-main-failure") return 0 ;;
       *) return 1 ;;
     esac
   }
@@ -614,18 +613,12 @@ PY
     fi
   }
   pin_reds smuggled
-  # …and the DELETED mutant, which the shipped roster does NOT red today, because
-  # the transitional "" alternative is still in it. That is a real, currently-open
-  # hole and it is asserted as such rather than papered over: this harness used to
-  # claim it caught this case. It does not. The assertion is written so it FLIPS
-  # the day "" is dropped — at which point delete this block and add `pin_reds
-  # deleted` beside the smuggled one. Tracked as
+  # …and the DELETED mutant. This USED to be a known gap: the transitional ""
+  # alternative accepted a deleted reporter, so the harness could not red it.
+  # PR #10155 ships report-main-failure and drops that alternative, so the
+  # roster is now EXACT and this mutant reds like any other. Closes
   # cch-w46-s4-followup-drop-empty-post-verdict-alternative.
-  if post_verdict_roster_ok "$(sed -n 's|^post_verdict_jobs=||p' "$TMPROOT/pv-deleted.facts")"; then
-    ok "  post-verdict[deleted]: KNOWN GAP — the transitional '' alternative accepts a deleted reporter (not a red)"
-  else
-    no "  post-verdict[deleted]: the roster now reds a deleted reporter — drop this block and use pin_reds deleted"
-  fi
+  pin_reds deleted
 fi
 echo
 

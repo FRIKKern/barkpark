@@ -185,6 +185,63 @@ defmodule BarkparkWeb.RequestStats do
 
   # ── Telemetry handler (write path — runs in the request process) ──────────
 
+  # ── CITED SAFE — this is a METER, not an admission bound (sibling-ETS
+  # atomicity wave, 2026-08-19). Read this before re-deriving it.
+  #
+  # This module was swept as a candidate sibling of the `Barkpark.RateLimiter`
+  # defect closed by #12579 (`:ets.lookup` then an unconditional `:ets.insert`,
+  # so N concurrent callers read the SAME bucket state and are all admitted —
+  # fail-OPEN under contention). It is not that shape, on two grounds that hold
+  # independently:
+  #
+  # (a) KEY SHAPE — there is no read-modify-write to lose. The write below is a
+  #     SINGLE `:ets.insert` keyed `{System.monotonic_time(:millisecond),
+  #     System.unique_integer([:monotonic])}`, with NO preceding `:ets.lookup`.
+  #     `unique_integer([:monotonic])` is VM-unique, so two concurrent inserts
+  #     can never collide on a key and overwrite one another, and nothing is
+  #     computed from previously-read state. Structurally not #12579's shape,
+  #     before any argument about consequences.
+  #
+  # (b) CONSUMER CENSUS — nothing admits, denies or sheds on any value here.
+  #     In-tree, non-test: `application.ex` (child spec, not a reader),
+  #     `router.ex` (mounts GET /v1/instance/request-stats behind `[:api,
+  #     :require_token]`), and `request_stats_controller.ex` — the ONLY reader,
+  #     and it is `json(conn, RequestStats.stats())`: no branch, no status
+  #     choice, no halt, no throttle. `metrics_controller.ex` and
+  #     `instance_site_deploy_controller.ex` mention the route in prose only.
+  #     No Studio LiveView, no HEEx, no component, no plug, no worker, no
+  #     in-process JS/Go reader.
+  #     Off box, the whole chain, so nobody re-derives it: Go agent
+  #     `ReqStatsProbe` (internal/agent/report.go) -> cloud health beat
+  #     (`req_per_s`, `p95_ms`, `err_5xx_per_s`, landed as VITALS in
+  #     cloud/lib/barkpark_cloud/web/router.ex — p95 explicitly REFUSED as a
+  #     fence, charter D131) -> `Usage.telemetry_threshold_meter(..., nil, warn,
+  #     over)`, whose quota argument is `nil`, so those meters TINT and draw no
+  #     bar. The only enforced meter in that module is `instances`, gated
+  #     elsewhere by `Billing.barkpark_limit/1` off team plan, not off this
+  #     beat. `grep -rn over_at cloud/lib` outside `usage.ex` returns zero: no
+  #     alerting, no autoscaling, no load-shedding reads these numbers. A lost
+  #     sample is cosmetic — the `rescue _ -> :ok` below already drops one by
+  #     design.
+  #
+  # THE PRUNE, as a complement rather than an assertion: `handle_info(:prune, _)`
+  # deletes rows STRICTLY older than `now_ms() - @window_ms`; `compute/4` keeps
+  # rows at or newer than the same cutoff, off the SAME monotonic clock, which
+  # never rewinds. A later read's cutoff is therefore always at or beyond the
+  # prune's, so prune can only delete rows the next read would already have
+  # excluded. The residual hazard is UNDER-deletion (a leak, if the match head's
+  # arity ever narrows — see the note at `handle_info(:prune, _)`), never
+  # dropping a live sample. And since no bound reads a sample, "drops a sample a
+  # bound depends on" has an empty referent.
+  #
+  # WHAT THIS VERDICT DOES NOT REST ON: the earlier Felix "already-good" stamp.
+  # That stamp graded this module on OTP/throughput grounds (an ETS write path
+  # that never serializes through the mailbox) — the exact reading a prior wave
+  # OVERTURNED for `Barkpark.RateLimiter`, where same-key contention was read as
+  # throughput and never as correctness, leaving a standing verified-no-change
+  # stamp on a defective function. The two grounds above are key shape and
+  # consumer census; neither leans on that stamp.
+  #
   # `meta` is the conn Phoenix has always handed this handler. `conn.status` is
   # the 5xx meter (D75); the route class + auth state (D9/D11) ride the same
   # event — no new event, no second table, one `route_info/4` match on the

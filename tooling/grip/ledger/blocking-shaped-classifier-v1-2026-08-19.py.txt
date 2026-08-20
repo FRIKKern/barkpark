@@ -1,0 +1,63 @@
+import json,os,re,sys,yaml
+D=sys.argv[1]; wf=os.path.join(D,".github/workflows")
+spec=json.load(open(os.path.join(D,".github/required-checks.json")))
+req={c["context"] for c in spec["protection"]["required_status_checks"]["checks"]}
+base=lambda n: re.sub(r'\s*\(\d+\.\d+,\s*\d+\.\d+\.\d+\)$','',n)
+excb={base(e["context"]) for e in spec["exclusions"]}
+rows=[];byfile={};parsefail=[]
+for f in sorted(os.listdir(wf)):
+    if not f.endswith((".yml",".yaml")): continue
+    try: d=yaml.safe_load(open(os.path.join(wf,f)))
+    except Exception as e: parsefail.append(f); continue
+    on=d.get("on",d.get(True))
+    for jid,j in (d.get("jobs") or {}).items():
+        if not isinstance(j,dict): continue
+        rows.append(dict(file=f,jid=jid,name=j.get("name",jid),needs=j.get("needs"),
+            coe=j.get("continue-on-error"),on=on,jif=str(j.get("if") or ""),
+            matrix=bool((j.get("strategy") or {}).get("matrix")) if isinstance(j.get("strategy"),dict) else False,
+            stepcoe=[s.get("name") for s in (j.get("steps") or []) if isinstance(s,dict) and s.get("continue-on-error")]))
+        byfile.setdefault(f,{})[jid]=rows[-1]
+def up(f,jid,seen):
+    r=byfile[f].get(jid)
+    if not r or jid in seen: return
+    seen.add(jid); n=r["needs"]; n=[n] if isinstance(n,str) else (n or [])
+    [up(f,x,seen) for x in n]
+cov=set()
+for r in rows:
+    if r["name"] in req:
+        s=set(); up(r["file"],r["jid"],s); cov|={(r["file"],j) for j in s}
+prc=lambda o: isinstance(o,dict) and "pull_request" in o
+ADV=re.compile(r"advisory|report mode|gates nothing|never gates|non-blocking|informational|\(skip\)",re.I)
+def if_false_on_pr(e):
+    if not e: return False
+    if re.search(r"github\.event_name\s*!=\s*'pull_request'",e) and "||" not in e: return True
+    if re.search(r"github\.event_name\s*==\s*'(schedule|push|workflow_dispatch)'",e) and "pull_request" not in e: return True
+    return False
+S={}
+cand=[]
+for r in rows:
+    if not prc(r["on"]): S.setdefault("X1 not PR-renderable",[]).append(r); continue
+    if r["name"] in req: S.setdefault("X2 REQUIRED",[]).append(r); continue
+    if base(r["name"]) in excb: S.setdefault("X3 ledgered exclusion row",[]).append(r); continue
+    if (r["file"],r["jid"]) in cov: S.setdefault("X4 transitive need of a required job",[]).append(r); continue
+    if r["coe"]: S.setdefault("X5 job continue-on-error",[]).append(r); continue
+    if if_false_on_pr(r["jif"]): S.setdefault("X6 job if: statically false on PR (renders SKIPPED, never red)",[]).append(r); continue
+    if ADV.search(r["name"]): S.setdefault("X7 self-ledgered advisory in its own name",[]).append(r); continue
+    if "${{" in r["name"]: S.setdefault("U  UNRESOLVABLE: templated name, no static rendered context",[]).append(r); continue
+    cand.append(r)
+for k in sorted(S): print(f"{k:62s} {len(S[k]):3d}"); [print("      ",r["file"],"|",r["name"]) for r in S[k]] if k[0] in "XU" and k[1] in "567U " else None
+print()
+print("DEFENDED BLOCKING-SHAPED COUNT:",len(cand))
+print("PARSE FAILURES (fail-closed if nonzero):",parsefail)
+print()
+M={}
+for r in cand:
+    pr=r["on"]["pull_request"] or {}
+    paths=isinstance(pr,dict) and ("paths" in pr or "paths-ignore" in pr)
+    k = "M1 paths-filtered (never renders on a PR that misses its globs)" if paths else \
+        ("M2 runtime-conditional (if: on a needs-output)" if r["jif"] else \
+         "M3 genuinely orphaned (renders on EVERY PR, red-capable, zero merge authority)")
+    M.setdefault(k,[]).append(r)
+for k in sorted(M):
+    print(f"{k}  = {len(M[k])}")
+    for r in M[k]: print("      ",r["file"],"|",r["name"], ("[step-coe: "+", ".join(map(str,r['stepcoe']))+"]") if r["stepcoe"] else "")

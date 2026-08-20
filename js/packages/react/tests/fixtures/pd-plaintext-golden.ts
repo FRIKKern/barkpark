@@ -119,6 +119,7 @@ export const TEXTLESS_SKIP: Record<string, string> = {
   diagram: 'media/diagram (mermaid) — `source` is diagram DSL, `caption` a viz label',
   // ── data-viz ────────────────────────────────────────────────────────────────
   chart: 'data-viz — numeric series + axis labels; `caption` is a viz label',
+  route: 'data-viz sport track — the polyline is coordinate data, sport/distance/caption are viz chrome, same textless family as chart/heatmap',
   heatmap: 'data-viz — a numeric cell matrix, no prose',
   stat: 'data-viz metric — `label`/`value` are viz chrome, not prose',
   'stat-grid': 'data-viz metric grid — label/value chrome',
