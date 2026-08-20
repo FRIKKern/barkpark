@@ -284,11 +284,43 @@ ERROR'
 # evidence. `RETIRED-*` is deliberately NOT in the vocabulary above and
 # `class_known` refuses it by an explicit arm, so a retired class can never be
 # smuggled back in as a live one.
+#
+# PRICE IS THE PRICED-BUT-UNGATED HOLDING PEN, AND THAT IS THE MECHANISM BEHIND
+# THE ONLY TWO ROTTEN FIGURES IN THE WHOLE COLUMN (wave 49). Sort the six
+# committed price literals — n=6, the FOUR rows of PDS_DOOR_PRICES plus the TWO
+# PRICE-classed dispositions here — by WHICH LEDGER HOLDS THEM and the
+# separation is 6/6 perfect. Every PDS_DOOR_PRICES row is THROUGH a required
+# gate ("THROUGH a required gate : 4 of 20" in the COUNTS block), and all four
+# reproduce at a matched load stamp. Both PRICE-classed dispositions are through
+# NO door — nothing required runs them — and BOTH were wrong by 1.5x and 17x.
+# A THROUGH price is re-derived by reality on every merge: the gate executes the
+# instrument, so the number is continuously contradictable. A PRICE-classed
+# price is a figure for a workload nothing ever runs, so no gate can disagree
+# with it and it rots undisturbed. A PRICE DESCENDS FROM A MEASUREMENT ONLY IF
+# SOMETHING RE-TAKES IT — which is why `--measure` exists, and why the two rows
+# below carry three trials each with their own load stamps instead of one
+# hand-typed figure.
+#
+# AND THE PDS-D692 CLAUSE MANDATING A WALL FIGURE BESIDE THE CPU PRICE IS
+# REFUSED HERE, IN WRITING, ON A MEASUREMENT (wave 49). D692 scopes its own
+# mandate to PORT-CHILD riders — a meter wrapped around a BEAM that fans out to
+# child BEAMs, where the CPU record genuinely goes blind (PDS-D633/D646, quoted
+# in the METER BLIND SPOT note above). Both rows below are plain bash harnesses
+# whose entire cost is direct-descendant CPU, and the `times` builtin is NOT
+# blind to those: measured this wave,
+#   LC_ALL=C bash -c <busy-loop child, output discarded>; times
+# printed `0m0.001s 0m0.002s` for the metering shell and `0m0.739s 0m0.072s` for
+# ITS CHILDREN, and `measure_sum` awk-accumulates over BOTH records. Paying the
+# clause here would mean editing `run_measure` AND relaxing the required refute
+# at api/test/barkpark/pds_door_census_test.exs:384 — weakening a required gate
+# to add a figure that is, on a shared host, not a property of the door at all
+# (a fixed workload swung 5.8x at constant load). The refuse is the ruling; the
+# rider is not touched.
 PDS_DOOR_DISPOSITIONS='pds-charter-ledger-sweep.sh	CONTENT-RED	by run 2026-08-04 at 683c2f00a: `--check` rc=1 "RED: an UNRESOLVED-CLAIM ARRIVAL is a charter claim nobody has adjudicated" (71 arrivals — the figure MOVES on every charter merge, because the lens is mined FROM the charter: 41 -> 45 -> 59 -> 71 across four merges, and the row read 59 while the sweep at that same commit printed 71); `--selftest` is rc=0 (3 of 3) and no longer hostage to the corpus; blocked on scripts/pds-charter-ledger-adjudication.md, not on price (CPU 3.42 s LOCAL)
 pds-record-parity.sh	RED-BY-DESIGN-REPORTER	by run 2026-08-03: `--selftest` rc=3 "unknown argument" — the flag does not exist; its only non-vacuous axis resolves task ids against the LIVE ledger and is red by design. A reporter must never carry a required check name.
 pds-window-sentinel.sh	NOT-YET-BUILT	source declares only `watch` and `preflight` verbs (scripts/pds-window-sentinel.sh:48-49); it is a host watcher with no pass/fail selftest to gate on.
-pds-ledger-census_test.sh	PRICE	CPU=33.44+6.89=40.33s LOCAL meter=/usr/bin/time -p around bash -c load1=24.26 2026-08-03 (rc=0, wall 68.24 s) — the SECOND tiering case; ~40 s CPU on a 2-4 vCPU runner needs its own justification.
-pds-scratch-target_test.sh	PRICE	CPU=4.83+4.08=8.91s LOCAL meter=/usr/bin/time -p around bash -c load1=79.23 2026-08-03 (rc=0, stub barkpark). Hermeticity on a runner WITHOUT local Postgres is unproven here.
+pds-ledger-census_test.sh	PRICE	CPU=22.96+3.31=26.27s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=7.30 2026-08-05 (no arguments, rc=0) — RE-TAKEN BY `--measure`, never by hand: 3 trials gave 26.27s at load1=7.30, 22.73s at load1=9.20, 22.80s at load1=7.32, all cpus=10. The OBSERVED BAND is 22.73-26.27 s CPU across load1 7.30-9.20, a 15.6% spread, and the row deliberately quotes the HIGH end of its own band, because the one direction a price column must not err is making an expensive thing look gate-able. It replaces 33.44+6.89=40.33s at load1=24.26, hand-typed through /usr/bin/time -p on 2026-08-03 and 1.53-1.77x this band. That figure was never re-derived by anything: no required gate runs this instrument, so nothing could contradict it. QUOTED AGAINST ITS OWN STAMP ONLY (PDS-D656) — this band is NOT poolable with the pds-scratch-target_test.sh band below, which was taken at systematically different loads, and it is NOT a quiet-host figure: the host carried 23 users at load averages 5,21 4,00 3,99 when the trials began. NOT VACUOUS: `--measure` discards subject output, so the full arm set was shown by a SEPARATE un-metered run — rc=0, `SELFTEST PASS: 173 checks.`; this harness prints NO failure(s) line on the green path at all (its counter prints only on the red path at :1400-1401), so 173 checks is the arm evidence in its place. Still the SECOND tiering case at ~23-26 s CPU on a 2-4 vCPU runner, which is why the class does not move.
+pds-scratch-target_test.sh	PRICE	CPU=0.24+0.30=0.54s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=9.56 2026-08-05 (no arguments, rc=0) — RE-TAKEN BY `--measure`, never by hand: 3 trials gave 0.54s at load1=9.56, 0.51s at load1=7.32, 0.54s at load1=6.76, all cpus=10; observed band 0.51-0.54 s CPU across load1 6.76-9.56, a 5.9% spread, high end quoted. It replaces 4.83+4.08=8.91s at load1=79.23, hand-typed 2026-08-03 and 16.5-17.5x this band — and the USER leg alone read 4.83 s stamped against 0.23-0.24 s measured, ~20x, which contention cannot manufacture: user CPU is work. NOT VACUOUS: a separate un-metered run exits 0 and prints `---- 0 failure(s)` then `SCRATCH TEST PASSED`, with 32 PASS / 0 FAIL arms and zero skips. THE STATED REASON MOVED WITH THE FIGURE, because a repaired number under an unrepaired justification still asserts what no measurement produced: the reason this row used to carry — that hermeticity on a runner WITHOUT local Postgres is unproven here — is REFUTED BY RUN. The harness names no Postgres binary anywhere in its source (zero matches for psql, pg_ctl, initdb or postgres; it drives two fake roots and a stub barkpark it writes itself) and it exits 0 with the same 32 PASS / 0 FAIL under PATH=/usr/bin:/bin:/usr/sbin:/sbin, with no Postgres reachable. WHAT SURVIVES IS THE CLASS, NOT ITS OLD REASON, and the class is now itself in doubt: 0.54 s is not a price that keeps any door shut, so this row is PRICE today only because nothing required runs it. The class move is NOT taken here — price_rows is exactly 2 against a required `assert length(price_rows) >= 2` (api/test/barkpark/pds_door_census_test.exs:344), so re-classing reds a required gate and must land WITH its rider in one commit. Filed as pds-w49-scratch-target-class-vs-its-own-price.
 pds-live-hetzner-placement-group.sh	ENVIRONMENT	by run 2026-08-03: `--selftest` rc=3 "REFUSE — needs one WORKING credential"; needs HCLOUD_TOKEN or HCLOUD_CONFIG (scripts/pds-live-hetzner-placement-group.sh:17-21).
 pds-live-bp-write-receipt.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token; refuses exit 3 otherwise (scripts/pds-live-bp-write-receipt.sh:219).
 pds-ledger-census.sh	ENVIRONMENT	needs live ledger credentials (BARKPARK_SERVER, scripts/pds-ledger-census.sh:1325) and python3 (exit 3 at :348-350).
