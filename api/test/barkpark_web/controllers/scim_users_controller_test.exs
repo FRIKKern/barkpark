@@ -395,4 +395,23 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
       assert build_conn() |> get("/scim/v2/ServiceProviderConfig") |> json_response(401)
     end
   end
+
+  # `deactivating?/1` guards `is_list(ops)` — the CONTAINER — then reads
+  # `op["op"]` on each element, which is `Access.get/3` and raises
+  # FunctionClauseError on a scalar Operation -> a generic 500. An `is_map(op)`
+  # conjunct drops the malformed entry instead.
+  describe "scalar Operations are dropped, never a 500 (element-shape class)" do
+    test "PATCH with a scalar Operation returns 200 and leaves the user active" do
+      %{token: token} = org_with_ws("uscalarop")
+      provision(token, "scalar@uscalarop.com") |> json_response(201)
+      user = Accounts.get_user_by_email("scalar@uscalarop.com")
+
+      resp =
+        scim(token)
+        |> patch("/scim/v2/Users/#{user.id}", Jason.encode!(%{"Operations" => ["x"]}))
+        |> json_response(200)
+
+      assert resp["active"] == true
+    end
+  end
 end

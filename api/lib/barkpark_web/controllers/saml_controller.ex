@@ -24,7 +24,13 @@ defmodule BarkparkWeb.SamlController do
     end
   end
 
-  def acs(conn, %{"org_slug" => slug, "SAMLResponse" => encoded}) do
+  # `when is_binary(encoded)` belongs on the ACTION HEAD, not on the callee:
+  # the :sso_browser pipeline carries no auth plug, so an unauthenticated
+  # caller posting `SAMLResponse[]=abc` used to raise FunctionClauseError
+  # inside Base.decode64/2 — below the action frame, where Phoenix's
+  # ActionClauseError→400 conversion no longer applies (500). Guarded here, a
+  # wrong-typed body falls through to the fallback clause below for a clean 400.
+  def acs(conn, %{"org_slug" => slug, "SAMLResponse" => encoded}) when is_binary(encoded) do
     c = Saml.connection_for_org_slug(slug)
 
     with %Barkpark.Sso.SamlConnection{} <- c || :no_conn,
@@ -100,7 +106,10 @@ defmodule BarkparkWeb.SamlController do
   # parameter is interpolated into the HTML — `slug` only builds server-side
   # entity/ACS URIs inside `sp_for/2`, never the response body.
   # sobelow_skip ["XSS.SendResp"]
-  def slo(conn, %{"org_slug" => slug, "SAMLRequest" => encoded}) do
+  # `when is_binary(encoded)` on the ACTION HEAD — same reason as acs/2 above:
+  # a list-valued `SAMLRequest` raised inside Base.decode64/2, below the action
+  # frame, so it surfaced as a 500 instead of a 400.
+  def slo(conn, %{"org_slug" => slug, "SAMLRequest" => encoded}) when is_binary(encoded) do
     c = Saml.connection_for_org_slug(slug)
 
     with %Barkpark.Sso.SamlConnection{} <- c || :no_conn,

@@ -4,12 +4,23 @@ defmodule Barkpark.Sharing.Links do
   file, independent of `Barkpark.Sharing` SECTION shares.
 
   A link is an opaque, revocable secret (`/s/<token>`) bound to a single item +
-  its tenant scope + an access level (`read`/`edit`). The raw token is returned
-  ONCE at create; only its SHA256 is stored. `resolve/1` enforces revocation +
-  expiry in the query, so a dead link looks identical to a missing one.
+  its tenant scope + an access level (`read`/`edit`). `resolve/1` enforces
+  revocation + expiry in the query, so a dead link looks identical to a missing
+  one.
+
+  THE RAW TOKEN IS STORED, unlike `Barkpark.Auth.ApiToken`: `create/1` writes
+  BOTH `token_hash` and the PLAINTEXT `token`, because P7's stable re-copyable
+  link needs a later read to re-emit `/s/<token>` (see
+  `Barkpark.Sharing.ShareLink`). A ShareLink row is therefore a LIVE CREDENTIAL
+  at rest and every read path that serialises one must be AUTHORISED BEFORE it
+  serialises — arpss-w8 closed exactly that hole in
+  `BarkparkWeb.ShareLinkController.list/2`. The older "returned once, only the
+  SHA256 is stored" wording that stood here was false, and believing it is what
+  made the leak look harmless.
 
   This context is storage + token mechanics only; the CONTROLLER owns existence
-  validation at mint and the per-kind read/write dispatch at resolve.
+  validation at mint, TENANCY CONFINEMENT on every admin action, and the
+  per-kind read/write dispatch at resolve.
   """
   import Ecto.Query
 
@@ -30,7 +41,8 @@ defmodule Barkpark.Sharing.Links do
   Create an item link. `attrs` must carry `:workspace_id`, `:project_id`,
   `:dataset`, `:kind` (`"doc"`/`"media"`), `:ref_id`, `:access`; `:ref_type`
   for docs; optional `:label`, `:ttl` (seconds — omit / nil for no expiry).
-  Returns `{:ok, {raw_token, %ShareLink{}}}` — the raw token shown ONCE.
+  Returns `{:ok, {raw_token, %ShareLink{}}}`. The raw token is ALSO persisted on
+  the row (see the moduledoc), so this is not a show-once secret.
   """
   @spec create(map()) :: {:ok, {binary(), ShareLink.t()}} | {:error, Ecto.Changeset.t()}
   def create(attrs) do
@@ -109,8 +121,10 @@ defmodule Barkpark.Sharing.Links do
   end
 
   @doc """
-  List the links for ONE item (newest first). Callers MUST NOT expose
-  `token_hash` (the raw is unrecoverable anyway). `ref_type` may be nil (media).
+  List the links for ONE item (newest first). RETURNS LIVE CREDENTIALS: each row
+  carries the PLAINTEXT `token` (and its hash), so a caller must be authorised
+  against `workspace_id` BEFORE it serialises anything this returns — the raw is
+  NOT unrecoverable. `ref_type` may be nil (media).
   """
   @spec list_for(binary(), binary(), binary() | nil, binary()) :: [ShareLink.t()]
   def list_for(workspace_id, kind, ref_type, ref_id) do
