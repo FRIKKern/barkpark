@@ -2212,6 +2212,251 @@ defmodule BarkparkCloud.ProvisioningTest do
     end
   end
 
+  # ── THE ROOT-PAT PATH (cloud-agent onramp) ──────────────────────────────────
+  #
+  # Why this block exists. `/credentials` was SESSION-ONLY, so the committed
+  # onramp config (#12729 — `.mcp.json`, `scripts/ensure-bp.sh`) had no way to
+  # fetch an instance's credentials from a fresh container: a script carries a
+  # Personal Access Token, never a browser session. The gate now accepts either
+  # credential kind and narrows a PAT with the `root` ability ON TOP of the team
+  # -admin role it already required of a session.
+  #
+  # THE REFUSALS ARE THE POINT, and they run on BOTH axes. A permission test
+  # that only proves the allowed path works is half a test, so every arm below
+  # asserts a body and not merely a status:
+  #
+  #   * the ABILITY axis — read / write / deploy PATs held by a real team admin
+  #     are all refused. `deploy` is the load-bearing one: `Auth.ability_implies/0`
+  #     widens both `write` and `deploy` INTO `read`, so a route gated on `read`
+  #     is reachable by every PAT tier alive. Gating on `root` is what keeps the
+  #     strongest credential the control plane holds out of a CI key's reach, and
+  #     this row is the tripwire on any future widening of that table.
+  #   * the ROLE axis — a `root` PAT whose holder has since been DEMOTED out of
+  #     admin is refused. `pat_abilities_allowed?/2` caps the mint at `read` for
+  #     a non-admin, so a root PAT can only ever be born privileged; nothing
+  #     revokes it on demotion, which is exactly why the role is re-read here on
+  #     every request rather than trusted from mint time.
+  #   * the TENANCY axis — a root PAT is still confined to its own team, and a
+  #     cross-team id is the same 404 a session gets, with no token in the body.
+  # A live box whose stored admin ciphertext decrypts to `token` — the one shape
+  # every row of the root-PAT block needs before it can be refused or served.
+  defp creds_bp(team, token) do
+    bp = barkpark_fixture(team)
+    {:ok, job} = Registry.enqueue_provision_job(bp)
+    {:ok, _} = Registry.succeed_job(job.id, "203.0.113.20", admin_token: token)
+    bp
+  end
+
+  defp pat_for(user, team, abilities) do
+    {:ok, plaintext, stored} =
+      Accounts.create_personal_access_token(user, team, %{
+        name: "onramp-#{Enum.join(abilities, "-")}-#{System.unique_integer([:positive])}",
+        abilities: abilities
+      })
+
+    {plaintext, stored}
+  end
+
+  describe "GET /v1/barkparks/:id/credentials (root-PAT path)" do
+    test "a root PAT held by the team owner gets the decrypted admin token" do
+      {owner, team} = user_with_team()
+      bp = creds_bp(team, "bp_admin_via_root_pat")
+      {pat, stored} = pat_for(owner, team, ["root"])
+
+      # The mint is EXCLUSIVE (`normalize_abilities/1` collapses root -> ["root"]),
+      # so this PAT carries no `read`/`write`/`deploy` string of its own — the
+      # implication table is what makes it reach anything, and it is the only
+      # tier that implies `root`.
+      assert stored.abilities == ["root"]
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat)
+
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["admin_token"] == "bp_admin_via_root_pat"
+
+      # Re-read the row: `succeed_job/3` set host/url AFTER the fixture handed
+      # back its struct, so asserting against the stale struct would compare the
+      # payload to `nil` and pass on an empty answer.
+      live = Registry.get_barkpark(bp.id)
+      assert body["host"] == live.host
+      assert body["url"] == live.url
+      assert body["host"] == "203.0.113.20"
+    end
+
+    test "a root PAT held by a team ADMIN (not the owner) also gets it" do
+      {_owner, team} = user_with_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      bp = creds_bp(team, "bp_admin_for_the_admin")
+      {pat, _} = pat_for(admin, team, ["root"])
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat)
+
+      assert conn.status == 200
+      assert json_body(conn)["admin_token"] == "bp_admin_for_the_admin"
+    end
+
+    for ability <- ~w(read write deploy) do
+      test "a #{ability} PAT — held by the OWNER — is refused, and told it needed root" do
+        {owner, team} = user_with_team()
+        bp = creds_bp(team, "bp_admin_never_shown")
+        {pat, _} = pat_for(owner, team, [unquote(ability)])
+
+        conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat)
+
+        assert conn.status == 403
+
+        # FULL-MAP equality: an assertion that only keys into ["error"] cannot
+        # notice the authority evidence going missing.
+        assert json_body(conn) == %{
+                 "error" => "forbidden",
+                 "required" => "root",
+                 "scope" => "token"
+               }
+
+        # The refusal is real, not a shape: the plaintext never reached the wire.
+        refute String.contains?(conn.resp_body, "bp_admin_never_shown")
+      end
+    end
+
+    # WHAT ACTUALLY PROTECTS THIS ROUTE FROM A STALE GRANT — and it is not the
+    # role arm. This was written expecting a 403 and it measured a 401: a rank
+    # drop runs `revoke_team_pats_exceeding_role/3` inside the same transaction
+    # (and a removal runs `revoke_team_pats/2`), so the credential is DEAD, not
+    # merely refused. Pinned here because it is the real property, and because a
+    # change that stopped revoking would turn this 401 into a 403 that the role
+    # arm below happens to catch — a silent downgrade from "revoked" to "denied"
+    # that nothing else in the suite would notice.
+    test "demoting the holder REVOKES the root PAT outright — 401, not a 403" do
+      {_owner, team} = user_with_team()
+      demoted = user_fixture()
+      {:ok, _} = Accounts.add_member(team, demoted, "admin")
+      bp = creds_bp(team, "bp_admin_withheld_after_demotion")
+
+      # Minted while they still held admin — the only way a non-admin can end up
+      # holding a root PAT at all (the mint caps a member at `read`).
+      {pat, _} = pat_for(demoted, team, ["root"])
+      assert call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat).status == 200
+
+      {:ok, _} = Accounts.update_member_role(team, demoted, "member")
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat)
+
+      assert conn.status == 401
+      assert json_body(conn)["error"] == "unauthorized"
+      refute String.contains?(conn.resp_body, "bp_admin_withheld_after_demotion")
+    end
+
+    # THE ROLE ARM ITSELF, driven directly — and labelled for what it is.
+    #
+    # No live path reaches this state today: every route that drops a grant
+    # revokes the team's PATs with it (the test above), so the honest claim is
+    # DEFENCE IN DEPTH and not "this closes a hole". Deleting the membership row
+    # through the Repo is therefore not a shortcut around a real flow — it IS
+    # the measurement: it isolates the gate from the revoker so the role arm can
+    # be proven to carry weight on its own.
+    #
+    # It is a losable test. Delete the `Authz.team_admin?` branch from the route
+    # and this row goes 200 with the plaintext admin token in the body, which is
+    # exactly the failure the branch exists to prevent.
+    test "a root PAT whose grant is gone but which was never revoked is refused on the ROLE axis" do
+      {_owner, team} = user_with_team()
+      ex_admin = user_fixture()
+      {:ok, membership} = Accounts.add_member(team, ex_admin, "admin")
+      bp = creds_bp(team, "bp_admin_never_reaches_an_ex_admin")
+
+      {pat, _} = pat_for(ex_admin, team, ["root"])
+      assert call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat).status == 200
+
+      # Drop the grant WITHOUT the revocation the real flows perform.
+      Repo.delete!(membership)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat)
+
+      assert conn.status == 403
+
+      # `admin` on the TEAM scope, not `root` on the token scope: the role check
+      # runs first, so the refusal names the authority they actually lack — the
+      # ability was never the thing missing.
+      assert json_body(conn) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+
+      refute String.contains?(conn.resp_body, "bp_admin_never_reaches_an_ex_admin")
+    end
+
+    test "a plain member cannot mint a root PAT in the first place" do
+      # The bound that makes the demotion case above the ONLY way a non-admin
+      # holds `root`. Without it, the role check would be the only thing between
+      # any member and a self-minted key to this route.
+      {_owner, team} = user_with_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      assert {:error, :forbidden} =
+               Accounts.create_personal_access_token(member, team, %{
+                 name: "member-tries-root",
+                 abilities: ["root"]
+               })
+    end
+
+    test "a root PAT is confined to its own team — a foreign box is the same 404" do
+      {outsider, outsider_team} = user_with_team()
+      {_owner, owning_team} = user_with_team()
+      bp = creds_bp(owning_team, "bp_admin_other_team")
+      {pat, _} = pat_for(outsider, outsider_team, ["root"])
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat)
+
+      # 404 and not 403: the same indistinguishable answer a session outsider
+      # gets, so a root PAT cannot be used to probe which ids exist.
+      assert conn.status == 404
+      assert json_body(conn)["error"] == "not_found"
+      refute String.contains?(conn.resp_body, "bp_admin_other_team")
+    end
+
+    test "a garbage bearer is still 401, and a root PAT still 401s once revoked" do
+      {owner, team} = user_with_team()
+      bp = creds_bp(team, "bp_admin_gone")
+      {pat, stored} = pat_for(owner, team, ["root"])
+
+      assert call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, "bpc_pat_nonsense").status ==
+               401
+
+      assert {:ok, _} = Accounts.revoke_personal_access_token(owner, stored.id)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, pat)
+      assert conn.status == 401
+      refute String.contains?(conn.resp_body, "bp_admin_gone")
+    end
+
+    test "the SESSION arm is unchanged — a member of the team still gets required: admin" do
+      # The two session refusal shapes are pinned in router_ability_matrix_test.exs;
+      # this restates the member one HERE, in the route's own suite, so a rewrite
+      # of the gate that quietly re-routes a session through the PAT branch (and
+      # starts answering `required: "root", scope: "token"` to a browser that has
+      # no token at all) reds where the change was made.
+      {_owner, team} = user_with_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+      {:ok, session} = Accounts.create_user_session_token(member)
+      bp = creds_bp(team, "bp_admin_not_for_members")
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, session)
+
+      assert conn.status == 403
+
+      assert json_body(conn) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+    end
+  end
+
   # claim-fence (bp-c55): a swept-and-re-claimed job's stale worker must NOT be able
   # to flip the row under the live claimant. When the worker echoes the claim_token
   # it holds, a transition whose token != the row's token is fenced out
