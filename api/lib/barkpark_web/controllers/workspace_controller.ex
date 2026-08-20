@@ -721,13 +721,6 @@ defmodule BarkparkWeb.WorkspaceController do
   # carries `/`, `/tmp` and `/opt/barkpark` on one). Stated, not hidden.
   @disk_margin_bytes 268_435_456
 
-  # Spill the raw tar body to a scratch directory, run `fun`, then always remove
-  # the scratch. `fun` is `(conn, bundle_path, receipt_map) -> conn`.
-  #
-  # File.rm_rf removes exactly the directory `Archive.open_scratch_dir!/0` just
-  # created — `spill_dir/0` (operator config) plus System.unique_integer/1. No
-  # request input reaches the path, same basis as archive.ex:229-231.
-  # sobelow_skip ["Traversal.FileModule"]
   # THE OPERATOR GRANT (task-ed7ae8110c7c8b41). An imported workspace arrives on
   # this instance with ZERO valid administrators: the bundle carries only the
   # SOURCE instance's `workspace_memberships` rows, naming principals that do
@@ -753,6 +746,19 @@ defmodule BarkparkWeb.WorkspaceController do
   # unreachable through the router and exists so the grant fails CLOSED —
   # granting nothing — rather than raising, if this action is ever mounted on a
   # pipeline that does not resolve a token.
+  #
+  # DELIBERATELY ABOVE the spill block below, not between it and its `def`.
+  # A Sobelow skip annotation binds to the NEXT definition, so defining this
+  # function underneath one both STOLE `with_spilled_body`'s waiver (Sobelow
+  # then correctly flagged its `File.rm_rf`) and silently handed THIS function
+  # a Traversal.FileModule waiver it never needed and nobody had reasoned
+  # about. The second half is the dangerous one: an annotation migrating onto
+  # unrelated code is how a waiver ends up covering something no one weighed.
+  # Inserting a definition between a comment block and its `def` reassigns any
+  # annotation in that block — true for skip annotations, `@canonical
+  # capability:` markers and credo disable-for-next-line alike. This paragraph
+  # deliberately does not spell the annotation token literally, so it cannot be
+  # mistaken for one by a scanner or miscounted by a census grep.
   defp operator_grant(conn) do
     case conn.assigns[:api_token] do
       %ApiToken{id: id} when is_binary(id) -> {id, "api_token"}
@@ -760,6 +766,13 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   end
 
+  # Spill the raw tar body to a scratch directory, run `fun`, then always remove
+  # the scratch. `fun` is `(conn, bundle_path, receipt_map) -> conn`.
+  #
+  # File.rm_rf removes exactly the directory `Archive.open_scratch_dir!/0` just
+  # created — `spill_dir/0` (operator config) plus System.unique_integer/1. No
+  # request input reaches the path, same basis as archive.ex:229-231.
+  # sobelow_skip ["Traversal.FileModule"]
   defp with_spilled_body(conn, fun) do
     scratch = Archive.open_scratch_dir!()
 
