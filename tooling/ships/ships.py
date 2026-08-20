@@ -32,6 +32,19 @@ it is load-bearing, and `--selftest` mutation-proves it: with the rule disabled
 the 570046c12 fixture MUST flip to SHIP. If you delete the rule as redundant,
 that arm reds.
 
+AN INSTRUMENT THAT CAN DISAGREE WITH ITSELF IS ONE YOU CAN CATCH.
+`--selftest` deliberately keeps arms that overlap: `CASES` asserts the ledger
+commit reads DOC, and the MUTATION ARM asserts that the same fixture reads SHIP
+once `ALWAYS_INERT` is disabled. Neither alone proves much — together they
+cannot both hold unless the rule is real AND the fixture still contains code
+extensions. Redundant arms are not waste here; they are how a guard that has
+quietly gone vacuous announces itself instead of passing.
+
+That is not a theory. Two measurement passes over the task board were WRONG
+before one was right, and the second was exposed by exactly this: a shape
+classifier reported zero EMPTY rows while empty rows printed in its own output.
+A single-armed instrument would have reported a confident, wrong number.
+
 USAGE
     git log --format=%H origin/main -50 | python3 tooling/ships/ships.py
     python3 tooling/ships/ships.py --selftest
