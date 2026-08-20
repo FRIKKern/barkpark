@@ -36,10 +36,25 @@ RESULT = {"done": False, "creds": None, "error": None}
 
 def build_manifest(name, webhook_url, redirect_url):
     # Minimal, least-privilege manifest for the Barkpark bridge.
-    #   issues:write  — mirror + intake + adopt (the core loop)
-    #   metadata:read — mandatory for every App
-    #   contents:read — read repo metadata the projection may reference
-    # Subscribe to `issues` ONLY (intake acts on issues.opened; the rest no-op).
+    #   issues:write        — mirror + intake + adopt (the core loop)
+    #   metadata:read       — mandatory for every App
+    #   contents:read       — read repo metadata the projection may reference
+    #   pull_requests:read  — REQUIRED to subscribe to the `pull_request` event.
+    #
+    # EVENTS ARE A CONTRACT WITH THE CODE, NOT A PREFERENCE. Every event the
+    # webhook controller dispatches on must appear in `default_events` or that
+    # handler is dead code that no test can notice. This list was `["issues"]`
+    # for 29 days after #5742 shipped a `pull_request` consumer
+    # (`Plugins.Github.MergeEvents`, the merge-gate autostamp), so GitHub never
+    # sent the event, the handler was never called once, and 9 merge-gated tasks
+    # in a single 40-day window went unstamped while five green unit tests said
+    # the bridge worked. `scripts/github-webhook-subscription-parity.sh` now reds
+    # when this list falls behind the controller.
+    #
+    #   issues        — intake acts on issues.opened; deleted/transferred/closed
+    #                   are the InboundEvents detach bookkeeping.
+    #   pull_request  — MergeEvents stamps the merge_gate:true criterion on a
+    #                   merged close. Needs pull_requests:read above.
     # NOTE on Projects v2: a USER-owned Projects v2 board is not writable by a
     # GitHub App installation token today, so the board dashboard is provisioned
     # separately with your own `gh` token (see github-projects-setup.sh) and the
@@ -55,8 +70,9 @@ def build_manifest(name, webhook_url, redirect_url):
             "issues": "write",
             "metadata": "read",
             "contents": "read",
+            "pull_requests": "read",
         },
-        "default_events": ["issues"],
+        "default_events": ["issues", "pull_request"],
     }
 
 
