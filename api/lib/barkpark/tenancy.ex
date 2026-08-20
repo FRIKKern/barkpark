@@ -1093,13 +1093,18 @@ defmodule Barkpark.Tenancy do
           select: {m.workspace_id, t.owner_user_id}
       )
 
-    Enum.reduce(token_owned, %{granted: [], unresolved: []}, fn {ws_id, owner_user_id}, acc ->
+    token_owned
+    |> Enum.reduce(%{granted: [], unresolved: []}, fn {ws_id, owner_user_id}, acc ->
+      # Prepend + reverse at the end: `acc.list ++ [x]` walks the whole
+      # accumulator on every workspace, and this runs over EVERY owner
+      # membership row on the box.
       case backfill_one(ws_id, owner_user_id) do
-        {:granted, user_id} -> %{acc | granted: acc.granted ++ [{ws_id, user_id}]}
+        {:granted, user_id} -> %{acc | granted: [{ws_id, user_id} | acc.granted]}
         :already -> acc
-        {:unresolved, reason} -> %{acc | unresolved: acc.unresolved ++ [{ws_id, reason}]}
+        {:unresolved, reason} -> %{acc | unresolved: [{ws_id, reason} | acc.unresolved]}
       end
     end)
+    |> then(&%{granted: Enum.reverse(&1.granted), unresolved: Enum.reverse(&1.unresolved)})
   end
 
   defp backfill_one(_ws_id, nil), do: {:unresolved, :no_owner_user}

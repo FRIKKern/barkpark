@@ -35,6 +35,11 @@ defmodule Barkpark.Repo.Migrations.BackfillUserOwnerMemberships do
   TODAY — a token that gains an `owner_user_id` after this deploy needs the
   function, not another migration.
 
+  `NOW() AT TIME ZONE 'utc'`, not bare `NOW()`: `timestamps(type:
+  :utc_datetime_usec)` produced `timestamp WITHOUT time zone` columns, so a
+  `timestamptz` cast silently uses the session TimeZone and would stamp local
+  wall-clock time as if it were UTC on any box not running UTC.
+
   One-way: which user rows this wrote is not distinguishable afterwards from a
   membership granted deliberately, so `down` is a documented no-op — reverting
   would revoke real access.
@@ -45,7 +50,8 @@ defmodule Barkpark.Repo.Migrations.BackfillUserOwnerMemberships do
   @insert """
   INSERT INTO workspace_memberships
     (id, workspace_id, principal_type, principal_id, role, inserted_at, updated_at)
-  SELECT gen_random_uuid(), m.workspace_id, 'user', t.owner_user_id, 'owner', NOW(), NOW()
+  SELECT gen_random_uuid(), m.workspace_id, 'user', t.owner_user_id, 'owner',
+         NOW() AT TIME ZONE 'utc', NOW() AT TIME ZONE 'utc'
   FROM workspace_memberships m
   JOIN api_tokens t ON t.id = m.principal_id
   JOIN users u ON u.id = t.owner_user_id
