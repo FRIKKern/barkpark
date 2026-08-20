@@ -2160,11 +2160,14 @@ defmodule BarkparkWeb.Router do
   # bundle import on a TARGET instance copies the source's DB rows, then pushes
   # each source blob HERE by its server-generated relative path so `serve/2`
   # (which derives the disk path from the row's `path`) finds the bytes. The
-  # `*path` is validated to the server-blob shape by `Media.put_blob/2` (reject
+  # `*path` is validated to the server-blob shape by `Media.put_blob/3` (reject
   # traversal / absolute / malformed → 422) and the body is written verbatim.
   # DELIBERATELY a bare route — an infra primitive, NOT a public SDK verb, so it
-  # is absent from the capabilities manifest. `:workspace_slug` scopes the
-  # operation logically (the admin gate is global); blobs share the media root.
+  # is absent from the capabilities manifest. `:workspace_slug` is BINDING: the
+  # `:require_admin` gate below is workspace-BLIND, so the action itself resolves
+  # the slug, binds the caller with `TenancyAuth.member?/2`, and refuses any blob
+  # key another workspace owns. Blobs still share one media root — the tenant
+  # wall is ownership of the key, not a prefix on it (see `Media.put_blob/3`).
   scope "/api/workspaces/:workspace_slug/media", BarkparkWeb do
     pipe_through([:api, :require_admin])
 
