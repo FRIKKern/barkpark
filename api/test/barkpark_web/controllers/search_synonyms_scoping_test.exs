@@ -104,7 +104,10 @@ defmodule BarkparkWeb.SearchSynonymsScopingTest do
       # POST create stamps the caller's OWN workspace — RED before the fix
       # (stamped Default's id).
       post_conn =
-        post(conn_for(raw), "/v1/data/search/#{@ds}/synonyms", %{"from" => "beta", "to" => "beta-to"})
+        post(conn_for(raw), "/v1/data/search/#{@ds}/synonyms", %{
+          "from" => "beta",
+          "to" => "beta-to"
+        })
 
       %{"result" => created} = json_response(post_conn, 200)
       row = Repo.get!(Barkpark.Search.Synonym, created["id"])

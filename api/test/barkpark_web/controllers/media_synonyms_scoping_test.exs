@@ -35,7 +35,10 @@ defmodule BarkparkWeb.MediaSynonymsScopingTest do
   # ws.id 5th arg is load-bearing: nil binds to Default (the nil-stays-green trap).
   defp bound_admin_token!(ws) do
     raw = "tok-" <> Ecto.UUID.generate()
-    {:ok, _} = Auth.create_token(raw, "media-scoping-admin", @ds, ["read", "write", "admin"], ws.id)
+
+    {:ok, _} =
+      Auth.create_token(raw, "media-scoping-admin", @ds, ["read", "write", "admin"], ws.id)
+
     raw
   end
 
@@ -85,7 +88,10 @@ defmodule BarkparkWeb.MediaSynonymsScopingTest do
       refute "default-only" in got
 
       post_conn =
-        post(conn_for(raw), "/v1/media/#{@ds}/search/synonyms", %{"from" => "beta", "to" => "beta-to"})
+        post(conn_for(raw), "/v1/media/#{@ds}/search/synonyms", %{
+          "from" => "beta",
+          "to" => "beta-to"
+        })
 
       %{"result" => created} = json_response(post_conn, 200)
       row = Repo.get!(Barkpark.Search.Synonym, created["id"])

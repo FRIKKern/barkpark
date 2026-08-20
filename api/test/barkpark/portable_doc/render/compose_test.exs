@@ -599,7 +599,12 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
   describe "compose_block api-endpoint method-class XSS fail-closed slug" do
     test "a quote+tag breakout method cannot escape the class attribute" do
       payload = ~s|"><img src=x onerror=alert(1)>|
-      html = Compose.compose_block(%{"type" => "api-endpoint", "method" => payload, "path" => "/x"}, :article)["html"]
+
+      html =
+        Compose.compose_block(
+          %{"type" => "api-endpoint", "method" => payload, "path" => "/x"},
+          :article
+        )["html"]
 
       # No attribute breakout: the sanitized class token carries only inert
       # [a-z0-9-] chars, so no `"` closes the class= and no live tag appears.
@@ -616,8 +621,18 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
     end
 
     test "legit HTTP methods keep their byte-identical modifier class" do
-      for {m, slug} <- [{"GET", "get"}, {"POST", "post"}, {"PUT", "put"}, {"PATCH", "patch"}, {"DELETE", "delete"}] do
-        html = Compose.compose_block(%{"type" => "api-endpoint", "method" => m, "path" => "/x"}, :article)["html"]
+      for {m, slug} <- [
+            {"GET", "get"},
+            {"POST", "post"},
+            {"PUT", "put"},
+            {"PATCH", "patch"},
+            {"DELETE", "delete"}
+          ] do
+        html =
+          Compose.compose_block(
+            %{"type" => "api-endpoint", "method" => m, "path" => "/x"},
+            :article
+          )["html"]
 
         assert html =~
                  ~s(<span class="bp-api-endpoint__method bp-api-endpoint__method--#{slug}">#{m}</span>)
@@ -625,12 +640,22 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
     end
 
     test "hyphenated IANA methods survive as lowercase slugs" do
-      html = Compose.compose_block(%{"type" => "api-endpoint", "method" => "VERSION-CONTROL", "path" => "/x"}, :article)["html"]
+      html =
+        Compose.compose_block(
+          %{"type" => "api-endpoint", "method" => "VERSION-CONTROL", "path" => "/x"},
+          :article
+        )["html"]
+
       assert html =~ "bp-api-endpoint__method--version-control"
     end
 
     test "an all-stripped method omits the modifier class (base only)" do
-      html = Compose.compose_block(%{"type" => "api-endpoint", "method" => "!!!", "path" => "/x"}, :article)["html"]
+      html =
+        Compose.compose_block(
+          %{"type" => "api-endpoint", "method" => "!!!", "path" => "/x"},
+          :article
+        )["html"]
+
       assert html =~ ~s(<span class="bp-api-endpoint__method">)
       refute html =~ "bp-api-endpoint__method--"
     end
