@@ -785,25 +785,38 @@ defmodule BarkparkWeb.BulldocsLiveTest do
           Barkpark.LabelFixtures.paper_attrs(%{
             "slug" => @diff_slug,
             "style" => "article",
+            "goal_id" => @diff_goal,
             "body_html" => "<p id=\"diff-body\">Diff demo body.</p>"
           })
         )
 
+      # W1.5-C (same reason as seed_rail_paper above): the rail scopes events to
+      # the paper's OWN workspace, so these must carry the paper's resolved scope
+      # to appear on it — mirroring how a real BulldocsLive write stamps the
+      # paper's workspace onto each event. Without it the paper is Default-stamped
+      # while its events are workspace-less, the rail loads EMPTY, and open-diff
+      # cannot find the paper's own events.
+      scope = %{"workspace_id" => paper.workspace_id, "project_id" => paper.project_id}
+
       {:ok, a} =
-        Events.create_event(%{
-          "goal_id" => @diff_goal,
-          "paper_slug" => @diff_slug,
-          "event_type" => "plan-written",
-          "payload_html" => "shared line\nORIGINAL middle\ntail line"
-        })
+        Events.create_event(
+          Map.merge(scope, %{
+            "goal_id" => @diff_goal,
+            "paper_slug" => @diff_slug,
+            "event_type" => "plan-written",
+            "payload_html" => "shared line\nORIGINAL middle\ntail line"
+          })
+        )
 
       {:ok, b} =
-        Events.create_event(%{
-          "goal_id" => @diff_goal,
-          "paper_slug" => @diff_slug,
-          "event_type" => "plan-grilled",
-          "payload_html" => "shared line\nREVISED middle\ntail line"
-        })
+        Events.create_event(
+          Map.merge(scope, %{
+            "goal_id" => @diff_goal,
+            "paper_slug" => @diff_slug,
+            "event_type" => "plan-grilled",
+            "payload_html" => "shared line\nREVISED middle\ntail line"
+          })
+        )
 
       {paper, a, b}
     end
