@@ -397,6 +397,29 @@ defmodule Barkpark.Content.Errors do
       details: %{field: field, op: op}
     }
 
+  # The SAME refusal, raised from INSIDE the query builder rather than caught at
+  # a controller door — `Barkpark.Content.InvalidFilterError` (defined at the
+  # bottom of this file). Every door that does not pre-guard its filter map now
+  # inherits this envelope through `BarkparkWeb.ErrorJSON`, so the code stays
+  # `invalid_filter` and the status stays 400 instead of collapsing to a generic
+  # `internal_error` 500.
+  #
+  # It names the OP but NOT the field: a builder-raised refusal does not inherit
+  # `QueryController.forbidden_query_field/4`'s ordering (that gate runs before
+  # the query is built, and never runs at all for internal doors), so echoing a
+  # caller-supplied field name back out of the builder would sit past the
+  # field-visibility gate. See the exception's moduledoc.
+  defp build({:error, %Barkpark.Content.InvalidFilterError{} = e}),
+    do: %{
+      code: "invalid_filter",
+      message: e.message,
+      status: 400,
+      # `op` is caller data of ANY shape (an atom key, a nested map from
+      # array-bracket syntax), so it is rendered to a string here — a raw term
+      # would raise inside Jason and cost the client its response.
+      details: %{op: if(is_binary(e.op), do: e.op, else: inspect(e.op))}
+    }
+
   # The modern /v1/data/query flat `--filter` string (QueryController.
   # normalize_filter_map/1). A non-empty string neither grammar family parses
   # used to fall through to an EMPTY filter map — fail-OPEN, the filter

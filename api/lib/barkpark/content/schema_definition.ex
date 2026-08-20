@@ -93,6 +93,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     ])
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))
+    |> validate_desk_group_filters()
     # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
     # can hold the same schema NAME in distinct datasets (e.g. "post" in
     # production + test), so the dataset_id leaf keeps them from colliding. The
@@ -119,6 +120,61 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:dataset_id)
   end
+
+  # `desk_groups` is a bare `{:array, :map}` — until this guard, NOTHING checked
+  # what was inside one. A chip carrying a typo'd filter op
+  # (`%{"filter" => %{"status" => %{"bogus" => "x"}}}`) was accepted at WRITE,
+  # stored, and then detonated at RENDER inside the Studio LiveView, because the
+  # query builder now refuses an unsupported op instead of silently returning
+  # every row. Catching it here is the honest half of that trade: the person who
+  # can fix the typo is the one who gets the error, at the moment they make it.
+  #
+  # Only a CHANGED `desk_groups` is validated (`get_change/2`), so an unrelated
+  # update to a schema that already stores a bad chip is not blocked — that chip
+  # is handled at render by `BarkparkWeb.Studio.PaneBuilder`'s pre-flight.
+  #
+  # The error names the field as well as the op: this is an authenticated admin
+  # write path, on the caller's OWN schema, so there is no field-visibility gate
+  # to sit past (unlike the read-path envelope — see
+  # `Barkpark.Content.InvalidFilterError`).
+  defp validate_desk_group_filters(changeset) do
+    case get_change(changeset, :desk_groups) do
+      groups when is_list(groups) ->
+        case Enum.find_value(groups, &offending_desk_group_filter/1) do
+          nil -> changeset
+          message -> add_error(changeset, :desk_groups, message)
+        end
+
+      _ ->
+        changeset
+    end
+  end
+
+  defp offending_desk_group_filter(group) when is_map(group) do
+    name = Map.get(group, "name") || Map.get(group, :name) || "(unnamed)"
+
+    case Map.get(group, "filter") || Map.get(group, :filter) do
+      nil ->
+        nil
+
+      filter ->
+        case Barkpark.Content.Query.validate_filter_map(filter) do
+          :ok ->
+            nil
+
+          {:error, {nil, :not_a_map}} ->
+            "desk group #{inspect(to_string(name))}: filter must be a map of " <>
+              "field => %{op => value}"
+
+          {:error, {field, op}} ->
+            "desk group #{inspect(to_string(name))}: unsupported filter operator " <>
+              "#{inspect(op)} on field #{inspect(field)}; valid operators: " <>
+              Enum.join(Barkpark.Content.Query.valid_filter_ops(), ", ")
+        end
+    end
+  end
+
+  defp offending_desk_group_filter(_group), do: nil
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Schema Definition v2 spec — Phase 0 (masterplan-20260425-085425, decisions
