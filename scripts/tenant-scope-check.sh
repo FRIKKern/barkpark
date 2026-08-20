@@ -27,6 +27,21 @@
 # forever). It does NOT re-litigate the ratified `_or_global` opt-in; it just
 # makes GROWING the fail-open surface a conscious, reviewed act.
 #
+# THE WAIVER IS A COMMENT, NOT A SUBSTRING (hardened 2026-08-18, wave
+# ci-gate-script-integrity). The marker used to be tested as a raw substring of
+# the line, so ANY occurrence — inside a string literal, inside a sigil, buried
+# mid-prose in an unrelated comment, or bare with no reason at all — laundered a
+# brand-new unjustified fail-open read to green. It is now accepted ONLY when it
+# opens a comment in CODE position (the `#` is outside every string/charlist/
+# sigil on the line, per `comment_start` below) AND carries a reason with at
+# least 3 word characters. Nine planted shapes lock that in — see --selftest.
+#
+# BLAST RADIUS, STATED HONESTLY: this gate runs in doc-gates.yml, which
+# publishes the ADVISORY "Doc budgets + anchors" context. That is NOT one of
+# main's required contexts, so a tenant-scope RED does not block a merge today.
+# This hardening makes an advisory security guard honest; it does not make it
+# blocking.
+#
 # Modeled on scripts/studio-literal-check.sh (Python scanner + allowlist + a
 # per-line annotation escape hatch). bash 3.2 compatible.
 #
@@ -36,9 +51,36 @@
 #   scripts/tenant-scope-check.sh --selftest   # tripwire: prove the gate REDs on a
 #                                              # planted read (temp dir; plants nothing
 #                                              # in the tree)
+# Any other argument is a usage error and exits 2 (a typo'd flag must never be
+# mistaken for a clean check).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+usage() {
+  echo "usage: scripts/tenant-scope-check.sh [--baseline|--selftest]" >&2
+}
+
+case "${1:-}" in
+  ""|--baseline|--selftest) ;;
+  *)
+    echo "tenant-scope-check: unknown argument: $1" >&2
+    usage
+    exit 2
+    ;;
+esac
+if [ "$#" -gt 1 ]; then
+  echo "tenant-scope-check: too many arguments" >&2
+  usage
+  exit 2
+fi
+
+# Absolute path to THIS script. --selftest re-invokes the REAL gate 14 times as
+# a bare command word, and a bare invocation is a COMMAND, not a path: run as
+# `cd scripts && bash tenant-scope-check.sh --selftest`, the invoked name carries
+# no slash, so every re-invocation died with "command not found" (rc 127) — a
+# FALSE RED on a legitimate invocation, and one that reads like a broken gate
+# rather than a broken call. Resolve it once, absolutely, and use that.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+ROOT="$(dirname "$(dirname "$SELF")")"
 # LIB / BASELINE are overridable (the --selftest tripwire points them at a temp
 # tree so it can prove the scanner reds without planting in the real source).
 LIB="${TENANT_SCOPE_LIB:-$ROOT/api/lib}"
@@ -64,12 +106,12 @@ end
 EX
   export TENANT_SCOPE_LIB="$TMP/lib"
   export TENANT_SCOPE_BASELINE="$TMP/baseline.txt"
-  "$0" --baseline >/dev/null
+  bash "$SELF" --baseline >/dev/null
 
   fail_selftest() { echo "tenant-scope-check --selftest: FAILED — $*"; exit 1; }
 
   # (0) clean tree passes
-  "$0" >/dev/null 2>&1 || fail_selftest "clean baselined tree did not pass"
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "clean baselined tree did not pass"
 
   # (a) plant a NEW unjustified fail-open read → must RED
   cat > "$TMP/lib/barkpark/content/leak.ex" <<'EX'
@@ -79,7 +121,7 @@ defmodule Demo.Leak do
   end
 end
 EX
-  if "$0" >/dev/null 2>&1; then
+  if bash "$SELF" >/dev/null 2>&1; then
     fail_selftest "a NEW unjustified fail-open read did NOT red the gate"
   fi
 
@@ -92,7 +134,7 @@ defmodule Demo.Leak do
   end
 end
 EX
-  "$0" >/dev/null 2>&1 || fail_selftest "a justified (# global-read:) read did NOT pass"
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "a justified (# global-read:) read did NOT pass"
 
   # (c) plant a NEW by-PK Repo.get(Document,…) → must RED
   cat > "$TMP/lib/barkpark/content/leak.ex" <<'EX'
@@ -102,11 +144,244 @@ defmodule Demo.Leak do
   end
 end
 EX
-  if "$0" >/dev/null 2>&1; then
+  if bash "$SELF" >/dev/null 2>&1; then
     fail_selftest "a NEW by-PK Repo.get(Document, id) did NOT red the gate"
   fi
+  rm -f "$TMP/lib/barkpark/content/leak.ex"
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "tree did not return to green after removing the planted leak"
 
-  echo "tenant-scope-check --selftest: PASS — gate reds on new fail-open + by-PK reads, passes when justified."
+  # --- the waiver is a COMMENT, not a substring -------------------------------
+  # Each probe plants ONE file holding a live, unbaselined fail-open read plus a
+  # `# global-read:` occurrence in some position, and asserts the verdict. `red`
+  # means the gate must refuse to launder the read; `green` means the waiver is
+  # a real, reviewed one and must keep working (the false-red control).
+  PROBE="$TMP/lib/barkpark/content/probe.ex"
+  probe() {  # probe <red|green> <label>   (file body on stdin)
+    local want="$1" label="$2" got
+    cat > "$PROBE"
+    if bash "$SELF" >/dev/null 2>&1; then got=green; else got=red; fi
+    [ "$got" = "$want" ] || fail_selftest "$label: expected $want, got $got"
+    rm -f "$PROBE"
+  }
+
+  # SPOOF 1 — a string literal on the line above is not a comment.
+  probe red "spoof/string-literal-above" <<'EX'
+defmodule Demo.Probe do
+  def read(q) do
+    msg = "# global-read: spoofed from a string literal"
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+  end
+end
+EX
+
+  # SPOOF 2 — the marker inside a string on the SAME line is not a comment.
+  probe red "spoof/string-literal-same-line" <<'EX'
+defmodule Demo.Probe do
+  def read(q) do
+    q |> Scope.scope_to_workspace_or_global(nil, nil) |> tag("# global-read: inline")
+  end
+end
+EX
+
+  # SPOOF 3 — a sigil string is not a comment either.
+  probe red "spoof/sigil" <<'EX'
+defmodule Demo.Probe do
+  def read(q) do
+    _x = ~s{# global-read: sigil string}
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+  end
+end
+EX
+
+  # SPOOF 4 — a BARE marker states no reviewed reason at all.
+  probe red "spoof/bare-marker" <<'EX'
+defmodule Demo.Probe do
+  def read(q) do
+    # global-read:
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+  end
+end
+EX
+
+  # SPOOF 5 — the marker buried mid-prose in an unrelated comment.
+  probe red "spoof/buried-in-prose" <<'EX'
+defmodule Demo.Probe do
+  def read(q) do
+    # TODO see ticket about # global-read: policy someday
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+  end
+end
+EX
+
+  # --- four shapes that ALREADY red correctly and must keep reding ------------
+  # RED 1 — marker on the line BELOW the read.
+  probe red "red/marker-below-the-read" <<'EX'
+defmodule Demo.Probe do
+  def read(q) do
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+    # global-read: too late, this sits below the read
+  end
+end
+EX
+
+  # RED 2 — marker in a DIFFERENT function.
+  probe red "red/marker-in-another-function" <<'EX'
+defmodule Demo.Probe do
+  def other do
+    # global-read: justifies this other function, not the read below
+    :ok
+  end
+
+  def read(q) do
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+  end
+end
+EX
+
+  # RED 3 — marker inside an @moduledoc heredoc, read after the closing quotes.
+  probe red "red/marker-in-moduledoc-heredoc" <<'EX'
+defmodule Demo.Probe do
+  @moduledoc """
+  Posture prose.
+  # global-read: documented, but documentation is not a waiver
+  """
+  def read(q), do: q |> Scope.scope_to_workspace_or_global(nil, nil)
+end
+EX
+
+  # RED 4 — marker as the last content line of a NON-doc heredoc.
+  probe red "red/marker-last-line-of-plain-heredoc" <<'EX'
+defmodule Demo.Probe do
+  def read(q) do
+    _blurb = """
+    prose
+    # global-read: last content line of a plain heredoc
+    """
+    q |> Scope.scope_to_workspace_or_global(nil, nil)
+  end
+end
+EX
+
+  # --- FALSE-RED CONTROL ------------------------------------------------------
+  # The 15 `# global-read:` markers live in api/lib on 2026-08-18, verbatim, each
+  # directly above a read of the kind it actually guards. If the hardened
+  # predicate ever invalidates a reviewed waiver, this probe REDs and the gate's
+  # own self-test says so before a false red reaches anyone.
+  probe green "control/15-live-marker-forms" <<'EX'
+defmodule Demo.Probe do
+  def a(task_id) do
+        # global-read: by-PK read for the renewal-family lock key
+        case Repo.get(Document, task_id) do
+            # global-read: in-lock re-read of the same PK row (see above)
+            _doc = Repo.get!(Document, task_id)
+        end
+  end
+
+  def b(doc_id) do
+        # global-read: in-lock by-PK re-read of a candidate row the sweeper's own cross-tenant scan selected — internal Oban worker, tenancy resolved by the candidate query, same posture as the reap re-read above.
+        case Repo.get(Document, doc_id) do
+        end
+  end
+
+  def c(task_id) do
+        # global-read: task-close by-PK — task_id IS the Document PK; tenancy is resolved by the caller's CAS claim (worker+epoch) inside this per-task advisory-locked txn, not a workspace_id thread (internal-worker posture).
+        case Repo.get(Document, task_id) do
+        end
+  end
+
+  def d(task_id) do
+        # global-read: by-PK re-read inside the stage-family advisory lock — same posture as pulse.ex/stamp.ex; caller authorization is enforced at the API seam.
+        case Repo.get(Document, task_id) do
+        end
+  end
+
+  def e(task_id) do
+        # global-read: by-PK re-read inside the close-family advisory lock
+        case Repo.get(Document, task_id) do
+        end
+  end
+
+  def f(doc) do
+        # global-read: by-PK re-read inside the listener-beat advisory lock — same posture as pulse.ex/stamp.ex/ttl_sweeper; the caller already resolved the row under its own scope.
+        case Repo.get(Document, doc.id) do
+        end
+  end
+
+  # global-read: FLAT-POSTURE admin console — this LiveView is admin/ops-gated
+  def g(q, ws, proj), do: q |> Scope.scope_to_workspace_or_global(ws, proj)
+
+  # global-read: FLAT-POSTURE admin console (see load_books/0) — single-row twin
+  def h(q, ws, proj), do: q |> Scope.scope_to_workspace_or_global(ws, proj)
+
+  def i(q, workspace_id, project_id) do
+        q
+        # global-read: related-read mirrors docs_with_tag/backlinks — route callers always thread a real workspace via scope_opts; nil workspace is the documented single-tenant/direct-caller bridge.
+        |> Scope.scope_to_workspace_or_global(workspace_id, project_id)
+  end
+
+  def j(q, workspace_id, project_id) do
+    q
+    # global-read: D45 tag-count distribution is deliberate instance-wide admin telemetry — the daily TagDistribution worker reads across all tenants (workspace_id nil → global); fail-open by design, NOT a per-request tenant read. (marker MUST stay the line directly above the call — tenant-scope-check.sh only reads the immediately-preceding line.)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+  end
+
+  def k(q, workspace_id, project_id) do
+    q
+    # global-read: registered type:tag vocabulary is deliberately workspace-OR-global (charter D3 — global codelist tags are shared; the E3 publish gate must accept both), so the fail-open _including_global family is the intended read here.
+    |> Scope.scope_to_workspace_including_global(workspace_id, project_id)
+  end
+
+  def l(q, workspace_id, project_id) do
+    q
+    # global-read: registered type:tag vocabulary is deliberately workspace-OR-global (charter D3 — global codelist tags are shared; the E3 publish gate must accept both), so the fail-open _including_global family is the intended read here.
+    |> Scope.scope_to_workspace_including_global(workspace_id, project_id)
+  end
+
+  def m(q) do
+      q
+      # global-read: the dedup wall deliberately reads workspace-OR-global — global/nil-workspace docs are the shared Default back-compat corpus (proven benign-shared by the content-plane object-authz wave, governed by the pdf-bl-anon ruling), so a scoped publish dedups against its own rows PLUS the shared surface and a flat/Default publish dedups against that shared corpus; a fail-closed scope_to_workspace/3 would silently stop matching the shared global duplicates. This closes the cross-tenant leak (workspace-A no longer sees workspace-B's PRIVATE rows) while keeping the intended shared-corpus comparison.
+      |> Scope.scope_to_workspace_or_global(
+        nil
+      )
+  end
+end
+EX
+
+  # A trailing same-line waiver — the shape the raw-substring check existed to
+  # support (it survives `#{}` interpolation) — must still work.
+  probe green "control/inline-trailing-waiver" <<'EX'
+defmodule Demo.Probe do
+  def read(q, ws) do
+    q |> Scope.scope_to_workspace_or_global(ws, nil) # global-read: deliberate flat-posture read
+  end
+end
+EX
+
+  # --- a scan root that scans NOTHING is a broken gate, not a clean tree ------
+  MISSING="$TMP/does-not-exist"
+  if TENANT_SCOPE_LIB="$MISSING" bash "$SELF" >/dev/null 2>&1; then
+    fail_selftest "a MISSING scan root did NOT red the gate"
+  fi
+  missing_out="$(TENANT_SCOPE_LIB="$MISSING" bash "$SELF" 2>&1 || true)"
+  case "$missing_out" in
+    *"scan root missing"*) ;;
+    *) fail_selftest "the missing-scan-root failure did not name the missing root" ;;
+  esac
+  mkdir -p "$TMP/empty-root"
+  if TENANT_SCOPE_LIB="$TMP/empty-root" bash "$SELF" >/dev/null 2>&1; then
+    fail_selftest "an EMPTY scan root (no *.ex files) did NOT red the gate"
+  fi
+
+  # --- argument dispatch ------------------------------------------------------
+  bash "$SELF" --baseline >/dev/null 2>&1 || fail_selftest "--baseline stopped dispatching"
+  bash "$SELF" >/dev/null 2>&1 || fail_selftest "the bare check stopped dispatching"
+  set +e
+  bash "$SELF" --zzz-nonsense >/dev/null 2>&1
+  unknown_rc=$?
+  set -e
+  [ "$unknown_rc" = "2" ] || fail_selftest "an unknown argument exited $unknown_rc, expected 2"
+
+  echo "tenant-scope-check --selftest: PASS — gate reds on new fail-open + by-PK reads and on all 5 marker spoofs + 4 out-of-position markers + a missing/empty scan root; passes when genuinely justified (15 live marker forms + inline waiver); unknown args exit 2."
   exit 0
 fi
 
@@ -137,7 +412,113 @@ FAIL_OPEN = re.compile(
 BY_PK = re.compile(r"\bRepo\.get!?\(\s*(?:Barkpark\.Content\.)?Document\s*,")
 
 # The reviewed opt-in annotation (on the matched line or the line directly above).
-JUSTIFY = "# global-read:"
+#
+# It is a COMMENT, not a substring. `JUSTIFY_RE` must match at the start of a
+# comment that begins in CODE position — i.e. the `#` is not inside a string,
+# charlist or sigil (see `comment_start`) — and the reason must carry real
+# content. That kills five spoofs that each used to launder a live unjustified
+# fail-open read to green: a string literal on the line above, a string on the
+# same line, a sigil, a BARE marker with no reason, and the marker buried
+# mid-prose in an unrelated comment.
+JUSTIFY_RE = re.compile(r"^#\s*global-read:\s*(.*)$")
+# A reason must be a real one: >= 3 word characters, so `# global-read:`,
+# `# global-read: "` and `# global-read: ---` are all rejected.
+MIN_REASON_WORD_CHARS = 3
+
+# Sigil delimiters that come in pairs (~s{...}, ~w[...], …).
+SIGIL_PAIRS = {"(": ")", "[": "]", "{": "}", "<": ">"}
+
+
+def comment_start(line):
+    """Index of the `#` that opens a real comment on `line`, or -1.
+
+    Single-line Elixir scanner: skips `?#` char literals, "…" strings, '…'
+    charlists, ~x{…} sigils and heredoc openers, and re-enters code position
+    inside `#{}` interpolation. Deliberately line-local — the gate only ever
+    asks about the matched line and the one directly above it.
+    """
+    n = len(line)
+    stack = []  # entries: ("str", closing_delim, interpolates) | ("code", "}", False)
+    i = 0
+    while i < n:
+        c = line[i]
+        top = stack[-1] if stack else None
+        if top is not None and top[0] == "str":
+            _, close, interp = top
+            if c == "\\":
+                i += 2
+                continue
+            if interp and c == "#" and line[i + 1:i + 2] == "{":
+                stack.append(("code", "}", False))
+                i += 2
+                continue
+            if line.startswith(close, i):
+                stack.pop()
+                i += len(close)
+                continue
+            i += 1
+            continue
+        # --- code position ---
+        if c == "?" and i + 1 < n:
+            # char literal: ?a, ?#, ?\n — never opens a comment
+            i += 3 if line[i + 1] == "\\" else 2
+            continue
+        if c == "#":
+            return i
+        if c == "~" and i + 1 < n and line[i + 1].isalpha():
+            j = i + 1
+            while j < n and line[j].isalpha():
+                j += 1
+            if j < n:
+                op = line[j]
+                # ~s interpolates, ~S does not
+                interp = line[i + 1:j].islower()
+                if op in SIGIL_PAIRS:
+                    stack.append(("str", SIGIL_PAIRS[op], interp))
+                    i = j + 1
+                    continue
+                if op in "\"'/|":
+                    if line.startswith(op * 3, j):
+                        stack.append(("str", op * 3, interp))
+                        i = j + 3
+                        continue
+                    stack.append(("str", op, interp))
+                    i = j + 1
+                    continue
+            i = j
+            continue
+        if c in "\"'":
+            if line.startswith(c * 3, i):
+                stack.append(("str", c * 3, True))
+                i += 3
+                continue
+            stack.append(("str", c, True))
+            i += 1
+            continue
+        if top is not None and top[0] == "code":
+            if c == "{":
+                stack.append(("code", "}", False))
+                i += 1
+                continue
+            if c == "}":
+                stack.pop()
+                i += 1
+                continue
+        i += 1
+    return -1
+
+
+def justified(line):
+    """True when `line` carries a well-formed reviewed `# global-read: <reason>`
+    waiver: a code-position comment that OPENS with the marker and states a
+    reason of at least MIN_REASON_WORD_CHARS word characters."""
+    idx = comment_start(line)
+    if idx < 0:
+        return False
+    m = JUSTIFY_RE.match(line[idx:].rstrip())
+    if not m:
+        return False
+    return len(re.findall(r"\w", m.group(1))) >= MIN_REASON_WORD_CHARS
 
 # Length-preserving blank (keeps line numbers + line indices aligned).
 def blank(m):
@@ -173,23 +554,42 @@ def scan(path, rel):
             continue
         # reviewed opt-in on this line or the line directly above → exempt
         above = raw_lines[i - 2] if i >= 2 else ""
-        if JUSTIFY in rawline or JUSTIFY in above:
+        if justified(rawline) or justified(above):
             continue
         hits.append((i, kind, normalize(rawline)))
     return hits
 
+# A scan root that does not exist (moved tree, typo'd TENANT_SCOPE_LIB override)
+# used to scan NOTHING and report "PASS — 0 baselined fail-open tenant read(s)":
+# a security gate certifying green forever. It is a hard failure now, in BOTH
+# modes — a baseline regenerated from an empty scan is just as laundering.
+if not os.path.isdir(lib):
+    print("tenant-scope-check: FAILED — scan root missing: %s\n"
+          "  The gate scanned nothing. Point TENANT_SCOPE_LIB at the Elixir\n"
+          "  source root (default api/lib) — an absent root is a broken gate,\n"
+          "  not a clean tree." % lib)
+    sys.exit(1)
+
 # Walk api/lib/**/*.ex, collect non-exempt occurrences.
+ex_files = 0
 occurrences = []  # (rel, kind, norm, lineno)
 for dirpath, _dirs, files in os.walk(lib):
     for fn in sorted(files):
         if not fn.endswith(".ex"):
             continue
+        ex_files += 1
         path = os.path.join(dirpath, fn)
         rel = os.path.relpath(path, lib)
         if rel in SKIP_FILES:
             continue
         for lineno, kind, norm in scan(path, rel):
             occurrences.append((rel, kind, norm, lineno))
+
+if ex_files == 0:
+    print("tenant-scope-check: FAILED — scan root holds no *.ex files: %s\n"
+          "  The gate scanned nothing. An empty scan root is a broken gate, not\n"
+          "  a clean tree." % lib)
+    sys.exit(1)
 
 # Baseline record key: (rel, kind, norm) — line-number-independent, so moving a
 # call within a file does not trip the gate; a genuinely NEW read is a new key.
