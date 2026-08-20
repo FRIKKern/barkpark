@@ -379,13 +379,23 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Go do
 
   @doc "Every non-test Go source in the package, concatenated."
   @spec source(binary) :: binary
-  def source(dir) do
+  def source(dir), do: dir |> paths() |> Enum.map_join("\n", &File.read!/1)
+
+  @doc """
+  The basenames of the non-test Go sources `source/1` concatenates.
+
+  Same `paths/1` as `source/1` on purpose: the SITE arm pins this list, so the
+  thing pinned and the thing scanned cannot drift apart.
+  """
+  @spec sources(binary) :: [binary]
+  def sources(dir), do: dir |> paths() |> Enum.map(&Path.basename/1)
+
+  defp paths(dir) do
     dir
     |> Path.join("*.go")
     |> Path.wildcard()
     |> Enum.reject(&String.ends_with?(&1, "_test.go"))
     |> Enum.sort()
-    |> Enum.map_join("\n", &File.read!/1)
   end
 
   @doc """
@@ -425,13 +435,27 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Go do
   @spec all_tags(binary) :: MapSet.t()
   def all_tags(src), do: tags(src)
 
-  defp tags(text) do
+  @doc """
+  Every json tag SITE in the package: tag NAME => how many times it is declared.
+
+  `all_tags/1` is this map with the multiplicities thrown away — and throwing
+  them away is precisely what made the go-tag floor unable to lose a site. It
+  is the SAME `tag_list/1`: same regex, same rejects, same reach, so the site
+  scan cannot grow a blind region the name scan does not already have. Any
+  divergence between the two is a broken scanner, and the SITE arm asserts
+  their key sets are equal for exactly that reason.
+  """
+  @spec tag_sites(binary) :: %{binary => pos_integer}
+  def tag_sites(src), do: src |> tag_list() |> Enum.frequencies()
+
+  defp tags(text), do: text |> tag_list() |> MapSet.new()
+
+  defp tag_list(text) do
     ~r/json:"([^"]*)"/
     |> Regex.scan(text, capture: :all_but_first)
     |> Enum.map(fn [t] -> t |> String.split(",") |> List.first() end)
     # `json:"-"` is an explicit DO-NOT-DECODE (DeployCensus.Raw), not a key.
     |> Enum.reject(&(&1 in ["", "-"]))
-    |> MapSet.new()
   end
 end
 
@@ -1004,6 +1028,151 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   @emitted_floor 149
   @go_tag_floor 273
 
+  # ---------------------------------------------------------------------------
+  # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
+  #
+  # `@go_tag_floor` counts NAMES, so it is a census of VOCABULARY and not of
+  # coverage: a name declared at twelve sites can lose eleven of them and the
+  # count never moves. MUTATION-PROVED on this tree, not predicted — turning
+  # `SiteDeleteResult.Status` (`internal/cloudclient/client.go`, `json:"status"`,
+  # a name declared at TWELVE sites) into `json:"-"` stops the CLI decoding the
+  # `status` key of the live `DELETE /v1/sites/:id` envelope that
+  # `renderSiteDeleted` prints, and left this file at 23 tests / 0 failures with
+  # `go test ./internal/cloudclient/...` green. Deleting a UNIQUE name reds three
+  # arms at once, which is the whole shape of the hole: the guard could only lose
+  # when the LAST site of a name died.
+  #
+  # THE REGISTER BELOW CLOSES IT, and the closure is a PARTITION, not a
+  # sampling. Every tag site in internal/cloudclient falls in exactly one class:
+  #
+  #   * a site of a name declared ONCE (175 of them) — deleting it deletes the
+  #     NAME, so `@go_tag_floor`'s `==` already reds. Not registered here.
+  #   * a site of a name declared MORE THAN ONCE (98 names, 341 sites) — this is
+  #     the blind class, and each row pins the exact multiplicity, so losing ONE
+  #     of twelve `status` sites reds BY NAME.
+  #
+  # 175 + 341 = 516, and the two classes are asserted to reconstruct exactly
+  # that total from `@go_tag_floor` and this register, so a register edited
+  # without the floor (or the reverse) reds rather than drifting. No tag site in
+  # the package can be deleted without a red — that is the claim, and the
+  # partition test is what makes it checkable rather than aspirational.
+  #
+  # MERGE HAZARD, the same one the floors already carry: these are `==`. A PR
+  # that declares a tag whose NAME already exists in internal/cloudclient does
+  # NOT move `@go_tag_floor` (it rides free on the union) but DOES move a row
+  # here — `team` and `scope` rode free in W19 S1, `sha`/`count`/`limit` in
+  # W26 S3. Re-measure by the 999-technique after the other PR lands; never sum.
+  @go_tag_sites %{
+    "as_of" => 5,
+    "at" => 2,
+    "barkpark_id" => 4,
+    "basis" => 6,
+    "became_live_at" => 2,
+    "build_log_url" => 2,
+    "bytes" => 2,
+    "censored" => 3,
+    "clock" => 3,
+    "code" => 3,
+    "content_rev" => 2,
+    "count" => 5,
+    "covered" => 2,
+    "current_deployment_id" => 2,
+    "dataset" => 2,
+    "deferred" => 3,
+    "delivered" => 2,
+    "deployment" => 3,
+    "deployments" => 2,
+    "detail" => 7,
+    "doc_type" => 2,
+    "domains" => 3,
+    "email" => 3,
+    "environment" => 4,
+    "error" => 8,
+    "evidence" => 2,
+    "failed" => 2,
+    "failure_class" => 2,
+    "failure_rate" => 2,
+    "failure_reason" => 2,
+    "framework" => 4,
+    "from" => 2,
+    "headroom" => 2,
+    "host" => 6,
+    "id" => 13,
+    "in_flight" => 2,
+    "inserted_at" => 8,
+    "instance" => 3,
+    "instances" => 2,
+    "kind" => 4,
+    "label" => 6,
+    "last_seen_at" => 2,
+    "live" => 2,
+    "max" => 2,
+    "measured_at" => 2,
+    "meters" => 2,
+    "min_sample" => 6,
+    "name" => 11,
+    "never_covered" => 3,
+    "next_cursor" => 2,
+    "ok" => 8,
+    "oldest_pending_seconds" => 2,
+    "p50" => 2,
+    "p95" => 2,
+    "pending" => 2,
+    "pinned_release" => 3,
+    "population" => 2,
+    "port" => 4,
+    "project" => 2,
+    "provider" => 3,
+    "quantile" => 2,
+    "reachable" => 3,
+    "reason" => 8,
+    "refused" => 4,
+    "required" => 2,
+    "role" => 4,
+    "runtime_target" => 3,
+    "sample" => 6,
+    "scale_mode" => 2,
+    "scope" => 4,
+    "seconds" => 2,
+    "series" => 2,
+    "sha" => 2,
+    "site" => 7,
+    "site_id" => 5,
+    "sites" => 3,
+    "slug" => 7,
+    "source" => 2,
+    "stage" => 3,
+    "stages" => 2,
+    "status" => 13,
+    "team" => 4,
+    "team_id" => 6,
+    "template" => 2,
+    "theme" => 2,
+    "to" => 2,
+    "token" => 2,
+    "trigger" => 3,
+    "unmetered" => 2,
+    "unreadable" => 2,
+    "unresolved" => 2,
+    "updated_at" => 5,
+    "url" => 5,
+    "usage" => 2,
+    "value" => 4,
+    "volume" => 2,
+    "window" => 2,
+    "workspace" => 2
+  }
+
+  # The SITE arm's corpus, pinned. `Go.source/1` globs `*.go` and drops
+  # `_test.go`, so its reach is whatever the directory happens to contain — and
+  # the multiplicities above are exact only for THIS file set. A new non-test
+  # source silently widens every count; pinning the list makes that a red with a
+  # name on it instead of a floor that quietly means something else. (This also
+  # corrects a fact in circulation: `client.go` has NOT been the whole corpus
+  # since `deliveries.go` landed in W26 S3.)
+  @cloudclient_sources ~w(client.go deliveries.go)
+  # ---------------------------------------------------------------------------
+
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
   # still worth exactly the same 14 vitals — the three new keys are in the base
@@ -1304,6 +1473,93 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   end
 
   # ---------------------------------------------------------------------------
+  # THE SITE ARM: the census can lose a SITE, not only the LAST site of a name
+  # ---------------------------------------------------------------------------
+
+  test "SITE: the arm's corpus is EXACTLY the declared non-test sources" do
+    assert Go.sources(@cloudclient) == @cloudclient_sources, """
+    the SITE arm's corpus moved: internal/cloudclient now compiles a different set of
+    non-test sources than `@cloudclient_sources` declares.
+
+      declared: #{Enum.join(@cloudclient_sources, ", ")}
+      on disk:  #{Enum.join(Go.sources(@cloudclient), ", ")}
+
+    Every multiplicity in `@go_tag_sites` is exact only for the pinned set. Re-measure
+    the register and `@go_tag_floor` against the new corpus before pinning it here —
+    a widened corpus that keeps the old numbers is an arm measuring something else.
+    """
+  end
+
+  test "SITE: every tag name declared more than once is registered at its EXACT multiplicity" do
+    src = Go.source(@cloudclient)
+    sites = Go.tag_sites(src)
+
+    # ANTI-VACUITY, both failure modes of a scanner that stopped scanning. A
+    # broken site regex reports an empty (or narrower) map and every row below
+    # would then red as "gone" rather than passing — but a map that is merely
+    # SHAPED right proves nothing, so pin the two properties that only a working
+    # frequency scan can have:
+    #   1. it sees the same vocabulary the name scanner does, and
+    #   2. it actually carries multiplicity rather than collapsing to a set.
+    assert MapSet.new(Map.keys(sites)) == Go.all_tags(src),
+           "the SITE scanner and the NAME scanner disagree about the vocabulary — the " <>
+             "SCANNER is broken, not the corpus."
+
+    assert Enum.sum(Map.values(sites)) > map_size(sites),
+           "every tag name counts exactly once — `tag_sites/1` has collapsed to a set and " <>
+             "the SITE arm is measuring vocabulary again."
+
+    actual = sites |> Enum.filter(fn {_name, count} -> count > 1 end) |> Map.new()
+
+    assert actual == @go_tag_sites, """
+    the tag SITE register moved.
+
+      sites LOST (a decoder stopped declaring a name it still declares elsewhere —
+      this is the blindness the arm exists for, and the name floor CANNOT see it):
+        #{fmt_sites(moved(@go_tag_sites, actual, &>/2))}
+
+      sites GAINED (a new declaration of an existing name — it rides free on the
+      NAME union, so `@go_tag_floor` does not move; bump the row here):
+        #{fmt_sites(moved(@go_tag_sites, actual, &</2))}
+
+      newly duplicated (a name that was declared once and now is not):
+        #{fmt_sites(Map.drop(actual, Map.keys(@go_tag_sites)))}
+
+      no longer duplicated (down to a single site — DELETE the row; the name
+      floor covers it from here):
+        #{fmt_sites(Map.drop(@go_tag_sites, Map.keys(actual)))}
+    """
+  end
+
+  test "SITE: the name floor and the multiplicity register PARTITION every tag site" do
+    # The totality claim, made checkable. Sites of once-declared names are
+    # covered by `@go_tag_floor`; sites of repeatedly-declared names by
+    # `@go_tag_sites`. If those two classes reconstruct the measured site total,
+    # nothing in the package is outside both — so no tag site can be deleted
+    # without one of the two arms reddening. If they do not, one of the two
+    # numbers was edited without the other and the coverage claim is void.
+    singles = @go_tag_floor - map_size(@go_tag_sites)
+    expected = singles + Enum.sum(Map.values(@go_tag_sites))
+    actual = Enum.sum(Map.values(Go.tag_sites(Go.source(@cloudclient))))
+
+    assert actual == expected, """
+    #{actual} tag site(s) found in internal/cloudclient, but `@go_tag_floor` (#{@go_tag_floor} names)
+    and `@go_tag_sites` (#{map_size(@go_tag_sites)} duplicated names, #{Enum.sum(Map.values(@go_tag_sites))} sites)
+    together account for #{expected}.
+
+    The floor and the register have drifted apart: one was bumped and the other was not,
+    and until they agree the "no site can be deleted silently" claim is NOT in force.
+    Re-measure BOTH by the 999-technique on this tree; never by arithmetic.
+    """
+
+    # The register's own definition, or the partition is not a partition: a row
+    # of 1 would be a site claimed by BOTH classes and counted twice above.
+    assert Enum.filter(@go_tag_sites, fn {_name, count} -> count < 2 end) == [],
+           "`@go_tag_sites` registers a name at fewer than 2 sites — that site belongs to " <>
+             "`@go_tag_floor`'s class, and registering it here double-counts the partition."
+  end
+
+  # ---------------------------------------------------------------------------
   # The two arms
   # ---------------------------------------------------------------------------
 
@@ -1427,6 +1683,28 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # Today's divergence is NOT blessed wholesale as reconciled. If this ever
     # reads zero, the split has stopped meaning anything.
     assert length(@known_open) > 0
+  end
+
+  # Rows present in BOTH maps whose count moved in the direction `cmp` says,
+  # carrying BOTH numbers: "which way and by how much" is the whole message.
+  defp moved(before, now, cmp) do
+    for {name, was} <- before,
+        is = now[name],
+        is != nil,
+        cmp.(was, is),
+        into: %{},
+        do: {name, {was, is}}
+  end
+
+  defp fmt_sites(map) when map_size(map) == 0, do: "(none)"
+
+  defp fmt_sites(map) do
+    map
+    |> Enum.sort()
+    |> Enum.map_join(", ", fn
+      {name, {was, is}} -> "#{name}: #{was} site(s) -> #{is}"
+      {name, count} -> "#{name} x#{count}"
+    end)
   end
 
   defp barkpark, do: Enum.find(@pairs, &(&1.name == "barkpark_json/4"))
