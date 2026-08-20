@@ -8,9 +8,9 @@ defmodule BarkparkWeb.WorkspaceController do
       `Tenancy.list_workspaces_for/1` query, not here.
 
     * `GET /api/workspaces/:workspace_slug/projects` — the Projects under that
-      workspace, but ONLY when the caller is a member. A non-member (and an
-      unknown slug) both return 404 so the endpoint never leaks whether a
-      workspace exists. `:require_token` already 401s an absent/invalid token.
+      workspace, but ONLY when the caller is a member. An unknown slug is 404;
+      a member-refused caller on a KNOWN workspace is 403 (see DENIAL SHAPE).
+      `:require_token` already 401s an absent/invalid token.
 
     * `DELETE /api/workspaces/:workspace_slug` — permanently delete a workspace
       and everything scoped to it. Gated on BOTH halves: the `:require_admin`
@@ -24,6 +24,29 @@ defmodule BarkparkWeb.WorkspaceController do
       complete bundle. Same two-part gate, same reason: on the global
       permission alone it streamed any tenant's whole workspace to any admin
       token (task-f416f96ef0860f47).
+
+  ## DENIAL SHAPE (charter D13 Tier A, gyldendal field report)
+
+  `projects`, `datasets` and `create_project` used to fold BOTH "no such
+  workspace" and "you are not a member of this one" into 404, on the argument
+  that the endpoint must never confirm a workspace exists to a non-member.
+  `Plugs.ResolveWorkspace` answers the SAME question 403 on the
+  `/w/:workspace_slug/p/:project_slug` family — so one membership question got
+  two opposite answers depending only on which route family the caller used,
+  and the field report hit exactly that: a real refusal read as "your
+  workspace does not exist".
+
+  These three actions now agree with the plug. An UNKNOWN slug is still 404; a
+  KNOWN workspace the caller is refused is 403. This accepts that
+  workspace-slug existence is public, which is already the ratified posture on
+  the scoped family. It is deliberately NOT extended to the enumeration-
+  sensitive surfaces (query_controller, `Plugs.PublicRead`,
+  `Plugs.RequireShareScope`, access/share/auth) — those keep their 404, and
+  `PublicRead`'s own moduledoc names the export leak its 404 closed.
+
+  Interior existence stays 404: an unknown PROJECT inside a workspace the
+  caller was admitted to is `not_found`, because the caller is a member and
+  could list those slugs anyway.
 
   Token is assigned to `conn.assigns[:api_token]` by the `:require_token`
   pipeline. The JSON envelope mirrors the flat `/v1` controllers — a plain map
@@ -54,6 +77,13 @@ defmodule BarkparkWeb.WorkspaceController do
   Any authenticated token may create a workspace; the creator is bound as an
   `"owner"` Membership in the same transaction, and a Default Project +
   "production" Dataset are bootstrapped so the workspace is immediately usable.
+
+  The creator binding is BOTH principals when there are two: the token gets its
+  `api_token`-typed owner row, and — when the token names a real owner user —
+  that human gets a `"user"`-typed owner row as well, so the person who made
+  the workspace can actually reach it as themselves (`Tenancy`
+  `create_workspace_with_owner/2`). A token with no owner user (CI/bootstrap)
+  writes the token row only; no placeholder membership is ever inserted.
   201 + the created workspace; 422 (via FallbackController) on an invalid /
   duplicate slug.
   """
@@ -72,25 +102,31 @@ defmodule BarkparkWeb.WorkspaceController do
   POST /api/workspaces/:workspace_slug/projects — create a Project (+ its
   "production" Dataset) under a workspace the caller is a MEMBER of.
 
-  A non-member (and an unknown slug) both collapse to 404 — the same no-leak
-  convention as the `projects` LIST action. 201 + the created project on
-  success; 422 on an invalid / duplicate slug.
+  An unknown slug is 404 and a refused caller on a known workspace is 403 —
+  the same denial shape as the `projects` LIST action (see DENIAL SHAPE in the
+  @moduledoc). 201 + the created project on success; 422 on an invalid /
+  duplicate slug.
   """
   def create_project(conn, %{"workspace_slug" => slug} = params) do
     token = conn.assigns[:api_token]
 
-    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
-         true <- TenancyAuth.member?(token, workspace.id),
-         {:ok, project} <-
-           Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
-      conn
-      |> put_status(:created)
-      |> json(%{project: render_project(project)})
-    else
-      # A changeset error flows to the FallbackController (422). Anything else
-      # (unknown slug / non-member) collapses to 404 — no existence leak.
-      {:error, %Ecto.Changeset{}} = err -> err
-      _ -> {:error, :not_found}
+    # D13 Tier A, same law as :projects — unknown slug 404, refused caller 403.
+    case Tenancy.get_workspace_by_slug(slug) do
+      %Tenancy.Workspace{} = workspace ->
+        if TenancyAuth.member?(token, workspace.id) do
+          # A changeset error flows to the FallbackController (422).
+          with {:ok, project} <-
+                 Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
+            conn
+            |> put_status(:created)
+            |> json(%{project: render_project(project)})
+          end
+        else
+          {:error, :forbidden}
+        end
+
+      _ ->
+        {:error, :not_found}
     end
   end
 
@@ -1020,38 +1056,57 @@ defmodule BarkparkWeb.WorkspaceController do
   def projects(conn, %{"workspace_slug" => slug}) do
     token = conn.assigns[:api_token]
 
-    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
-         true <- TenancyAuth.member?(token, workspace.id) do
-      projects = Tenancy.list_projects(workspace)
+    # Denial shape (charter D13 Tier A): an UNKNOWN slug is 404, a KNOWN
+    # workspace the caller is refused is 403 — the same answer
+    # `Plugs.ResolveWorkspace` already gives on the /w/:ws/p/:project family.
+    # See DENIAL SHAPE in the @moduledoc for why these two must agree.
+    case Tenancy.get_workspace_by_slug(slug) do
+      %Tenancy.Workspace{} = workspace ->
+        if TenancyAuth.member?(token, workspace.id) do
+          projects = Tenancy.list_projects(workspace)
 
-      json(conn, %{
-        workspace: render_workspace(workspace),
-        projects: Enum.map(projects, &render_project/1)
-      })
-    else
-      # Unknown slug OR a real workspace the caller is not a member of both
-      # collapse to 404 — never confirm a workspace exists to a non-member.
-      _ -> {:error, :not_found}
+          json(conn, %{
+            workspace: render_workspace(workspace),
+            projects: Enum.map(projects, &render_project/1)
+          })
+        else
+          {:error, :forbidden}
+        end
+
+      _ ->
+        {:error, :not_found}
     end
   end
 
   def datasets(conn, %{"workspace_slug" => ws_slug, "project_slug" => proj_slug}) do
     token = conn.assigns[:api_token]
 
-    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws_slug),
-         true <- TenancyAuth.member?(token, workspace.id),
-         %Tenancy.Project{} = project <- Tenancy.get_project(ws_slug, proj_slug) do
-      datasets = Tenancy.list_datasets(project)
+    # D13 Tier A on the WORKSPACE only. An unknown PROJECT inside a workspace
+    # the caller was admitted to stays 404 (Tier B): project-slug existence is
+    # tenant-interior, and the caller who reaches that clause is already a
+    # member, so 404 there confirms nothing it could not list anyway.
+    case Tenancy.get_workspace_by_slug(ws_slug) do
+      %Tenancy.Workspace{} = workspace ->
+        if TenancyAuth.member?(token, workspace.id) do
+          case Tenancy.get_project(ws_slug, proj_slug) do
+            %Tenancy.Project{} = project ->
+              datasets = Tenancy.list_datasets(project)
 
-      json(conn, %{
-        workspace: render_workspace(workspace),
-        project: render_project(project),
-        datasets: Enum.map(datasets, &render_dataset/1)
-      })
-    else
-      # Unknown workspace/project, or a non-member — collapse to 404, never
-      # confirming existence to a caller who cannot see it.
-      _ -> {:error, :not_found}
+              json(conn, %{
+                workspace: render_workspace(workspace),
+                project: render_project(project),
+                datasets: Enum.map(datasets, &render_dataset/1)
+              })
+
+            _ ->
+              {:error, :not_found}
+          end
+        else
+          {:error, :forbidden}
+        end
+
+      _ ->
+        {:error, :not_found}
     end
   end
 
