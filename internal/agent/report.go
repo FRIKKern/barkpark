@@ -145,8 +145,16 @@ type Report struct {
 	// GitCommit is `git rev-parse HEAD` in the checkout (the deployed code's
 	// commit). Empty + DirtyTree=false when the probe could not read it.
 	GitCommit string `json:"git_commit"`
-	// DirtyTree is true when `git status --porcelain` is non-empty — the
-	// deployed checkout has uncommitted changes (a deploy-hygiene red flag).
+	// DirtyTree is true when `git status --porcelain --untracked-files=no` is
+	// non-empty — the deployed checkout has uncommitted changes to TRACKED
+	// files (a deploy-hygiene red flag).
+	//
+	// The `--untracked-files=no` flag is load-bearing, not a tidy-up: without
+	// it, every working production box is dirty FOREVER. Boxes accrue untracked
+	// operational junk (built binaries, worktrees, .env backups, spawned site
+	// dirs) that no deploy can clear, so the gauge would be pinned true and
+	// could never report the good state — a light that is always on says
+	// nothing. Do not re-add untracked counting.
 	DirtyTree bool `json:"dirty_tree"`
 
 	// HealthStatus rolls the health-gate up to the registry's enum
@@ -399,10 +407,13 @@ func (g gitProbe) commit() string {
 	return strings.TrimSpace(out)
 }
 
-// dirty returns true iff `git status --porcelain` is non-empty (uncommitted
-// changes). A probe error reports false — we do not invent dirtiness.
+// dirty returns true iff `git status --porcelain --untracked-files=no` is
+// non-empty — uncommitted changes to TRACKED files. Untracked files are
+// deliberately excluded: a live box always carries some (see DirtyTree above),
+// so counting them pins the gauge true forever and it can never say clean.
+// A probe error reports false — we do not invent dirtiness.
 func (g gitProbe) dirty() bool {
-	out, err := g.git("status", "--porcelain")
+	out, err := g.git("status", "--porcelain", "--untracked-files=no")
 	if err != nil {
 		return false
 	}

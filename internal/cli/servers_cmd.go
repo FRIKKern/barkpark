@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // runUse is the `bp use <name|url>` built-in — the headline of the named-server
@@ -233,13 +234,16 @@ func runServers(out *writer, args []string) int {
 	// Human table: ★ NAME  [kind]  URL  (tier, last_connected)
 	// Two-pass render so a long DisplayName or [kind] never overruns its
 	// field and desyncs the URL column (mirrors renderRows in table.go).
-	// First pass: measure the widest name and kind cell (rune-counted).
+	// First pass: measure the widest name and kind cell in terminal display
+	// cells (runewidth.StringWidth, mirroring renderRows in table.go), NOT
+	// rune-count — a wide-CJK/emoji DisplayName is one rune but two cells, so
+	// rune-count under-measures it and shears the KIND/SERVER columns.
 	maxName, maxKind := 12, 8
 	for _, e := range list {
-		if n := utf8.RuneCountInString(cfg.DisplayName(e)); n > maxName {
+		if n := runewidth.StringWidth(cfg.DisplayName(e)); n > maxName {
 			maxName = n
 		}
-		if k := utf8.RuneCountInString("[" + cfg.KindOf(e) + "]"); k > maxKind {
+		if k := runewidth.StringWidth("[" + cfg.KindOf(e) + "]"); k > maxKind {
 			maxKind = k
 		}
 	}
@@ -247,10 +251,13 @@ func runServers(out *writer, args []string) int {
 	// gutter the "★ "/"  " mark occupies, so column labels sit over their values
 	// (this was the only headerless table in the CLI). Mirrors renderRows' header
 	// + "-" separator in table.go.
-	out.outf("  %-*s %-*s %s", maxName, "NAME", maxKind, "KIND", "SERVER")
-	out.outf("  %-*s %-*s %s",
-		maxName, strings.Repeat("-", maxName),
-		maxKind, strings.Repeat("-", maxKind),
+	out.outf("  %s %s %s",
+		runewidth.FillRight("NAME", maxName),
+		runewidth.FillRight("KIND", maxKind),
+		"SERVER")
+	out.outf("  %s %s %s",
+		strings.Repeat("-", maxName),
+		strings.Repeat("-", maxKind),
 		strings.Repeat("-", len("SERVER")))
 	// Second pass: print each row padded to the measured widths.
 	for _, e := range list {
@@ -269,11 +276,19 @@ func runServers(out *writer, args []string) int {
 		case e.LastConnected != "":
 			extra = "  (" + e.LastConnected + ")"
 		}
-		out.outf("%s%-*s %-*s %s%s", mark, maxName, name, maxKind, kind, e.Server, extra)
+		// FillRight pads to display-cell width (see renderRows in table.go) rather
+		// than fmt's %-*s, which pads to a rune COUNT and under-pads wide runes.
+		out.outf("%s%s %s %s%s", mark,
+			runewidth.FillRight(name, maxName),
+			runewidth.FillRight(kind, maxKind),
+			e.Server, extra)
 		// An instance reached via more than one hostname lists its other hostnames
 		// indented beneath the primary row, so the fold into ONE entry is visible.
 		if len(e.Aliases) > 0 {
-			out.outf("  %-*s %-*s also: %s", maxName, "", maxKind, "", joinComma(e.Aliases))
+			out.outf("  %s %s also: %s",
+				runewidth.FillRight("", maxName),
+				runewidth.FillRight("", maxKind),
+				joinComma(e.Aliases))
 		}
 	}
 	return exitOK

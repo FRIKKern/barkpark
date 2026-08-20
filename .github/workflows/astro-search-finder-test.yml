@@ -9,6 +9,13 @@ name: astro-search-finder-test
 # seed becomes a real `PrefixSeed` and `lookupPrefix` never throws — the exact
 # regression, caught at the seam. Dep-free: no `npm ci`, no browser.
 #
+# It also carries the BUILD-GUARD contract for BOTH search-starter editions: the
+# configs bake BARKPARK_TOKEN into browser JS, so each one must verify the token's
+# auth_tier first and hard-fail on a privileged token. The path filter was scoped
+# to `src/**` only, which meant it never saw EITHER config — a guard deletion
+# shipped completely unwatched. Both config files are now in the filter and the
+# guard test runs on any change to them.
+#
 # Gates a PR only once registered as a required check in branch protection
 # (a human GitHub step); until then it still reds the PR page on failure.
 
@@ -16,11 +23,19 @@ on:
   push:
     branches: [main]
     paths:
+      # Kept in lockstep with the pull_request list below — GitHub Actions does
+      # not expand YAML anchors, so the two lists are duplicated by necessity.
       - "templates/astro-search-starter/src/**"
+      - "templates/astro-search-starter/astro.config.mjs"
+      - "templates/search-starter/next.config.mjs"
+      - "templates/search-starter/token-guard.test.mjs"
       - ".github/workflows/astro-search-finder-test.yml"
   pull_request:
     paths:
       - "templates/astro-search-starter/src/**"
+      - "templates/astro-search-starter/astro.config.mjs"
+      - "templates/search-starter/next.config.mjs"
+      - "templates/search-starter/token-guard.test.mjs"
       - ".github/workflows/astro-search-finder-test.yml"
 
 concurrency:
@@ -39,3 +54,20 @@ jobs:
       - name: Run the finder contract tests
         working-directory: templates/astro-search-starter
         run: node --test 'src/**/*.test.ts'
+
+  token-guard:
+    name: Browser-token build guard (both editions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Asserts BOTH build configs refuse a non-public-read BARKPARK_TOKEN:
+      # astro.config.mjs (guard extracted from source — it cannot be imported
+      # without astro's node_modules) and next.config.mjs (imported for real and
+      # its async config factory invoked). Dep-free: no npm ci, fetch is stubbed.
+      # Removing either guard reds this job.
+      - name: Run the token-guard contract tests
+        working-directory: templates/search-starter
+        run: node --test token-guard.test.mjs

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // refNow is the reference clock the fixture's timestamps are laid out against:
@@ -297,6 +299,58 @@ func TestBuildBoard_CountsEventsPassthrough(t *testing.T) {
 	}
 	if len(b.Events) != 2 || b.Events[1].DocID != "t9" {
 		t.Fatalf("events = %+v, want the fixture's two events", b.Events)
+	}
+}
+
+// TestBuildBoard_CachePrimedInProgressTellsCollapsedTruth is the D124 regression:
+// a first-paint cache written by an older binary can carry a stale/twin-doubled
+// in_progress prime count. BuildBoard must copy-on-write recompute JUST the
+// in_progress bucket from the rows actually in hand — so the momentum line paints
+// the TRUE in-flight number (2), not the lie (42) — while leaving Snapshot.Counts
+// untouched and every OTHER bucket at the server's corpus total (or "showing N of
+// M" would compare the clamped list against itself).
+func TestBuildBoard_CachePrimedInProgressTellsCollapsedTruth(t *testing.T) {
+	// A cache-shaped snapshot: only the 2 live in_progress rows survived the
+	// 1000-row list clamp, but the persisted Counts carry a doubled in_progress
+	// prime (42) alongside honest done/open corpus totals.
+	claimed := func(id string) Task {
+		return Task{DocID: id, Lifecycle: lifeInProgress, UpdatedAt: refNow,
+			Claim: &Claim{Worker: "w", ClaimedAt: refNow}}
+	}
+	counts := map[string]int{"in_progress": 42, "done": 8, "open": 10} // summed 60
+	s := Snapshot{
+		Tasks:  []Task{claimed("t1"), claimed("t2")},
+		Counts: counts,
+	}
+
+	b := BuildBoard(s, RepoContext{}, refNow)
+
+	// Copy-on-write: the recomputed bucket is 2, the ORIGINAL snapshot map is
+	// never mutated (a cache re-used across paints must not rot).
+	if b.Counts["in_progress"] != 2 {
+		t.Fatalf("board in_progress = %d, want 2 (recomputed from s.Tasks)", b.Counts["in_progress"])
+	}
+	if s.Counts["in_progress"] != 42 {
+		t.Fatalf("Snapshot.Counts mutated: in_progress = %d, want the untouched 42", s.Counts["in_progress"])
+	}
+	// Other buckets stay the server corpus totals — untouched by the recompute.
+	if b.Counts["done"] != 8 || b.Counts["open"] != 10 {
+		t.Fatalf("other buckets changed: done=%d open=%d, want 8/10 (corpus totals)", b.Counts["done"], b.Counts["open"])
+	}
+
+	// The momentum line paints the collapsed truth: 2 in flight, a "showing N of
+	// M" whose M sums the RECOMPUTED counts (2+8+10 = 20), and a % consistent with
+	// that denominator (8 done / 20 = 40%). The lie must appear nowhere.
+	line := ansi.Strip(momentumLine(b, UIState{}, 120))
+	for _, want := range []string{"2 in flight", "showing 2 of 20", "40%"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("momentum line %q missing %q", line, want)
+		}
+	}
+	for _, bad := range []string{"42 in flight", "of 60"} {
+		if strings.Contains(line, bad) {
+			t.Fatalf("momentum line %q still paints the stale lie %q", line, bad)
+		}
 	}
 }
 

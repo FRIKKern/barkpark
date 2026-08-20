@@ -17,6 +17,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
 
 // scriptedCloud is a small router that maps METHOD+PATH (and optionally a
@@ -83,19 +85,26 @@ func (s *scriptedCloud) requestsFor(method, path string) []scriptedRequest {
 	return out
 }
 
-// TestSitesListRendersTable: `bp sites` with two sites + one returning
-// deployments. The table carries NAME, DOMAINS, STATUS, LAST DEPLOY.
+// sitesListFixture is the /v1/sites body the list tests read: two sites, one
+// carrying the server's `last_deployment` embed (status/trigger/inserted_at/
+// updated_at — the four keys router.ex actually sends, and no more), one with
+// no embed and no current_deployment_id, i.e. genuinely never deployed.
+//
+// The deployments routes are DELIBERATELY ABSENT from these fixtures. Before
+// deploy-reliability W17 the list walked an N+1 over /v1/sites/:id/deployments
+// and would have needed them; now a request to one of those paths 404s through
+// the harness and the assertions below catch it by counting requests.
+const sitesListFixture = `{"sites":[
+	{"id":"site-1","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":["blog.example.com"],"scale_mode":"always_on","port":4101,"current_deployment_id":"dep-a","inserted_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T01:00:00Z","last_deployment":{"status":"live","trigger":"content-auto","inserted_at":"2026-06-26T02:00:00Z","updated_at":"2026-06-26T02:04:00Z"}},
+	{"id":"site-2","barkpark_id":"bp-1","team_id":"team-1","name":"Shop","slug":"shop","framework":"nextjs","domains":[],"scale_mode":"zero","port":0,"current_deployment_id":"","inserted_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T01:00:00Z","last_deployment":null}
+]}`
+
+// TestSitesListRendersTable: `bp sites` with two sites, one carrying the
+// server's last_deployment embed. The table carries NAME, DOMAINS, STATUS,
+// LAST DEPLOY.
 func TestSitesListRendersTable(t *testing.T) {
 	withTempConfigHome(t)
-	s := newScriptedCloud(t).
-		route("GET", "/v1/sites", http.StatusOK, `{"sites":[
-			{"id":"site-1","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":["blog.example.com"],"scale_mode":"always_on","port":4101,"current_deployment_id":"dep-a","inserted_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T01:00:00Z"},
-			{"id":"site-2","barkpark_id":"bp-1","team_id":"team-1","name":"Shop","slug":"shop","framework":"nextjs","domains":[],"scale_mode":"zero","port":0,"current_deployment_id":"","inserted_at":"2026-06-26T00:00:00Z","updated_at":"2026-06-26T01:00:00Z"}
-		]}`).
-		route("GET", "/v1/sites/site-1/deployments", http.StatusOK, `{"deployments":[
-			{"id":"dep-a","site_id":"site-1","status":"live","image_tag":"sha:b","inserted_at":"2026-06-26T02:00:00Z"}
-		]}`).
-		route("GET", "/v1/sites/site-2/deployments", http.StatusOK, `{"deployments":[]}`)
+	s := newScriptedCloud(t).route("GET", "/v1/sites", http.StatusOK, sitesListFixture)
 
 	srv := httptest.NewServer(s.handler())
 	defer srv.Close()
@@ -114,8 +123,9 @@ func TestSitesListRendersTable(t *testing.T) {
 			t.Fatalf("table missing column %q:\n%s", want, stdout)
 		}
 	}
-	// Both sites + the live status of site-1.
-	for _, want := range []string{"Blog", "Shop", "blog.example.com", "live"} {
+	// Both sites appear, and site-1's status + stamp came off the EMBED (the
+	// timestamp is the discriminator: it exists nowhere but last_deployment).
+	for _, want := range []string{"Blog", "Shop", "blog.example.com", "live", "2026-06-26T02:00:00Z"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("table missing %q:\n%s", want, stdout)
 		}
@@ -124,6 +134,248 @@ func TestSitesListRendersTable(t *testing.T) {
 	reqs := s.requestsFor("GET", "/v1/sites")
 	if len(reqs) == 0 || reqs[0].auth != "Bearer sess-abc" {
 		t.Fatalf("expected bearer auth on /v1/sites; requests = %+v", s.requests)
+	}
+}
+
+// TestSitesListReadsTheEmbedAndMakesExactlyOneRequest is the N+1 headstone.
+//
+// `bp sites` used to issue 1 + N requests — one list, then one
+// /v1/sites/:id/deployments per site. Two things were wrong with that, and the
+// second is the one this epic cares about: it cost N extra round trips, and it
+// read every site's status at a DIFFERENT INSTANT, so the fleet "snapshot" was
+// N snapshots stapled together. This pins the request COUNT at exactly one, so
+// the walk cannot creep back in unnoticed.
+func TestSitesListReadsTheEmbedAndMakesExactlyOneRequest(t *testing.T) {
+	withTempConfigHome(t)
+	s := newScriptedCloud(t).route("GET", "/v1/sites", http.StatusOK, sitesListFixture)
+
+	srv := httptest.NewServer(s.handler())
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSites(out, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if len(s.requests) != 1 {
+		t.Fatalf("bp sites made %d requests, want exactly 1 (the N+1 is back):\n%+v", len(s.requests), s.requests)
+	}
+	if s.requests[0].path != "/v1/sites" {
+		t.Fatalf("the one request was %s %s, want GET /v1/sites", s.requests[0].method, s.requests[0].path)
+	}
+	// And the outcome still reached the human off that single response.
+	if !strings.Contains(stdout, "site outcomes") {
+		t.Fatalf("no cohort line rendered:\n%s", stdout)
+	}
+}
+
+// TestSitesListCohortSplitsSettledFromInFlight: deferred and building are
+// reported as IN FLIGHT, never as outcomes, and never-deployed is its own
+// named bucket rather than an absence.
+//
+// The measured reason for the split: two identical calls to the live control
+// plane five minutes apart returned {live 8, failed 2, deferred 1, building 1}
+// and {live 10, failed 2}, and a 48-hour replay at 30-minute cutoffs produced
+// 22 distinct (live, failed, deferred) triples over 97 samples — the modal one
+// held only 19.6% of the time. `deferred` and `building` are TRANSIENT states
+// that a latest-per-site query happily reports as if they were outcomes.
+func TestSitesListCohortSplitsSettledFromInFlight(t *testing.T) {
+	withTempConfigHome(t)
+	body := `{"sites":[
+		{"id":"s1","name":"a","slug":"a","domains":[],"current_deployment_id":"d1","last_deployment":{"status":"live","trigger":"manual","inserted_at":"2026-08-07T10:00:00Z","updated_at":"2026-08-07T10:05:00Z"}},
+		{"id":"s2","name":"b","slug":"b","domains":[],"current_deployment_id":"d2","last_deployment":{"status":"failed","trigger":"push","inserted_at":"2026-08-07T10:01:00Z","updated_at":"2026-08-07T10:06:00Z"}},
+		{"id":"s3","name":"c","slug":"c","domains":[],"current_deployment_id":"d3","last_deployment":{"status":"deferred","trigger":"content-auto","inserted_at":"2026-08-07T10:02:00Z","updated_at":"2026-08-07T10:02:00Z"}},
+		{"id":"s4","name":"d","slug":"d","domains":[],"current_deployment_id":"d4","last_deployment":{"status":"building","trigger":null,"inserted_at":"2026-08-07T10:03:00Z","updated_at":"2026-08-07T10:03:00Z"}},
+		{"id":"s5","name":"auto-proof","slug":"auto-proof","domains":[],"current_deployment_id":"","last_deployment":null}
+	]}`
+	s := newScriptedCloud(t).route("GET", "/v1/sites", http.StatusOK, body)
+	srv := httptest.NewServer(s.handler())
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSites(out, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	for _, want := range []string{
+		"2 settled — 1 live, 1 failed", // deferred + building are NOT in here
+		"2 in flight — 1 deferred, 1 building",
+		"1 never deployed", // its own bucket, not a silent drop
+		"counts, not a rate",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("cohort line missing %q:\n%s", want, stdout)
+		}
+	}
+	// A percentage anywhere on the cohort line would be pinning the weather.
+	if strings.Contains(stdout, "%") {
+		t.Fatalf("cohort printed a percentage; the cohort is one instant of a moving system:\n%s", stdout)
+	}
+}
+
+// TestSiteCohortBucketsSumToSiteCount pins the identity
+//
+//	settled + in_flight + never_deployed (+ unreported) == len(sites)
+//
+// mirroring the contract internal/cli/cloud_site_cmd.go:2013 states for the
+// per-site window. A site that lands in NO bucket is the denominator lie in
+// miniature: the reader subtracts the printed counts from the site count and
+// gets an unexplained remainder with no name.
+//
+// NOTE THE SHAPE OF THESE ASSERTIONS: not one of them pins a cohort VALUE.
+// The live cohort is time-varying (22 distinct triples over 97 samples), so a
+// test that expected 10 live / 2 failed / 0 deferred would be flaky by
+// construction — it would be asserting the weather, not the code.
+func TestSiteCohortBucketsSumToSiteCount(t *testing.T) {
+	statuses := []string{
+		"live", "running", "ready", "active",
+		"failed", "error",
+		"cancelled", "canceled",
+		"deferred", "queued", "building", "pushing",
+		"quantum_superposition", // a status word the control plane may add tomorrow
+		"",                      // embed present, status word absent
+	}
+	for _, st := range statuses {
+		st := st
+		t.Run("status="+st, func(t *testing.T) {
+			sites := []cloudclient.Site{
+				{ID: "deployed", CurrentDeploymentID: "d1", LastDeployment: &cloudclient.SiteDeploymentEmbed{Status: st}},
+				{ID: "never", CurrentDeploymentID: ""},           // no production deploy at all
+				{ID: "embed-missing", CurrentDeploymentID: "d2"}, // deployed, but no embed
+			}
+			c := summarizeSiteCohort(sites)
+			if c.Sites != len(sites) {
+				t.Fatalf("Sites = %d, want %d", c.Sites, len(sites))
+			}
+			if got := c.Accounted(); got != len(sites) {
+				t.Fatalf("buckets accounted for %d sites, want %d (%+v)", got, len(sites), c)
+			}
+			if c.NeverDeployed != 1 {
+				t.Fatalf("never-deployed = %d, want exactly 1 (%+v)", c.NeverDeployed, c)
+			}
+			// The exact criterion identity, in the sub-case where the control
+			// plane reported everything it owed us.
+			if c.Unreported == 1 {
+				if c.Settled()+c.InFlight()+c.NeverDeployed+c.Unreported != len(sites) {
+					t.Fatalf("settled+in_flight+never_deployed+unreported != len(sites) (%+v)", c)
+				}
+			}
+			// Deferred and building never count as outcomes, at any status.
+			if c.Outcomes() != c.Live+c.Failed {
+				t.Fatalf("Outcomes() folded in something other than live+failed (%+v)", c)
+			}
+		})
+	}
+}
+
+// TestSiteCohortDeferredIsCostNotOutcome: a fleet whose every site is deferred
+// reports ZERO outcomes and zero live — it must not report "0% failed" or
+// "100% deferred" or any other number that reads like reliability.
+//
+// The measured justification: 1,837 of 2,124 deferred rows are followed by a
+// same-site live within one hour, and 0 of 2,124 ever set became_live_at.
+// Deferral is terminal for the ROW and usually transient for the SITE, so it is
+// a COST — folding it into a reliability rate lies in whichever direction the
+// author picked.
+func TestSiteCohortDeferredIsCostNotOutcome(t *testing.T) {
+	sites := []cloudclient.Site{
+		{ID: "s1", CurrentDeploymentID: "d1", LastDeployment: &cloudclient.SiteDeploymentEmbed{Status: "deferred"}},
+		{ID: "s2", CurrentDeploymentID: "d2", LastDeployment: &cloudclient.SiteDeploymentEmbed{Status: "deferred"}},
+	}
+	c := summarizeSiteCohort(sites)
+	if c.Deferred != 2 || c.InFlight() != 2 {
+		t.Fatalf("deferred sites did not land in flight: %+v", c)
+	}
+	if c.Outcomes() != 0 || c.Settled() != 0 {
+		t.Fatalf("deferral was counted as an outcome: %+v", c)
+	}
+
+	out, buf, _ := newTestWriter()
+	renderSiteCohort(out, c)
+	got := buf.String()
+	if strings.Contains(got, "%") {
+		t.Fatalf("a rate was printed over a deferral-only cohort:\n%s", got)
+	}
+	if !strings.Contains(got, "2 in flight — 2 deferred") {
+		t.Fatalf("deferral not reported as in-flight cost:\n%s", got)
+	}
+}
+
+// TestSitesListJSONCarriesTheEmbedKeysetAndTheCohort: `bp sites -o json` emits
+// the server's four embed keys verbatim (no CLI-invented key), the cohort with
+// every bucket, and NO rate.
+func TestSitesListJSONCarriesTheEmbedKeysetAndTheCohort(t *testing.T) {
+	withTempConfigHome(t)
+	s := newScriptedCloud(t).route("GET", "/v1/sites", http.StatusOK, sitesListFixture)
+	srv := httptest.NewServer(s.handler())
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "json"
+		return runSites(out, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	var payload struct {
+		Sites []struct {
+			ID             string          `json:"id"`
+			Outcome        string          `json:"outcome"`
+			NeverDeployed  *bool           `json:"never_deployed"`
+			LastDeployment *map[string]any `json:"last_deployment"`
+		} `json:"sites"`
+		Cohort map[string]any `json:"cohort"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout)
+	}
+	if len(payload.Sites) != 2 {
+		t.Fatalf("want 2 sites, got %d", len(payload.Sites))
+	}
+	// site-1 carries the embed, with EXACTLY the server's four keys.
+	last := payload.Sites[0].LastDeployment
+	if last == nil {
+		t.Fatalf("site-1 lost its last_deployment:\n%s", stdout)
+	}
+	if len(*last) != 4 {
+		t.Fatalf("last_deployment widened past the server's keyset: %+v", *last)
+	}
+	for _, k := range []string{"status", "trigger", "inserted_at", "updated_at"} {
+		if _, ok := (*last)[k]; !ok {
+			t.Fatalf("last_deployment missing %q: %+v", k, *last)
+		}
+	}
+	if payload.Sites[0].Outcome != "live" {
+		t.Fatalf("site-1 outcome = %q, want live", payload.Sites[0].Outcome)
+	}
+	// site-2 has no embed, and says WHICH absence that is.
+	if payload.Sites[1].LastDeployment != nil {
+		t.Fatalf("site-2 invented a last_deployment: %+v", payload.Sites[1])
+	}
+	if payload.Sites[1].NeverDeployed == nil || !*payload.Sites[1].NeverDeployed {
+		t.Fatalf("site-2 did not report never_deployed=true: %+v", payload.Sites[1])
+	}
+	if payload.Sites[1].Outcome != "never_deployed" {
+		t.Fatalf("site-2 outcome = %q, want never_deployed", payload.Sites[1].Outcome)
+	}
+	// The cohort rides along, with every bucket named and no rate.
+	for _, k := range []string{"sites", "settled", "live", "failed", "in_flight", "deferred", "building", "never_deployed", "unreported", "accounted"} {
+		if _, ok := payload.Cohort[k]; !ok {
+			t.Fatalf("cohort missing %q: %+v", k, payload.Cohort)
+		}
+	}
+	if payload.Cohort["rate"] != nil {
+		t.Fatalf("cohort emitted a rate: %+v", payload.Cohort)
+	}
+	if payload.Cohort["accounted"] != payload.Cohort["sites"] {
+		t.Fatalf("cohort buckets do not account for every site: %+v", payload.Cohort)
 	}
 }
 

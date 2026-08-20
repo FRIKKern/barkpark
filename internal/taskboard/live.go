@@ -2,6 +2,8 @@ package taskboard
 
 import (
 	"context"
+	"errors"
+	"net/url"
 	"strings"
 	"time"
 
@@ -123,6 +125,15 @@ func (m Model) handleChange(msg changeMsg) (Model, tea.Cmd) {
 // (applySnapshot) may clear that — a live stream with unreachable reads must
 // keep the honest ✗. No dirty bit, no debounce, no refetch: a pulse says the
 // pipe is open, not that anything changed.
+//
+// The one state a pulse DOES lift is the timeout class: a snapshot fetch that
+// blew its budget degrades to ◐ + "server timeout" (applySnapshot never marks
+// a slow fetch ConnOffline — slow is not gone), and the stream proving itself
+// alive is exactly the evidence that upgrades that dot back to ●. The "server
+// timeout" label itself is NOT cleared here — the DATA on screen is still
+// stale, and only a snapshot that actually lands (applySnapshot's success
+// path) may say the fetch path recovered. Genuine unreachability (dial-tcp →
+// ConnOffline) stays behind the guard above, untouched.
 func (m Model) handlePulse() (Model, tea.Cmd) {
 	m.lastLiveEvent = m.now()
 	if m.ui.Conn != ConnOffline {
@@ -151,7 +162,10 @@ func (m Model) handleBackstop() (Model, tea.Cmd) {
 // was seen within liveStale (liveIsFresh) — regardless of what drove THIS
 // refetch (a live event, a debounce, or the periodic backstop):
 //
-//   - refetch failed      → ConnOffline, KEEP the last good board.
+//   - refetch failed      → ConnOffline, KEEP the last good board — EXCEPT the
+//     timeout class (isSnapshotTimeout), which degrades to ◐/● under the same
+//     liveIsFresh truth: a fetch that blew its budget proves slow, not gone,
+//     and must never paint the ✗ offline lie.
 //   - success, live fresh → ConnLive   (a real SSE frame within liveStale).
 //   - success, live stale → ConnPolling (we are leaning on the NDJSON poll).
 //
@@ -169,13 +183,28 @@ func (m Model) handleBackstop() (Model, tea.Cmd) {
 // each SSE frame would make the pane unusable while it breathes.
 func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	if msg.err != nil {
-		m.ui.Conn = ConnOffline
 		// Surface WHY — getJSON builds its errors precisely so the status chrome
 		// can name the failure truthfully (snapshotErrorLabel maps it to a short
 		// honest label). Without this line the board goes silently dark on a fetch
 		// error, which reads as "no tasks" instead of "sync failed" (the 8 MiB cap
 		// incident). The next landed snapshot clears it on the success path below.
 		m.ui.ConnProblem = snapshotErrorLabel(msg.err)
+		if isSnapshotTimeout(msg.err) {
+			// Timeout class: the fetch blew its budget, which means the server is
+			// SLOW, not gone — ✗ offline would be a lie (the 5s-inherited-timeout
+			// flap: offline → recovered → offline while the server answered every
+			// time). Degrade under the same single truth as the success path: a
+			// fresh SSE frame holds ● (the pipe is proven alive, so the dot never
+			// flaps through ◐ on one slow fetch), a stale stream reads ◐. The
+			// "server timeout" label above says why the DATA is stale either way.
+			if m.liveIsFresh() {
+				m.ui.Conn = ConnLive
+			} else {
+				m.ui.Conn = ConnPolling
+			}
+			return m, nil
+		}
+		m.ui.Conn = ConnOffline
 		return m, nil
 	}
 	m.ui.ConnProblem = ""
@@ -314,13 +343,41 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// labelServerTimeout is the timeout class's operator-facing label — the same
+// phrase humanizeReason (actions.go) uses for a timed-out claim/close, so the
+// two surfaces name the one condition with one voice. Distinct from "offline"
+// by design: a timeout means the server is slow, not gone.
+const labelServerTimeout = "server timeout"
+
+// isSnapshotTimeout reports whether a snapshot fetch error is a client-side
+// timeout — TYPED, mirroring humanizeReason's errors.As pattern (actions.go),
+// never a string match on deadline text (the phrasing varies by transport
+// stage and Go version). Two shapes cover every stage of getJSONCtx's request:
+// http.Client.Do wraps a deadline/dial timeout as *url.Error (whose Timeout()
+// is true for context.DeadlineExceeded too), and a deadline that fires MID-BODY
+// surfaces from io.ReadAll as context.DeadlineExceeded without the url.Error
+// wrapper. A dial-tcp connection refused is a *url.Error with Timeout()==false,
+// so genuine unreachability stays out of this class.
+func isSnapshotTimeout(err error) bool {
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.Timeout() {
+		return true
+	}
+	return errors.Is(err, context.DeadlineExceeded)
+}
+
 // snapshotErrorLabel keeps the identity strip accurate without dumping a long
 // transport/decode error into the fixed-width header. The full error remains at
 // the fetch boundary for tests and diagnostics; this is the operator-facing
-// classification.
+// classification. The timeout class is checked FIRST and TYPED — a *url.Error's
+// text spells the whole request and would otherwise fall to the default bucket,
+// which is how a slow fetch used to read "offline".
 func snapshotErrorLabel(err error) string {
 	if err == nil {
 		return ""
+	}
+	if isSnapshotTimeout(err) {
+		return labelServerTimeout
 	}
 	s := strings.ToLower(err.Error())
 	switch {

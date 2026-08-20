@@ -27,6 +27,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.Accounts.{Team, TeamMembership, User}
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.Subscription
+  alias BarkparkCloud.GitHub.CommitDistance
   alias BarkparkCloud.Notifications
   alias BarkparkCloud.Notifications.Withhold
 
@@ -52,9 +53,22 @@ defmodule BarkparkCloud.Registry do
 
   # A barkpark row that has NEVER phoned home (last_seen_at nil) and is older
   # than this stops holding a name claim against custom-host attachment — see
-  # provisioning_fqdn_taken?/1. Every live instance reports within a minute of
+  # provisioning_fqdn_taken?/2. Every live instance reports within a minute of
   # provisioning, so 7 days of silence-from-birth is unambiguous abandonment.
+  #
+  # SILENCE-FROM-BIRTH IS NOT ABANDONMENT ON ITS OWN. Measured 2026-08-08, this
+  # clock alone was 0-for-3 on live data: all three rows it would have released
+  # were on live subscriptions and one was still being polled every ~15 minutes
+  # with its decrypted admin bearer token. `provisioning_fqdn_claim/2` therefore
+  # guards it with three further legs; this constant is only the LAST of six.
   @abandoned_claim_after_days 7
+
+  # A `usage_samples` row inside this window is proof of an IN-FLIGHT
+  # platform→instance transmission (the sampler writes one row per checkable
+  # instance every ~15 min, crontab 7,22,37,52), so it is a hard block on
+  # releasing the row's name claim. Sized well above the sampler's own period so
+  # a couple of missed sweeps cannot look like silence — see claim_leg/2.
+  @recent_sample_window_hours 24
 
   # The four terminal reasons `reap_stale_deployments/0` stamps. Named so the
   # alert fan-out below can pair a reaped row with the reason it was just written
@@ -695,10 +709,34 @@ defmodule BarkparkCloud.Registry do
   is down (or a webhook already gone) never blocks the delete: the CP row is the
   truth, and the by-name reconciler can reap the leftover later.
   """
-  @spec delete_site(Site.t()) :: {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  @spec delete_site(Site.t()) ::
+          {:ok, Site.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :foreign_key_constraint, String.t()}
   def delete_site(%Site{} = site) do
     _ = deregister_content_webhook(site)
     Repo.delete(site)
+  rescue
+    # W70 S2 (D848/D856) — the INVERSE ORPHAN made typed. This is a bare
+    # `Repo.delete` on a struct with no declared constraint, so a child FK that
+    # regressed from CASCADE to RESTRICT/NO ACTION does not surface as
+    # `{:error, changeset}` — the DATABASE raises `Ecto.ConstraintError` here,
+    # AFTER the caller already tore the box down. Rather than let that crash
+    # become an untyped 500 `server_error`, catch the foreign_key case and hand
+    # the caller a typed tuple naming the constraint. `ConstraintError.message`
+    # is a ~12-line developer blob (SQL, the changeset hint, the whole struct) —
+    # it MUST NOT reach a user, so we surface only the constraint NAME and let
+    # the router compose the two-halves sentence. Any OTHER constraint type
+    # (unique/check/exclusion) is not something this row can hit and is re-raised
+    # untouched so a genuine bug still crashes loudly.
+    e in Ecto.ConstraintError ->
+      case e do
+        %Ecto.ConstraintError{type: :foreign_key, constraint: constraint} ->
+          {:error, :foreign_key_constraint, constraint}
+
+        other ->
+          reraise other, __STACKTRACE__
+      end
   end
 
   @doc """
@@ -884,9 +922,18 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  Lift suspension on every Barkpark a `team` owns — billing recovered. Bulk
+  Lift suspension on every Barkpark a `team` owns, WHATEVER suspended it. Bulk
   `UPDATE`, idempotent via the `suspended == true` guard (a second call clears
   nothing). Clears the reason + timestamp. Returns `{:ok, count}`.
+
+  NOT THE BILLING PATH ANY MORE (cch-w55-s4). This used to read "billing
+  recovered" and was called by both billing recovery sites; being reason- and
+  mode-blind, it lifted `"quota_exceeded"` flags a downgrade had set and revived
+  `self_hosted` rows `suspend_team_barkparks/2` refuses to touch. Billing now
+  calls `resume_billing_suspended/1`. Nothing in `lib/` calls this function
+  today — it is kept as the deliberate BLANKET lift (an operator-scale "clear
+  every suspension for this team"), and a new caller must mean that, not
+  "recover a payer". If you want the billing axis, you want the other one.
   """
   @spec resume_team_barkparks(Team.t() | binary()) :: {:ok, non_neg_integer()}
   def resume_team_barkparks(team) do
@@ -903,12 +950,64 @@ defmodule BarkparkCloud.Registry do
     {:ok, count}
   end
 
+  @doc """
+  cch-w55-s4: lift ONLY the suspensions a paid invoice is entitled to lift — the
+  billing axis, on `mode == "managed"` rows. The reason-and-mode-scoped twin of
+  `suspend_team_barkparks/2`, and the one the billing recovery paths call.
+
+  WHY IT IS NOT `resume_team_barkparks/1`. That function's entire `where` is
+  `team_id and suspended == true`: no reason scope and no mode scope, while its
+  suspend twin has both. So a paid invoice used to clear a `"quota_exceeded"`
+  flag the billing axis never set — a team downgraded from `support_plus` to
+  `supporter` ended with FIVE live boxes on a three-box plan, with nothing
+  scheduled to re-suspend them — and it revived a `self_hosted` row that
+  `suspend_team_barkparks/2` had refused to touch (count 0).
+
+  WHY BOTH REASONS, not just `"billing_lapsed"`. `Billing.maybe_enforce/1`
+  stamps `"billing_past_due"` when a grace window elapses. A resume scoped to
+  `"billing_lapsed"` alone would strand those boxes FOREVER — trading an
+  over-grant for a permanent under-restore (it reds
+  `billing_lifecycle_test.exs`'s dunning-recovery arms). The billing axis owns
+  exactly these two reasons, and this function lifts exactly them.
+
+  One bulk `UPDATE`; idempotent (a second call clears nothing, count 0).
+  Returns `{:ok, count}`.
+  """
+  @spec resume_billing_suspended(Team.t() | binary()) :: {:ok, non_neg_integer()}
+  def resume_billing_suspended(team) do
+    tid = team_id(team)
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    {count, _} =
+      Barkpark
+      |> where(
+        [b],
+        b.team_id == ^tid and b.suspended == true and b.mode == "managed" and
+          b.suspended_reason in ["billing_lapsed", "billing_past_due"]
+      )
+      |> Repo.update_all(
+        set: [suspended: false, suspended_reason: nil, suspended_at: nil, updated_at: now]
+      )
+
+    {:ok, count}
+  end
+
   ## Quota reconciler suspension — the reversible plan-ceiling enforcement.
   #
   # A SEPARATE axis from the bulk billing-lapse suspend above: these single-row
   # helpers stamp/clear the `"quota_exceeded"` reason (driven by
-  # `Billing.reconcile_plan_limit/1`), so a downgrade suspend and a billing-lapse
-  # suspend never restore each other. All three reuse main's `suspend_changeset`
+  # `Billing.reconcile_plan_limit/1`).
+  #
+  # HOW FAR THE INDEPENDENCE ACTUALLY GOES (cch-w55-s4 retraction). This comment
+  # used to assert that "a downgrade suspend and a billing-lapse suspend never
+  # restore each other." That holds in the SUSPEND direction only: each side
+  # stamps its own reason and neither clears the other's. In the RESTORE
+  # direction it was FALSE — `resume_team_barkparks/1` is reason-blind and did
+  # clear `"quota_exceeded"` rows whenever a billing recovery ran. The billing
+  # recovery paths now call `resume_billing_suspended/1` above, which IS
+  # reason-scoped, so the independence holds both ways for those callers; a
+  # direct `resume_team_barkparks/1` call remains blanket by design and is not
+  # the billing axis. All three helpers below reuse main's `suspend_changeset`
   # and `suspended*` columns — no new schema.
 
   @doc """
@@ -3004,7 +3103,18 @@ defmodule BarkparkCloud.Registry do
   """
   @spec provision_push_relay_webhook(Barkpark.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def provision_push_relay_webhook(%Barkpark{} = bp, opts \\ []) do
+  def provision_push_relay_webhook(bp, opts \\ [])
+
+  # cch-w58-bl — same refusal as `wire_site_url/2` above, same reason: this
+  # creates/converges the box's `chat_blocked` webhook row over the admin relay,
+  # a credentialed WRITE. The bodiless head above carries the `\\ []` default now
+  # that the function has more than one clause. The route's result mapping ends
+  # in a `{:error, _other} -> 500 provision_failed` catch-all, so it also grew an
+  # explicit 409 clause for `:suspended` — otherwise a deliberate refusal would
+  # surface to the operator as an internal error.
+  def provision_push_relay_webhook(%Barkpark{suspended: true}, _opts), do: {:error, :suspended}
+
+  def provision_push_relay_webhook(%Barkpark{} = bp, opts) do
     workspace = Keyword.get(opts, :workspace) || bp.bootstrap_workspace || "default"
     project = Keyword.get(opts, :project) || bp.bootstrap_project || "default"
     dataset = Keyword.get(opts, :dataset) || bp.bootstrap_dataset || "production"
@@ -3112,7 +3222,8 @@ defmodule BarkparkCloud.Registry do
   admin token itself NEVER leaves this function (not in the URL, not in the
   response, not logged) — only the short-lived ticket does.
 
-  Errors: `:not_live` (no `url` yet — still provisioning/failed),
+  Errors: `:suspended` (the billing verdict — checked FIRST, before the admin
+  token is decrypted), `:not_live` (no `url` yet — still provisioning/failed),
   `:no_admin_token` (row never got one; mirrors the `/credentials` 404),
   `:decrypt_failed` (tampered ciphertext, fail-closed), `:instance_error`
   (the instance call failed or returned a non-ticket).
@@ -3130,8 +3241,20 @@ defmodule BarkparkCloud.Registry do
   """
   @spec mint_studio_link(Barkpark.t(), String.t() | nil) ::
           {:ok, String.t()}
-          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+          | {:error, :suspended | :not_live | :no_admin_token | :decrypt_failed | :instance_error}
   def mint_studio_link(bp, user_email \\ nil)
+
+  # cch-w54-s2 — a SUSPENDED box mints nothing. `billing.ex`'s own
+  # cancel_subscription/1 calls suspension "data retained, access revoked"; until
+  # this clause existed no access was revoked — a suspended instance still handed
+  # back a redeemable ticket. Keyed on the BOOLEAN, not the reason: both
+  # producers set the same column, and the console paints one state from it
+  # (lifecyclePillState "stopped", Open Studio hidden), so the server is now
+  # congruent with the state the client already shows. It sits ABOVE the working
+  # clause deliberately: the refusal fires BEFORE reveal_admin_token/1, so the
+  # stored admin credential is never decrypted and no byte leaves the control
+  # plane for a suspended box.
+  def mint_studio_link(%Barkpark{suspended: true}, _user_email), do: {:error, :suspended}
 
   def mint_studio_link(%Barkpark{url: url} = bp, user_email)
       when is_binary(url) and url != "" do
@@ -3219,7 +3342,8 @@ defmodule BarkparkCloud.Registry do
   payload: `{:ok, %{token, workspace_id, permissions, expires_at}}`. The
   caller must never log or audit the token value.
 
-  Errors: `:not_live` (no `url` yet — still provisioning/failed),
+  Errors: `:suspended` (the billing verdict — checked FIRST, before the admin
+  token is decrypted), `:not_live` (no `url` yet — still provisioning/failed),
   `:no_admin_token` (row never got one; mirrors `/credentials`),
   `:decrypt_failed` (tampered ciphertext, fail-closed),
   `:app_token_unsupported` (the instance 404s the mint route — a pre-exchange
@@ -3238,11 +3362,20 @@ defmodule BarkparkCloud.Registry do
              expires_at: String.t() | nil
            }}
           | {:error,
-             :not_live
+             :suspended
+             | :not_live
              | :no_admin_token
              | :decrypt_failed
              | :app_token_unsupported
              | :instance_error}
+  # cch-w54-s2 — the strictly-worse sibling of the studio-link hole, and the
+  # reason gating studio-link alone was refused: this token is DURABLE
+  # (read+write+chat, long expiry) and member-reachable, so one mint through a
+  # suspended box outlives the suspension entirely. Same physics as the clause
+  # above: boolean-keyed, above the working clause, so the refusal beats
+  # reveal_admin_token/1 and the instance is never called.
+  def mint_app_token(%Barkpark{suspended: true}, _user_email), do: {:error, :suspended}
+
   def mint_app_token(%Barkpark{url: url} = bp, user_email)
       when is_binary(url) and url != "" and is_binary(user_email) and user_email != "" do
     case reveal_admin_token(bp) do
@@ -3514,6 +3647,8 @@ defmodule BarkparkCloud.Registry do
 
   Returns `{:ok, %{site_url:, webhook_url:}}`, or:
     * `:invalid_url`     — `site_url` isn't an http(s) origin
+    * `:suspended`       — the box is suspended; the control plane no longer
+                           writes its configuration (see the clause below)
     * `:not_live`        — the instance has no `url` yet (still provisioning)
     * `:no_admin_token`  — no stored admin token (pre-feature instance)
     * `:decrypt_failed`  — a stored ciphertext failed to decrypt (fail-closed)
@@ -3529,12 +3664,27 @@ defmodule BarkparkCloud.Registry do
           {:ok, %{site_url: String.t(), webhook_url: String.t()}}
           | {:error,
              :invalid_url
+             | :suspended
              | :not_live
              | :no_admin_token
              | :decrypt_failed
              | :no_bootstrap
              | :no_webhook
              | :instance_error}
+  # cch-w58-bl — a SUSPENDED box is not WRITTEN. Wiring a site URL is a
+  # credentialed WRITE against the instance (LIST then PUT of its revalidation
+  # webhook) with the DECRYPTED stored admin token; on a suspended row that is
+  # the control plane still configuring a server its own console says it has
+  # stopped managing. Keyed on the BOOLEAN, not the reason — both producers set
+  # the same column and the console paints one state from it — and placed as a
+  # LEADING clause (D685: the guard goes where the request is BUILT), so the
+  # refusal fires BEFORE `reveal_admin_token_or_error/1` touches the ciphertext:
+  # no credential is decrypted and no byte leaves the control plane. Prior art:
+  # `mint_studio_link/2` above. Deliberately NOT keyed on reachability
+  # (`verify_reachable` / `last_verified_at`) — D684 retracted that column, and a
+  # never-verified box still wires (pinned by test).
+  def wire_site_url(%Barkpark{suspended: true}, _site_url), do: {:error, :suspended}
+
   def wire_site_url(%Barkpark{url: url} = bp, site_url)
       when is_binary(url) and url != "" and is_binary(site_url) do
     with {:ok, origin} <- normalize_site_origin(site_url),
@@ -3699,17 +3849,45 @@ defmodule BarkparkCloud.Registry do
   NEVER raises, and ALWAYS best-effort-persists on failure: any failure mode —
   not live, no/tampered admin token, transport error, non-200 (a pre-feature
   instance 404s the endpoint), undecodable body — lands `update_state:
-  "unknown"` on the row (with a fresh `update_checked_at`) and returns
-  `{:error, reason}`. A 200 with a `"check"` map persists its state (whitelisted
+  "unknown"` on the row and returns `{:error, reason}`. `update_checked_at` is
+  refreshed only when a check was ACTUALLY made (cch-w65): the three rungs that
+  return before a request is built — not live, no admin token, tampered token —
+  leave the column exactly as they found it. A 200 with a `"check"` map
+  persists its state (whitelisted
   against `Barkpark.update_states/0`, anything else → `"unknown"`), the
   running/latest releases, and the check time, returning `{:ok, bp}`.
+
+  THE REASON IS PERSISTED (cch-w58). "unknown" alone collapses five different
+  worlds, and this call is the one question per hour that CAN lose, so its
+  answer lands in `update_unavailable_reason`:
+
+    * `identity_refused` (401) — the box does not hold THIS row's admin token.
+      A refutation of our stored credential, not a transient.
+    * `forbidden` (403) — the box knows the credential and refuses the principal.
+    * `no_self_update_route` (404) — a PRE-FEATURE box: no such route, nothing
+      refused. Deliberately NOT folded into `identity_refused` (charter D684).
+    * `unreachable` — no response at all (transport failure).
+    * `bad_shape` — a 200 whose body we could not read as a check envelope.
+    * `instance_error` — any other status.
+
+  A clean 200 CLEARS the column, so a stale refusal can never outlive a
+  recovery. Nothing REFUSES on this column yet — it is evidence, not a guard.
 
   Transport is the same swappable seam `mint_studio_link/1` uses
   (`:studio_link_http_client`; tests wire `StudioLinkFakeHttpClient`).
   """
   @spec refresh_update_status(Barkpark.t()) ::
           {:ok, Barkpark.t()}
-          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+          | {:error,
+             :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :identity_refused
+             | :forbidden
+             | :no_self_update_route
+             | :unreachable
+             | :bad_shape
+             | :instance_error}
   def refresh_update_status(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
     case reveal_admin_token(bp) do
       {:ok, nil} ->
@@ -3729,9 +3907,29 @@ defmodule BarkparkCloud.Registry do
         case studio_link_http_client().request(request) do
           {:ok, %{status: 200, body: body}} ->
             case Jason.decode(body) do
+              # A 200 we cannot read is not the same world as a box that
+              # errored: the box answered and believes it succeeded, and the
+              # shape is what failed. Same word `Usage` already uses for it,
+              # and it is the only writer of this rung (cch-w58 review).
               {:ok, %{"check" => %{} = check}} -> persist_update_check(bp, check)
-              _ -> persist_update_unknown(bp, :instance_error)
+              _ -> persist_update_unknown(bp, :bad_shape)
             end
+
+          # The box's OWN admin route answered, and its answer DISCRIMINATES —
+          # each of these is a different world, and collapsing them is what made
+          # "unknown" unreadable (cch-w58). 404 stays its own third outcome: a
+          # pre-feature box has no such route and has refused nothing.
+          {:ok, %{status: 401}} ->
+            persist_update_unknown(bp, :identity_refused)
+
+          {:ok, %{status: 403}} ->
+            persist_update_unknown(bp, :forbidden)
+
+          {:ok, %{status: 404}} ->
+            persist_update_unknown(bp, :no_self_update_route)
+
+          {:error, _} ->
+            persist_update_unknown(bp, :unreachable)
 
           _ ->
             persist_update_unknown(bp, :instance_error)
@@ -3756,30 +3954,99 @@ defmodule BarkparkCloud.Registry do
       update_state: state,
       update_running_release: string_field(check["running_release"]),
       update_latest_release: string_field(check["latest_release"]),
-      update_checked_at: DateTime.utc_now()
+      update_checked_at: DateTime.utc_now(),
+      # The box answered us on its own admin route: whatever it refused an hour
+      # ago, it does not refuse now. A stale refusal must not survive a recovery.
+      update_unavailable_reason: nil
     })
+    # FORCED, not cast: `cast` emits no change when the value already matches the
+    # IN-MEMORY struct, and the caller may hold a struct read BEFORE the refusal
+    # was persisted (the router's fire-and-forget kick, a retry on a struct
+    # carried across calls). That would leave the accusation in the row while the
+    # box is demonstrably answering. The clear is unconditional.
+    |> Ecto.Changeset.force_change(:update_unavailable_reason, nil)
     |> Repo.update()
   end
 
   # Best-effort "unknown" landing for every failure mode — the row always
-  # reflects that we asked and got no usable verdict. The write itself is
-  # best-effort too (a changeset/DB failure never masks the original reason).
+  # reflects that we asked and got no usable verdict, AND (cch-w58) WHICH
+  # no-usable-verdict it was. The write itself is best-effort too (a
+  # changeset/DB failure never masks the original reason), and every atom that
+  # reaches here is in `Barkpark.update_unavailable_reasons/0`.
+  #
+  # THE CLOCK RECORDS A CHECK THAT WAS ACTUALLY MADE (cch-w65). Three of the
+  # nine rungs return BEFORE any request is built — `:no_admin_token`,
+  # `:decrypt_failed` and `:not_live` — so no bytes ever left this plane and
+  # there is no check whose time could be recorded. Stamping one there is the
+  # control plane inventing evidence about a box it never spoke to, and the
+  # console shipped a client-side apology (`UPDATE_REFUSAL_UNCLOCKED`) to teach
+  # the browser which three of nine server rungs to disbelieve.
+  @unclocked_reasons [:no_admin_token, :decrypt_failed, :not_live]
+
   defp persist_update_unknown(bp, reason) do
     _ =
       bp
-      |> Barkpark.update_status_changeset(%{
-        update_state: "unknown",
-        update_running_release: nil,
-        update_latest_release: nil,
-        update_checked_at: DateTime.utc_now()
-      })
+      |> Barkpark.update_status_changeset(update_unknown_attrs(reason))
       |> Repo.update()
 
     {:error, reason}
   end
 
+  defp update_unknown_attrs(reason) do
+    attrs = %{
+      update_state: "unknown",
+      update_running_release: nil,
+      update_latest_release: nil,
+      update_unavailable_reason: Atom.to_string(reason)
+    }
+
+    # OMITTED, never an explicit `nil` (charter D789). A box that answered
+    # honestly an hour ago and has since lost its `url` still HAS a true
+    # last-checked time; writing nil would erase it and trade one lie for
+    # another. A never-checked row simply stays NULL, which every reader
+    # already renders honestly (`digest_email.format_ts(nil) -> "never"`).
+    if reason in @unclocked_reasons,
+      do: attrs,
+      else: Map.put(attrs, :update_checked_at, DateTime.utc_now())
+  end
+
   defp string_field(v) when is_binary(v) and v != "", do: v
   defp string_field(_), do: nil
+
+  @doc """
+  Grade how far behind `main` the commit this box actually SERVES is, and
+  persist the verdict into its own three columns (deploy-reliability W21).
+
+  This is the control plane's OWN measurement, and it is deliberately not
+  `update_state`: that column mirrors the box's release-tag self-grade, which
+  reads `current` on a box 2,468 commits behind. The verdict comes from ONE
+  unauthenticated GitHub compare call
+  (`BarkparkCloud.GitHub.CommitDistance.verdict/2`).
+
+  NEVER raises and ALWAYS writes: every failure mode — an empty/NULL
+  `git_commit` (the agent is offline), an unknown sha (404), a rate-limit
+  refusal (403), a transport error, an unconfigured client — lands
+  `commit_ancestry: "unknown"` with `commit_distance: NULL`, never 0, plus a
+  fresh `commit_distance_checked_at` so the row honestly says "we asked and got
+  no usable answer". Returns `{:ok, bp}` on a persisted verdict of any rung, or
+  `{:error, reason}` if the write itself failed.
+
+  `update_state`, `update_checked_at` and every other column are untouched: the
+  write goes through the narrow `Barkpark.commit_distance_changeset/2`.
+  """
+  @spec refresh_commit_distance(Barkpark.t(), keyword()) ::
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def refresh_commit_distance(%Barkpark{} = bp, opts \\ []) do
+    %{ancestry: ancestry, distance: distance} = CommitDistance.verdict(bp.git_commit, opts)
+
+    bp
+    |> Barkpark.commit_distance_changeset(%{
+      commit_ancestry: ancestry,
+      commit_distance: distance,
+      commit_distance_checked_at: DateTime.utc_now()
+    })
+    |> Repo.update()
+  end
 
   @doc """
   Trigger a self-update RUN on a live instance: `POST <instance>/v1/admin/self-update`
@@ -3800,10 +4067,24 @@ defmodule BarkparkCloud.Registry do
   is pinned. `force: true` overrides (an explicit "yes, update the pinned box").
   The rollout worker never hits this — it already excludes pinned rows from its
   candidate query — but the interactive relay must not silently no-op a pin.
+
+  IDENTITY REFUSAL (cch-w60-s4): a box whose last probe was refused
+  (`update_unavailable_reason == "identity_refused"` — it answered our stored
+  admin credential 401) returns `{:error, :identity_refused}` BEFORE the token
+  is decrypted and before anything reaches the wire. A pinned AND refused box
+  still returns `:pinned` on an unforced trigger (the pin clause matches
+  above); `force: true` reaches the refusal. Both are terminal, and the wire is
+  empty either way — only the word differs.
   """
   @spec trigger_self_update(Barkpark.t(), keyword()) ::
           {:ok, non_neg_integer(), map()}
-          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error | :pinned}
+          | {:error,
+             :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :instance_error
+             | :pinned
+             | :identity_refused}
   def trigger_self_update(bp, opts \\ [])
 
   def trigger_self_update(%Barkpark{pinned_release: pin} = bp, opts)
@@ -3837,17 +4118,51 @@ defmodule BarkparkCloud.Registry do
   target_sha>` on 202), so the operator's explicit rollback wins over the
   stale pin. An unpinned rollback would be undone within one rollout tick —
   a lie.
+
+  IDENTITY REFUSAL (cch-w60-s4): rollback rides the same shared POST seam, so a
+  box that refuted our stored admin credential returns `{:error,
+  :identity_refused}` with nothing on the wire — there is no pin clause above
+  this trigger, so the refusal is the only verdict.
   """
   @spec trigger_rollback(Barkpark.t(), keyword()) ::
           {:ok, non_neg_integer(), map()}
-          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+          | {:error,
+             :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :instance_error
+             | :identity_refused}
   def trigger_rollback(bp, _opts \\ []), do: relay_admin_post(bp, "/v1/admin/rollback")
 
   # The shared instance-admin relay: reveal the stored admin token, POST `body`
   # (default: an empty object) to <instance_url><path>, hand back the instance's
   # verdict with its semantics intact (undecodable body degrades to %{} — the
   # status alone is the verdict). Both admin triggers ride this one seam.
-  defp relay_admin_post(bp, path, body \\ %{}), do: relay_admin(bp, :post, path, body)
+  #
+  # cch-w60-s4 — THE PLANE STOPS ASKING A REFUTED BOX TO EXECUTE. When the last
+  # update probe was refused by the box itself (`update_unavailable_reason ==
+  # "identity_refused"` — the box answered our stored admin credential 401), an
+  # EXECUTE ask is spending a decrypted secret at an address that has already
+  # told us the secret is wrong. Refuse here, ABOVE `relay_admin/4` — so the
+  # refusal fires BEFORE `reveal_admin_token/1` and nothing reaches the wire.
+  #
+  # The guard sits on this shared POST seam (exactly two callers repo-wide, both
+  # admin triggers, and it is `defp`) rather than on either trigger, so a third
+  # admin trigger added later INHERITS the refusal instead of escaping it. It is
+  # deliberately NOT on `relay_admin/4`: that seam also carries token mints, site
+  # deploys and READS, and refusing a read because a WRITE credential was refuted
+  # is a different doctrine call.
+  #
+  # ONE RUNG ONLY. The column is `:string` (`Barkpark` :224) with a nine-rung
+  # whitelist, so the pattern is the literal STRING — an atom pattern would ship
+  # a refusal that can never fire. `"forbidden"` (the box knows our token but
+  # denies the route) is a DIFFERENT fact and is deliberately not matched here.
+  defp relay_admin_post(bp, path, body \\ %{})
+
+  defp relay_admin_post(%Barkpark{update_unavailable_reason: "identity_refused"}, _path, _body),
+    do: {:error, :identity_refused}
+
+  defp relay_admin_post(bp, path, body), do: relay_admin(bp, :post, path, body)
 
   @doc """
   The PUBLIC instance-admin relay (site-spawner D22/D29): reveal `bp`'s stored
@@ -4314,22 +4629,38 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  @doc """
-  Decrypt one env var's value. Returns `{:ok, plaintext}` or `:error` (tampered
-  ciphertext fails closed). A `is_shown_once` var is `{:error, :write_once}` —
-  write-once values are never revealed (compliance posture).
-  """
-  @spec reveal_env_var(EnvVar.t()) :: {:ok, binary()} | :error | {:error, :write_once}
-  def reveal_env_var(%EnvVar{is_shown_once: true}), do: {:error, :write_once}
-  def reveal_env_var(%EnvVar{value_encrypted: ciphertext}), do: Vault.decrypt(ciphertext)
+  # A per-row reveal helper lived here and refused an `is_shown_once` row with
+  # `{:error, :write_once}`. It was DELETED in wave 56 — not because write-once is
+  # wrong, but because no production caller could ever reach the guard: it had zero
+  # non-test callers, and the env-var HTTP surface is exactly three routes
+  # (`GET /v1/env-vars`, which never returns values; POST; DELETE) with no reveal
+  # route at all. The only thing that could make the refusal fire was the test that
+  # asserted it. A guard that cannot lose is worse than no guard — it reads as
+  # protection the system does not actually provide, and it makes the write-once
+  # posture look enforced on a read path that does not exist. Write-once is still
+  # enforced where a caller can actually hit it: `put_env_var/2` refuses a rewrite
+  # of an `is_shown_once` row. If a reveal path is ever wanted, it arrives with the
+  # route that needs it, and the guard becomes losable again.
 
   @doc """
   The resolved, DECRYPTED env map for a provisioned `barkpark`: its Team's
   team-scoped vars, with the instance's own `barkpark`-scoped vars layered on top
   (most-specific-wins). Keys are env var names, values are plaintext.
 
-  This is the injection payload — called at provision-claim time and folded into
-  the Go worker's `claim_json` so the values reach the box's runtime env. ALWAYS
+  Called at provision-claim time and folded into the Go worker's `claim_json`
+  under the `env` key.
+
+  RETRACTED ON REVIEW (wave 56): this paragraph used to open "This is the
+  injection payload" and end "so the values reach the box's runtime env". It is
+  not an injection payload and the values reach nothing.
+  `internal/provisioner.JobSpec` declares no `env` field and every claim decode
+  is a bare `json.Unmarshal`, so the key is silently dropped by the only process
+  that could act on it. The console retracted the same claim in cch-w53-s1
+  ("Values are not delivered to any instance yet"); `lib` was still asserting the
+  opposite in two places, of which this was one. Building delivery is filed
+  separately — until it exists, this function resolves a map nobody consumes.
+
+  ALWAYS
   team-filtered (the never-leak-across-tenants invariant); a barkpark belongs to
   exactly one team, so resolution can only ever surface that team's secrets.
 
@@ -5143,8 +5474,9 @@ defmodule BarkparkCloud.Registry do
   that, the host must not already be claimed by ANY other surface that answers
   on our boxes — a Site domain, another barkpark's `custom_host` (exact, or as
   a PARENT domain owned by a different team: `sub.barkpark.jarl.no` is refused
-  while `barkpark.jarl.no` belongs to someone else), or a provisioning FQDN
-  (any barkpark's `url`, clean or suffixed) — each of those would silently
+  while `barkpark.jarl.no` belongs to someone else), or ANOTHER barkpark's
+  provisioning FQDN (its `url` host, compared NORMALISED — a url-held FQDN and
+  a custom_host are ONE namespace) — each of those would silently
   shadow or be shadowed by the attach. Taken → `{:error, :taken}`. The
   pre-check is check-then-write; the `barkparks_custom_host_unique_idx` unique
   constraint is the atomic backstop for a custom_host↔custom_host race
@@ -5175,14 +5507,14 @@ defmodule BarkparkCloud.Registry do
   # barkpark's custom_host (self is excluded — re-attaching your own host is an
   # idempotent no-op, not a conflict), a DIFFERENT team's custom_host as a
   # PARENT of `norm` (attach-domain V2: you may nest under your own attached
-  # domain, never under someone else's), or any barkpark's provisioning FQDN
-  # (`url` stores `https://<fqdn>` — including this barkpark's own primary
-  # FQDN, which never needs attaching).
+  # domain, never under someone else's), or ANOTHER barkpark's provisioning
+  # FQDN (`url` stores `https://<fqdn>`; self is excluded there too, so a row
+  # may attach the host it already answers on).
   defp custom_host_taken?(norm, %Barkpark{id: self_id, team_id: team_id}) do
     registered_site_domain?(norm) or
       other_barkpark_custom_host?(norm, self_id) or
       foreign_custom_host_suffix?(norm, team_id) or
-      provisioning_fqdn_taken?(norm)
+      provisioning_fqdn_taken?(norm, self_id)
   end
 
   # Does `norm` sit UNDER a custom_host owned by a different team? The stored
@@ -5213,32 +5545,208 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  defp provisioning_fqdn_taken?(norm) do
-    url = "https://" <> norm
+  # Does ANOTHER row already answer on `norm` as its provisioning FQDN? A
+  # url-held FQDN and a custom_host occupy ONE hostname namespace — the two
+  # partial unique indexes (`barkparks_url_unique_idx`,
+  # `barkparks_custom_host_unique_idx`) are DISJOINT and structurally cannot
+  # see across them, so this pre-check is the only guard there is.
+  #
+  # Self is EXCLUDED, exactly as `other_barkpark_custom_host?/2` does it: a row
+  # attaching the host it ALREADY serves (its own provisioning FQDN — e.g.
+  # re-attaching to re-run the DNS upsert after a repair) shadows nobody, so
+  # refusing it would only block a legitimate re-attach. Excluding self cannot
+  # widen the walk for anyone else: `claim_leg/2` is evaluated per OTHER row, so
+  # every leg that would have held the name against a stranger still holds it.
+  defp provisioning_fqdn_taken?(norm, self_id) do
+    case provisioning_fqdn_claim(norm, self_id) do
+      :free ->
+        false
 
-    # ABANDONED rows do not hold a name claim. A row whose agent NEVER phoned
-    # home (last_seen_at nil — every live instance reports within a minute of
-    # provisioning), that is older than @abandoned_claim_after_days, and that
-    # has no active job in flight is a provisioning ghost (seen live
-    # 2026-07-08: a June-29 pre-registry-era attempt squatted
-    # gyldendal.barkpark.cloud forever with no owner able to release it).
-    # Excluding it here lets a legitimate attach reclaim the name; the ghost
-    # row itself stays untouched (it is dead weight, not a conflict).
+      {:held, leg, why} ->
+        Logger.info("custom_host refused for #{norm}: leg=#{leg} — #{why}")
+        true
+    end
+  end
+
+  @doc """
+  Does any row's provisioning FQDN still hold the name `host`, and if so WHICH
+  leg holds it? `:free` (no row, or the only rows are genuinely abandoned) or
+  `{:held, leg, why}` — `leg` is the atom naming the refusing leg and `why` is
+  the operator-facing sentence.
+
+  ABANDONED rows do not hold a name claim. A row whose agent NEVER phoned home
+  (last_seen_at nil — every live instance reports within a minute of
+  provisioning), that is older than `@abandoned_claim_after_days`, and that has
+  no active job in flight is a provisioning ghost (seen live 2026-07-08: a
+  June-29 pre-registry-era attempt squatted gyldendal.barkpark.cloud forever
+  with no owner able to release it). Excluding it lets a legitimate attach
+  reclaim the name; the ghost row itself stays untouched (it is dead weight,
+  not a conflict).
+
+  `last_seen_at IS NULL` alone is NOT abandonment — it means the AGENT never
+  phoned home, which says nothing about whether the PLATFORM is still dialling
+  the box. Measured 2026-08-08 on live data, the silence-only carve-out was
+  0-for-3: every row it would have released was on a live subscription, and one
+  of them was still being polled every ~15 minutes with its decrypted admin
+  bearer token. So three independent AND-legs guard the release, any ONE of
+  which keeps the claim:
+
+    * `:admin_credential` — the row holds `admin_token_encrypted`. A row the
+      platform can still decrypt a bearer token FOR is by definition not
+      abandoned; releasing its name hands the next tenant a hostname the
+      platform keeps dialling with someone else's live credential. HARD BLOCK,
+      independent of `last_seen_at`.
+    * `:recent_usage_sample` — a `usage_samples` row inside the last 24h. The
+      sampler only writes for instances it actually reaches out to; a sample is
+      proof of an in-flight platform→instance transmission. HARD BLOCK,
+      independent of `last_seen_at`.
+    * `:active_subscription` — the owning team has a live subscription
+      (`active` or `past_due`; a past_due row is still a billed customer). We
+      do not release the name of something a customer is paying for.
+
+  Widening the carve-out means deleting a leg here, and the refusal names which
+  leg refused so that cost is visible before anyone does.
+
+  The stored `url` is matched NORMALISED, never string-equal to
+  `"https://" <> host`: surrounding whitespace trimmed, scheme stripped,
+  everything from the first character outside the hostname alphabet cut (port,
+  path, query, fragment), trailing dot dropped, case folded. Matching one exact
+  spelling of the origin reads only one of the ways the column is written and
+  lets every other spelling of the SAME hostname through — that is the hole this
+  walk closes.
+
+  `self_id` (the /2 head; `/1` passes `nil` and excludes nobody) drops the
+  asking row from the walk, so a row may attach the host it already answers on.
+  Two things this walk deliberately does NOT do, both pre-existing and owned
+  elsewhere: it adds no `custom_host IS NULL` gate, so a re-attach still
+  overwrites an existing `custom_host` and orphans that host's A record — the
+  class-level seam owned by
+  `cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`;
+  and a self-attach still runs the real persist-and-enqueue path
+  (`persist_and_enqueue_domain`, `web/router.ex`), so it enqueues an
+  attach_domain job and a DNS upsert — reasoned idempotent, not driven by a test
+  here.
+  """
+  @spec provisioning_fqdn_claim(String.t()) :: :free | {:held, atom(), String.t()}
+  def provisioning_fqdn_claim(host) when is_binary(host), do: provisioning_fqdn_claim(host, nil)
+
+  @spec provisioning_fqdn_claim(String.t(), Ecto.UUID.t() | nil) ::
+          :free | {:held, atom(), String.t()}
+  def provisioning_fqdn_claim(host, self_id) when is_binary(host) do
+    norm = normalize_claim_host(host)
     cutoff = DateTime.add(DateTime.utc_now(), -@abandoned_claim_after_days, :day)
+    sample_cutoff = DateTime.add(DateTime.utc_now(), -@recent_sample_window_hours, :hour)
 
     Barkpark
-    |> where([b], b.url == ^url)
     |> where(
       [b],
-      not (is_nil(b.last_seen_at) and b.inserted_at < ^cutoff and
-             b.id not in subquery(active_job_barkpark_ids()))
+      # The `btrim` is load-bearing, not cosmetic: without it this fragment and
+      # its Elixir twin `normalize_claim_host/1` DISAGREED on every
+      # leading-whitespace spelling. The scheme regex is anchored, so ` https://h`
+      # missed it, and the next step (`[^a-z0-9.-].*$`) then ate the string from
+      # its first character — the whole stored url normalised to `""`, matched
+      # nothing, and `provisioning_fqdn_claim/2` answered `:free` for a hostname
+      # a LIVE box serves. The character set is exactly the 25 codepoints
+      # `String.trim/1` strips (Unicode `White_Space`).
+      #
+      # Every C0 control in that set is spelled `\uXXXX`, never `\t`/`\v`/`\f`:
+      # PostgreSQL 15 has no `\v` case in its escape-string lexer, so there
+      # `E'\v'` is the LETTER v ("any other character following a backslash is
+      # taken literally"), while 16+ reads it as U+000B. That one-character
+      # difference broke the twins BOTH ways on 15 — U+000B was not trimmed (a
+      # VT-led url normalised to `""` again), and the letter `v` WAS, so a
+      # stored `https://host.tv` normalised to `host.t` and the claim answered
+      # `:free` for a live `.tv` box. `\uXXXX` is documented and reads the same
+      # on every supported server. The set's LENGTH is 25 under either
+      # spelling, so only membership testing catches this;
+      # `registry_claim_host_normaliser_test.exs` drives all 25 codepoints
+      # through both twins for exactly that reason.
+      fragment(
+        "regexp_replace(regexp_replace(regexp_replace(btrim(lower(?), E'\\u0009\\u000a\\u000b\\u000c\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'), '^[a-z][a-z0-9+.-]*://', ''), '[^a-z0-9.-].*$', ''), '\\.+$', '') = ?",
+        b.url,
+        ^norm
+      )
     )
-    |> select([b], 1)
-    |> limit(1)
-    |> Repo.one()
-    |> case do
-      nil -> false
-      _ -> true
+    |> exclude_self_claim(self_id)
+    |> select([b], %{
+      id: b.id,
+      last_seen_at: b.last_seen_at,
+      inserted_at: b.inserted_at,
+      has_admin_token: not is_nil(b.admin_token_encrypted),
+      active_job: b.id in subquery(active_job_barkpark_ids()),
+      recent_sample:
+        fragment(
+          "EXISTS (SELECT 1 FROM usage_samples us WHERE us.barkpark_id = ? AND us.measured_at >= ?)",
+          b.id,
+          ^sample_cutoff
+        ),
+      live_subscription:
+        fragment(
+          "EXISTS (SELECT 1 FROM subscriptions s WHERE s.team_id = ? AND s.status IN ('active','past_due'))",
+          b.team_id
+        )
+    })
+    |> Repo.all()
+    |> Enum.find_value(:free, &claim_leg(&1, cutoff))
+  end
+
+  # CONDITIONAL, and that is the whole point: an unconditional
+  # `b.id != ^self_id` compiles to SQL `id != NULL` when `self_id` is nil, which
+  # is never true — every row would drop out of the walk and EVERY name would
+  # read `:free` through the /1 head. No id predicate is the only safe nil case.
+  defp exclude_self_claim(query, nil), do: query
+  defp exclude_self_claim(query, self_id), do: where(query, [b], b.id != ^self_id)
+
+  # The url side of the comparison, in Elixir: the same shape the SQL fragment
+  # above produces for `b.url` — case-folded, surrounding whitespace stripped
+  # (`String.trim/1`, whose 25-codepoint Unicode `White_Space` set the
+  # fragment's `btrim` mirrors character-for-character), scheme dropped,
+  # everything from the first character outside the hostname alphabet cut,
+  # trailing dots dropped. These two are TWINS: a step added to one and not the
+  # other re-opens the `:free`-for-a-live-host hole by spelling, which is why
+  # `registry_claim_host_normaliser_test.exs` drives both through one corpus
+  # instead of trusting this comment. `normalize_domain/1` is NOT a drop-in — it
+  # only case-folds and trims a trailing dot, so a caller passing an origin
+  # (`https://host:4000/studio`) would compare a scheme-and-port-bearing string
+  # against a bare hostname and match nothing.
+  defp normalize_claim_host(host) when is_binary(host) do
+    host
+    |> String.downcase()
+    |> String.trim()
+    |> String.replace(~r{^[a-z][a-z0-9+.-]*://}, "")
+    |> String.replace(~r/[^a-z0-9.-].*$/, "")
+    |> String.trim_trailing(".")
+  end
+
+  # Which leg (if any) keeps THIS row's name claim? nil = this row is a
+  # genuine ghost and releases the name. The two hard-block legs are named
+  # first: they are the ones a widening operator must consciously delete.
+  defp claim_leg(row, cutoff) do
+    cond do
+      row.has_admin_token ->
+        {:held, :admin_credential,
+         "row #{row.id} still holds a decryptable admin token — the platform can dial this host with a live credential, so it is not abandoned"}
+
+      row.recent_sample ->
+        {:held, :recent_usage_sample,
+         "row #{row.id} was sampled by the usage worker within the last #{@recent_sample_window_hours}h — the platform is still transmitting to this host"}
+
+      row.live_subscription ->
+        {:held, :active_subscription,
+         "row #{row.id} belongs to a team with a live subscription (active or past_due) — a billed name is never released"}
+
+      not is_nil(row.last_seen_at) ->
+        {:held, :agent_reporting, "row #{row.id} phoned home at #{row.last_seen_at}"}
+
+      row.active_job ->
+        {:held, :active_job, "row #{row.id} has a provision job in flight"}
+
+      DateTime.compare(row.inserted_at, cutoff) != :lt ->
+        {:held, :within_grace,
+         "row #{row.id} is younger than the #{@abandoned_claim_after_days}-day abandonment window"}
+
+      true ->
+        nil
     end
   end
 
@@ -5485,7 +5993,7 @@ defmodule BarkparkCloud.Registry do
     # redelivery race (rolled back) emails nobody. No edge guard is needed: the
     # row did not exist a moment ago, so this is always an edge.
     with {:ok, %Deployment{} = failed} <- result do
-      dispatch_deployment_failed(failed.site_id, failed.failure_reason)
+      dispatch_deployment_failed(failed)
     end
 
     result
@@ -6858,7 +7366,7 @@ defmodule BarkparkCloud.Registry do
       {pushing_rows, @instance_unreachable_reason}
     ]
     |> Enum.flat_map(fn {rows, reason} ->
-      Enum.map(rows || [], fn {_id, site_id} -> {site_id, reason} end)
+      Enum.map(rows || [], fn {id, site_id} -> {site_id, reason, %{deployment_id: id}} end)
     end)
     |> dispatch_reaped_deployment_alerts()
 
@@ -6881,18 +7389,71 @@ defmodule BarkparkCloud.Registry do
   defp maybe_dispatch_deployment_failed("failed", _updated), do: :ok
 
   defp maybe_dispatch_deployment_failed(_prior, %Deployment{status: "failed"} = updated),
-    do: dispatch_deployment_failed(updated.site_id, updated.failure_reason)
+    do: dispatch_deployment_failed(updated)
 
   defp maybe_dispatch_deployment_failed(_prior, _updated), do: :ok
+
+  # wave 15 S4 (charter D248): the alert says WHICH deployment failed. Until now
+  # the payload was exactly `%{detail: failure_reason}` plus the site name added
+  # by `dispatch_site_event/3` — a cause with no subject, so three alerts in an
+  # hour could not be told apart from three attempts at one push.
+  defp dispatch_deployment_failed(%Deployment{} = deployment) do
+    dispatch_deployment_failed(
+      deployment.site_id,
+      deployment.failure_reason,
+      deployment_identity(deployment)
+    )
+  end
 
   # Site-keyed, because a Deployment only `belongs_to :site` and the alert's team
   # lives one hop further out. `Notifications.dispatch_site_event/3` resolves the
   # team through the site and names the site in the alert; it never raises.
-  defp dispatch_deployment_failed(site_id, failure_reason) do
-    Notifications.dispatch_site_event(site_id, :deployment_failed, %{
-      detail: failure_reason || ""
-    })
+  #
+  # `identity` is whatever the call site actually HOLDS — the two struct-bearing
+  # sites carry the full identity, the reaper carries the id its `select:`
+  # already named. Nothing is synthesized to fill a gap.
+  defp dispatch_deployment_failed(site_id, failure_reason, identity) when is_map(identity) do
+    payload = Map.put(identity, :detail, failure_reason || "")
+
+    Notifications.dispatch_site_event(site_id, :deployment_failed, payload)
   end
+
+  # The deployment's own identity, and ONLY facts that are columns.
+  #
+  #   * `deployment_id` — actionable on its own: `GET
+  #     /v1/sites/:id/deployments/:dep_id` is a real ability-gated read.
+  #   * `stage` — nullable telemetry (PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE);
+  #     omitted when the row never reported one.
+  #   * ONE code identity under its REAL column name — `git_ref` for a
+  #     repo-driven build, else `content_rev` for a content-bound static one,
+  #     else the `build_id` hash. There is no commit-sha column; a key named
+  #     `commit` would be an invention.
+  #
+  # NO DURATION, deliberately. `deployments` has no started_at/finished_at,
+  # `became_live_at` is NULL on every failed row, and `updated_at - inserted_at`
+  # is not build time (`Sites.Deploy.record_stage/2` writes RETIRE-skipped
+  # console entries onto rows that are already failed — measured median drift
+  # 65s, max 2,270s). A fabricated number is worse than an absent one.
+  defp deployment_identity(%Deployment{} = deployment) do
+    %{deployment_id: deployment.id}
+    |> put_present(:stage, deployment.stage)
+    |> put_code_identity(deployment)
+  end
+
+  defp put_code_identity(identity, %Deployment{git_ref: ref}) when is_binary(ref) and ref != "",
+    do: Map.put(identity, :git_ref, ref)
+
+  defp put_code_identity(identity, %Deployment{content_rev: rev})
+       when is_binary(rev) and rev != "",
+       do: Map.put(identity, :content_rev, rev)
+
+  defp put_code_identity(identity, %Deployment{build_id: id}) when is_binary(id) and id != "",
+    do: Map.put(identity, :build_id, id)
+
+  defp put_code_identity(identity, %Deployment{}), do: identity
+
+  defp put_present(identity, _key, value) when value in [nil, ""], do: identity
+  defp put_present(identity, key, value), do: Map.put(identity, key, value)
 
   # The capped fan-out described at `@reap_alert_cap`.
   defp dispatch_reaped_deployment_alerts([]), do: :ok
@@ -6900,7 +7461,9 @@ defmodule BarkparkCloud.Registry do
   defp dispatch_reaped_deployment_alerts(alerts) do
     {send_now, dropped} = Enum.split(alerts, @reap_alert_cap)
 
-    Enum.each(send_now, fn {site_id, reason} -> dispatch_deployment_failed(site_id, reason) end)
+    Enum.each(send_now, fn {site_id, reason, identity} ->
+      dispatch_deployment_failed(site_id, reason, identity)
+    end)
 
     if dropped != [] do
       # The Logger line stays — operators read logs during an incident — but it is
@@ -6924,14 +7487,14 @@ defmodule BarkparkCloud.Registry do
   # exactly the moment not to fire N queries. A since-deleted site simply has no
   # team and drops out of the map.
   defp record_withheld_reap_alerts(dropped) do
-    site_ids = dropped |> Enum.map(fn {site_id, _reason} -> site_id end) |> Enum.uniq()
+    site_ids = dropped |> Enum.map(fn {site_id, _reason, _identity} -> site_id end) |> Enum.uniq()
 
     teams_by_site =
       from(s in Site, where: s.id in ^site_ids, select: {s.id, s.team_id})
       |> Repo.all()
       |> Map.new()
 
-    Enum.each(dropped, fn {site_id, _reason} ->
+    Enum.each(dropped, fn {site_id, _reason, _identity} ->
       case Map.get(teams_by_site, site_id) do
         team_id when is_binary(team_id) ->
           Withhold.record(team_id, "deployment_failed", :reap_alert_cap)

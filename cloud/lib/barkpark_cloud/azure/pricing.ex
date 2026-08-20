@@ -176,9 +176,19 @@ defmodule BarkparkCloud.Azure.Pricing do
       _ ->
         server = self()
 
+        # The spawn is unlinked and unmonitored, so if refresh/1 RAISES (inets
+        # not started, a cacerts failure, an unforeseen return shape) the
+        # completion signal would never fire and `refreshing?` would latch true
+        # for the BEAM lifetime — every later stale read short-circuits on the
+        # in-flight guard (cache frozen at last-good) and every flush/0 waiter
+        # parks. `after` fires the signal on the raising path too; refresh/1 is
+        # already fail-closed, so a crash-into-completion is correct here.
         spawn(fn ->
-          _ = refresh(now_ms)
-          send(server, :refresh_done)
+          try do
+            _ = refresh(now_ms)
+          after
+            send(server, :refresh_done)
+          end
         end)
 
         {:noreply, %{state | refreshing?: true}}

@@ -187,8 +187,13 @@ jobs:
       # otherwise be invisible: a weekly job that silently stopped producing any
       # signal at all still shows a green-ish tab. Turning drift itself into a
       # red is a policy change and deliberately NOT made here.
+      # `cancelled()` is here because `failure()` evaluates FALSE on a cancelled
+      # run, and cancelled is the dominant non-success conclusion on this
+      # repository's scheduled workflows. A gate that stopped running is the same
+      # silence as a gate that ran red — worse, because its old issue keeps
+      # sitting there looking current.
       - name: Report failure to a human
-        if: failure()
+        if: failure() || cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_FAILURE_KEY: codebase-intel-drift-guard

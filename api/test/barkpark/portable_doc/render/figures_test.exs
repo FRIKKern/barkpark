@@ -63,8 +63,24 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
   describe "section_divider_html/0" do
     test "emits a div containing the § glyph" do
       html = Figures.section_divider_html()
-      assert html =~ "<div style="
+      assert html =~ ~s(<div class="bp-section-divider" style=)
       assert html =~ "§"
+    end
+
+    # The class is a HANDLE, not styling: the reader shell needs to be able to say
+    # "this divider sits directly in front of a section head, which already draws
+    # that boundary" (paper-surface.css §divider dedup), and a class-less box
+    # gives a stylesheet nothing to say it about. So the values must all still be
+    # INLINE — view_edit_parity_test.exs §8 compares those declarations against
+    # the edit mirror, and a value that migrated into a class rule would leave
+    # that comparison passing over an empty set.
+    test "carries the class as a positional handle only — every value stays inline" do
+      html = Figures.section_divider_html()
+
+      assert html =~ ~s(class="bp-section-divider" style="position:relative;)
+      assert html =~ ~s(class="bp-section-divider__mark" style="position:relative;)
+      assert html =~ "border-top:1px solid var(--paper-rule"
+      assert html =~ "margin:2.4rem 0"
     end
   end
 

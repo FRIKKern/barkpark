@@ -690,15 +690,22 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
         ann = annotations_of(block)
 
+        # The svg rides its own scroll container (same idiom as the calendar
+        # heatmap's bp-heat__scroll): CSS gives the svg a min-width at the
+        # viewBox size, so viewBox-unit text never paints below its authored px
+        # at narrow viewports — the figure scrolls instead of shrinking its
+        # labels away (probe-figure-fidelity-2026-08-12 measured 11px ticks
+        # painting 4.26px at a 360 viewport under plain width:100%).
         ~s|<div class="bp-chart">| <>
           cap_html <>
+          ~s|<div class="bp-chart__scroll">| <>
           ~s|<svg viewBox="0 0 #{@vw} #{@vh}" preserveAspectRatio="none" role="img">| <>
           grid_svg(min_v, max_v) <>
           regions_svg(ann, n) <>
           plot_svg(series, kind, min_v, max_v, n) <>
           overlays_svg(ann, series, min_v, max_v, n) <>
           x_labels_svg(x_labels) <>
-          "</svg>" <> legend_html(series) <> "</div>"
+          "</svg></div>" <> legend_html(series) <> "</div>"
     end
   end
 
@@ -810,15 +817,36 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           x = x_at(i, n)
           y = y_at(value, min_v, max_v)
           ly = if y < @pad_t + 20, do: y + 16, else: y - 8
+          anchor = ann_anchor(x, label)
 
           ~s|<circle class="bp-chart__pt" cx="#{fmt(x)}" cy="#{fmt(y)}" r="3.5"/>| <>
-            ~s|<text class="bp-chart__ann" x="#{fmt(x)}" y="#{fmt(ly)}" text-anchor="middle">#{escape_html(label)}</text>|
+            ~s|<text class="bp-chart__ann" x="#{fmt(x)}" y="#{fmt(ly)}" text-anchor="#{anchor}">#{escape_html(label)}</text>|
         else
           ""
         end
       end)
 
     lines <> marks
+  end
+
+  # Edge-aware anchor for the point call-out label — the horizontal clamp the
+  # regions/reflines already have (their labels are pinned mid-region / hard
+  # right). A blanket text-anchor middle let a last-index label paint past the
+  # viewBox (probe-figure-fidelity-2026-08-12 measured bbox right 654.1 vs 640).
+  # The SVG is emitted server-side, so the text box can't be measured; estimate
+  # the 10px mono label at ~3.1 viewBox units per half-char (SF Mono advance
+  # ≈6.2/char at scale 1, slightly generous) and flip the anchor when the
+  # estimated box would cross a viewBox edge: near the right edge the label
+  # ends at the datum, near the left it starts there, everywhere else it stays
+  # centered. The circle marker keeps the exact datum x either way.
+  defp ann_anchor(x, label) do
+    half = String.length(label) * 3.1
+
+    cond do
+      x + half > @vw - 2 -> "end"
+      x - half < 2 -> "start"
+      true -> "middle"
+    end
   end
 
   # The called-out datum: series si (author order, clamped in-range), point at

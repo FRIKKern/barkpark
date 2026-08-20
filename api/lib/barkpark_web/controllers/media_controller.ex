@@ -96,7 +96,7 @@ defmodule BarkparkWeb.MediaController do
            ) do
         {:file, full_path} ->
           conn
-          |> Delivery.put_file_cache_headers(full_path)
+          |> Delivery.put_file_cache_headers(full_path, Access.visibility(doc))
           |> maybe_send_file(full_path, mime)
 
         {:redirect, url} ->
@@ -139,7 +139,7 @@ defmodule BarkparkWeb.MediaController do
       mime = MIME.from_path(full_path)
 
       conn
-      |> Delivery.put_file_cache_headers(full_path)
+      |> Delivery.put_file_cache_headers(full_path, Access.visibility(doc))
       |> maybe_send_file(full_path, mime)
     else
       {:error, :not_found} ->

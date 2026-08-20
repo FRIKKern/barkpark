@@ -29,7 +29,12 @@ defmodule BarkparkWeb.SocialController do
     end
   end
 
-  def callback(conn, %{"provider" => name, "code" => code, "state" => state}) do
+  # `when is_binary(code)` on the ACTION HEAD — Social.handle_callback/3 already
+  # guards `is_binary(code)`, but a callee guard raises BELOW the action frame,
+  # where Phoenix's ActionClauseError→400 conversion no longer applies (500).
+  # Guarded here, `?code[]=` falls through to the fallback clause for a 400.
+  def callback(conn, %{"provider" => name, "code" => code, "state" => state})
+      when is_binary(code) do
     p = Social.provider(name)
 
     cond do

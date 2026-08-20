@@ -347,7 +347,13 @@ const ALLOW_PREFIXES = [
 // says anything DISTINCT. A rule that only re-states the base would pass here;
 // what stops that is CONTRAST_PAIRS plus the driven computed-style proof in the
 // slice's evidence, not this check.
-const DEPLOY_STATUSES = ["queued", "building", "pushing", "live", "failed", "cancelled"];
+// cch-w64-s6: "deferred" added — the enum this list claims to mirror
+// (registry/deployment.ex) carries SEVEN values, and the missing word is why the
+// check called `.dep-deferred`'s total ABSENCE of a rule green while the raw
+// status rode into the DOM. The word alone REDS origin/main (E13, naming
+// `.dep-deferred`), so it co-merges with the rule in the same commit — a
+// deliberate guard+fix co-merge, not a guard weakened to fit.
+const DEPLOY_STATUSES = ["queued", "building", "pushing", "live", "failed", "cancelled", "deferred"];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
 // (selector targets, event delegation markers), not visual classes. Each is
@@ -444,6 +450,10 @@ const CONTRAST_PAIRS = [
   { fg: "--danger", bg: "--surface", min: 4.5, why: "error text (.deploy-fail, .wh-del-err)" },
   { fg: "--danger", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".dep-failed pill text" },
   { fg: "--warn-strong", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".dep-building pill text" },
+  // cch-w64-s6: `.dep-deferred` keeps the warn hue but gives up the filled chip
+  // (it no longer holds a build slot), so its ground is the CARD itself — the
+  // one pair the tinted variant would not have owed.
+  { fg: "--warn-strong", bg: "--surface", min: 4.5, why: ".dep-deferred pill text on an open chip" },
   { fg: "--text", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".notice-ok copy" },
   { fg: "--text", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".notice-warn copy" },
   { fg: "--text", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".notice-error copy" },

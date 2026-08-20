@@ -54,25 +54,48 @@ defmodule BarkparkCloud.Sites.BoxRelay do
   @callback rollback(Barkpark.t(), map()) :: reply()
   @callback teardown(Barkpark.t(), map()) :: reply()
 
-  @doc """
-  The configured relay implementation. Defaults to the real HTTP admin relay; the
-  test env swaps in the in-memory fake through `:site_box_relay`.
-  """
-  @spec impl() :: module()
-  def impl,
-    do: Application.get_env(:barkpark_cloud, :site_box_relay, BarkparkCloud.Sites.BoxRelay.HTTP)
+  # The verbs that only READ the box. Everything else is a WRITE and is fenced
+  # below for a box that has already refused our stored admin credential.
+  @reads [:poll_deploy]
 
   @spec start_deploy(Barkpark.t(), map()) :: reply()
-  def start_deploy(bp, payload), do: impl().start_deploy(bp, payload)
+  def start_deploy(bp, payload), do: dispatch(bp, :start_deploy, [bp, payload])
 
   @spec poll_deploy(Barkpark.t(), String.t(), String.t()) :: reply()
-  def poll_deploy(bp, slug, build_id), do: impl().poll_deploy(bp, slug, build_id)
+  def poll_deploy(bp, slug, build_id), do: dispatch(bp, :poll_deploy, [bp, slug, build_id])
 
   @spec rollback(Barkpark.t(), map()) :: reply()
-  def rollback(bp, payload), do: impl().rollback(bp, payload)
+  def rollback(bp, payload), do: dispatch(bp, :rollback, [bp, payload])
 
   @spec teardown(Barkpark.t(), map()) :: reply()
-  def teardown(bp, payload), do: impl().teardown(bp, payload)
+  def teardown(bp, payload), do: dispatch(bp, :teardown, [bp, payload])
+
+  # THE SITE-WRITE FENCE (cloud-console-hardening D741). `Registry.relay_admin_post/3`
+  # already refuses an INSTANCE write to a box whose `update_unavailable_reason` is
+  # "identity_refused" — the box answered our stored admin credential with a 401,
+  # so the same credential over the same address cannot do anything but 401 again.
+  # The SITE writes ride `relay_admin/4` and bypassed that fence by construction:
+  # every deploy, rollback and teardown for such a box spent a full request (and,
+  # for a deploy, a whole build) to be told no again, and the plane then reported
+  # it as an unreachable box — a 502 about the network for a refusal about identity.
+  #
+  # The fence lands HERE, at the dispatcher, and NOT one seam up in `Sites.Deploy`:
+  # hoisting it would also refuse the READ (`poll_deploy`) and the read-token mint,
+  # which are exactly what still tells a human the truth about a refused box. So the
+  # three WRITES refuse and the READ stays open.
+  defp dispatch(%Barkpark{update_unavailable_reason: "identity_refused"}, verb, _args)
+       when verb not in @reads,
+       do: {:error, :identity_refused}
+
+  defp dispatch(_bp, verb, args), do: apply(impl(), verb, args)
+
+  # The configured relay implementation. Defaults to the real HTTP admin relay; the
+  # test env swaps in the in-memory fake through `:site_box_relay`. PRIVATE on
+  # purpose: every outbound call must go through `dispatch/3` above, and a caller
+  # holding the module could reach the box around the fence.
+  @spec impl() :: module()
+  defp impl,
+    do: Application.get_env(:barkpark_cloud, :site_box_relay, BarkparkCloud.Sites.BoxRelay.HTTP)
 end
 
 defmodule BarkparkCloud.Sites.BoxRelay.HTTP do

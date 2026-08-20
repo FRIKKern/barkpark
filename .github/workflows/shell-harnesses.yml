@@ -21,6 +21,83 @@ name: Shell harnesses
 # release-scan.sh at all before this: no syntax check, no test, no caller, while
 # it classified advisory jobs by a NAME REGEX and counted `cancelled` as
 # failure. Same lesson as doctor.sh — an unguarded reader drifts silently.
+#
+# Fourth tenant: scripts/epic-zero-criteria-census.sh, which had ZERO callers of
+# ANY kind — six repo-wide grep hits, every one inside the script itself. No
+# workflow, no Makefile target, no hook: break the census outright and nothing
+# reds. Only its `--self-test` rides this lane, and the split is deliberate.
+# `--self-test` is hermetic (mktemp fixtures through an in-script python3
+# classifier, 8 named mutation cases, no bp, no network). The census's LIVE
+# ratchet shells `bp task get`, and `bp` is not on GitHub runners — it would
+# print `UNKNOWN: bp is not on PATH` and exit 2 on every PR forever, so it is
+# deliberately NOT wired here. Note this workflow is NOT one of main's required
+# contexts (those are exactly: Elixir gate, PR references an active task, Cloud
+# gate, Console gate) — wiring the census makes it RUN, not BLOCK.
+#
+# Fifth tenant: scripts/webhook-fanout-watch.test.sh, the mutation matrix for
+# scripts/webhook-fanout-watch.sh — the LEVEL check over live `site-autodeploy-*`
+# webhook rows. `Registry.content_webhook_types/1` fails OPEN (a blank doc_type
+# yields `[]`, the box's match-everything sentinel), so a single edit re-arms the
+# fan-out the 2026-08-07 repair closed and nothing re-asserts it. Only the
+# HERMETIC half rides here: fixtures through the classifier, no `bp`, no network,
+# so it cannot rot into a skip. The LIVE verdict is a runbook command plus a
+# named open human gate (a control-plane read token, unarmed) — wiring a
+# scheduled live job today would exit 3 on every run forever, which is a watch
+# that can only lose. NOT a Cloud tenant: the script is deliberately absent from
+# cloud-path-escape-check.sh's CLOUD_PATHS (see that file, lines 115-127, on why
+# widening the set publishes green contexts over jobs that never ran).
+#
+# ── Sixth through thirteenth tenants: the ORPHAN SWEEP (deploy-reliability W30)
+# A census of all 32 behavioural shell harnesses on origin/main found exactly 16
+# that NO workflow executes — over a thousand mutation assertions guarding
+# nothing between waves. `scripts/seal-run.sh` and its harness did not appear in
+# any of the 48 workflow files at all: the runner itself was uninvoked, not just
+# its test. The proof that this is not theoretical: #11082 widened CLOUD_PATHS
+# with `internal/**`, which silently invalidated
+# `scripts/registration-sample.test.sh` (40 pass / 3 fail on origin/main, green
+# on the parent commit) and NOTHING reported it. That harness is fixed and wired
+# in the same change, and the two ratchets it delegates classification to are in
+# the paths list below precisely so the NEXT path-set edit reds here instead of
+# rotting in silence.
+#
+# MENTION IS NOT EXECUTION, and absence of mention is not proof of orphanhood.
+# `console-path-escape-check.test.sh` appears four times across
+# console-harness.yml and elixir.yml and every one is a COMMENT — it is wired
+# here. `cloud-path-escape-check.test.sh` and `elixir-path-escape-check.test.sh`
+# are already REACHED by a wired parent's `--selftest` (cloud.yml:175,
+# elixir.yml:241) and are deliberately NOT duplicated here.
+#
+# Two harnesses read OTHER workflow files as fixtures — seal-run.test.sh copies
+# `.github/workflows/cloud.yml` plus the real seal predicate into its e2e
+# fixture, and console-path-escape-check.test.sh extracts and executes
+# console-harness.yml's own skip-shim steps. Both are in the paths list, so this
+# lane runs on edits to them. That is deliberately wider than "the script and its
+# test": an input that can break a harness must be able to trigger it.
+#
+# A further tenant (deploy-reliability W35): the 96-assertion
+# mutation matrix behind scripts/deploy-reliability-exit-run.sh — the exit
+# artefact's headline instrument, the one thing that re-derives the epic's
+# never-covered number on demand. `grep -rln deploy-reliability-exit-run
+# .github/` returned NOTHING before this: 96 assertions that neutralise each
+# refusal guard by its `# MUT:` anchor and watch the refusal disappear were a
+# document, not a gate, so an edit to the runner broke them in silence.
+# crown-reconcile.test.sh, the comparable instrument, is gated twice. The harness
+# is fixture-driven and offline — `git init` repos in mktemp, a stub producer, a
+# `--depth 1` file:// clone for the shallow case, git identity passed with
+# `git -c` so a runner without a configured user still commits — so no secret and
+# no network is involved. The last four paths entries are INPUTS, not the
+# harness: its closing probes bind the runner's printed 90s cap and flag set to
+# the real client and census command, and the artefact's own invariants to
+# check-doc-budgets.sh. An input that can break a harness must be able to trigger
+# it (same reason cloud.yml is in this list for seal-run). Default checkout depth
+# is deliberate: the one probe that wants `origin/main` (seal-run byte identity)
+# refuses to fake a verdict when the ref is unresolvable and says so by name.
+#
+# The honest limit, stated once for every tenant here: this workflow is NOT
+# one of main's required contexts (those are exactly: Elixir gate, PR references
+# an active task, Cloud gate, Console gate). Wiring makes a harness RUN, not
+# BLOCK. Running is the prerequisite; registering is a separate, evidence-gated
+# decision that scripts/registration-sample.sh exists to adjudicate.
 
 on:
   pull_request:
@@ -32,7 +109,102 @@ on:
       - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
+      - "scripts/epic-zero-criteria-census.sh"
+      - "scripts/webhook-fanout-watch.sh"
+      - "scripts/webhook-fanout-watch.test.sh"
+      # ORPHAN SWEEP (W30). Per file, never a directory glob — D26.
+      - "scripts/seal-run.sh"
+      - "scripts/seal-run.test.sh"
+      - "cloud/priv/static/__preview__/seal-predicate.mjs"
+      - ".github/workflows/cloud.yml"
+      - "scripts/registration-sample.sh"
+      - "scripts/registration-sample.test.sh"
+      - "scripts/lib/check-runs.sh"
+      - "scripts/cloud-path-escape-check.sh"
+      - "scripts/console-path-escape-check.sh"
+      - "scripts/console-path-escape-check.test.sh"
+      - ".github/workflows/console-harness.yml"
+      - "scripts/pds-ledger-census.sh"
+      - "scripts/pds-ledger-census_test.sh"
+      - "scripts/pds-record-parity.sh"
+      - "scripts/pds-record-parity.test.sh"
+      - "scripts/pds-scratch-target.sh"
+      - "scripts/pds-scratch-target_test.sh"
+      - "scripts/file-ci-failure-issue.sh"
+      - "scripts/file-ci-failure-issue.test.sh"
+      - "scripts/install-cli.sh"
+      - "scripts/install-cli.test.sh"
+      - "scripts/fetch-prebuilt.sh"
+      - "scripts/fetch-prebuilt.test.sh"
+      - "deploy/site-runtime-install.sh"
+      - "deploy/site-runtime-install_test.sh"
+      - "tooling/task-obsession/reland_check.py"
+      - "tooling/task-obsession/reland_check.test.sh"
+      - "tooling/task-obsession/reland_fetch.py"
+      - "tooling/task-obsession/reland_workflow_sim.py"
+      - "tooling/task-obsession/reland_loudfail.test.sh"
+      - "tooling/task-obsession/fixtures/*.json"
+      - ".github/workflows/reland-check.yml"
+      - "tooling/fleet/fleet-run.sh"
+      - "tooling/fleet/fleet-run-verdict-test.sh"
+      - "scripts/audit-paper-readers.sh"
+      - "scripts/audit-paper-readers-test.sh"
+      - "bin/barkpark"
+      - "scripts/barkpark-boot-selftest.sh"
+      # WORKFLOW PORTABILITY (epic-cycle distribution w1-s6). The two scripts are
+      # per-file per D26; the third entry is a GLOB, and deliberately so.
+      # `.claude/workflows/*.workflow.js` is not a convenience — it IS the corpus
+      # definition the tripwire enumerates. Pinning the four engines by name would
+      # make this lane go dark on the one PR that matters most: the PR adding a
+      # FIFTH engine, which is precisely when a hardcoded /Users path or an
+      # untracked charter reference gets introduced. The glob is cheap by
+      # construction: it can only ever match files this lane already checks.
+      - "scripts/workflow-portability-check.sh"
+      - "scripts/workflow-portability-check.test.sh"
+      - ".claude/workflows/*.workflow.js"
+      # DEPLOY-RELIABILITY EXIT RUNNER (W35). Per file, never a directory glob —
+      # D26. The first two are the runner and its harness; the last four are the
+      # INPUTS the harness's closing probes bind the runner's claims to, so an
+      # edit to any of them reds here on the PR that makes it rather than leaving
+      # the artefact's quoted numbers as fiction. seal-run.sh, the fifth input, is
+      # already listed above.
+      - "scripts/deploy-reliability-exit-run.sh"
+      - "scripts/deploy-reliability-exit-run.test.sh"
+      - "internal/cloudclient/client.go"
+      - "internal/cli/cloud_deploy_census_cmd.go"
+      - "scripts/deploy-reliability-exit-2026-08-10.md"
+      - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
+      # ── ORPHAN SWEEP II (CI gate-wiring wave, cgsiw-s3) ────────────────────
+      #
+      # cloud-static-gz-guard.sh. Its SUBJECT SET is the four things that make a
+      # committed .gz unrepresentable: the static dir itself (a tracked *.gz can
+      # only arrive by being added there), the ignore rule that stops the
+      # accident, the Dockerfile RUN that builds the sibling from the bytes
+      # `COPY priv priv` just laid down, and the router's `gzip: true` that
+      # serves it. The static dir is a GLOB and deliberately so — the file whose
+      # arrival this guard exists to catch (`app.js.gz`) does not exist yet, so
+      # pinning today's filenames would make the lane go dark on exactly the PR
+      # that matters. Same argument the .workflow.js glob makes above.
+      - "scripts/cloud-static-gz-guard.sh"
+      - "cloud/priv/static/**"
+      - "cloud/.gitignore"
+      - "cloud/Dockerfile"
+      - "cloud/lib/barkpark_cloud/web/router.ex"
+      # pds-live-hetzner-placement-group.sh --selftest-offline. Its subject set
+      # is the script and the committed 404/200 fixture corpus its harvest
+      # validators reproduce byte-for-byte. The corpus entry is a glob for the
+      # same reason: the PR that adds a TWELFTH fixture is the one that can
+      # break the emitter's byte-identity claim.
+      - "scripts/pds-live-hetzner-placement-group.sh"
+      - "internal/cli/testdata/pds_live_hetzner_*.json"
+      # doc-gates-paths-parity-check.sh. Its subject set is exactly one file —
+      # doc-gates.yml's two hand-maintained `paths:` lists — so that file must
+      # be able to trigger this lane. A guard whose trigger does not cover its
+      # subject set never runs on the PR that breaks it, which is the entire
+      # finding this wave is built on.
+      - "scripts/doc-gates-paths-parity-check.sh"
+      - ".github/workflows/doc-gates.yml"
   push:
     branches: [main]
     paths:
@@ -43,7 +215,77 @@ on:
       - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
+      - "scripts/epic-zero-criteria-census.sh"
+      - "scripts/webhook-fanout-watch.sh"
+      - "scripts/webhook-fanout-watch.test.sh"
+      # ORPHAN SWEEP (W30). Must mirror the pull_request list above exactly: a
+      # harness wired on PRs only goes dark the moment a merge lands.
+      - "scripts/seal-run.sh"
+      - "scripts/seal-run.test.sh"
+      - "cloud/priv/static/__preview__/seal-predicate.mjs"
+      - ".github/workflows/cloud.yml"
+      - "scripts/registration-sample.sh"
+      - "scripts/registration-sample.test.sh"
+      - "scripts/lib/check-runs.sh"
+      - "scripts/cloud-path-escape-check.sh"
+      - "scripts/console-path-escape-check.sh"
+      - "scripts/console-path-escape-check.test.sh"
+      - ".github/workflows/console-harness.yml"
+      - "scripts/pds-ledger-census.sh"
+      - "scripts/pds-ledger-census_test.sh"
+      - "scripts/pds-record-parity.sh"
+      - "scripts/pds-record-parity.test.sh"
+      - "scripts/pds-scratch-target.sh"
+      - "scripts/pds-scratch-target_test.sh"
+      - "scripts/file-ci-failure-issue.sh"
+      - "scripts/file-ci-failure-issue.test.sh"
+      - "scripts/install-cli.sh"
+      - "scripts/install-cli.test.sh"
+      - "scripts/fetch-prebuilt.sh"
+      - "scripts/fetch-prebuilt.test.sh"
+      - "deploy/site-runtime-install.sh"
+      - "deploy/site-runtime-install_test.sh"
+      - "tooling/task-obsession/reland_check.py"
+      - "tooling/task-obsession/reland_check.test.sh"
+      - "tooling/task-obsession/reland_fetch.py"
+      - "tooling/task-obsession/reland_workflow_sim.py"
+      - "tooling/task-obsession/reland_loudfail.test.sh"
+      - "tooling/task-obsession/fixtures/*.json"
+      - ".github/workflows/reland-check.yml"
+      - "tooling/fleet/fleet-run.sh"
+      - "tooling/fleet/fleet-run-verdict-test.sh"
+      - "scripts/audit-paper-readers.sh"
+      - "scripts/audit-paper-readers-test.sh"
+      - "bin/barkpark"
+      - "scripts/barkpark-boot-selftest.sh"
+      # WORKFLOW PORTABILITY — mirrors the pull_request list above, glob included.
+      # A lane wired on PRs only goes dark the moment a merge lands.
+      - "scripts/workflow-portability-check.sh"
+      - "scripts/workflow-portability-check.test.sh"
+      - ".claude/workflows/*.workflow.js"
+      # DEPLOY-RELIABILITY EXIT RUNNER (W35) — mirrors the pull_request list
+      # above, inputs included. A lane wired on PRs only goes dark the moment a
+      # merge lands.
+      - "scripts/deploy-reliability-exit-run.sh"
+      - "scripts/deploy-reliability-exit-run.test.sh"
+      - "internal/cloudclient/client.go"
+      - "internal/cli/cloud_deploy_census_cmd.go"
+      - "scripts/deploy-reliability-exit-2026-08-10.md"
+      - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
+      # ── ORPHAN SWEEP II (cgsiw-s3) — mirrors the pull_request list above,
+      # globs included. A lane wired on PRs only goes dark the moment a merge
+      # lands, and these two lists staying set-equal is itself now guarded (by
+      # doc-gates-paths-parity-check.sh, for doc-gates.yml's twin lists).
+      - "scripts/cloud-static-gz-guard.sh"
+      - "cloud/priv/static/**"
+      - "cloud/.gitignore"
+      - "cloud/Dockerfile"
+      - "cloud/lib/barkpark_cloud/web/router.ex"
+      - "scripts/pds-live-hetzner-placement-group.sh"
+      - "internal/cli/testdata/pds_live_hetzner_*.json"
+      - "scripts/doc-gates-paths-parity-check.sh"
+      - ".github/workflows/doc-gates.yml"
 
 permissions:
   contents: read
@@ -58,6 +300,7 @@ concurrency:
 jobs:
   doctor-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,6 +315,7 @@ jobs:
 
   merge-verb-table:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: bp-merge.sh syntax check
@@ -86,6 +330,7 @@ jobs:
   release-scan-verdict:
     name: release-scan.sh CI-verdict derivation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,3 +347,445 @@ jobs:
         # vacuously. Set RELEASE_SCAN_TEST_LIVE=1 locally to re-verify the
         # recordings against the real API.
         run: bash scripts/release-scan.test.sh
+
+  zero-criteria-census:
+    name: epic-zero-criteria-census.sh self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (the classifier is python3; absence would be exit 2)
+        # The census turns a missing python3 into exit 2 UNKNOWN — correctly red,
+        # but illegibly so. ubuntu-latest ships python3 preinstalled (as
+        # deploy-harnesses.yml and reland-check.yml already rely on); this step
+        # makes that dependency explicit so an image change fails by NAME here
+        # rather than as a mysterious UNKNOWN from the census.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — add actions/setup-python" >&2
+            exit 1
+          }
+          python3 --version
+      - name: epic-zero-criteria-census.sh syntax check
+        run: bash -n scripts/epic-zero-criteria-census.sh
+      - name: census self-test (8 mutation cases, mktemp fixtures, no bp/network)
+        # ONLY --self-test. The live ratchet shells `bp task get` against the
+        # server; `bp` is not on runners, so wiring it here would print
+        # "UNKNOWN: bp is not on PATH" and exit 2 on every PR forever — a gate
+        # that can only lose is not a gate. The token-free ratchet port is
+        # tracked separately.
+        run: bash scripts/epic-zero-criteria-census.sh --self-test
+
+  webhook-fanout-guard:
+    name: webhook-fanout-watch.sh mutation matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: jq is present (the row parser is jq; absence would be exit 3)
+        # The watch turns a missing jq into exit 3 CONFIGURATION FAULT — correctly
+        # red, but illegibly so. ubuntu-latest ships jq; this step makes the
+        # dependency fail BY NAME if an image change ever removes it.
+        run: |
+          command -v jq >/dev/null || {
+            echo "jq missing on the runner image — the webhook row parser needs it" >&2
+            exit 1
+          }
+          jq --version
+      - name: webhook-fanout-watch.sh syntax check
+        run: bash -n scripts/webhook-fanout-watch.sh
+      - name: webhook-fanout-watch.test.sh syntax check
+        run: bash -n scripts/webhook-fanout-watch.test.sh
+      - name: live-row guard mutation matrix (hermetic fixtures, no bp/network)
+        # NO `continue-on-error` here or anywhere in this file. It launders a red
+        # into a green JOB conclusion — the thing branch protection and the fleet
+        # actually read — leaving only an X nobody scrolls to. A deploy guard that
+        # cannot lose is the disease this epic exists to cure.
+        #
+        # ONLY the hermetic half. The LIVE verdict needs `bp` plus a control-plane
+        # read credential; neither is on runners, so a scheduled live job would
+        # exit 3 forever. It is a runbook command + the named open human gate
+        # dr-w19-hg-cloud-control-plane-read-token (see the script's header).
+        run: bash scripts/webhook-fanout-watch.test.sh
+
+  # ── ORPHAN SWEEP (deploy-reliability W30) ──────────────────────────────────
+  # Every job below runs a harness that, before this change, NO workflow
+  # executed. Each was measured green against a clean `git archive origin/main`
+  # extract first; registration-sample was the one exception (40/3, RC 1) and is
+  # repaired in the same change rather than wired red.
+
+  seal-run-guard:
+    name: seal-run.sh probe matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # FULL checkout, not a sparse one: with only scripts/ present the harness
+        # drops to 63 passed / 2 FAILED — its e2e fixture copies the real seal
+        # predicate and .github/workflows/cloud.yml into a temp repo. It does NOT
+        # need full git history (it builds its own shallow fixture from a file://
+        # clone), so the default fetch-depth is correct here.
+      - name: node is present (seal-run.test.sh exits 2 without it)
+        # The harness drives a Node stand-in predicate and hard-refuses at :43
+        # with exit 2 — correctly red, but illegibly so. ubuntu-latest ships node;
+        # this makes the dependency fail BY NAME if an image change removes it,
+        # matching the python3 and jq name-checks above.
+        run: |
+          command -v node >/dev/null || {
+            echo "node missing on the runner image — seal-run.test.sh drives a node predicate" >&2
+            exit 1
+          }
+          node --version
+      - name: seal-run.sh syntax check
+        run: bash -n scripts/seal-run.sh
+      - name: seal-run.test.sh syntax check
+        run: bash -n scripts/seal-run.test.sh
+      - name: seal-run probe matrix (hermetic, offline, stand-in predicate)
+        # Neither scripts/seal-run.sh NOR its harness appeared in any of the 48
+        # workflow files: the runner the fleet seals waves with was itself
+        # uninvoked. Tracked as dr-seal-run-harness-runs-in-no-ci.
+        run: bash scripts/seal-run.test.sh
+
+  registration-sample-bar:
+    name: registration-sample.sh mutation matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: registration-sample.sh syntax check
+        run: bash -n scripts/registration-sample.sh
+      - name: registration-sample.test.sh syntax check
+        run: bash -n scripts/registration-sample.test.sh
+      - name: the sampler can still REFUSE (control + 3 plants + 2 traps)
+        # THE REASON THIS LANE EXISTS. #11082 widened CLOUD_PATHS with
+        # `internal/**`; the harness's control fixture head `internal/tui/x.go`
+        # stopped being NEITHER-shape and three `of which NEITHER` expectations
+        # went stale in one commit, with nothing running to say so. The
+        # expectations now DERIVE from the same ratchets the sampler consults, and
+        # both ratchets are in this workflow's paths list, so the next path-set
+        # edit reds here on the PR that makes it.
+        run: bash scripts/registration-sample.test.sh
+
+  console-path-ratchet:
+    name: console-path-escape-check.sh classification matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: console-path-escape-check.sh syntax check
+        run: bash -n scripts/console-path-escape-check.sh
+      - name: console path classification + console-harness.yml skip-shim invariants
+        # Its four appearances in console-harness.yml and elixir.yml are all
+        # COMMENTS — mention is not execution. The cloud and elixir siblings are
+        # deliberately absent from this file: they are already REACHED by a wired
+        # parent's --selftest (cloud.yml:175, elixir.yml:241), and wiring them
+        # twice would buy a second runner for the same assertions.
+        run: bash scripts/console-path-escape-check.test.sh
+
+  pds-harnesses:
+    name: PDS census / parity / scratch-target harnesses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: jq is present (pds-record-parity.test.sh exits 99 without it)
+        # :143 turns a missing jq into exit 99 TEST HARNESS FAIL while building
+        # fixtures. Fail by name instead.
+        run: |
+          command -v jq >/dev/null || {
+            echo "jq missing on the runner image — the PDS fixtures are built with jq" >&2
+            exit 1
+          }
+          jq --version
+      - name: pds-ledger-census ordering + response-shape matrix
+        run: bash scripts/pds-ledger-census_test.sh
+      - name: pds-record-parity 108-check matrix
+        run: bash scripts/pds-record-parity.test.sh
+      - name: pds-scratch-target two-root coexistence + teardown
+        run: bash scripts/pds-scratch-target_test.sh
+
+  ci-failure-issue-filer:
+    name: file-ci-failure-issue.sh behaviour matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: file-ci-failure-issue.sh syntax check
+        run: bash -n scripts/file-ci-failure-issue.sh
+      - name: issue-filer matrix (fake gh on PATH, no live GitHub)
+        run: bash scripts/file-ci-failure-issue.test.sh
+
+  distribution-harnesses:
+    name: install-cli / fetch-prebuilt / site-runtime-install harnesses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: install-cli.sh syntax check
+        run: bash -n scripts/install-cli.sh
+      - name: install-cli replay matrix (fake curl, temp HOME, no network)
+        run: bash scripts/install-cli.test.sh
+      - name: fetch-prebuilt.sh syntax check
+        run: bash -n scripts/fetch-prebuilt.sh
+      - name: fetch-prebuilt replay matrix (fake curl, no network)
+        run: bash scripts/fetch-prebuilt.test.sh
+      - name: site-runtime-install.sh syntax check
+        run: bash -n deploy/site-runtime-install.sh
+      - name: site-runtime-install replays (fake-only PATH, no box touched)
+        # cp-ops.yml ships this script to a real box on manual dispatch; until
+        # now nothing checked it could still be parsed, let alone that it behaves.
+        run: bash deploy/site-runtime-install_test.sh
+
+  tooling-harnesses:
+    name: reland-check / fleet-run-verdict / paper-reader-audit harnesses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (reland_check.py is the classifier)
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — add actions/setup-python" >&2
+            exit 1
+          }
+          python3 --version
+      - name: reland_check damper matrix
+        # reland-check.yml runs reland_check.py in anger (and swallows its
+        # stderr with `|| true`); its harness ran nowhere.
+        run: bash tooling/task-obsession/reland_check.test.sh
+      - name: reland-check loud-fail matrix (HTTP error, truncation, zero digest)
+        # The re-land job is `continue-on-error: true`, so its green conclusion
+        # carries NO information — these fixtures are the only thing that proves
+        # it can still tell an error envelope, a 16%-of-the-corpus scan, and a
+        # signal-less ledger apart from a clean scan. RELAND_REQUIRE_YAML makes a
+        # missing PyYAML a failure instead of a silently skipped section.
+        env:
+          RELAND_REQUIRE_YAML: "1"
+        run: |
+          # The sim reads reland-check.yml itself, so PyYAML is load-bearing here.
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          bash tooling/task-obsession/reland_loudfail.test.sh
+      - name: fleet-run verdict matrix
+        run: bash tooling/fleet/fleet-run-verdict-test.sh
+      - name: audit-paper-readers.sh syntax check
+        run: bash -n scripts/audit-paper-readers.sh
+      - name: paper-reader audit fixture
+        # paper-readers.yml executes audit-paper-readers.sh on every run; its
+        # fixture harness — the only thing that proves the audit can report a
+        # miss — executed nowhere.
+        run: bash scripts/audit-paper-readers-test.sh
+
+  launcher-boot-selftest:
+    name: bin/barkpark up/stop differential selftest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # MANDATORY. The selftest is DIFFERENTIAL against a PINNED pre-fix
+          # blob (0bff57e4f500e9c9fc99424fa2635ca9988be725:bin/barkpark, an
+          # ancestor of main). On a shallow checkout that object is absent and
+          # the script exits 2 on every run forever — a gate that can only lose.
+          fetch-depth: 0
+      - name: the pinned pre-fix reference blob is readable
+        # Fail by NAME if history ever stops carrying the pin, rather than as an
+        # opaque exit 2 from the selftest itself.
+        run: git cat-file -e 0bff57e4f500e9c9fc99424fa2635ca9988be725:bin/barkpark
+      - name: bin/barkpark syntax check
+        run: bash -n bin/barkpark
+      - name: up/stop selftest (6 differential fixtures, 2 controls, no postgres)
+        # Hermetic: temp BARKPARK_HOME, a probed-free port, curl/mix stubs, and
+        # only pids the harness itself spawned are ever signalled.
+        run: bash scripts/barkpark-boot-selftest.sh
+
+  workflow-portability:
+    name: .claude/workflows engines load on a machine that is not this one
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # The DEFAULT depth is correct here. Clause G asks `git cat-file -e
+        # HEAD:<path>`, which needs HEAD's tree and nothing older, and the
+        # harness builds its own fixture repos from mktemp. No history required.
+      - name: node is present (clauses P/M1/M2/C/W are node-parsed)
+        # The tripwire turns a missing node into a RED by design (clause N: a
+        # blind check must never skip). That is correct but illegible; fail by
+        # NAME here instead, matching the python3/jq name-checks above.
+        run: |
+          command -v node >/dev/null || {
+            echo "node missing on the runner image — the workflow engines are parsed with it" >&2
+            exit 1
+          }
+          node --version
+      - name: workflow-portability-check.sh syntax check
+        run: bash -n scripts/workflow-portability-check.sh
+      - name: workflow-portability-check.test.sh syntax check
+        run: bash -n scripts/workflow-portability-check.test.sh
+      - name: the tripwire can still LOSE (19 mutation cases, hermetic git fixtures)
+        # THE FAIL-BEFORE PROOF, and it lives here rather than in a chartered
+        # before/after because a guard and its fixes cannot co-merge and still
+        # demonstrate the red. Case 2 mutates an engine into a syntax error that
+        # `node --check` reports GREEN; case 6 plants a reference that exists on
+        # disk and is untracked — the vacuous pass a working-tree oracle gives.
+        # No `continue-on-error` anywhere in this file: it launders a red into a
+        # green JOB conclusion, which is the only thing the fleet reads.
+        run: bash scripts/workflow-portability-check.test.sh
+      - name: the live corpus is portable
+        # The ratchet proper. ADVISORY by decision D4 — this workflow is not one
+        # of main's required contexts (those are exactly: Elixir gate, PR
+        # references an active task, Cloud gate, Console gate), so wiring makes
+        # this RUN, not BLOCK. Promotion is a separate evidence-gated decision,
+        # filed as ecd-bl-tripwire-promotion.
+        run: bash scripts/workflow-portability-check.sh .claude/workflows
+
+  exit-runner-guard:
+    name: deploy-reliability-exit-run.sh mutation matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # The DEFAULT depth is correct here. The harness builds every fixture with
+        # `git init` in mktemp (and its shallow case from a `--depth 1` file://
+        # clone), so it needs no history of this repository. The single probe that
+        # would use `origin/main` — seal-run.sh byte identity — refuses to fake a
+        # verdict when the ref is unresolvable and reports the skip BY NAME.
+      - name: python3 is present (the census stub's envelope is python3-shaped)
+        # scripts/deploy-reliability-exit-run.test.sh:48 hard-refuses with exit 2
+        # when python3 is missing — correctly red, but illegibly so. Fail by NAME,
+        # matching the python3/jq/node name-checks above.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — add actions/setup-python" >&2
+            exit 1
+          }
+          python3 --version
+      - name: deploy-reliability-exit-run.sh syntax check
+        run: bash -n scripts/deploy-reliability-exit-run.sh
+      - name: deploy-reliability-exit-run.test.sh syntax check
+        run: bash -n scripts/deploy-reliability-exit-run.test.sh
+      - name: the exit runner's refusals can still LOSE (96 assertions, offline)
+        # THE REASON THIS LANE EXISTS: `grep -rln deploy-reliability-exit-run
+        # .github/` matched nothing, so the epic's headline instrument — the one
+        # that re-derives the never-covered number — had 96 assertions guarding
+        # it and no runner to execute them. Every refusal here is proven by
+        # MUTATION: the guard's `if` is neutralised by its `# MUT:` anchor and the
+        # refusal is watched disappearing, and the mutation step asserts the sed
+        # changed a line, so a renamed anchor reds instead of no-opping.
+        # No `continue-on-error` here or anywhere in this file — it launders a red
+        # into the green JOB conclusion the fleet reads.
+        run: bash scripts/deploy-reliability-exit-run.test.sh
+
+  # ── ORPHAN SWEEP II (CI gate-wiring + spec-generator wave, cgsiw-s3) ────────
+  #
+  # Two guards that were already WRITTEN, already GREEN, and already carried a
+  # mutation-proven selftest — and that no workflow in .github/workflows/ ever
+  # invoked. `grep -rln cloud-static-gz-guard .github/` and `grep -rln
+  # pds-live-hetzner-placement-group .github/` both matched NOTHING. That is the
+  # wave's premise in its purest form: a guard can be perfectly written and
+  # still vacuous AS A GATE, because the wiring never runs it on the PR that
+  # breaks the thing it guards. Wiring is the whole fix.
+  #
+  # Each rides the house selftest-first idiom — two bare lines in one `run: |`
+  # block, no `&&` (a multi-line GitHub `run:` is `bash -e`, so line one failing
+  # already stops the step; `&&` would only make a two-line chain harder to
+  # read), exactly as doc-gates.yml does for never-cancel-main-check.sh. The
+  # selftest goes FIRST on purpose: if the guard has lost the ability to fail,
+  # that is reported before its verdict on the live tree is believed.
+
+  cloud-static-gz:
+    name: cloud-static-gz-guard.sh (uncommitted siblings, both halves wired)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # The DEFAULT depth is correct. Check 1 asks `git ls-files`, which reads
+        # the index, and the selftest builds its own `git init` repo in mktemp.
+        # No history of this repository is required.
+      - name: cloud-static-gz-guard.sh syntax check
+        run: bash -n scripts/cloud-static-gz-guard.sh
+      - name: the gz guard can still LOSE, then the live tree passes
+        # The selftest builds a throwaway repo from the REAL files and breaks
+        # each invariant in turn — the `*.gz` ignore rule deleted, the Dockerfile
+        # gzip step deleted, that step reordered ABOVE `COPY priv priv` (the
+        # ordering is what makes source and sibling born together), and the
+        # router losing `gzip: true` — asserting a red on each. Baseline on
+        # origin/main: `10 passed, 0 failed`. Hermetic: git + bash, no network,
+        # no `bp`, and it plants nothing in the tree.
+        run: |
+          bash scripts/cloud-static-gz-guard.sh --selftest
+          bash scripts/cloud-static-gz-guard.sh
+
+  pds-hetzner-offline:
+    name: pds-live-hetzner-placement-group.sh --selftest-offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 is present (the manifest emitter and its validators are python3)
+        # Matching the python3/jq/node name-checks above: an image change that
+        # drops python3 should fail BY NAME here rather than as a mysterious
+        # refusal from inside the offline arm.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image — the manifest emitter is python3" >&2
+            exit 1
+          }
+          python3 --version
+      - name: pds-live-hetzner-placement-group.sh syntax check
+        run: bash -n scripts/pds-live-hetzner-placement-group.sh
+      - name: the credential-free arm (ONLY --selftest-offline is CI-able)
+        # ONE ARM, DELIBERATELY. Per the script's own usage block, `--selftest`
+        # HARD-REFUSES at exit 3 without a Hetzner credential — two of its four
+        # credential states are PROCEED states and would pass vacuously with
+        # none — and `--harvest-only` keeps the credential fence too. Wiring
+        # either here would manufacture a permanent red that says nothing.
+        # `--selftest-offline` is the arm the script itself names as "the
+        # CREDENTIAL-FREE arm and the CI-able gate": it scrubs every
+        # HCLOUD_*/HETZNER_* variable out of its own environment, re-execs,
+        # COUNTS what survived (must be zero), then runs four mutation blocks
+        # plus the harvest validators — including a proof that the committed
+        # fixture manifest is byte-identical to what this script's own emitter
+        # produces. There is no bare run to pair it with: the bare script is the
+        # LIVE arm and needs the credential.
+        run: bash scripts/pds-live-hetzner-placement-group.sh --selftest-offline
+
+  doc-gates-paths-parity:
+    name: doc-gates.yml push.paths == pull_request.paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        # DEFAULT depth. The guard reads one file out of the working tree and
+        # builds every fixture under mktemp.
+      - name: python3 + PyYAML are present (the workflow is yaml-PARSED, not grepped)
+        # The guard turns a missing python3/PyYAML into exit 2
+        # HARNESS-UNAVAILABLE — correctly refusing rather than skipping, but
+        # illegibly so. Resolve it by NAME here instead. PyYAML is INSTALLED
+        # rather than demanded, matching this file's own idiom at the
+        # reland-check step above: whether the runner image happens to ship it
+        # is an image fact, not a finding about this repo, and a red that says
+        # `ModuleNotFoundError: yaml` teaches a reader nothing about doc-gates'
+        # paths lists. A missing python3 is still a hard, named failure — pip3
+        # cannot repair that.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image" >&2
+            exit 1
+          }
+          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
+          python3 -c "import yaml; print('PyYAML', yaml.__version__)"
+      - name: doc-gates-paths-parity-check.sh syntax check
+        run: bash -n scripts/doc-gates-paths-parity-check.sh
+      - name: the parity guard can still LOSE, then the live doc-gates.yml passes
+        # doc-gates.yml hosts ~14 guards behind a hand-enumerated `paths:`
+        # filter, and behind it TWICE — push and pull_request each carry their
+        # own ~70-entry copy. They have ALREADY drifted (70 vs 69). The 15-case
+        # selftest proves BOTH directions (a matched pair passes, a one-sided
+        # pair reds), the fail-closed arm (a zero-entry or unparseable block is
+        # exit 2 HARNESS-UNAVAILABLE, never a pass — `[] == []` is the vacuous
+        # green this refuses), and the terminal unknown-argument refusal. The
+        # comparison itself was disarmed in a scratch copy and the selftest went
+        # 11 passed / 4 FAILED; that proof is recorded in the guard's header.
+        run: |
+          bash scripts/doc-gates-paths-parity-check.sh --selftest
+          bash scripts/doc-gates-paths-parity-check.sh

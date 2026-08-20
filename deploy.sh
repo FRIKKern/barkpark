@@ -239,6 +239,24 @@ if [ -n "${BARKPARK_PLUGINS+x}" ]; then
   fi
 fi
 
+# Persist BARKPARK_CLOUD_URL the same way — set-ness only, ${VAR+x} not
+# ${VAR:-}. This is the control-plane ORIGIN constant (https://barkpark.cloud)
+# that arms the "Log in with Barkpark Cloud" button on /login; runtime.exs reads
+# it into :cloud_login_url and the session page deep-links to
+# <origin>/#/instance-login?url=<this instance's own origin>. bp setup deploy
+# always threads it through the ssh env prefix, so this backfills the value onto
+# boxes provisioned before caddy.go's go-live step stamped it (older instances
+# render NO Cloud button until this runs). An unset var writes nothing, so a
+# manual `bash deploy.sh` keeps today's behaviour byte-identically.
+if [ -n "${BARKPARK_CLOUD_URL+x}" ]; then
+  echo ">> Persisting BARKPARK_CLOUD_URL=$BARKPARK_CLOUD_URL into .env"
+  if grep -q "^BARKPARK_CLOUD_URL=" "$APP_DIR/.env"; then
+    sed -i "s|^BARKPARK_CLOUD_URL=.*|BARKPARK_CLOUD_URL=$BARKPARK_CLOUD_URL|" "$APP_DIR/.env"
+  else
+    echo "BARKPARK_CLOUD_URL=$BARKPARK_CLOUD_URL" >> "$APP_DIR/.env"
+  fi
+fi
+
 set -a; source "$APP_DIR/.env"; set +a
 
 # Admin token: on the `clean` profile, mint one now so the seed installs it and

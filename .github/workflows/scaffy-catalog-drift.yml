@@ -1,29 +1,51 @@
 name: scaffy-catalog-drift
 
-# ADVISORY tripwire for served-catalog drift (CLI-reliability wave, charter D6-D7).
+# ACTING drift gate for the served scaffy catalog (scaffy epic W8, charter D100).
 #
-# THE GAP THIS CLOSES. The served scaffy catalog on guerrilla.barkpark.cloud is
-# seeded by a HUMAN running the two bp verbs after amending a scaffy/commands/*
-# file — no deploy path and no CI job runs `go run ./scaffy/seed --check`. So a
-# merged .scaffy edit that skips the re-seed leaves the served catalog silently
-# behind main (it happened: #5787/#5788 left `seed --check` RED on main for days
-# until a manual re-seed on 2026-07-23 13:56Z). This workflow makes that drift
-# VISIBLE on every corpus change and once a day.
+# SUPERSESSION (D100). This header previously recorded the advisory doctrine
+# from the CLI-reliability wave (D6-D7): "drift is a serve-side condition,
+# remediation is a HUMAN re-seed, never a CI mutation", enforced with
+# `continue-on-error: true`. That doctrine is REFUTED BY ITS OWN HISTORY: the
+# tripwire fired on the very merge that introduced it (#11134, run
+# 31316266670 — step AND job failed) and on every daily run for ~8 days
+# afterwards, while continue-on-error rolled every one of those runs up
+# green. An alarm nobody can hear is not advisory — it is silent. Charter
+# D100 flips this workflow to an acting gate: it reds the suite hard, and
+# when a credential is present it repairs the drift itself. Do not "fix"
+# this back to advisory without overturning D100.
 #
-# WHY ADVISORY (never a gate). Drift is a SERVE-SIDE condition, not a defect in
-# the pushed diff — a correct commit is exactly what CANNOT clear it (the fix is
-# a human re-seed, never a CI mutation). So the job carries
-# `continue-on-error: true`: it reports, it never blocks a merge. And it is
-# TOKENLESS by design — `seed --check` reads the PUBLISHED perspective with a
-# plain unauthenticated GET, so no guerrilla credential is ever provisioned into
-# CI.
+# HONEST FRAMING. This is a post-merge WATCHER that reds main's own suite —
+# it fires on push-to-main, on the daily cron, and on dispatch. It can NEVER
+# gate a merge pre-merge: drift is a serve-side condition, so the PR diff
+# that introduces it is exactly what a pre-merge run cannot see.
 #
-# WHY THE SELF-TEST. `seed --check` exits 1 on drift AND on a network failure
-# (a check that cannot check must never report clean). To trust a GREEN we must
-# first see the tripwire actually FIRE this run: the self-test mutates one
-# corpus file in the ephemeral checkout, asserts exit 1 AND a DRIFT table row
-# (not merely the exit code — a fetch failure exits 1 with no table), then
-# restores it. make-the-check-able-to-fail, proven every run.
+# FAILURE SEMANTICS — the job reds on exactly four conditions:
+#   1. SELF-TEST FAILURE — the hermetic fixture below cannot prove the check
+#      both passes on a clean corpus and fires on a broken one.
+#   2. UNREACHABLE — the served catalog could not be fetched. A check that
+#      cannot check never reports clean; distinguished from DRIFT (no table).
+#   3. DRIFT with no BARKPARK_SEED_TOKEN — the served catalog is behind main
+#      and this runner holds no credential to fix it.
+#   4. DRIFT, auto-seed ran, and the re-check did not come back green.
+# Green means: in sync, or drifted-and-repaired-to-green this run.
+#
+# TOKEN. BARKPARK_SEED_TOKEN is a guerrilla API token; permissions ["write"]
+# suffices — /v1/data/mutate rides the require_write gate and publish is a
+# plain mutation clause (api/lib/barkpark/content/mutations.ex:203). Minting
+# and installing it is the separate human-gated task
+# scaffy-backlog-seed-token-mint; until then any DRIFT reds this suite
+# honestly instead of pretending health.
+#
+# HERMETIC SELF-TEST. `seed --check` resolves its host from the `server`
+# field of ${XDG_CONFIG_HOME}/barkpark/config.json (scaffy/seed/main.go
+# serverURL). The self-test exploits that seam STEP-SCOPED: it derives the
+# corpus payloads, assembles the exact query envelope guerrilla would serve,
+# serves it from a localhost python http.server, and asserts the check goes
+# green on the full corpus AND red (exit 1 + a DRIFT/MISSING table row) on
+# the same fixture minus one doc. Zero guerrilla egress, so it can never be
+# INCONCLUSIVE for network reasons — and the real audit below runs without
+# the override, resolving guerrilla as normal. make-the-check-able-to-fail,
+# proven both ways, every run.
 
 on:
   push:
@@ -44,19 +66,16 @@ permissions:
 
 concurrency:
   group: scaffy-catalog-drift-${{ github.ref }}
-  # LITERAL false — strictly never-cancel. A daily/advisory audit has no reason
-  # to cancel an in-flight run, and a literal `true` here reds
+  # LITERAL false — strictly never-cancel. A daily audit has no reason to
+  # cancel an in-flight run, and a literal `true` here reds
   # never-cancel-main-check.sh via doc-gates' .github/workflows/** glob
   # (this workflow fires on push-to-main). Keep it false.
   cancel-in-progress: false
 
 jobs:
   drift:
-    name: served-catalog drift audit (advisory)
+    name: served-catalog drift gate (post-merge watcher)
     runs-on: ubuntu-latest
-    # ADVISORY: this job reports drift, it NEVER gates a merge. Drift is a
-    # serve-side condition remediated by a human re-seed, not by the diff.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -64,75 +83,200 @@ jobs:
         with:
           go-version-file: go.mod # honors the pinned toolchain
 
-      # ── Self-test: prove the tripwire CAN fail, this run ──────────────────
-      # Mutate one corpus file, assert `seed --check` reds with a DRIFT row,
-      # then restore. A trap guarantees restoration even if an assertion aborts.
-      - name: Self-test — drift must red with a DRIFT row
+      # ── Hermetic self-test: prove the check can PASS and can FAIL ─────────
+      # Local fixture only — no guerrilla egress. Green path: the full derived
+      # corpus audits clean. Red path: the same fixture minus one doc must
+      # exit 1 WITH a DRIFT/MISSING table row (not merely a nonzero exit — a
+      # fetch failure also exits 1, but prints no table).
+      - name: Self-test — hermetic fixture, green and red both proven
         run: |
           set -uo pipefail
-          target="$(ls scaffy/commands/*.scaffy | sort | head -n1)"
-          echo "self-test target: $target"
-          restore() { git checkout -- scaffy/commands/ 2>/dev/null || true; }
-          trap restore EXIT
+          tmp="$RUNNER_TEMP/scaffy-drift-selftest"
+          rm -rf "$tmp"
+          mkdir -p "$tmp/fixture/v1/data/query/production" "$tmp/xdg/barkpark" "$tmp/payloads"
 
-          printf '\n# scaffy-catalog-drift self-test marker\n' >> "$target"
+          # Derive the corpus payloads (derived artifacts; dir never committed).
+          go run ./scaffy/seed --out "$tmp/payloads"
+
+          # Full-corpus fixture: the exact envelope guerrilla would serve if
+          # perfectly in sync (fetchServed reads result.documents[]._id/source).
+          jq -s '{result: {documents: map({_id: ._id, source: .source})}}' \
+            "$tmp"/payloads/*.json > "$tmp/fixture/v1/data/query/production/command"
+
+          # python3 http.server strips the query string (?limit=100) when
+          # mapping the request to a file, so the plain file above serves the
+          # exact URL fetchServed builds.
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory "$tmp/fixture" >/dev/null 2>&1 &
+          srv=$!
+          trap 'kill "$srv" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 50); do
+            curl -fsS -o /dev/null "http://127.0.0.1:8765/v1/data/query/production/command" 2>/dev/null && break
+            sleep 0.2
+          done
+
+          # STEP-SCOPED server override: only this step's runs resolve the
+          # fixture; the real audit below has no override and hits guerrilla.
+          printf '{"server":"http://127.0.0.1:8765"}' > "$tmp/xdg/barkpark/config.json"
+
+          # GREEN path — the check must be able to pass.
           # `|| code=$?`, never `; code=$?`: Actions' default run shell is
           # `bash -e {0}`, so a bare failing substitution aborts the step
-          # BEFORE code is captured — the self-test would fail exactly when
-          # the tripwire correctly reds.
+          # before code is captured.
           code=0
-          out="$(go run ./scaffy/seed --check 2>&1)" || code=$?
-          restore; trap - EXIT
+          out="$(XDG_CONFIG_HOME="$tmp/xdg" go run ./scaffy/seed --check 2>&1)" || code=$?
           echo "$out"
+          if [ "$code" -ne 0 ] || ! grep -q 'MATCH — catalog in sync' <<<"$out"; then
+            echo "::error::SELF-TEST FAILED (green path) — the full-corpus fixture did not audit clean (exit $code); a green from this check cannot be trusted."
+            exit 1
+          fi
 
+          # RED path — the tripwire must fire on a fixture minus one doc.
+          jq 'del(.result.documents[0])' \
+            "$tmp/fixture/v1/data/query/production/command" > "$tmp/minus-one.json"
+          mv "$tmp/minus-one.json" "$tmp/fixture/v1/data/query/production/command"
+          code=0
+          out="$(XDG_CONFIG_HOME="$tmp/xdg" go run ./scaffy/seed --check 2>&1)" || code=$?
+          echo "$out"
           if [ "$code" -eq 0 ]; then
-            echo "::error::SELF-TEST FAILED — a mutated corpus file did NOT red seed --check (the tripwire is blind)."
+            echo "::error::SELF-TEST FAILED (red path) — a fixture missing one doc did NOT red seed --check (the tripwire is blind)."
             exit 1
           fi
-          if ! grep -qE '[[:space:]]DRIFT$' <<<"$out"; then
-            # exit 1 but no DRIFT row = the served catalog was UNREACHABLE, not
-            # drift. We cannot prove the tripwire fires this run; surface it,
-            # but the advisory job continues (continue-on-error).
-            echo "::warning::SELF-TEST INCONCLUSIVE — seed --check exited $code with no DRIFT table row; the served catalog was likely UNREACHABLE (no Actions egress to guerrilla.barkpark.cloud). Tripwire fire not proven this run."
+          if ! grep -qE '[[:space:]](DRIFT|MISSING)$' <<<"$out"; then
+            echo "::error::SELF-TEST FAILED (red path) — exit $code with no DRIFT/MISSING table row; the red was not a drift verdict."
             exit 1
           fi
-          echo "self-test OK — mutation produced exit $code and a DRIFT row; tripwire proven able to fail."
+          echo "self-test OK — hermetic fixture green on the full corpus, red (exit $code + DRIFT/MISSING row) minus one doc; zero guerrilla egress."
 
-      # ── Real check: served catalog vs main corpus ────────────────────────
-      # Runs the same audit `make seed-check` runs locally. The summary
-      # distinguishes UNREACHABLE (fetch failed, no table) from DRIFT DETECTED
-      # (table rows) from in-sync, so an advisory red is never ambiguous noise.
+      # ── Real audit: served catalog vs main corpus ─────────────────────────
+      # Same audit `make seed-check` runs locally. Verdicts: in sync → green
+      # here; UNREACHABLE → hard red here (distinguished from drift: the fetch
+      # failed and no table printed); DRIFT → verdict passes to the auto-seed
+      # step below, which repairs or reds — it never soft-passes.
       - name: Audit served catalog vs main
+        id: audit
         run: |
           set -uo pipefail
-          # errexit-safe capture (default run shell is `bash -e {0}`): a drift
-          # exit 1 must reach the summary logic below, not abort the step.
           code=0
-          out="$(make seed-check 2>&1)" || code=$?
+          out="$(go run ./scaffy/seed --check 2>&1)" || code=$?
           echo "$out"
 
           summary() { printf '%s\n' "$@" >>"$GITHUB_STEP_SUMMARY"; }
-          summary "## scaffy catalog drift audit" ""
+          summary "## scaffy catalog drift gate" ""
 
-          if grep -qE 'MATCH — catalog in sync' <<<"$out" && [ "$code" -eq 0 ]; then
+          if [ "$code" -eq 0 ] && grep -q 'MATCH — catalog in sync' <<<"$out"; then
             summary "**In sync** — every served command matches the main corpus." \
                     "" '```' "$(grep -E 'MATCH,|MATCH —|catalog drift check' <<<"$out")" '```'
+            echo "status=sync" >>"$GITHUB_OUTPUT"
             echo "catalog in sync"
             exit 0
           fi
 
           if grep -qE '[[:space:]](DRIFT|MISSING|EXTRA)$' <<<"$out"; then
-            summary "**DRIFT DETECTED (advisory)** — the served catalog is behind main." \
-                    "Remediation is a HUMAN re-seed of the touched commands — see \`scaffy/seed/README.md\`. Never a CI mutation." \
+            # Re-seedable ids (DRIFT/MISSING have a local payload; EXTRA has
+            # none — only a human retire clears it, so it reds the re-check).
+            awk '/[[:space:]](DRIFT|MISSING)$/ {print $1}' <<<"$out" > "$RUNNER_TEMP/drifted-ids.txt"
+            summary "**DRIFT** — the served catalog is behind main; the auto-seed step decides the verdict (repair-to-green or hard red)." \
                     "" '```' "$out" '```'
-            echo "::warning::scaffy catalog drift detected — re-seed the touched commands per scaffy/seed/README.md (advisory; does not block merges)."
+            echo "status=drift" >>"$GITHUB_OUTPUT"
+            echo "drift detected — the auto-seed step repairs or reds; this exit 0 is a handoff, not a pass."
+            exit 0
+          fi
+
+          # Nonzero exit and no table row: the audit could not fetch the
+          # served catalog. NOT clean and NOT drift — hard red, honestly named.
+          summary "**UNREACHABLE** — could not fetch the served catalog (no table printed)." \
+                  "A check that cannot check never reports clean. Likely no runner egress to guerrilla.barkpark.cloud." \
+                  "" '```' "$out" '```'
+          echo "status=unreachable" >>"$GITHUB_OUTPUT"
+          echo "::error::scaffy catalog audit UNREACHABLE — served catalog fetch failed; drift status unknown; failing hard."
+          exit 1
+
+      # ── Auto-seed (secret-gated) or hard red ──────────────────────────────
+      # DRIFT verdicts land here. With BARKPARK_SEED_TOKEN: re-derive the
+      # payloads and, per drifted id, post ONE atomic mutation batch
+      # (createOrReplace + publish) to /v1/data/mutate/production; the E3
+      # unknown_tag wall (422) is cleared by registering the payload's tag
+      # docs and retrying once (scaffy/seed/README.md §unknown_tag). The
+      # repair only counts if seed --check then comes back GREEN. Without the
+      # token: hard red — behind main with no credential to fix it.
+      - name: Auto-seed drifted commands or red honestly
+        if: steps.audit.outputs.status == 'drift'
+        env:
+          BARKPARK_SEED_TOKEN: ${{ secrets.BARKPARK_SEED_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -z "${BARKPARK_SEED_TOKEN:-}" ]; then
+            echo "::error::DRIFT — the served catalog is behind main and this runner holds no credential to fix it (BARKPARK_SEED_TOKEN absent; minting is task scaffy-backlog-seed-token-mint). Failing hard."
             exit 1
           fi
 
-          # exit != 0 and no drift table = the audit could not reach the served
-          # catalog. Honest UNREACHABLE, not a clean bill and not drift.
-          summary "**UNREACHABLE (advisory)** — could not fetch the served catalog (no table printed)." \
-                  "This is NOT a clean result and NOT drift — the audit could not run. Likely no Actions-runner egress to guerrilla.barkpark.cloud." \
+          # Matches seed --check's defaultServer — the runner has no
+          # barkpark/config.json, so the audit above resolved the same host.
+          server="https://guerrilla.barkpark.cloud"
+
+          # Fresh payloads for the re-seed (scaffy/seed/out is gitignored).
+          go run ./scaffy/seed
+
+          post() {
+            # post <body-file>: response body → $RUNNER_TEMP/resp.json,
+            # prints the HTTP status code (empty on transport failure).
+            curl -sS -o "$RUNNER_TEMP/resp.json" -w '%{http_code}' \
+              -X POST "$server/v1/data/mutate/production" \
+              -H "Authorization: Bearer $BARKPARK_SEED_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data @"$1"
+          }
+
+          while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            payload="scaffy/seed/out/$id.json"
+            if [ ! -f "$payload" ]; then
+              echo "::error::drifted id '$id' has no derived payload — cannot re-seed it."
+              exit 1
+            fi
+            # ONE atomic batch per id: createOrReplace + publish together.
+            jq --arg id "$id" \
+              '{mutations: [{createOrReplace: (. + {_type: "command"})}, {publish: {id: $id, type: "command"}}]}' \
+              "$payload" > "$RUNNER_TEMP/body.json"
+            http="$(post "$RUNNER_TEMP/body.json")" || true
+            if [ "$http" = "422" ] && grep -q 'unknown_tag' "$RUNNER_TEMP/resp.json"; then
+              echo "unknown_tag on $id — registering its tag docs, then one retry (E3 wall)"
+              for tag in $(jq -r '.tags[].tag' "$payload"); do
+                jq -n --arg t "$tag" \
+                  '{mutations: [{createOrReplace: {_id: $t, _type: "tag", title: $t, description: "Tag used by the scaffy command catalog; registered by the scaffy-catalog-drift auto-seed."}}, {publish: {id: $t, type: "tag"}}]}' \
+                  > "$RUNNER_TEMP/tag-body.json"
+                thttp="$(post "$RUNNER_TEMP/tag-body.json")" || true
+                case "$thttp" in
+                  2??) echo "registered tag doc '$tag' (HTTP $thttp)" ;;
+                  *)
+                    echo "::error::tag-doc registration for '$tag' failed (HTTP ${thttp:-transport-error}): $(cat "$RUNNER_TEMP/resp.json" 2>/dev/null)"
+                    exit 1
+                    ;;
+                esac
+              done
+              http="$(post "$RUNNER_TEMP/body.json")" || true
+            fi
+            case "$http" in
+              2??) echo "re-seeded $id (HTTP $http)" ;;
+              *)
+                echo "::error::re-seed of '$id' failed (HTTP ${http:-transport-error}): $(cat "$RUNNER_TEMP/resp.json" 2>/dev/null)"
+                exit 1
+                ;;
+            esac
+          done < "$RUNNER_TEMP/drifted-ids.txt"
+
+          # The repair only counts if the audit itself comes back green.
+          code=0
+          out="$(go run ./scaffy/seed --check 2>&1)" || code=$?
+          echo "$out"
+          summary() { printf '%s\n' "$@" >>"$GITHUB_STEP_SUMMARY"; }
+          if [ "$code" -eq 0 ] && grep -q 'MATCH — catalog in sync' <<<"$out"; then
+            summary "**Repaired** — drift auto-seeded and the re-check is green." \
+                    "" '```' "$(grep -E 'MATCH,|MATCH —|catalog drift check' <<<"$out")" '```'
+            echo "auto-seed converged — served catalog back in sync."
+            exit 0
+          fi
+          summary "**NOT CONVERGED** — auto-seed ran but the re-check is still red (EXTRA rows need a human retire; see scaffy/seed/README.md)." \
                   "" '```' "$out" '```'
-          echo "::warning::scaffy catalog audit UNREACHABLE — served catalog fetch failed; drift status unknown this run."
+          echo "::error::auto-seed did not converge to green (re-check exit $code) — failing hard."
           exit 1

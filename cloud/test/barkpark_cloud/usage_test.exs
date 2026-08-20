@@ -282,7 +282,16 @@ defmodule BarkparkCloud.UsageTest do
     end
 
     test "every failure reason the gatherer can mint survives to the envelope, distinctly" do
-      for reason <- [:exception, :deadline_exceeded, :unreachable, :bad_shape, :too_many_datasets] do
+      for reason <- [
+            :exception,
+            :deadline_exceeded,
+            :unreachable,
+            :unauthorized,
+            :refused,
+            :instance_error,
+            :bad_shape,
+            :too_many_datasets
+          ] do
         m = meters(%{webhooks: {:error, reason}})
         assert m.webhooks.value == "unmetered"
         assert m.webhooks.unavailable_reason == Atom.to_string(reason)
@@ -291,6 +300,25 @@ defmodule BarkparkCloud.UsageTest do
       # A timeout and a crash are different answers, not one degraded map.
       assert meters(%{webhooks: {:error, :deadline_exceeded}}).webhooks !=
                meters(%{webhooks: {:error, :exception}}).webhooks
+    end
+
+    test "w58-s3: a box that ANSWERED and said no never reaches the wire as \"unreachable\"" do
+      # `unreachable` is a claim about the network. A delivered 401/5xx/404 is a
+      # claim about the box — if the allowlist ever drops these three they
+      # degrade to "unknown", which the console renders as "the read failed".
+      for reason <- [:unauthorized, :refused, :instance_error] do
+        m = meters(%{datasets: {:error, reason}})
+        assert m.datasets.unavailable_reason == Atom.to_string(reason)
+        refute m.datasets.unavailable_reason == "unreachable"
+        refute m.datasets.unavailable_reason == "unknown"
+      end
+
+      distinct =
+        for reason <- [:unauthorized, :refused, :instance_error, :unreachable],
+            uniq: true,
+            do: meters(%{datasets: {:error, reason}}).datasets
+
+      assert length(distinct) == 4
     end
 
     test "an unrecognised reason normalises to \"unknown\" — no raw internal atom on the wire" do

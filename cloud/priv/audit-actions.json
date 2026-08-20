@@ -1,0 +1,244 @@
+{
+  "$comment": "THE AUDIT VERB TABLE — the SOLE authority for two vocabularies that used to be two hand-lists. (1) BarkparkCloud.Accounts.AuditEvent's closed @actions allowlist reads `actions[].verb` at COMPILE time (@external_resource + Jason.decode!), so validate_inclusion(:action, @actions) still enforces the identical closed set. (2) The console's ACTION_LABELS object in cloud/priv/static/app.js is a BEGIN/END GENERATED region emitted from `actions[].label` by design/emit.mjs and digest-fenced by design/emit-manifest.json. NEITHER side greps the other's syntax: both are OUTPUTS of this file. A row IS the declaration, and its label rides on it — so a label for an undeclared verb has nowhere to live (charter cch-w65). `label: null` is legal and means the console renders the raw dotted slug through humanAction's documented fallback (charter D582: ugly, not false) — but a null MUST carry `reason_code` + `reason`, so \"unlabelled on purpose\" is machine-checked instead of a discipline. Adding a verb: append a row here, run `node design/emit.mjs --write`, commit app.js + design/emit-manifest.json. Order is the emitted order; it mirrors the noun grouping the old hand-list carried.",
+  "reason_codes": {
+    "d582-copy-not-written": "No console sentence fragment has been written for this verb yet. D582 ruled the raw dotted slug HONEST — humanAction(a) returns ACTION_LABELS[a] || a, so the row renders unpolished rather than disappearing. The reason must name the open row that owns the copy (a `cch-w…` slug), so the excuse points at its owner the way the Elixir census's @producerless anchors point at code.",
+    "no-producer": "The verb is DECLARED but nothing in cloud/lib produces it, so no audit row can ever carry it and a label would name a category the feed cannot show. The reason must cite `@producerless` — the census allowlist in cloud/test/barkpark_cloud/audit_vocabulary_census_test.exs that already excuses it with an anchor/blocker pair."
+  },
+  "actions": [
+    { "verb": "member.invited", "label": "invited a member" },
+    { "verb": "member.role_changed", "label": "changed a member's role" },
+    { "verb": "member.removed", "label": "removed a member" },
+    { "verb": "invitation.revoked", "label": "revoked an invitation" },
+    { "verb": "invitation.accepted", "label": "accepted an invitation" },
+    { "verb": "subscription.activated", "label": "activated a subscription" },
+    { "verb": "subscription.canceled", "label": "canceled a subscription" },
+    { "verb": "token.minted", "label": "minted an API token" },
+    { "verb": "token.revoked", "label": "revoked an API token" },
+    { "verb": "site.created", "label": "created a site" },
+    { "verb": "site.deleted", "label": "deleted a site" },
+    { "verb": "site.deploy_requested", "label": "requested a deploy" },
+    {
+      "verb": "site.artifact_uploaded",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A build artifact was uploaded to a site. Renders as the raw dotted slug through humanAction's fallback (D582) — unpolished, not false. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    { "verb": "site.env_changed", "label": "replaced a site's environment" },
+    { "verb": "site.domain_added", "label": "added a domain" },
+    { "verb": "site.github_connected", "label": "connected a repo" },
+    {
+      "verb": "site.github_disconnected",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "The inverse of site.github_connected, which IS labelled — the asymmetry is exactly the drift this table now makes visible. Raw slug via D582's fallback. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "site.cloudflare_bound",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A site's domain was bound to Cloudflare. Renders as the raw dotted slug (D582); the operator can read it, it just is not a sentence. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    { "verb": "site.rolled_back", "label": "rolled back a site" },
+    {
+      "verb": "deployment.promoted",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A deployment was promoted to production. The only `deployment.*` verb in the vocabulary, so the noun group has no labelled sibling to copy a voice from. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "webhook.created",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "Minted through instance_mutation_action/1 (the six-verb webhook layer the Elixir census resolves), never as a literal. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "webhook.updated",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "Minted through instance_mutation_action/1, one of the six webhook verbs. Renders as the raw dotted slug (D582's documented fallback). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "webhook.deleted",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "Minted through instance_mutation_action/1, one of the six webhook verbs. Renders as the raw dotted slug (D582's documented fallback). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "webhook.rotated",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A webhook signing secret was rotated — a security-relevant row an operator is most likely to squint at, and still a raw slug (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "webhook.replayed",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A stored webhook delivery was replayed. Minted through instance_mutation_action/1; renders as the raw dotted slug (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "webhook.test_sent",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A test delivery was fired at a webhook endpoint. Minted through instance_mutation_action/1; raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    { "verb": "barkpark.go_live", "label": "launched a Barkpark" },
+    { "verb": "barkpark.deleted", "label": "removed a Barkpark" },
+    {
+      "verb": "barkpark.retry_requested",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "One of the nine OC24 instance-lifecycle triggers, written through audit_lifecycle_trigger/5 at the call site. Every one of them is unlabelled — the register this epic ships speaks in slugs. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.verify_requested",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "An instance-lifecycle trigger written through audit_lifecycle_trigger/5. Renders as the raw dotted slug (D582's documented fallback). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.studio_link_minted",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A one-shot Studio sign-in link was minted for an instance — a credential-shaped act reading as a machine token. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.app_token_minted",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "An app token was minted ON an instance. Its control-plane sibling token.minted IS labelled 'minted an API token', so the same act reads two ways depending on where it happened. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.app_token_revoked",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "An app token was revoked ON an instance; token.revoked, its control-plane sibling, is labelled. Raw slug via D582 until the copy lands. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.site_url_set",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "An instance's public site URL was set. Written through audit_lifecycle_trigger/5; renders as the raw dotted slug (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.self_update_triggered",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A self-update was triggered on an instance — the write whose refusal path IS labelled (barkpark.credentials_refused), so the failure reads as English and the attempt does not. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.rollback_triggered",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A rollback was triggered on an instance; the site-level sibling site.rolled_back IS labelled 'rolled back a site'. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    { "verb": "barkpark.autoupdate_changed", "label": "changed autoupdate" },
+    {
+      "verb": "barkpark.domain_attached",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A domain was attached to an instance; the site-level sibling site.domain_added IS labelled 'added a domain'. Raw slug via D582 until the copy lands. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.vercel_deploy_triggered",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A Vercel deploy was triggered for an instance's front end. Written through audit_lifecycle_trigger/5; raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.resurrected",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A decommissioned instance was resurrected — the loudest lifecycle act in the register and still a machine token in the sentence slot. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.push_relay_provisioned",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A git push relay was provisioned for an instance. Renders as the raw dotted slug through humanAction's fallback (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "barkpark.credentials_refused",
+      "label": "was refused — the instance rejected our access credential",
+      "note": [
+        "cch-w63-s8. The row a REFUSED write leaves: the plane declined to send an",
+        "instance write because the box answered our stored admin credential 401.",
+        "The actor tried; the request never left. The expanded detail carries the",
+        "wire word (reason: \"identity_refused\") and which write it was."
+      ]
+    },
+    {
+      "verb": "env_var.created",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "An environment variable was created on a site, through Accounts.audit/3 inside the router's transaction. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "env_var.deleted",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "An environment variable was deleted; site.env_changed, the bulk-replace verb over the same data, IS labelled. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "provider.connected",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A hosting/DNS provider credential was connected to the team. Renders as the raw dotted slug through humanAction's fallback (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "provider.disconnected",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A provider credential was disconnected — a row that matters when a deploy later fails, and it reads as a machine token. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "github.installation_connected",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A GitHub App installation was connected to the team; the site-level site.github_connected IS labelled 'connected a repo'. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "github.installation_disconnected",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "A GitHub App installation was disconnected from the team. Renders as the raw dotted slug through humanAction's fallback (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "github.repo_pushed",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "Barkpark pushed a repo to GitHub on the team's behalf. Renders as the raw dotted slug through humanAction's fallback (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "notifications.settings_changed",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "Notification settings were changed for the team. Renders as the raw dotted slug through humanAction's fallback (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "notifications.channels_changed",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "Which channels notifications go out on was changed. Renders as the raw dotted slug through humanAction's fallback (D582). Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    {
+      "verb": "notifications.events_changed",
+      "label": null,
+      "reason_code": "d582-copy-not-written",
+      "reason": "Which events raise a notification was changed — a subscription edit that quietly decides what the team hears about. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
+    },
+    { "verb": "twofa.enabled", "label": "enabled two-factor authentication" },
+    { "verb": "twofa.disabled", "label": "disabled two-factor authentication" },
+    {
+      "verb": "oauth.linked",
+      "label": null,
+      "reason_code": "no-producer",
+      "reason": "Declared but produced by NOTHING in cloud/lib: the OAuth callback cannot tell a LINK from a BIRTH, so no row is written. Excused by name in @producerless (cloud/test/barkpark_cloud/audit_vocabulary_census_test.exs) with an anchor that must resolve and a blocker that must stay absent. A label here would name a category the feed can never show."
+    },
+    {
+      "verb": "email.verified",
+      "label": null,
+      "reason_code": "no-producer",
+      "reason": "Declared but produced by NOTHING in cloud/lib: the verify-email route exists and confirms the user, but no call site on that path writes an audit row. Excused by name in @producerless (cloud/test/barkpark_cloud/audit_vocabulary_census_test.exs). A label here would name a category the feed can never show."
+    }
+  ]
+}

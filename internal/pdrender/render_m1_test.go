@@ -3,11 +3,13 @@ package pdrender
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 // stubRefResolver is the caller-supplied resolver seam under test: it maps the
@@ -190,24 +192,87 @@ func TestCodeMemoization(t *testing.T) {
 	}
 }
 
-// TestFigureCounterIncrements asserts the shared figure counter advances across
-// sibling figures in one RenderDoc pass (Figure 1., Figure 2., …).
-func TestFigureCounterIncrements(t *testing.T) {
+// boldLeadRe matches an SGR run that opens with the bold attribute (1) and is
+// immediately followed by the author's "Figure 2." lead.
+var boldLeadRe = regexp.MustCompile(`\x1b\[1(;[0-9;]*)?mFigure 2\.`)
+
+// TestStatLabelKeepsEveryWrappedLine is the TRUNCATION TRIPWIRE: a stat cell's
+// label is authored content, so every wrapped line must reach the terminal. The
+// cell used to emit firstLine(wrapLines(label)) — at a wide render the trailing
+// " Aug" of "remedies executed on GitHub, 12 Aug" vanished into a cell whose
+// resolved width was narrower than the label, silently losing the author's words.
+func TestStatLabelKeepsEveryWrappedLine(t *testing.T) {
+	const label = "remedies executed on GitHub, 12 Aug"
+	ctx := RenderCtx{Width: 24, Theme: DarkTheme(), Profile: NoColor}
+	lines := statCell(map[string]any{"value": "9", "label": label}, ctx)
+	joined := ansi.Strip(strings.Join(lines, "\n"))
+
+	if !strings.Contains(joined, "Aug") {
+		t.Errorf("stat label truncated — %q lost its tail:\n%s", label, joined)
+	}
+	// The label wrapped (its width exceeds the cell), so it must span >1 line and
+	// every authored word must survive somewhere in the cell.
+	if len(lines) < 3 {
+		t.Errorf("expected value + at least two wrapped label lines, got %d:\n%s", len(lines), joined)
+	}
+	for _, word := range strings.Fields(label) {
+		if !strings.Contains(joined, word) {
+			t.Errorf("stat label lost the word %q:\n%s", word, joined)
+		}
+	}
+}
+
+// TestFigureCaptionsAreAuthorTruth is the INVENTION TRIPWIRE: pdrender must
+// print exactly the caption the author typed — never a number of its own. The
+// old document-global counter made the terminal contradict the author (a paper
+// whose captions already read "Figure 2. …" rendered "Figure 1. Figure 2. …"),
+// and it numbered children before parents. The web reader only EMPHASISES an
+// author-typed lead (figures.ex figcaption_inner/1); this pins the same rule.
+func TestFigureCaptionsAreAuthorTruth(t *testing.T) {
+	fig := func(caption, text string) Block {
+		return Block{Type: "figure", Attrs: map[string]any{"type": "figure", "caption": caption},
+			Child: &Block{Type: "paragraph", Attrs: map[string]any{"type": "paragraph",
+				"content": []any{map[string]any{"type": "text", "value": text}}}}}
+	}
 	reg := testRegistry()
-	blocks := []Block{
-		{Type: "figure", Attrs: map[string]any{"type": "figure", "caption": "first"},
-			Child: &Block{Type: "paragraph", Attrs: map[string]any{"type": "paragraph",
-				"content": []any{map[string]any{"type": "text", "value": "a"}}}}},
-		{Type: "figure", Attrs: map[string]any{"type": "figure", "caption": "second"},
-			Child: &Block{Type: "paragraph", Attrs: map[string]any{"type": "paragraph",
-				"content": []any{map[string]any{"type": "text", "value": "b"}}}}},
+	ctx := RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}
+
+	// Unnumbered captions stay unnumbered — no "Figure" appears anywhere.
+	plain := ansi.Strip(reg.RenderDoc([]Block{fig("first", "a"), fig("second", "b")}, ctx))
+	if strings.Contains(plain, "Figure") {
+		t.Errorf("pdrender generated a figure number the author never typed:\n%s", plain)
 	}
-	out := ansi.Strip(reg.RenderDoc(blocks, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}))
-	if !strings.Contains(out, "Figure 1.") {
-		t.Errorf("expected 'Figure 1.' in output:\n%s", out)
+	for _, want := range []string{"first", "second"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("lost the author's caption %q:\n%s", want, plain)
+		}
 	}
-	if !strings.Contains(out, "Figure 2.") {
-		t.Errorf("expected 'Figure 2.' in output:\n%s", out)
+
+	// An author-typed lead survives verbatim, exactly once, with no second number
+	// bolted on in front of it.
+	numbered := ansi.Strip(reg.RenderDoc([]Block{fig("Figure 2. The ingest path.", "a")}, ctx))
+	if strings.Count(numbered, "Figure") != 1 {
+		t.Errorf("expected the author's single 'Figure 2.' lead, got:\n%s", numbered)
+	}
+	if !strings.Contains(numbered, "Figure 2. The ingest path.") {
+		t.Errorf("author's numbered caption not rendered intact:\n%s", numbered)
+	}
+
+	// …and that lead is EMPHASISED (bold) when the terminal can style, the analogue
+	// of the web's <b> run-in. The suite's default profile emits no SGR, so ask for
+	// real escapes the way heading_alias_drift_test does.
+	oldProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(oldProfile)
+	styled := reg.RenderDoc([]Block{fig("Figure 2. The ingest path.", "a")},
+		RenderCtx{Width: 60, Theme: DarkTheme(), Profile: TrueColor})
+	// The lead carries its own SGR run opening with the bold attribute (1); the
+	// remainder of the caption is the plain caption tone.
+	if !boldLeadRe.MatchString(styled) {
+		t.Errorf("expected a bold run-in on the author's 'Figure 2.' lead:\n%q", styled)
+	}
+	if !strings.Contains(styled, "Figure 2.\x1b[0m") {
+		t.Errorf("expected the lead to close as its own styled run:\n%q", styled)
 	}
 }
 

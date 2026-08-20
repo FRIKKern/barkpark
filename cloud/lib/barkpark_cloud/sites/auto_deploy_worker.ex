@@ -35,8 +35,10 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   what prevents the race, not the `(site_id, build_id)` index). Fail-closed HEALTH
   + the force nonce then inherit for free from the proven manual deploy path.
 
-  The build itself runs the SAME way a manual deploy does — `Deploy.start/1`
-  spawns the supervised, claim-fenced, reaper-recoverable driver — so a crashed
+  The build itself runs the SAME way a manual deploy does — `Deploy.start_reported/1`
+  spawns the supervised, claim-fenced, reaper-recoverable driver AND reports whether
+  the spawn happened (the fire-and-forget `Deploy.start/1` that used to be named here
+  was deleted in deploy-reliability W17: it laundered a refusal into `:ok`) — so a crashed
   auto-rebuild is swept exactly like a crashed manual one. The `:site_deploy`
   queue is concurrency-1 so the enqueue+start step is serial per box, and the box
   itself flock-serializes the build.
@@ -84,6 +86,8 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   # headroom; the [:available, :scheduled] state filter is what actually gates.
   @unique [keys: [:site_id], states: [:available, :scheduled], period: 300]
 
+  import Ecto.Query, only: [from: 2]
+
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Deployment, Site}
   alias BarkparkCloud.Repo
@@ -104,6 +108,17 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   # wasted intermediate builds. 60s coalesces a publishing session into ~one
   # build per site per minute; override per deployment with AUTODEPLOY_DEBOUNCE_S.
   @schedule_in_default 60
+
+  @doc """
+  The debounce window (seconds) a plain publish-triggered enqueue schedules at —
+  `@schedule_in_default`, or `AUTODEPLOY_DEBOUNCE_S` when it parses and clears
+  the floor. Public because `Sites.Deploy` derives the DEFER backoff from it
+  (`Deploy.deferral_backoff_seconds/1`): the backoff is a MULTIPLE of the
+  operator's own window, never a second, independently-tuned constant that could
+  silently disagree with it.
+  """
+  @spec debounce_seconds() :: pos_integer()
+  def debounce_seconds, do: schedule_in()
 
   defp schedule_in do
     case System.get_env("AUTODEPLOY_DEBOUNCE_S") do
@@ -126,8 +141,37 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   """
   @spec enqueue(binary()) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue(site_id) when is_binary(site_id) do
+    enqueue(site_id, schedule_in())
+  end
+
+  @doc """
+  Enqueue at an EXPLICIT window (seconds) — the DEFER paths' form
+  (deploy-reliability W20).
+
+  Two callers pass a window: `defer_behind_running_build/2` here, and
+  `Sites.Deploy`'s deferral arm via `requeue_rebuild/2`. Both derive it from
+  `Deploy.deferral_backoff_seconds/1`, so a chain that is already six rounds deep
+  stops re-firing on the same blind 60s clock that paced it there (measured: p50
+  61.6s between consecutive deferrals of a site, 63.7% inside the 55-75s band —
+  the clock, not the box, set the cadence).
+
+  It is a SEPARATE ARITY, not a default argument, on purpose: the publish webhook
+  and the manual/API trigger must keep the plain debounce, and a default argument
+  would let a mis-edit hand them the backoff while every existing test stayed
+  green. `auto_deploy_worker_test.exs` pins both untouched callers on arity 1.
+
+  NO `replace:` OPTION IS PASSED, HERE OR ANYWHERE (charter W19 probe P6):
+  `replace` has no max/min semantics, so with a 900s deferral pending an ordinary
+  60s publish would drag it back to 59s — a publish-triggered reset of the very
+  backoff this exists to hold, with all tests still green. Without it the defer
+  insert is written VERBATIM, because the sibling it would have conflicted with is
+  `:executing` (∉ `@unique` states) or already gone.
+  """
+  @spec enqueue(binary(), pos_integer()) :: {:ok, Oban.Job.t()} | {:error, term()}
+  def enqueue(site_id, schedule_in)
+      when is_binary(site_id) and is_integer(schedule_in) and schedule_in > 0 do
     %{site_id: site_id}
-    |> new(schedule_in: schedule_in(), unique: @unique)
+    |> new(schedule_in: schedule_in, unique: @unique)
     |> Oban.insert()
   end
 
@@ -301,9 +345,24 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   # NOT `{:snooze, n}`: snooze increments `attempt` against `max_attempts: 3`, so
   # three busy rounds would DISCARD the job. A fresh debounced job carries no
   # attempt history at all, and its `site_id` unique collapses repeats onto one.
+  #
+  # THE RE-FIRE IS NO LONGER BLIND (deploy-reliability W20). This path holds only
+  # the site and the in-flight row — it has no `cause` and mints no row of its
+  # own, so it cannot count its own chain. It asks `Sites.Deploy` for the depth
+  # instead of inventing a second, differently-shaped backoff: one owner for the
+  # window, so the two defer paths can never disagree about how long a chain of a
+  # given depth waits.
   defp defer_behind_running_build(site, %Deployment{} = in_flight) do
-    case enqueue(site.id) do
+    case enqueue(site.id, Deploy.deferral_backoff_seconds(site)) do
       {:ok, _job} ->
+        # THE ATTEMPT THAT MINTS NO ROW NOW SPEAKS (deploy-reliability W12, S6).
+        # Everything above this line stays true — no fake `deferred` row is
+        # minted, and the real build in flight is not relabelled — but the
+        # attempt is no longer INVISIBLE: it is counted on the row it coalesced
+        # ONTO, which is the only truthful home for it. This attempt did not
+        # produce a build; it joined one.
+        record_coalesced_attempt(in_flight)
+
         Logger.info(
           "auto-deploy deferred for site #{site.id}: deployment #{in_flight.id} is already #{in_flight.status} — rebuild re-queued"
         )
@@ -317,5 +376,46 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
 
         {:error, reason}
     end
+  end
+
+  # HOW MANY PUBLISHES THIS BUILD IS ANSWERING FOR — the count of attempts that
+  # minted no row of their own, hung on the in-flight row they coalesced onto.
+  #
+  # WHY IT MATTERS EVEN THOUGH IT IS QUIET TODAY, measured from Oban rather than
+  # guessed: in the twelve hours 2026-08-06 08:00-20:00Z there were 2,256
+  # `AutoDeployWorker` jobs against 1,052 deployment rows — 1,204 ATTEMPTS THAT
+  # MINTED NO ROW against 277 counted deferrals (4.35:1). Since 22:00Z the same
+  # ratio is 0.086:1 and zero per minute. That is DORMANT, not fixed: the gap is
+  # a function of publish load against build duration, so it returns precisely
+  # when the number is worth having.
+  #
+  # "Attempts that minted no row", never "uncounted deferrals": the
+  # `{:duplicate, %{status: "queued"}}` re-drive arm above has the same shape and
+  # the two are indistinguishable once written down, so the honest name is the
+  # one that describes what was observed rather than what it is assumed to mean.
+  #
+  # ATOMIC `UPDATE`, never a changeset: N publishes can race one build from N
+  # processes, and a read-modify-write would drop every attempt but the last —
+  # which is the whole count. `COALESCE` because the 30,633 rows that predate the
+  # column are NULL (honestly unknown), and `NULL + 1` is NULL.
+  #
+  # Best-effort telemetry: the return value is discarded and a row that vanished
+  # between the coalesce and this write updates zero rows without raising. The
+  # DEFERRAL is the contract; the count is the record of it.
+  defp record_coalesced_attempt(%Deployment{id: id}) do
+    now = DateTime.utc_now()
+
+    from(d in Deployment,
+      where: d.id == ^id,
+      update: [
+        set: [
+          coalesced_attempts: fragment("COALESCE(?, 0) + 1", d.coalesced_attempts),
+          coalesced_last_at: ^now
+        ]
+      ]
+    )
+    |> Repo.update_all([])
+
+    :ok
   end
 end

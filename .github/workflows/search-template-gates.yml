@@ -1,0 +1,89 @@
+name: search-template-gates
+
+# Arms the three fail-closed search-template tripwires that shipped to main but
+# were wired into ZERO of 50 workflows (search-template epic, charter D88/D93,
+# §278(3); wave 12 slice stw12-arm-tripwires). Each tripwire already ships its
+# own `--selftest` whose NEGATIVE half must red — a gate that cannot fail proves
+# nothing — so this workflow runs the fail-closed form of each on every PR that
+# touches the starter templates or a gate's own source.
+#
+#   1. check-vendor-blocks.mjs   — the vendored renderer must paint every block
+#                                  type the repo teaches; --selftest (16/16).
+#   2. templates-literal-check.sh — no light-mode palette text literal and no
+#                                  hardcoded focus ring in the starter .tsx;
+#                                  --selftest (17 cases) + the real scan.
+#   3. verify-bp-commands.mjs    — every `bp …` command PRINTED in the flagship
+#                                  template docs must PARSE against the CLI's own
+#                                  sources. Run over the template docs with
+#                                  repo-RELATIVE paths (the resolver concatenates
+#                                  join(root, rel), so an absolute path 404s to a
+#                                  false exit-2) and --offline (accepted only when
+#                                  every target is under templates/**).
+#
+# FAIL-CLOSED, by design: the bp-command job REDS whenever a flagship doc prints
+# a command the CLI cannot parse. That is the gate catching real dishonesty, not
+# a broken workflow — the fix is to correct (or cut) the offending doc copy, not
+# to loosen the gate. It stays fail-closed on unproven commands on purpose.
+#
+# NOTE: a new workflow only *blocks* a PR once a human registers it as a required
+# check in branch protection. Until then it still runs and reds the PR page on
+# failure. Triggers on pull_request only, so main's own status stays untouched.
+
+on:
+  pull_request:
+    paths:
+      - "templates/**"
+      - "scripts/check-vendor-blocks.mjs"
+      - "scripts/templates-literal-check.sh"
+      - "tooling/doc-truth/verify-bp-commands.mjs"
+      - "tooling/doc-truth/bp-cli-sources.mjs"
+      - "tooling/doc-truth/verify-docs.mjs"
+      - ".github/workflows/search-template-gates.yml"
+
+concurrency:
+  group: search-template-gates-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  vendor-block-coverage:
+    name: Vendored renderer block coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Self-test the tripwire (its negative half must red)
+        run: node scripts/check-vendor-blocks.mjs --selftest
+
+  contrast-focus-literals:
+    name: Starter-template contrast/focus literals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Self-test the tripwire (its negative half must red)
+        run: bash scripts/templates-literal-check.sh --selftest
+      - name: Scan the starter templates
+        run: bash scripts/templates-literal-check.sh
+
+  bp-command-truth:
+    name: Flagship template bp-command parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Repo-RELATIVE paths ONLY: the resolver does join(root, rel) which
+      # concatenates, so an absolute path resolves to a non-existent file and
+      # exits 2 (a false "target not found") instead of adjudicating. --offline
+      # drops the manifest source and is accepted because every target is under
+      # templates/**.
+      - name: Verify every printed bp command parses
+        run: >-
+          node tooling/doc-truth/verify-bp-commands.mjs --offline
+          templates/DEPLOYING.md
+          templates/MANIFEST.md
+          templates/astro-search-starter/README.md
+          templates/search-starter/DEPLOYING.md
+          templates/search-starter/README.md

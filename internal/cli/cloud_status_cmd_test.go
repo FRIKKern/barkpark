@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -636,5 +637,468 @@ func TestRunCloudStatusTableDetailColumn(t *testing.T) {
 	}
 	if strings.Contains(healthyHeader, "DETAIL") {
 		t.Fatalf("healthy bucket must not grow a DETAIL column:\n%s", stdout)
+	}
+}
+
+// --- the DEPLOY section (dr-w19-s7) ------------------------------------------
+
+// statusDeployFleet is the fleet body every deploy-section test renders: two
+// live, healthy boxes. Both read `ok` on every column above the DEPLOY section,
+// which is the whole point — the deploy line is the sentence those columns
+// cannot say.
+const statusDeployFleet = `{"barkparks":[
+	{"id":"bp-1","name":"alpha","host":"h1","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current"},
+	{"id":"bp-2","name":"beta","host":"h2","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current"}
+]}`
+
+// statusDeploySites maps the census's site_ids onto boxes — the fold `bp cloud
+// status` does client-side, because a census row carries site_id and nothing
+// that names a box.
+const statusDeploySites = `{"sites":[
+	{"id":"site-a","barkpark_id":"bp-1"},
+	{"id":"site-c","barkpark_id":"bp-2"}
+]}`
+
+// newStatusDeployServer stands up a fake control plane answering the three
+// routes the DEPLOY section reads, with a chosen census status + body.
+func newStatusDeployServer(t *testing.T, censusStatus int, censusBody string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/deploy-ledger/census":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(censusStatus)
+			_, _ = io.WriteString(w, censusBody)
+		case "/v1/sites":
+			_, _ = io.WriteString(w, statusDeploySites)
+		default:
+			_, _ = io.WriteString(w, statusDeployFleet)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	seedCloudLogin(t, srv.URL)
+}
+
+// statusDeployCensus builds a census body whose two site rows carry the given
+// volume/live. `live` is a real key here; the older-control-plane case has its
+// own body below, WITHOUT it.
+func statusDeployCensus(minSample, aVolume, aLive, cVolume, cLive int) string {
+	return fmt.Sprintf(`{"window":{"from":"2026-08-07T00:00:00Z","to":"2026-08-08T00:00:00Z"},
+		"volume":%d,"failed":0,"min_sample":%d,
+		"failure_rate":{"sample":%d,"pct":0,"numerator":0,"min_sample":%d,"refused":false,"reason":""},
+		"sites":[
+			{"site_id":"site-a","volume":%d,"failed":1,"deferred":0,"live":%d,"failure_rate":{"sample":%d,"pct":null,"numerator":1,"min_sample":%d,"refused":true,"reason":""},"top_class":null},
+			{"site_id":"site-c","volume":%d,"failed":0,"deferred":0,"live":%d,"failure_rate":{"sample":%d,"pct":null,"numerator":0,"min_sample":%d,"refused":true,"reason":""},"top_class":null}
+		]}`,
+		aVolume+cVolume, minSample, aVolume+cVolume, minSample,
+		aVolume, aLive, aVolume, minSample,
+		cVolume, cLive, cVolume, minSample)
+}
+
+// statusDeployLineFor returns the DEPLOY line for a named box.
+func statusDeployLineFor(t *testing.T, out, name string) string {
+	t.Helper()
+	for _, l := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, name+" ") && !strings.Contains(l, "https://") {
+			return trimmed
+		}
+	}
+	t.Fatalf("no DEPLOY line for %q:\n%s", name, out)
+	return ""
+}
+
+// TestStatusDeployLineCarriesLiveRateWithItsDenominator is the headline pin: a
+// metered box prints live WITH the denominator it was taken over, under a window
+// that names its DAILY period — and nothing above it moves.
+func TestStatusDeployLineCarriesLiveRateWithItsDenominator(t *testing.T) {
+	withTempConfigHome(t)
+	newStatusDeployServer(t, 200, statusDeployCensus(200, 435, 109, 1479, 416))
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "DEPLOY · period: DAILY · window") {
+		t.Fatalf("the deploy section must name its DAILY period and its window:\n%s", stdout)
+	}
+	// alpha owns site-a (435/109); beta owns site-c (1479/416). Both clear
+	// min_sample 200, so both are a rate WITH its denominator.
+	if line := statusDeployLineFor(t, stdout, "alpha"); !strings.Contains(line, "live 109/435 (25.1%)") {
+		t.Fatalf("alpha deploy line = %q, want the rate WITH its denominator", line)
+	}
+	if line := statusDeployLineFor(t, stdout, "beta"); !strings.Contains(line, "live 416/1479 (28.1%)") {
+		t.Fatalf("beta deploy line = %q, want the rate WITH its denominator", line)
+	}
+	// Both boxes still read `ok`: the gauge changed no status, rank or bucket.
+	if !strings.Contains(stdout, "HEALTHY (2)") {
+		t.Fatalf("the deploy line must not move a box between buckets:\n%s", stdout)
+	}
+}
+
+// TestStatusDeployRefusesBelowMinSample: under the census's own @min_sample the
+// line is UNMETERED with the reason — never a percentage, never a comforting
+// zero, and never a green.
+func TestStatusDeployRefusesBelowMinSample(t *testing.T) {
+	withTempConfigHome(t)
+	newStatusDeployServer(t, 200, statusDeployCensus(200, 12, 0, 4, 4))
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	line := statusDeployLineFor(t, stdout, "alpha")
+	if !strings.Contains(line, "UNMETERED") || !strings.Contains(line, "min_sample of 200") {
+		t.Fatalf("alpha deploy line = %q, want UNMETERED naming the floor", line)
+	}
+	if strings.Contains(line, "%)") {
+		t.Fatalf("a refused line must carry no percentage: %q", line)
+	}
+	// The box that shipped 4 of 4 is refused too — a flattering small sample is
+	// as unmeasured as a damning one.
+	if l := statusDeployLineFor(t, stdout, "beta"); !strings.Contains(l, "UNMETERED") {
+		t.Fatalf("beta deploy line = %q, want UNMETERED on a 4-row sample", l)
+	}
+}
+
+// TestStatusDeployOlderControlPlaneIsUnmeteredNotZeroLive is the POINTER pin: a
+// control plane predating #10519 sends site rows with no `live` key at all, and
+// that must render UNMETERED — a nil summed as zero would report every box in
+// the fleet as shipping nothing, the most alarming reading of an absence there
+// is.
+func TestStatusDeployOlderControlPlaneIsUnmeteredNotZeroLive(t *testing.T) {
+	withTempConfigHome(t)
+	const noLive = `{"window":{"from":"2026-08-07T00:00:00Z","to":"2026-08-08T00:00:00Z"},
+		"volume":1914,"failed":18,"min_sample":200,
+		"failure_rate":{"sample":1914,"pct":0.9,"numerator":18,"min_sample":200,"refused":false,"reason":""},
+		"sites":[
+			{"site_id":"site-a","volume":435,"failed":1,"deferred":325,"failure_rate":{"sample":435,"pct":0.2,"numerator":1,"min_sample":200,"refused":false,"reason":""},"top_class":null},
+			{"site_id":"site-c","volume":1479,"failed":17,"deferred":900,"failure_rate":{"sample":1479,"pct":1.1,"numerator":17,"min_sample":200,"refused":false,"reason":""},"top_class":null}
+		]}`
+	newStatusDeployServer(t, 200, noLive)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	line := statusDeployLineFor(t, stdout, "alpha")
+	if !strings.Contains(line, "UNMETERED") || !strings.Contains(line, "no per-site `live`") {
+		t.Fatalf("alpha deploy line = %q, want UNMETERED naming the missing per-site live", line)
+	}
+	if strings.Contains(line, "live 0/") || strings.Contains(line, "(0.0%)") {
+		t.Fatalf("an absent `live` must never render as zero-live: %q", line)
+	}
+}
+
+// TestStatusDeployCensusRefusalNamesItself: a 403 on the census renders as a
+// refusal that says nothing was read — never as a fleet with no deploy rows.
+func TestStatusDeployCensusRefusalNamesItself(t *testing.T) {
+	withTempConfigHome(t)
+	newStatusDeployServer(t, 403, `{"error":"forbidden","scope":"team","required":"read"}`)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0 (the fleet table still rendered)\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "NOT READ") || !strings.Contains(stdout, "403 forbidden") {
+		t.Fatalf("a refused census must name the refusal:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "no deploy rows in this window") {
+		t.Fatalf("a refusal must never render as an empty window:\n%s", stdout)
+	}
+}
+
+// TestStatusDeployIsAGaugeNotAFence: the diff adds no twelfth rung, no verdict
+// arm and no hardcoded floor. The ladder is still eleven, the buckets still
+// three, and the ONLY threshold the deploy line consults is the census's own
+// min_sample off the wire.
+func TestStatusDeployIsAGaugeNotAFence(t *testing.T) {
+	if len(attentionRankOrder) != 11 {
+		t.Fatalf("the ladder grew a rung: %v", attentionRankOrder)
+	}
+	// The floor is read, never carried: a census that sends min_sample 999 moves
+	// the refusal, which a hardcoded fence could not do.
+	metered := &statusDeployBox{Volume: 435, Live: 109, Sites: 1, LiveKnown: true}
+	if got := statusDeployLine(metered, 200); !strings.Contains(got, "live 109/435") {
+		t.Fatalf("metered = %q", got)
+	}
+	if got := statusDeployLine(metered, 999); !strings.Contains(got, "UNMETERED") || !strings.Contains(got, "999") {
+		t.Fatalf("the floor must come off the wire, got %q", got)
+	}
+	// And a control plane that sends NO floor cannot be silently assumed to have
+	// one: no percentage is quoted at all.
+	if got := statusDeployLine(metered, 0); !strings.Contains(got, "UNMETERED") || strings.Contains(got, "%)") {
+		t.Fatalf("an absent min_sample must refuse, got %q", got)
+	}
+}
+
+// TestDeployCensusSiteDecodesLive is the DECODER pin proper: the wire's per-site
+// `live` must land in a field. Before this slice DeployCensusSite had six fields
+// and no Live, so this key decoded to nothing and nothing said so.
+func TestDeployCensusSiteDecodesLive(t *testing.T) {
+	var site cloudclient.DeployCensusSite
+	if err := json.Unmarshal([]byte(`{"site_id":"s","volume":435,"failed":1,"deferred":325,"live":109}`), &site); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if site.Live == nil || *site.Live != 109 {
+		t.Fatalf("Live = %v, want 109 off the wire", site.Live)
+	}
+	// live + deferred + failed closes over volume exactly on the real payload
+	// this is modelled on — the arithmetic that makes `volume - failed -
+	// deferred` unnecessary as well as forbidden.
+	if 109+325+1 != site.Volume {
+		t.Fatalf("cohorts do not close over volume: %d", site.Volume)
+	}
+	// And the absence stays distinguishable from a zero.
+	var older cloudclient.DeployCensusSite
+	if err := json.Unmarshal([]byte(`{"site_id":"s","volume":435,"failed":1,"deferred":325}`), &older); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if older.Live != nil {
+		t.Fatalf("a control plane sending no `live` must decode to nil, got %d", *older.Live)
+	}
+}
+
+// --- dr-w24-s2: the commit distance reaches the CLI ---------------------------
+//
+// The lie these tests exist for is measured, not hypothetical. Prod's registry
+// carries, ON ONE ROW: commit_distance 2493, commit_ancestry "behind",
+// update_state "current". The honest column and the reassuring column sit beside
+// each other and, before this slice, only the reassuring one reached a human —
+// the control plane has been measuring commit distance hourly with ZERO readers.
+//
+// update_state is not incapable of saying `behind` (a live row says it today).
+// It is pinned: no release tag has been cut since 2026-07-08, so every box that
+// reached the newest tag grades `current` however far main runs ahead of it.
+
+// behindProdRow is the real production shape, verbatim — the row this whole
+// slice exists for.
+func behindProdRow() cloudclient.Barkpark {
+	d := 2493
+	return cloudclient.Barkpark{
+		ID: "bp-1", Name: "guerrilla", Host: "h", URL: "https://guerrilla.barkpark.cloud",
+		LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+		UpdateState:    "current",
+		CommitDistance: &d, CommitAncestry: "behind",
+		CommitDistanceCheckedAt: "2026-08-08T12:17:01Z",
+	}
+}
+
+// TestCommitDistanceRowIsBehindNotOk is the predicate fix itself. MUTATION
+// TARGET: narrow attentionStatus's arm back to `live && b.UpdateState ==
+// "behind"` and this test REDS with status "ok" / bucket "healthy" — which is
+// exactly what prod renders today.
+func TestCommitDistanceRowIsBehindNotOk(t *testing.T) {
+	ranked := rankBarkparks([]cloudclient.Barkpark{behindProdRow()})
+	if got := ranked[0].Status; got != "behind" {
+		t.Fatalf("a 2,493-behind box classified %q — the commit measurement is not reaching the verdict", got)
+	}
+	if got := ranked[0].Bucket; got != "attention" {
+		t.Fatalf("bucket = %q, want attention: a box 2,493 commits behind cannot be healthy", got)
+	}
+	if want := attentionRank("behind"); ranked[0].Rank != want {
+		t.Fatalf("rank = %d, want the UNCHANGED behind rung %d (no new vocabulary)", ranked[0].Rank, want)
+	}
+}
+
+// TestCommitDistanceEntersAttentionBucketRendered is the same fact on RENDERED
+// BYTES: the row lands in ATTENTION, prints its distance, and the release-tag
+// grade never stands alone.
+func TestCommitDistanceEntersAttentionBucketRendered(t *testing.T) {
+	ranked := rankBarkparks([]cloudclient.Barkpark{behindProdRow()})
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderStatusBucket(w, "ATTENTION", "attention", ranked)
+	got := sout.String()
+
+	if !strings.Contains(got, "ATTENTION (1)") {
+		t.Fatalf("the box must be IN the attention bucket:\n%s", got)
+	}
+	if !strings.Contains(got, "BEHIND") {
+		t.Fatalf("the BEHIND column must appear once the plane emits an ancestry:\n%s", got)
+	}
+	if !strings.Contains(got, "2493") {
+		t.Fatalf("the measured distance must be printed:\n%s", got)
+	}
+	// `current` may appear ONLY inside the sentence that contradicts it. An
+	// unqualified `current` anywhere on this row is the defect.
+	const qualified = "2493 commits behind main · release-tag grade still reads current"
+	if !strings.Contains(got, qualified) {
+		t.Fatalf("the DETAIL must name the disagreement, want %q:\n%s", qualified, got)
+	}
+	if n := strings.Count(got, "current"); n != 1 {
+		t.Fatalf("`current` must appear exactly once, inside %q — got %d occurrences:\n%s", qualified, n, got)
+	}
+	if strings.Contains(got, "0 behind") {
+		t.Fatalf("no row may render `0 behind`:\n%s", got)
+	}
+}
+
+// TestBehindCellVocabulary pins every cell the column can print. The two that
+// matter: a NULL distance is UNMETERED (never 0, never blank), and a plane that
+// sent no ancestry at all yields "" so the column collapses out and an older CP
+// renders byte-identical to before.
+func TestBehindCellVocabulary(t *testing.T) {
+	n := func(v int) *int { return &v }
+	cases := []struct {
+		name string
+		bp   cloudclient.Barkpark
+		want string
+	}{
+		{"behind prints the number", cloudclient.Barkpark{CommitAncestry: "behind", CommitDistance: n(2493)}, "2493"},
+		{"measured zero is even", cloudclient.Barkpark{CommitAncestry: "current", CommitDistance: n(0)}, "even"},
+		{"unknown is UNMETERED", cloudclient.Barkpark{CommitAncestry: "unknown"}, "UNMETERED"},
+		{"behind with no number is UNMETERED", cloudclient.Barkpark{CommitAncestry: "behind"}, "UNMETERED"},
+		{"ahead names itself", cloudclient.Barkpark{CommitAncestry: "ahead_of_main", CommitDistance: n(3)}, "ahead 3"},
+		{"diverged names itself", cloudclient.Barkpark{CommitAncestry: "diverged", CommitDistance: n(5)}, "diverged 5"},
+		{"an older control plane says nothing", cloudclient.Barkpark{}, ""},
+	}
+	for _, c := range cases {
+		if got := behindCell(c.bp); got != c.want {
+			t.Errorf("%s: behindCell = %q, want %q", c.name, got, c.want)
+		}
+	}
+	// The disease, stated as a test: nothing ungradeable renders "0".
+	for _, bp := range []cloudclient.Barkpark{
+		{CommitAncestry: "unknown"},
+		{CommitAncestry: "behind"},
+		{CommitAncestry: "unknown", CommitDistanceCheckedAt: "2026-08-08T12:17:01Z"},
+	} {
+		if got := behindCell(bp); got == "0" {
+			t.Errorf("an ungradeable box rendered %q — a NULL distance must never read as even with main", got)
+		}
+	}
+}
+
+// TestUnmeteredDistanceSortsToTheTop is the field's own contract
+// (registry/barkpark.ex: "show NULL as unmetered and sort it to the TOP"): the
+// box we could NOT grade is the first one an operator sees in its rank, not the
+// one buried under the boxes we could.
+func TestUnmeteredDistanceSortsToTheTop(t *testing.T) {
+	n := func(v int) *int { return &v }
+	// Names chosen so the pre-existing alphabetical tiebreak would put the
+	// unmetered box LAST — the sort key has to be doing the work, not luck.
+	fleet := []cloudclient.Barkpark{
+		{ID: "a", Name: "alpha", Host: "h", LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+			UpdateState: "current", CommitAncestry: "behind", CommitDistance: n(617)},
+		{ID: "b", Name: "beta", Host: "h", LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+			UpdateState: "current", CommitAncestry: "behind", CommitDistance: n(2493)},
+		{ID: "z", Name: "zulu", Host: "h", LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+			UpdateState: "behind", CommitAncestry: "unknown", CommitDistanceCheckedAt: "2026-08-08T12:17:08Z"},
+	}
+	ranked := rankBarkparks(fleet)
+	if ranked[0].BP.Name != "zulu" {
+		t.Fatalf("order = %s,%s,%s — the UNMETERED box must sort to the top of its rank",
+			ranked[0].BP.Name, ranked[1].BP.Name, ranked[2].BP.Name)
+	}
+	// …and the metered rows keep their own alphabetical order underneath.
+	if ranked[1].BP.Name != "alpha" || ranked[2].BP.Name != "beta" {
+		t.Fatalf("metered rows lost their name order: %s then %s", ranked[1].BP.Name, ranked[2].BP.Name)
+	}
+
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderStatusBucket(w, "ATTENTION", "attention", ranked)
+	got := sout.String()
+	if !strings.Contains(got, "UNMETERED") {
+		t.Fatalf("a NULL distance must render UNMETERED:\n%s", got)
+	}
+	iUnmetered := strings.Index(got, "UNMETERED")
+	i617, i2493 := strings.Index(got, "617"), strings.Index(got, "2493")
+	if iUnmetered > i617 || iUnmetered > i2493 {
+		t.Fatalf("UNMETERED must be printed ABOVE every metered row (at %d, vs 617 at %d and 2493 at %d):\n%s",
+			iUnmetered, i617, i2493, got)
+	}
+}
+
+// TestOlderControlPlaneRendersWithoutTheBehindColumn is the compatibility rung:
+// a plane that predates the emission sends no ancestry, and the view must read
+// exactly as it did before this slice — no column, no sentinel, no reordering.
+func TestOlderControlPlaneRendersWithoutTheBehindColumn(t *testing.T) {
+	ranked := rankBarkparks([]cloudclient.Barkpark{
+		{ID: "a", Name: "alpha", Host: "h", LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online", UpdateState: "current"},
+	})
+	if ranked[0].Status != "ok" {
+		t.Fatalf("status = %q: an unmeasured box must not be graded behind", ranked[0].Status)
+	}
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderStatusBucket(w, "HEALTHY", "healthy", ranked)
+	got := sout.String()
+	if strings.Contains(got, "BEHIND") || strings.Contains(got, "UNMETERED") {
+		t.Fatalf("an older control plane must render exactly as before:\n%s", got)
+	}
+}
+
+// TestStatusJSONCarriesCommitDistance pins the `-o json` projection: ancestry and
+// checked_at ALWAYS present (a script can tell "the plane said nothing" from "the
+// plane measured and got unknown"), the distance itself tri-state — present when
+// measured, ABSENT when not, never 0.
+func TestStatusJSONCarriesCommitDistance(t *testing.T) {
+	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{behindProdRow()})[0])
+	if row["commit_distance"] != 2493 {
+		t.Fatalf("commit_distance = %v, want 2493", row["commit_distance"])
+	}
+	if row["commit_ancestry"] != "behind" {
+		t.Fatalf("commit_ancestry = %v, want behind", row["commit_ancestry"])
+	}
+	if row["commit_distance_checked_at"] != "2026-08-08T12:17:01Z" {
+		t.Fatalf("commit_distance_checked_at = %v, want the plane's timestamp", row["commit_distance_checked_at"])
+	}
+	if row["status"] != "behind" || row["bucket"] != "attention" {
+		t.Fatalf("the JSON verdict must agree with the table: status=%v bucket=%v", row["status"], row["bucket"])
+	}
+
+	unknown := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{{
+		ID: "u", Name: "muscle-1", Host: "h", LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online",
+		UpdateState: "current", CommitAncestry: "unknown", CommitDistanceCheckedAt: "2026-08-08T12:17:08Z",
+	}})[0])
+	if v, present := unknown["commit_distance"]; present {
+		t.Fatalf("commit_distance must be ABSENT for an ungradeable box, got %v — a 0 there reads as even with main", v)
+	}
+	for _, k := range []string{"commit_ancestry", "commit_distance_checked_at"} {
+		if _, present := unknown[k]; !present {
+			t.Fatalf("%s must be present so a script can see WHY the distance is missing", k)
+		}
+	}
+}
+
+// TestBarkparkDecodesCommitDistance proves the wire type reads what router.ex
+// now emits, and that an omitted distance decodes to nil rather than 0.
+func TestBarkparkDecodesCommitDistance(t *testing.T) {
+	var measured cloudclient.Barkpark
+	if err := json.Unmarshal([]byte(`{"commit_distance":2493,"commit_ancestry":"behind","commit_distance_checked_at":"2026-08-08T12:17:01Z"}`), &measured); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if measured.CommitDistance == nil || *measured.CommitDistance != 2493 {
+		t.Fatalf("CommitDistance = %v, want 2493", measured.CommitDistance)
+	}
+	if measured.CommitAncestry != "behind" || measured.CommitDistanceCheckedAt == "" {
+		t.Fatalf("ancestry/checked_at did not decode: %+v", measured)
+	}
+
+	for _, body := range []string{`{}`, `{"commit_distance":null,"commit_ancestry":"unknown"}`} {
+		var bp cloudclient.Barkpark
+		if err := json.Unmarshal([]byte(body), &bp); err != nil {
+			t.Fatalf("decode %s: %v", body, err)
+		}
+		if bp.CommitDistance != nil {
+			t.Fatalf("%s decoded CommitDistance = %d, want nil — a *int is the whole point", body, *bp.CommitDistance)
+		}
 	}
 }

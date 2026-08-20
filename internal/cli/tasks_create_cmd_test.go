@@ -260,8 +260,11 @@ func TestRunTaskCreateReceiptRefusesWhatTheServerDidNotEcho(t *testing.T) {
 }
 
 func TestIsProdServer(t *testing.T) {
-	prod := []string{"https://api.barkpark.cloud", "https://prod.example.com"}
-	nonprod := []string{"http://localhost:4000", "https://guerrilla.barkpark.cloud", "http://127.0.0.1:4000"}
+	// Fail-closed (onb-backlog-isprod-custom-host-write-confirm): any non-local
+	// host is prod — including guerrilla.barkpark.cloud, which IS the live fleet
+	// and was previously (wrongly) asserted non-prod here.
+	prod := []string{"https://api.barkpark.cloud", "https://prod.example.com", "https://guerrilla.barkpark.cloud"}
+	nonprod := []string{"http://localhost:4000", "http://127.0.0.1:4000"}
 	for _, s := range prod {
 		if !isProdServer(s) {
 			t.Errorf("isProdServer(%q) = false, want true", s)

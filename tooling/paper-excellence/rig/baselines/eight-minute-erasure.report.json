@@ -1,0 +1,1131 @@
+{
+  "label": "eight-minute-erasure",
+  "deviceScaleFactor": 2,
+  "fullPage": true,
+  "format": "jpeg",
+  "jpegQuality": 72,
+  "allowedHost": "127.0.0.1",
+  "blocked": [
+    "cdn.jsdelivr.net (mermaid, asciinema-player)",
+    "all non-loopback hosts"
+  ],
+  "excludedFromAssertions": [
+    "diagram/mermaid",
+    "asciicast",
+    "remote images"
+  ],
+  "shots": [
+    {
+      "cell": "eight-minute-erasure__light__1280",
+      "file": "eight-minute-erasure__light__1280.jpeg",
+      "scale": 2,
+      "bytes": 2228772,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 21,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "I · What the timestamps say",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "II · Reconstructing it from the repository",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "III · Three sentences that mattered",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "IV · Was the change even right?",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "V · How much is actually lost",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "VI · Right change, wrong size, wrong way",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "container",
+          "head": "VII · Declaration of peace — to Sigurd Hegge",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 1,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.9,
+      "proseCplSamples": 19,
+      "captionCpl": 67.9,
+      "captionWidth": 453.5,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 519.8,
+          "offCentre": 0,
+          "left": 380.1,
+          "right": 899.9,
+          "inkWidth": 519.8,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 623,
+          "offCentre": 0,
+          "left": 328.5,
+          "right": 951.5,
+          "inkWidth": 623,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(30, 107, 82)",
+          "background": "rgb(231, 242, 236)",
+          "accent": "rgb(30, 107, 82)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(138, 100, 32)",
+          "background": "rgb(247, 240, 223)",
+          "accent": "rgb(138, 100, 32)"
+        },
+        ".bp-callout--danger": {
+          "color": "rgb(166, 58, 46)",
+          "background": "rgb(247, 233, 230)",
+          "accent": "rgb(166, 58, 46)"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        7
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 34,
+        "heavy": 6,
+        "structuralHeavy": 6,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 28,
+          "2": 6
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 826.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1622.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2395.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4074.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5482.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7016.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "eight-minute-erasure__light__1920",
+      "file": "eight-minute-erasure__light__1920.jpeg",
+      "scale": 2,
+      "bytes": 2415331,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 21,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "I · What the timestamps say",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "II · Reconstructing it from the repository",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "III · Three sentences that mattered",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "IV · Was the change even right?",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "V · How much is actually lost",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "VI · Right change, wrong size, wrong way",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "container",
+          "head": "VII · Declaration of peace — to Sigurd Hegge",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 1,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.9,
+      "proseCplSamples": 19,
+      "captionCpl": 67.9,
+      "captionWidth": 453.5,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 519.8,
+          "offCentre": 0,
+          "left": 700.1,
+          "right": 1219.9,
+          "inkWidth": 519.8,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 623,
+          "offCentre": 0,
+          "left": 648.5,
+          "right": 1271.5,
+          "inkWidth": 623,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(30, 107, 82)",
+          "background": "rgb(231, 242, 236)",
+          "accent": "rgb(30, 107, 82)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(138, 100, 32)",
+          "background": "rgb(247, 240, 223)",
+          "accent": "rgb(138, 100, 32)"
+        },
+        ".bp-callout--danger": {
+          "color": "rgb(166, 58, 46)",
+          "background": "rgb(247, 233, 230)",
+          "accent": "rgb(166, 58, 46)"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        8
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 34,
+        "heavy": 6,
+        "structuralHeavy": 6,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 28,
+          "2": 6
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 826.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1622.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2395.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4074.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5482.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7016.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "eight-minute-erasure__dark__1280",
+      "file": "eight-minute-erasure__dark__1280.jpeg",
+      "scale": 2,
+      "bytes": 2240631,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 21,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "I · What the timestamps say",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "II · Reconstructing it from the repository",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "III · Three sentences that mattered",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "IV · Was the change even right?",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "V · How much is actually lost",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "VI · Right change, wrong size, wrong way",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "container",
+          "head": "VII · Declaration of peace — to Sigurd Hegge",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 1,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.9,
+      "proseCplSamples": 19,
+      "captionCpl": 67.9,
+      "captionWidth": 453.5,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 519.8,
+          "offCentre": 0,
+          "left": 380.1,
+          "right": 899.9,
+          "inkWidth": 519.8,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 623,
+          "offCentre": 0,
+          "left": 328.5,
+          "right": 951.5,
+          "inkWidth": 623,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(95, 207, 156)",
+          "background": "rgb(18, 36, 28)",
+          "accent": "rgb(95, 207, 156)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(227, 182, 97)",
+          "background": "rgb(42, 34, 16)",
+          "accent": "rgb(227, 182, 97)"
+        },
+        ".bp-callout--danger": {
+          "color": "rgb(240, 138, 128)",
+          "background": "rgb(42, 22, 20)",
+          "accent": "rgb(240, 138, 128)"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        7
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 34,
+        "heavy": 6,
+        "structuralHeavy": 6,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 28,
+          "2": 6
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 826.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1622.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2395.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4074.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5482.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7016.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "eight-minute-erasure__dark__1920",
+      "file": "eight-minute-erasure__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 2429258,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 21,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "I · What the timestamps say",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "II · Reconstructing it from the repository",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "III · Three sentences that mattered",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "IV · Was the change even right?",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "V · How much is actually lost",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "VI · Right change, wrong size, wrong way",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "container",
+          "head": "VII · Declaration of peace — to Sigurd Hegge",
+          "gap": 16,
+          "rule": 1,
+          "ruleGap": 0,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 1,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.9,
+      "proseCplSamples": 19,
+      "captionCpl": 67.9,
+      "captionWidth": 453.5,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-table",
+          "width": 519.8,
+          "offCentre": 0,
+          "left": 700.1,
+          "right": 1219.9,
+          "inkWidth": 519.8,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 623,
+          "offCentre": 0,
+          "left": 648.5,
+          "right": 1271.5,
+          "inkWidth": 623,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(95, 207, 156)",
+          "background": "rgb(18, 36, 28)",
+          "accent": "rgb(95, 207, 156)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(227, 182, 97)",
+          "background": "rgb(42, 34, 16)",
+          "accent": "rgb(227, 182, 97)"
+        },
+        ".bp-callout--danger": {
+          "color": "rgb(240, 138, 128)",
+          "background": "rgb(42, 22, 20)",
+          "accent": "rgb(240, 138, 128)"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        8
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 34,
+        "heavy": 6,
+        "structuralHeavy": 6,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 28,
+          "2": 6
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 826.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1622.4,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2395.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4074.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 5482.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 7016.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    }
+  ]
+}

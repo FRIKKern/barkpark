@@ -56,6 +56,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # gate). It drives the REAL scanner via GO_LIT_SELFTEST so a future edit that
 # weakens strip_comments/LITERAL/ALLOW_LINE is caught here, not just in prose.
 # CI wires this right after the main check (doc-gates.yml) so it can't rot.
+#
+# Refuse an argument this gate does not understand first. A swallowed flag — a
+# `--selftest` typo, a future rename — would silently run the ordinary check
+# and report green, fabricating the tripwire's own proof.
+if [ -n "${1:-}" ] && [ "$1" != "--selftest" ]; then
+    echo "go-literal-check: unknown argument '$1' (expected nothing or --selftest)" >&2
+    exit 2
+fi
+
 if [ "${1:-}" = "--selftest" ]; then
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT

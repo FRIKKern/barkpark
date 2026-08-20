@@ -595,6 +595,10 @@ FLEET (control plane — needs 'bp login')
             the FLEET deploy rate over a pinned window, printed WITH its
             denominator — and a named refusal, never a fake zero, when it could
             not be read                            (bp cloud deployments -h)
+  deliveries
+            what actually happened to ONE merge: the PLATFORM delivery record for
+            a sha — merged · waited · built · serving, and the run that delivered
+            it — NOT the webhook log above    (bp cloud deliveries -h)
   domain    a domain's DNS/TLS checklist (found · points here · TLS · serving);
             exit 0 only when it's serving              (bp cloud domain -h)
   usage     an instance's usage meters — honest counts, "unmetered" where a

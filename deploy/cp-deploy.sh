@@ -49,6 +49,14 @@ log "target=$NEW"
 if [ ! -f cloud/.env ]; then log "MISSING cloud/.env — abort (containers untouched)"; git reset --hard "$OLD"; exit 12; fi
 set -a; . cloud/.env; set +a
 
+# The slot must be able to state which commit it serves (dr-w20-s1). Sourced
+# from $NEW — the sha this run just checked out — never a second `git rev-parse`,
+# so it can never disagree with what was actually deployed. This export sits
+# AFTER the .env source on purpose: a stale BARKPARK_GIT_SHA left in cloud/.env
+# must not be able to win. compose passes it through via the bare
+# `- BARKPARK_GIT_SHA` line in cloud/docker-compose.yml; GET /health reads it.
+export BARKPARK_GIT_SHA="$NEW"
+
 # ---- Which slot serves now? Caddy's upstream port is the source of truth.
 ACTIVE_PORT="$(grep -oE 'localhost:41[0-9]{2}' "$CADDYFILE" | head -1 | cut -d: -f2)"
 ACTIVE_PORT="${ACTIVE_PORT:-4100}"

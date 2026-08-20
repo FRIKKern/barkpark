@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
@@ -48,6 +50,12 @@ type siteCP struct {
 	createResp fakeResp
 	deployResp fakeResp
 	pollResp   fakeResp
+	// pollSeq, when non-empty, answers the n-th poll with its n-th entry (the
+	// last entry repeats). pollResp models a stream that was ALREADY settled on
+	// the first read; a real deploy usually walks queued → building → <terminal>,
+	// and a test that only ever sees the terminal status on poll #1 cannot tell a
+	// status-specific early exit from a working terminal predicate.
+	pollSeq    []fakeResp
 	getResp    fakeResp
 	rollResp   fakeResp
 	deleteResp fakeResp
@@ -81,6 +89,20 @@ func newSiteCP(t *testing.T) *siteCP {
 	return &siteCP{t: t}
 }
 
+// pollAt is the response for the n-th (1-based) poll: pollSeq when a test set
+// one, otherwise the single pollResp every pre-existing test uses. Past the end
+// of pollSeq the last entry repeats, so a sequence ending in a non-terminal
+// status still exercises the full poll budget rather than falling off a cliff.
+func (cp *siteCP) pollAt(n int) fakeResp {
+	if len(cp.pollSeq) == 0 {
+		return cp.pollResp
+	}
+	if n > len(cp.pollSeq) {
+		return cp.pollSeq[len(cp.pollSeq)-1]
+	}
+	return cp.pollSeq[n-1]
+}
+
 // serve stands the fake up, seeds a cloud login pointed at it, and returns it.
 func (cp *siteCP) serve() *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +127,7 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.write(w, cp.artifactResp)
 		case r.Method == "GET" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/"):
 			cp.pollHits++
-			cp.write(w, cp.pollResp)
+			cp.write(w, cp.pollAt(cp.pollHits))
 		// The LIST route (no trailing slash) — `bp cloud site status`'s second read.
 		// The poll case above matches ".../deployments/" WITH the slash, so before
 		// this case a bare list GET fell to the default arm and t.Fatal'd every
@@ -968,6 +990,182 @@ func TestRunCloudSiteDeployCancelled(t *testing.T) {
 	}
 }
 
+// TestRunCloudSiteDeployDeferredStopsPollingAndNamesTheRefusal is the wave-32 cure
+// for the MAJORITY outcome (deploy-reliability charter D543). `deferred` is 73.7%
+// of settled deploy attempts (D209) and was terminal server-side all along
+// (registry/deployment.ex maps it to []), but it was missing from
+// cloudclient.SiteDeploymentTerminal — so with follow ON BY DEFAULT this exact
+// fixture used to burn all 300 polls (300 × 2s ≈ 10 min, one GET every 2s against
+// the very box that had just said it was at capacity) and then print
+// "… deploy in progress (stage BUILD)" over a row the control plane had already
+// settled. The refusal reason was on the wire from the FIRST poll and never shown.
+//
+// Two things are pinned here and they fail for different reasons: the poll count
+// (the ten minutes) and the sentence (the lie).
+func TestRunCloudSiteDeployDeferredStopsPollingAndNamesTheRefusal(t *testing.T) {
+	const deferredReason = "the instance refused the deploy (HTTP 409): box_at_capacity — the box is at its build capacity (1 of 1 build slots in use) — deferred: refusal 3 of 12 in this site's current chain — a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
+
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-1","stages":[{"name":"PLAN","status":"done"}]}}`}
+	// The FIRST poll already settles deferred — nothing after it can ever change.
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"deferred","stage":"BUILD","failure_reason":` + mustJSONString(deferredReason) + `,"failure_class":"BOX_AT_CAPACITY_DEFERRED","stages":[{"name":"PLAN","status":"done"}]}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	// THE TEN MINUTES. One poll, not siteDeployPollMax of them.
+	if cp.pollHits != 1 {
+		// siteDeployPoll is forced to 0 in tests, so the budget is quoted from the
+		// PRODUCTION interval (2s) rather than the harness's.
+		t.Fatalf("a deferred deploy polled %d times, want exactly 1 — deferred is terminal server-side, so anything above 1 is the CLI re-asking a row that can never change, and %d of them is the full siteDeployPollMax(%d)×2s ≈ 10 minute spin an operator sat through",
+			cp.pollHits, siteDeployPollMax, siteDeployPollMax)
+	}
+	// THE LIE. "in progress" is the sentence this test exists to keep out.
+	if strings.Contains(stdout, "in progress") {
+		t.Fatalf("a settled deferred row must never be narrated as in progress:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "site live") {
+		t.Fatalf("a deferred deploy never went live:\n%s", stdout)
+	}
+	// THE TRUTH, all three parts: what happened, how deep the chain is (through
+	// siteDeferralLine, so the depth arrives with its own honest gloss rather than
+	// as a bare countdown), and that the rebuild is already queued — an operator
+	// who re-publishes by hand here just deepens the chain.
+	for _, want := range []string{
+		"deferred",
+		"the box refused this round",
+		"visitors still see the previous build",
+		"refusal 3 of 12 consecutive",
+		"any successful deploy resets it to 0",
+		"zero-progress guard, not a countdown",
+		"already queued",
+		"do NOT re-publish",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the deferred verdict must say %q:\n%s\nstderr:%s", want, stdout, stderr)
+		}
+	}
+	// A deferral is not a drop, and the failure vocabulary must not leak onto it.
+	if strings.Contains(stdout, "failed") || strings.Contains(stderr, "failed") {
+		t.Fatalf("a deferral is a refusal, not a failure:\n%s\n%s", stdout, stderr)
+	}
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0 (charter D543)\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+}
+
+// TestRunCloudSiteDeployDeferredMidStreamStopsAtTheDeferral covers the stream the
+// fixture above cannot: a deploy that is genuinely in progress for two polls and
+// THEN defers, which is the likelier live sequence (the box accepts the row, walks
+// to BUILD, and only there discovers it is at capacity). The sibling test settles
+// on poll #1, so it would still pass if the loop had grown a status-specific early
+// exit rather than a working terminal predicate; this one pins that the loop keeps
+// polling while the row can still change and stops the moment it cannot.
+func TestRunCloudSiteDeployDeferredMidStreamStopsAtTheDeferral(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","stages":[]}}`}
+	cp.pollSeq = []fakeResp{
+		{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","stages":[{"name":"PLAN","status":"done"}]}}`},
+		{200, `{"deployment":{"id":"dep-1","status":"building","stage":"BUILD","stages":[{"name":"PLAN","status":"done"},{"name":"BUILD","status":"running"}]}}`},
+		{200, `{"deployment":{"id":"dep-1","status":"deferred","stage":"BUILD","failure_class":"BOX_AT_CAPACITY_DEFERRED","failure_reason":"box_at_capacity — deferred: refusal 2 of 12 in this site's current chain — a rebuild carrying this content has been re-queued","stages":[{"name":"PLAN","status":"done"}]}}`},
+	}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	// Three polls: two that had to happen (the row could still change) and the
+	// one that settled it. Anything more is the ten-minute spin re-asking a
+	// settled row; anything less means the loop quit while the deploy was live.
+	if cp.pollHits != 3 {
+		t.Fatalf("polled %d times, want exactly 3 (queued, building, deferred)\nstdout:%s", cp.pollHits, stdout)
+	}
+	if strings.Contains(stdout, "in progress") {
+		t.Fatalf("a settled deferred row must never be narrated as in progress:\n%s", stdout)
+	}
+	for _, want := range []string{"deferred", "the box refused this round", "already queued"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the deferred verdict must say %q:\n%s\nstderr:%s", want, stdout, stderr)
+		}
+	}
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0 (charter D543)", code)
+	}
+}
+
+// TestRenderSiteDeployVerdictDeferredWithNoStageDoesNotInventOne pins the one
+// place this verdict could fabricate: an empty Stage. The first cut defaulted it
+// to "PLAN" — the stage a deferral plausibly stops at, printed as though it had
+// been read. A control plane that sends no stage must produce a sentence that
+// says no stage was named.
+func TestRenderSiteDeployVerdictDeferredWithNoStageDoesNotInventOne(t *testing.T) {
+	out, buf, errBuf := newTestWriter()
+	code := renderSiteDeployVerdict(out, testSiteID, cloudclient.SiteDeployment{
+		ID: "dep-1", Status: "deferred",
+		FailureReason: "box_at_capacity — deferred: refusal 1 of 12 in this site's current chain",
+	})
+	stdout := buf.String()
+	if strings.Contains(stdout, "PLAN") || strings.Contains(stdout, "BUILD") {
+		t.Fatalf("an absent stage must never be rendered as a named one:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "deferred before it named a stage") {
+		t.Fatalf("the no-stage deferral must say so out loud:\n%s\nstderr:%s", stdout, errBuf.String())
+	}
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0 (charter D543)", code)
+	}
+}
+
+// TestRunCloudSiteDeployDeferredKeepsExitZero pins charter D543 — the exit code is
+// a DECISION, not an accident, and this test is what stops a future wave flipping
+// it on the reasoning that "it didn't go live". It didn't, and it also lost
+// nothing: wave 32 measured content coverage at 100.00% on settled deferrals
+// because the re-queued rebuild carries the same content and lands. Since deferral
+// is ~74% of deploy invocations, a non-zero exit here would break every
+// `deploy && notify` chain and every `set -e` script for an outcome that costs a
+// wait — cry-wolf on the operator surface, which is the failure this epic exists
+// to prevent. Callers that genuinely need liveness get an opt-in --wait-for-live
+// (dr-w32-bl-deploy-wait-for-live-flag), not a redefinition of this code.
+func TestRunCloudSiteDeployDeferredKeepsExitZero(t *testing.T) {
+	deferred := cloudclient.SiteDeployment{
+		ID: "dep-1", Status: "deferred", Stage: "BUILD",
+		FailureReason: "box_at_capacity — deferred: refusal 3 of 12 in this site's current chain — a rebuild carrying this content has been re-queued",
+	}
+	if got := siteDeployExit(deferred); got != exitOK {
+		t.Fatalf("siteDeployExit(deferred) = %d, want %d — D543 decided deferred keeps exit 0; flipping it breaks every `deploy && notify` chain for ~74%% of invocations, and the honest fix is the SENTENCE, not the code", got, exitOK)
+	}
+	// The neighbours it must NOT be confused with: both are drops, both stay
+	// non-zero, so the ruling above is narrow rather than a blanket exit 0.
+	for _, drop := range []string{"failed", "cancelled"} {
+		if got := siteDeployExit(cloudclient.SiteDeployment{ID: "dep-2", Status: drop}); got != exitGeneric {
+			t.Fatalf("siteDeployExit(%q) = %d, want %d — a dropped deploy must never exit 0", drop, got, exitGeneric)
+		}
+	}
+
+	// And the machine lane agrees end to end: -o json emits the envelope carrying
+	// the deferred status and still exits 0, so a script reads the OUTCOME from the
+	// payload rather than inferring a failure from $?.
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stages":[]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"deferred","stage":"BUILD","stages":[]}}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("deferred -o json exit=%d want %d", code, exitOK)
+	}
+	if cp.pollHits != 1 {
+		t.Fatalf("-o json polled %d times, want 1 — the machine lane must collapse too", cp.pollHits)
+	}
+	var env struct {
+		Deployment struct {
+			Status string `json:"status"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("deploy json not parseable: %v\n%s", err, stdout)
+	}
+	if env.Deployment.Status != "deferred" {
+		t.Fatalf("the envelope must carry the deferred status (that is how a script learns the outcome it cannot read from $?): %+v\n%s", env.Deployment, stdout)
+	}
+}
+
 // TestRunCloudSiteDeployCancelledJSON proves the machine path agrees with the human
 // one: -o json still emits the envelope, and the exit code is non-zero, so a script
 // that checks $? never treats a cancelled deploy as a shipped one.
@@ -1136,6 +1334,405 @@ func TestRunCloudSiteDeleteRmAlias(t *testing.T) {
 	}
 }
 
+// --- typed site refusals (cch-w69 S6) ----------------------------------------
+//
+// RED BEFORE (recorded, and reproducible by reverting cloud_site_cmd.go alone):
+// both verbs used to hand the refusal to the bare `cloudFail`, which branches on
+// the substring "unauthorized" and nothing else. Every refusal below therefore
+// printed the label "failed" and exited 1 — a 409 the box refused, a 404 that is
+// not our site and a 500 the plane crashed on were one undifferentiated exit, and
+// `-o json` carried "failed" instead of the plane's own code. The pre-fix exits
+// were: identity_refused 409 → 1 (want 6), teardown_failed 422 → 1 (want 1, but
+// labelled "failed" instead of "teardown_failed"), 502 → 1 (want 8), 404 → 1
+// (want 4), forbidden 403 → 3 only by the "unauthorized" substring accident.
+
+// siteIdentityRefusedDetail is the control plane's OWN sentence for the refused
+// box (cloud/lib/barkpark_cloud/sites/deploy.ex `unreachable/2`
+// :identity_refused). The CLI relays it rather than minting a third wording, so
+// this fixture is the plane's bytes.
+const siteIdentityRefusedDetail = "The request was never sent — the instance rejected our access credential. Barkpark Cloud stops asking a box that refused it; the hourly update check is what notices the credential working again."
+
+func TestRunCloudSiteDeleteIdentityRefusedIsAConflict(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{409, `{"ok":false,"error":"identity_refused","detail":"` + siteIdentityRefusedDetail + `"}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitConflict {
+		t.Fatalf("a 409 identity_refused must exit %d (conflict), got %d\n%s", exitConflict, code, stderr)
+	}
+	if strings.Contains(stdout, "deregistered") {
+		t.Fatalf("a refused teardown must not print a delete receipt:\n%s", stdout)
+	}
+	// The plane's sentence is RELAYED, not forked.
+	if !strings.Contains(stderr, "the instance rejected our access credential") {
+		t.Fatalf("the refusal must relay the plane's detail:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "still registered") {
+		t.Fatalf("a refused teardown must say the site is still registered:\n%s", stderr)
+	}
+}
+
+func TestRunCloudSiteRollbackIdentityRefusedIsAConflict(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{409, `{"ok":false,"error":"identity_refused","detail":"` + siteIdentityRefusedDetail + `"}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitConflict {
+		t.Fatalf("a 409 identity_refused must exit %d (conflict), got %d\n%s", exitConflict, code, stderr)
+	}
+	if strings.Contains(stdout, "rolled back") {
+		t.Fatalf("a refused rollback must not print a rollback receipt:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "the instance rejected our access credential") {
+		t.Fatalf("the refusal must relay the plane's detail:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "Nothing was flipped") {
+		t.Fatalf("a refused rollback must say nothing was flipped:\n%s", stderr)
+	}
+}
+
+// A 422 teardown_failed keeps exit 1 (the ladder's default family) but must stop
+// printing the label "failed": -o json has to name the plane's own code, or no
+// script can tell a refused teardown from a transport error.
+func TestRunCloudSiteDeleteTeardownFailedJSONCarriesThePlanesCode(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{422, `{"ok":false,"error":"teardown_failed","detail":"caddy validate rejected the disarm"}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "delete", testSiteID, "--yes")
+	if code != exitGeneric {
+		t.Fatalf("a 422 teardown_failed must exit %d, got %d", exitGeneric, code)
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json envelope: %v\n%s", err, stdout)
+	}
+	if env.OK {
+		t.Fatalf("a refusal envelope must be ok:false:\n%s", stdout)
+	}
+	if env.Error.Code != "teardown_failed" {
+		t.Fatalf("json must carry the plane's code, got %q\n%s", env.Error.Code, stdout)
+	}
+	if !strings.Contains(env.Error.Message, "caddy validate rejected the disarm") {
+		t.Fatalf("the message must relay the plane's detail, got %q", env.Error.Message)
+	}
+}
+
+// 5xx → exitServer: the plane itself failed, which is a different retry story
+// from a refusal it measured.
+func TestRunCloudSiteRollbackServerFailureExitsServer(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{502, `{"ok":false,"error":"rollback_failed","detail":"instance blog is unreachable — the rollback could not be delivered"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitServer {
+		t.Fatalf("a 502 must exit %d (server), got %d\n%s", exitServer, code, stderr)
+	}
+	// An unknown/flat code still relays the plane's sentence — the default arm.
+	if !strings.Contains(stderr, "could not be delivered") {
+		t.Fatalf("the default arm must relay the plane's detail:\n%s", stderr)
+	}
+}
+
+func TestRunCloudSiteDeleteNotFoundExitsNotFound(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{404, `{"error":"not_found"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitNotFound {
+		t.Fatalf("a 404 must exit %d (not-found), got %d\n%s", exitNotFound, code, stderr)
+	}
+	if !strings.Contains(stderr, "no such site") {
+		t.Fatalf("a 404 must name the site as unknown:\n%s", stderr)
+	}
+}
+
+// The CAUSE outranks the STATUS: a teamless login is exit 1 with `bp team use`,
+// never exit 3 — the credential is fine (the doctrine #11711 pins).
+func TestRunCloudSiteDeleteNoTeamStaysGenericWithTheTeamFix(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{403, `{"error":"forbidden","reason":"no_team"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitGeneric {
+		t.Fatalf("a no_team refusal must stay exit %d, got %d\n%s", exitGeneric, code, stderr)
+	}
+	if !strings.Contains(stderr, "bp team use") {
+		t.Fatalf("a no_team refusal must point at `bp team use`:\n%s", stderr)
+	}
+}
+
+// A plain 403 (the write ability, not the team) is an auth exit.
+func TestRunCloudSiteRollbackForbiddenExitsAuth(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{403, `{"error":"forbidden","required":"write","scope":"team"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitAuth {
+		t.Fatalf("a 403 forbidden must exit %d (auth), got %d\n%s", exitAuth, code, stderr)
+	}
+	if !strings.Contains(stderr, "write") {
+		t.Fatalf("a forbidden refusal must name the ability it wanted:\n%s", stderr)
+	}
+}
+
+// THE PRESERVED SEAM: a refusal that is NOT a typed CloudRefusal (or a 401 whose
+// message carries the "unauthorized:" prefix) must still route through cloudFail
+// so expired-session handling reads identically to every other cloud verb.
+func TestRunCloudSiteDeleteUnauthorizedKeepsTheCloudFailSeam(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deleteResp = fakeResp{401, `{"error":"invalid_token"}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "delete", testSiteID, "--yes")
+	if code != exitAuth {
+		t.Fatalf("a 401 must exit %d (auth), got %d\n%s", exitAuth, code, stderr)
+	}
+	if !strings.Contains(stderr, "bp login") {
+		t.Fatalf("the 401 seam must still tell the user to re-run `bp login`:\n%s", stderr)
+	}
+}
+
+// --- typed create refusals (cch-w70 round 1, D862) ---------------------------
+//
+// bp cloud site create now joins the ONE #11784 refusal dialect (siteRefusedCreate)
+// instead of the bare cloudFail(out, "create site", cerr) it used to hand every
+// refusal to. That old seam branched only on the substring "unauthorized": a
+// user-fixable 422, a transient 503 and a 404 that named the wrong instance all
+// exited 1, and `-o json` carried "failed" for each. POST /v1/sites emits no
+// top-level 403 and no reachable 409, so the exit families that land here are
+// 401 → 3 (cloudFail fallthrough), no_team → 1, 404 → 4, every 422 → 1, and
+// 502/503 → 8 — NEVER 6.
+//
+// RED BEFORE (reproducible by reverting cloud_site_cmd.go alone — the create arm
+// back to `return cloudFail(out, "create site", cerr)`): barkpark_not_found 404
+// exited 1 (want 4), node_ports_exhausted 503 exited 1 (want 8), and
+// read_token_mint_failed 502 exited 1 (want 8) — three families collapsed onto
+// exitGeneric. The VACUITY guard the verify run flagged is honoured: these assert
+// the EXIT CODE per family, not a detail substring (cloudError already folds
+// detail into Error(), so a substring check passes on pre-fix bytes too).
+
+// createRefused is the create-with-refusal harness: the create POST answers with
+// the given fixture and the mandatory --instance is a UUID (resolved with no
+// network call), so the POST is the only request that fires.
+func createRefused(t *testing.T, resp fakeResp) (string, string, int) {
+	t.Helper()
+	cp := newSiteCP(t)
+	cp.createResp = resp
+	cp.serve()
+	return runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
+}
+
+// no_team is a 422 whose CAUSE (not its status) sets the exit: a teamless login
+// stays exit 1 with the `bp team use` fix, never exit 3 — the credential is fine.
+func TestRunCloudSiteCreateNoTeamStaysGenericWithTheTeamFix(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{422, `{"error":"no_team"}`})
+	if code != exitGeneric {
+		t.Fatalf("a no_team refusal must stay exit %d, got %d\n%s", exitGeneric, code, stderr)
+	}
+	if !strings.Contains(stderr, "bp team use") {
+		t.Fatalf("a no_team refusal must point at `bp team use`:\n%s", stderr)
+	}
+}
+
+// barkpark_not_found is a 404 → exitNotFound, and the sentence points at
+// --instance (the thing that was not found), NOT a site slug the user never typed.
+// RED BEFORE: cloudFail exited 1 here.
+func TestRunCloudSiteCreateBarkparkNotFoundExitsNotFound(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{404, `{"error":"barkpark_not_found"}`})
+	if code != exitNotFound {
+		t.Fatalf("a 404 barkpark_not_found must exit %d (not-found), got %d\n%s", exitNotFound, code, stderr)
+	}
+	if !strings.Contains(stderr, "--instance") {
+		t.Fatalf("a create 404 must point at --instance, not a site slug:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "No site was created") == false {
+		t.Fatalf("a refused create must say no site was created:\n%s", stderr)
+	}
+}
+
+// Every 422 the create door emits (content_binding_empty, name_required,
+// content_binding_required, barkpark_required, invalid) is exit 1 — the ladder's
+// default family. A representative one stands in.
+func TestRunCloudSiteCreateInvalidBindingExitsGeneric(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{422, `{"error":"content_binding_empty","detail":"this site's token sees nothing at acme/blog/production for type post"}`})
+	if code != exitGeneric {
+		t.Fatalf("a 422 create refusal must exit %d (generic), got %d\n%s", exitGeneric, code, stderr)
+	}
+	if !strings.Contains(stderr, "token sees nothing") {
+		t.Fatalf("the default arm must relay the plane's detail:\n%s", stderr)
+	}
+}
+
+// --- readable-types menu on an empty-binding create refusal (cch-w70, D863) --
+//
+// content_binding_empty ships a STRUCTURED `readable_types` array (the site's own
+// token can see these types) alongside a `detail` that carries a PROSE copy of the
+// same menu + the CLI re-run line. The console renders the array (siteReadableTypesMenu)
+// and drops the CLI line; the CLI used to relay `detail` whole and never touched
+// the array, so a script got the sentence but no list to parse.
+//
+// The fixture ships THREE rows — two with counts, one WITHOUT (bare type) — so the
+// grammar `type (count)` / bare `type` is exercised on one payload, plus a JUNK
+// row (empty type) the render must drop.
+const emptyBindingBody = `{"error":"content_binding_empty",` +
+	`"detail":"this site would build from nothing — its token sees nothing at acme/blog/production. ` +
+	`This site CAN read: task (12), paper (40), note. ` +
+	"Re-run naming a type this site can read: `bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>`\"," +
+	`"readable_types":[{"type":"task","count":12},{"type":"paper","count":40},{"type":"note"},{"type":""}]}`
+
+// The HUMAN receipt renders the menu FROM THE ARRAY in the console grammar and
+// keeps the bp re-run line. ANTI-VACUITY: it asserts the CLI-COMPOSED line
+// (`It can read: task (12), paper (40), note`) which is NOT a substring of the
+// server prose (`This site CAN read: …`), and asserts the server prose menu
+// sentence is GONE — both red on pre-fix, where the whole detail is relayed
+// verbatim (the prose sentence is present and the composed line absent).
+func TestRunCloudSiteCreateEmptyBindingRendersReadableTypesMenu(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{422, emptyBindingBody})
+	if code != exitGeneric {
+		t.Fatalf("a 422 content_binding_empty must exit %d (generic), got %d\n%s", exitGeneric, code, stderr)
+	}
+	// The array-derived menu, in the console grammar: counts in parens, the
+	// count-less row bare, the empty-type junk row dropped.
+	if !strings.Contains(stderr, "It can read: task (12), paper (40), note") {
+		t.Fatalf("the receipt must render the menu FROM THE ARRAY in console grammar:\n%s", stderr)
+	}
+	// The server's PROSE menu sentence is replaced, not echoed — proving the CLI
+	// composed from the array rather than relaying detail whole (reds pre-fix).
+	if strings.Contains(stderr, "This site CAN read:") {
+		t.Fatalf("the CLI must compose from the array, not echo the server prose menu:\n%s", stderr)
+	}
+	// The bp re-run line is the CLI's home — kept, unlike the console which strips it.
+	if !strings.Contains(stderr, "--doc-type <type>") {
+		t.Fatalf("the CLI must KEEP the bp re-run line:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "No site was created") {
+		t.Fatalf("a refused create must say no site was created:\n%s", stderr)
+	}
+}
+
+// The MACHINE envelope carries the menu at error.details.readable_types with the
+// server's row ORDER and `type`-before-`count` key order preserved (re-serialized
+// from the decoded rows via struct tags — junk rows dropped, never a Go map that
+// would alphabetize). ANTI-VACUITY:
+// error.details did not exist for this refusal pre-fix, so a decode of
+// error.details.readable_types reds outright on pre-fix bytes.
+func TestRunCloudSiteCreateEmptyBindingJSONCarriesReadableTypes(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{422, emptyBindingBody}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("a 422 content_binding_empty must exit %d, got %d\n%s", exitGeneric, code, stdout)
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				ReadableTypes []struct {
+					Type  string `json:"type"`
+					Count *int   `json:"count"`
+				} `json:"readable_types"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json envelope: %v\n%s", err, stdout)
+	}
+	if env.OK || env.Error.Code != "content_binding_empty" {
+		t.Fatalf("want ok:false code:content_binding_empty:\n%s", stdout)
+	}
+	got := env.Error.Details.ReadableTypes
+	// Server row ORDER preserved, junk row (empty type) dropped upstream.
+	if len(got) != 3 || got[0].Type != "task" || got[1].Type != "paper" || got[2].Type != "note" {
+		t.Fatalf("error.details.readable_types must carry task,paper,note in order:\n%s", stdout)
+	}
+	if got[0].Count == nil || *got[0].Count != 12 || got[2].Count != nil {
+		t.Fatalf("counts must survive (task=12) and the count-less row stay bare (note):\n%s", stdout)
+	}
+	// KEY order preserved too — struct-tag order, not a Go map that would alphabetize.
+	if !strings.Contains(stdout, `"readable_types":[{"type":"task","count":12}`) {
+		t.Fatalf("the raw array bytes must carry the server's key order:\n%s", stdout)
+	}
+}
+
+// node_ports_exhausted is a 503 → exitServer: the box, not the caller, is out of
+// room. RED BEFORE: cloudFail exited 1. A script must be able to tell this
+// retry-elsewhere state from a user-fixable 422.
+func TestRunCloudSiteCreateNodePortsExhaustedExitsServer(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{503, `{"error":"node_ports_exhausted","detail":"this instance has no free node-slot port left — retire a node site or move to a larger box"}`})
+	if code != exitServer {
+		t.Fatalf("a 503 node_ports_exhausted must exit %d (server), got %d\n%s", exitServer, code, stderr)
+	}
+	if !strings.Contains(stderr, "no free node-slot port") {
+		t.Fatalf("the 503 must relay the plane's detail:\n%s", stderr)
+	}
+}
+
+// read_token_mint_failed is a 502 → exitServer, and the human receipt RELAYS the
+// plane's detail (the box that refused to mint the site's read token). RED
+// BEFORE: cloudFail exited 1.
+func TestRunCloudSiteCreateReadTokenMintFailedExitsServerRelayingDetail(t *testing.T) {
+	const detail = "acme refused to mint the site's read token (HTTP 403): forbidden"
+	_, stderr, code := createRefused(t, fakeResp{502, `{"error":"read_token_mint_failed","detail":"` + detail + `"}`})
+	if code != exitServer {
+		t.Fatalf("a 502 read_token_mint_failed must exit %d (server), got %d\n%s", exitServer, code, stderr)
+	}
+	if !strings.Contains(stderr, detail) {
+		t.Fatalf("the 502 human receipt must relay the plane's detail verbatim:\n%s", stderr)
+	}
+}
+
+// read_token_mint_failed in -o json names the plane's OWN code (not "failed") and
+// carries exit 8 — so a script can branch on the exact refusal.
+func TestRunCloudSiteCreateReadTokenMintFailedJSONCarriesThePlanesCode(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{502, `{"error":"read_token_mint_failed","detail":"acme refused to mint the read token"}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
+	if code != exitServer {
+		t.Fatalf("a 502 read_token_mint_failed must exit %d, got %d\n%s", exitServer, code, stdout)
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json envelope: %v\n%s", err, stdout)
+	}
+	if env.OK {
+		t.Fatalf("a refusal envelope must be ok:false:\n%s", stdout)
+	}
+	if env.Error.Code != "read_token_mint_failed" {
+		t.Fatalf("json must carry the plane's code, got %q\n%s", env.Error.Code, stdout)
+	}
+}
+
+// THE PRESERVED SEAM: a 401 whose message carries the "unauthorized:" prefix still
+// routes through cloudFail with the shared `bp login` sentence and the
+// byte-identical "create site" label — the ONE refusal that is never about the
+// site. This exit (3) is unchanged from the pre-fix behaviour, on purpose.
+func TestRunCloudSiteCreateUnauthorizedKeepsTheCloudFailSeam(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{401, `{"error":"invalid_token"}`})
+	if code != exitAuth {
+		t.Fatalf("a 401 must exit %d (auth), got %d\n%s", exitAuth, code, stderr)
+	}
+	if !strings.Contains(stderr, "bp login") {
+		t.Fatalf("the 401 seam must still tell the user to re-run `bp login`:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "create site") {
+		t.Fatalf("the 401 seam must keep the byte-identical `create site` label:\n%s", stderr)
+	}
+}
+
 // --- status ------------------------------------------------------------------
 
 func TestRunCloudSiteStatus(t *testing.T) {
@@ -1216,11 +1813,15 @@ func TestRunCloudSiteStatusFlagsFailedNewestDeployment(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit=%d want 0\n%s", code, stderr)
 	}
-	// The bound really went on the wire — one row is all this read needs.
+	// The bound really went on the wire, and it is still ONE call. W11 raised the
+	// page from 1 to siteStatusLedgerPage (20) inside that same call so the
+	// censored "still waiting" bound can be taken from the OLDEST pending row
+	// instead of the newest (= shortest) one; row [0] is still the newest, so this
+	// test's subject is unchanged.
 	if cp.listHits != 1 {
 		t.Fatalf("status must read the deployments list exactly once, got %d hits", cp.listHits)
 	}
-	if !strings.Contains(cp.listQuery, "limit=1") {
+	if !strings.Contains(cp.listQuery, fmt.Sprintf("limit=%d", siteStatusLedgerPage)) {
 		t.Fatalf("status must bound the newest-deployment read, query=%q", cp.listQuery)
 	}
 	// The header no longer says a bare "live" and nothing else.
@@ -2235,21 +2836,208 @@ func TestRunCloudSiteStatusDeferralPreD99(t *testing.T) {
 }
 
 // TestSiteDeferralChainNotOnFailedRows keeps the two vocabularies apart: the
-// numeric keys ride ONLY a deferred row. A failed row whose reason happens to
-// quote a chain (the terminal round does) is a drop, not a deferral, and giving
-// it deferral keys would let a dashboard count a lost publish as a re-queued one.
+// `deferral_*` keys ride ONLY a deferred row. A failed row is a drop, not a
+// re-queue, and giving it deferral keys would let a dashboard count a lost
+// publish as a waiting one.
+//
+// ITS ORIGINAL RATIONALE WAS FALSE, and dr-w29-s7 corrects it rather than
+// deleting the property. The comment used to claim "the terminal round does"
+// quote a chain — meaning `refusal N of M`. It does not: that clause is written
+// only on the DEFERRED branch (cloud/lib/barkpark_cloud/sites/deploy.ex:1302),
+// and 0 of 7 live abandoned rows match it. The first fixture below is therefore
+// a sentence NO producer emits; the second is the real one, from
+// `abandonment_reason/3` (deploy.ex:1424), and it is the case that actually had
+// to be defended. Both must stay free of `deferral_*` — the abandoned row gets
+// `abandonment_*` instead (TestSiteAbandonmentChainReachesTheJSONEnvelope).
 func TestSiteDeferralChainNotOnFailedRows(t *testing.T) {
-	failed := cloudclient.SiteDeployment{
-		ID:            "dep-x",
+	rows := map[string]cloudclient.SiteDeployment{
+		"a sentence no producer emits": {
+			ID:            "dep-x",
+			Status:        "failed",
+			FailureReason: "…and it has now refused 12 rebuilds in a row for this site (refusal 12 of 12)",
+		},
+		"the real abandonment sentence": {
+			ID:            "dep-y",
+			Status:        "failed",
+			FailureClass:  "ABANDONED_AT_CAPACITY",
+			FailureReason: siteAbandonmentSentence(12, "so the instance has been at its concurrent-build cap for that entire run; check for builds holding slots without finishing, or raise the cap"),
+			DeferralDepth: siteIntPtr(12),
+			DeferralBound: siteIntPtr(12),
+			DeferralCause: strPtr("BOX_AT_CAPACITY_DEFERRED"),
+		},
+	}
+	for name, failed := range rows {
+		m := siteDeploymentMap(failed)
+		for _, k := range []string{"deferral_depth", "deferral_bound", "deferral_cause"} {
+			if _, ok := m[k]; ok {
+				t.Fatalf("%s: a failed row must not carry %s: %+v", name, k, m)
+			}
+		}
+		if siteDeployDeferred(failed.Status) {
+			t.Fatalf("%s: siteDeployDeferred must not match a failed row", name)
+		}
+	}
+}
+
+// siteAbandonmentSentence rebuilds `Sites.Deploy.abandonment_reason/3`'s output
+// byte-for-byte (cloud/lib/barkpark_cloud/sites/deploy.ex:1424):
+//
+//	reason <> " — and it has now refused #{rounds} rebuilds in a row for this site, #{terminal_verdict(cause)}"
+//
+// The fixture goes through this one helper so the Go reader is pinned to the
+// PRODUCER's template rather than to a paraphrase of it — the same discipline
+// deploy_ledger_test.exs applies from the Elixir side.
+func siteAbandonmentSentence(rounds int, verdict string) string {
+	return fmt.Sprintf(
+		"the instance refused the deploy (HTTP 409): box_at_capacity — and it has now refused %d rebuilds in a row for this site, %s",
+		rounds, verdict)
+}
+
+// TestSiteAbandonmentChainReachesTheJSONEnvelope is the dr-w29-s7 defect in one
+// fixture. Before it, an abandoned row lost ALL THREE chain numbers from
+// `bp cloud site status -o json` while `failure_class: ABANDONED_AT_CAPACITY`
+// survived — the machine surface was strictly WORSE than the human one, which
+// still printed "refused 12 rebuilds in a row" in prose.
+//
+// MUTATION PROOF: delete the `siteDeployAbandoned` block in siteDeploymentMap
+// and this test reds on the first key — the exact silence being fixed.
+func TestSiteAbandonmentChainReachesTheJSONEnvelope(t *testing.T) {
+	m := siteDeploymentMap(cloudclient.SiteDeployment{
+		ID:            "dep-abandoned",
 		Status:        "failed",
-		FailureReason: "…and it has now refused 12 rebuilds in a row for this site (refusal 12 of 12)",
+		FailureClass:  "ABANDONED_BOX_STUCK",
+		FailureReason: siteAbandonmentSentence(6, "so the instance is not busy but stuck; check its deploy runner"),
+		DeferralDepth: siteIntPtr(6),
+		DeferralBound: siteIntPtr(6),
+	})
+	if got := m["abandonment_depth"]; got != 6 {
+		t.Fatalf("abandonment_depth = %v, want 6: %+v", got, m)
 	}
-	m := siteDeploymentMap(failed)
-	if _, ok := m["deferral_depth"]; ok {
-		t.Fatalf("a failed row must not carry deferral_depth: %+v", m)
+	if got := m["abandonment_bound"]; got != 6 {
+		t.Fatalf("abandonment_bound = %v, want 6: %+v", got, m)
 	}
-	if siteDeployDeferred(failed.Status) {
-		t.Fatalf("siteDeployDeferred must not match a failed row")
+	if got := m["abandonment_cause"]; got != "ABANDONED_BOX_STUCK" {
+		t.Fatalf("abandonment_cause = %v, want the ledger class: %+v", got, m)
+	}
+	// The keys are DISTINCT, never an alias: a reader summing `deferral_depth`
+	// must not silently start counting given-up publishes as waiting ones.
+	for _, k := range []string{"deferral_depth", "deferral_bound", "deferral_cause"} {
+		if _, ok := m[k]; ok {
+			t.Fatalf("an abandoned row must not borrow the deferral key %s: %+v", k, m)
+		}
+	}
+	// It renders, byte for byte, as JSON a script can threshold on.
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"abandonment_bound":6`, `"abandonment_depth":6`, `"abandonment_cause":"ABANDONED_BOX_STUCK"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("rendered JSON missing %s:\n%s", want, b)
+		}
+	}
+}
+
+// TestSiteAbandonmentDepthFallsBackToTheProducersSentence covers the seven live
+// rows that predate the columns (charter D504 rules NO BACKFILL, so they are the
+// only population that can prove this arm is reachable). Depth comes off the
+// producer's own clause and the cause off the class — and `abandonment_bound` is
+// ABSENT, never a zero: the bound is not in the sentence, and re-deriving 12/6
+// in Go would hardcode the other cause's budget (D195).
+func TestSiteAbandonmentDepthFallsBackToTheProducersSentence(t *testing.T) {
+	m := siteDeploymentMap(cloudclient.SiteDeployment{
+		ID:           "dep-old",
+		Status:       "failed",
+		FailureClass: "ABANDONED_AT_CAPACITY",
+		FailureReason: siteAbandonmentSentence(12,
+			"so the instance has been at its concurrent-build cap for that entire run; check for builds holding slots without finishing, or raise the cap"),
+	})
+	if got := m["abandonment_depth"]; got != 12 {
+		t.Fatalf("the prose fallback must read the depth off the producer's clause, got %v: %+v", got, m)
+	}
+	if got := m["abandonment_cause"]; got != "ABANDONED_AT_CAPACITY" {
+		t.Fatalf("abandonment_cause = %v: %+v", got, m)
+	}
+	if v, ok := m["abandonment_bound"]; ok {
+		t.Fatalf("an unknown bound must be ABSENT, not %v: %+v", v, m)
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"abandonment_bound"`) {
+		t.Fatalf("no bound key may be rendered at all:\n%s", b)
+	}
+	// The RAW capture carries the clause when FailureReason is the humanizer's
+	// generic arm — the fallback reads that too, or those rows stay silent.
+	raw := siteDeploymentMap(cloudclient.SiteDeployment{
+		ID: "dep-raw", Status: "failed", FailureClass: "ABANDONED_UNCLASSIFIED",
+		FailureReason:    "the deploy did not complete",
+		FailureReasonRaw: siteAbandonmentSentence(9, "so the instance is refusing this site persistently for a cause the ledger cannot name; check its deploy runner"),
+	})
+	if got := raw["abandonment_depth"]; got != 9 {
+		t.Fatalf("the raw capture must be read too, got %v: %+v", got, raw)
+	}
+}
+
+// TestSiteAbandonmentKeysOnlyOnAbandonedRows pins the gate to the ledger CLASS.
+// An ordinary build failure — even a deep chain that was merely deferred — never
+// grows abandonment keys, and a class-less failed row emits nothing at all.
+func TestSiteAbandonmentKeysOnlyOnAbandonedRows(t *testing.T) {
+	rows := map[string]cloudclient.SiteDeployment{
+		"an ordinary build failure": {
+			ID: "dep-b", Status: "failed", FailureClass: "BUILD_EXIT_NONZERO",
+			FailureReason: "the build exited 1", DeferralDepth: siteIntPtr(3), DeferralBound: siteIntPtr(12),
+		},
+		"a failed row with no class at all": {
+			ID: "dep-c", Status: "failed",
+			FailureReason: siteAbandonmentSentence(12, "so the instance is not busy but stuck; check its deploy runner"),
+		},
+		"a live row": {ID: "dep-d", Status: "live"},
+	}
+	for name, d := range rows {
+		m := siteDeploymentMap(d)
+		for _, k := range []string{"abandonment_depth", "abandonment_bound", "abandonment_cause"} {
+			if _, ok := m[k]; ok {
+				t.Fatalf("%s must not carry %s: %+v", name, k, m)
+			}
+		}
+	}
+	if !siteDeployAbandoned("ABANDONED_UNCLASSIFIED") {
+		t.Fatal("the class predicate must match every ABANDONED_* member")
+	}
+	if siteDeployAbandoned("BOX_AT_CAPACITY_DEFERRED") || siteDeployAbandoned("") {
+		t.Fatal("the class predicate must not match a deferral class or an empty class")
+	}
+}
+
+// TestSiteDeferralCauseReachesTheJSONEnvelope closes the third silent drop:
+// `deferral_cause` has been decoded since #10248 and emitted nowhere, so a
+// script could read how deep a chain ran and never WHY. It rides a DEFERRED row
+// only, and only when the control plane actually sent it.
+func TestSiteDeferralCauseReachesTheJSONEnvelope(t *testing.T) {
+	m := siteDeploymentMap(cloudclient.SiteDeployment{
+		ID: "dep-def", Status: "deferred",
+		FailureReason: "the instance refused the deploy (HTTP 409): box_at_capacity — deferred: refusal 3 of 12 in this site's current chain — a rebuild carrying this content has been re-queued",
+		DeferralDepth: siteIntPtr(3), DeferralBound: siteIntPtr(12),
+		DeferralCause: strPtr("BOX_AT_CAPACITY_DEFERRED"),
+	})
+	if got := m["deferral_cause"]; got != "BOX_AT_CAPACITY_DEFERRED" {
+		t.Fatalf("deferral_cause = %v, want the ledger class: %+v", got, m)
+	}
+	if m["deferral_depth"] != 3 || m["deferral_bound"] != 12 {
+		t.Fatalf("the depth pair must be unchanged: %+v", m)
+	}
+	// A pre-#10248 box sends no cause, and silence stays silence.
+	old := siteDeploymentMap(cloudclient.SiteDeployment{
+		ID: "dep-old-def", Status: "deferred",
+		FailureReason: "the instance refused the deploy (HTTP 409): box_at_capacity — deferred: refusal 3 of 12 in this site's current chain — a rebuild carrying this content has been re-queued",
+	})
+	if _, ok := old["deferral_cause"]; ok {
+		t.Fatalf("a control plane that sent no cause must yield no key: %+v", old)
+	}
+	if old["deferral_depth"] != 3 {
+		t.Fatalf("the prose fallback for the depth pair must still work: %+v", old)
 	}
 }
 
@@ -2282,5 +3070,702 @@ func TestRunCloudSiteStatusFailedNewestBeatsDeferredLivePointer(t *testing.T) {
 	}
 	if strings.Contains(stdout, "refusal 3 of 12") || strings.Contains(stdout, "deferral ") {
 		t.Fatalf("no deferral section may be printed when the newest row is a drop:\n%s", stdout)
+	}
+}
+
+// --- dr-w12 S7: the waiting clock counts the one shape that IS an unbounded wait -
+
+// TestSiteWaitingSinceMeasuresADeferralChainFromItsStart is the whole slice in one
+// fixture. Before it, siteDeployWaiting read `!terminal && !deferred`, so
+// siteWaitingSince skipped every refused round — and a refusal chain is precisely
+// the shape whose wait is unbounded, since a refusal can be followed by a refusal
+// forever. On the production ledger deferrals are 53.6% of attempts, and the
+// operator's censored bound over all of them was NOTHING.
+//
+// MUTATION / BEFORE-AFTER PROOF: `git checkout HEAD -- internal/cli/cloud_site_cmd.go`
+// (this test calls only siteWaitingSince and siteTimeToWebLine, both of which
+// predate the slice, so the package still compiles) and this test REDS with
+// "measured no wait at all" — the exact silence being fixed.
+func TestSiteWaitingSinceMeasuresADeferralChainFromItsStart(t *testing.T) {
+	ttwFreeze(t)
+	dep := &cloudclient.SiteDeployment{
+		ID: "dep-live", Status: "live",
+		InsertedAt: ttwStamp(9 * time.Hour), BecameLiveAt: ttwStamp(8*time.Hour - 5*time.Minute),
+	}
+	chainReason := func(depth int) string {
+		return fmt.Sprintf("the instance refused the deploy (HTTP 409): box_at_capacity — deferred: refusal %d of 12 in this site's current chain — a rebuild carrying this content has been re-queued", depth)
+	}
+	// Newest-first, as the page arrives: four rounds of ONE chain. Each round is
+	// its own row with its own inserted_at, and the newest one is the SHORTEST wait
+	// in the chain — reading it would report 2m for a publish that has been stuck
+	// for over three hours.
+	ledger := []cloudclient.SiteDeployment{
+		{ID: "dep-r4", Status: "deferred", InsertedAt: ttwStamp(2 * time.Minute), FailureReason: chainReason(4)},
+		{ID: "dep-r3", Status: "deferred", InsertedAt: ttwStamp(21 * time.Minute), FailureReason: chainReason(3)},
+		{ID: "dep-r2", Status: "deferred", InsertedAt: ttwStamp(58 * time.Minute), FailureReason: chainReason(2)},
+		{ID: "dep-r1", Status: "deferred", InsertedAt: ttwStamp(3*time.Hour + 5*time.Minute), FailureReason: chainReason(1)},
+		*dep,
+	}
+
+	waited, id, ok := siteWaitingSince(dep, ledger)
+	if !ok {
+		t.Fatal("a four-round deferral chain measured no wait at all — the clock is still blind to the one shape that is unbounded")
+	}
+	if waited != 3*time.Hour+5*time.Minute {
+		t.Fatalf("the wait must run from the FIRST refused attempt (3h05m), got %s", waited)
+	}
+	if id != "dep-r1" {
+		t.Fatalf("the bound must name the chain's START row, got %q", id)
+	}
+
+	line := siteTimeToWebLine(dep, ledger)
+	if !strings.Contains(line, "at least 3h05m so far") {
+		t.Fatalf("the printed bound must be the chain's, got %q", line)
+	}
+	for _, shorter := range []string{"at least 2m", "at least 21m", "at least 58m"} {
+		if strings.Contains(line, shorter) {
+			t.Fatalf("the newest refusal is the shortest wait in the chain and must never be the bound (%s): %q", shorter, line)
+		}
+	}
+	// The clock is measured from the START, the DEPTH is read off the head — two
+	// different rows, because "how deep am I now" is only true on the latest round.
+	// Quoting the measured row's own sentence would print "refusal 1 of 12" over a
+	// chain four rounds deep.
+	if !strings.Contains(line, "refusal 4 of 12 consecutive") {
+		t.Fatalf("the depth must come from the NEWEST refusal, not the row the clock was measured from: %q", line)
+	}
+	if strings.Contains(line, "refusal 1 of 12") {
+		t.Fatalf("the chain-start row's stale depth must not be printed as the current one: %q", line)
+	}
+	// The WAIT leads; the depth is a detail behind it. The chain is bounded and
+	// small (24h p50 3, max 11) while the wait it produces is not, so a header that
+	// opened with the depth would lead with the least alarming number on the row.
+	if i, j := strings.Index(line, "still waiting"), strings.Index(line, "refusal 4 of 12"); i < 0 || j < 0 || i > j {
+		t.Fatalf("the wait must be printed BEFORE the chain depth: %q", line)
+	}
+	// Depth-of-fence, never a bare count — and never a chain-derived rate
+	// (charter D174/D142: chains carry no key, so any percentage over them is
+	// unfalsifiable and era-unstable).
+	for _, want := range []string{"of 12 consecutive", "zero-progress guard, not a countdown", "any successful deploy resets it to 0"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("the depth must carry its fence and what it counts (%q): %q", want, line)
+		}
+	}
+	if strings.Contains(line, "%") {
+		t.Fatalf("no chain-derived rate may be printed: %q", line)
+	}
+}
+
+// TestSiteWaitingClauseNamesItsClock: #10189 landed the NAME THE CLOCK law on this
+// surface for the time-to-web number, and the censored wait had been printing a
+// bare duration beside it. The two clocks are 7.1x apart at p50 and 13.6x at p95
+// on IDENTICAL rows (publish-keyed p50 235s vs row-keyed p50 33s) — a duration
+// that does not say which one it is has an order of magnitude of slack in it.
+func TestSiteWaitingClauseNamesItsClock(t *testing.T) {
+	ttwFreeze(t)
+	ledger := []cloudclient.SiteDeployment{
+		{ID: "dep-q", Status: "queued", InsertedAt: ttwStamp(40 * time.Minute)},
+	}
+	line := siteTimeToWebLine(nil, ledger)
+	if !strings.Contains(line, "at least 40m00s so far") {
+		t.Fatalf("the censored bound must be printed: %q", line)
+	}
+	for _, want := range []string{"inserted_at", "not from your publish", "60s of debounce"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("every printed wait must disclose whose clock it is (%q): %q", want, line)
+		}
+	}
+	// A queued row is not a refused one: no chain vocabulary may attach to it.
+	if strings.Contains(line, "REFUSED") || strings.Contains(line, "refusal") {
+		t.Fatalf("a slow build is not a refusal chain: %q", line)
+	}
+}
+
+// TestSiteWaitingChainDegradesWhenTheControlPlaneIsSilent is the able-to-lose arm,
+// and it is the reason the pre-D99 branch in siteDeferralLine is kept rather than
+// tidied away: a box that does not report chain depth must produce a wait that
+// SAYS the depth is unavailable, not a wait with a zero in it. "refusal 0 of 0"
+// would read as "no chain" — the exact inversion of the truth.
+func TestSiteWaitingChainDegradesWhenTheControlPlaneIsSilent(t *testing.T) {
+	ttwFreeze(t)
+	ledger := []cloudclient.SiteDeployment{
+		{ID: "dep-d2", Status: "deferred", InsertedAt: ttwStamp(6 * time.Minute),
+			FailureReason: "the instance refused the deploy (HTTP 409): box_at_capacity - deferred: a rebuild carrying this content has been re-queued"},
+		{ID: "dep-d1", Status: "deferred", InsertedAt: ttwStamp(52 * time.Minute),
+			FailureReason: "the instance refused the deploy (HTTP 409): box_at_capacity - deferred: a rebuild carrying this content has been re-queued"},
+	}
+	line := siteTimeToWebLine(nil, ledger)
+	// The WAIT survives the silence — it is measured from stamps the row carries,
+	// not from the sentence it does not.
+	if !strings.Contains(line, "at least 52m00s so far") {
+		t.Fatalf("an unreported chain must still be timed from its start: %q", line)
+	}
+	if !strings.Contains(line, "does not report how deep the refusal chain is") {
+		t.Fatalf("a silent control plane must be named as silent: %q", line)
+	}
+	if strings.Contains(line, "refusal 0") {
+		t.Fatalf("an unparseable chain must never print a zero depth: %q", line)
+	}
+}
+
+// TestSiteStalenessCarriesTheChainBesideTheWait is the machine twin: a script that
+// pages a fleet should be able to separate "a build is slow" from "the box keeps
+// refusing", without grepping prose. The flag rides ONLY a deferred bound (never a
+// `false` on the others, which would read as a measurement the CLI did not make),
+// and the depth pair rides only a control plane that actually said it.
+func TestSiteStalenessCarriesTheChainBesideTheWait(t *testing.T) {
+	ttwFreeze(t)
+	newest := &cloudclient.SiteDeployment{ID: "dep-r2", Status: "deferred"}
+	chain := []cloudclient.SiteDeployment{
+		{ID: "dep-r2", Status: "deferred", InsertedAt: ttwStamp(4 * time.Minute),
+			FailureReason: "box_at_capacity — deferred: refusal 7 of 12 in this site's current chain"},
+		{ID: "dep-r1", Status: "deferred", InsertedAt: ttwStamp(80 * time.Minute),
+			FailureReason: "box_at_capacity — deferred: refusal 6 of 12 in this site's current chain"},
+	}
+	m := siteStalenessMap(nil, newest, chain)
+	if m["latest_waiting_seconds_at_least"] != int64(80*60) {
+		t.Fatalf("the censored bound must be the chain start's 80m, got %v", m["latest_waiting_seconds_at_least"])
+	}
+	if m["latest_waiting_deferred"] != true {
+		t.Fatalf("a refused wait must be flagged as one: %+v", m)
+	}
+	if m["latest_waiting_deferral_depth"] != 7 || m["latest_waiting_deferral_bound"] != 12 {
+		t.Fatalf("the depth pair must come from the chain HEAD (7 of 12): %+v", m)
+	}
+	// No rate, no percentage, ever: chains have no key and the closed-live rate is
+	// era-unstable (48.4% over 7d vs 28.3% over 24h) — charter D174/D142.
+	for k := range m {
+		if strings.Contains(k, "rate") || strings.Contains(k, "percent") {
+			t.Fatalf("no chain-derived rate may reach the envelope: %q", k)
+		}
+	}
+
+	// A slow build carries neither the flag nor the pair — absence means "not a
+	// refusal", which is the only honest shape for a fact we did not measure.
+	slow := []cloudclient.SiteDeployment{{ID: "dep-q", Status: "building", InsertedAt: ttwStamp(11 * time.Minute)}}
+	q := siteStalenessMap(nil, &cloudclient.SiteDeployment{ID: "dep-q", Status: "building"}, slow)
+	for _, k := range []string{"latest_waiting_deferred", "latest_waiting_deferral_depth", "latest_waiting_deferral_bound"} {
+		if _, present := q[k]; present {
+			t.Fatalf("%s must be ABSENT on a non-refused wait: %+v", k, q)
+		}
+	}
+}
+
+// --- deploy-reliability W14 (charter D213/D214/D220/D221) ---------------------
+//
+// THE READER STOPPED PARSING ENGLISH, THE PARAGRAPH NAMED ITS WINDOW, AND THE ONE
+// CLAUSE THE DATA CONTRADICTED STOPPED BEING ASSERTED.
+//
+// Every human-paragraph proof below is captured with runSite(t, "table", …), and
+// that is load-bearing rather than habit: internal/cli/output.go:74-80 picks the
+// format by TTY when -o is absent, so a piped or agent-captured run gets RAW
+// JSON. A test that captured stdout without pinning "table" would assert against
+// JSON and pass while the paragraph it claims to fix went untouched.
+
+// siteIntPtr is the wire shape of the deferral columns: *int, absent on every row
+// written before 2026-08-07T10:12:35Z.
+func siteIntPtr(v int) *int { return &v }
+
+// TestSiteDeferralChainPrefersTheColumnsOverTheProse is the column-first,
+// prose-fallback contract in one table.
+//
+// THE DISAGREEMENT CASE IS THE POINT. A row whose columns say 9 of 12 while its
+// sentence still says 3 of 6 must render the COLUMN — the sentence is a snapshot
+// the control plane wrote at defer time and the columns are what it computed. If
+// the fallback ever won that tie, this reader would be a regex with extra steps.
+//
+// AND THE NULL CASE IS WHY THE REGEX STAYS. The columns are stamped on 116 of
+// 1,934 post-boundary deferred rows (6.0%), and the boundary is a HARD STEP: NULL
+// is exactly equivalent to "this row predates 2026-08-07T10:12:35Z". A column-only
+// reader over a pre-boundary window reads 100% NULL for the WHOLE window — it
+// loses the window, not a slice of it.
+func TestSiteDeferralChainPrefersTheColumnsOverTheProse(t *testing.T) {
+	const prose36 = "box_at_capacity — deferred: refusal 3 of 6 in this site's current chain"
+	cases := []struct {
+		name               string
+		row                cloudclient.SiteDeployment
+		wantDepth, wantBnd int
+		wantOK             bool
+	}{
+		{
+			name: "columns WIN a disagreement with the prose",
+			row: cloudclient.SiteDeployment{
+				ID: "dep-c", Status: "deferred", FailureReason: prose36,
+				DeferralDepth: siteIntPtr(9), DeferralBound: siteIntPtr(12),
+			},
+			wantDepth: 9, wantBnd: 12, wantOK: true,
+		},
+		{
+			name: "NULL columns fall back to the prose, which still renders",
+			row: cloudclient.SiteDeployment{
+				ID: "dep-p", Status: "deferred", FailureReason: prose36,
+			},
+			wantDepth: 3, wantBnd: 6, wantOK: true,
+		},
+		{
+			name: "a zero DEPTH column is no chain — and does NOT re-read the prose",
+			row: cloudclient.SiteDeployment{
+				ID: "dep-z", Status: "deferred", FailureReason: prose36,
+				DeferralDepth: siteIntPtr(0), DeferralBound: siteIntPtr(12),
+			},
+			wantOK: false,
+		},
+		{
+			name: "a zero BOUND column is no chain — and does NOT re-read the prose",
+			row: cloudclient.SiteDeployment{
+				ID: "dep-b", Status: "deferred", FailureReason: prose36,
+				DeferralDepth: siteIntPtr(4), DeferralBound: siteIntPtr(0),
+			},
+			wantOK: false,
+		},
+		{
+			name: "half a pair is not a pair: depth without bound falls back",
+			row: cloudclient.SiteDeployment{
+				ID: "dep-h", Status: "deferred", FailureReason: prose36,
+				DeferralDepth: siteIntPtr(9),
+			},
+			wantDepth: 3, wantBnd: 6, wantOK: true,
+		},
+		{
+			name:   "neither columns nor a parseable sentence is honestly nothing",
+			row:    cloudclient.SiteDeployment{ID: "dep-n", Status: "deferred", FailureReason: "box_at_capacity — deferred: a rebuild has been re-queued"},
+			wantOK: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			depth, bound, ok := siteDeferralChain(tc.row)
+			if ok != tc.wantOK {
+				t.Fatalf("ok=%v want %v (depth=%d bound=%d)", ok, tc.wantOK, depth, bound)
+			}
+			if !ok {
+				// The zero-guard: a refused read must produce NOTHING, never a
+				// "refusal 0 of 0", which reads as "no chain" — the exact inversion.
+				if depth != 0 || bound != 0 {
+					t.Fatalf("a refused read must return zeros and ok=false, got %d of %d", depth, bound)
+				}
+				return
+			}
+			if depth != tc.wantDepth || bound != tc.wantBnd {
+				t.Fatalf("got %d of %d, want %d of %d", depth, bound, tc.wantDepth, tc.wantBnd)
+			}
+		})
+	}
+}
+
+// TestRunCloudSiteStatusRendersTheColumnDepthOverTheProse carries the same
+// disagreement all the way to the surface an owner actually reads: the columns
+// are on the wire, the sentence contradicts them, and the paragraph prints 9 of 12
+// while -o json carries the same pair as numbers.
+func TestRunCloudSiteStatusRendersTheColumnDepthOverTheProse(t *testing.T) {
+	const prose = "the instance refused the deploy (HTTP 409): box_at_capacity — deferred: refusal 3 of 6 in this site's current chain — a rebuild carrying this content has been re-queued"
+
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-9","site_id":"` + testSiteID + `","status":"deferred","stage":"PLAN",` +
+		`"failure_reason":` + mustJSONString(prose) + `,"failure_class":"BOX_AT_CAPACITY_DEFERRED",` +
+		`"deferral_depth":9,"deferral_bound":12,"deferral_cause":"BOX_AT_CAPACITY_DEFERRED","environment":"production"}],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "refusal 9 of 12 consecutive") {
+		t.Fatalf("the COLUMN depth must win over the sentence:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "refusal 3 of 6 consecutive") {
+		t.Fatalf("the stale prose pair must not be rendered as the chain:\n%s", stdout)
+	}
+
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	var env struct {
+		Latest struct {
+			Depth *int `json:"deferral_depth"`
+			Bound *int `json:"deferral_bound"`
+		} `json:"latest_deployment"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Latest.Depth == nil || *env.Latest.Depth != 9 || env.Latest.Bound == nil || *env.Latest.Bound != 12 {
+		t.Fatalf("the json pair must be the columns' 9 of 12: %+v\n%s", env.Latest, jstdout)
+	}
+}
+
+// TestSiteDeferralBoundIsNeverHardcodedTo12 pins the OTHER bound. The control
+// plane's max_consecutive_deferrals is 12 for BOX_AT_CAPACITY_DEFERRED and 6 for
+// everything else, and prod carries real "of 6" rows — a renderer that assumed 12
+// would print a fence twice as far away as the one the row is measured against.
+func TestSiteDeferralBoundIsNeverHardcodedTo12(t *testing.T) {
+	cause := "BOX_BUSY_DEFERRED"
+	col := cloudclient.SiteDeployment{
+		ID: "dep-busy", Status: "deferred", FailureClass: "BOX_BUSY_DEFERRED",
+		DeferralDepth: siteIntPtr(5), DeferralBound: siteIntPtr(6),
+		DeferralCause: &cause,
+	}
+	if line := siteDeferralLine(col); !strings.Contains(line, "refusal 5 of 6 consecutive") {
+		t.Fatalf("a bound-6 cause must render its own fence: %q", line)
+	}
+	prose := cloudclient.SiteDeployment{
+		ID: "dep-busy-old", Status: "deferred", FailureClass: "BOX_BUSY_DEFERRED",
+		FailureReason: "the instance refused the deploy (HTTP 409): box_busy — deferred: refusal 5 of 6 in this site's current chain",
+	}
+	if line := siteDeferralLine(prose); !strings.Contains(line, "refusal 5 of 6 consecutive") {
+		t.Fatalf("the prose arm must carry the row's own bound too: %q", line)
+	}
+	if strings.Contains(siteDeferralLine(col)+siteDeferralLine(prose), "of 12") {
+		t.Fatalf("no renderer may substitute the capacity bound for this cause's")
+	}
+}
+
+// TestRunCloudSiteStatusNamesTheWindowItRead is the census: the paragraph now says
+// how many attempts it read, over what span, and how many of them the box refused
+// — with a denominator beside every count.
+//
+// The fixture is majority-deferred on purpose, because that is the shape the
+// surface used to render as six green ticks: search-capstone's reachable 200-row
+// window was 148 deferred / 47 live / 5 failed and the header named none of it.
+func TestRunCloudSiteStatusNamesTheWindowItRead(t *testing.T) {
+	ttwFreeze(t)
+	rows := []string{
+		`{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","inserted_at":"2026-08-07T10:29:17Z","became_live_at":"2026-08-07T10:29:48Z"}`,
+	}
+	// 12 refused rounds and one failed round, newest first (the page's own order).
+	stamps := []string{
+		"2026-08-07T10:20:00Z", "2026-08-07T10:10:00Z", "2026-08-07T10:00:00Z",
+		"2026-08-07T09:50:00Z", "2026-08-07T09:40:00Z", "2026-08-07T09:30:00Z",
+		"2026-08-07T09:20:00Z", "2026-08-07T09:10:00Z", "2026-08-07T09:00:00Z",
+		"2026-08-07T08:50:00Z", "2026-08-07T08:40:00Z", "2026-08-07T08:30:00Z",
+	}
+	for i, ts := range stamps {
+		rows = append(rows, fmt.Sprintf(`{"id":"dep-d%d","site_id":"%s","status":"deferred","inserted_at":%q,"failure_class":"BOX_AT_CAPACITY_DEFERRED","deferral_depth":%d,"deferral_bound":12}`,
+			i, testSiteID, ts, len(stamps)-i))
+	}
+	rows = append(rows, `{"id":"dep-f","site_id":"`+testSiteID+`","status":"failed","inserted_at":"2026-08-07T01:32:34Z","failure_class":"BUILD_FAILED"}`)
+
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[` + strings.Join(rows, ",") + `],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	for _, want := range []string{
+		"recent attempts (the window this status read",
+		"14 attempts read, from 2026-08-07T01:32:34Z to 2026-08-07T10:29:17Z",
+		"12 of 14 deferred by the box",
+		"1 of 14 live",
+		"1 of 14 failed",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the window paragraph must carry %q:\n%s", want, stdout)
+		}
+	}
+	// A count without a denominator is the defect this block exists to fix — and a
+	// derived share is banned outright (charter D174/D142: chains carry no key, so
+	// any percentage over them is unfalsifiable and era-unstable).
+	if strings.Contains(stdout, "%") {
+		t.Fatalf("the window must print counts with denominators, never a rate:\n%s", stdout)
+	}
+	// The census is its OWN block after the KV table, not KV rows — renderKV sorts
+	// alphabetically and pads to the widest key, so census rows would scatter
+	// between `dataset` and `framework` and widen the whole header.
+	kvEnd := strings.Index(stdout, "recent attempts")
+	if kvEnd < 0 {
+		t.Fatalf("no window block at all:\n%s", stdout)
+	}
+	if i := strings.Index(stdout, "dataset"); i < 0 || i > kvEnd {
+		t.Fatalf("the window block must come AFTER the KV table:\n%s", stdout)
+	}
+
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	win, ok := env["window"].(map[string]any)
+	if !ok {
+		t.Fatalf("the window must be its OWN sibling node, not a staleness key:\n%s", jstdout)
+	}
+	stale, _ := env["staleness"].(map[string]any)
+	if _, folded := stale["attempts_read"]; folded {
+		t.Fatalf("the census must not be folded into staleness:\n%s", jstdout)
+	}
+	for k, want := range map[string]float64{"attempts_read": 14, "deferred_count": 12, "live_count": 1, "failed_count": 1} {
+		if win[k] != want {
+			t.Fatalf("window.%s = %v want %v\n%s", k, win[k], want, jstdout)
+		}
+	}
+	if win["oldest_inserted_at"] != "2026-08-07T01:32:34Z" || win["newest_inserted_at"] != "2026-08-07T10:29:17Z" {
+		t.Fatalf("the window must name the span it ACTUALLY saw: %+v", win)
+	}
+	// The three substring guards this node has to live under: two enforced on
+	// siteStalenessMap's keys, and `deferral_depth` scanned over the whole
+	// serialized stdout by TestRunCloudSiteStatusDeferralPreD99.
+	for k := range win {
+		for _, banned := range []string{"rate", "percent", "deferral_depth"} {
+			if strings.Contains(k, banned) {
+				t.Fatalf("window key %q carries the banned substring %q", k, banned)
+			}
+		}
+	}
+}
+
+// TestSiteWindowRefusesASpanItCannotProve: a page whose rows carry no readable
+// inserted_at gets NO span rather than a 1970 one, and the rows are counted out
+// loud instead of silently vanishing from the denominator.
+func TestSiteWindowRefusesASpanItCannotProve(t *testing.T) {
+	w, ok := siteReadWindow([]cloudclient.SiteDeployment{
+		{ID: "dep-a", Status: "deferred"},
+		{ID: "dep-b", Status: "deferred", InsertedAt: "not-a-timestamp"},
+	})
+	if !ok {
+		t.Fatal("a page with rows is still a window")
+	}
+	if w.Oldest != "" || w.Newest != "" {
+		t.Fatalf("an unprovable span must stay empty, got %q..%q", w.Oldest, w.Newest)
+	}
+	if w.Rows != 2 || w.Deferred != 2 || w.Stampless != 2 {
+		t.Fatalf("stampless rows must still be counted: %+v", w)
+	}
+	m := siteWindowMap(w)
+	for _, k := range []string{"oldest_inserted_at", "newest_inserted_at"} {
+		if _, present := m[k]; present {
+			t.Fatalf("%s must be ABSENT when unprovable, never a zero instant: %+v", k, m)
+		}
+	}
+	if m["attempts_without_a_stamp"] != 2 {
+		t.Fatalf("the unstamped rows must be reported: %+v", m)
+	}
+	// An EMPTY page is not a window at all — an absent census means "could not
+	// read the ledger", which a zeroed one would hide.
+	if _, ok := siteReadWindow(nil); ok {
+		t.Fatal("an empty ledger must produce no window node")
+	}
+}
+
+// TestSiteWindowSaysThePageRanOut: the page is siteStatusLedgerPage rows, so a
+// full page means older attempts exist that this status never read. Saying so is
+// the difference between a bounded read and an implied history.
+func TestSiteWindowSaysThePageRanOut(t *testing.T) {
+	full := make([]cloudclient.SiteDeployment, siteStatusLedgerPage)
+	for i := range full {
+		full[i] = cloudclient.SiteDeployment{ID: fmt.Sprintf("dep-%d", i), Status: "deferred", InsertedAt: ttwStamp(time.Duration(i) * time.Minute)}
+	}
+	w, _ := siteReadWindow(full)
+	if !w.PageFull {
+		t.Fatalf("a full page must be flagged as full: %+v", w)
+	}
+	var buf bytes.Buffer
+	out := newWriter(&buf, &buf)
+	renderSiteWindow(out, w)
+	if !strings.Contains(buf.String(), "older attempts exist that this status did not read") {
+		t.Fatalf("a full page must say the read ran out:\n%s", buf.String())
+	}
+	short, _ := siteReadWindow(full[:3])
+	if short.PageFull {
+		t.Fatalf("a short page must NOT claim it ran out: %+v", short)
+	}
+}
+
+// TestRunCloudSiteStatusDoesNotPromiseARequeueItCannotSee is charter D213, and it
+// is the sharpest correction in this slice.
+//
+// Both deferred-newest status lines used to end "(a rebuild is already re-queued)"
+// UNCONDITIONALLY. The CLI cannot see that: on site `search`, 47 of 523 content_rev
+// chains are deferred-only with no live and no failed row, and every one of them
+// got that promise. The single most reassuring clause in the owner paragraph was
+// the one the data contradicted.
+//
+// The replacement is a BLIND SPOT, not a loss claim — charter D212 settles the
+// abandonment as benign supersession (227 of 227 settled abandoned chains have a
+// later live row on the same site, ZERO do not), so "your publish was lost" would
+// be a second false claim pointing the other way.
+func TestRunCloudSiteStatusDoesNotPromiseARequeueItCannotSee(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-9","site_id":"` + testSiteID + `","status":"deferred","stage":"PLAN","inserted_at":"2026-08-07T10:20:00Z",` +
+		`"failure_class":"BOX_AT_CAPACITY_DEFERRED","deferral_depth":4,"deferral_bound":12}],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if strings.Contains(stdout, "a rebuild is already re-queued") {
+		t.Fatalf("the CLI must not assert a re-queue no row on the page shows:\n%s", stdout)
+	}
+	for _, want := range []string{
+		"the NEWEST deploy was DEFERRED by the box",
+		"nothing newer than it is on the page this status read",
+		"not visible from here",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the deferred header must name its blind spot (%q):\n%s", want, stdout)
+		}
+	}
+	// The register is "we cannot see one", never a loss claim (charter D212).
+	for _, banned := range []string{"was lost", "dropped your", "abandoned"} {
+		if strings.Contains(stdout, banned) {
+			t.Fatalf("a benign supersession must not be narrated as a loss (%q):\n%s", banned, stdout)
+		}
+	}
+}
+
+// TestSiteRequeueVisibleNeedsANewerUnsettledRow is the other arm of the same
+// predicate: it says YES only on evidence, and the evidence is narrow on purpose.
+// A newer FAILED or LIVE row is not the refused round being retried, and an
+// unparseable stamp on either side proves nothing — refusing to guess here is
+// exactly what the unconditional clause failed to do.
+func TestSiteRequeueVisibleNeedsANewerUnsettledRow(t *testing.T) {
+	refused := cloudclient.SiteDeployment{ID: "dep-d", Status: "deferred", InsertedAt: "2026-08-07T10:00:00Z"}
+	newerQueued := cloudclient.SiteDeployment{ID: "dep-q", Status: "queued", InsertedAt: "2026-08-07T10:05:00Z"}
+	newerLive := cloudclient.SiteDeployment{ID: "dep-l", Status: "live", InsertedAt: "2026-08-07T10:05:00Z"}
+	olderQueued := cloudclient.SiteDeployment{ID: "dep-o", Status: "queued", InsertedAt: "2026-08-07T09:00:00Z"}
+	stampless := cloudclient.SiteDeployment{ID: "dep-s", Status: "queued"}
+
+	if !siteRequeueVisible(refused, []cloudclient.SiteDeployment{newerQueued, refused}) {
+		t.Fatal("a newer unsettled row IS a visible re-queue")
+	}
+	for _, ledger := range [][]cloudclient.SiteDeployment{
+		{newerLive, refused},
+		{refused, olderQueued},
+		{stampless, refused},
+		{refused},
+		nil,
+	} {
+		if siteRequeueVisible(refused, ledger) {
+			t.Fatalf("no evidence of a re-queue in %+v", ledger)
+		}
+	}
+	// A refused row with no stamp of its own can order nothing and must refuse.
+	if siteRequeueVisible(cloudclient.SiteDeployment{ID: "dep-d", Status: "deferred"}, []cloudclient.SiteDeployment{newerQueued}) {
+		t.Fatal("an unstamped refused row cannot prove anything is newer than it")
+	}
+	if c := siteRequeueClause(refused, []cloudclient.SiteDeployment{newerQueued, refused}); !strings.Contains(c, "already on this site's ledger") {
+		t.Fatalf("a proven re-queue may be claimed: %q", c)
+	}
+}
+
+// TestRunCloudSiteStatusWindowOverAFailedNewestFixture proves the census on the
+// newest-failed-over-an-older-live shape BY FIXTURE, and that is deliberate:
+// charter D228h measured the population EMPTY across all 13 sites (the two
+// failed-newest sites have no older live row at all), so a criterion phrased
+// against a live site would have forced a fabricated pass.
+func TestRunCloudSiteStatusWindowOverAFailedNewestFixture(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[` +
+		`{"id":"dep-9","site_id":"` + testSiteID + `","status":"failed","stage":"BUILD","inserted_at":"2026-08-07T11:00:00Z","failure_reason":"the build command exited non-zero — nothing was switched","failure_class":"BUILD_FAILED"},` +
+		`{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","inserted_at":"2026-08-07T09:00:00Z","became_live_at":"2026-08-07T09:01:00Z"}` +
+		`],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	// The staleness arm is untouched — the census rides BESIDE it, never over it.
+	if !strings.Contains(stdout, "NEWEST deploy FAILED") {
+		t.Fatalf("the failed-newest half-truth must survive the census:\n%s", stdout)
+	}
+	for _, want := range []string{
+		"2 attempts read, from 2026-08-07T09:00:00Z to 2026-08-07T11:00:00Z",
+		"0 of 2 deferred by the box",
+		"1 of 2 live",
+		"1 of 2 failed",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the window must carry %q:\n%s", want, stdout)
+		}
+	}
+}
+
+// TestSiteWindowAccountsForEveryRowItRead is the review fix (W14): the census's
+// buckets must be EXHAUSTIVE over the page it read.
+//
+// The first cut counted deferred/live/failed/waiting only, so a `cancelled` row
+// landed in no bucket at all: the paragraph printed "12 of 20 deferred · 3 of 20
+// live · 1 of 20 failed", the reader subtracted, and the remaining rows were
+// simply gone with no name and no note. That is the same class of defect as the
+// unnamed window one layer up — a census that cannot account for its own
+// denominator invites the reader to invent the difference.
+//
+// The identity is asserted on the STRUCT (so it holds for every caller) and the
+// unnamed residue is proven to surface in the human block rather than vanish.
+func TestSiteWindowAccountsForEveryRowItRead(t *testing.T) {
+	ledger := []cloudclient.SiteDeployment{
+		{ID: "d1", Status: "deferred", InsertedAt: "2026-08-07T10:00:00Z"},
+		{ID: "d2", Status: "live", InsertedAt: "2026-08-07T09:00:00Z"},
+		{ID: "d3", Status: "failed", InsertedAt: "2026-08-07T08:00:00Z"},
+		{ID: "d4", Status: "building", InsertedAt: "2026-08-07T07:00:00Z"},
+		{ID: "d5", Status: "cancelled", InsertedAt: "2026-08-07T06:00:00Z"},
+		{ID: "d6", Status: "canceled", InsertedAt: "2026-08-07T05:00:00Z"},
+		{ID: "d7", Status: "quiesced-by-a-word-this-cli-has-never-seen", InsertedAt: "2026-08-07T04:00:00Z"},
+		{ID: "d8", Status: "", InsertedAt: "2026-08-07T03:00:00Z"},
+	}
+	w, ok := siteReadWindow(ledger)
+	if !ok {
+		t.Fatal("a page with rows is a window")
+	}
+	sum := w.Deferred + w.Live + w.Failed + w.Waiting + w.Cancelled + w.Other
+	if sum != w.Rows {
+		t.Fatalf("the buckets must account for every row read: %d != %d (%+v)", sum, w.Rows, w)
+	}
+	if w.Cancelled != 2 {
+		t.Fatalf("both spellings of cancelled must be counted: %+v", w)
+	}
+	// A status word this CLI has never seen is still NON-TERMINAL, so it is a wait
+	// — the honest reading, and the reason `other` is a narrow safety net rather
+	// than a catch-all. Only a row carrying no status at all lands there.
+	if w.Waiting != 2 {
+		t.Fatalf("an unrecognised non-terminal status is a wait: %+v", w)
+	}
+	if w.Other != 1 {
+		t.Fatalf("a status-less row must land in the named residue, not in nothing: %+v", w)
+	}
+
+	var buf bytes.Buffer
+	renderSiteWindow(newWriter(&buf, &buf), w)
+	for _, want := range []string{
+		"2 of 8 cancelled",
+		"1 of 8 in another state this CLI does not name",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Fatalf("the residue must be printed, not dropped (%q):\n%s", want, buf.String())
+		}
+	}
+
+	m := siteWindowMap(w)
+	// Emitted at zero too, or the identity is unwritable by a machine reader.
+	empty, _ := siteReadWindow([]cloudclient.SiteDeployment{{ID: "d1", Status: "live", InsertedAt: "2026-08-07T10:00:00Z"}})
+	for _, k := range []string{"cancelled_count", "other_count"} {
+		if _, present := m[k]; !present {
+			t.Fatalf("%s missing from the json census: %+v", k, m)
+		}
+		if _, present := siteWindowMap(empty)[k]; !present {
+			t.Fatalf("%s must be present even at zero: %+v", k, siteWindowMap(empty))
+		}
+	}
+	// And the census's own key guards still hold for the new keys.
+	for k := range m {
+		for _, banned := range []string{"rate", "percent", "deferral_depth"} {
+			if strings.Contains(k, banned) {
+				t.Fatalf("window key %q carries the banned substring %q", k, banned)
+			}
+		}
 	}
 }

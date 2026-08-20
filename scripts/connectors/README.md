@@ -417,6 +417,35 @@ The **live** credentialed turn still rides the human gate
 `connectors-hg-live-isolated-cloud-turn` — this preflight only certifies the host
 is *ready* for it.
 
+## The live-turn driver (W35, D270) — `w35-live-turn-driver.sh`
+
+The instrument the human sitting drives to close the live-success gates. Neither
+committed harness can: `w11-isolated-turn-proof.sh` injects a **bogus** key and
+hard-asserts the 401 (a real-key success FAILS it), and
+`w14-session-sandbox-proof.sh` is hermetic (fake vercel, no real sandbox). The
+driver runs the REAL shim with a REAL `ANTHROPIC_API_KEY` and asserts SUCCESS —
+it never modifies the proven harnesses.
+
+```bash
+scripts/connectors/w35-live-turn-driver.sh bake         # LIVE: warm snapshot (npm pin check BEFORE create); prints export CLOUD_SANDBOX_SNAPSHOT=<id>
+scripts/connectors/w35-live-turn-driver.sh single       # LIVE: one real turn; asserts result frame is_error absent/false
+scripts/connectors/w35-live-turn-driver.sh multiturn    # LIVE: --session-id turn 1, --resume turn 2; asserts codeword recall
+scripts/connectors/w35-live-turn-driver.sh teardown <id>  # LIVE: remove + snapshot sweep + ls/snapshots-ls clean asserts
+scripts/connectors/w35-live-turn-driver.sh --self-test  # hermetic (fake vercel, no credentials) — what CI runs
+```
+
+Every live mode runs `preflight-vercel.sh` FIRST and refuses loud. Key custody
+(D110): the key rides the driver's own env → the shim's single `--env` pair,
+never argv/logs — the self-test plants a key and proves it. Egress honesty:
+with `CLOUD_SANDBOX_SNAPSHOT` set the create argv carries `--allowed-domain`;
+without it the driver **warns loudly** that the turn is allow-all (the lock
+rides ONLY the snapshot branch). An EXIT trap removes session sandboxes, deletes
+stop-snapshots, and asserts both `sandbox ls` and `sandbox snapshots ls` are
+clean — spend bound ≤2 sandboxes / ≤10m each / snapshots deleted same sitting
+(D279). The self-test includes a **mutation leg** (drop the `--resume` flag ⇒
+the wiring check goes RED). The ONE consolidated human packet for all five live
+gates: [`connectors/docs/live-gates-packet.md`](../../connectors/docs/live-gates-packet.md).
+
 ## Gate
 
 ```bash
@@ -432,7 +461,9 @@ bash -n scripts/connectors/d10-vercel-sandbox-coldstart.sh scripts/connectors/d1
   && shellcheck -S error scripts/connectors/w14-session-sandbox-proof.sh \
   && scripts/connectors/w14-session-sandbox-proof.sh \
   && shellcheck -S error scripts/connectors/preflight-vercel.sh \
-  && scripts/connectors/preflight-vercel.sh --self-test
+  && scripts/connectors/preflight-vercel.sh --self-test \
+  && shellcheck -S error scripts/connectors/w35-live-turn-driver.sh \
+  && scripts/connectors/w35-live-turn-driver.sh --self-test
 ```
 
 ## What Wave 11 does NOT do (filed as backlog)
