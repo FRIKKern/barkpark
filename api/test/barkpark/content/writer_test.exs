@@ -234,15 +234,28 @@ defmodule Barkpark.Content.WriterTest do
   # _guard` for anything that got past it (the Repo call that follows blows up
   # for want of a sandbox in this async unit case — that blow-up is the signal,
   # not a failure).
+  #
+  # The rescue is NARROW on purpose. A bare `rescue _ -> :passed_the_guard`
+  # reports success for ANY exception — including one raised by the guard
+  # itself — so the two "is NOT refused" tests below could not have failed for
+  # the right reason. Only the sandbox's own ownership/connection errors count
+  # as "reached the Repo"; anything else re-raises and reds the test.
   defp guard_verdict(attrs) do
     case Writer.create_document("post", attrs, "test") do
       {:error, %Ecto.Changeset{errors: [{:unknown_fields, _}]}} -> :refused
       _ -> :passed_the_guard
     end
   rescue
-    _ -> :passed_the_guard
+    e in [DBConnection.OwnershipError, DBConnection.ConnectionError] ->
+      _ = e
+      :passed_the_guard
   catch
-    :exit, _ -> :passed_the_guard
+    # An ownership failure can also arrive as an exit from the checkout proc.
+    :exit, {reason, _} when reason in [:noproc, :normal, :shutdown] ->
+      :passed_the_guard
+
+    :exit, {:timeout, _} ->
+      :passed_the_guard
   end
 
   # ── validate_task_kind/2 ──────────────────────────────────────────────────
