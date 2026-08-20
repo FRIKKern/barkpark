@@ -81,6 +81,17 @@ defmodule Barkpark.Content.Writer do
   write. Fires `:after_save` asynchronously after a successful write.
   """
   def create_document(type, attrs, dataset, opts \\ []) do
+    # [collide-refusal] Refuse the mixed shape BEFORE the envelope coercion —
+    # see `refuse_orphan_top_level_keys/1` for the full reasoning. All four
+    # create-family verbs (create / createOrReplace / createIfNotExists /
+    # replace) funnel through this one function, so the gate covers the family
+    # rather than one instance.
+    with :ok <- refuse_orphan_top_level_keys(attrs) do
+      do_create_document_from_attrs(type, attrs, dataset, opts)
+    end
+  end
+
+  defp do_create_document_from_attrs(type, attrs, dataset, opts) do
     attrs = from_envelope(attrs)
     raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || generate_id(type)
     doc_id = DraftId.draft_id(raw_id)
@@ -1187,6 +1198,89 @@ defmodule Barkpark.Content.Writer do
           "content" => content
         }
     end
+  end
+
+  # [collide-refusal] The mixed-shape data loss (Gyldendal field report #3).
+  #
+  # `from_envelope/1` above has exactly two behaviours, and the branch it takes
+  # is decided by ONE test: "is there a map under the key `content`". On the
+  # flat branch every non-reserved top-level key is folded into `content`. On
+  # the content-present branch attrs pass through UNCHANGED — and then
+  # `Document.changeset/2`'s `cast/3` whitelist (12 column names) silently
+  # discards every top-level key that is not a column. Nobody wrote a line that
+  # says "discard this"; the write answered 200 with the fields gone.
+  #
+  # THE TRIGGER IS A FIELD-NAME COLLISION, NOT A MALFORMED REQUEST. A purely
+  # flat document whose own editorial field happens to be named `content` — a
+  # Norwegian localized body, `content: %{"nb" => "brodtekst"}` — takes the
+  # legacy-envelope branch without ever intending to use the legacy envelope,
+  # and loses `slug`, `publishedAt`, `authorRef`. A bulk migration is safe until
+  # ONE document type names a field `content`; then that type, and only that
+  # type, loses everything else, silently, at scale.
+  #
+  # WHY THIS REFUSES AND MUST NEVER FOLD — do not "improve" this into a merge.
+  # `Content.Mutations.incoming_content/1` (mutations.ex, the ledger
+  # close-bypass guard) resolves the payload through this SAME
+  # `from_envelope/1`. On a mixed shape it therefore sees only the nested
+  # `content` map and is BLIND to flat siblings. That is safe today ONLY
+  # because the cast strip stops those siblings landing. Folding orphan keys
+  # into `content` would let a flat `lifecycle_status: "done"` beside a content
+  # map land while `incoming_content` never saw it — a task-lifecycle bypass.
+  # Refuse; do not fold.
+  #
+  # Loud, not advisory: a warning in a bulk migration is precisely how the
+  # field report happened. The refusal names EVERY discarded key, taken at the
+  # line that would have thrown them away, so the caller can fix the payload in
+  # one pass. `_id` stays exempt — `from_envelope/1` legitimately consumes it
+  # into `doc_id` — as does every other member of `@reserved_in`.
+  #
+  # Only string keys are considered: `@reserved_in` is a string list and the
+  # HTTP/envelope shape this guards is always string-keyed. Internal callers
+  # that build atom-keyed attrs are out of scope for this refusal (all of them
+  # pass reserved keys only).
+  #
+  # `ifMatch` / `ifRevisionID` ride on the mutation payload as OPTIMISTIC-LOCK
+  # CONTROL, not as document data — `Content.Mutations.if_rev/1` reads them off
+  # the same map before handing it here — so they are exempt alongside
+  # `@reserved_in`. They are exempt HERE only; adding them to `@reserved_in`
+  # would change what `from_envelope/1` folds on the flat branch, which is a
+  # different question and not this refusal's to answer.
+  @collide_exempt @reserved_in ++ ~w(ifMatch ifRevisionID)
+
+  defp refuse_orphan_top_level_keys(%{} = attrs) do
+    if is_map(Map.get(attrs, "content")) do
+      case attrs
+           |> Map.drop(@collide_exempt)
+           |> Map.keys()
+           |> Enum.filter(&is_binary/1)
+           |> Enum.sort() do
+        [] -> :ok
+        orphans -> {:error, orphan_keys_changeset(orphans)}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp refuse_orphan_top_level_keys(_attrs), do: :ok
+
+  # Surfaced as the canonical `validation_failed` 422 envelope
+  # (`Content.Errors` already maps `{:error, %Ecto.Changeset{}}` there), keyed
+  # under `unknown_fields` so a machine consumer keys on one field and a human
+  # reads the names. A dedicated error code would mean a new `@hints` member
+  # and an OpenAPI regeneration for a refusal that IS a validation failure.
+  defp orphan_keys_changeset(orphans) do
+    %Document{}
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.add_error(
+      :unknown_fields,
+      "top-level keys %{fields} are not document columns and would be silently " <>
+        "discarded because this payload also carries a `content` map. Move them " <>
+        "INSIDE `content`, or drop the `content` key so the flat envelope folds " <>
+        "them for you. (A document whose own field is named `content` takes the " <>
+        "legacy-envelope branch — rename that field or nest the whole document.)",
+      fields: Enum.join(orphans, ", ")
+    )
   end
 
   # [ifmatch-unfenced-update] Rev-fenced UPDATE — the write-path mirror of

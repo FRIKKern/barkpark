@@ -59,6 +59,201 @@ defmodule BarkparkWeb.MutateControllerTest do
     })
   end
 
+  # [collide-refusal] Gyldendal field report #3 — the mixed shape used to
+  # answer 200 while dropping every flat sibling key.
+  #
+  # `Writer.from_envelope/1` branches on "is there a MAP under `content`". On
+  # that branch attrs pass through unchanged, and `Document.changeset/2`'s
+  # 12-column `cast/3` whitelist then discards every non-column top-level key —
+  # silently, with no warnings key in the response. THE TRIGGER IS A FIELD-NAME
+  # COLLISION, not a malformed request: a purely flat document whose own
+  # editorial field is named `content` takes the legacy-envelope branch it never
+  # meant to use.
+  #
+  # MEASURED ON UNPATCHED main (2026-08-20): status 200, stored content
+  # %{"nb" => "brodtekst"}, LOST ["authorRef", "publishedAt", "slug"], response
+  # body keys exactly ["results", "transactionId"].
+  #
+  # The fix REFUSES and must never fold — `Content.Mutations.incoming_content/1`
+  # resolves through the same `from_envelope/1` and is blind to flat siblings,
+  # so folding them into `content` would ship a task-lifecycle bypass. See the
+  # `[collide-refusal]` comment in content/writer.ex.
+  describe "mixed-shape refusal (field-report #3)" do
+    setup do
+      Content.upsert_schema(
+        %{"name" => "artikkel", "title" => "Artikkel", "visibility" => "public", "fields" => []},
+        "test"
+      )
+
+      :ok
+    end
+
+    test "MIXED shape is 422 and names every discarded key", %{conn: conn} do
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "collide-mixed",
+              "_type" => "post",
+              "title" => "Mixed",
+              "content" => %{"body" => "hi"},
+              "slug" => "the-slug",
+              "publishedAt" => "2026-08-20",
+              "authorRef" => "a-1"
+            }
+          }
+        ])
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "validation_failed"
+      assert [message] = body["error"]["details"]["unknown_fields"]
+      assert message =~ "authorRef, publishedAt, slug"
+      # Refused means REFUSED: nothing landed, not even the content map.
+      assert {:error, _} = Content.get_document("drafts.collide-mixed", "post", "test")
+    end
+
+    test "COLLIDE shape — the document's OWN field is named content — is 422, not 200",
+         %{conn: conn} do
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "collide-nb",
+              "_type" => "artikkel",
+              "title" => "Kollisjon",
+              "content" => %{"nb" => "brodtekst"},
+              "slug" => "kollisjon",
+              "publishedAt" => "2026-08-20",
+              "authorRef" => "forfatter-1"
+            }
+          }
+        ])
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert [message] = body["error"]["details"]["unknown_fields"]
+      assert message =~ "authorRef, publishedAt, slug"
+      assert {:error, _} = Content.get_document("drafts.collide-nb", "artikkel", "test")
+    end
+
+    # It is the shared create spine that drops, not one verb — so pin the
+    # refusal on each door individually rather than trusting the shared path.
+    for {verb, id} <- [
+          {"create", "collide-v-create"},
+          {"createOrReplace", "collide-v-cor"},
+          {"createIfNotExists", "collide-v-cine"},
+          {"replace", "collide-v-replace"}
+        ] do
+      test "#{verb} refuses the mixed shape", %{conn: conn} do
+        verb = unquote(verb)
+        id = unquote(id)
+
+        # `replace` reads FIRST and 404s an absent id, so give it a row to
+        # replace — the refusal must still win over a successful overwrite.
+        if verb == "replace" do
+          assert mutate(conn, [
+                   %{
+                     "create" => %{
+                       "_id" => id,
+                       "_type" => "post",
+                       "title" => "seed",
+                       "content" => %{"body" => "seed"}
+                     }
+                   }
+                 ]).status == 200
+        end
+
+        resp =
+          mutate(conn, [
+            %{
+              verb => %{
+                "_id" => id,
+                "_type" => "post",
+                "title" => "Mixed",
+                "content" => %{"body" => "hi"},
+                "slug" => "the-slug"
+              }
+            }
+          ])
+
+        assert resp.status == 422
+        body = Jason.decode!(resp.resp_body)
+        assert [message] = body["error"]["details"]["unknown_fields"]
+        assert message =~ "slug"
+      end
+    end
+
+    test "the legitimate FLAT shape (no content key) still folds and lands", %{conn: conn} do
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "collide-flat-ok",
+              "_type" => "post",
+              "title" => "Flat",
+              "slug" => "the-slug",
+              "publishedAt" => "2026-08-20"
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.collide-flat-ok", "post", "test")
+      assert doc.content["slug"] == "the-slug"
+      assert doc.content["publishedAt"] == "2026-08-20"
+    end
+
+    test "a reserved-keys-only payload with a content map still lands", %{conn: conn} do
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "collide-reserved-ok",
+              "_type" => "post",
+              "title" => "Reserved",
+              "status" => "draft",
+              "content" => %{"body" => "hi"}
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.collide-reserved-ok", "post", "test")
+      assert doc.content == %{"body" => "hi"}
+    end
+
+    # MEASURED, not assumed: a SCALAR `content` takes the FLAT branch
+    # (`from_envelope/1` guards on `is_map`), so the refusal correctly stays
+    # quiet and the siblings fold. But `"content"` is itself a member of
+    # `@reserved_in`, so the flat branch's `Map.drop(@reserved_in)` DISCARDS
+    # the scalar value — a narrower sibling of #3 that this slice does NOT
+    # fix (fixing it means changing what `from_envelope/1` folds, a different
+    # question). Pinned here so the loss is a recorded fact rather than a
+    # surprise; filed as gfr-w1-flat-scalar-content-key-drop on the wave ledger.
+    test "a SCALAR content field takes the flat branch — siblings fold, the scalar is dropped",
+         %{conn: conn} do
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "collide-scalar-ok",
+              "_type" => "post",
+              "title" => "Scalar",
+              "content" => "just text",
+              "slug" => "the-slug"
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.collide-scalar-ok", "post", "test")
+      assert doc.content["slug"] == "the-slug"
+      # KNOWN GAP, not an endorsement — see the comment above.
+      assert doc.content["content"] == nil
+    end
+  end
+
   # The ledger's back door (cch-w1-ledger-close-guard, epic decision D22).
   #
   # OBSERVED LIVE before the guard: a `type:task` row went `open` → `done`
