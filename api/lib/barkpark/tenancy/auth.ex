@@ -16,10 +16,106 @@ defmodule Barkpark.Tenancy.Auth do
       authorization combines membership AND the role.
 
   `authorize/3` is the single entry point the router and controllers call.
-  It is total: any non-member, unknown action, or unrecognised principal is
-  denied. Cross-tenant isolation is guaranteed by the membership lookup being
-  keyed on `(principal_id, workspace_id, principal_type)` — a principal with
-  no membership row in a workspace can never be authorized there.
+  Cross-tenant isolation is guaranteed by the membership lookup being keyed on
+  `(principal_id, workspace_id, principal_type)` — a principal with no
+  membership row in a workspace can never be authorized there.
+
+  ## Fail closed, not fail crash (the READ predicates)
+
+  The read predicates — `membership/2`, `membership_role/2`, `member?/2`,
+  `workspace_admin?/2` and `authorize/3` — DENY on malformed or absent input
+  instead of raising. Until this seam landed, the prose here claimed a totality
+  the module did not have: `membership/2` had no terminal clause, so a `nil` or
+  non-binary in EITHER id position raised `FunctionClauseError`, and any
+  non-castable binary (the empty string included) raised `Ecto.Query.CastError`
+  from the `:binary_id` comparison inside `Repo.one`. Note the module name:
+  `Ecto.Query.CastError`, NOT `Ecto.CastError` — the latter fires zero times on
+  this path, so a test asserting it would be vacuous.
+
+  The HTTP truth those raises produced, stated plainly because it corrects the
+  original finding: `Ecto.Query.CastError` is mapped to **400** by
+  `phoenix_ecto`, so the non-castable-STRING class was a 400 `internal_error`;
+  only the `nil` / non-binary `FunctionClauseError` class fell through to
+  Plug's `Any` fallback and was a **500**. Both are now a clean denial.
+  (Comments elsewhere in this repo phrase this class as "CastError -> 500"; on
+  this path that phrasing is wrong on both the module and the status.)
+
+  Do NOT read the seam as "a malformed id never reaches the query".
+  `Ecto.UUID.cast/1` accepts any 16-byte binary as raw UUID bytes — a 16-byte
+  input is normalised into a well-formed synthetic UUID, DOES reach the query,
+  and denies by matching no row. That admits one real WIDENING, recorded here
+  rather than smuggled: the raw 16 bytes of a live workspace id used to crash
+  and now RESOLVE the real membership row. No privilege is gained (producing
+  those bytes requires already holding the id), but it is a behaviour change on
+  a security path. Normalisation is `Ecto.UUID.cast/1` and nothing else —
+  deliberately no `String.trim/1`, because a whitespace-padded id denies today
+  and making it resolve would be a widening disguised as a convenience.
+
+  ## What is deliberately NOT totalised
+
+    * The WRITE constructors stay LOUD. `create_membership/2,3,4` and
+      `role_for_permissions/1` still raise on malformed input, on purpose:
+      three `create_membership` callers DISCARD the return value (the app-token
+      controller binds it to `_`; SSO and SCIM call it as a bare expression
+      inside a `for`), so a silent denial there would provision a principal
+      with NO SEAT and report success. Every caller derives its ids from an
+      already-loaded row, so the crash is unreachable from client input anyway.
+    * `role_permits?/3` and `granted_actions/2` take NO id guard. A built-in
+      role name is workspace-id-INDEPENDENT by design — it resolves from the
+      compiled-in `@builtin_role_actions` map BEFORE any DB read, so a tenant
+      can never redefine `admin` to escalate. `role_permits?("admin", "",
+      :admin)` is `true` today and MUST stay true; a guard above that lookup
+      would silently TIGHTEN authorization. The cast guard therefore sits on
+      the DB read inside `db_actions/2` alone — the only branch a CUSTOM
+      (non-built-in) role name reaches.
+
+  ## Two distinctions this module must not blur
+
+    * `authorize/3` is NOT an admin gate; `workspace_admin?/2` is. `authorize/3`
+      answers "is this principal a MEMBER here, and does its grant satisfy the
+      action" — where the grant is the token's GLOBAL `permissions[]` for an
+      `%ApiToken{}` and the membership ROLE for a `%User{}`. It never reads
+      `membership.role` for a token, so a global-admin token added to workspace
+      B as a plain `member` PASSES `authorize(tok, B, :admin)` and correctly
+      FAILS `workspace_admin?(tok, B)`. That divergence IS the cross-tenant
+      admin bypass fix (barkpark-23yi / barkpark-fsko); it is load-bearing and
+      the two predicates must never be "unified".
+    * A scope-bound share-EDIT token (`Barkpark.Auth.create_share_token/5`)
+      carries a non-nil `workspace_id` but is inserted with a plain
+      `Repo.insert` — never the membership-creating path — so it has NO
+      membership row and EVERY predicate here denies it. That is CORRECT: its
+      authority comes from `BarkparkWeb.Plugs.RequireShareEditToken`, which
+      sets `:share_public` so `ResolveWorkspace` skips the membership gate.
+      Routing a share-token-reachable surface through `authorize/3` would deny
+      the entire class. What actually refuses such a token on the flat
+      `/v1/shares*` admin routes is neither this module nor `RequireAdmin`: the
+      `:api` pipeline runs `BarkparkWeb.Plugs.OptionalToken` BEFORE
+      `:require_admin`, and `OptionalToken` halts 403 via
+      `RequireToken.share_token_off_surface?/2`.
+
+  ## A BARE principal id is ambiguous — say which kind it is
+
+  Every predicate here also accepts a raw id binary, and a raw id carries NO
+  discriminator: nothing in `"3f2a…"` says whether it names an api_token or a
+  user. The 2-arity raw-binary path reads it as an **api_token** — that is the
+  historical contract, every in-tree caller that passes a bare id passes a
+  TOKEN id, and re-reading it as "whichever row exists" would silently WIDEN a
+  user id into a token's grant. The hazard it used to carry is that the wrong
+  guess was SILENT: `workspace_admin?(user.id, ws)` answered `false` for a user
+  holding a genuine admin seat, indistinguishable from a real denial, and a
+  silent FALSE on an admin gate is a lockout nobody reports as a security bug.
+
+  So state the kind. `membership/3`, `member?/3`, `membership_role/3` and
+  `workspace_admin?/3` take an explicit `:user | :api_token` and are the ONLY
+  correct way to ask about a raw id. The 2-arity raw-binary path keeps its
+  api_token reading byte-for-byte, and when that lookup misses while the same
+  id names a real USER member of that workspace it LOGS the mis-typed call
+  before denying. It still returns `nil` — the fail-closed posture above is not
+  traded for a raise on an authorization path — but it is no longer silent.
+
+  Out of scope: denying on a nil workspace ARGUMENT says nothing about a nil
+  `workspace_id` COLUMN on a token row. `task-46e7d44068e7185e` is NOT
+  answered by this seam.
 
   Action → satisfying grant:
 
@@ -33,6 +129,7 @@ defmodule Barkpark.Tenancy.Auth do
       * `:admin` ← "admin", "owner"
   """
   import Ecto.Query, warn: false
+  require Logger
 
   alias Barkpark.Repo
   alias Barkpark.Accounts.User
@@ -41,6 +138,10 @@ defmodule Barkpark.Tenancy.Auth do
 
   @type action :: :read | :write | :admin
   @type principal :: ApiToken.t() | User.t() | binary()
+
+  # The membership `principal_type` discriminator, as an argument. A raw id
+  # binary cannot carry it, so the 3-arity predicates take it explicitly.
+  @type principal_kind :: :user | :api_token
 
   # Which permission strings satisfy each action (API-token principals).
   @read_perms ~w(read admin public-read)
@@ -78,6 +179,25 @@ defmodule Barkpark.Tenancy.Auth do
   workspace creator → `owner`; a token's home-workspace mint binding → its
   perms-derived role) pass `role` EXPLICITLY. Returns the inserted membership
   or a changeset error (e.g. the principal is already a member of the workspace).
+
+  ## HAZARD — `principal_type` DEFAULTS to `"api_token"`
+
+  The fourth argument is the `principal_type` DISCRIMINATOR, and it defaults.
+  An implicit default on a discriminator column means a USER grant written as
+  `create_membership(ws.id, user.id, "admin")` silently inserts an
+  **api_token**-typed row for a user principal. Every user-granting caller in
+  `api/lib` passes `"user"` EXPLICITLY (`Barkpark.SSO`, `Barkpark.SCIM`, the
+  app-token controller, the session controller), so no shipped row is
+  mis-typed — but a TEST that omits it is this repo's proven vacuous-green
+  generator, and it fails in the most confusing shape available: the row is
+  invisible to `membership(%User{}, ws)`, so `authorize/3` DENIES, while the
+  bare-id arm of `workspace_admin?(user.id, ws)` reads TRUE off the mis-typed
+  row. A whole user axis can go green while proving nothing — a wave-10
+  verifier reproduced exactly that. Pass `"user"` EXPLICITLY for a user grant.
+  `test/barkpark/tenancy/auth_principal_kind_test.exs` pins this hazard, and
+  the deliberate mis-typed row at `test/barkpark/org_session_policy_test.exs`
+  is why the default is documented rather than inferred: inferring the kind
+  from the id would rewrite that row's meaning.
   """
   @spec create_membership(binary(), binary(), String.t(), String.t()) ::
           {:ok, Membership.t()} | {:error, Ecto.Changeset.t()}
@@ -118,36 +238,106 @@ defmodule Barkpark.Tenancy.Auth do
 
   @doc """
   Fetch the Membership for a token (or principal id) in a workspace, or nil.
-  Accepts either an `%ApiToken{}` struct or a raw principal id binary.
+
+  A STRUCT argument is unambiguous: `%ApiToken{}` resolves a
+  `principal_type: "api_token"` row, `%User{}` a `principal_type: "user"` row.
+  The `principal_type` discriminator IS the cross-kind isolation, so a user id
+  can never accidentally match a token's grant.
+
+  A RAW id binary is NOT unambiguous — see the moduledoc. This arity reads it
+  as an **api_token** id (unchanged, historical contract). If you hold a raw id
+  whose kind you know, call `membership/3` and say so; passing a bare USER id
+  here answers `nil` and logs the mis-typed call.
   """
   @spec membership(principal(), binary()) :: Membership.t() | nil
   def membership(%ApiToken{id: principal_id}, workspace_id),
-    do: membership(principal_id, workspace_id)
+    do: membership(principal_id, workspace_id, :api_token)
 
   # A User principal resolves to a `principal_type: "user"` membership row.
-  # Kept SEPARATE from the raw-binary clause below (which defaults to
-  # "api_token") so a user id can never accidentally match a token's grant —
-  # the principal_type discriminator IS the cross-tenant/cross-kind isolation.
-  def membership(%User{id: principal_id}, workspace_id)
-      when is_binary(principal_id) and is_binary(workspace_id) do
-    Repo.one(
-      from m in Membership,
-        where:
-          m.principal_id == ^principal_id and
-            m.workspace_id == ^workspace_id and
-            m.principal_type == "user"
-    )
-  end
+  # Kept SEPARATE from the raw-binary clause below (which reads "api_token") so
+  # a user id can never accidentally match a token's grant.
+  def membership(%User{id: principal_id}, workspace_id),
+    do: membership(principal_id, workspace_id, :user)
 
+  # THE AMBIGUOUS ARM. A bare binary says nothing about its kind, and this arm
+  # keeps reading it as an api_token id — byte-identical to before for a real
+  # token member, because every in-tree bare-id caller passes a token id and
+  # re-reading it as "whichever row exists" would silently WIDEN a user id into
+  # a token's grant. What changed is that a WRONG guess is no longer silent:
+  # when the api_token lookup misses and the same id names a real USER member
+  # of this workspace, the caller asked the wrong question and gets told. The
+  # answer stays `nil` — #12616 made this module fail CLOSED rather than crash,
+  # and a raise on an authorization path is precisely the hazard that seam
+  # removed, so the signal is a LOG, not an exception. The probe costs one
+  # extra query only on the bare-id DENIAL path (struct callers delegate
+  # straight to `membership/3` and never reach it).
   def membership(principal_id, workspace_id)
       when is_binary(principal_id) and is_binary(workspace_id) do
-    Repo.one(
-      from m in Membership,
-        where:
-          m.principal_id == ^principal_id and
-            m.workspace_id == ^workspace_id and
-            m.principal_type == "api_token"
-    )
+    case membership(principal_id, workspace_id, :api_token) do
+      %Membership{} = membership -> membership
+      nil -> deny_bare_id(principal_id, workspace_id)
+    end
+  end
+
+  # TERMINAL DENIAL — the whole seam. Everything the struct/guarded heads above
+  # do not match (a nil, a non-binary, an unrecognised principal struct such as
+  # a %CallerContext{}) denies HERE instead of raising FunctionClauseError.
+  # It must stay CONTIGUOUS with the clause above: a def of another name
+  # between them emits "clauses with the same name and arity should be grouped
+  # together", which --warnings-as-errors turns into a failed build.
+  # (`%ApiToken{id: nil}` no longer lands here — it delegates as
+  # `membership(nil, ws, :api_token)` and denies on membership/3's terminal.)
+  def membership(_principal, _workspace_id), do: nil
+
+  @doc """
+  Fetch the Membership for a RAW principal id whose kind is stated EXPLICITLY.
+
+  This is the ONLY correct way to ask about a raw id: `principal_kind` is the
+  `principal_type` discriminator the id itself cannot carry. `:user` reads the
+  user row space, `:api_token` the token row space — never both, so this widens
+  nothing.
+
+  Same fail-closed posture as `membership/2`: a nil, a non-binary or an
+  unrecognised kind DENIES (returns nil) instead of raising.
+  """
+  @spec membership(binary(), binary(), principal_kind()) :: Membership.t() | nil
+  def membership(principal_id, workspace_id, principal_kind)
+      when is_binary(principal_id) and is_binary(workspace_id) and
+             principal_kind in [:user, :api_token] do
+    case {Repo.uuid_or_nil(principal_id), Repo.uuid_or_nil(workspace_id)} do
+      {pid, ws} when is_binary(pid) and is_binary(ws) ->
+        principal_type = Atom.to_string(principal_kind)
+
+        Repo.one(
+          from m in Membership,
+            where:
+              m.principal_id == ^pid and
+                m.workspace_id == ^ws and
+                m.principal_type == ^principal_type
+        )
+
+      _ ->
+        nil
+    end
+  end
+
+  # TERMINAL DENIAL for the explicit-kind arity, contiguous for the same
+  # grouped-clauses reason as membership/2's.
+  def membership(_principal_id, _workspace_id, _principal_kind), do: nil
+
+  # A bare id that matched no api_token membership. Deny either way; when the
+  # id names a real USER member here, the call was mis-typed — say so LOUDLY
+  # instead of handing back an answer to a question the caller did not ask.
+  defp deny_bare_id(principal_id, workspace_id) do
+    if membership(principal_id, workspace_id, :user) do
+      Logger.error(
+        "Tenancy.Auth: a BARE principal id was read as an api_token id but names a USER " <>
+          "member of this workspace — DENIED. Pass the %User{} struct, or the 3-arity " <>
+          "form with :user. principal_id=#{principal_id} workspace_id=#{workspace_id}"
+      )
+    end
+
+    nil
   end
 
   @doc "True when the token (or principal id) is a member of the workspace."
@@ -157,14 +347,36 @@ defmodule Barkpark.Tenancy.Auth do
   end
 
   @doc """
+  True when the RAW principal id of the STATED kind is a member of the
+  workspace. The unambiguous form of `member?/2` — see `membership/3`.
+  """
+  @spec member?(binary(), binary(), principal_kind()) :: boolean()
+  def member?(principal_id, workspace_id, principal_kind) do
+    not is_nil(membership(principal_id, workspace_id, principal_kind))
+  end
+
+  @doc """
   Authorize `token` to perform `action` in `workspace_id`.
 
   Returns `:ok` when the token is a member of the workspace AND its
   `permissions` satisfy the action; `{:error, :forbidden}` otherwise.
 
-  This is the function the router and controllers call. It is intentionally
-  total — any unknown action or a non-member returns `{:error, :forbidden}`
-  rather than raising.
+  This is the function the router and controllers call. It denies rather than
+  raising: an unknown action, an unrecognised principal shape, a non-member,
+  AND — since the `membership/2` seam — a malformed or absent id all return
+  `{:error, :forbidden}`.
+
+  That last class is NEW, and the catch-all clause below never covered it. The
+  catch-all is a SHAPE catch-all only: the `%ApiToken{}` arm guards just
+  `is_binary(workspace_id) and action in [...]`, so `""` and any non-UUID
+  string SATISFIED that guard, matched the arm, reached `Repo.one` and raised
+  `Ecto.Query.CastError` (HTTP 400) — never `Ecto.CastError`; and
+  `%ApiToken{id: nil}` raised `FunctionClauseError` (HTTP 500). Totality for
+  malformed input is inherited from `membership/2`, not declared here.
+
+  It is NOT an admin gate — see the module doc: a global-admin token that is a
+  plain `member` of workspace B passes `authorize(tok, B, :admin)` and must
+  still fail `workspace_admin?(tok, B)`.
   """
   @spec authorize(principal(), binary(), action()) :: :ok | {:error, :forbidden}
   def authorize(%ApiToken{} = token, workspace_id, action)
@@ -261,16 +473,27 @@ defmodule Barkpark.Tenancy.Auth do
     end
   end
 
+  # The ONLY id guard on the role path. `granted_actions/2` above answers for a
+  # built-in role WITHOUT consulting the workspace id at all, so the guard
+  # cannot sit any higher without flipping `role_permits?("admin", "", :admin)`
+  # from true to false — a silent authorization TIGHTENING. Here, a malformed
+  # workspace id yields no permission rows, i.e. a denial for a custom role.
   defp db_actions(role, workspace_id) do
-    Repo.all(
-      from rp in RolePermission,
-        join: r in Role,
-        on: rp.role_id == r.id,
-        where:
-          r.name == ^role and
-            (r.workspace_id == ^workspace_id or is_nil(r.workspace_id)),
-        select: rp.action
-    )
+    case Repo.uuid_or_nil(workspace_id) do
+      nil ->
+        []
+
+      ws_uuid ->
+        Repo.all(
+          from rp in RolePermission,
+            join: r in Role,
+            on: rp.role_id == r.id,
+            where:
+              r.name == ^role and
+                (r.workspace_id == ^ws_uuid or is_nil(r.workspace_id)),
+            select: rp.action
+        )
+    end
   end
 
   @doc """
@@ -327,6 +550,18 @@ defmodule Barkpark.Tenancy.Auth do
   end
 
   @doc """
+  The membership ROLE of a RAW principal id of the STATED kind. The
+  unambiguous form of `membership_role/2` — see `membership/3`.
+  """
+  @spec membership_role(binary(), binary(), principal_kind()) :: String.t() | nil
+  def membership_role(principal_id, workspace_id, principal_kind) do
+    case membership(principal_id, workspace_id, principal_kind) do
+      %Membership{role: role} -> role
+      nil -> nil
+    end
+  end
+
+  @doc """
   True when the token's membership ROLE in `workspace_id` confers admin
   authority (`owner` or `admin`). This is the per-membership admin gate: a
   `member` of B — even one holding global `admin` perms — is NOT a workspace
@@ -336,5 +571,18 @@ defmodule Barkpark.Tenancy.Auth do
   @spec workspace_admin?(principal(), binary()) :: boolean()
   def workspace_admin?(token_or_principal_id, workspace_id) do
     membership_role(token_or_principal_id, workspace_id) in @admin_roles
+  end
+
+  @doc """
+  True when a RAW principal id of the STATED kind holds admin authority in the
+  workspace. The unambiguous form of `workspace_admin?/2`.
+
+  Prefer this (or the struct form) whenever you hold a bare id: `workspace_admin?/2`
+  reads a bare binary as an api_token id, so a bare USER id answers `false` for
+  a user who genuinely holds an admin seat — a silent DENY on an admin gate.
+  """
+  @spec workspace_admin?(binary(), binary(), principal_kind()) :: boolean()
+  def workspace_admin?(principal_id, workspace_id, principal_kind) do
+    membership_role(principal_id, workspace_id, principal_kind) in @admin_roles
   end
 end

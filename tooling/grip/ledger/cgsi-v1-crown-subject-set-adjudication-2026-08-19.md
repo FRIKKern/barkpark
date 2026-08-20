@@ -15,10 +15,10 @@ Tree under test: `origin/main` @ `bf499f54b63135b8ae078305b83f2b5b2c078877` (NOT
 
 Scripts committed beside this file:
 
-    python3 tooling/grip/ledger/derive.py  "$D"   # membership of A and B, needs-closure
-    python3 tooling/grip/ledger/narrow.py  "$D"   # structural evidence scan (job name / own steps / job-adjacent prose)
-    python3 tooling/grip/ledger/f2.py      "$D"   # file-header prose rule (the false-red factory)
-    python3 tooling/grip/ledger/mirror.py  "$D"   # name-anchored 200-char window (mirror of the forward clause)
+    python3 tooling/grip/ledger/cgsi-subject-set-derive-2026-08-19.py  "$D"   # membership of A and B, needs-closure
+    python3 tooling/grip/ledger/cgsi-structural-evidence-scan-2026-08-19.py  "$D"   # structural evidence scan (job name / own steps / job-adjacent prose)
+    python3 tooling/grip/ledger/cgsi-file-header-prose-rule-2026-08-19.py  "$D"   # file-header prose rule (the false-red factory)
+    python3 tooling/grip/ledger/cgsi-name-anchored-window-2026-08-19.py  "$D"   # name-anchored 200-char window (mirror of the forward clause)
 
 ## Decisive numbers (2026-08-19)
 

@@ -449,6 +449,10 @@ func DefaultRegistry(theme Theme) *Registry {
 	// only under a TrueColor profile; ANSI-plain braille otherwise, byte-stable).
 	// W3 of the slate — the capstone (see chart.go).
 	r.blocks["chart"] = chartRenderer{}
+	// route: a sport track (encoded polyline in `polyline`) rasterised through
+	// the same braille dot-canvas as chart — the terminal twin of the web SVG
+	// track shape (data_viz.ex §route). Meta row + caption below the plot.
+	r.blocks["route"] = routeRenderer{}
 	// ── jarl figure family (duel / lineage) ───────────────────────────────────
 	// duel: a two-arm comparison — legend header + `label  valueA vs valueB`
 	// rows with the authored dim delta under each label (duel.go). lineage:

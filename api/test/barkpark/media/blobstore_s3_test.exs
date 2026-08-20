@@ -293,6 +293,38 @@ defmodule Barkpark.Media.Blobstore.S3Test do
     refute_received {:request, _, _}
   end
 
+  describe "download/2 caps the response body it will buffer" do
+    # HONESTY LIMIT: the Req.Test plug seam (Req's run_plug) PRE-BUFFERS the
+    # stub body and hands it to the `into:` collector as a SINGLE {:data} chunk,
+    # so this proves the over-cap REFUSAL, not a true mid-stream memory abort.
+    # In real (Finch) streaming the collector halts before the whole body lands
+    # in memory; here the full body is already in memory when the collector
+    # runs. What the test PINS is the fail-safe outcome: an over-cap body is
+    # refused and never written to the cache. Remove `into: download_collector()`
+    # from s3.ex download/2 and the full body is buffered, written and served —
+    # reddening BOTH assertions below.
+    test "an over-cap 200 body is refused and no truncated blob is cached" do
+      put_media_storage([])
+      rel = unique_rel("oversized.bin")
+      full = Media.file_path(rel)
+      on_exit(fn -> File.rm_rf(Path.dirname(full)) end)
+
+      # One byte past the 100 MB cap tied to the upload ceiling
+      # (endpoint.ex:155 / media_controller.ex:316). No legitimately-uploaded
+      # object can exceed it — an over-cap body is an out-of-band bucket writer.
+      oversized = :binary.copy("x", 100_000_001)
+
+      Req.Test.stub(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 200, oversized) end)
+
+      # Refused as a typed 503, exactly like any other download fault — the
+      # caller cannot tell an over-cap body from a black-hole bucket by shape.
+      assert {:error, :storage_unavailable} = S3.ensure_local(rel)
+
+      # The truncated partial body never reached the write-through cache.
+      refute File.exists?(full)
+    end
+  end
+
   test "ensure_local/1 answers {:error, :not_found} on a bucket 404 (row outlived blob)" do
     put_media_storage([])
 

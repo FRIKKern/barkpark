@@ -9,8 +9,8 @@ defmodule BarkparkCloud.Push.PushRelayReceiverTest do
 
     * signature contract (the box's Webhooks.Dispatcher scheme —
       `t=<unix>,v1=<hex>` = HMAC-SHA256 over "<t>.<raw-body>", ±300s):
-      valid → 202; forged / stale / tampered-body-under-valid-sig / missing →
-      401, nothing enqueued;
+      valid → 202; forged / stale / FUTURE-dated / tampered-body-under-valid-sig
+      / missing → 401, nothing enqueued;
     * TRUE replay dedupe (mob-bl-push-hardening): an identical signed re-send
       inside the window still 202s but enqueues ZERO new jobs
       (PushDeliveryWorker args-uniqueness); a fresh `blocked_since` — a
@@ -157,6 +157,26 @@ defmodule BarkparkCloud.Push.PushRelayReceiverTest do
       conn = deliver(bp.id, body, sign(secret, stale_ts, body))
 
       assert conn.status == 401
+      refute_enqueued(worker: PushDeliveryWorker)
+    end
+
+    # clk-w4 (TESTABILITY, not a defect). This route shares
+    # `InboundSignature.verify` with the content-publish receiver, whose future
+    # arm covers the verifier itself — this arm covers THIS route's own wiring,
+    # which is the second anonymously-reachable HMAC-only leg in cloud. The
+    # offset only has to clear the 300s tolerance; a wide one makes the arm
+    # immune to a test-host clock step between this line and the server's read.
+    test "a FUTURE-dated timestamp 401s too — the replay window is two-sided" do
+      team = team_fixture()
+      {bp, secret} = relay_barkpark(team)
+      register_device(member_fixture(team))
+
+      body = Jason.encode!(@payload)
+      future_ts = System.system_time(:second) + 3600
+      conn = deliver(bp.id, body, sign(secret, future_ts, body))
+
+      assert conn.status == 401
+      assert json_body(conn)["error"] == "bad_signature"
       refute_enqueued(worker: PushDeliveryWorker)
     end
 
