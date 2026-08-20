@@ -170,6 +170,39 @@ defmodule BarkparkCloud.FailureCopy do
 
   The DB stays RAW by design: only the JSON/email boundary scrubs, so ops
   recovery via `Repo.get(ProvisionJob, id).console` and the logs is unaffected.
+
+  ## ONE order, and the two entry points that carry it (dr-w22-s1)
+
+  `scrub/1`'s key clause opens with `(?<![A-Za-z0-9])`, and a CSI run parks an
+  alphanumeric (`m`) immediately LEFT of the key — so a colourised
+  `\\e[31mclient_secret=…\\e[0m` hides its key from the scrub, and the scrub then
+  leaves the value in place. Measured over 2,000 random values: 2000/2000 leaked
+  under `scrub |> strip_ansi`, 0/2000 under `strip_ansi |> scrub`. THE STRIP
+  MUST RUN FIRST, on every path.
+
+    * `raw/1` = `strip_ansi |> scrub` — the RAW-LOG entry point. Any boundary
+      that renders a remote capture without classifying it calls this.
+    * `humanize/1` = `classify |> strip_ansi |> scrub` — classify FIRST, because
+      its prefixes are anchored on the producer's template and an escape run can
+      sit between the prefix and the text (`BUILD failed (exit 12): \\e[22m`), so
+      stripping first would change what the classifier reads. The strip then
+      runs BEFORE the scrub, for the reason above.
+
+  deploy-reliability W2 S4 shipped `humanize/1` as `classify |> scrub |>
+  strip_ansi`, which leaked the SAME 2000/2000 on the unclassified terminal arm
+  — in clean cleartext, because the trailing strip removed the escape bytes the
+  scrub had been blocked by. Pinned now by
+  "raw-log order: strip_ansi BEFORE scrub…" AND by a `humanize/1` assertion on a
+  colourised non-prefixed key, in `failure_copy_test.exs`.
+
+  RESIDUAL, stated rather than hidden: the OSC shape
+  `"\\e]0;t\\ainapi_key=<secret>"` leaks under BOTH orders — stripping the OSC
+  leaves the `n` of `in` flush against the key, which re-blocks the same
+  lookbehind. Not closed here.
+
+  Provider-prefixed credentials (including our own `bppat_`/`bpcs_`) are
+  order-INDEPENDENT — that clause matches the token itself — so the order only
+  decides whether the key-shaped secrets survive.
   """
 
   # An extractor refusal code: `E_` followed by SCREAMING_SNAKE. Anchored on a
@@ -228,14 +261,48 @@ defmodule BarkparkCloud.FailureCopy do
     #
     # Same `@prose_value` guard, same reason: "token: expired" and
     # "no api_key: set in the config file" are status prose, not credentials.
-    {~r/\b((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?!#{@prose_value})[^\s"',;)]+/i,
+    #
+    # The left edge is `(?<![A-Za-z0-9])`, NOT `\b`. `_` is a word character, so
+    # `\b` cannot fire between the `_` and the `TOKEN` in `BARKPARK_TOKEN=…` —
+    # which made every `[A-Z_]*TOKEN=` env fold invisible to this clause, and an
+    # env fold is the single most common way a provisioner capture carries a
+    # live credential. The lookbehind excludes only alphanumerics, so
+    # `BARKPARK_TOKEN=`, `MY_SECRET=` and `DEPLOY_TOKEN=` all match while
+    # `xtoken=` (a longer word merely ENDING in `token`) still does not.
+    #
+    # `(?![=:])` in the value position is the price of that widening. Reaching
+    # past `_` puts every `*_token`/`*_password` identifier in a captured stack
+    # trace or source echo inside this clause's reach, and `=` is not in the
+    # value's stop set — so `hashed_password == before` would render
+    # "hashed_password =[redacted] before", copy loss where no secret ever was.
+    # A COMPARISON is not an assignment. A real value never STARTS with `=` or
+    # `:`, so the guard costs no redaction (`token=abc==` still redacts whole).
+    {~r/(?<![A-Za-z0-9])((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?![=:])(?!#{@prose_value})[^\s"',;)]+/i,
      "\\1#{@redaction}"},
 
     # Provider-prefixed credentials: Stripe/OpenAI `sk-`/`pk-`, GitHub `ghp_`/
-    # `github_pat_`, Slack `xoxb-`, AWS `AKIA…`, Hetzner `hcloud_`. These carry
-    # hyphens and underscores, so the bare-token clause below (which is
-    # `[A-Za-z0-9]` only) cannot see them.
-    {~r/\b(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[baprs]|hcloud)[-_][A-Za-z0-9\-_]{8,}/,
+    # `github_pat_`, Slack `xoxb-`, AWS `AKIA…`, Hetzner `hcloud_`, and — since
+    # deploy-reliability W2 S4 — BARKPARK'S OWN `bppat_` (PAT, `auth.ex`) and
+    # `bpcs_` (scoped chat/MCP session token, `auth.ex`). These carry hyphens and
+    # underscores, so the bare-token clause below (which is `[A-Za-z0-9]` only)
+    # cannot see them.
+    #
+    # Our own prefixes are the load-bearing addition, not a tidy-up. A minted PAT
+    # is `bppat_` + `Base.url_encode64(32 bytes, padding: false)`, and ~94% of
+    # those 43-char bodies contain a `-` or `_` that breaks the bare-token
+    # clause's contiguous-alnum run — so before this clause knew the prefix, a
+    # real token measured 94.3% LEAKED through `scrub/1` in four of six shapes
+    # (`BARKPARK_TOKEN=…`, `export BARKPARK_TOKEN=…`, bare in prose, and a
+    # colourised `token=…`), and the ~6% that redacted did so by accident of the
+    # alphabet. Matching the TOKEN — not the syntax around it — is what makes
+    # this hole close independently of env-var spelling, prose and colour codes.
+    #
+    # Our prefixes require `_` specifically (the vendor arm keeps `[-_]`): every
+    # Barkpark credential is minted with an underscore, and `bpcs-mint-refused`
+    # — a real sentinel in `api/lib/barkpark_web/studio/claude_chat.ex` — is
+    # copy a person needs to read, not a secret. `bp-` alone is deliberately
+    # absent: every provisioned site is named `bp-<slug>-<hash>`.
+    {~r/\b(?:(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[baprs]|hcloud)[-_]|(?:bppat|bpcs)_)[A-Za-z0-9\-_]{8,}/,
      @redaction},
 
     # An AWS access key id: `AKIA` + 16 uppercase alphanumerics, no separator, so
@@ -274,19 +341,75 @@ defmodule BarkparkCloud.FailureCopy do
 
   def scrub(other), do: other
 
+  # A terminal control sequence: ESC (0x1B) followed by either a CSI parameter
+  # run terminated by a final byte (`\e[31m`, `\e[22m`, `\e[2K`), an OSC string
+  # terminated by BEL or ST, or a bare two-byte escape. Anchored on the REAL
+  # 0x1B byte — the literal four-character text `\x1B` appears in zero rows; the
+  # bytes appear in 1,366.
+  # Ordered: OSC first (it swallows a payload), then CSI, then a bare two-byte
+  # escape as the fallback — PCRE alternation is ordered, so the specific arms
+  # always win over the catch-all.
+  @ansi ~r/\x1B(?:\][^\x07\x1B]*(?:\x07|\x1B\\)|\[[0-?]*[ -\/]*[@-~]|[ -~])/
+
+  @doc """
+  Strip terminal control sequences from a string bound for a person's screen, an
+  inbox, or a JSON payload.
+
+  Remote build output is captured from a PTY, so an Astro `BUILD failed (exit 12)`
+  reason arrives as `\\e[31m\\e[1m04:34:24\\e[22m [ERROR] …`. 1,366 of 17,395 failed
+  rows carry real 0x1B bytes (verified with `position(chr(27) in failure_reason)`)
+  and NOTHING stripped them anywhere — not this module, not the CLI's
+  `siteFailure`, not the console's `failureCopy()`. They render as `[31m[1m` in
+  a browser, as raw colour in a terminal that then keeps that colour, and as
+  mojibake in an email.
+
+  Applied at the display boundary only, beside `scrub/1`: the stored row keeps
+  the raw bytes so ops recovery from the DB and the logs is unaffected.
+  Non-binaries pass through unchanged. Idempotent.
+  """
+  @spec strip_ansi(term()) :: term()
+  def strip_ansi(text) when is_binary(text), do: Regex.replace(@ansi, text, "")
+
+  def strip_ansi(other), do: other
+
+  @doc """
+  Fold a RAW remote capture — a console line, an ssh stderr fold, a provider
+  body — for a person's screen: strip the terminal control sequences, THEN
+  redact the secret-shaped substrings.
+
+  This is the raw-log entry point, and the order is the whole point of it. A
+  bare `scrub/1` on a colourised capture is a live leak: the CSI parks an
+  alphanumeric immediately left of the key, the scrub's key clause never fires,
+  and the value ships verbatim (dr-w22-s1 measured it byte-identical to input
+  through `Router.call/2` on three display boundaries). Call this, never
+  `scrub/1` alone, wherever a capture reaches a reader unclassified.
+
+  Non-binaries pass through unchanged (both halves no-op). Idempotent.
+  """
+  @spec raw(term()) :: term()
+  def raw(value), do: value |> strip_ansi() |> scrub()
+
   @doc """
   Map a raw internal deploy/provision failure string to human-facing copy, with
   secret-shaped substrings redacted.
 
-  The scrub runs AFTER classification and WRAPS the whole `cond` — see the
-  moduledoc for why either change is a live regression. Passes `nil` and
-  non-binary reasons through unchanged; unrecognized reasons pass through
-  scrubbed.
+  `classify/1` runs FIRST — its prefixes are anchored on the producer's template
+  and an escape run can sit between the prefix and the text
+  (`BUILD failed (exit 12): \\e[22m`), so stripping first would change what the
+  classifier reads. Passes `nil` and non-binary reasons through unchanged;
+  unrecognized reasons pass through stripped and scrubbed.
+
+  dr-w22-s1: `strip_ansi/1` then runs BEFORE the scrub, not after it. The
+  unclassified terminal arm of the `cond` IS a raw-log path, and under the
+  previous `scrub |> strip_ansi` it leaked a colourised `api_key=…` 2000/2000 —
+  in clean cleartext, because the trailing strip removed the very bytes that had
+  blocked the scrub. See the moduledoc; the tail is now `raw/1`'s order.
   """
   @spec humanize(term()) :: term()
   def humanize(nil), do: nil
 
-  def humanize(reason) when is_binary(reason), do: reason |> classify() |> scrub()
+  def humanize(reason) when is_binary(reason),
+    do: reason |> classify() |> strip_ansi() |> scrub()
 
   def humanize(other), do: other
 
@@ -304,6 +427,24 @@ defmodule BarkparkCloud.FailureCopy do
   # the bare form only avoids matching `hetzner dnssomething` because of one
   # space character, and a space is not a guarantee.
   @dns_step ~r/\b(?:hetzner dns (?:upsert|change-ttl|delete|resolve|list)|hcloud zone rrset (?:set-records|change-ttl|delete|list))\b/
+
+  # A credential rejection, matched against the LOWERED reason. Both tokens are
+  # ordinary English that a producer-controlled PATH carries routinely
+  # (`dist/errors/unauthorized/index.html` is what a framework calls its 401
+  # page), so each side is guarded against `/`, `\`, `-`, `_` and word
+  # characters: the token must stand as its OWN word, never as a path segment or
+  # part of a longer identifier. `401 Unauthorized`, `unauthorized (401)`,
+  # `unauthorized:` and `returned invalid token` all still match — a real
+  # producer always leaves the word standing alone.
+  #
+  # A TRAILING DOT IS NOT A PATH SEPARATOR, and the trailing guard says so
+  # (review of cch-w40-s6). A flat `(?!\.)` also excluded `…said Unauthorized.`
+  # and `…: unauthorized. check the token` — a producer ending a SENTENCE, which
+  # is at least as common as a path — so the token would have passed through
+  # unclassified. The guard is `\.` followed by a NON-SPACE (`unauthorized.html`,
+  # `auth.unauthorized` via the lookbehind); a dot at end-of-capture or before
+  # whitespace still classifies.
+  @credential_rejected ~r{(?<![\w/\\.\-])(?:unauthorized|invalid token)(?:(?![\w/\\\-])(?!\.\S))}
 
   # The fallback-ladder aggregate's TWO markers. BOTH are required: the header
   # phrase alone can appear inside a longer operator note, and the `"\n  - "`
@@ -490,9 +631,34 @@ defmodule BarkparkCloud.FailureCopy do
           String.contains?(down, "resource_unavailable") ->
         "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
 
-      # Auth / token: the provider rejected our stored credentials.
-      String.contains?(down, "unauthorized") or String.contains?(down, "invalid token") ->
-        "The hosting provider rejected our credentials. We're on it — try again shortly."
+      # Credential rejected: SOMETHING refused SOMEONE'S credential.
+      #
+      # THE COPY NAMES NEITHER A PARTY NOR AN OWNER NOR A REMEDY, for the same
+      # reason the capacity arm above names neither a provider nor a resource:
+      # this is a substring test over a string and `humanize/1` is arity 1. The
+      # copy it used to get — "The hosting provider rejected our credentials.
+      # We're on it — try again shortly." — asserted three things the predicate
+      # cannot see. On the capture the build script actually emits
+      # (`FATAL: 401 Unauthorized from …/w/acme/p/blog — the site read token is
+      # invalid`, deploy/site-deploy.sh, reaching here through
+      # `Sites.Deploy.stage_detail/2`) all three are wrong at once: the rejected
+      # credential is the USER'S OWN site read token, no hosting provider is in
+      # the story, nobody is "on it", and a retry is the one remedy that cannot
+      # work. An arity-2 (provider-aware) seam is buildable but would make this
+      # WORSE — the misattributed axis is WHOSE credential, not WHICH provider,
+      # so it would only upgrade the line to "Hetzner rejected our credentials".
+      # Nothing is lost by saying less: `Sites.Deploy.console_entry/1` folds the
+      # raw capture verbatim (scrubbed) into the console line beside this.
+      #
+      # THE PREDICATE IS PATH-GUARDED. `unauthorized` and `invalid token` are
+      # ordinary words a producer-controlled PATH can carry —
+      # `dist/errors/unauthorized/index.html` is simply what a framework calls
+      # its 401 error page — so a disk-full build was being reported as a
+      # credential rejection. The guard is the same self-satisfaction fix wave
+      # 25 applied to the DNS clause: the token must stand as its OWN word, not
+      # as a segment of a path or a longer identifier.
+      Regex.match?(@credential_rejected, down) ->
+        "A credential was rejected. This capture doesn't say whose credential it was — the raw error line names it."
 
       # Refused: the peer ANSWERED and said no — an RST, nothing listening on the
       # port we dialled. Split out of the network class in wave 28 (D321(3)),
@@ -580,14 +746,35 @@ defmodule BarkparkCloud.FailureCopy do
     "Adopt is a snapshot-based clone-swap on Hetzner; Azure has no equivalent yet, so the same verb would quietly mean something different."
   end
 
-  # Hetzner pause: a stopped Hetzner server still bills for its resources, so we
-  # don't offer a pause that lies about cost — archive releases it instead.
+  # Hetzner pause: the vendor bills a server for as long as it EXISTS, powered on
+  # or off — "you pay for a server that has completed the creation process for as
+  # long as it exists, regardless of whether it is turned on or not" and "we will
+  # bill you for your servers until you delete them, independent of their state"
+  # (https://docs.hetzner.com/cloud/billing/faq/). So we offer no pause.
+  #
+  # RETRACTED (cch-w55-s2): this clause used to prescribe "archive it to stop
+  # paying". Archive stops nothing — `runNeutralArchive`
+  # (internal/cli/cloud_instance_archive_cmd.go) SSH-collects a bundle and
+  # returns without touching power or existence, and the `--fast` path takes a
+  # snapshot whose `--stop` is "never a hard stop"
+  # (internal/cli/hetzner_instance_cmd.go). The box keeps billing, and the same
+  # vendor page bills snapshots "per gigabyte per month" — so the old remedy
+  # strictly INCREASED the bill. Deletion is the only charge-stopping act, and
+  # this plane has no archive-then-delete path to promise.
   def capability_gap_reason("hetzner", "pause") do
-    "Hetzner boxes can't be paused — a stopped server still bills. Archive it to stop paying and resurrect it later."
+    "A Hetzner server bills for as long as it exists, powered on or off — we can't pause it. Deleting the instance is the only thing that stops the charge."
   end
 
   # Catalog: the provider doesn't publish a normalized size-and-region catalog
   # here, so provisioning falls back to fixed defaults (generic across kinds).
+  #
+  # "HERE" means THIS control plane, so this sentence may only reach a kind the
+  # CP does NOT catalog. The kinds it DOES catalog (a `build_provider_catalog/2`
+  # clause, routed for `@neutral_kinds`) never carry this gap: the conduit's
+  # `own_catalog_capability/2` answers `catalog` itself, so the reason is not
+  # generated for them at all. `providers_catalog_capability_test.exs` holds that
+  # line — this clause stays for the kinds it is still true about (and any
+  # future provider that connects without a catalog).
   def capability_gap_reason(_kind, "catalog") do
     "This provider doesn't publish a size-and-region catalog here yet, so provisioning uses fixed defaults."
   end
@@ -626,7 +813,20 @@ defmodule BarkparkCloud.FailureCopy do
   host's certificate is requested on demand by the attach step
   (`/v1/tls/ask` — `registry.ex` `domain_registered?/1` deliberately excludes the
   platform FQDN), so the two `pending` stories point the operator at different
-  things. Every OTHER stage's copy is kind-agnostic. The terminal default clause
+  things.
+
+  `points_here` splits for the same reason, and the split is not cosmetic:
+  `router.ex`'s attach path says it in its own words — "platform hosts: DNS A
+  record + box wiring; external hosts: box wiring only — THE CUSTOMER OWNS
+  DNS." The kind-agnostic copy this stage used to return ("It's pointed
+  automatically when the instance is provisioned; if it persists, re-attach the
+  domain or contact support") is true only of the PLATFORM FQDN. For a custom
+  host it told the one person who can fix the problem that it was handled for
+  them, and offered support as the recourse — and for a SITE it is doubly
+  wrong, since `DomainStatus` maps EVERY site domain to `"custom"` and a site
+  has no "instance provisioned" event at all.
+
+  Every other stage's copy is genuinely kind-agnostic. The terminal default clause
   GUARANTEES no non-ok stage is ever reason-less — the console (S13b) and CLI
   read this one copy through the domain-status envelope, so they can't drift.
   """
@@ -636,8 +836,33 @@ defmodule BarkparkCloud.FailureCopy do
     "This domain isn't resolving publicly yet. If you just launched or attached it, DNS records take up to a minute to propagate — give it a moment and re-check."
   end
 
+  # PLATFORM pointing: the provisioning FQDN's A record is ours to set, and the
+  # provision step sets it. "Automatically" is a true claim here and only here.
+  # cch-w50-s2 — "or contact support" removed. The wave that split this clause by
+  # kind cleaned the CUSTOM arm below and left the PLATFORM arm still offering a
+  # desk that does not exist on this deployment: no address, no inbox, no route,
+  # no docs page, no nav link (every "support" in cloud/lib is the fleet SUPPORT
+  # MACHINE role), and the plane's only mail identity is noreply@barkpark.cloud
+  # with no reply_to. Re-attaching IS the real remedy here and it stays; nothing
+  # new is authored in the removed clause's place (charter D438). Banned by
+  # test/barkpark_cloud/failure_copy_support_channel_test.exs, the Elixir twin of
+  # the console ban in __app.test.mjs.
+  def domain_stage_remediation("platform", "points_here") do
+    "This domain resolves, but not to this instance's address. The platform sets this record itself when the instance is provisioned; if it persists, re-attach the domain."
+  end
+
+  # CUSTOM pointing: the customer owns this zone (router.ex attach path —
+  # "external hosts: box wiring only — the customer owns DNS"), so the remedy is
+  # theirs to apply and naming it is the whole value of this line. Every SITE
+  # domain is "custom", and a site has no "instance provisioned" event at all.
+  def domain_stage_remediation("custom", "points_here") do
+    "This domain resolves, but not to this instance's address. DNS for a custom domain stays with you: point its A record at this instance's address (shown on the instance in the console), then re-check once the change propagates."
+  end
+
+  # An unknown kind: say what the stage means and stop — who owns the record is
+  # exactly what an unknown kind cannot tell us.
   def domain_stage_remediation(_kind, "points_here") do
-    "This domain resolves, but not to this instance's address. It's pointed automatically when the instance is provisioned; if it persists, re-attach the domain or contact support."
+    "This domain resolves, but not to this instance's address. Check which address its DNS record points at, then re-check."
   end
 
   # PLATFORM cert: provision-time Caddy issues + renews it automatically.

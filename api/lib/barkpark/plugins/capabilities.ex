@@ -281,7 +281,24 @@ defmodule Barkpark.Plugins.Capabilities do
     |> maybe_put_build(base, opts)
     |> maybe_gate_views(opts)
     |> maybe_gate_chat(base, opts)
+    |> maybe_gate_bpml(base, opts)
     |> then(fn m -> Map.put(m, "etag", etag_for(m)) end)
+  end
+
+  # The root `bpml` vocabulary key (BPML masterplan W0): the block-tag →
+  # allowed-attributes grammar, the inline alias→mark table, and a derived
+  # digest clients echo to detect stale generated types. STRICTLY OPT-IN
+  # (`include_bpml: true`, wired from `?bpml=1`) for the same reason
+  # `build`/`views`/`chat` are: released bp binaries strict-decode the manifest
+  # root, so an unconditional new root key would brick every CLI in the wild.
+  # NOT withheld from tier "none": the vocabulary describes the public paper
+  # format, not any capability of this instance — same class as the reader.
+  defp maybe_gate_bpml(manifest, _caller_tier, opts) do
+    if Keyword.get(opts, :include_bpml, false) do
+      Map.put(manifest, "bpml", Barkpark.PortableDoc.Bpml.vocabulary())
+    else
+      manifest
+    end
   end
 
   # Build identity (compile-time constants — see Barkpark.BuildInfo) is

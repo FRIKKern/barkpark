@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Plugs.PublicRead do
 
         - allow `GET /v1/data/query/:dataset/:type`
         - allow `GET /v1/data/doc/:dataset/:type/:doc_id`
+        - allow `GET /v1/graph` (the whole-dataset corpus graph)
         - reject `?perspective` not in `[nil, "", "published"]` with
           `403 forbidden` / "perspective not allowed"
         - reject types whose schema visibility is not `"public"` with
@@ -71,6 +72,29 @@ defmodule BarkparkWeb.Plugs.PublicRead do
   workspace is denied even when a same-named public type exists in another
   workspace or the shared/global layer. Absent scope assigns (e.g. the unit
   test's hand-built conn) fall back to dataset-string resolution — nil-safe.
+
+  ## `/v1/graph` — admitted BY NAME, and its visibility is the controller's
+
+  The corpus graph is the ONE read a statically-built site needs beyond the two
+  data routes: with it denied, `templates/search-starter` builds against
+  guerrilla emitting `<meta name="bp-doc-id" content=""/>` — the 403 is swallowed
+  and the site ships empty. It is admitted here as an exact two-segment path.
+
+  Two consequences the route shape forces:
+
+    * `/v1/graph` carries NO `:type` segment, so there is no schema for this plug
+      to gate. `type_gate/1` returns `:none` for it and the plug hands the
+      request to `TasksController.graph_corpus/2`, which restricts its OWN type
+      list to public-visibility schemas per caller
+      (`Content.Schema.public_type_names/1`). A bare allowlist entry WITHOUT that
+      controller-side filter would have leaked every private type's titles; a
+      bare allowlist entry without `type_gate/1` would have raised
+      `FunctionClauseError` — a 500 — on the old two-clause `extract_ds_type/1`.
+    * The siblings stay OUT: `/v1/graph/:id` (leaks a draft-only title at the
+      default perspective), `/v1/graph/orphans` (an unpaginated full-corpus
+      dump), `/v1/graph/dangling` and `/v1/graph/:id/tasks` all fall to the
+      catch-all and are denied 403. Deny-by-default means admitting a route is a
+      deliberate act, never a side effect of a prefix match.
   """
 
   import Plug.Conn
@@ -87,7 +111,12 @@ defmodule BarkparkWeb.Plugs.PublicRead do
   # `["public-read", "read"]` by TokenController is still the public tier. The
   # map pattern requires the `:permissions` key and a list value: a token struct
   # without it is NOT clamped (absence of the key is not evidence of the tier).
-  defp public_read_token?(conn) do
+  #
+  # PUBLIC on purpose: `TasksController.graph_corpus/2` asks the same question to
+  # decide whether to restrict its schema list, and the tier test must have ONE
+  # definition. A second copy in the controller is exactly how a clamp and its
+  # downstream filter drift apart.
+  def public_read_token?(conn) do
     case conn.assigns[:api_token] do
       %{permissions: perms} when is_list(perms) -> "public-read" in perms
       _ -> false
@@ -120,6 +149,10 @@ defmodule BarkparkWeb.Plugs.PublicRead do
     case data_path(path) do
       ["v1", "data", "query", _ds, _type] -> true
       ["v1", "data", "doc", _ds, _type, _id] -> true
+      # The corpus graph ONLY — an EXACT two-segment match. `/v1/graph/:id`,
+      # `/v1/graph/orphans`, `/v1/graph/dangling` and `/v1/graph/:id/tasks` are
+      # longer paths and fall to the catch-all below (403).
+      ["v1", "graph"] -> true
       _ -> false
     end
   end
@@ -130,9 +163,24 @@ defmodule BarkparkWeb.Plugs.PublicRead do
     conn.params["perspective"] in [nil, "", "published"]
   end
 
+  # Route-shape aware, and TOTAL. The old shape destructured
+  # `extract_ds_type/1`'s two-clause return unconditionally, so admitting any
+  # route without a `:type` segment turned the clamp into a 500 (an unmatched
+  # function clause is a crash, not a denial). Three outcomes now:
+  #
+  #   {:type, ds, type} → the schema gate runs (the two data routes)
+  #   :none             → no schema to gate; the CONTROLLER owns visibility
+  #                       (`/v1/graph`, see the moduledoc)
+  #   :unknown          → deny. Unreachable while `allowed_route?/1` enumerates
+  #                       exactly these shapes; it exists so the next route
+  #                       added to the allowlist without a clause here fails
+  #                       CLOSED (404) instead of crashing or leaking.
   defp schema_public?(%{path_info: path} = conn) do
-    {dataset, type} = extract_ds_type(data_path(path))
-    Content.schema_public?(type, dataset, scope_opts(conn))
+    case type_gate(data_path(path)) do
+      {:type, dataset, type} -> Content.schema_public?(type, dataset, scope_opts(conn))
+      :none -> true
+      :unknown -> false
+    end
   end
 
   # Strip the tenancy-scoped `/w/:ws/p/:project` prefix so the flat and scoped
@@ -140,8 +188,10 @@ defmodule BarkparkWeb.Plugs.PublicRead do
   defp data_path(["w", _ws, "p", _proj | rest]), do: rest
   defp data_path(path), do: path
 
-  defp extract_ds_type(["v1", "data", "query", ds, type]), do: {ds, type}
-  defp extract_ds_type(["v1", "data", "doc", ds, type, _id]), do: {ds, type}
+  defp type_gate(["v1", "data", "query", ds, type]), do: {:type, ds, type}
+  defp type_gate(["v1", "data", "doc", ds, type, _id]), do: {:type, ds, type}
+  defp type_gate(["v1", "graph"]), do: :none
+  defp type_gate(_), do: :unknown
 
   # Tenancy opts from the resolved scope assigns (nil-safe): a private type in
   # THIS workspace stays denied even if a same-named public type lives in

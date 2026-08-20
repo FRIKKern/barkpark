@@ -62,8 +62,8 @@ defmodule BarkparkCloud.Web.Auth do
   # `last_used_at` is what the sessions card renders as "Active just now", so it
   # is a claim that the platform SERVED this device — but authentication runs
   # strictly before authorization. `require_platform_operator/2` resolves the
-  # user, THEN checks the allowlist and answers `forbidden(conn)`; there are six
-  # `forbidden(conn)` sites in this module and every one of them is downstream
+  # user, THEN checks the allowlist and answers `forbidden/2`; there are seven
+  # `forbidden/2` sites in this module and every one of them is downstream
   # of the verify. An eager stamp therefore made a REFUSED device print as
   # active, and a throttle at the write site could not touch it: an idle device
   # satisfies any staleness guard (measured — idle 3600s, one request, 403, and
@@ -85,7 +85,7 @@ defmodule BarkparkCloud.Web.Auth do
   # The PAT twin. A PAT is the SAME liveness claim on the tokens card, and it
   # runs through the same authentication-before-authorization ordering: the
   # branch below resolves the credential, and `require_ability/2` answers
-  # `forbidden(conn)` only afterwards — so an eager stamp made a read-only PAT
+  # `forbidden/2` only afterwards — so an eager stamp made a read-only PAT
   # that was just 403'd print as freshly used. Measured: backdate 3600s, fire
   # ONE refused request, and the stamp jumped a full hour past any throttle.
   defp defer_pat_touch(conn, token) do
@@ -139,13 +139,13 @@ defmodule BarkparkCloud.Web.Auth do
   `BarkparkWeb.Plugs.RequireWorkspaceRole` (fail-closed on a missing assign → 403)
   in this `Plug.Router`'s inline style.
   """
-  def require_team_admin(conn, opts), do: gate_role(conn, opts, &Authz.team_admin?/2)
+  def require_team_admin(conn, opts), do: gate_role(conn, opts, &Authz.team_admin?/2, "admin")
 
   @doc """
   Require a USER who is the OWNER of `current_team` (the billing / delete-team
   gate). Same shape as `require_team_admin/2`, narrower check.
   """
-  def require_team_owner(conn, opts), do: gate_role(conn, opts, &Authz.team_owner?/2)
+  def require_team_owner(conn, opts), do: gate_role(conn, opts, &Authz.team_owner?/2, "owner")
 
   @doc """
   Require a valid USER credential — either a session token OR a Personal Access
@@ -266,7 +266,7 @@ defmodule BarkparkCloud.Web.Auth do
       if Enum.any?(abilities, &implies?(&1, ability)) do
         conn
       else
-        forbidden(conn)
+        forbidden(conn, required: ability, scope: "token")
       end
     end
   end
@@ -336,7 +336,7 @@ defmodule BarkparkCloud.Web.Auth do
     cond do
       conn.halted -> conn
       conn.assigns.current_user.email in Notifications.platform_admin_emails() -> conn
-      true -> forbidden(conn)
+      true -> forbidden(conn, required: "platform_operator", scope: "platform")
     end
   end
 
@@ -383,7 +383,7 @@ defmodule BarkparkCloud.Web.Auth do
               not_found(conn)
 
             TeamMembership.rank(role) < TeamMembership.rank(min_role) ->
-              forbidden(conn)
+              forbidden(conn, required: min_role, scope: "team")
 
             true ->
               conn
@@ -395,12 +395,22 @@ defmodule BarkparkCloud.Web.Auth do
   end
 
   @doc """
-  Require that the authed user is owner|admin of their PRIMARY team — the gate
-  for privileged actions on routes that still resolve the team implicitly
+  Require that the authed user is owner|admin of the CURRENTLY SELECTED team —
+  the gate for privileged actions on routes that resolve the team implicitly
   (billing/checkout, go-live, DELETE barkpark) rather than from a path `:id`.
-  401 if unauthenticated; 422 `no_team` if the user has no team; 403 if a member
-  but not admin. On success the conn passes through with `:current_team` already
-  assigned by `require_user/2`.
+
+  The team read is `conn.assigns[:current_team]`, which `require_user/2` fills
+  via `resolve_team/2`: the `x-barkpark-team` header wins whenever the caller is
+  a member of that team (the SPA's team switcher), and only an absent/unusable
+  header falls back to the primary membership. So this gate is NOT primary-team
+  scoped — it judges whichever team the caller currently has selected, and EVERY
+  refusal it emits says `scope: "team"` for that reason.
+
+  401 if unauthenticated; 403 `{forbidden, reason: "no_team", scope: "team"}` if
+  the user has no team; 403 `{forbidden, required: "admin", scope: "team"}` if a
+  member but not admin. Holding no grant is an AUTHORITY answer, not a malformed
+  body — one condition, one status. On success the conn passes through with
+  `:current_team` already assigned by `require_user/2`.
   """
   @spec require_primary_team_admin(Plug.Conn.t()) :: Plug.Conn.t()
   def require_primary_team_admin(conn) do
@@ -411,23 +421,29 @@ defmodule BarkparkCloud.Web.Auth do
         conn
 
       is_nil(conn.assigns[:current_team]) ->
-        json_halt(conn, 422, %{error: "no_team"})
+        forbidden(conn, reason: "no_team", scope: "team")
 
       Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
         conn
 
       true ->
-        forbidden(conn)
+        forbidden(conn, required: "admin", scope: "team")
     end
   end
 
   @doc """
-  Require that the authed user is the OWNER of their PRIMARY team — the billing
-  gate (checkout / portal / cancel). The narrower twin of
-  `require_primary_team_admin/1`, preserving the same 401 / 422 `no_team` / 403
-  contract: 401 if unauthenticated; 422 `no_team` if the user has no team; 403 if
-  a member/admin but not the owner. Reads `Authz.team_owner?/2`. On success the
-  conn passes through with `:current_team` already assigned by `require_user/2`.
+  Require that the authed user is the OWNER of the CURRENTLY SELECTED team — the
+  billing gate (checkout / portal / cancel). The narrower twin of
+  `require_primary_team_admin/1`, and it answers the same three conditions the
+  same way: 401 if unauthenticated; 403 `{forbidden, reason: "no_team", scope:
+  "team"}` if the user has no team; 403 `{forbidden, required: "owner", scope:
+  "team"}` if a member/admin but not the owner — a missing grant is an authority
+  answer, never a bad body. Reads `Authz.team_owner?/2` against
+  `conn.assigns[:current_team]` — filled by `resolve_team/2` from the
+  `x-barkpark-team` header when the caller is a member of that team, primary
+  membership only as the fallback. Not primary-team scoped, hence
+  `scope: "team"` on every refusal. On success the conn passes through with
+  `:current_team` already assigned by `require_user/2`.
   """
   @spec require_primary_team_owner(Plug.Conn.t()) :: Plug.Conn.t()
   def require_primary_team_owner(conn) do
@@ -438,13 +454,13 @@ defmodule BarkparkCloud.Web.Auth do
         conn
 
       is_nil(conn.assigns[:current_team]) ->
-        json_halt(conn, 422, %{error: "no_team"})
+        forbidden(conn, reason: "no_team", scope: "team")
 
       Authz.team_owner?(conn.assigns.current_user, conn.assigns.current_team) ->
         conn
 
       true ->
-        forbidden(conn)
+        forbidden(conn, required: "owner", scope: "team")
     end
   end
 
@@ -463,20 +479,59 @@ defmodule BarkparkCloud.Web.Auth do
 
   # Ensure a user, then enforce `check.(user, team)`. A no-team authenticated
   # user is 403 (not 401) — they ARE authenticated, they simply hold no grant.
-  defp gate_role(conn, opts, check) do
+  #
+  # `check` arrives as an opaque capture (`&Authz.team_admin?/2` vs
+  # `&Authz.team_owner?/2`), so this function cannot introspect WHICH authority
+  # it is enforcing — `required` is the caller's own label for it, and it is the
+  # only reason the two arms are distinguishable in a refusal.
+  defp gate_role(conn, opts, check, required) do
     conn = if conn.assigns[:current_user], do: conn, else: require_user(conn, opts)
 
     cond do
       # require_user already sent 401 — leave it.
-      conn.halted -> conn
-      is_nil(conn.assigns[:current_team]) -> forbidden(conn)
-      check.(conn.assigns.current_user, conn.assigns.current_team) -> conn
-      true -> forbidden(conn)
+      conn.halted ->
+        conn
+
+      # NO AUTHORITY HERE. A user who holds no team at all cannot be repaired by
+      # any role grant, so naming one would be a second confidently-wrong
+      # sentence. State the actual cause instead; the status stays 403 (they are
+      # authenticated, they simply hold no grant).
+      is_nil(conn.assigns[:current_team]) ->
+        forbidden(conn, reason: "no_team", scope: "team")
+
+      check.(conn.assigns.current_user, conn.assigns.current_team) ->
+        conn
+
+      true ->
+        forbidden(conn, required: required, scope: "team")
     end
   end
 
   defp unauthorized(conn), do: json_halt(conn, 401, %{error: "unauthorized"})
-  defp forbidden(conn), do: json_halt(conn, 403, %{error: "forbidden"})
+
+  @doc """
+  Send a 403 whose body carries the AUTHORITY that was missing, and halt.
+
+  ADDITIVE ONLY. `error: "forbidden"` is the slug 21 assertions across 10 test
+  files already pin — evidence is merged AROUND it, never over it, so a client
+  that reads only `error` is unaffected while one that can render a cause has
+  something to render.
+
+  PUBLIC (cch-w36-s1) because the ONE refusal on the launch→checkout chain is
+  not gated by this module at all: `go_live` gates the session branch INLINE in
+  the router (it must not re-run `require_user/2` and discard the resolved
+  PAT/session assigns), and it used to ship a bare `%{error: "forbidden"}` — the
+  console could not tell that refusal apart from the owner-only billing one. The
+  router now emits its evidence through this seam instead of reaching a private
+  function or growing a second copy of the shape.
+
+  NO DEFAULT ARGUMENT, on purpose: `evidence \\\\ []` reds the Cloud gate, which
+  compiles with `--warnings-as-errors` (charter D396(2)).
+  """
+  @spec forbidden(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
+  def forbidden(conn, evidence),
+    do: json_halt(conn, 403, Enum.into(evidence, %{error: "forbidden"}))
+
   defp not_found(conn), do: json_halt(conn, 404, %{error: "not_found"})
 
   defp json_halt(conn, status, body) do

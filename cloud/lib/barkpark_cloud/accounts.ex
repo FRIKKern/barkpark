@@ -468,12 +468,36 @@ defmodule BarkparkCloud.Accounts do
   # stamp-only cutoff it has always had. `id` is a `:binary_id`, so a non-UUID
   # from a query string would raise Ecto.Query.CastError — it is cast first, and
   # anything that is not a UUID degrades to the stamp-only arm rather than 500ing.
+  #
+  # The tiebreak arm is a ROW comparator, not the equivalent OR-decomposition: the
+  # two select the same rows, but only the ROW form can SEEK. On the EXISTING
+  # `(team_id, inserted_at)` index the OR form leaves `Index Cond:` carrying
+  # `team_id` alone and drops the stamp bound into `Filter:` — a full scan of the
+  # team's trail per page (542 buffers / 4.284 ms for a 50-row page on a 250k-row
+  # corpus); the ROW form lifts `inserted_at <= $2` into the Index Cond (14
+  # buffers / 0.104 ms), with NO migration. Prophylactic at today's row counts.
+  #
+  # THE SPELLING IS LOAD-BEARING. `type(^ts, :utc_datetime_usec)` renders
+  # `$2::timestamp` — a naive timestamp against a `timestamptz` column, coerced
+  # through the SESSION TimeZone, which slips the page boundary by the server's
+  # UTC offset. `$2` is left UNCAST so Postgres infers `timestamptz` from the
+  # ROW's left operand. The uuid half needs `type(^uuid, Ecto.UUID)` or Ecto never
+  # dumps the string and Postgrex raises "expected a binary of 16 bytes".
+  #
+  # ROW comparison differs from the OR form on NULLs, and no NULL is reachable:
+  # `audit_events.id` is the primary key and `inserted_at` comes from
+  # `timestamps(type: :utc_datetime_usec, updated_at: false)` — both NOT NULL —
+  # and both params are non-nil by the clause head and the successful cast.
   defp maybe_audit_before(query, nil, _before_id), do: query
 
   defp maybe_audit_before(query, %DateTime{} = ts, before_id) when is_binary(before_id) do
     case Ecto.UUID.cast(before_id) do
       {:ok, uuid} ->
-        where(query, [e], e.inserted_at < ^ts or (e.inserted_at == ^ts and e.id < ^uuid))
+        where(
+          query,
+          [e],
+          fragment("(?,?) < (?,?)", e.inserted_at, e.id, ^ts, type(^uuid, Ecto.UUID))
+        )
 
       :error ->
         where(query, [e], e.inserted_at < ^ts)
@@ -751,20 +775,50 @@ defmodule BarkparkCloud.Accounts do
 
   `opts[:except]` keeps ONE token alive (by plaintext) so a password-change
   caller is not logged out of their own in-flight tab. Returns `{:ok, count}` —
-  the number of rows stamped revoked.
+  the number of SESSION rows stamped revoked, which is the number the console
+  reports back as `{revoked: N}`; the `"sse"` tickets swept below are NOT counted
+  (they are plumbing, and inflating N would put a new unsupported number on the
+  screen in place of the old one).
+
+  ## Why this ALSO sweeps the user's live `"sse"` stream tickets (cch-w53-s4)
+
+  A `"sse"` ticket is a 60-second bearer for `GET /v1/events` riding the same
+  polymorphic `user_tokens` table. Leaving it alone left a measured hole: a
+  ticket minted one second before "sign out everywhere" still opened a fresh
+  authenticated stream AFTER the revoke, for the rest of its TTL. So the sweep
+  is `context in ["session", "sse"]`.
+
+  THE WIDENING STOPS THERE, and both fences are load-bearing:
+
+    * NOT `"pat"` — a PAT is a programmatic credential a human never sees a
+      browser prompt for; killing one on a password change is the silent
+      breakage this carve-out exists to prevent (pinned by accounts_test's
+      "sign out everywhere revokes sessions but NOT the user's PATs").
+    * This is a `user_id + context` SWEEP, and it is correct ONLY here, on the
+      sign-out-everywhere / password-change path. The per-ticket burn in
+      `consume_sse_ticket/1` stays MATCHED-ROW-ONLY: making that one a sweep is
+      charter D28's two-tab mutual-eviction storm (tab B's mint kills tab A's
+      unconsumed ticket, A 401s, A remints, B dies, forever).
+
+  The `:except` plaintext is a SESSION token, so it never spares an `"sse"` row:
+  the surviving tab's pre-minted ticket dies with the rest and the client remints
+  on the next stream error (app.js already remints on every error, because a 401
+  is terminal for `EventSource`). That is one extra round trip on the caller's
+  own tab, deliberately traded for closing the 60s window.
   """
   @spec revoke_all_user_sessions(User.t() | binary(), keyword()) :: {:ok, non_neg_integer()}
   def revoke_all_user_sessions(user, opts \\ []) do
     uid = user_id(user)
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
-    # context == "session" ONLY: "sign out everywhere" / a password change must
-    # never silently revoke the user's live PATs (programmatic credentials).
-    base =
+    live =
       from t in UserToken,
         where: t.user_id == ^uid,
-        where: t.context == "session",
         where: is_nil(t.revoked_at)
+
+    # context == "session" ONLY: "sign out everywhere" / a password change must
+    # never silently revoke the user's live PATs (programmatic credentials).
+    base = from t in live, where: t.context == "session"
 
     query =
       case Keyword.get(opts, :except) do
@@ -773,7 +827,45 @@ defmodule BarkparkCloud.Accounts do
       end
 
     {count, _} = Repo.update_all(query, set: [revoked_at: now])
+
+    # Second statement, not a widened first one, so the reported count stays a
+    # count of SESSIONS. Unredeemed stream tickets are dead weight the moment
+    # the sessions behind them are gone.
+    {_tickets, _} =
+      Repo.update_all(from(t in live, where: t.context == "sse"), set: [revoked_at: now])
+
     {:ok, count}
+  end
+
+  @doc """
+  Does `user` still hold at least ONE live session? The cheap existence half of
+  `list_user_sessions/1`, for callers that only need the boolean.
+
+  Exists for the SSE loop (`GET /v1/events`), which authenticates ONCE at connect
+  and then parks: without a recheck, a stream opened before "sign out everywhere"
+  kept delivering team events forever, and the confirm sheet's promise that every
+  other device is signed out was true of the ROWS and false of the CHANNEL. The
+  loop calls this on each heartbeat tick and ends the stream when it goes false,
+  which bounds revocation at one heartbeat rather than never.
+
+  `context == "session"` matches the two credentials that can open a stream (a
+  session bearer, or an `"sse"` ticket that only a live session could have
+  minted), and deliberately does NOT count PATs — a PAT cannot open `/v1/events`,
+  so counting one would keep a revoked human's stream alive off a machine
+  credential.
+  """
+  @spec user_has_live_session?(User.t() | binary()) :: boolean()
+  def user_has_live_session?(user) do
+    uid = user_id(user)
+    now = DateTime.utc_now()
+
+    Repo.exists?(
+      from t in UserToken,
+        where: t.user_id == ^uid,
+        where: t.context == "session",
+        where: is_nil(t.revoked_at),
+        where: is_nil(t.expires_at) or t.expires_at > ^now
+    )
   end
 
   @doc """
@@ -1664,12 +1756,14 @@ defmodule BarkparkCloud.Accounts do
   Members of `team` as `[%{user: %User{}, role: role, joined_at: inserted_at}]`,
   oldest membership first (stable, like `list_user_teams/1`).
   """
-  @spec list_team_members(Team.t()) :: [map()]
-  def list_team_members(%Team{} = team) do
+  @spec list_team_members(Team.t() | binary()) :: [map()]
+  def list_team_members(team) do
+    tid = team_id(team)
+
     from(m in TeamMembership,
       join: u in User,
       on: u.id == m.user_id,
-      where: m.team_id == ^team.id,
+      where: m.team_id == ^tid,
       order_by: [asc: m.inserted_at, asc: m.id],
       select: %{user: u, role: m.role, joined_at: m.inserted_at}
     )
@@ -1784,10 +1878,12 @@ defmodule BarkparkCloud.Accounts do
 
   @doc """
   Change `user`'s role in `team` to `new_role`, guarding the last-owner
-  invariant on a downgrade away from owner. On a downgrade from an admin/owner
-  grant to `member`, the user's sessions are also evicted so a demoted user
-  loses elevated access immediately (mirrors Coolify revoking tokens on a role
-  change). `{:ok, %TeamMembership{}}` | `{:error, :invalid_role | :not_found | :last_owner}`.
+  invariant on a downgrade away from owner. On ANY demotion — a drop in
+  `TeamMembership.rank/1`, owner→admin included — the user's sessions are
+  evicted and the PATs the new role could no longer mint are revoked, so a
+  demoted user loses elevated access immediately (mirrors Coolify revoking
+  tokens on a role change).
+  `{:ok, %TeamMembership{}}` | `{:error, :invalid_role | :not_found | :last_owner}`.
 
   The UNAUTHORIZED primitive — the member-management route calls the actor-aware
   `update_member_role_as/4`.
@@ -1808,7 +1904,14 @@ defmodule BarkparkCloud.Accounts do
   end
 
   defp do_update_role(team, %TeamMembership{role: current_role} = membership, user, new_role) do
-    was_elevated = TeamMembership.admin?(current_role)
+    # A DEMOTION is a RANK DROP, derived from the ladder that ranks the roles —
+    # never a named role. The old equality-against-a-role-literal gate was right
+    # only while `pat_abilities_allowed?/2` happened to collapse owner and
+    # admin: split those two and the remedy would silently stop running on an
+    # owner→admin demotion while the elevated PATs stayed alive. Derived, the
+    # gate cannot go stale — when the two roles ARE equivalent the revoker's
+    # own predicate simply selects zero rows.
+    demoted? = TeamMembership.rank(new_role) < TeamMembership.rank(current_role)
 
     Repo.transaction(fn ->
       # Demoting the last owner: last-owner guard UNDER A LOCK (TOCTOU). Lock the
@@ -1822,10 +1925,10 @@ defmodule BarkparkCloud.Accounts do
         |> TeamMembership.changeset(%{role: new_role})
         |> Repo.update!()
 
-      # A downgrade out of an elevated grant evicts the user's sessions, and the
-      # elevated PATs minted under the old role — but ONLY those: a plain member
-      # may still hold the read-only PAT they are entitled to mint.
-      if was_elevated and new_role == "member" do
+      # A demotion evicts the user's sessions, and the PATs minted under the
+      # old role that the new role could not mint — but ONLY those: a plain
+      # member may still hold the read-only PAT they are entitled to mint.
+      if demoted? do
         {:ok, _} = delete_user_session_tokens(user)
         {:ok, _} = revoke_team_pats_exceeding_role(team, user, new_role)
       end
@@ -2162,10 +2265,23 @@ defmodule BarkparkCloud.Accounts do
   @doc """
   Mint a 2fa-pending token (#{@two_factor_pending_minutes} min TTL) for `user`.
   Returns the plaintext exactly once.
+
+  `first_factor` names WHAT ALREADY CLEARED before this challenge was minted, and
+  rides the row's `sent_to` — the same column, for the same reason, as
+  `create_oauth_exchange_code/2`'s `"oauth:<provider>"`. `nil` is the password leg
+  (`POST /v1/auth/login`), which is why it is the default: that caller established
+  the first factor itself and has nothing to carry.
+
+  cch-w53-s6 — it exists because `POST /v1/auth/oauth/exchange` can now mint one of
+  these too. Without the provider travelling here, the session the challenge
+  finally mints would be stamped `origin: "two_factor"`, whose own comment at the
+  challenge leg asserts the PASSWORD leg already passed — false for an IdP
+  sign-in, and the sessions security panel would say so out loud.
   """
-  @spec create_two_factor_pending_token(User.t()) ::
+  @spec create_two_factor_pending_token(User.t(), binary() | nil) ::
           {:ok, binary()} | {:error, Ecto.Changeset.t()}
-  def create_two_factor_pending_token(%User{} = user) do
+  def create_two_factor_pending_token(%User{} = user, first_factor \\ nil)
+      when is_binary(first_factor) or is_nil(first_factor) do
     plaintext = generate_token()
 
     expires_at =
@@ -2178,6 +2294,7 @@ defmodule BarkparkCloud.Accounts do
       user_id: user.id,
       context: "2fa_pending",
       token_hash: UserToken.hash_token(plaintext),
+      sent_to: first_factor,
       expires_at: expires_at
     })
     |> Repo.insert()
@@ -2208,6 +2325,37 @@ defmodule BarkparkCloud.Accounts do
   end
 
   def verify_two_factor_pending_token(_), do: nil
+
+  @doc """
+  Resolve a 2fa-pending token to the first factor that ALREADY cleared before it
+  was minted (the `sent_to` written by `create_two_factor_pending_token/2`), or
+  `nil` when the token is unknown, expired, or was minted by the password leg.
+
+  Read it BEFORE `delete_two_factor_pending_tokens/1` burns the row. Same
+  context-scoped, expiry-filtered lookup as `verify_two_factor_pending_token/1`,
+  deliberately: a caller must not be able to learn a first factor from a token the
+  verifier would refuse.
+
+  `nil` collapses the two honest "no OAuth here" answers — password-minted, and
+  minted before this column carried anything — into the one that stamps the
+  unqualified `"two_factor"`. That is the conservative direction: an unnamed first
+  factor degrades to the ORIGINAL origin rather than inventing a provider.
+  """
+  @spec two_factor_pending_first_factor(binary()) :: binary() | nil
+  def two_factor_pending_first_factor(plaintext) when is_binary(plaintext) do
+    hash = UserToken.hash_token(plaintext)
+    now = DateTime.utc_now()
+
+    query =
+      from t in UserToken,
+        where: t.token_hash == ^hash and t.context == "2fa_pending",
+        where: is_nil(t.expires_at) or t.expires_at > ^now,
+        select: t.sent_to
+
+    Repo.one(query)
+  end
+
+  def two_factor_pending_first_factor(_), do: nil
 
   @doc "Delete every 2fa-pending token for a user (after a successful challenge)."
   @spec delete_two_factor_pending_tokens(User.t()) :: {non_neg_integer(), nil}

@@ -40,6 +40,12 @@ defmodule BarkparkWeb.CapabilitiesController do
     # emitted only to callers that ask (and never to tier "none").
     include_chat = params["chat"] in ["1", "true"]
 
+    # ?bpml=1 opts in to the root "bpml" vocabulary key (BPML masterplan W0):
+    # the block grammar + inline marks + drift-detection digest. Same opt-in
+    # discipline as ?build/?views/?chat — strict-decoding released CLIs must
+    # keep receiving the exact old shape unless they ask.
+    include_bpml = params["bpml"] in ["1", "true"]
+
     # base_url must be the host the caller ACTUALLY dialed, not the frozen
     # boot-time PHX_HOST scalar — a custom instance hostname and the canonical
     # FQDN each get their own host back (D4 server-side: one instance, many
@@ -54,6 +60,7 @@ defmodule BarkparkWeb.CapabilitiesController do
         include_build: include_build,
         include_views: include_views,
         include_chat: include_chat,
+        include_bpml: include_bpml,
         server: server
       )
 

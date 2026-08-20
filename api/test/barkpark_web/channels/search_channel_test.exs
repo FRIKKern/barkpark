@@ -606,7 +606,13 @@ defmodule BarkparkWeb.SearchChannelTest do
       refute "session" in type_labels
     end
 
-    test "parity bypass: a tokened WS caller (public-read permissions) still reads private types — the filter is not stricter over WS than the query route",
+    # INVERTED by dr-w2-s7. This case used to assert that a public-read WS
+    # caller read private types "for parity with the query route" — but the
+    # query route's `authed?/1` moved in the same commit, so parity now means
+    # CLAMPED on both. The retriever is the one enforcement seat, which is why
+    # one clause seals REST, federated and this WS transport together.
+    test "a public-read WS caller is clamped: asking for the private type by name yields an " <>
+           "empty reply, not its rows",
          %{ws: ws, proj: proj} do
       raw = "vis-pr-tok-#{System.unique_integer([:positive])}"
       {:ok, token} = Auth.create_token(raw, "vis-parity", "test", ["public-read", "read"], ws.id)
@@ -623,6 +629,32 @@ defmodule BarkparkWeb.SearchChannelTest do
         push(joined, "query", %{
           "q" => "wsleakprobe",
           "seq" => 3,
+          "engine" => "postgres",
+          "types" => "session"
+        })
+
+      assert_reply ref, :ok, reply
+      refute "ws-leak-session" in Enum.map(reply.documents, & &1["_id"])
+      assert reply.count == 0
+    end
+
+    test "NON-REGRESSION: a {read} WS caller still reads the private type over the same channel",
+         %{ws: ws, proj: proj} do
+      raw = "vis-read-tok-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "vis-read", "test", ["read"], ws.id)
+      socket = socket(UserSocket, "vis-read-id", %{api_token: token})
+
+      {:ok, _reply, joined} =
+        Phoenix.ChannelTest.join(
+          socket,
+          BarkparkWeb.SearchChannel,
+          "search:#{ws.slug}:#{proj.slug}:test"
+        )
+
+      ref =
+        push(joined, "query", %{
+          "q" => "wsleakprobe",
+          "seq" => 4,
           "engine" => "postgres",
           "types" => "session"
         })

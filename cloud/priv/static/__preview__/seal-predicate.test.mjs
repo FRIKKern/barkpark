@@ -1647,52 +1647,203 @@ test('wave 29: a checkout with WHOLE history is BYTE-IDENTICAL to the undiscrimi
 // Same disease as the ancestry leg: a population this program could not read, reported as
 // one it read and found clean.
 
-// A canned ledger page, so these stay hermetic. `q` is the single HTTP site, so standing
-// a page in for it drives fetchRoster and fetchById at once.
-// The real `q` body is left intact behind a dead name rather than deleted: a mutation
-// that has to delete a whole function body is a mutation that drifts the day the body
-// changes shape.
-const cannedPage = (n) => 'function q(params) { return { result: { documents: Array.from({ length: '
-  + n + ' }, (_, i) => ({ _id: "row-" + i, lifecycle_status: "done", parent_id: "cloud-console-hardening-epic" })) } }; }\n'
+// A canned PAGING ledger, so these stay hermetic. `q` is the single HTTP site, so
+// standing pages in for it drives the whole roster walk. The real `q` body is left intact
+// behind a dead name rather than deleted: a mutation that has to delete a whole function
+// body is a mutation that drifts the day the body changes shape.
+//
+// It behaves like the endpoint MEASURED on 2026-08-09 (wave 64): `offset` moves the
+// window, `count=true` adds `result.total`, `order=_createdAt:asc` is honoured. Every one
+// of those is a switch, so a test can make the server misbehave in exactly ONE way at a
+// time and watch which arm fires. `rows: Infinity` is a ledger that never runs out —
+// the shape a walk must be able to give up on rather than loop over forever.
+//
+// `fetchById` reaches the same `q` with no `limit`, so it comes back empty here; these
+// tests run `--successor TERMINAL` (which consults no successor) and read clause (a)'s
+// OWN letters, never the exit code, exactly as the wave-29 control did.
+const cannedLedger = (o) => 'function q(params) {\n'
+  + '  const p = new Map(params);\n'
+  + '  const ROWS = ' + (o.rows === Infinity ? 'Infinity' : String(o.rows))
+  + ', TOTAL = ' + (o.total === undefined || o.total === null ? 'null' : String(o.total))
+  + ', DESC = ' + Boolean(o.descending)
+  + ', OFFSET_HONOURED = ' + (o.offsetHonoured !== false) + ';\n'
+  + '  const off = OFFSET_HONOURED ? Number(p.get("offset") || 0) : 0;\n'
+  + '  const lim = Number(p.get("limit") || 0);\n'
+  + '  const stamp = (i) => "2026-01-01T00:00:00." + String(DESC ? 999999999 - i : i).padStart(9, "0") + "Z";\n'
+  + '  const docs = [];\n'
+  + '  for (let i = off; i < Math.min(off + lim, ROWS); i += 1)\n'
+  + '    docs.push({ _id: "row-" + i, _createdAt: stamp(i), lifecycle_status: "done", parent_id: "cloud-console-hardening-epic" });\n'
+  + '  const result = { documents: docs, count: docs.length, offset: off, limit: lim };\n'
+  + '  if (TOTAL !== null) result.total = TOTAL;\n'
+  + '  return { result };\n'
+  + '}\n'
   + 'function _unused_real_q(params) {';
 
-test('wave 29 TRUNCATION FALSE SEAL: a FULL page of roster is REFUSED, not counted', () => {
-  // DRIVEN, EXIT 0, one number. `result.count` is the PAGE SIZE; the response carries no
-  // total and no hasMore, so a page that is FULL cannot be told from one that is COMPLETE.
-  // Measured on origin/main: lower the limit and the predicate prints `VERDICT: SEAL
-  // orphans=0` at rc 0 over a roster of 288 carrying 57 orphans.
-  const must = (s, from, to) => { assert.ok(s.includes(from), `anchor drifted: ${from}`); return s.replace(from, to); };
-  const shrink = (s) => must(must(s, 'function q(params) {', cannedPage(3)),
-    'const ROSTER_PAGE_LIMIT = 500;', 'const ROSTER_PAGE_LIMIT = 3;');
+const must = (s, from, to) => { assert.ok(s.includes(from), `anchor drifted: ${from}`); return s.replace(from, to); };
+const chain = (...fns) => (s) => fns.reduce((acc, f) => f(acc), s);
+const withLedger = (o) => (s) => must(s, 'function q(params) {', cannedLedger(o));
+const withPageLimit = (n) => (s) => must(s, 'const ROSTER_PAGE_LIMIT = 500;', `const ROSTER_PAGE_LIMIT = ${n};`);
+const withMaxPages = (n) => (s) => must(s, 'const ROSTER_MAX_PAGES = 40;', `const ROSTER_MAX_PAGES = ${n};`);
+// READ ON THE CLAUSE-(a) LETTERS, NEVER ON THE EXIT CODE, in every control below. The
+// exit code is the CONJUNCTION of (a), (b) and (c), and clause (b) reads git per
+// registered defect — so in a depth-1 checkout a control bound to `status === SEAL` reds
+// with `b=HISTORY-UNAVAILABLE` for an ENVIRONMENT fact while passing on a full clone, and
+// `console-unit` runs at depth-1 on every push to main. (`VERDICT: SEAL` lives inside
+// `if (ok)` and is structurally unreachable wherever clause (b) is not clean, so it
+// cannot be asserted here either.) The floor these tests pin is clause (a)'s.
+const rosterRun = (mutate) => mutatedRun(mutate, ['--repo', REPO, '--successor', 'TERMINAL']);
 
-  const refused = mutatedRun(shrink, ['--repo', REPO, '--successor', 'TERMINAL']);
+test('wave 64 THE INSTRUMENT READS ITS OWN EPIC: the roster PAGINATES past the page limit', () => {
+  // THE DEFECT THIS REPLACES. Waves 29–63 read ONE page and refused whenever it came back
+  // full — correct, and by wave 64 no longer a read: this epic passed 500 children around
+  // wave 40 and carries 850 today, so the predicate answered `INFRA-FAULT a=UNKNOWN
+  // b=UNKNOWN c=UNKNOWN code=ROSTER-TRUNCATED` about the one epic it exists to certify,
+  // and every Law-0 figure came from a raw `curl limit=1000` with no truncation guard of
+  // its own. Seven rows over a page limit of three is the same crossing in miniature:
+  // three pages (3 + 3 + 1), terminating on the SHORT page.
+  const paged = rosterRun(chain(withLedger({ rows: 7, total: 7 }), withPageLimit(3)));
+  assert.notEqual(paged.status, INFRA, `a roster it CAN page is not an infra fault: ${token(paged.out)}`);
+  assert.doesNotMatch(token(paged.out), /code=ROSTER-/, 'no roster refusal may fire on a walk that completed');
+  assert.match(token(paged.out), /\broster=7\b/, 'the POPULATION, not the page size');
+  assert.doesNotMatch(token(paged.out), /\broster=3\b/, 'the pre-fix answer was the first page and nothing else');
+  assert.match(token(paged.out), /\ba=PASS\b/, 'clause (a) is evaluated over the whole roster');
+
+  // AND THE OLD ARM IS NOT MERELY DISARMED — it is re-aimed. A page that comes back FULL
+  // is now the NORMAL case, so the sentence the old refusal printed must be gone from a
+  // healthy walk rather than merely unreached.
+  assert.doesNotMatch(paged.out, /came back FULL/);
+});
+
+test('wave 64 THE REFUSAL SURVIVES (ceiling): a walk that cannot finish REFUSES, and the refusal can lose', () => {
+  // A ledger that never runs out. The walk must give up and SAY SO, never loop and never
+  // count what it managed to read as if it were the population.
+  const endless = chain(withLedger({ rows: Infinity }), withPageLimit(3), withMaxPages(4));
+
+  const refused = rosterRun(endless);
   assert.equal(refused.status, INFRA, 'a roster this program could not read whole is an infra fault, never a verdict');
   assert.match(token(refused.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=ROSTER-TRUNCATED/);
-  assert.match(refused.out, /came back FULL — 3 rows against a page limit of 3/);
+  assert.match(refused.out, /could not be paginated to the end — 4 pages of 3 were read \(12 rows\)/);
   assert.doesNotMatch(refused.out, /VERDICT: SEAL/);
 
-  // THE CONTROL — the identical run with ONLY the fullness check removed COUNTS the
-  // truncated page as the population and reports clause (a) clean over it.
-  //
-  // READ ON THE CLAUSE-(a) LETTERS, NEVER ON THE EXIT CODE. The exit code is the
-  // CONJUNCTION of (a), (b) and (c), and clause (b) reads git per registered defect — so
-  // in a depth-1 checkout this arm exits 1 with `b=HISTORY-UNAVAILABLE` for an
-  // ENVIRONMENT fact and a control bound to `status === SEAL` reds there while passing on
-  // a full clone. That is the same hostage-taking the wave-27 empty-roster control above
-  // documents in its own comment, and `console-unit` runs at depth-1 on every push to
-  // main. The floor this test pins is clause (a)'s, so clause (a)'s letters are what it
-  // reads. (`VERDICT: SEAL` is pushed INSIDE `if (ok)` and is therefore structurally
-  // unreachable wherever clause (b) is not clean — it cannot be asserted here either.)
-  const counted = mutatedRun((s) => must(shrink(s), 'if (docs.length >= ROSTER_PAGE_LIMIT)', 'if (false)'),
-    ['--repo', REPO, '--successor', 'TERMINAL']);
-  assert.notEqual(counted.status, INFRA, 'pre-fix the truncated page was never refused — it was counted');
-  assert.match(token(counted.out), /\ba=PASS\b/,
-    `pre-fix, clause (a) read clean over a roster it had silently truncated: ${token(counted.out)}`);
-  assert.match(token(counted.out), /\borphans=0\b/, 'orphans=0 over a page, reported as if over a population');
-  assert.match(token(counted.out), /\broster=3\b/, 'and it printed the PAGE SIZE as if it were the population');
-  assert.doesNotMatch(token(counted.out), /code=ROSTER-TRUNCATED/,
-    'the fullness mutation must actually remove the refusal — otherwise this control passes vacuously');
-  assert.doesNotMatch(counted.out, /came back FULL/);
+  // THE CONTROL — MUTATION-PROOF THAT THE REFUSAL IS LOAD-BEARING. Soften the ceiling
+  // from a refusal into a `break` (the "just warn and carry on" shape) and the identical
+  // run reports clause (a) CLEAN over the 12 rows it happened to reach, out of a ledger
+  // with no end. That is the false seal the arm exists to prevent, and it is what a
+  // pagination fix that could no longer refuse would have shipped.
+  const softened = rosterRun((s) => must(endless(s),
+    'if (page > ROSTER_MAX_PAGES)', 'if (page > ROSTER_MAX_PAGES) break;\n    if (false)'));
+  assert.notEqual(softened.status, INFRA, 'softened, the walk stops refusing');
+  assert.doesNotMatch(token(softened.out), /code=ROSTER-TRUNCATED/,
+    'the mutation must actually remove the refusal — otherwise this control passes vacuously');
+  assert.match(token(softened.out), /\ba=PASS\b/, 'and clause (a) reads clean over a population it never finished reading');
+  assert.match(token(softened.out), /\broster=12\b/, '12 rows of an endless ledger, printed as the population');
+});
+
+test('wave 64 THE REFUSAL SURVIVES (window): an `offset` the server IGNORES is a refusal, not a loop', () => {
+  // The second shape of "pagination cannot terminate", and the one an endpoint can cause
+  // without erroring: `offset` accepted and dropped. Every page comes back full and
+  // IDENTICAL, so a walk that trusted its own parameter would read page one forever.
+  // No `total` is served here — this arm must fire on the pages alone.
+  const stuck = chain(withLedger({ rows: Infinity, offsetHonoured: false }), withPageLimit(3));
+
+  const refused = rosterRun(stuck);
+  assert.equal(refused.status, INFRA);
+  assert.match(token(refused.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=ROSTER-TRUNCATED/);
+  assert.match(refused.out, /STOPPED ADVANCING at offset 3/);
+  assert.match(refused.out, /first id \(row-0\) is the first id of the page before it/);
+
+  // THE CONTROL — remove the non-advancing arm (and the order arm behind it, which sees
+  // the same repeated page as a sequence going backwards) and the CEILING still catches
+  // it, at page six instead of page two. Three independent refusals stacked over one
+  // fault is what stops this from being one guard wearing three hats.
+  const noWindow = chain(stuck, withMaxPages(6),
+    (s) => must(s, 'if (docs.length >= ROSTER_PAGE_LIMIT && firstId !== null && firstId === prevFirstId)', 'if (false)'),
+    (s) => must(s, 'if (at < highWater)', 'if (false)'));
+  const ceilingCaught = rosterRun(noWindow);
+  assert.equal(ceilingCaught.status, INFRA, 'with the window arm gone the ceiling still refuses');
+  assert.match(token(ceilingCaught.out), /code=ROSTER-TRUNCATED/);
+  assert.match(ceilingCaught.out, /could not be paginated to the end — 6 pages of 3/);
+  assert.doesNotMatch(ceilingCaught.out, /STOPPED ADVANCING/,
+    'the window mutation must actually apply — otherwise the arm under test never left');
+
+  // AND WITH EVERY ARM SOFTENED, the pre-fix disease returns intact: 3 unique rows of an
+  // endless ledger, clause (a) clean over them.
+  const blind = rosterRun(chain(noWindow,
+    (s) => must(s, 'if (page > ROSTER_MAX_PAGES)', 'if (page > ROSTER_MAX_PAGES) break;\n    if (false)')));
+  assert.notEqual(blind.status, INFRA);
+  assert.match(token(blind.out), /\ba=PASS\b/);
+  assert.match(token(blind.out), /\broster=3\b/, 'one page, reported as the population — the wave-29 defect, exactly');
+});
+
+test('wave 64: a walk that comes back SHORT of the server\'s own total REFUSES (ROSTER-INCOMPLETE)', () => {
+  // `count=true` makes the endpoint state a total, so the walk can check its own work.
+  // A row unpublished or reparented mid-walk shifts the window left and takes a row with
+  // it — silently, because a short page still looks like the end.
+  const short = chain(withLedger({ rows: 5, total: 9 }), withPageLimit(3));
+
+  const refused = rosterRun(short);
+  assert.equal(refused.status, INFRA, 'a roster short of its own reported total is a read that missed rows');
+  assert.match(token(refused.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=ROSTER-INCOMPLETE/);
+  assert.match(refused.out, /came back SHORT — 5 unique rows paginated against a server-reported total of 9 \(4 missing\)/);
+
+  // THE CONTROL — without the arm, clause (a) certifies 5 rows of a population of 9.
+  const counted = rosterRun(chain(short, (s) => must(s,
+    'if (typeof total === \'number\' && rows.length < total)', 'if (false)')));
+  assert.notEqual(counted.status, INFRA);
+  assert.doesNotMatch(token(counted.out), /code=ROSTER-INCOMPLETE/, 'the mutation must actually remove the refusal');
+  assert.match(token(counted.out), /\ba=PASS\b/);
+  assert.match(token(counted.out), /\broster=5\b/, '5 of 9, reported as the population');
+
+  // AND THE ARM MUST NOT FIRE ON GROWTH. Rows created after the count was taken sort to
+  // the TAIL under `_createdAt:asc` and ARE read, so more rows than the total is not a
+  // miss and refusing it would make the instrument unreadable during a live wave — which
+  // is the failure mode this whole slice exists to end.
+  const grew = rosterRun(chain(withLedger({ rows: 7, total: 5 }), withPageLimit(3)));
+  assert.notEqual(grew.status, INFRA, 'a roster LONGER than the reported total missed nothing');
+  assert.match(token(grew.out), /\broster=7\b/);
+});
+
+test('wave 64: an `order` the endpoint DROPS IN SILENCE is caught by reading the rows (ROSTER-UNORDERED)', () => {
+  // MEASURED, and the reason the order is verified rather than trusted: `order=_id:asc`
+  // came back in the default `_updatedAt:desc` with no error and no signal. `_updatedAt`
+  // re-sorts on every pulse, stamp and close, so offset paging over it repeats one row
+  // and drops another — a truncation with no full page to notice.
+  const unordered = chain(withLedger({ rows: 7, total: 7, descending: true }), withPageLimit(3));
+
+  const refused = rosterRun(unordered);
+  assert.equal(refused.status, INFRA);
+  assert.match(token(refused.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=ROSTER-UNORDERED/);
+  assert.match(refused.out, /came back OUT OF ORDER at offset 0/);
+
+  // THE CONTROL — without the arm the walk pages happily over a sequence that is not the
+  // one it asked for, and says nothing about it.
+  const trusted = rosterRun(chain(unordered, (s) => must(s, 'if (at < highWater)', 'if (false)')));
+  assert.notEqual(trusted.status, INFRA);
+  assert.doesNotMatch(token(trusted.out), /code=ROSTER-UNORDERED/, 'the mutation must actually remove the refusal');
+  assert.match(token(trusted.out), /\broster=7\b/);
+});
+
+test('wave 64: the roster request actually CARRIES offset, order and count — read off curl\'s own argv', () => {
+  // NAMING THE AFFORDANCE IS NOT ENOUGH IF THE REQUEST DOES NOT USE IT. A shim `curl`
+  // records the flags it was handed, so the paging parameters are asserted from the wire
+  // rather than from the source that claims to send them.
+  const shimDir = tmp('seal-pred-curl-args-');
+  const argsFile = join(shimDir, 'argv.txt');
+  writeFileSync(join(shimDir, 'curl'),
+    `#!/bin/sh\nprintf '%s\\n' "$@" >> ${argsFile}\nprintf '{"result":{"documents":[],"count":0,"offset":0,"limit":500,"total":0}}\\n200\\n'\n`);
+  spawnSync('chmod', ['+x', join(shimDir, 'curl')]);
+  const r = spawnSync('node', [PREDICATE, '--repo', REPO, '--successor', 'TERMINAL'],
+    { encoding: 'utf8', timeout: 120000, env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}` } });
+  // An empty roster is refused on its own floor (wave 27) — that is not what is under
+  // test here; the request is.
+  assert.notEqual(r.status, null, 'the predicate produced no exit status');
+  const argv = readFileSync(argsFile, 'utf8');
+  assert.match(argv, /^offset=0$/m, 'the walk must ASK for a window');
+  assert.match(argv, /^order=_createdAt:asc$/m, 'and page by a key that does not move under a live wave');
+  assert.match(argv, /^count=true$/m, 'and ask for the total it checks its own work against');
+  assert.match(argv, /^limit=500$/m);
+  assert.match(argv, /^filter\[parent_id\]=cloud-console-hardening-epic$/m,
+    'never a bare parent_id — that returns 500 UNFILTERED rows');
 });
 
 test('wave 29: bucket (c) REFUSES an empty gate table instead of certifying c=PASS over zero gates', () => {

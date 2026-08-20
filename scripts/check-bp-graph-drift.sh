@@ -24,11 +24,15 @@
 # edit the doctrine mandates, fires nothing. Hence a dedicated workflow whose
 # trigger paths list all four literal copies.
 #
-# ADVISORY, and honestly so: this repo has no branch protection
-# (`branches/main/protection` -> 404 "Branch not protected", `/rulesets` -> []),
-# so there is no required-check list to register against. This job REDS THE PR
-# PAGE; it does not gate the merge. Repo-wide protection is filed separately
-# (stw10-backlog-branch-protection) and is deliberately not smuggled in here.
+# ADVISORY, and honestly so — but NOT for the reason first written here. The
+# original ground was "there is nothing to register against", true only while
+# protection was a 404. Since 2026-07-28T22:42:10Z main IS protected, with
+# `enforce_admins: true` and a required-context list committed at
+# `.github/required-checks.json`. This check is not on that list, so it REDS THE
+# PR PAGE and does not gate the merge. (`/rulesets` -> [] is TRUE and still the
+# wrong reading: protection here is classic branch protection, not a ruleset.)
+# Putting a check ON that list is a repo-settings decision taken through
+# scripts/required-checks-*.sh, never smuggled in here.
 #
 # bash 3.2 compatible (stock macOS): no associative arrays, no mapfile.
 #
@@ -99,6 +103,15 @@ check() {
   echo "OK — all 3 mirrors are byte-identical to $CANONICAL."
   return 0
 }
+
+# ---- argument dispatch -------------------------------------------------------
+# Refuse an argument this gate does not understand. A swallowed flag — a
+# `--selftest` typo, a future rename — would silently run the ordinary check
+# and report green, fabricating the tripwire's own proof.
+if [ -n "${1:-}" ] && [ "$1" != "--selftest" ]; then
+  echo "check-bp-graph-drift: unknown argument '$1' (expected nothing or --selftest)" >&2
+  exit 2
+fi
 
 # ---- selftest ---------------------------------------------------------------
 if [ "${1:-}" = "--selftest" ]; then

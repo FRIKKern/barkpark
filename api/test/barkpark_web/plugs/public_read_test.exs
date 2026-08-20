@@ -158,6 +158,89 @@ defmodule BarkparkWeb.Plugs.PublicReadTest do
   # `BarkparkWeb.Integration.PublicReadEnforcementTest`, where the listen case
   # fails before the `plug(PublicRead)` line in `pipeline :require_token`.
 
+  # ── /v1/graph: admitted by name, and the admission must not crash ─────────
+  #
+  # WITHOUT the `type_gate/1` clause for a path with no `:type` segment, this
+  # test does not fail with a wrong status — it RAISES `FunctionClauseError`
+  # from the old two-clause `extract_ds_type/1`, i.e. a 500 in production. That
+  # is precisely why a bare allowlist entry would have been a worse bug than the
+  # 403 it replaced.
+  test "public-read GET /v1/graph: admitted (no crash on the missing :type segment)" do
+    conn = build_conn(:get, "/v1/graph") |> run(public_read_token())
+    refute conn.halted
+    refute conn.status == 500
+  end
+
+  test "public-read GET /v1/graph?dataset=production: admitted" do
+    conn = build_conn(:get, "/v1/graph?dataset=production") |> run(public_read_token())
+    refute conn.halted
+  end
+
+  test "public-read GET /v1/graph on the SCOPED mirror shape: admitted" do
+    conn = build_conn(:get, "/w/acme/p/site/v1/graph") |> run(public_read_token())
+    refute conn.halted
+  end
+
+  test "public-read GET /v1/graph?perspective=drafts: still 403 (the perspective clamp holds)" do
+    conn = build_conn(:get, "/v1/graph?perspective=drafts") |> run(public_read_token())
+    assert conn.halted
+    assert conn.status == 403
+    assert decode(conn)["error"]["message"] == "perspective not allowed"
+  end
+
+  test "public-read POST /v1/graph: 403 (GET-only admission)" do
+    conn = build_conn(:post, "/v1/graph") |> run(public_read_token())
+    assert conn.halted
+    assert conn.status == 403
+  end
+
+  # LEAK-STILL-CLOSED. Admitting one route must not widen the surface by prefix:
+  # the graph siblings each leak something the corpus does not (a draft-only
+  # title at the default perspective; an unpaginated full-corpus dump), and the
+  # non-graph `:require_token` reads are the live leak this plug's mount closed
+  # (a public-read token read a 52MB export including 129 drafts).
+  test "the graph SIBLINGS remain unadmitted: 403" do
+    for path <- [
+          "/v1/graph/gh-9531",
+          "/v1/graph/gh-9531/tasks",
+          "/v1/graph/orphans",
+          "/v1/graph/dangling",
+          "/w/acme/p/site/v1/graph/orphans"
+        ] do
+      conn = build_conn(:get, path) |> run(public_read_token())
+
+      assert conn.halted, "#{path} was admitted for a public-read token"
+      assert conn.status == 403, "#{path} returned #{conn.status}, expected 403"
+      assert decode(conn)["error"]["code"] == "forbidden"
+    end
+  end
+
+  test "the non-graph :require_token reads remain 403" do
+    for path <- [
+          "/v1/data/export/production",
+          "/v1/data/listen/production",
+          "/v1/data/revision/production/p1",
+          "/v1/data/analytics/production",
+          "/v1/data/history/production/post/p1"
+        ] do
+      conn = build_conn(:get, path) |> run(public_read_token())
+
+      assert conn.halted, "#{path} was admitted for a public-read token"
+      assert conn.status == 403, "#{path} returned #{conn.status}, expected 403"
+
+      assert decode(conn)["error"]["message"] ==
+               "public-read tokens may only read published public documents"
+    end
+  end
+
+  test "the data routes are unchanged by the readmit: public 200-path, private 404" do
+    refute run(build_conn(:get, "/v1/data/query/production/post"), public_read_token()).halted
+
+    denied = run(build_conn(:get, "/v1/data/query/production/secret"), public_read_token())
+    assert denied.halted
+    assert denied.status == 404
+  end
+
   test "public-read POST on allowed path (non-GET): 403 forbidden" do
     conn =
       build_conn(:post, "/v1/data/query/production/post")

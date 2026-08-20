@@ -128,7 +128,12 @@ defmodule Barkpark.Seeds.Demo do
           %{name: "slug", title: "Slug", type: "slug", surface: "sidebar"},
           %{name: "bio", title: "Bio", type: "text", rows: 4, surface: "body"},
           %{name: "avatar", title: "Avatar", type: "image", surface: "body"},
-          %{name: "email", title: "Email", type: "string", surface: "sidebar"},
+          # Contact email is PII — `private: true` is the field-visibility
+          # declaration the Envelope chokepoint redacts on (render/3 drops it
+          # for anonymous and non-admin callers; field_readable?/3 refuses it
+          # in filter/order clauses). Sealed by
+          # test/barkpark/content/envelope_author_email_seal_test.exs.
+          %{name: "email", title: "Email", type: "string", surface: "sidebar", private: true},
           %{
             name: "role",
             title: "Role",

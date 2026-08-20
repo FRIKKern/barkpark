@@ -15,7 +15,19 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
     * `"instance"` — ride the platform `BarkparkCloud.Mailer` (the default; no
       per-team SMTP needed).
     * `"smtp"`     — the per-team SMTP relay in the `smtp_*` columns.
-    * `"api"`      — a hosted-provider key (the adapter itself is deferred).
+
+  cch-w52-s1 — there is no third option. `"api"` was offered by this schema, by
+  the console's segmented control and by a Vault-encrypted `api_key_encrypted`
+  column for as long as they existed, and NOTHING carried it: `deliver_alert/2`
+  has an `smtp` clause and a catch-all, there is no Swoosh adapter beyond
+  Local/Test/SMTP, and `config.exs` sets `:swoosh, :api_client, false`. An
+  "api" team's alert rode the platform mailer and was logged `sent`. The offer
+  is deleted rather than disclosed (charter D589; live prod carried zero such
+  rows). The schema FIELD goes now so the column drop can follow safely — Ecto
+  selects the full field list, so the field must stop being selected BEFORE the
+  column is dropped (D594; the migration is cch-w52-s3's).
+  `transport_manifest_test.exs` reds if an option ever outruns its mechanism
+  again.
 
   Transactional identity email (invite / reset / verify) NEVER consults this —
   it always rides the platform transport (see `Notifications.Transactional`).
@@ -35,14 +47,25 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @transports ~w(instance smtp api)
+  @transports ~w(instance smtp)
   @encryptions ~w(starttls tls none)
 
   # The per-event toggle columns, in one list so the dispatcher and the
   # changeset share a single source of truth.
-  @events ~w(provision_succeeded provision_failed deployment_succeeded
+  #
+  # WAVE 30 S1 — SIX, NOT NINE. `deployment_succeeded`, `member_invited` and
+  # `token_expiring` were toggles for events NOTHING in `cloud/lib` dispatches;
+  # the console rendered all three as promises, and `token_expiring` defaulted
+  # ON. They are dropped (migration
+  # `20260804123000_drop_producerless_notification_events`) rather than wired:
+  # `dispatch_event/3` fans to `team_member_emails/1`, so a token-expiry
+  # producer would mail one user's credential schedule to the whole team. The
+  # missing alerts are filed as feature work, not left standing as offers.
+  # Every atom here MUST have a producer — `__app.test.mjs`'s bidirectional
+  # notification census reds the Console gate otherwise.
+  @events ~w(provision_succeeded provision_failed
              deployment_failed agent_reachable agent_unreachable
-             subscription_past_due member_invited token_expiring)a
+             subscription_past_due)a
 
   schema "email_notification_settings" do
     field :transport, :string, default: "instance"
@@ -53,19 +76,15 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
     field :smtp_password_encrypted, :string, redact: true
     field :smtp_port, :integer
     field :smtp_encryption, :string
-    field :api_key_encrypted, :string, redact: true
     field :from_address, :string
     field :from_name, :string
 
     field :provision_succeeded, :boolean, default: false
     field :provision_failed, :boolean, default: true
-    field :deployment_succeeded, :boolean, default: false
     field :deployment_failed, :boolean, default: true
     field :agent_reachable, :boolean, default: false
     field :agent_unreachable, :boolean, default: true
     field :subscription_past_due, :boolean, default: true
-    field :member_invited, :boolean, default: false
-    field :token_expiring, :boolean, default: true
 
     field :last_test_sent_at, :utc_datetime_usec
 
@@ -119,7 +138,6 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
         :smtp_password_encrypted,
         :smtp_port,
         :smtp_encryption,
-        :api_key_encrypted,
         :from_address,
         :from_name,
         :last_test_sent_at

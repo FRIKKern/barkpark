@@ -37,7 +37,7 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod # honors the pinned go 1.24.2 (chroma)
+          go-version-file: go.mod # single source of truth: the `go` directive in go.mod (1.25.0)
       - run: go test ./...
       # Drift guard: the committed go:embed copy of deploy.sh must match the
       # repo-root canonical script (make cli-build syncs it locally; a hand-run

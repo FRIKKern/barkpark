@@ -221,8 +221,8 @@ func TestReadyCountIncludesEpicRoots(t *testing.T) {
 
 func TestBottomChromeIsExactlyThreeUsefulLines(t *testing.T) {
 	b := Board{
-		TaskCount: 1000,
-		Counts:    map[string]int{"open": 900, "done": 600}, // total 1500 > 1000 fetched
+		TaskCount: 1500,
+		Counts:    map[string]int{"open": 900, "done": 600}, // fetch == corpus: not clamped
 	}
 	chrome := bottomChrome(b, UIState{Conn: ConnPolling}, 80, fixedNow)
 	if len(chrome) != 3 {
@@ -242,6 +242,119 @@ func TestBottomChromeIsExactlyThreeUsefulLines(t *testing.T) {
 		if strings.Contains(plain, noise) {
 			t.Errorf("three-line chrome retained %q noise:\n%s", noise, plain)
 		}
+	}
+}
+
+// TestMomentumShowingNofM proves the 1000-row horizon disclosure (charter D40):
+// when the fetch (TaskCount) is short of the true corpus (summed Counts) the
+// momentum line owns a dim "showing N of M" note. It renders at a comfortable
+// width, sheds WHOLE (never a mid-token fragment) when the pane is tight, and
+// stays silent when nothing was clamped.
+func TestMomentumShowingNofM(t *testing.T) {
+	truncated := Board{
+		TaskCount: 1000,
+		Counts:    map[string]int{"in_progress": 2, "open": 4731, "done": 2000}, // 6733 corpus
+	}
+	st := UIState{Conn: ConnPolling}
+
+	wide := ansi.Strip(momentumLine(truncated, st, 120))
+	if !strings.Contains(wide, "showing 1000 of 6733") {
+		t.Errorf("wide momentum should disclose the clamp:\n%s", wide)
+	}
+
+	// Narrow enough to clip the note but hold the base: it sheds WHOLE — no
+	// partial "showing"/" of " — while the primary counts stay untruncated.
+	narrow := ansi.Strip(momentumLine(truncated, st, 50))
+	if strings.Contains(narrow, "showing") || strings.Contains(narrow, " of ") {
+		t.Errorf("a tight pane must shed the note whole, never fragment it:\n%q", narrow)
+	}
+	// The primary instruments survive the shed.
+	for _, want := range []string{"in flight", "done"} {
+		if !strings.Contains(narrow, want) {
+			t.Errorf("primary instrument %q lost to the shed:\n%q", want, narrow)
+		}
+	}
+
+	// A full fetch (TaskCount == corpus) discloses nothing — nothing was clamped.
+	full := Board{TaskCount: 6733, Counts: truncated.Counts}
+	if got := ansi.Strip(momentumLine(full, st, 120)); strings.Contains(got, "showing") {
+		t.Errorf("an un-clamped board must stay silent:\n%s", got)
+	}
+	// A zero fetch (no snapshot yet) is not a clamp either.
+	zero := Board{Counts: truncated.Counts}
+	if got := ansi.Strip(momentumLine(zero, st, 120)); strings.Contains(got, "showing") {
+		t.Errorf("a zero-fetch board must stay silent:\n%s", got)
+	}
+}
+
+// TestMomentumInFlightDenominatorCollapsed — the D115/D120 denominator proof.
+// Prime's raw lifecycle_counts are twin-doubled (no collapse_twins), so a board
+// painted from them shows an inflated "N in flight" AND — because the deciding
+// predicate of the showing-N-of-M disclosure is TaskCount < summedLifecycleCounts,
+// not any >1000 threshold — discloses a clamp that never happened. The collapsed
+// path (mergeInflight + countInProgress, the exact FetchSnapshotFull seam)
+// repairs both numbers. Twin divergence is SYNTHESIZED (twin-doubled prime
+// counts + a union-only claimed row): the live prime-vs-union delta is 0 today,
+// so a live inequality assert would be vacuously green.
+func TestMomentumInFlightDenominatorCollapsed(t *testing.T) {
+	window := []Task{
+		{DocID: "w1", Kind: "task", Lifecycle: "in_progress", Claim: &Claim{Worker: "wA"}, UpdatedAt: fixedNow},
+		{DocID: "w2", Kind: "task", Lifecycle: "open", UpdatedAt: fixedNow},
+	}
+	inflight := []Task{
+		{DocID: "w1", Kind: "task", Lifecycle: "in_progress", Claim: &Claim{Worker: "wA"}, UpdatedAt: fixedNow}, // dedup case
+		{DocID: "u1", Kind: "task", Lifecycle: "in_progress", Claim: &Claim{Worker: "wB"}, UpdatedAt: fixedNow}, // union-only
+	}
+	// A lifecycle-divergent twin counts once per copy in prime: it says 3 in
+	// flight while the deduped union holds 2. Summed counts: 3 + 1 = 4.
+	extras := primeExtras{counts: map[string]int{"in_progress": 3, "open": 1}}
+	st := UIState{Conn: ConnLive}
+
+	// MUTATION CONTROL — the pre-D120 board: prime's RAW counts, uncollapsed.
+	// TaskCount(2, window only) < summed(4) fires the disclosure over a corpus
+	// that was never clamped, and the in-flight count paints the doubled 3.
+	// This is the exact lie D115 live-reproduced (11-vs-10); if the collapse
+	// seam ever regresses, the assertions below are what the operator would see.
+	//
+	// The verbatim Counts copy is DELIBERATE, not a shortcut. D124 (#11974) put a
+	// SECOND collapse inside BuildBoard itself — recomputeInProgress rewrites the
+	// in_progress bucket from s.Tasks — so BuildBoard can no longer compose an
+	// uncollapsed board: it collapses by construction. Left as it was, this
+	// control silently lost its teeth (it painted "1 in flight" with no
+	// disclosure at all, i.e. it stopped reproducing the lie it exists to
+	// reproduce). Restoring the pre-D124 contract — Counts copied verbatim from
+	// prime, the ONE line D124 changed on this path — is what keeps the
+	// assertions below honest instead of vacuous.
+	rawBoard := BuildBoard(composeSnapshot(window, extras, fixedNow), RepoContext{}, fixedNow)
+	rawBoard.Counts = map[string]int{"in_progress": 3, "open": 1} // prime verbatim, pre-D124
+	rawLine := ansi.Strip(momentumLine(rawBoard, st, 120))
+	if !strings.Contains(rawLine, "3 in flight") || !strings.Contains(rawLine, "showing 2 of 4") {
+		t.Fatalf("mutation control lost its teeth — uncollapsed counts no longer reproduce the twin-doubled lie:\n%s", rawLine)
+	}
+
+	// The collapsed path, exactly as FetchSnapshotFull merges it.
+	merged, _ := mergeInflight(window, nil, inflight, nil)
+	// The FETCH seam's own teeth, asserted DIRECTLY. Since D124 the board
+	// re-derives in_progress from the rows it holds, so a regression in
+	// countInProgress (prime's raw 3, or len(third-fetch)) would be MASKED by
+	// recomputeInProgress before it ever reached the rendered line below.
+	// Pin the seam's output where nothing downstream can launder it.
+	if got := countInProgress(merged); got != 2 {
+		t.Fatalf("countInProgress must collapse the twin-doubled 3 to the deduped union 2, got %d", got)
+	}
+	extras.counts["in_progress"] = countInProgress(merged)
+	b := BuildBoard(composeSnapshot(merged, extras, fixedNow), RepoContext{}, fixedNow)
+	line := ansi.Strip(momentumLine(b, st, 120))
+	if !strings.Contains(line, "2 in flight") {
+		t.Errorf("collapsed momentum should count the deduped union (2), got:\n%s", line)
+	}
+	if strings.Contains(line, "showing") {
+		t.Errorf("nothing was clamped once the denominator collapsed — the disclosure must stay silent:\n%s", line)
+	}
+	// The deciding predicate directly: the union board is whole, so TaskCount
+	// must not read short of the summed lifecycle counts.
+	if b.TaskCount < summedLifecycleCounts(b) {
+		t.Errorf("TaskCount %d < summed counts %d on a whole union board — the denominator still carries a twin double-count", b.TaskCount, summedLifecycleCounts(b))
 	}
 }
 

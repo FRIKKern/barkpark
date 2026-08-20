@@ -41,6 +41,15 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   Intentional, documented divergences (View-only list bottom-margin) are
   encoded as guarded invariants below, so ADDING them to Edit trips the wire and
   forces a conscious decision rather than silent double-spacing.
+
+  §2/§5/§6 compare PRODUCER-EXHAUSTIVELY (`nil` included), so a ONE-SIDED ADD —
+  a property added to the producer that the mirror simply lacks — reds. Before
+  pe-w1-parity-gate-one-sided-adds those sections filtered on
+  `Map.has_key?(mirror, prop)`, and a mutation adding
+  `font-size: var(--bp-body-size)` to `.bp-paper-surface p` with no editor twin
+  shipped GREEN through all 1156 portable_doc tests. Deliberate asymmetries now
+  live in `@documented_divergences`, one reason each, with a rot guard that
+  fails if an entry stops describing a real difference.
   """
   use ExUnit.Case, async: true
 
@@ -54,7 +63,15 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # `.bp-table__td` classes, and `declarations_for/3` accepts a class selector as the
   # `element` (targeting ".bp-paper-surface .bp-table__th" vs ".bp-paper-editor-body
   # .bp-table__th"), so a drift between the reader rule and the edit mirror trips §2.
-  @parity_elements ~w(h1 h2 h3 p li code img .bp-table .bp-table__th .bp-table__td)
+  # `.bp-stats` / `.bp-chart` complete the reader's EVIDENCE-BAND BREAKOUT trio
+  # (.bp-table is the third): all three step out of the prose column via
+  # `margin-inline: var(--bp-evidence-pull)` + `width: var(--bp-evidence-width)`,
+  # so an unmirrored change to their geometry desyncs canvas from reader.
+  # Red-before (mutation-proven 2026-08-17, pe-w2-parity-widening): with the gate
+  # widened, `padding: 4px` added to `.bp-paper-surface .bp-stats` with no editor
+  # twin reds §2 (".bp-stats.padding: View=\"4px\" Edit=nil"); before the widening
+  # the same mutation shipped GREEN through the whole portable_doc tree.
+  @parity_elements ~w(h1 h2 h3 p li code img .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart)
 
   @root_heex Path.expand(
                "../../../../lib/barkpark_web/layouts/root.html.heex",
@@ -163,9 +180,67 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
     refute html =~ ~r/<li[^>]*\sstyle=/
   end
 
+  # ── Documented-divergence allowlist ────────────────────────────────────────
+  # §2/§5/§6 below compare PRODUCER-EXHAUSTIVELY (§7's shape): every
+  # (property, value) the producer declares must appear byte-identical on the
+  # mirror, `nil` INCLUDED — so a one-sided ADD (a property the mirror simply
+  # lacks) reds instead of being filtered out of the comparison. Before this,
+  # those sections filtered on `Map.has_key?(mirror, prop)`, which meant adding
+  # e.g. `font-size: var(--bp-body-size)` to `.bp-paper-surface p` with no
+  # editor twin shipped GREEN through all 1156 portable_doc tests
+  # (mutation-proven 2026-08-12, pe-w1-parity-gate-one-sided-adds).
+  #
+  # A DELIBERATE asymmetry therefore has to be declared here, keyed by
+  # `{section, element, property}`, each with a one-line reason. The map is the
+  # complete list of things this file knowingly lets diverge — anything not in
+  # it must match. Sections:
+  #
+  #   :view_edit    — §2, `.bp-paper-surface <el>` (paper-surface.css)
+  #                        ↔ `.bp-paper-editor-body <el>` (root.html.heex)
+  #   :studio_bundle — §5, root.html.heex ↔ assets/paper-editor/src/styles.css
+  #   :view_bundle   — §6, paper-surface.css callout tones ↔ styles.css mirror
+  #
+  # Mirror-ONLY properties (the mirror declares what the producer does not) stay
+  # unchecked in every section — the mirrors legitimately carry standalone-host
+  # extras, and this wave scopes the gate to producer-side adds.
+  # Verified 2026-08-12 against paper-surface.css / root.html.heex /
+  # assets/paper-editor/src/styles.css — each entry states WHY the mirror may
+  # stay silent. All four §2 entries share one mechanism (§4's single-producer
+  # note): the Studio canvas mounts in LIGHT DOM inside
+  # `<main class="bp-paper-shell bp-paper-surface">` with `Stylesheet.css/0`
+  # inlined on the same page, so the View rule itself paints the canvas and the
+  # editor rule only redeclares what it must.
+  @documented_divergences %{
+    {:view_edit, "h1", "color"} =>
+      "headings inherit the View group rule in Studio (light-DOM canvas) and the bundle's `.bp-paper-editor-body { color: var(--paper-ink) }` wrapper standalone",
+    {:view_edit, "h2", "color"} =>
+      "headings inherit the View group rule in Studio (light-DOM canvas) and the bundle's `.bp-paper-editor-body { color: var(--paper-ink) }` wrapper standalone",
+    {:view_edit, "h3", "color"} =>
+      "headings inherit the View group rule in Studio (light-DOM canvas) and the bundle's `.bp-paper-editor-body { color: var(--paper-ink) }` wrapper standalone",
+    {:view_edit, "h1", "font-family"} =>
+      "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy",
+    {:view_edit, "h2", "font-family"} =>
+      "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy",
+    {:view_edit, "h3", "font-family"} =>
+      "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy"
+    # `max-width` is GONE from the View rule as of pe-w1-evidence-breakout, so its
+    # entry is gone too — the rot guard below fails an allowlist that outlives the
+    # asymmetry it describes. It was `100%` beside `width: 100%` (a no-op) and
+    # would have CLAMPED the evidence band the moment the table stepped out of the
+    # column; the band width supersedes it on both surfaces.
+    #
+    # Both `.bp-table` entries (`display` / `overflow-x`, the reader's mobile
+    # scroll chrome) are GONE too (pe-w2-parity-widening, closing
+    # pe-w1-bundle-table-scroll-chrome-gap): the chrome now lives in BOTH editor
+    # copies, so the mirrors match and the rot guard would red the entries.
+  }
+
+  defp divergence(section, element, prop),
+    do: Map.get(@documented_divergences, {section, element, prop})
+
   # ── 2. Cross-surface CSS parity — the drift tripwire ───────────────────────
 
-  test "every shared (element, property) has byte-identical values across View and Edit" do
+  test "every View (element, property) has a byte-identical value on the Edit surface" do
     edit = edit_css()
     view = view_css()
 
@@ -173,21 +248,65 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
       for element <- @parity_elements,
           view_decls = declarations_for(view, "bp-paper-surface", element),
           edit_decls = declarations_for(edit, "bp-paper-editor-body", element),
-          prop <- Map.keys(view_decls),
-          Map.has_key?(edit_decls, prop),
-          view_decls[prop] != edit_decls[prop] do
-        "#{element}.#{prop}: View=#{inspect(view_decls[prop])} Edit=#{inspect(edit_decls[prop])}"
+          {prop, value} <- Enum.to_list(view_decls),
+          is_nil(divergence(:view_edit, element, prop)),
+          Map.get(edit_decls, prop) != value do
+        "#{element}.#{prop}: View=#{inspect(value)} Edit=#{inspect(Map.get(edit_decls, prop))}"
       end
 
     assert mismatches == [],
            """
-           View↔Edit typography drift detected — a property was changed on one
-           surface but not the other. Align the EDIT rule (root.html.heex
-           .bp-paper-editor-body) to the published VIEW value (paper-surface.css
-           .bp-paper-surface), per charter D6, OR route both through the same
-           --bp-* token. Divergences:
+           View↔Edit typography drift detected — a property was changed or ADDED
+           on the View surface without the matching change on Edit (`Edit=nil`
+           means the editor rule never declares it at all). Align the EDIT rule
+           (root.html.heex .bp-paper-editor-body) to the published VIEW value
+           (paper-surface.css .bp-paper-surface), per charter D6, OR route both
+           through the same --bp-* token. If the asymmetry is DELIBERATE, add it
+           to @documented_divergences with a one-line reason. Divergences:
 
            #{Enum.join(mismatches, "\n")}
+           """
+  end
+
+  test "every documented divergence is still a real divergence (allowlist rot guard)" do
+    # An allowlist entry whose asymmetry has since been fixed is a permanent
+    # HOLE in the gate — the property would be free to drift again unnoticed.
+    # Assert every entry still names a live producer↔mirror difference, and
+    # carries a non-empty reason.
+    surfaces = %{
+      view_edit: {view_css(), "bp-paper-surface", edit_css(), "bp-paper-editor-body"},
+      studio_bundle: {edit_css(), "bp-paper-editor-body", bundle_css(), "bp-paper-editor-body"},
+      view_bundle: {view_css(), "bp-paper-surface", bundle_css(), "bp-paper-editor-body"}
+    }
+
+    stale =
+      for {{section, element, prop}, reason} <- @documented_divergences do
+        {producer_css, producer_class, mirror_css, mirror_class} = Map.fetch!(surfaces, section)
+        producer = declarations_for(producer_css, producer_class, element)
+        mirror = declarations_for(mirror_css, mirror_class, element)
+
+        assert is_binary(reason) and String.trim(reason) != "",
+               "documented divergence {#{section}, #{element}, #{prop}} has no reason"
+
+        cond do
+          not Map.has_key?(producer, prop) ->
+            "{#{section}, #{element}, #{prop}} — the PRODUCER no longer declares it"
+
+          Map.get(mirror, prop) == producer[prop] ->
+            "{#{section}, #{element}, #{prop}} — the mirror now matches; drop the allowlist entry"
+
+          true ->
+            nil
+        end
+      end
+      |> Enum.reject(&is_nil/1)
+
+    assert stale == [],
+           """
+           @documented_divergences has stale entries — each one is a hole this
+           gate can no longer close. Delete them:
+
+           #{Enum.join(stale, "\n")}
            """
   end
 
@@ -293,14 +412,22 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # Studio loads ONLY the root.html.heex inline rules (BP_PAPER_EDITOR_NO_INJECT);
   # embedders load ONLY assets/paper-editor/src/styles.css. Until now "keep it
   # byte-aligned with the bundle" comments were the sole enforcement between
-  # those two hand-kept copies. Same contract as §2: every shared
-  # (element, property) pair must be byte-identical. Properties one side
-  # declares and the other doesn't are allowed — the bundle base rule carries
+  # those two hand-kept copies. Same contract as §2, Studio-exhaustive: every
+  # (property, value) Studio declares must be byte-identical on the bundle,
+  # `nil` included — so ADDING a rule to root.html.heex without the bundle twin
+  # reds. Bundle-ONLY properties stay allowed — the bundle base rule carries
   # standalone-host extras (background/font on the wrapper, a plain `pre` rule)
   # that Studio inherits from `.bp-paper-surface` instead.
-  @mirror_elements ~w(h1 h2 h3 p li ul ol code img blockquote hr pre.bp-canvas-code)
+  # `.bp-table` rides here too (pe-w2-parity-widening): its scroll chrome
+  # (`display: block; overflow-x: auto`) now lives in BOTH editor copies, so the
+  # root↔bundle pair is gated the same way the prose elements are.
+  # `.bp-stats` / `.bp-chart` complete the trio here as well (wave-2 review):
+  # §2 gates them reader↔root only, so WITHOUT these entries a bundle-side
+  # drift on either breakout class would ship green — the exact rot §5 exists
+  # to catch.
+  @mirror_elements ~w(h1 h2 h3 p li ul ol code img blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart)
 
-  test "Studio inline editor rules and the bundle stylesheet stay byte-aligned" do
+  test "every Studio inline editor (element, property) is byte-identical in the bundle stylesheet" do
     studio = edit_css()
     bundle = bundle_css()
 
@@ -308,19 +435,22 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
       for element <- @mirror_elements,
           studio_decls = declarations_for(studio, "bp-paper-editor-body", element),
           bundle_decls = declarations_for(bundle, "bp-paper-editor-body", element),
-          prop <- Map.keys(studio_decls),
-          Map.has_key?(bundle_decls, prop),
-          studio_decls[prop] != bundle_decls[prop] do
-        "#{element}.#{prop}: Studio=#{inspect(studio_decls[prop])} Bundle=#{inspect(bundle_decls[prop])}"
+          {prop, value} <- Enum.to_list(studio_decls),
+          is_nil(divergence(:studio_bundle, element, prop)),
+          Map.get(bundle_decls, prop) != value do
+        "#{element}.#{prop}: Studio=#{inspect(value)} Bundle=#{inspect(Map.get(bundle_decls, prop))}"
       end
 
     assert mismatches == [],
            """
            Studio↔bundle editor-typography drift — the root.html.heex inline
-           mirror and assets/paper-editor/src/styles.css disagree, so the
-           embedded editor no longer looks like the Studio canvas. Align the
+           mirror and assets/paper-editor/src/styles.css disagree (`Bundle=nil`
+           means the bundle never declares the property Studio just added), so
+           the embedded editor no longer looks like the Studio canvas. Align the
            copies (and rebuild the bundle if styles.css changed — see the
-           wave-1 mechanics note in the pd-doctrine charter). Divergences:
+           wave-1 mechanics note in the pd-doctrine charter). If the asymmetry is
+           DELIBERATE, add it to @documented_divergences with a one-line reason.
+           Divergences:
 
            #{Enum.join(mismatches, "\n")}
            """
@@ -361,7 +491,7 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
     .bp-callout--danger .bp-callout--neutral .bp-callout__summary .bp-callout__body
   )
 
-  test "callout tone card is byte-identical between the reader surface and the embedder bundle" do
+  test "every callout tone (element, property) is byte-identical between the reader surface and the embedder bundle" do
     view = view_css()
     bundle = bundle_css()
 
@@ -369,20 +499,22 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
       for element <- @callout_tone_elements,
           view_decls = declarations_for(view, "bp-paper-surface", element),
           bundle_decls = declarations_for(bundle, "bp-paper-editor-body", element),
-          prop <- Map.keys(view_decls),
-          Map.has_key?(bundle_decls, prop),
-          view_decls[prop] != bundle_decls[prop] do
-        "#{element}.#{prop}: View=#{inspect(view_decls[prop])} Bundle=#{inspect(bundle_decls[prop])}"
+          {prop, value} <- Enum.to_list(view_decls),
+          is_nil(divergence(:view_bundle, element, prop)),
+          Map.get(bundle_decls, prop) != value do
+        "#{element}.#{prop}: View=#{inspect(value)} Bundle=#{inspect(Map.get(bundle_decls, prop))}"
       end
 
     assert mismatches == [],
            """
            Callout tone drift — the embedder bundle's hand-copied
            `.bp-paper-editor-body .bp-callout*` mirror disagrees with the reader's
-           `.bp-paper-surface .bp-callout*` rules (paper-surface.css). Standalone
+           `.bp-paper-surface .bp-callout*` rules (paper-surface.css) — `Bundle=nil`
+           means the bundle never copied a property the reader declares. Standalone
            editors would paint callouts a different colour than the /papers reader.
            Re-copy the reader tone block verbatim into styles.css (and rebuild the
-           bundle). Divergences:
+           bundle). If the asymmetry is DELIBERATE, add it to
+           @documented_divergences with a one-line reason. Divergences:
 
            #{Enum.join(mismatches, "\n")}
            """
@@ -623,6 +755,110 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
 
       assert map_size(decls) > 0,
              "#{name} stylesheet has no `#{selector}` declarations — a selector rename likely broke the divider lockstep parser"
+    end
+  end
+
+  # ── 9. The SECTION HEAD — one device, four hand-kept declarations ───────────
+  # A top-level level-2 heading is a section boundary and draws it with air + a
+  # rule + a gap (space.section → `--bp-section-*`; the reasoning lives on the
+  # rule in paper-surface.css). Unlike the h1/h2/h3 margins §2 and §5 already
+  # cover, this device cannot ride the shared `.bp-paper-surface h2` element
+  # rule: component chrome emits bare `<h2>`s too (a `.bp-card` title inside a
+  # grid cell), and only POSITION separates a section head from a card's title.
+  # So it is written four times against four document shapes — and four hand-kept
+  # copies of one law is precisely the drift surface §2/§5 exist for.
+  #
+  # The failure this catches is NOT a deleted token (design/check.mjs Part L
+  # already refuses that, on both surfaces). It is one copy keeping the air while
+  # another keeps the rule: every per-file census passes, the reader and the
+  # canvas disagree, and the only witness is a screenshot nobody diffs.
+  #
+  # Exhaustive over the READER's declarations, `nil` included, in §2's shape —
+  # so adding a property to the reader without the three editor twins reds here.
+  @section_head_reader "> #paper-body > h2"
+  @section_head_stream "> #paper-body > div:not([class]) > h2"
+  @section_head_edit "> h2"
+
+  test "the section head is byte-identical across the reader and all three editor copies" do
+    view = view_css()
+
+    reader = declarations_for(view, "bp-paper-surface", @section_head_reader)
+
+    copies = [
+      {"Studio inline (root.html.heex)",
+       declarations_for(edit_css(), "bp-paper-editor-body", @section_head_edit)},
+      {"embedder bundle (assets/paper-editor/src/styles.css)",
+       declarations_for(bundle_css(), "bp-paper-editor-body", @section_head_edit)}
+    ]
+
+    mismatches =
+      for {name, decls} <- copies,
+          {prop, value} <- Enum.to_list(reader),
+          Map.get(decls, prop) != value do
+        "#{name} — #{prop}: reader=#{inspect(value)} copy=#{inspect(Map.get(decls, prop))}"
+      end
+
+    assert mismatches == [],
+           """
+           SECTION HEAD drift — the reader and an editor copy disagree about the
+           section boundary. One surface is drawing a device the other is not:
+
+           #{Enum.join(mismatches, "\n")}
+
+           The device is air + rule + gap TOGETHER. Change all four declarations
+           (paper-surface.css reader + its keyed-stream leg, root.html.heex,
+           assets/paper-editor/src/styles.css) or none, then re-run the render rig
+           — the rendered gap is asserted against the artifact's 92px there.
+           """
+  end
+
+  test "the reader's section head covers BOTH document shapes it ships in" do
+    # The block-backed reader streams every top-level block as its own class-less
+    # `<div id data-block-id>` (bulldocs_live.ex, `phx-update="stream"`), while
+    # the legacy whole-body path and the render rig put the heading directly in
+    # the article. A rule written against only one of those is dead on the page
+    # that actually ships AND green in every gate that reads declarations rather
+    # than selectors — so the two legs are pinned to carry identical values.
+    view = view_css()
+
+    flat = declarations_for(view, "bp-paper-surface", @section_head_reader)
+    streamed = declarations_for(view, "bp-paper-surface", @section_head_stream)
+
+    assert flat == streamed,
+           """
+           the section head's two reader legs disagree:
+             #{@section_head_reader} => #{inspect(flat)}
+             #{@section_head_stream} => #{inspect(streamed)}
+           The keyed-stream leg is the one the live reader matches; the flat leg is
+           the legacy body and the render rig. Both must draw the same boundary.
+           """
+  end
+
+  test "the section head declares all three halves of the device (parser sanity)" do
+    # Guards the two tests above against a vacuous pass: if a selector is renamed
+    # the declaration maps go empty, every comparison trivially holds, and the
+    # drift tripwire silently stops tripping (distrust-vacuous-green).
+    surfaces = [
+      {"reader", declarations_for(view_css(), "bp-paper-surface", @section_head_reader)},
+      {"reader keyed-stream leg",
+       declarations_for(view_css(), "bp-paper-surface", @section_head_stream)},
+      {"Studio inline", declarations_for(edit_css(), "bp-paper-editor-body", @section_head_edit)},
+      {"embedder bundle",
+       declarations_for(bundle_css(), "bp-paper-editor-body", @section_head_edit)}
+    ]
+
+    for {name, decls} <- surfaces do
+      for {prop, token} <- [
+            {"margin-top", "--bp-section-beat"},
+            {"border-top", "--bp-section-rule"},
+            {"padding-top", "--bp-section-gap"}
+          ] do
+        value = Map.get(decls, prop)
+
+        assert value && String.contains?(value, "var(#{token})"),
+               "#{name}: the section head's #{prop} is #{inspect(value)}, expected it to read var(#{token}) — " <>
+                 "a selector rename or a half-written device would make the parity tests above vacuous"
+      end
     end
   end
 end

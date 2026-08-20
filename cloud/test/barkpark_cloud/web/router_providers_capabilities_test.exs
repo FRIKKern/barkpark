@@ -82,10 +82,15 @@ defmodule BarkparkCloud.Web.RouterProvidersCapabilitiesTest do
   test "capabilities are the raw fixture bools — no 'tier' key leaks in as a capability" do
     providers = body(session_token(user_fixture()))["providers"]
 
-    # hetzner: core+labels true, catalog/lifecycle/pause false (matches fixture).
+    # hetzner: core+labels true, pause false (matches fixture).
     assert providers["hetzner"]["capabilities"]["core"] == true
     assert providers["hetzner"]["capabilities"]["labels"] == true
-    assert providers["hetzner"]["capabilities"]["catalog"] == false
+    assert providers["hetzner"]["capabilities"]["pause"] == false
+    # `catalog` is the ONE key the CP answers itself rather than reading — this
+    # control plane builds the hetzner/azure catalogs (build_provider_catalog/2)
+    # even though the Go seam has no Cataloger. Owned by
+    # providers_catalog_capability_test.exs; the fixture bool stays false there.
+    assert providers["hetzner"]["capabilities"]["catalog"] == true
     # tier is metadata, never a capability.
     refute Map.has_key?(providers["fake"]["capabilities"], "tier")
   end

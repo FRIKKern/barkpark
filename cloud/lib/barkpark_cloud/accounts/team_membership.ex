@@ -41,6 +41,13 @@ defmodule BarkparkCloud.Accounts.TeamMembership do
   @doc "Integer rank of a role (member<admin<owner); 0 for an unknown role."
   def rank(role), do: Map.get(@ranks, role, 0)
 
+  @doc """
+  Every role this ladder ranks. Exists so a census can DERIVE its role domain
+  from `@ranks` instead of re-typing it — a re-typed literal pins itself and
+  catches nothing when a role is added to one ladder only.
+  """
+  def ranked_roles, do: Map.keys(@ranks)
+
   @doc "True when `role` is an admin-or-higher grant (owner|admin)."
   def admin?(role), do: rank(role) >= rank("admin")
 

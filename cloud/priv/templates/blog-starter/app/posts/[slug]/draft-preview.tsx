@@ -3,6 +3,7 @@
 import { useOptimisticDocument } from '@barkpark/nextjs/actions'
 import type { Block } from '@barkpark/react'
 import { PortableDocSurface } from './portable-doc-surface'
+import { formatDate } from '../../../lib/format-date'
 
 interface Author {
   _id: string
@@ -68,9 +69,9 @@ export function DraftModePreview({ initialPost, author, tags }: Props) {
 
       <article>
         <h1 className="text-4xl font-bold">{data.title}</h1>
-        {data.publishedAt ? (
+        {formatDate(data.publishedAt) ? (
           <p className="text-sm text-slate-500">
-            {new Date(data.publishedAt).toLocaleDateString()}
+            {formatDate(data.publishedAt)}
             {author ? ` · ${author.name}` : ''}
           </p>
         ) : null}

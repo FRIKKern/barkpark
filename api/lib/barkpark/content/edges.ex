@@ -241,6 +241,23 @@ defmodule Barkpark.Content.Edges do
   invariant). Resolves EACH target → O(edges) DB round-trips; the Phase-3
   projector runs it off the request path.
 
+  ## `dangling: :skip` — the OPT-IN escape from O(edges) round-trips
+
+  Dangling resolution is ONE un-batched DB round-trip per reference value per
+  document. `/v1/graph`'s corpus derivation discards the boolean entirely (it
+  maps raw edges to `%{from_id, to_id, kind, weight, plugin_source}`), so on a
+  4096-document corpus it paid ~1,300 serial queries — and held a pool
+  connection for all of them — to produce a value nobody read. A caller that
+  does not read `dangling` passes `dangling: :skip`; the edge then carries
+  `dangling: nil`, meaning NOT COMPUTED (never "not dangling"), and no
+  existence query is issued.
+
+  The DEFAULT is `:resolve` and is unchanged — `Graph.dangling/1` (the
+  `/v1/graph/dangling` report), `EdgeProjector` and `corpus_edges/3` all read
+  through the default and must keep resolving. A default flip here would
+  silently EMPTY the dangling report, since it filters on `& &1.dangling` and
+  `nil` is falsy.
+
   Returns `[%{from_id, to_id, kind, field, refType, dangling}]`. `kind` is the
   source reference field's NAME (e.g. `"dependencies"`, `"intentions"`,
   `"related"`) so distinct reference fields become distinct edge kinds in
@@ -254,7 +271,7 @@ defmodule Barkpark.Content.Edges do
             kind: String.t(),
             field: String.t(),
             refType: String.t() | nil,
-            dangling: boolean()
+            dangling: boolean() | nil
           }
         ]
   def extract_edges(doc, opts \\ []) do
@@ -278,6 +295,11 @@ defmodule Barkpark.Content.Edges do
       |> Keyword.get_lazy(:schemas, fn -> Content.list_schemas(dataset, opts) end)
       |> Enum.find(fn s -> s.name == type end)
 
+    # `:dangling` is the OPT-IN round-trip escape (see the `dangling: :skip`
+    # section of this function's doc). DEFAULT `:resolve` — every existing
+    # caller keeps its per-target existence query and its boolean.
+    dangling_mode = Keyword.get(opts, :dangling, :resolve)
+
     case schema do
       nil ->
         []
@@ -289,7 +311,10 @@ defmodule Barkpark.Content.Edges do
           to_id = DraftId.published_id(raw_target)
 
           dangling =
-            not resolve_target_existence(to_id, ref_type, dataset, opts)
+            case dangling_mode do
+              :skip -> nil
+              _ -> not resolve_target_existence(to_id, ref_type, dataset, opts)
+            end
 
           %{
             from_id: from_id,

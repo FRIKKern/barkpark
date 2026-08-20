@@ -1,0 +1,39 @@
+
+ barkpark · tasks       ⇄ guerrilla  CONN · T↔  ──────────────────────────────────────────────────────────────────────────
+ ▎ The task TUI is glanceable, live, a… ··· 15/23│ │ The task TUI is glanceable, live, and never flickers                     │
+ ├─ ⠿ The drive harness goes hermetic — fixture-…│ │ ✓ done · C3/7 · task · relevance-loop                                    │
+ │    C5/7 · P1 · 2/5                            │ │                                                                          │
+ ├─ ⠿ The wide panes overflow markers answer cli…│ │ criteria 4/4                                                             │
+ │    C5/7 · P3 · 4/5                            │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
+ ├─ ⠿ The NOW band and the in-flight count tell …│ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
+ │    C5/7 · P2 · 3/4                            │ │     constant motion.                                                     │
+ ├─ ⠿ Task-TUI wave 21 settlement paperwork: the…│ │   ✓ Mouse and keyboard operate the focused column consistently.          │
+ │    C5/7 · P1 · ✓○ 1/2 · w21-decide-fable · T│ │   ✓ The current taskboard regression suite is green.                     │
+ ├─ ✓ hitmap.go height-2 reservation — audit whe…│ │                                                                          │
+ └─ ✓ The drive harness anchors row identity on …│ │ purpose · derived                                                        │
+   +4 more · 13 done · 1 cancelled               │ │   part of   standalone task                                              │
+                                                 │ │   impact    blocks 0 · blocked by 0                                      │
+   Scaffy epic — commands as content: a… ··· 1/14│ │   does      The task TUI is glanceable, live, and never flickers         │
+ ├─ ⠿ The story stops contradicting the engine: …│ │   why       Why this task is worth doing is not recorded.                │
+ │    C5/7 · P2 · 4/5                            │ │   endgame   Meet all 4 acceptance criteria and close the task.           │
+ ├─ ⠿ pull --check answers for the server that p…│ │   important 50/100 — Default score; no priority is recorded.             │
+ │    C5/7 · P1 · 4/5                            │ │   relevant  50/100 — Default score; task is present on this board.       │
+ ├─ ⠿ bp scaffy describe: a command's contract i…│ │   proof     Recorded task intent — The task TUI is glanceable, live, and │
+ │    C5/7 · P1 · 4/5                            │ │             never flickers — document.title                              │
+ ├─ ⠿ The served-catalog drift check becomes an …│ │   proof     Acceptance contract — 4 recorded criteria —                  │
+ │    C5/7 · P1 · 5/6                            │ │             content.acceptance_criteria                                  │
+ ├─ ⠿ Assert env stops clobbering a stranger's c…│ │   derived from recorded task facts · add authored purpose to override    │
+ │    C5/7 · P1 · 3/4                            │ │                                                                          │
+ ├─ ⠿ Close the census trap at the trigger: go-t…│ │ created T ago (Jul 23, 00:34) · updated T ago (Aug 17, 17:42)        │
+ │    C5/7 · P1 · 2/3                            │ │                                                                          │
+ ├─ ⠿ Scaffy W8 second-consumer drift-truth wave…│ │ ○ created (Jul 23) → ⠿ claimed by relevance-loop (Jul 04) →              │
+ │    C4/7 · P2 · scaffy-w8-decider · T        │ │   ✓ done (Aug 17)                                                        │
+ └─ ✓ Reconcile scaffy false-done ledger rows ag…│ │                                                                          │
+   +6 more                                       │ │ labels  proj:tui · phase:goal                                            │
+                                                 │ │                                                                          │
+   Paper Excellence epic — close the a… ··· 31/73│ │ claim  relevance-loop · epoch 1 · claimed T ago (Jul 04, 07:10)        │
+ ├─ ⠿ Corpus census recheck runs the real printe…│ │                                                                          │
+   ↓ 40 more below                               │ │                                                                          │
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ │                                                                          │
+ ⠿ 15 in flight · ○ 2+ ready · ✓ 3328 done ·… 51%│ │                                                                          │
+ jk · enter open · esc back · c claim · x close …│ │                                                                          │

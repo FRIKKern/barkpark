@@ -76,7 +76,7 @@
 // would store volume where the charter demands trust. This module imports no
 // writer and contains no write call.
 
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -986,8 +986,19 @@ export const LEDGER_CORPUS_NAME = "the durable recipe ledger (tooling/grip/ledge
  * said so. The counts ride back on the returned envelope and are printed above
  * the census proper.
  */
+// THE READ-PATH BOUNDS, read from the shell exactly as ledger.mjs's write path
+// reads them (`date -u`, UTC/Z-form). The library owns no clock and imports no
+// screen (D19); the census is the caller, so IT supplies `date -u` and
+// screenCommand to the fold. Without them, a FUTURE-OBSERVED-AT row (composed,
+// not observed) and a REFUSED-COMMAND rerun (outage-capable) fold clean through
+// the product read path while writeLedgerRun refuses both — the D66 read-path
+// residual this closes.
+function shellNow() {
+  return execFileSync("date", ["-u", "+%Y-%m-%dT%H:%M:%SZ"], { encoding: "utf8" }).trim();
+}
+
 export function loadLedgerRecipes(dir = LEDGER_DIR, { allRivals = false } = {}) {
-  const folded = foldLedger(dir);
+  const folded = foldLedger(dir, { now: shellNow(), screen: screenCommand });
   const commands = [];
   let skippedRivals = 0;
   for (const entry of folded.entries) {

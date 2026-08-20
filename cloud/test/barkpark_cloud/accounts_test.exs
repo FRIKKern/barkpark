@@ -523,6 +523,35 @@ defmodule BarkparkCloud.AccountsTest do
       assert [survivor] = Accounts.list_user_sessions(user)
       assert survivor.token_hash == UserToken.hash_token(keep)
     end
+
+    # cch-w53-s4. The sweep is `context in ["session", "sse"]`, and the two tests
+    # below are the fences on each side of that widening: everything a signed-out
+    # user could still stream with must die, and NOTHING else may.
+    test "it also burns the user's live SSE stream tickets" do
+      user = user_fixture()
+      {:ok, _} = Accounts.create_user_session_token(user)
+      ticket = elem(Accounts.create_sse_ticket(user), 1)
+
+      # Without this, a ticket minted a second before "sign out everywhere"
+      # opened a fresh authenticated /v1/events stream for the rest of its 60s
+      # TTL — the row-level half of the "signed out immediately" claim.
+      assert {:ok, 1} = Accounts.revoke_all_user_sessions(user)
+      assert Accounts.consume_sse_ticket(ticket) == nil
+    end
+
+    test "the count it reports is SESSIONS only — tickets are not padding" do
+      # The number goes straight to the console as `{revoked: N}` ("N sessions
+      # signed out"). Counting swept tickets would inflate it into a new number
+      # the product cannot support, which is the exact defect class this wave is
+      # closing. Two sessions + two tickets is still 2.
+      user = user_fixture()
+      {:ok, _} = Accounts.create_user_session_token(user)
+      {:ok, _} = Accounts.create_user_session_token(user)
+      {:ok, _} = Accounts.create_sse_ticket(user)
+      {:ok, _} = Accounts.create_sse_ticket(user)
+
+      assert {:ok, 2} = Accounts.revoke_all_user_sessions(user)
+    end
   end
 
   describe "update_user_password/4 (change password ⇒ sign out everywhere)" do
@@ -750,6 +779,36 @@ defmodule BarkparkCloud.AccountsTest do
       assert Accounts.list_user_sessions(user) == []
       # The PAT still verifies.
       assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(pat_plain)
+    end
+
+    test "the SSE widening stops at 'sse' — a PAT row is not swept with it" do
+      # cch-w53-s4 widened the sweep from `context == "session"` to
+      # `context in ["session", "sse"]`. One character further ("pat" in the same
+      # list, or dropping the context filter for a plain user_id sweep) kills the
+      # user's programmatic credentials on a password change and nothing in the
+      # UI would say so. Assert on the ROWS, not just on verify/2, so a future
+      # verify that tolerates revoked_at cannot hide it.
+      {user, team} = user_with_team()
+      {:ok, _s} = Accounts.create_user_session_token(user)
+      {:ok, _ticket} = Accounts.create_sse_ticket(user)
+
+      {:ok, _pat_plain, pat} =
+        Accounts.create_personal_access_token(user, team, %{name: "ci-key", abilities: ["read"]})
+
+      assert {:ok, 1} = Accounts.revoke_all_user_sessions(user)
+
+      live = fn context ->
+        Repo.one(
+          from t in UserToken,
+            where: t.user_id == ^user.id and t.context == ^context and is_nil(t.revoked_at),
+            select: count(t.id)
+        )
+      end
+
+      assert live.("session") == 0
+      assert live.("sse") == 0
+      assert live.("pat") == 1
+      assert is_nil(Repo.get!(UserToken, pat.id).revoked_at)
     end
 
     test "a password change does NOT revoke the user's PATs" do

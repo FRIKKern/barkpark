@@ -27,7 +27,14 @@ defmodule BarkparkCloud.Workers.PushDeliveryWorker do
   could first land — 600s covers the full replayable lifetime of one signed
   request. Uniqueness spans Oban's default states (completed included, within
   the period), so a replay arriving AFTER the original delivered still
-  dedupes. NOTE: enforcement relies on the fan-out using `Oban.insert/2`
+  dedupes — and that `:completed` inclusion is correct ONLY BECAUSE
+  `blocked_since` makes every genuine event's args distinct; if a future
+  payload shape ever drops or trims that field, two DIFFERENT blocks can
+  produce identical args and this ruling FLIPS (a genuinely new notification
+  would be swallowed by an already-delivered one). The pin that holds it is
+  `push_relay_receiver_test.exs`'s "a replay arriving AFTER the first job
+  COMPLETED still enqueues ZERO new jobs" — the only test that reaches
+  `:completed`. NOTE: enforcement relies on the fan-out using `Oban.insert/2`
   per job — OSS `Oban.insert_all/2` skips unique checks.
 
   ### Two known edges, RE-RECORDED as still accepted (wave-2 relay build)

@@ -57,6 +57,34 @@
 
   const scheme = window.matchMedia("(prefers-color-scheme: dark)");
 
+  // Legibility floor (probe-figure-fidelity-2026-08-12): with useMaxWidth the
+  // engine emits width="100%" and stamps the diagram's NATURAL width as an
+  // inline max-width, so a wide diagram in a narrow pane scales its 14-16px
+  // labels down to ~4px. Promote that natural width to the svg's width and
+  // make the host <pre> a scroll container: text always paints at its
+  // authored size and the diagram scrolls instead of shrinking.
+  function unshrink(nodes) {
+    nodes.forEach((pre) => {
+      pre.querySelectorAll("svg").forEach((svg) => {
+        if (svg.style.maxWidth) {
+          svg.style.width = svg.style.maxWidth;
+          // A flex host would shrink the svg right back; opt out.
+          svg.style.flex = "none";
+          pre.style.overflowX = "auto";
+          pre.style.maxWidth = "100%";
+        }
+      });
+    });
+  }
+
+  // mermaid.run resolves after the svg lands in the DOM; `finally` keeps a
+  // parse failure surfacing exactly as before (unshrink is a no-op then).
+  function runAndUnshrink(nodes) {
+    Promise.resolve(window.mermaid.run({ nodes })).finally(() =>
+      unshrink(nodes)
+    );
+  }
+
   function initMermaid() {
     if (window.mermaid && window.mermaid.initialize) {
       window.mermaid.initialize({
@@ -83,11 +111,11 @@
       }
     });
     if (window.mermaid && window.mermaid.run) {
-      window.mermaid.run({
-        nodes: Array.from(
+      runAndUnshrink(
+        Array.from(
           document.querySelectorAll('pre.mermaid:not([data-processed="true"])')
         )
-      });
+      );
     }
   });
 
@@ -103,17 +131,17 @@
         if (n.dataset.bpSrc == null) n.dataset.bpSrc = n.textContent;
       });
       if (window.mermaid && window.mermaid.run) {
-        window.mermaid.run({ nodes });
+        runAndUnshrink(nodes);
       } else {
         window.addEventListener(
           "load",
           () => {
             if (window.mermaid && window.mermaid.run) {
-              window.mermaid.run({
-                nodes: Array.from(
+              runAndUnshrink(
+                Array.from(
                   this.el.querySelectorAll('pre.mermaid:not([data-processed="true"])')
                 )
-              });
+              );
             }
           },
           { once: true }

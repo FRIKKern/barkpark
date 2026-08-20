@@ -15,8 +15,21 @@ defmodule BarkparkCloud.Push.FanoutResultTest do
   test, and a test that mocked Oban would be asserting on the mock. The fan-out
   calls THIS function with THAT verdict, so the seam is the honest place to
   prove it.
+
+  `async: false` (dr-w28-s5). Two tests below assert `capture_log(...) == ""`,
+  and `ExUnit.CaptureLog` captures the WHOLE VM's log — every line any other
+  process emits during the block, including one from a test running in a
+  different async case. `cchi-w33-fanout-capture-log-async-true-asserts-the-whole-vm`
+  censused this file when no async neighbour logged; `Sites.Deploy.resume_orphaned/0`
+  gained a warning two days later (#10476) and the emptiness assertions became
+  a coin flip. A/B against a noisy async neighbour: 5/5 RED at `async: true`,
+  5/5 GREEN at `async: false`, with both assertions untouched.
+
+  The assertions themselves stay `== ""` and are NOT softened to a substring
+  match: emptiness is the property — a future unexpected log line on the quiet
+  path must red here rather than slip past a `=~`.
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 

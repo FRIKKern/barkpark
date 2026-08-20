@@ -59,9 +59,12 @@ defmodule BarkparkCloud.RegistryDeploymentFreshnessTest do
   test "newest deployment wins per site (older row never shadows the freshest)" do
     site = setup_site()
 
-    # Distinct git_refs so both rows coexist (a partial unique index forbids two
-    # ACTIVE deployments at the same ref) — the map must still pick the newest.
+    # The older row is SETTLED — deploy-truth W1 re-keyed the active index onto
+    # (site_id, environment), so a site has at most one build in flight and a
+    # second active row is refused whatever its git_ref. The map must still pick
+    # the newest.
     {:ok, old} = Registry.create_deployment(site, %{git_ref: "v1", trigger: "manual"})
+    {:ok, old} = Registry.transition_deployment(old, %{status: "failed"})
     backdate(old.id, 3600)
 
     {:ok, _new} =

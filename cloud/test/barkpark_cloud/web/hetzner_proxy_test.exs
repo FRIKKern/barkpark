@@ -219,7 +219,16 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
       conn = call(:get, "/v1/hetzner/overview", session_token(user))
 
       assert conn.status == 403
-      assert json_body(conn) == %{"error" => "forbidden"}
+
+      # The refusal names its CAUSE, not an authority: no role grant repairs a
+      # user who holds no team at all, so `required` must stay absent here.
+      assert json_body(conn) == %{
+               "error" => "forbidden",
+               "reason" => "no_team",
+               "scope" => "team"
+             }
+
+      refute Map.has_key?(json_body(conn), "required")
       assert HetznerFakeHttpClient.requests() == []
     end
 
@@ -237,7 +246,15 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
       conn = call(:get, "/v1/hetzner/overview", session_token(user))
 
       assert conn.status == 403
-      assert json_body(conn) == %{"error" => "forbidden"}
+
+      # A member CAN be repaired — by an admin grant — so this arm names the
+      # authority the gate actually required.
+      assert json_body(conn) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+
       assert HetznerFakeHttpClient.requests() == []
     end
 

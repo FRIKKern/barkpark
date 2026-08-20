@@ -115,6 +115,15 @@ config :barkpark, Barkpark.SelfUpdate,
 # Core-auth mailer captured in-process during tests (assert_email).
 config :barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Test
 
+# The prod register ceiling is 5/HOUR/IP (BarkparkWeb.Plugs.AuthWriteRateLimit),
+# and the limiter's ETS bucket is process-global with an hourly refill — so the
+# suite's own anonymous registers (auth_controller_test, org_require_mfa_test,
+# webauthn_controller_test, …) all bill the SAME 127.0.0.1 bucket and would trip
+# it within seconds of the run starting. Effectively-off here; the real ceiling
+# is pinned by test/barkpark_web/plugs/auth_write_rate_limit_test.exs, which sets
+# a small budget explicitly and drives the live route until it 429s.
+config :barkpark, :auth_write_rate_limits, register: 1_000_000
+
 # Fixed paper-ingest secret for tests.
 config :barkpark, :ingest_token, "barkpark-test-ingest-token"
 config :barkpark, :media_signing_secret, "test-media-signing-secret"

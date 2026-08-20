@@ -46,6 +46,33 @@ defmodule Barkpark.StudioChatTest do
     s
   end
 
+  # ── Wave-26 leaked-session pollution guard (felix-w27-s6) ────────────────────
+  #
+  # The StudioChat Recorder is an app-tree GenServer (RuntimeSupervisor) that can
+  # outlive a prior test's sandbox owner and COMMIT chat_sessions rows which then
+  # escape that test's transaction rollback. Those committed rows ride
+  # `list_sessions/*`'s recency-desc ordering AHEAD of this file's freshly-seeded
+  # rows, reddening the cap / recency / archived-filter assertions on a SHIFTING,
+  # order-dependent set (refuted as a prod defect in the wave-26 review, real as
+  # suite pollution). At setup — before any test here has created a single session
+  # — every visible `chat_sessions` row is such a leak, so purge them for a clean
+  # baseline. Restrict-FK children (`chat_runtime_usage_receipts`,
+  # `epic_assignment_runtime_attempts`) are cleared first; deleting the sessions
+  # then cascades the on_delete:delete_all children (messages, telemetry, leases).
+  # The purge runs inside this test's sandbox transaction and rolls back with it —
+  # test-infra hygiene only, ZERO prod code touched.
+  setup do
+    purge_leaked_chat_sessions!()
+    :ok
+  end
+
+  defp purge_leaked_chat_sessions! do
+    Repo.query!("DELETE FROM chat_runtime_usage_receipts")
+    Repo.query!("DELETE FROM epic_assignment_runtime_attempts")
+    Repo.delete_all(Session)
+    :ok
+  end
+
   describe "create_session/1 + get_session/1" do
     test "the caller-minted UUID is the PK (autogenerate false) and round-trips" do
       id = Ecto.UUID.generate()

@@ -152,7 +152,14 @@ defmodule BarkparkCloud.Usage do
   # and the fan-outs already mint, carried through to the surfaces instead of
   # being flattened into the deliberate "not metered" state. Anything outside
   # this set normalises to "unknown" (never a raw internal atom on the wire).
-  @unavailable_reasons ~w(exception deadline_exceeded unreachable bad_shape too_many_datasets)
+  # `unreachable` means the box NEVER ANSWERED (a client-level failure: refused
+  # connection, DNS, TLS handshake, socket close). A box that DID answer and said
+  # no is a different fact and gets its own word — `unauthorized` (it rejected
+  # our admin credential), `instance_error` (it failed on its own side) or
+  # `refused` (any other delivered non-2xx). Telling a paying customer "we could
+  # not reach your box" about a credential rejection sends them to their network.
+  @unavailable_reasons ~w(exception deadline_exceeded unreachable unauthorized refused
+                          instance_error bad_shape too_many_datasets)
 
   # The trailing window `history/2` reads — matches the sampler's 14-day
   # `usage_samples` retention (AgentRetentionWorker prune), so the sparkline is
@@ -728,6 +735,9 @@ defmodule BarkparkCloud.Usage do
           {:ok, %{status: status, body: body}} when status in 200..299 ->
             parse_dataset_slugs(body)
 
+          {:ok, %{status: status}} ->
+            {:error, delivered_failure(status)}
+
           _ ->
             {:error, :unreachable}
         end
@@ -817,6 +827,9 @@ defmodule BarkparkCloud.Usage do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
         decode_list_count(body, "webhooks")
 
+      {:ok, %{status: status}} ->
+        {:error, delivered_failure(status)}
+
       _ ->
         {:error, :unreachable}
     end
@@ -836,10 +849,22 @@ defmodule BarkparkCloud.Usage do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
         decode_scalar_total(body, "total_documents")
 
+      {:ok, %{status: status}} ->
+        {:error, delivered_failure(status)}
+
       _ ->
         {:error, :unreachable}
     end
   end
+
+  # A DELIVERED non-2xx: the box ANSWERED. Which word it earns is a
+  # user-facing judgement, so it is made in ONE place for all three reads —
+  # 401/403 is our credential being rejected, a 5xx is the instance failing on
+  # its own side, and anything else is a refused read. None of these is
+  # `unreachable`: the packets arrived.
+  defp delivered_failure(status) when status in [401, 403], do: :unauthorized
+  defp delivered_failure(status) when status in 500..599, do: :instance_error
+  defp delivered_failure(_status), do: :refused
 
   # `{"<key>": [...]}` → `{:ok, length}`; any other shape → an honest degrade.
   defp decode_list_count(body, key) when is_binary(body) do

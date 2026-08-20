@@ -93,12 +93,40 @@ type onbPathCheck struct {
 	Detail   string `json:"detail"`
 }
 
+// The CLI-freshness leg is a TRI-state, not a boolean. "up-to-date" and "behind"
+// are READINGS — they require a resolved release to compare against. Everything
+// else (a dev build, an unreachable release feed) is an ABSENCE of reading, and
+// this receipt refuses to launder an absence into either verdict: reporting
+// up-to-date would be a green nobody earned, reporting behind would be a false
+// alarm. Both are forbidden; "unreported" is the honest third answer.
+const (
+	onbCLIUpToDate   = "up-to-date"
+	onbCLIBehind     = "behind"
+	onbCLIUnreported = "unreported"
+)
+
+// onbCLIDevRemedy is the ONE command that refreshes a dev build. A dev binary
+// cannot be compared against the cli-v* channel at all (and `bp upgrade` refuses
+// on that same ground), so the only move that makes it current is rebuilding it
+// from the tree it was built from.
+const onbCLIDevRemedy = "git pull && make cli-install"
+
 type onbCLICheck struct {
 	Installed string `json:"installed"`
 	Latest    string `json:"latest"`
-	UpToDate  bool   `json:"up_to_date"`
-	Detail    string `json:"detail"`
+	// Status is the tri-state verdict: onbCLIUpToDate / onbCLIBehind /
+	// onbCLIUnreported. It is the authoritative field — read this, not the bool.
+	Status string `json:"status"`
+	// UpToDate is the boolean PROJECTION of Status, kept for readers written
+	// against the original shape. It is a POINTER on purpose: an unreported leg
+	// serialises as `"up_to_date": null`, so a bool-only reader gets an explicit
+	// "no reading" instead of a fabricated true.
+	UpToDate *bool  `json:"up_to_date"`
+	Detail   string `json:"detail"`
 }
+
+// onbBool boxes a boolean for onbCLICheck.UpToDate (nil = no reading taken).
+func onbBool(b bool) *bool { return &b }
 
 type onbCloudSession struct {
 	Present bool   `json:"present"`
@@ -113,6 +141,16 @@ type onbInstance struct {
 	URL     string   `json:"url"`
 	Aliases []string `json:"aliases"`
 	Source  string   `json:"source"`
+	// AliasShadow is the compare-only fleet-reconcile advisory (D39). It is set
+	// ONLY on the doctor receipt's local-first path (onboardingInstance), and ONLY
+	// when the fleet row matching this box's stamped InstanceID carries a canonical
+	// target the local alias set does not know — a rename the additive-only alias
+	// store (mergeAliases, config.go) can never self-heal. It names the remedy
+	// (`bp connect <newURL>`). Empty on every other path: fail-open (no token /
+	// fleet error / no matching row), and always empty on whoami's network-free
+	// localInstance — so `omitempty` keeps those receipts byte-identical. This
+	// field is advisory ONLY; nothing here mutates config.
+	AliasShadow string `json:"alias_shadow,omitempty"`
 }
 
 type onbAuthCheck struct {
@@ -218,6 +256,16 @@ func buildOnboardingReceipt(g globals, ctx manifest.Context) onboardingReceipt {
 	}
 	// The core readiness gate: bp is drivable, the target answers, and a real
 	// read-only tool call round-tripped. Freshness/Cloud are advisory.
+	//
+	// WHAT AN UNREPORTED LEG DOES TO `ok` (decided, not defaulted): nothing. An
+	// unknown is not a failure — flipping ok:false on a dev build would fire an
+	// alarm on the most common developer setup, and a receipt that cries wolf gets
+	// ignored, which is the failure mode this whole check exists to prevent. The
+	// leg stays advisory (as it always was) but it is now VISIBLY unreported in
+	// both renders — Status "unreported", `up_to_date: null`, a "?" mark, and a
+	// named caveat on the READY line — so nobody can read a green receipt as
+	// "freshness verified". Silence about a leg is the sin; ok:false is a
+	// different, equally dishonest one.
 	r.OK = r.Path.Resolved && r.Auth.Reachable && r.ToolCall.OK
 	return r
 }
@@ -237,6 +285,7 @@ func buildOnboardingReceipt(g globals, ctx manifest.Context) onboardingReceipt {
 func onboardingWhoamiSpine(g globals, ctx manifest.Context, cfg *Config, m *manifest.Manifest) map[string]any {
 	return map[string]any{
 		"instance": localInstance(cfg, ctx),
+		"cli":      whoamiCLIFreshness(),
 		"mcp": map[string]any{
 			"version": cliVersion,
 			"count":   len(mcpTaskToolNames),
@@ -245,6 +294,47 @@ func onboardingWhoamiSpine(g globals, ctx manifest.Context, cfg *Config, m *mani
 		"tool_call":          onboardingToolCallProof(g, ctx, m),
 		"reload_instruction": onboardingReloadInstruction,
 	}
+}
+
+// whoamiCLIFreshness is the whoami half of the CLI-freshness leg (charter D28):
+// the SAME tri-state verdict the doctor receipt renders (onboardingCLIFreshness),
+// but resolved ONLY from the on-disk release cache — it NEVER makes an HTTP call,
+// so whoami keeps its local-first, always-exit-0 contract on the always-run hot
+// path. The split of labour is deliberate: the doctor (already network-bearing)
+// pays for the resolve and refreshes the cache; whoami reads it for free.
+//
+// The tri-state stays honest end to end:
+//   - a dev build short-circuits to UNREPORTED — it cannot be compared against
+//     the cli-v* channel at all, exactly as the doctor leg and `bp upgrade` hold;
+//   - a cold or stale cache (never refreshed, or older than the TTL) is honest
+//     UNREPORTED that names the ONE command which refreshes it: `bp doctor`;
+//   - only a FRESH cache yields a reading — up-to-date or behind — and even then
+//     it is transparently marked as cache-sourced.
+//
+// It never launders an absence into a green (up-to-date) or a false alarm
+// (behind): an unknown is reported as unknown.
+func whoamiCLIFreshness() onbCLICheck {
+	c := onbCLICheck{Installed: cliVersion, Status: onbCLIUnreported}
+	if cliVersion == "dev" {
+		c.Detail = "running a dev build (go build) — there is no release to compare it against, so freshness is UNREPORTED; refresh it with `" + onbCLIDevRemedy + "`"
+		return c
+	}
+	cache, fresh := readReleaseCache()
+	if !fresh {
+		c.Detail = "freshness UNREPORTED — no fresh release reading cached; run `bp doctor --onboarding` to refresh it"
+		return c
+	}
+	c.Latest = cache.Latest
+	if compareVersions(cliVersion, cache.Latest) < 0 {
+		c.Status = onbCLIBehind
+		c.UpToDate = onbBool(false)
+		c.Detail = "a newer CLI is available (cached — run `bp doctor --onboarding` to re-check) — run `bp upgrade`"
+		return c
+	}
+	c.Status = onbCLIUpToDate
+	c.UpToDate = onbBool(true)
+	c.Detail = "up to date (cached — run `bp doctor --onboarding` to re-check)"
+	return c
 }
 
 // localInstance is whoami's NETWORK-FREE instance identity: the active saved
@@ -292,25 +382,36 @@ func onboardingPathCheck() onbPathCheck {
 }
 
 // onboardingCLIFreshness is (b): installed version vs the newest cli-v* release.
-// A dev build is not "stale" — it just can't be compared.
+// A dev build is not "stale" — but it is not FRESH either: it cannot be compared,
+// so it reports onbCLIUnreported and names the one command that fixes it. The
+// same applies when the release feed cannot be resolved: no feed, no reading.
 func onboardingCLIFreshness() onbCLICheck {
-	c := onbCLICheck{Installed: cliVersion}
+	c := onbCLICheck{Installed: cliVersion, Status: onbCLIUnreported}
 	if cliVersion == "dev" {
-		c.UpToDate = true
-		c.Detail = "running a dev build — release comparison skipped"
+		c.Detail = "running a dev build (go build) — there is no release to compare it against, so freshness is UNREPORTED; refresh it with `" + onbCLIDevRemedy + "`"
 		return c
 	}
 	latest, err := onboardingLatestRelease()
 	if err != nil {
-		c.Detail = "could not resolve the latest release: " + err.Error()
+		c.Detail = "freshness UNREPORTED — could not resolve the latest release: " + err.Error()
 		return c
 	}
+	// Refresh the on-disk cache whoami reads. This is `bp doctor --onboarding`,
+	// one of several network-bearing surfaces that keep the cache warm — bp
+	// upgrade (runUpgrade) and the update-notice background resolve write it too;
+	// only plain `bp doctor` (doctor_cmd.go) stays offline and refreshes nothing.
+	// Best-effort: a cache-write failure never sinks the receipt's own live
+	// reading below.
+	_ = writeReleaseCache(latest)
 	c.Latest = latest
 	if compareVersions(cliVersion, latest) < 0 {
+		c.Status = onbCLIBehind
+		c.UpToDate = onbBool(false)
 		c.Detail = "a newer CLI is available — run `bp upgrade`"
 		return c
 	}
-	c.UpToDate = true
+	c.Status = onbCLIUpToDate
+	c.UpToDate = onbBool(true)
 	c.Detail = "up to date"
 	return c
 }
@@ -345,8 +446,13 @@ func onboardingInstance(cfg *Config, ctx manifest.Context) *onbInstance {
 
 	// Local-first: a stamped InstanceID means we already know this box's identity
 	// from the saved config — no fleet fetch, no network. This is the offline win.
+	// The identity ALWAYS resolves locally here; the only thing that can leave the
+	// process is the compare-only alias-shadow advisory below, and only under a
+	// Cloud token. Fail-open throughout: no token / fleet error / no matching row
+	// leave the receipt byte-identical.
 	local := localInstance(cfg, ctx)
 	if local != nil && local.ID != "" {
+		local.AliasShadow = onboardingAliasShadowAdvisory(cfg, local)
 		return local
 	}
 
@@ -366,6 +472,48 @@ func onboardingInstance(cfg *Config, ctx manifest.Context) *onbInstance {
 	// (url + saved name). localInstance covers every active!=\"\" case, so this is
 	// the last honest report before nil (which only happens when active is empty).
 	return local
+}
+
+// onboardingAliasShadowAdvisory is the D39 compare-only fleet reconcile: it
+// answers "has the fleet renamed this box's canonical target out from under a
+// stale local alias set?" WITHOUT ever mutating config. The alias store is
+// additive-only by construction (mergeAliases, config.go — the sole persist
+// writer, no prune path), so a canonical rename can never self-heal locally: the
+// dead hostname prints as truth forever. This advisory makes that recoverable by
+// naming the remedy (`bp connect <newURL>`, the existing ADDITIVE fold-in).
+//
+// It runs ONLY on the local-first path (a stamped InstanceID is present) and is
+// TOKEN-GATED (same gate as the fleet fallback). It matches the fleet row by
+// Barkpark.ID EQUALITY against the stamped InstanceID — NEVER by URL, because a
+// URL match cannot detect the very rename this exists to catch. FAIL-OPEN: no
+// token, a fleet error, or no matching row all return "" (silent, receipt
+// unchanged); the identity itself always came from local config regardless.
+func onboardingAliasShadowAdvisory(cfg *Config, local *onbInstance) string {
+	if cfg == nil || local == nil || local.ID == "" || !cfg.HasCloudToken() || onboardingListFleet == nil {
+		return ""
+	}
+	fleet, err := onboardingListFleet(cfg)
+	if err != nil {
+		return "" // fail-open: a fleet error never sinks the receipt
+	}
+	for _, b := range fleet {
+		if strings.TrimSpace(b.ID) != local.ID {
+			continue // ID EQUALITY — never a URL match
+		}
+		target := fleetTarget(b.URL, b.Host)
+		if target == "" {
+			return ""
+		}
+		// Does any local URL/alias already address this canonical target? Reuse the
+		// fleetMatchesActive normalization (scheme-normalized URL + host forms).
+		for _, known := range append([]string{local.URL}, local.Aliases...) {
+			if fleetMatchesActive(b, strings.TrimRight(strings.TrimSpace(known), "/")) {
+				return "" // the canonical target is already a known alias — no shadow
+			}
+		}
+		return "fleet canonical target is now " + target + ", absent from local aliases — run `bp connect " + target + "` to fold it in"
+	}
+	return "" // no fleet row carries this InstanceID — fail-open, silent
 }
 
 // fleetMatchesActive reports whether a fleet row addresses the same box as the
@@ -570,9 +718,12 @@ func renderOnboardingReceipt(out *writer, r onboardingReceipt) {
 	out.outf("bp doctor — onboarding readiness receipt")
 
 	out.outf("  %s PATH                bp %s", mark(r.Path.Resolved), pathDetail(r.Path))
-	out.outf("  %s CLI                 %s", mark(r.CLI.UpToDate), cliDetail(r.CLI))
+	out.outf("  %s CLI                 %s", markTri(r.CLI.Status), cliDetail(r.CLI))
 	out.outf("  %s Cloud session       %s", mark(r.CloudSession.Present), cloudDetail(r.CloudSession))
 	out.outf("  %s Instance            %s", mark(r.Instance != nil), instanceDetail(r.Instance))
+	if r.Instance != nil && r.Instance.AliasShadow != "" {
+		out.outf("  ⚠ alias shadow        %s", r.Instance.AliasShadow)
+	}
 	out.outf("  %s Auth                %s", mark(r.Auth.Reachable), authDetail(r.Auth))
 	out.outf("  %s MCP catalog         %d tools: %s", mark(r.MCP.Count == len(mcpTaskToolNames)), r.MCP.Count, strings.Join(r.MCP.Tools, ", "))
 	out.outf("  %s Tool-call proof     %s", mark(r.ToolCall.OK), r.ToolCall.Summary)
@@ -580,10 +731,27 @@ func renderOnboardingReceipt(out *writer, r onboardingReceipt) {
 	out.outf("  → reload: %s", r.Reload)
 
 	if r.OK {
-		out.outf("=> READY — bp resolves, %s is reachable, and a read-only tool call round-tripped", r.Auth.Server)
+		verdict := "=> READY — bp resolves, " + r.Auth.Server + " is reachable, and a read-only tool call round-tripped"
+		// A READY receipt must never imply that an unreported leg was verified.
+		if un := onboardingUnreported(r); len(un) > 0 {
+			verdict += " (UNREPORTED: " + strings.Join(un, "; ") + ")"
+		}
+		out.outf("%s", verdict)
 	} else {
 		out.outf("=> NOT READY — %s", strings.Join(onboardingBlockers(r), "; "))
 	}
+}
+
+// onboardingUnreported names the legs that took NO reading — legs that are
+// neither pass nor fail. They do not sink r.OK (see buildOnboardingReceipt), but
+// they are printed on the verdict line so a green receipt cannot be mistaken for
+// a fully-measured one.
+func onboardingUnreported(r onboardingReceipt) []string {
+	var u []string
+	if r.CLI.Status == onbCLIUnreported {
+		u = append(u, "CLI freshness")
+	}
+	return u
 }
 
 // onboardingBlockers lists the core failures sinking readiness (advisory misses
@@ -610,6 +778,19 @@ func mark(ok bool) string {
 		return "✓"
 	}
 	return "✗"
+}
+
+// markTri renders a tri-state leg: ✓ read-and-good, ✗ read-and-bad, ? no reading
+// taken. A "?" is deliberately NOT a "✗" — the check did not fail, it abstained.
+func markTri(status string) string {
+	switch status {
+	case onbCLIUpToDate:
+		return "✓"
+	case onbCLIBehind:
+		return "✗"
+	default:
+		return "?"
+	}
 }
 
 func pathDetail(p onbPathCheck) string {
@@ -680,7 +861,9 @@ USAGE
 
 WHAT IT DOES
   emits ONE trustworthy receipt for THIS machine's readiness to drive a Barkpark,
-  in a fixed order: (a) bp on PATH, (b) CLI freshness vs the newest release,
+  in a fixed order: (a) bp on PATH, (b) CLI freshness vs the newest release
+  (up-to-date / behind / unreported — a dev build can't be compared, so it says
+  so instead of claiming a green),
   (c) Cloud session presence, (d) the target instance's id + team + URL/aliases,
   (e) target reachability + auth tier, (f) the 8-tool MCP task catalog,
   (g) a READ-ONLY tool-call proof (a real task_ready call), and (h) the exact

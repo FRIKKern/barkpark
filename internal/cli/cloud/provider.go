@@ -297,9 +297,17 @@ type Auditor interface {
 }
 
 // Pauser is the OPTIONAL capability a provider advertises when it can STOP a box
-// (releasing compute billing) and START it again WITHOUT deleting it — Hetzner
-// poweroff/poweron, Azure deallocate/start. Distinct from lifecycle archive
-// (which snapshots + destroys); pause preserves the running box's disk.
+// and START it again WITHOUT deleting it — Azure deallocate/start
+// (azure.AzureProvider), plus FakeProvider in dev.
+//
+// It says nothing about the BILL: what a stop costs is vendor-specific. Azure
+// deallocation releases the compute charge; Hetzner bills a server "for as long
+// as it exists, regardless of whether it is turned on or not"
+// (https://docs.hetzner.com/cloud/billing/faq/), which is precisely why the
+// Hetzner provider does NOT implement this interface. Distinct from lifecycle
+// archive, which COPIES — a portable bp-bundle-v1 or a Hetzner snapshot image —
+// and never powers down or deletes the box; pause preserves the running box's
+// disk.
 type Pauser interface {
 	Pause(ctx context.Context, name string) error
 	Resume(ctx context.Context, name string) error

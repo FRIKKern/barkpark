@@ -72,6 +72,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"reflect"
 	"regexp"
@@ -282,7 +283,11 @@ func successClaimRegistry() []claimSite {
 			// only on the team the control plane says the token belongs to.
 			Name: "emitDeviceLoginSuccess",
 			Render: func(out *writer, resp any) {
-				emitDeviceLoginSuccess(out, deviceLoginBase, resp.(cloudclient.LoginResp).TeamID)
+				// The account-identity widening (deviceAccount) is best-effort chrome
+				// on TOP of the team-id contract this row probes: the probe holds it
+				// at the zero value so the receipt still varies ONLY on TeamID, the
+				// post-condition the disposition pins.
+				emitDeviceLoginSuccess(out, deviceLoginBase, resp.(cloudclient.LoginResp).TeamID, deviceAccount{})
 			},
 			Backed:       cloudclient.LoginResp{Token: "tok-1", TeamID: "team-a"},
 			Contradicted: cloudclient.LoginResp{Token: "tok-1", TeamID: "team-b"},
@@ -476,6 +481,36 @@ func successClaimRegistry() []claimSite {
 			},
 			Backed:       stampStoredBacked(),
 			Contradicted: stampStoredContradicted(),
+		},
+
+		// ── migrate_cmd.go / tasks_create_cmd.go — PDS wave 48's two A3 sites ───
+		{
+			// `bp migrate`'s per-type line used to count len(batch) — the REQUEST —
+			// with the mutate response discarded on every 2xx. The pair here is the
+			// same batch of 2 documents with the server confirming 2 results and 1:
+			// the count is now read out of `results`, so a server that wrote fewer
+			// than we sent has to print fewer (and loses the checkmark).
+			Name:   "migrateTypeReceipt",
+			Render: renderMigrateClaim,
+			Backed: mutateBodyFixture(
+				map[string]any{"id": "post-a", "operation": "createOrReplace"},
+				map[string]any{"id": "post-b", "operation": "createOrReplace"},
+			),
+			Contradicted: mutateBodyFixture(
+				map[string]any{"id": "post-a", "operation": "createOrReplace"},
+			),
+		},
+		{
+			// A2: `bp task create`'s birth receipt used to read the lifecycle out of
+			// the request map the CLI itself had defaulted "open" into — tautological
+			// by construction. It is now read off results[].document, the record the
+			// server persisted (Envelope.render of the written row), so the pair
+			// varies on the STORED lifecycle and a receipt echoing the request would
+			// print the same bytes for both halves.
+			Name:         "renderTaskCreated",
+			Render:       renderTaskCreatedClaim,
+			Backed:       taskCreatedBodyFixture("considering"),
+			Contradicted: taskCreatedBodyFixture("open"),
 		},
 
 		{
@@ -697,6 +732,90 @@ var (
 // supportOnlineNarration / supportDNSNarration in cloud_support_cmd.go
 // directly, so there is no second copy of the sentence left to drift.
 
+// ── PDS wave 48 — the two receipts that used to assert from the REQUEST ─────
+//
+// Both probes are DECODED /v1/data/mutate bodies (an unnamed map[string]any —
+// what a JSON decode of that endpoint produces, and the arm-1 carve-out for a
+// body with no Go type). Each render marshals the probe back and hands the
+// BYTES to the production parser (migrateBatchWritten / firstMutationRecord),
+// so the row exercises the real decode instead of a copy of it, and both
+// surfaces are rendered by the production functions.
+
+// mutateBodyFixture is one /v1/data/mutate 2xx body, results in order.
+func mutateBodyFixture(results ...map[string]any) map[string]any {
+	rows := make([]any, 0, len(results))
+	for _, r := range results {
+		rows = append(rows, r)
+	}
+	return map[string]any{"transactionId": "tx-1", "results": rows}
+}
+
+// taskCreatedBodyFixture is the create response for ONE task, varying only on
+// the lifecycle_status the server PERSISTED into the echoed document.
+func taskCreatedBodyFixture(lifecycle string) map[string]any {
+	return mutateBodyFixture(map[string]any{
+		"id": "task-9",
+		"document": map[string]any{
+			"_id":              "task-9",
+			"_draft":           false,
+			"lifecycle_status": lifecycle,
+		},
+	})
+}
+
+func claimBodyBytes(resp any) []byte {
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return b
+}
+
+// migrateClaimPlan is the plan the migrate row's machine surface is projected
+// through: it is held FIXED across the pair, so the only thing that can move
+// the -o json envelope is the count the server returned.
+var migrateClaimPlan = migratePlan{
+	from:    migrateEndpoint{name: "src", url: "http://src", kind: "local"},
+	to:      migrateEndpoint{name: "dst", url: "http://dst", kind: "local"},
+	dataset: "production",
+	types:   []migrateTypeCount{{Type: "post", Count: migrateClaimSent}},
+	total:   migrateClaimSent,
+}
+
+// migrateClaimSent is how many documents the batch SENT — the number the old
+// receipt printed unconditionally.
+const migrateClaimSent = 2
+
+// renderMigrateClaim drives `bp migrate`'s per-type receipt on both surfaces:
+// the human line and the -o json envelope's total_migrated, which now carry the
+// same server-derived count.
+func renderMigrateClaim(out *writer, resp any) {
+	written, err := migrateBatchWritten(claimBodyBytes(resp))
+	if err != nil {
+		out.errf("  ✗ post: %v", err)
+		return
+	}
+	if out.machineOut() {
+		out.emitStructured(migratePlanJSON(migrateClaimPlan, false,
+			[]migrateTypeCount{{Type: "post", Count: written}}, written, nil))
+		return
+	}
+	out.outf("%s", migrateTypeReceipt("post", written, migrateClaimSent))
+}
+
+// taskCreatedClaimDraftID is the draft id the create mutation returned — held
+// fixed across the pair, so only the persisted record can move the receipt.
+const taskCreatedClaimDraftID = "drafts.task-9"
+
+func renderTaskCreatedClaim(out *writer, resp any) {
+	rec, ok := firstMutationRecord(claimBodyBytes(resp))
+	if !ok {
+		out.errf("task create: server returned no id")
+		return
+	}
+	renderTaskCreated(out, taskCreatedClaimDraftID, rec)
+}
+
 // requiredEnrollments is the FLOOR: deleting a row to make the gate green fails
 // here instead. Names are the registry Name minus any "/variant" suffix.
 var requiredEnrollments = []string{
@@ -721,6 +840,9 @@ var requiredEnrollments = []string{
 	"renderSiteSettingsUpdated",
 	// PDS wave 26 — the ledger writer this epic's own evidence is made of.
 	"renderStampVerdict",
+	// PDS wave 48 — the two receipts that asserted from the REQUEST.
+	"migrateTypeReceipt",
+	"renderTaskCreated",
 }
 
 // ── LEDGER ROWS (charter PDS-D363) ──────────────────────────────────────────

@@ -97,11 +97,11 @@ defmodule Barkpark.Search.DocumentsRetriever do
       # (they reuse retriever_opts) in one place — never duplicated per
       # transport. ALLOWLIST, not denylist: it matches the query route's live
       # 404 for schemaless types and fails closed on any future visibility
-      # value; an empty allowlist yields an empty result. Bypassed for ANY
-      # authenticated principal (`:api_token`/`:user`) — EXACT parity with
-      # query_controller.ex's `authed?` (which admits any token, including
-      # public-read); tightening that for public-read tokens must move both
-      # routes together and is filed separately.
+      # value; an empty allowlist yields an empty result. Bypassed for an
+      # authenticated principal (`:api_token`/`:user`) EXCEPT the public-read
+      # tier, which is clamped exactly like an anonymous caller — EXACT parity
+      # with query_controller.ex's `authed?`, which moved in the same commit
+      # (the "filed separately" this comment used to name is now discharged).
       |> restrict_anonymous_to_public_types(scope, opts)
 
     base = if browse?, do: base, else: where_match(base, parsed, terms, config, relaxed)
@@ -318,19 +318,56 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   # Schema-visibility gate (D62) — see the `base` pipeline comment above. An
-  # authenticated principal (any api_token or user session) bypasses entirely:
-  # exact parity with QueryController's `authed?/1`, never stricter on one
-  # route. Everyone else — anonymous, nil, or any unknown future principal —
+  # authenticated principal (any api_token or user session) bypasses, EXCEPT the
+  # public-read tier: exact parity with QueryController's `authed?/1`, which
+  # moved in the same commit, never stricter on one route. Everyone else —
+  # anonymous, nil, the public-read tier, or any unknown future principal —
   # fails CLOSED onto the public-type allowlist.
+  #
+  # KEYED ON THE PERMISSION, NOT ON `principal_type`. The old shape asked "is
+  # this caller authenticated"; a `public-read` token IS an `:api_token`, so the
+  # browser-shipped site credential (cloud sites/deploy.ex ships it into the
+  # build as BARKPARK_TOKEN against the SCOPED `/w/:ws/p/:proj` base URL) skipped
+  # the visibility filter wholesale and read every private type through the
+  # scoped search door. The flat mirror never leaked because `:api_grant_read`
+  # mounts `Plugs.PublicRead`; `:scoped_api` does not — and MUST NOT, because
+  # PublicRead is deny-by-default outside a query/doc/graph allowlist and 21
+  # routes ride bare `:scoped_api` (scoped search, scoped federated search,
+  # suggestions/interaction/correction, the six preview reads, the whole scoped
+  # media surface). Mounting it there would 403 all of them and take the live
+  # flagship dark (search-template D49). The clamp belongs HERE, where it filters
+  # rather than denies: a public-read caller still gets 200, just the public
+  # types — and because this is the same one-clause-on-`base` seat as the grant
+  # clause, results, count AND facets are clamped together (a leaked count or
+  # type facet is an existence leak by itself).
   defp restrict_anonymous_to_public_types(query, scope, opts) do
-    case Keyword.get(opts, :caller_context) do
-      %{principal_type: p} when p in [:api_token, :user] ->
-        query
-
-      _ ->
-        where(query, [d], d.type in ^public_type_names(scope, opts))
+    if bypasses_visibility_gate?(Keyword.get(opts, :caller_context)) do
+      query
+    else
+      where(query, [d], d.type in ^public_type_names(scope, opts))
     end
   end
+
+  # True only for an authenticated principal OUTSIDE the public-read tier.
+  # Anything else — anonymous, nil, a bare map without `:principal_type`, any
+  # future principal — is false, so the allowlist applies (fail CLOSED).
+  defp bypasses_visibility_gate?(%{principal_type: p} = ctx) when p in [:api_token, :user],
+    do: not public_read_principal?(ctx)
+
+  defp bypasses_visibility_gate?(_), do: false
+
+  # MEMBERSHIP, never list equality — the SAME test as
+  # `BarkparkWeb.Plugs.PublicRead.public_read_token?/1` and
+  # `AnonPerspective.anon_pinned?/1`, read off the CallerContext's `:roles`
+  # (`CallerContext.from_token/1` stores the token's permission list there
+  # verbatim). `TokenController` allowlists `~w(public-read read)` and returns
+  # the caller's list VERBATIM and UNORDERED, so `["public-read", "read"]` is a
+  # real minted shape and a `roles == ["public-read"]` equality pin would be
+  # escapable by construction. A context whose `:roles` is absent or non-list
+  # falls through to `false` — absence of the key is not evidence of the tier,
+  # and over-clamping every principal would break member/preview reads.
+  defp public_read_principal?(%{roles: roles}) when is_list(roles), do: "public-read" in roles
+  defp public_read_principal?(_), do: false
 
   # The ALLOWLIST of schema type names an anonymous caller may search: schemas
   # in the caller's tenancy scope whose visibility is EXPLICITLY "public" —
@@ -342,15 +379,16 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # `d.type in []` ⇒ WHERE false ⇒ empty results/count/facets (fail closed).
   # The Indx indexer applies the same predicate at index time
   # (IndexerWorker.schema_public?/1) — one invariant, two enforcement points.
+  #
+  # The derivation itself now lives in `Content.Schema.public_type_names/2` so
+  # the corpus graph (`TasksController.graph_corpus/2`) restricts its type list
+  # through the SAME predicate rather than a second hand-rolled copy — the gap
+  # this comment used to name as filed-separately.
   defp public_type_names(scope, opts) do
-    scope
-    |> Barkpark.Content.list_schemas(
+    Barkpark.Content.Schema.public_type_names(scope,
       workspace_id: Keyword.get(opts, :workspace_id),
       project_id: Keyword.get(opts, :project_id)
     )
-    |> Enum.filter(&(&1.visibility == "public"))
-    |> Enum.map(& &1.name)
-    |> Enum.filter(&(is_binary(&1) and &1 != ""))
   end
 
   # Mirror of Content.scope_to_dataset for the search read path (barkpark-y9ee).

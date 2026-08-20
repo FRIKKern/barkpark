@@ -594,6 +594,54 @@ func TestAssertCmdD38(t *testing.T) {
 	}
 }
 
+const ccProbeSrc = `COMMAND "cc-probe" DESCRIPTION "D101 CC-when-unset probe." CONCEPT "probe" DIRECTION "add"
+
+ASSERT CMD "printf '%s' \"$CC\" > cc-probe.txt"
+`
+
+// TestAssertCmdD101CCWhenUnset — D101 (amends D38): the assert env
+// defaults CC=/usr/bin/clang ONLY when the ambient env carries no CC.
+// Both branches run through the real assert-exec path (sh -c echoing
+// $CC): a stranger's ambient CC survives verbatim; an absent CC yields
+// the /usr/bin/clang default. The "preserved" branch FAILS against the
+// old unconditional append (which clobbered any ambient CC).
+func TestAssertCmdD101CCWhenUnset(t *testing.T) {
+	t.Run("ambient CC preserved verbatim", func(t *testing.T) {
+		t.Setenv("CC", "sentinel-cc-9f")
+		root := t.TempDir()
+		cmdPath := writeCommand(t, root, "cc-probe.scaffy", ccProbeSrc)
+		rep, err := Run(RunOptions{CommandPath: cmdPath, Vars: nil, RepoRoot: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !rep.Ok {
+			t.Fatalf("asserts failed: %+v", rep.Asserts)
+		}
+		if got := readTreeFile(t, root, "cc-probe.txt"); got != "sentinel-cc-9f" {
+			t.Fatalf("ambient CC clobbered: got %q, want sentinel-cc-9f", got)
+		}
+	})
+
+	t.Run("absent CC defaults to clang", func(t *testing.T) {
+		if old, ok := os.LookupEnv("CC"); ok {
+			os.Unsetenv("CC")
+			t.Cleanup(func() { os.Setenv("CC", old) })
+		}
+		root := t.TempDir()
+		cmdPath := writeCommand(t, root, "cc-probe.scaffy", ccProbeSrc)
+		rep, err := Run(RunOptions{CommandPath: cmdPath, Vars: nil, RepoRoot: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !rep.Ok {
+			t.Fatalf("asserts failed: %+v", rep.Asserts)
+		}
+		if got := readTreeFile(t, root, "cc-probe.txt"); got != "/usr/bin/clang" {
+			t.Fatalf("absent-CC default: got %q, want /usr/bin/clang", got)
+		}
+	})
+}
+
 const failCmdSrc = `COMMAND "check-fail" DESCRIPTION "Failing assert probe." CONCEPT "probe" DIRECTION "add"
 
 ASSERT CMD "printf boom && exit 3"

@@ -1,0 +1,204 @@
+{
+  "_id": "design-probe",
+  "_source": "AUTHORED, not fetched. Written in BPML (Barkpark.PortableDoc.Bpml, source beside this file as design-probe.bpml) and parsed to blocks \u2014 there is no published paper behind it, so fetch-fixtures.sh must never be pointed at this slug. It carries the shapes the six real papers do not: sections as `section` CONTAINERS (eyebrow + h2 heads INSIDE the container, which no top-level `> #paper-body > \u2026 > h2` leg reaches, so the section-head device does not size them); consecutive containers (whose trailing and leading `PdHr` stack into one doubled boundary); and a content-NARROW table (whose box centres on the evidence band while its ink pins to the band's left edge). All three are MEASURED in the report and none is asserted \u2014 each is an open finding with its own task, and a fixture that red-lined on them could not be committed.",
+  "blocks": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "One page, three sections, every boundary the grammar cares about: eyebrow heads, prose at measure, evidence that breaks wide, and the gaps between them. If the section law changes, this page shows it first."
+        }
+      ],
+      "type": "ingress"
+    },
+    {
+      "blocks": [
+        {
+          "text": "I \u00b7 THE FIRST BOUNDARY",
+          "type": "eyebrow"
+        },
+        {
+          "level": 2,
+          "text": "Prose above, evidence below",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "This paragraph exists to put honest prose ahead of an evidence block. The gap under this line is the "
+            },
+            {
+              "marks": [
+                "strong"
+              ],
+              "type": "text",
+              "value": "evidence beat"
+            },
+            {
+              "type": "text",
+              "value": " \u2014 thirty pixels against the paragraph's sixteen \u2014 and the gap above the next section head is the "
+            },
+            {
+              "marks": [
+                "strong"
+              ],
+              "type": "text",
+              "value": "section gap"
+            },
+            {
+              "type": "text",
+              "value": ", which today sits at fifty-one pixels against the artifact's ninety-two."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "head": [
+            [
+              {
+                "type": "text",
+                "value": "boundary"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "today"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "target"
+              }
+            ]
+          ],
+          "rows": [
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "evidence beat"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "29.9px"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "30px"
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "type": "text",
+                  "value": "section gap"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "51.3px"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "92px"
+                }
+              ]
+            ]
+          ],
+          "type": "table"
+        }
+      ],
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "text": "II \u00b7 THE WIDE BAND",
+          "type": "eyebrow"
+        },
+        {
+          "level": 2,
+          "text": "Components that earn their width",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "The strip below should ride the evidence band \u2014 1040 at common widths, 1240 on a wide screen \u2014 while this paragraph holds the reading measure."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "items": [
+            {
+              "label": "body, from the token",
+              "value": "18px"
+            },
+            {
+              "label": "evidence beat, measured",
+              "value": "29.9px"
+            },
+            {
+              "label": "band at 1920",
+              "value": "1240px"
+            },
+            {
+              "label": "horizontal scroll, anywhere",
+              "value": "0"
+            }
+          ],
+          "type": "stats"
+        }
+      ],
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "text": "III \u00b7 THE CLOSING BEAT",
+          "type": "eyebrow"
+        },
+        {
+          "level": 2,
+          "text": "A callout to end on",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Sections should end the way they open \u2014 with air proportional to their weight."
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "The ratio is the law: evidence opens at one-and-a-half to two times the paragraph beat, and sections at four. Where this page disagrees with the shell, the shell is wrong."
+            }
+          ],
+          "type": "callout"
+        }
+      ],
+      "type": "section"
+    }
+  ],
+  "slug": "design-probe-section-rhythm",
+  "style": "article",
+  "title": "Section Rhythm Probe"
+}

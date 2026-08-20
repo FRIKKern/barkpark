@@ -297,6 +297,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+  # spec-authority: advisory-ok — the `(blocking)` token is inside the JOB name,
+  # which IS this job's rendered check-run context and IS a committed exclusion
+  # row (S6 LEAF OF AN EXCLUDED AGGREGATOR) in .github/required-checks.json.
+  # Renaming it would silently invalidate that row. The token means "blocking
+  # WITHIN this workflow, unlike the advisory sobelow job" — see the sentence
+  # below, which is the true and intended reading.
   sobelow-inline-overlap:
     name: Sobelow baseline does not swallow its own inline waivers (blocking)
     # BLOCKING on purpose, unlike the sobelow job above. That job is advisory
@@ -498,6 +504,31 @@ jobs:
 
           bad=0
 
+          # ── D377 tally: did anything SUBSTANTIVE actually run? ────────────
+          # `bad` answers "is anything wrong"; it cannot answer "was anything
+          # tested", and until wave 33 nothing did. These two answer it.
+          # Only PATH-GATED jobs count: the dispatcher and the ratchet carry the
+          # gate value NEVER and run on every head, so they are present in a
+          # "nothing ran" run exactly as in a full one and can distinguish
+          # nothing.
+          dispatched=0
+          not_dispatched=""
+
+          # ── D770/D771 — `bad` SAYS THAT something is wrong, never WHICH ───
+          # Measured by executing this very step body with one upstream =
+          # failure: the step LOG names the offending job one line above, but
+          # the `::error::` — the ONLY line the check-run API carries, and so
+          # the only line a reader ever sees at the merge button — named
+          # NOTHING. `bad` is a bit; this is the set behind it. It is appended
+          # at EVERY `bad=1` site, so it can never disagree with the verdict: a
+          # job reaches this list through the same line that reds the gate.
+          # DERIVED from `${job}` — never a hardcoded name, and never a
+          # re-print of the step log.
+          # Comma-joined, not space-joined: job names contain spaces
+          # ("changes (dispatcher)"), so a space-joined list cannot be read
+          # back as a set.
+          reds=""
+
           # decide <job-name> <result> <gate-value>
           #   gate-value is the dispatcher output that gated the job, or the
           #   literal string NEVER for jobs that must always run. A skip is
@@ -517,22 +548,34 @@ jobs:
                   echo "          most often because an upstream FAILED. Refusing to green a required"
                   echo "          context on it."
                   bad=1
+                  reds="${reds:+${reds}, }${job}"
                 fi
                 ;;
               failure | cancelled)
                 echo "  FAIL    ${job}: ${result}"
                 bad=1
+                reds="${reds:+${reds}, }${job}"
                 ;;
               '')
                 echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
                 echo "          or the run object is malformed. Cannot tell, therefore red."
                 bad=1
+                reds="${reds:+${reds}, }${job}"
                 ;;
               *)
                 echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
                 bad=1
+                reds="${reds:+${reds}, }${job}"
                 ;;
             esac
+            # Tally, for the D377 notice at the bottom of this step. NEVER-gated
+            # jobs are excluded on purpose (see the declaration above).
+            if [ "$gate" != "NEVER" ]; then
+              case "$result" in
+                success) dispatched=$((dispatched + 1)) ;;
+                skipped) not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
           }
 
           # The dispatcher itself may never skip: without it there are no gate
@@ -545,7 +588,26 @@ jobs:
 
           echo
           if [ "$bad" -ne 0 ]; then
-            echo "::error::Security gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose."
+            # NOT "the required context": branch protection on main requires
+            # exactly four, and `Security gate` is not among them (they are
+            # `Elixir gate`, `Cloud gate`, `Console gate`, `PR references an
+            # active task` — enforce_admins=true). Saying otherwise told every
+            # reader this red blocked a merge it cannot block.
+            echo "::error::Security gate: at least one upstream job is not in the allow-set (see above). This gate is RED on purpose; it is an advisory context, not one of the four required on main. NOT IN THE ALLOW-SET: ${reds}"
             exit 1
+          fi
+
+          # ── D377/D378 — SAY IT WHERE A PERSON AND AN API CAN READ IT ──────
+          # Same defect as the three REQUIRED aggregators, same fix, and it is
+          # fixed here too so the four gates cannot drift apart: on a docs-only
+          # head this context concludes `success` with every substantive job
+          # skipped and publishes ann=0 / title=null / summary=null — identical
+          # bytes to a run where Sobelow and mix_audit actually ran.
+          # $GITHUB_STEP_SUMMARY does not reach the check-run API; a bare
+          # ::notice:: does (probe/elixir-gate-annotation, run 31055317124).
+          # ONE notice, never one per job — GitHub caps annotations at 10 per
+          # level per step and truncates the rest silently.
+          if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=Security gate: green — nothing ran::NOTHING SECURITY RAN on this head.%0ASecurity gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Security job executed', never as 'the security scans passed'."
           fi
           echo "Security gate: every upstream job either succeeded or was legitimately not dispatched."

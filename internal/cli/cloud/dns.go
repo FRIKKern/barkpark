@@ -155,8 +155,11 @@ func (f *FakeDNS) DeleteRecord(_ context.Context, zone, name, typ string) error 
 	return nil
 }
 
-// compile-time assertion that *FakeDNS satisfies the interface.
+// compile-time assertion that *FakeDNS satisfies the interface, and the
+// by-value sweep's optional RecordLister with it — the test seam must not be
+// able to keep the sweep tests green after the capability is dropped.
 var _ DNSProvider = (*FakeDNS)(nil)
+var _ RecordLister = (*FakeDNS)(nil)
 
 // hetznerDNSBase is the Hetzner DNS API root. Hetzner-first to match the
 // provisioning strategy (HcloudProvider in provider.go).
@@ -513,5 +516,7 @@ func readBody(r io.Reader) string {
 	return strings.TrimSpace(string(b))
 }
 
-// compile-time assertion that *HetznerDNS satisfies the interface.
+// compile-time assertion that *HetznerDNS satisfies the interface, and the
+// by-value sweep's optional RecordLister with it.
 var _ DNSProvider = (*HetznerDNS)(nil)
+var _ RecordLister = (*HetznerDNS)(nil)

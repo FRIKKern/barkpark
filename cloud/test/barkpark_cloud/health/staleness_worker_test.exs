@@ -86,6 +86,33 @@ defmodule BarkparkCloud.Health.StalenessWorkerTest do
     bp
   end
 
+  # A NEVER-REPORTED instance: provisioned/adopted long ago, agent has never sent
+  # a byte (`last_seen_at` NULL, `agent_status` "offline", `health_status`
+  # "unknown" — exactly what succeed_job/adopt now write). This is the shape
+  # production carries and the shape the sweep's second arm exists to catch.
+  defp never_reported_instance(team, seconds_old \\ 3600) do
+    n = System.unique_integer([:positive])
+
+    {:ok, bp} =
+      Registry.register_barkpark(team, %{
+        name: "Never #{n}",
+        slug: "never-#{n}",
+        mode: "managed"
+      })
+
+    # Backdate creation past the staleness window — register_barkpark stamps
+    # inserted_at with now(), and the arm is keyed on inserted_at.
+    {1, _} =
+      Registry.Barkpark
+      |> where([b], b.id == ^bp.id)
+      |> Repo.update_all(set: [inserted_at: ago(seconds_old)])
+
+    reloaded = Registry.get_barkpark(bp.id)
+    assert is_nil(reloaded.last_seen_at)
+    assert reloaded.agent_status == "offline"
+    reloaded
+  end
+
   defp ago(seconds) do
     DateTime.utc_now() |> DateTime.add(-seconds, :second) |> DateTime.truncate(:microsecond)
   end
@@ -143,6 +170,74 @@ defmodule BarkparkCloud.Health.StalenessWorkerTest do
     # No second flip, no re-increment, no second alert.
     assert after_.unreachable_count == before.unreachable_count
     assert after_.agent_status == "offline"
+    refute_email_sent()
+  end
+
+  # cch-w34-s2 — the never-reported arm. Before this wave the candidate query
+  # ALSO required `agent_status == "online"`, and nothing in cloud/lib writes
+  # "online" without co-writing last_seen_at, so the `last_seen_at IS NULL` arm
+  # its own docstring promised could not fire. Production carried 3 boxes in
+  # exactly this state for 38 days with a green "up" and zero missed-heartbeat
+  # counts. These tests pin that the arm is now REACHABLE — remove the
+  # `is_nil(b.last_seen_at)` branch (or restore the blanket online requirement)
+  # in Registry.stale_online_barkparks/1 and both of them red.
+  test "a NEVER-REPORTED instance is a candidate: the counter bumps on tick 1" do
+    {team, _owner} = subscribed_team_with_owner()
+    bp = never_reported_instance(team)
+
+    assert :ok = tick()
+
+    reloaded = Registry.get_barkpark(bp.id)
+    assert reloaded.unreachable_count == 1
+    assert reloaded.unreachable_notification_sent == false
+    refute_email_sent()
+  end
+
+  test "a NEVER-REPORTED instance crosses the gate: ONE alert, then it backs off" do
+    {team, owner} = subscribed_team_with_owner()
+    bp = never_reported_instance(team)
+
+    assert :ok = tick()
+    assert :ok = tick()
+
+    flipped = Registry.get_barkpark(bp.id)
+    assert flipped.unreachable_count == 2
+    assert flipped.agent_status == "offline"
+    assert flipped.health_status == "unknown"
+    assert flipped.unreachable_notification_sent == true
+    assert_email_sent(subject: @unreachable_subject, to: {"", owner.email})
+
+    # The latch IS this arm's backoff (a never-reported row has no online status
+    # to lose): tick 3 neither re-increments nor re-alerts.
+    assert :ok = tick()
+    settled = Registry.get_barkpark(bp.id)
+    assert settled.unreachable_count == 2
+    refute_email_sent()
+  end
+
+  test "a never-reported instance created INSIDE the window is not yet a candidate" do
+    {team, _owner} = subscribed_team_with_owner()
+    bp = never_reported_instance(team, 0)
+
+    assert :ok = tick()
+
+    reloaded = Registry.get_barkpark(bp.id)
+    assert reloaded.unreachable_count == 0
+    refute_email_sent()
+  end
+
+  test "a never-reported instance whose team is NOT subscribed is never alerted" do
+    n = System.unique_integer([:positive])
+    {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+    # NO Billing.subscribe — the paid-fleet gate applies to BOTH arms.
+    bp = never_reported_instance(team)
+
+    tick()
+    tick()
+    tick()
+
+    reloaded = Registry.get_barkpark(bp.id)
+    assert reloaded.unreachable_count == 0
     refute_email_sent()
   end
 

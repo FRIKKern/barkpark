@@ -128,8 +128,48 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # no nonce spent. So a bare HEAD of either is inert and no `side_effecting_get?/1`
   # clause is owed. Session and public are unchanged, which is the reassuring
   # half: no existing route silently changed auth class.
-  @baseline_total 64
-  @baseline_session 45
+  # 2026-08-05: 65 / 46 / 7 / 12. deploy-reliability W1 S2 added ONE
+  # session-authenticated GET, `/v1/operator/deploy-ledger/census`. RULED NOT
+  # SIDE-EFFECTING by reading the whole path: `Auth.require_platform_operator/2`
+  # only reads the session and the operator allowlist, and the handler is
+  # `DeployLedger.parse_window/2` (pure string parsing) then
+  # `DeployLedger.census/3`, which is a single grouped `Repo.all` and an
+  # in-memory fold — no row minted, no credential burned, no nonce spent. So a
+  # bare HEAD of it is inert and no `side_effecting_get?/1` clause is owed.
+  # agent_or_worker and public are unchanged: no existing route changed class.
+  # 2026-08-07: 66 / 47 / 7 / 12. deploy-reliability dr-w16-s6 added ONE
+  # session-or-PAT GET, `/v1/deploy-ledger/census` — the team-scoped twin of the
+  # operator route above, added because that operator route 403s for every real
+  # account (PLATFORM_ADMIN_EMAILS is unset in production), so the correct number
+  # this epic spent sixteen waves building was unreadable by anyone. It counts as
+  # SESSION because `Auth.require_user_or_pat` is a session wrapper here; the
+  # `Auth.require_ability("read")` beside it narrows a PAT, it does not reclassify
+  # the route. RULED NOT SIDE-EFFECTING by reading the whole path:
+  # `require_ability/2` is a pure map lookup, and the handler is
+  # `Registry.list_sites_for_team/1` (a `Repo.all`), an in-Elixir list
+  # intersection, `DeployLedger.parse_window/2` (string parsing) and
+  # `DeployLedger.census/3` (one grouped `Repo.all` + an in-memory fold) — no row
+  # minted, no credential burned, no nonce spent. The one write anywhere on the
+  # path is the throttled `last_used` bookkeeping `require_user_or_pat/2` defers,
+  # which is not a state change a HEAD could exploit and which every one of the
+  # session GETs already inside this baseline shares. So a bare HEAD is inert and
+  # no `side_effecting_get?/1` clause is owed. machine and public are unchanged:
+  # no existing route changed class.
+  # 2026-08-08: 67 / 48 / 7 / 12. deploy-reliability dr-w23-s2 added ONE
+  # session-or-PAT GET, `/v1/deliveries` — the read half of the platform's own
+  # per-sha delivery record (the write half is a POST, so it does not move this
+  # GET census at all). It counts as SESSION for the same reason the row above
+  # does: `Auth.require_user_or_pat` is a session wrapper here and the
+  # `require_ability("read")` beside it narrows a PAT rather than reclassifying
+  # the route. RULED NOT SIDE-EFFECTING: the handler is
+  # `PlatformDelivery.normalize_sha/1` + `clamp_limit/1` (pure) and
+  # `PlatformDelivery.list/1` (one `Repo.all`) — no row minted, no credential
+  # burned, no nonce spent; the only write on the path is the same throttled
+  # `last_used` bookkeeping every session GET in this baseline already shares. So
+  # a bare HEAD is inert and no `side_effecting_get?/1` clause is owed. machine
+  # and public are unchanged: no existing route changed class.
+  @baseline_total 67
+  @baseline_session 48
   @baseline_machine 7
   @baseline_public 12
 

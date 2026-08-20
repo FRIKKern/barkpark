@@ -181,6 +181,37 @@ defmodule Barkpark.Tasks.BoardTest do
     end
   end
 
+  describe "snapshot/1 safety cap (felix W25 — bounded HTTP reader, unbounded LiveView twin)" do
+    # NAMED FAILURE MODE: `load_task_docs/1` re-runs an unbounded `Repo.all` over
+    # the whole `type:task` corpus every 15s per connected Studio board socket.
+    # This proves the safety cap `@snapshot_max` (config-overridable) bounds the
+    # scan. MUTATION: drop `limit: ^snapshot_max()` from `load_task_docs/1` and
+    # `map_size(board.cards_by_id)` becomes cap+1 → this assertion REDS; with the
+    # bound in place it caps at `cap` → GREENS.
+    test "load_task_docs caps the corpus scan at the config-overridable bound" do
+      cap = 3
+      prev = Application.get_env(:barkpark, :board_snapshot_max)
+      Application.put_env(:barkpark, :board_snapshot_max, cap)
+      on_exit(fn -> restore_env(:board_snapshot_max, prev) end)
+
+      # cap + 1 DISTINCT, LIVE (non-cancelled), NON-TWIN task docs — distinct
+      # doc_ids so no draft/published collapse folds them, so each is its own
+      # card. Unbounded, all cap+1 reach cards_by_id; capped, at most `cap` do.
+      for i <- 1..(cap + 1) do
+        task!("cap-task-#{i}", "Cap task #{i}", %{"lifecycle_status" => "open"})
+      end
+
+      board = Board.snapshot(dataset: "production")
+
+      assert map_size(board.cards_by_id) <= cap,
+             "the safety cap must bound cards_by_id to #{cap}, got #{map_size(board.cards_by_id)}"
+    end
+  end
+
+  # Restore an Application env key to its prior state (delete when it had none).
+  defp restore_env(key, nil), do: Application.delete_env(:barkpark, key)
+  defp restore_env(key, prev), do: Application.put_env(:barkpark, key, prev)
+
   describe "snapshot/1 field-visibility seal (legacy parity — selective, not blanket)" do
     test "an UNDECLARED field stays public (the gate reads the schema, not a blanket redaction)" do
       seal_schema!()

@@ -10,7 +10,8 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
 
       Deploy.enqueue(site, bp, false, "template-auto", probed_content_rev)
 
-  and, only when that actually minted a NEW row, `Deploy.start/1`. Nothing else.
+  and, only when that actually minted a NEW row, `Deploy.start_reported/1`.
+  Nothing else.
 
   ## Why UNFORCED is the entire design (never force on a schedule)
 
@@ -22,7 +23,7 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
   measured builds queueing behind builds for hours). Unforced, `build_id =
   hash(code_rev + content_rev + config)` is stable across ticks, so the
   `(site_id, build_id)` unique index collapses an unchanged site to `{:duplicate,
-  _}` — a pure no-op, no build, no `Deploy.start/1`. The sweep costs one analytics
+  _}` — a pure no-op, no build, no driver start. The sweep costs one analytics
   read per site per hour when nothing moved.
 
   ## The content_rev SKIP (the build-storm tripwire)
@@ -59,7 +60,7 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
   The `:site_deploy` queue's concurrency 1 serializes JOBS, not builds:
   `AutoDeployWorker` starts one build per job, so for it the queue really is a
   serial gate — but this worker visits the whole fleet in ONE job, and
-  `Deploy.start/1` hands each site to a supervised Task immediately. The box
+  `Deploy.start_reported/1` hands each site to a supervised Task immediately. The box
   single-flights per SLUG only, so after any instance roll (`code_rev` is the
   box's git commit and advances on every `api/**`/`internal/**`/`deploy/**`/
   `templates/**` merge) an uncapped sweep would start K concurrent builds on a
@@ -287,8 +288,23 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
     # force: FALSE — the whole design. See the moduledoc.
     case Deploy.enqueue(site, bp, false, "template-auto", content_rev) do
       {:ok, deployment} ->
-        :ok = Deploy.start(deployment)
-        :enqueued
+        # THE SWEEP IS ALLOWED TO LOSE. This used to be `:ok = Deploy.start(row)`
+        # against a wrapper spec'd `:: :ok` — a match that could not fail — so a
+        # tick whose every spawn was refused still reported `enqueued: N`. A row
+        # minted but never driven is a build that did not happen; count it
+        # `failed` and name the row a human can go look at.
+        case Deploy.start_reported(deployment) do
+          {:ok, _outcome} ->
+            :enqueued
+
+          {:error, reason} ->
+            Logger.warning(
+              "template-freshness could not start the driver for site #{site.id}: " <>
+                "#{inspect(reason)} — deployment #{deployment.id} is left queued; next tick retries"
+            )
+
+            :failed
+        end
 
       # Nothing changed since the last build: the (site_id, build_id) unique index
       # collapsed this into the existing row. The expected outcome on a quiet

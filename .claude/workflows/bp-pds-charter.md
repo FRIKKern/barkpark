@@ -2576,6 +2576,141 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 48 2026-08-05 — REVIEWED AND PUSHED, grade A — 7 of 7 round-1 slices green, 7 PRs open (#9598–#9604), 1 round-2 slice deferred BY DESIGN (paper `pds-wave-48-2026-08-05`)
+
+**THE WAVE'S OWN HEADLINE.** Seven slices, each taking one Barkpark verb, receipt, class, gate or
+price that had stopped descending from a measurement and giving it an ending — and the wave found the
+defect class *in its own output*. Two slices, both individually correct, composed back into the exact
+lie the wave set out to kill. **All seven branches are pushed and all seven PRs are open.**
+
+**WHAT LANDED (7 PRs, all pushed, none merged — the lead merges).**
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `pds-w47-measure-and-host-axis` | `…measure-is-built-the-price-grammar-gains-0` | #9598 | The price column stops being typed. `--measure` meters a door with the `times` BUILTIN as the metering shell's final command, making D669's exec-discard trap structurally unreachable rather than avoided by a deletable no-op. Never gated, falsifiably: a depth guard refuses a meter inside a meter, and a witness makes "`--check` never invokes `--measure`" a fact a run can DISPROVE — two independent mechanisms, so one edit cannot defeat both. `LC_ALL=C` pins meter AND summer as two removable variables, and the summer is fail-closed on radix in both directions. **NO FOREIGN PRICE WAS TAKEN**, and the refusal is written into the header naming the measured citation surface. Two rows RE-METERED, not re-worded — including one that priced THREE arms while its rider ran FOUR. Selftest 33 → 43 arms. Reviewer changed nothing. |
+| `pds-bl-w47-find-event-launders-the-honest-status` | `…the-next-js-proxy-launders-the-api-s-hon-1-r` | #9599 | Two bare `await fetch(...)` expression statements discarded the Response, and fetch does not reject on 4xx/5xx, so the API's honest 422/500 was laundered into `{ok:true}` one hop out — never reaching the catch, never logged. Six exits now route through one helper, so `recorded` cannot be produced except by passing a measured value. The third lie class (parsed but no write attempted) is filed nowhere else and got its own falsifier. First route-handler test in `web/` — zero of 39 files covered any of the five routes. Reviewer fixed the cross-slice seam (below) and pinned WHAT was sent, not merely that something was. |
+| `task-pds-correction-receipt-surfaces-status` | `…the-correction-receipt-collapses-five-ou-2` | #9600 | `correction/2` destructured away the `status:` key D496 shipped, so all five outcomes rendered the identical 51 bytes — **a lost write and a genuine record were byte-identical on the wire.** No crash existed; the defect was pure laundering at the boundary. Seven HTTP tests assert all five outcomes with row counts read back, plus one that resets the table between them and asserts no two receipts are equal. The `:error` arm is driven by a genuinely request-reachable fault (a NUL byte reaching a `:string` column), not a mock. Mutation-proven twice. Reviewer changed nothing. |
+| `pds-w48-react-reference-error-collapse` | `…a-published-npm-component-renders-nothin-3` | #9601 | A published npm component rendered NOTHING on a 500 — 401/403/429/5xx collapsed into the same `null` as a genuine 404, and `notFound` defaults to null. The two derived-fetcher branches are repaired ASYMMETRICALLY because they fail differently; `err.code`, never `instanceof`. The design deviation is a MEASUREMENT, not a preference: under React 19 a consumer ErrorBoundary catches neither a throw in the render resumed after `use()` nor a rejected promise passed to it — both hang forever even with a boundary present, so "rethrow for the consumer's error.tsx" is not an option React offers. Reviewer mutation-proved both branches independently (8 and 6 reds). |
+| `pds-w48-cli-count-and-birth-receipts` | `…two-bp-receipts-assert-from-the-request--4-r` | #9602 | Two A3 sites. `bp migrate` counted `len(batch)` with the response discarded on 2xx; it now counts the server's `results` array, and an unreadable body is an ERROR, not a full count. `bp task create` read the birth lifecycle out of the REQUEST map the CLI itself had defaulted — tautological by construction, which is why no test could have caught it. **No glyph sweep**: a shipped behavioral registry already encodes this law, so the cheap fix was ENROLLMENT. Reviewer added the falsifier the registry structurally cannot carry (below). |
+| `pds-w48-deploy-banner-descends-from-health` | `…every-curl-installed-barkpark-prints-bar-5-r` | #9603 | Every curl-installed Barkpark printed "Barkpark is running!" after 30 FAILED probes, exit 0 — run-proven at the real 30 iterations, 61s, `go:embed`ed into `bp`. The banner now branches on the measurement and exits 1, with the refusal placed at the very END so the once-only admin token still prints. The probe port is re-read from the `.env` the service actually sources. First harness for `deploy.sh` in the repo. Reviewer defused a time bomb, wired the harness into CI, and made a non-numeric port refuse. |
+| `pds-w48-meter-rot-and-duplicate-rate-table` | `…the-one-price-ledger-with-a-fast-self-pr-6-r` | #9604 | **The inverted control D683 asked for.** A meter that is fast (0.065s), self-proving, non-vacuous and correct on every envelope it walked — and rotted anyway, printing 34 against a doc saying 24, because zero of 43 workflows call it. THE INSTRUMENT IS NOT THE MECHANISM; BEING RUN IS. Three fail-open paths closed in the EXIT CODE. The higher-blast-radius half: `tally_wf.py` dropped an unrated model's DOLLARS while counting its tokens, at rc=0 — 62.5% of true spend missing on a two-model transcript, and `/papers/epic-cycle-research-program-abcde` names that file as ITS cost axis. Reviewer closed the population assertion's own fail-open. |
+
+**THE WAVE UNDID ITS OWN WORK AT ONE SEAM, AND THAT IS THIS WAVE'S REAL LESSON.** The correction slice
+deliberately keeps HTTP 200 for a LOST write and moves the news into the body as
+`{ok:false, status:"error", recorded:false}`. The find-event proxy read only `res.ok`. So the repaired
+upstream said "I recorded nothing" and the repaired proxy **overwrote it with `recorded:true`** — the
+identical defect, one layer up, manufactured by two correct slices of the same wave landing together.
+Neither builder could have seen it; each verified their own hop. The proxy now reads the upstream's
+explicit `recorded:false`, deliberately asymmetric: an unreadable 2xx body stays `true`, because
+manufacturing a false out of OUR parse failure is the same fabrication reversed. **Generalises: when a
+wave moves a fact OFF the status line and INTO the body, every hop that reads the status line is now
+lying, and the hop and the endpoint are usually different slices.** Merge #9599 and #9600 together.
+
+**THE FLIP-RISK RE-DERIVATION, AND IT HELD.** Slice 1 was flagged HIGH-FLIP-RISK on foreign-price
+provenance. The reviewer re-derived it independently rather than re-reading the builder: anon GitHub
+logs probed live → HTTP 403; the run JSON → 200 carrying wall only;
+`git grep -nE 'nproc|loadavg|uptime|/usr/bin/time' origin/main -- .github` EMPTY; `ci.yml:141
+retention-days: 14` confirmed. The refusal stands on measurement. A genuinely independent SECOND
+reviewer is still warranted before merge.
+
+**THREE THINGS THE REVIEWER FOUND THAT THE GATES COULD NOT.** (1) The deploy harness's "permanent
+CONTROL" was a TIME BOMB: it read `origin/main:deploy.sh` and then applied three MANDATORY
+substitutions that the slice itself REMOVES, so the first time the fix reached main the harness would
+FATAL and red forever — a permanent red produced by the fix succeeding. Pinned to the revision that
+carries the defect. **A control has to name the artifact it is a control FOR, and that artifact does
+not move.** (2) The success-claim registry proves `written` VARIES with the response but
+**structurally cannot** pin the checkmark — both halves of its pair vary, so both still differ if the
+✓ prints unconditionally; forcing the short-write branch off left the whole registry green over
+`✓ post 1/2`. (3) `meter.py`'s new population assertion was keyed to an exact-argument match, so
+`verify tooling/scaffy-duels/` walked the same 34 envelopes and silently dropped the drift check —
+a CI job on the parent path would have carried the gate's name and none of its force.
+
+**THE LEDGER, AUDITED.** All seven built tasks: `in_progress`, evidence stamped as the work happened,
+the merge-gated criterion left OPEN for the lead, `wave_paper` and `parent_id` set. The deferred slice
+sits `open` at 0/9 with no claim, correctly. Honest misses are preserved, not papered over. Three
+builders could not file follow-ups because `/v1/data/mutate` was degraded mid-wave and said so on
+their now-lines rather than dropping the residual: two are now filed and published
+(`pds-w49-meter-ci-decision`, `pds-w49-meter-per-model-recompute`), one was RESOLVED by the reviewer
+(the deploy harness is now wired into CI), and one turned out to be a confirmed duplicate of the
+already-filed deferred slice — a draft was raised and WITHDRAWN rather than left to pollute the board.
+No task outside this wave was touched.
+
+**WHAT THE LEAD MUST KNOW BEFORE MERGING.** (1) **#9599 and #9600 are a pair** — merging the API half
+alone re-launders its own honest `ok:false`. (2) #9601 re-baselines a gzip budget 22.5 → 22.75 KB
+(+0.98%, inside the 2% bar); the builder stamped it an honest MISS, not a pass, and it is the lead's
+ruling — note the new cap leaves ~50 bytes of headroom, so the trap is one change away from recurring.
+(3) #9603 changes `deploy.sh`'s exit code, which is the point, but `bp setup`'s ssh caller was not read
+(out of scope). (4) #9602 changes `bp task create`'s visible receipt against any server that does not
+echo `results[].document`; guerrilla and prod do. (5) The merge-gated criterion on all seven rows is
+yours to close.
+
+**NEXT WAVE.** Merge round 1 (#9598–#9604) — the file sets are disjoint EXCEPT the #9599/#9600 pair,
+which must land together. Then dispatch `pds-w47-price-column-retake` (round 2) once #9598 is on main,
+since it uses `--measure` and hand-taking those two condemned figures is precisely the fraud this epic
+files. The strongest direction after that is the seam this wave discovered: sweep every hop that reads
+a status line for a fact the endpoint has since moved into the body.
+
+### Wave 47 2026-08-04 — REVIEWED AND PUSHED, grade A — 6 of 6 round-1 slices green, 6 PRs open, 2 round-≥2 slices deferred BY DESIGN (paper `pds-wave-47-2026-08-04`)
+
+**THE WAVE'S OWN HEADLINE.** The direction that opened this wave — an ANCHORED / DRIFTED / UNANCHORED
+currency axis over the open board — was REFUTED by its own survey and CUT at Decide (D677), and what
+replaced it is six slices that each take one Barkpark assertion that had stopped descending from a
+measurement and give it an ending. Three of them are the epic's own instruments turning the epic's
+law on themselves. **Every branch is pushed and every PR is open** — the failure mode six previous
+waves ended in did not recur here.
+
+**WHAT LANDED (6 PRs, all pushed, none merged — the lead merges).**
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `pds-w47-door-census-silences` | `…the-door-census-stops-being-silent-about-0-r` | #9524 | Two silences closed in one commit with the blocking rider. The price ledger gains its orphan direction, keyed on `class != THROUGH` (not `computed == yes`, which leaves the cross-ledger contradiction silent); RETIRED- is refused on both sides and the `CPU=` glob is ANCHORED, because main's floating glob printed a retire costume as a live price. The COUNTS block went from accounting for 4 rows of 20 to the full eleven-band partition, summed and ASSERTED. `--selftest` 24 → 33 arms; the census's own price re-taken in the same PR against an untouched-main export metered in the same window (+95%, measured, not the briefed ~+44%). Reviewer fixed: the rider was unformatted and would have red the format gate. |
+| `pds-w47-d448-drift-refuses` | `…the-receipt-census-stops-printing-five-f-1-r` | #9525 | Five of eight population literals had read DRIFT on every run for four waves under a banner declaring the block `advisory — printed, never enforced`. Both endings taken per row: `@rederived` holds the eight quantities re-taken BY RUN with lens, engine, command and tree beside them (`@recorded` kept VERBATIM, so the edit is an ADD and not a three-site lift), and `D448-DRIFT-REFUSES` exits 1 on any mismatch with the re-derivation command inside the FAIL sentence. The write/read/unrouted trio is a DIFFERENT LENS and the depth sweep proves it. Charter amended in the same PR at PDS-D448b. Reviewer fixed: the block printed the column word `recorded` while comparing against `@rederived`, so one word named two constants in one output. |
+| `pds-w47-citation-resolver-repair` | `…the-citation-resolver-learns-the-heading-2` | #9526 | The epic's own citation resolver had stopped descending from what it measured, twice. Its header ruled that the charter defines essentially no D as a heading — false today for D643–D673 — and it printed six FALSE unresolved citations over the real corpus, all six defined as headings. And `sort -u` made it blind to duplicates by construction, so a citation resolved against whichever of two findings the sort kept. Union lens (unresolved 6 → 0, defined 652 → 676) plus a strict-grammar uniqueness leg with a TWO-SIDED baseline pinned by NUMBER, never by line. Reviewer changed nothing. |
+| `pds-w47-ledger-denominator-and-blind-spots` | `…the-board-census-fixes-its-denominator-a-3-r` | #9527 | The open-PDS denominator had five circulating answers. Settled by one field, `lifecycle_status == "open"`, case-exact, DERIVED every run and printed with its lens, its instant and its re-derivation command — no literal threshold anywhere, because the board moves while the wave reading it files rows. Beside it a blind-spot block that NAMES rather than counts: rows outside any root-anchored closure, and a second `perspective=drafts` read split into never-published vs PHANTOM edit shadows. The drafts lens has an honest UNREAD state instead of a fabricated zero. Reviewer fixed: the block said `open` where the arm keeps every non-terminal row, which would have reported a `considering` row as one the denominator missed. |
+| `pds-w47-n1-adjudication` | `…the-seventeen-one-criterion-from-done-ro-4` | #9528 | The throughput half of the wish, sized honestly. All seventeen N−1 rows adjudicated; two closed on evidence in hand, five bought BY RUN (never by re-reading a builder's transcript), ten left open and named with what each still owes, four re-scoped as misfiled. Nothing closed — the seal is the lead's. The PR-resolution recipe is committed: `content.github.issue` is the mirrored ISSUE, so the charter's task-to-PR tables are the only working resolver. Reviewer changed nothing. |
+| `pds-w47-interaction-receipt-pin` | `…the-interaction-receipt-is-pinned-where--5-r` | #9529 | The repaired four-way receipt was pinned only at the module seam: zero tests anywhere asserted `recorded`, no test posted to the media endpoint at all, and the 422/500 arms had never executed on any host. Twelve HTTP cases on both twins, the happy path backed by `Repo.get` on the returned id. Its evidence is the contrast: a callee-confined revert fabricates an event id for a lost write while the gated receipt census still prints `CENSUS OK`. Reviewer fixed a HIGH-FLIP-RISK citation — see below. |
+
+**THE FLIP-RISK RE-DERIVATION, AND IT MOVED.** Slice 6 was flagged HIGH-FLIP-RISK on reachability at
+Decide. The reviewer re-walked the enclosing `scope` blocks independently rather than re-reading the
+builder's reasoning, and the citation was wrong even though the conclusion was right: the moduledoc
+named `router.ex:2190` and `:2416` while describing the pipelines `[:api, :api_grant_read]` and `:api`.
+Those two lines are the workspace-scoped mirror on `pipe_through(:scoped_api)`, whose full paths carry
+both slugs and which nothing in the file dispatches to. The routes under test are `:1655` and `:2111`.
+**The lesson generalises: a reachability claim must cite the route the request resolves to, and a
+duplicated controller action across a flat route and a scoped mirror is exactly where that goes wrong
+silently.** A genuinely independent second reviewer is still warranted on this slice before merge, and
+on `pds-w47-measure-and-host-axis` (provenance) when it is dispatched.
+
+**THE LEDGER, AUDITED.** All six built tasks: `in_progress`, evidence stamped as the work happened,
+the merge-gated criterion left OPEN for the lead, `wave_paper` and `parent_id` set. The two deferred
+slices sit `open` at 0/N with no claim, correctly. One honest MISS is preserved rather than papered
+over (`pds-w47-ledger-denominator-and-blind-spots` criterion 0, whose live triple no longer exists).
+`pds-w33-bl-catchall-success-clauses` was NOT falsely stamped: three `--miss` notes and a
+`disposition_reason` recommending close-as-superseded, which is the right ending for a row with no PR
+of its own. One omission was found and fixed by the reviewer: `pds-w46-price-ledger-orphan-direction`
+sat at 2/4 while slice 1 built exactly its remaining two criteria — both are now stamped from the
+reviewer's own re-run, with UNMERGED stated in the evidence and the row left open for the lead.
+
+**WHAT THE LEAD MUST KNOW BEFORE MERGING.** (1) Seven N−1 rows were stamped by passing the CLI's
+`--merge-gated` override as a worker, not as the lead. Nothing was closed and every override is
+recorded verbatim, but if you disagree with a re-derivation, re-open the criterion rather than trust
+the flip. (2) #9525 touches this charter at ~:9894, far from PR #9509's append-only tail; the wave-47
+citation resolver was run against #9509's head charter and greens, and the `PDS-D448b` bullet mints no
+duplicate under the titled grammar. (3) The merge-gated criterion on all six rows is criterion 8 or 10
+and is yours to close.
+
+**THE SHARPEST RESIDUAL, AND IT IS THE WISH'S OWN SENTENCE.** Merging #9525 gives the receipt census a
+fourth gated arm, and the door census's price row for it still reads `the THREE GATED ARMS SUMMED` —
+a price that stops descending from its instrument the moment the other PR lands, silently, at rc=0.
+It is filed (`task-869b52af6f4e4153`) rather than smuggled into either PR, because re-pricing it needs
+a metered run on a quiet host and the two PRs are separately gated. That is the honest ending here;
+it is also proof the epic still generates this defect faster than any single wave pays it.
+
+**NEXT WAVE.** Merge round 1 (#9524–#9529) in any order — the file sets are disjoint. Then dispatch
+`pds-w47-measure-and-host-axis` (round 2) once #9524 is on main, since it edits the same file and the
+same rider; then `pds-w47-price-column-retake` (round 3) once round 2 is on main, because it uses
+`--measure` and hand-taking those two condemned figures is precisely the fraud this epic files.
+
 ### Wave 46 2026-08-04 — REVIEWED AND PUSHED, grade A — 3 of 3 round-1 slices green, 3 PRs open, 3 round-≥2 slices deferred BY DESIGN (paper `pds-wave-46-2026-08-03`)
 
 **WHAT LANDED (3 PRs, all pushed, none merged — the lead merges).**
@@ -4500,6 +4635,16 @@ reviewer on the final state, plus a FOUR-WAY TRIAL MERGE onto `origin/main` fcd3
 clean, compiled (`go test -c -o /dev/null ./internal/cli/` exit 0, `go build ./...` exit 0) and
 passed the full `internal/cli` suite together (`ok 28.250s`). Census invariants unmoved on the merge
 result: `TOTAL=50 NON_LITERAL=2 KEYS=52 OPAQUE_CALLERS=0 KINDS=13`.
+
+> **NAMING NOTE, ADDED BY WAVE 48 AND NORMATIVE FOR EVERY `OPAQUE_CALLERS` MENTION ABOVE `:10439`.**
+> The census key was RENAMED `OPAQUE_CALLERS` → `OPAQUE_ACTION_CALLERS`. Eight charter lines mention the
+> old token (on `origin/main` 2026-08-05: `:4563 :4591 :4630 :4757 :9178 :10118 :10131 :10439`); only the
+> last marks itself as pre-rename. **All seven earlier mentions are PRE-RENAME HISTORY** — they record what
+> the instrument printed at the time, and a grep for `OPAQUE_CALLERS` against today's code will find
+> nothing. This one note annotates all seven; it does not rewrite the historical records, because the
+> charter is memory and a record edited to match today stops being a record. This discharges the substance
+> of `pds-bl-charter-says-opaque-callers`; whether that row closes on a note rather than seven inline
+> edits is the lead's call, and the wave does not close it itself.
 
 | slice | final branch | PR | what it actually does |
 |---|---|---|---|
@@ -9892,6 +10037,29 @@ finds the epic's own instrument inside it.
   under-reports 100 % while exiting clean. `ugrep` is not installed on this host at all, so the
   digest's "4 instead of 98" could not be reproduced; the disease is the same and the instance is
   stronger. **Every census this epic ships must state the engine it was measured with.**
+- **PDS-D448b — FIVE OF D448'S EIGHT LITERALS ARE AMENDED, RE-DERIVED BY RUN, AND THE CENSUS NOW
+  REFUSES THE NEXT DRIFT** (wave 47, `pds-w47-d448-drift-refuses`, executing PDS-D678). D448's figures
+  above are KEPT as the wave-33 record and are not repealed; what follows is the same eight quantities
+  re-taken today, and it is the baseline `scripts/pds-elixir-receipt-census.exs` now enforces
+  (`@rederived`, arm `D448-DRIFT-REFUSES`, exit 1 on any mismatch — it printed `advisory — printed,
+  never enforced` for four waves while five rows read DRIFT on every run).
+  **COMMAND** — `elixir scripts/pds-elixir-receipt-census.exs`, run from the repo root, rc=0,
+  `CENSUS OK`, at tree `49345a98c`, 2026-08-04.
+  **LENS** (PDS-D448a — quote the lens with the number or the number lies): build-free AST
+  (`Code.string_to_quoted`), substring counting via `:binary.matches/2` and NO regex engine, route
+  depth `@max_depth` = 6, `transaction` NOT a write verb (PDS wave 34), corpus `api/lib/**/*.ex` = 804
+  files. **ENGINE**: Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
+  (printed live by the run, never transcribed).
+  **THE AMENDED FIGURES**: textual **103 → 104**, phantom **8 → 9** (same lens, the tree moved; the
+  pair still partitions — `LENS-LOSES-NOTHING` proves 104 == ast 95 + phantom 9), write-routed
+  **64 → 54**, read-routed **17 → 14**, unrouted **10 → 23**. **The write/read/unrouted trio is NOT
+  tree drift — it is a DIFFERENT LENS**, and the census measures it: the depth sweep prints 54/14/23 at
+  depth 6 and IDENTICALLY at 7, 8, 9, 10, 12 (the route relation's closure), while 64/17/10 appears at
+  no depth in that table. D448's `64 write / 17 read / 10 unrouted` is what a deeper (or hand-followed)
+  route sees; both are honest and neither may be quoted without its lens. **UNCHANGED, AND NOT TO BE
+  WIDENED**: ast-literal **95**, consumer **4**, emitted **91** read `==` in the same run and are
+  carried across untouched — the census derives the 5-re-derived / 3-inherited split at runtime and
+  prints it, so widening one to match the other shrinks a printed number instead of hiding in prose.
 - **PDS-D449 — THE GO APPARATUS PORTS IN FOUR ARMS AND BREAKS IN THE FIFTH, AND THE BREAK IS
   ARCHITECTURAL, NOT SYNTACTIC.** Answered by PORTING AND RUNNING, as the wish demanded, not by
   reasoning. Arms A1–A4 port: `Code.string_to_quoted` is build-free, needs no mix project and dodges
@@ -13696,3 +13864,1208 @@ axis (1, 4, 5), is built at `opus@medium`. That is a recorded constraint, not a 
 are routine.
 
 CHARTER PR: docs-only, `Task: task-2ac1f95237c4a8e5`.
+
+## WAVE 47 — A COUNT THAT OMITS ITS OWN BAD NEWS (decided 2026-08-04, paper `pds-wave-47-2026-08-04`)
+
+Ground for every line below: a clean `git archive origin/main` export at **49345a98c**, never the primary
+checkout (which is 421 commits behind and does not contain `scripts/pds-door-census.sh` at all). The local
+charter copy was 11,931 lines against origin's 13,698 and contained **zero** lines origin does not — a stale
+rotation slot, not unmerged work.
+
+**WAVE 46 SHIPPED FOUR PRs, NOT TWO.** #9466 (charter, 358254654), #9476 (frozen blob, 430480ce0), #9475
+(census integrity, caf5a6128) and #9477 (receipt census price, 49345a98c) are all merged and all ancestors
+of main. The strategic direction read the tree ten minutes before #9477 landed and reported 2 of 6. Slices
+4/5/6 — `pds-w45-price-provenance`, `pds-w44-hetzner-offline-door`,
+`pds-w45-bl-ledger-census-lazy-urllib` — still never ran.
+
+### PDS-D677 — THE CURRENCY AXIS IS CUT. A PATH-ANCHOR ORACLE SCORES PRECISION ZERO ON THIS BOARD, AND THE AXIS ALREADY EXISTS AT A STRICTLY BETTER KEY.
+
+The wave was framed on "an open row is a claim about the code": triage all open PDS rows into ANCHORED /
+DRIFTED / UNANCHORED. Two independent measurements killed it, and the sharpest attack recorded against the
+direction was the one that landed.
+
+**DRIFTED IS ZERO.** A hand-scored random sample of 25 open rows against origin/main: ANCHORED 20, DRIFTED
+**0**, UNANCHORED 5. Every one of the 17 unresolved tokens was an EXTRACTOR ARTIFACT — 7 in-document
+abbreviations (`census.exs:568` for a file that exists in full elsewhere in the same row), 4 external
+filesystem paths (`~/.config/hcloud/cli.toml`), 2 prospective files the row proposes to create, 1 ambiguous
+basename (`mutations.ex:713` is past EOF in `tasks/` and valid in `content/`), 1 relative path, 1 glob
+fragment, 1 prose hypothetical. A naive extractor would have printed **15 false DRIFTED and 0 true**.
+Independently, a full 380-row scan: naive 120 DRIFTED, 42 after three purely mechanical rules that never
+consult the tree, 11 after an artifact filter, and **0** on hand-reading all 11. Two further artifact classes
+neither pass predicted: RUNTIME-GENERATED (`api/lib/barkpark/filler/fixture_live.ex` is WRITTEN by
+`write_corpus!/3`) and NEGATIVE-ASSERTION (`pds-bl-live-runners-duplicated` says *there is no*
+`scripts/pds-live-lib.sh` — the file's absence CONFIRMS the row, so the oracle inverts its truth).
+
+**THERE IS NO AGE GRADIENT, AND THE SIGN IS INVERTED.** Drift share by band: w<=33 10.5%, w34-40 35.3%,
+w41-46 13.2%, unnumbered 6.9%. The PEAK is the middle band and the OLDEST band is the CLEANEST. "Stratify
+toward old rows to find the head" has no basis.
+
+**A CONTENT-AWARE PASS DOES NOT RESCUE IT — IT MANUFACTURES DRIFT IN THE OTHER DIRECTION.** 20 rows citing a
+specific `file:line`, each read off origin/main: 15 still carry the claimed construct. Of the 5 mismatches,
+FOUR are pure LINE DRIFT where the row is still live (`writer.ex:1063`, `stage.ex:113`, and — perfectly —
+the row about stale citations carrying a stale citation, `charter.md:5515` for a string now at `:7765`).
+Exactly ONE is true content drift. A line-content oracle prints 25% DRIFTED at 20% precision.
+
+**AND BOTH ORACLES ARE STRUCTURALLY BLIND TO THE CASE THAT SET THE WAVE.**
+`pds-w33-bl-catchall-success-clauses` IS repaired on main — and scores ANCHORED under both oracles, because
+its cited line `github_webhook_controller.ex:87` still reads verbatim: that line is the row's
+DECLARED-HONEST CONTROL, not its defect. The one true positive the direction cited was found by a human
+reading semantics, and no lens proposed here could ever have found it.
+
+**THE DECISIVE FINDING: THE AXIS IS ALREADY SHIPPED, BETTER.** `scripts/pds-elixir-receipt-census.exs` keys
+91 judged rows on `{path, mfa, head_hash, expr_fp}`, runs build-free, and its own committed measurement says
+`{path, mfa}` = 75 distinct, `+expr_fp` = 91, and **`expr_fp` IS THE LOAD-BEARING FIELD**. A path/line key is
+a strict SUBSET of `{path, mfa}` — it collapses 91 rows to 75, losing 18% of the discrimination before
+resolving a single token. `UNJUDGED` already reds on key drift and `ROSTER-VERDICT-FRESH` already prints its
+own blind shape. A rival is a dedup defect against a gated instrument.
+
+**RULING.** The three-verdict grammar was right and the oracle was wrong. The axis is CUT — not re-scoped,
+not deferred. Any future revival must (a) build on the receipt census's key, not a path, and (b) publish a
+hand-scored precision figure BEFORE it ships, the way this wave did.
+
+### PDS-D678 — THE WAVE'S FUEL IS THE ADVISORY BLOCK THAT ALREADY MEASURES THE EPIC'S OWN LITERALS AS FALSE, EVERY RUN, SINCE WAVE 33.
+
+Run by Decide at 49345a98c, rc=0, `CENSUS OK`:
+
+| row | recorded | derived | |
+|---|---|---|---|
+| textual | 103 | 104 | DRIFT |
+| ast-literal | 95 | 95 | == |
+| phantom | 8 | 9 | DRIFT |
+| consumer | 4 | 4 | == |
+| emitted | 91 | 91 | == |
+| write-routed | 64 | 54 | DRIFT |
+| read-routed | 17 | 14 | DRIFT |
+| unrouted | 10 | 23 | DRIFT |
+
+**Five of eight PDS-D448 population literals no longer descend from the tree**, including a **130% error on
+`unrouted`** — the number the epic's routing argument rests on. `scripts/pds-elixir-receipt-census.exs:120`
+says it out loud: *"Recorded by PDS-D448 (wave 33 survey). Printed as DRIFT lines, never enforced"*. A gate
+lies when its green costs nothing to produce; an instrument that measures its own charter as false and
+cannot red is the same lie with better manners. Two legal endings, one per row: RE-DERIVE-AND-AMEND, or
+REFUSE. The three `==` rows are not to be disturbed — a block widened until everything matches is the fourth
+law again.
+
+### PDS-D679 — THE EPIC'S OWN CITATION RESOLVER REDS FALSELY SIX TIMES TODAY AND IS BLIND TO DUPLICATES BY CONSTRUCTION.
+
+`scripts/pds-record-parity.sh` AXIS A is the near-exact prior art for citation resolution, and it is wrong in
+two independent ways. Run by Decide over the real merged-commit corpus (216 distinct cited D-numbers):
+`unresolved: 6` — **D644 D649 D656 D661 D666 D667**. All six ARE defined, as `### PDS-D### —` HEADINGS
+(D656 at `:12813`, D667 at `:13409`). Its header RULES that "the charter defines essentially no D as a
+heading"; that was true and is now false for **24** numbers, D643-D673. An instrument this epic built to
+catch phantom citations currently MANUFACTURES them. It is advisory (zero hits for `pds-record-parity` under
+`.github/`), which is why the false red survived and the dishonesty is permanent.
+
+And `:334` ends `| sort -u > "$defs"`. **A number defined twice reads as resolved.** `PDS-D664` names two
+unrelated findings — `:2654` "A REPAIRED PREDICATE CARRIES ITS OLD DEFECT FOR EXACTLY ONE LINE" and
+`:13311` "THE CLASS PREDICATE DOES NOT EXIST AND WILL NOT BE INVENTED THIS WAVE" — and the arm resolves a
+citation of D664 to the bold-lead form, which is the finding the citing task does NOT mean. **The gate
+certifies resolution against the wrong law.** That is this wave's own sentence, inside the epic.
+
+### PDS-D680 — EIGHTEEN D-NUMBERS NAME TWO FINDINGS EACH, THE MECHANISM IS AN UNOWNED POINTER, AND IT RECURS EVERY WAVE INCLUDING THIS ONE.
+
+> **AMENDED BY WAVE 48 (PDS-D689).** This decision's own prose said "19 genuine collisions, 17 numbers" —
+> two different figures for one quantity, and neither derivable from the 21 it quotes. `21 − 1` (D559, a
+> false positive) `− 2` (D145/D146, benign) `= 18`, which is exactly what the instrument shipped in this
+> same wave already says in two places: `scripts/pds-record-parity.sh:251 DUP_BASELINE_GENUINE` lists 18
+> numbers, and the arbiter task's criterion 3 reads "The existing 18 baselined pairs are NOT renumbered".
+> Re-measured on `origin/main` 2026-08-05 by the strict titled grammar: **20 duplicated, 18 genuine + 2
+> benign, byte-exact against the baseline, zero unexpected, zero stale.** The heading and the sentence below
+> are corrected to 18. A count in charter prose that does not match the instrument shipped alongside it is
+> the exact defect this epic exists to kill, and it was sitting inside the decision that named the problem.
+
+`grep -oE 'PDS-D[0-9]{3} —' | sort | uniq -c | awk '$1>1'` returns **21**. Hand-classified: **D559 is a FALSE
+positive** (`:11859` is an inline parenthetical INSIDE another decision's body); **D145/D146 are BENIGN
+restatements** (D146's two headings are byte-identical). So **18 genuine collisions** — 18 numbers where one
+token names two unrelated findings. A naive uniqueness grep — which is exactly what
+`pds-bl-charter-d399-duplicate-identifier` proposes — ships with a known false red on day one.
+
+**THE MECHANISM IS SYSTEMATIC.** Every genuine pair is one occurrence in a REVIEW-phase block and one in the
+NEXT wave's DECIDE block. D664 `:2654` under `### Wave 45 … REVIEWED`, `:13311` under `## WAVE 46 … DECIDED`;
+same shape for D553-D556, D570-D573, D492-D495. **Reviewer and decider allocate from one next-number pointer
+and neither owns it.** LAW FROM HERE: the REVIEW phase and the next wave's DECIDE phase may not allocate from
+the same pointer. This wave allocated D677+ after re-deriving the maximum in use (D676) rather than
+inheriting a count.
+
+**"CITE BY LINE FOREVER" IS REFUTED ON THE EPIC'S OWN RECORD.**
+`tooling/grip/ledger/pds-w30-charter-coverage-rederivation.md:14` pins the D399 pair at `6503`/`6586`; today
+they are `8625`/`8708`, and the charter went 6,888 → 13,698 lines. The charter's own D571 cites
+"D554 (`:10547`)" — also stale. Duplicated numbers are cited BARE in shipped Go too: D400 nine times
+(including `internal/cli/hetzner_respost.go:32`, which transcribes a heading verbatim), D399 six.
+
+### PDS-D681 — THE DOOR CENSUS'S COUNTS BLOCK ACCOUNTS FOR 4 OF 20 ROWS, AND A CLASS CHANGE IS INVISIBLE.
+
+The five printed labels are the four COMPUTED classes plus ERRORS. **ZERO of the six LEDGER classes
+(`PDS_DOOR_CLASSES`, `:170-175`) is ever counted.** Today that is 4 + 0 + 0 + 0 = 4 of 20; **16 rows are
+invisible above the fold**, including the one CONTENT-RED and the one NOT-YET-BUILT.
+
+The consequence is sharper than a missing line. Flipping `pds-window-sentinel.sh` from NOT-YET-BUILT to
+CONTENT-RED changes **exactly one line of the entire 60-line output** — the table row — with the COUNTS block
+**byte-identical** and rc=0 both ways. The flagship instrument cannot tell *"one instrument is RED right
+now"* from *"one instrument was never built"* anywhere a reader looks, inside a block whose own header reads
+**"COUNTS — derived from the rows above, never transcribed."** The derivation is honest; the COVERAGE is 20%.
+
+**THE rc=0 OVER A CONTENT-RED ROW IS NOT THE DEFECT AND MUST NOT BE "FIXED".** It is a declared ruling in
+three places: the header at `:54-57` scopes the exit contract to DISPOSABILITY; PDS-D637 invented CONTENT-RED
+as a REASON A DOOR IS NOT THROUGH, a peer of ENVIRONMENT and PRICE; and
+`api/test/barkpark/pds_door_census_test.exs:16-24` + `:149-172` PIN the exit code as a DESCENT from the
+printed counts and explicitly refuse both fixed polarities — *"Pinning rc == 0 would be a standing invitation
+to soften the census into greenness; pinning rc != 0 would be a permanent red."* **`disposed != healthy`.**
+Reddening on it breaks a required gate and violates the epic's own descent law.
+
+The remedy is PORTING, not designing: `scripts/pds-elixir-receipt-census.exs:4297-4320` already ships
+`report_derivation_partition/2` — "THE PARTITION, PRINTED IN FULL" — with an explicit `@derivation_residual`
+band. Same epic, one file over. Print the FULL six-class vocabulary INCLUDING ZEROS (`uniq -c` omits
+HUMAN-GATE, and `:13655` records HUMAN-GATE-at-zero as a live finding), and ASSERT the `ACCOUNTED FOR` line
+rather than printing it.
+
+### PDS-D682 — THE PRICE LEDGER'S ORPHAN DIRECTION IS KEYED ON THE CLASS, NOT ON PROVENANCE, AND `RETIRED-` IS A WORKING SHAPE BYPASS TODAY.
+
+**THE PREDICATE IS `class != THROUGH`, NOT `computed == yes`.** `orphan_error()` (`:662-675`) keys on
+`computed==yes` because a *disposition* is only unread once the tree has decided. A *price* is unread whenever
+the class is not THROUGH — including the LEDGER-decided classes, where `computed=no`. That is exactly where
+the CROSS-LEDGER CONTRADICTION lives: an instrument disposed `PRICE` carries its price in the DISPOSITION
+evidence with `computed=no`, so a second, different figure in `PDS_DOOR_PRICES` is two ledgers naming one
+price, and `ledger_keys` refuses a cross-ledger union by deliberate design (`:702-712` — a union
+double-reports). Proven by run: planting 19.98 s against `pds-scratch-target_test.sh`'s own 8.91 s gives rc=0
+at HEAD and rc=1 under the class-keyed predicate. **A `computed`-keyed predicate ships a half-fix that leaves
+precisely that case silent.**
+
+**THE `RETIRED-` RULING IS TWO-SIDED AND THE SECOND SIDE IS AN UNFILED DEFECT.** The disposition ledger has a
+class column, so `RETIRED-<class>` is a legal value there. **THE PRICE LEDGER HAS NO CLASS COLUMN** — field 2
+IS the price. So `price_shape_error`'s globs being UNANCHORED (`*'CPU='*'LOCAL'*'meter='*`) means
+`RETIRED-CPU=0.01+0.01=0.02s LOCAL meter=… load1=1.00` passes EVERY shape arm on main **today**, while
+`ledger_field` at `:824` hands that same text to the THROUGH branch as a LIVE price. A working price wearing
+a costume, silent right now. **RULING: a price has exactly ONE legal ending — DELETE THE ROW.** A price is
+not a refusal needing superseding evidence; its supersession IS a new measurement, which replaces field 2 in
+place. There was no prior charter ruling on retiring a price row; this is new law, mutation-proven in both
+directions before it was written.
+
+### PDS-D683 — A LOAD CEILING IS REFUTED AS A PRICE DISCRIMINATOR. THE ONE THAT DESCENDS IS STRUCTURAL AND 6/6: A PRICE DESCENDS ONLY IF SOMETHING RE-TAKES IT.
+
+A `load1 <= N` refusal is buildable and mutation-provable (rc=1, ERRORS 4, THROUGH unmoved). **It does not
+sort honest from dishonest at any N.** All six committed prices were re-taken at THEIR OWN LOAD STAMPS:
+
+| row | stamp | load-matched re-take | verdict |
+|---|---|---|---|
+| `pds-status-only-residue.exs` | 0.82 s @ 26.44 | 0.62+0.15 / 0.61+0.14 @ 26.5-27.0 | HONEST to 0.01 s |
+| `pds-record-parity.test.sh` | user 1.45 @ 26.44 | user 1.41 / 1.40 @ 27.7-28.5 | HONEST to 3% |
+| `pds-door-census.sh` | 1.07 s @ 3.26 | measured HIGHER at higher load | load-consistent |
+| `pds-elixir-receipt-census.exs` | 12.75 s @ 2.93 | measured HIGHER at higher load | conservative |
+| `pds-ledger-census_test.sh` | 40.33 s @ 24.26 | 18.7-24.5 s @ 28.2-29.9 (HIGHER load) | **1.8× OVERSTATED** |
+| `pds-scratch-target_test.sh` | 8.91 s @ 79.23 | 0.52-1.04 s @ 32.8-70.0 | **8.6-17× OVERSTATED** |
+
+**The killer: the one genuinely-broken low-stamp row is stamped 24.26 — BELOW both proven-honest rows at
+26.44.** A ceiling at 10 printed FOUR refusals of which TWO are false positives. Also refuted:
+`pds-w46-load-stamp-provenance-doubt`'s comma-locale hypothesis — two independent instruments reproduce their
+user CPU to within 0.04 s AT load1 26.44, so the stamps are real; all four entered in one commit,
+`ab8c86b05` (#9380). And scratch-target's gap is not load at all: its **user** CPU is 4.83 stamped against
+0.35-0.40 measured, and user CPU is *work* — contention cannot produce 13×. Its run is not degenerate
+(full arm set, `0 failure(s)`, rc=0, zero skips).
+
+**THE DISCRIMINATOR THAT DOES DESCEND.** Sort the six by WHICH LEDGER HOLDS THEM and the separation is
+perfect, 6/6, with a causal mechanism: all four `PDS_DOOR_PRICES` rows are THROUGH a required gate and **all
+four reproduce**; the two `PRICE`-classed dispositions are through NO door and **both are wrong**. A THROUGH
+price is contradicted by reality on every merge. A `PRICE`-classed disposition is a price for an instrument
+nothing ever runs — no gate can disagree with it, so it rots undisturbed. **A PRICE DESCENDS FROM A
+MEASUREMENT ONLY IF SOMETHING RE-TAKES IT.** n=6 with a mechanism is suggestive, not proven; it is falsifiable
+cheaply (price a seventh instrument through a door and check whether it rots), and it is shipped as a refusal
+whose failure mode is a re-measurement. Two build traps recorded: row `:223` carries TWO `load1=` tokens (its
+own 3.26 and a disclaimed historical 41.63, so a last-token parse refuses the census's own honest price), and
+this host prints load averages with COMMA decimals.
+
+### PDS-D684 — `--measure` WAS NEVER DEFERRABLE BY THIS CHARTER, AND THE FOREIGN PRICE COSTS A GRAMMAR CHANGE, NOT NOTHING.
+
+The direction proposed deferring `--measure` and citing D668/D669. **Both citations were smoke-checked and
+D669 says the opposite.** Its heading is "`--measure --all` IS FIRST-CLASS AND IS NEVER GATED", its body says
+the missing criterion **"It is added"**, and its ONLY prohibition is on GATING. PDS-D663 makes it law:
+*"D648's directive that 'the door's own first CI run overwrite' the local figure remains law, and
+`--measure` is its instrument."* The census's own header at `:65-67` rules the same thing — the LOCAL label
+exists *"so the door's own first CI run can OVERWRITE it"*, not so a figure can be pasted over it. A wave that
+defers the instrument while promising a FOREIGN price ships a price descending from no meter the instrument
+drove — **the fifth law violated by the wave citing it.** The meter is built first.
+
+**"THE PROOF COSTS NOTHING" IS FALSE.** Relabelling one price LOCAL → FOREIGN takes `--check` from
+rc=0/ERRORS 0 to **rc=1 / ERRORS 1** at `price_shape_error` (`:682-689`), whose glob hard-requires the literal
+LOCAL for EVERY price. (Good news inside the mutation: `THROUGH … : 4 of 20` did NOT move — D667's axis
+separation held.) The leg needs the grammar widened to `(LOCAL|FOREIGN)` **plus a required host axis**, a NEW
+selftest arm that reds when a price carries NEITHER (widening without it converts a pin into a hole — the
+very mutation that proves the pin would then pass), the rider regex at `:329` and the test NAME at `:316`
+widened in the SAME commit, and the header sentence rewritten. Also: a rider edit dispatches `compile=true`,
+so the PR pays prod-compile and perf as well as the full suite.
+
+**NO `.github/**` EDIT IS NEEDED — RE-DERIVED BY RUN, NOT BY READING.**
+`echo scripts/pds-door-census.sh | bash scripts/elixir-path-escape-check.sh --match test` → `true`;
+`scripts/pds-ledger-census.sh` → `false` (the non-vacuous control). The four THROUGH doors are declared at
+`:99-102` and `.github/workflows/elixir.yml:196-197` shells out. The Test job is `ubuntu-latest` on a
+single-leg matrix, so a FOREIGN row is unambiguous about its runner — but the row must NAME it.
+
+**TWO METER FACTS THE BUILDER INHERITS.** Meter with the `times` BUILTIN as the final command of the metering
+shell: D669's exec-discard trap is STRUCTURALLY unreachable for a builtin (never `exec`'d, so no accumulated
+`RUSAGE_CHILDREN` can be discarded) and it needs no `time(1)` on the runner. Recorded honestly: D669's trap
+did NOT reproduce on this host's bash 3.2.57 — that does not refute D669 on a different libc, but it is
+another argument for immunity that is structural rather than empirical. And **`LC_ALL=C` IS MANDATORY**:
+without it, awk's locale parse of `times` output under a comma-decimal locale silently truncated to integers
+and emitted `CPU=0+1=1,00s` — **a fabricated price, 2.5× low, from a real measurement** — which `:685`'s
+substring globs would have ACCEPTED. `nproc` and `/proc/loadavg` do not exist on darwin.
+
+**STILL DEFERRED, AND THE REASON IS MEASURED, NOT INHERITED**: `--measure --all`, the content key, PRICE-STALE
+(`pds-bl-w47-measure-all-content-key-price-stale`). D664 §4 is decisive — `pds-scratch-target_test.sh` last
+changed at `6f4ca7904`, a WEEK BEFORE its 8.91 s stamp, so **a content key would have certified the worst
+price in the ledger FRESH IN PERPETUITY.** And D683 changes what expiry should key on: a content hash grades
+all six the same; "does anything re-take this row" separates them 6/6.
+
+### PDS-D685 — THE OPEN-ROW DENOMINATOR IS 374 ON THE PUBLISHED LENS, `parent_id` IS NOT MIXED-KEYED, AND THREE ROWS MUST PRINT BY NAME.
+
+Five answers were circulating (344 / 354 / 374 / 379 / 405). **The "mixed-keyed `parent_id`" premise is
+FALSE**: across the whole 5,075-doc corpus, **0 of 4,592** non-null values resolve as a UUID `id` and **4,537
+resolve as `doc_id`**. The "344 UUID closure" is a **DEPTH-1 TRUNCATION**, not a lens — pushing `c['id']`
+onto the frontier matches no `parent_id`, so the walk halts after level 1. The correct slug-keyed walk finds
+659 with depth histogram `{1: 549, 2: 110}`; 35 open grandchildren are invisible to the broken walk.
+
+**THE CENSUS INHERITS NO HOLE.** `build_closure` (`:677-720`) already keys on the slug, walks transitively and
+asserts a fixpoint that dies EXIT_FAIL_CLOSED; its printed 653 / 405 / 374 reconcile exactly with an
+independent walk. **THE RULING: one field, `lifecycle_status == "open"`, case-exact** — not `disposition`
+(216 live rows carry none, so a disposition-keyed denominator silently drops 216), not "live/non-terminal"
+(405 folds in 30 `considering` + 1 `blocked`, and by the task-funnel doctrine `considering` PRECEDES open).
+**374** through the published lens; **376** is the honest total of open rows that exist; **379 is wrong** — it
+double-counts three PHANTOMS, unpublished edit shadows whose published twin is `done`. **354 reproduces under
+no rule at all.**
+
+**AND THE REFUSAL IS THREE NAMED ROWS.** `pds-bl-merge-gated-criteria-carry-the-flag` is OPEN, PDS-slugged,
+and parented to `task-lifecycle-visibility-epic` — no closure anchored at `task-2ac1f95237c4a8e5` can ever see
+it, at any depth, under any key. Note its subject: it is literally about the MERGE-GATED criteria class this
+wave adjudicates. Plus `drafts.task-85d64913a19c0d70` and `drafts.pds-bl-wrongpath-arm-blind-to-wrong-id`,
+never published. A census printing 374 without naming what it cannot see is a count that does not descend
+from the population it claims.
+
+**PAID FOR FREE, AND IT POINTS THE OTHER WAY.** `pds-w43-bl-lapse-lens-drafts-undercount-unmeasured` asks for
+clause 7's three shape keys over a drafts-inclusive read. Measured, with the reimplementation validated by
+reproducing the census's published shape-A count of 24 exactly: **A 24 → 27 (+3), B 0 → 0, C 0 → 0**, and the
++3 are EXACTLY the three phantoms. The published read does not undercount shape A; **the drafts read
+MANUFACTURES three false lapses.** Amend the caveat with that delta; do not retire it. B and C are 0 on both
+lenses and are therefore UNDISCRIMINATED — their deltas are not verified.
+
+**NO LITERAL 374 MAY BE COMMITTED AS A THRESHOLD.** It was taken at an instant against a board this wave
+mutates. Print it derived, with the instant and the re-derivation command.
+
+### PDS-D686 — THE N-1 LEVER IS TWO FREE CLOSES, NOT SEVENTEEN, AND SAYING SO IS THE POINT.
+
+Seventeen open PDS rows sit one criterion from done. Thirteen resolve to a merged PR through the charter's
+task-to-PR tables; **all thirteen merge commits are ancestors of origin/main and all thirteen carry 4/4
+required contexts green** (read from `.github/required-checks.json` on main, not memory). So the MERGE half of
+every merge-gated criterion is discharged by run, today.
+
+**That is not the same as closable.** ELEVEN of the thirteen conjoin an INDEPENDENT LEAD RE-DERIVATION that
+has never been performed, and each criterion explicitly forbids re-reading the builder's. **Filing "close the
+seventeen" would be this wave asserting a close that does not descend from the measurement its own criterion
+names** — the epic's disease, in the wave that diagnoses it. So: 2 close on quoted run output
+(`pds-w45-bl-sweep-adjudication-frozen-blob`, whose criterion has no second conjunct; and
+`pds-w41-residue-lens-unrun`, discharged by CI run 30759156397 printing `27 doctests, 13408 tests, 0 failures,
+48 excluded` with the test carrying no excludable tag). Five cheap re-derivations are ATTEMPTED — a row that
+cannot be bought stays open, and that is a pass. Ten stay open with their criterion intact.
+
+**TWO INHERITED PREMISES REFUTED.** (a) "each already carrying a lapsed claim" is FALSE — `claimed_by`,
+`claim_epoch`, `claim_expires_at` and `worker` are ALL NULL on all seventeen. (b) The exact-string count is
+13, not 15. **CONFIRMED**: `content.github.issue` is the mirrored ISSUE — `gh pr view` fails on every one
+tested — so the charter's task-to-PR tables are the only working resolver, and they resolved 13/13.
+
+### PDS-D687 — THE INTERACTION RECEIPT IS REPAIRED AND UNPINNED, AND THE GATED CENSUS CANNOT SEE THE REGRESSION THAT MATTERS.
+
+`pds-w33-bl-catchall-success-clauses`'s repair is real and symmetric: `search_controller.ex:323-350` and
+`v1/media_controller.ex:214-241` are byte-identical three-arm cases over a discriminated union, delegating to
+ONE implementation. It shipped as #8950 under `task-b75cb51e6184a423` (DONE 8/8), so the row closes as
+**SUPERSEDED**, never as criteria-met — its criterion 5 ("PR merged to main") can never be honestly stamped
+because the row has no PR of its own.
+
+**BUT IT IS PINNED ONLY AT THE MODULE SEAM.** `git grep '"recorded"' origin/main -- api/test js web` returns
+**ZERO LINES**. The only HTTP test of either endpoint asserts just `ok == true` and
+`is_binary(interactionEventId)`. **NO test posts to the MEDIA endpoint at all.** The 422 and 500 arms have
+never executed on any host.
+
+**AND IT IS WORSE THAN UNPINNED, PROVEN BY MUTATION.** Rewriting `content/search_intelligence.ex:32` so
+`record_interaction/3` discards the real result and returns `{:ok, Ecto.UUID.generate()}` restores the exact
+original defect — every failure renders `ok:true, recorded:true` with a **FABRICATED** interactionEventId,
+strictly worse than the original — and `mix test` over the census, search, suggestions and controller suites
+returns **221 tests, 0 failures**. The gated receipt census pins the controller EXPRESSION FINGERPRINT and
+never issues a request, so a callee-confined regression is invisible to the entire apparatus. Its own
+ROSTER-VERDICT-FRESH arm DECLARES that blind shape in prose today. **The declaration is honest; the coverage
+is absent — and a declared blind spot with no coverage is still a green that costs nothing for that class.**
+The census is not toothless in general: reverting the controllers themselves DOES red it by MFA at rc=1.
+The hole is precisely one hop deep.
+
+### PDS-D688 — A SURFACE WHOSE LOCAL GATE IS RED ON UNTOUCHED MAIN GETS NO SLICE, AND THE HETZNER RIDER IS RESCUED INTO GIT.
+
+`web/app/api/find-event/route.ts:63-79` — the ONLY live caller of the interaction endpoint — never binds the
+fetch response and unconditionally returns `NextResponse.json({ ok: true })`. Its bare `catch` carries a
+declared best-effort comment, but that declaration covers EXCEPTIONS, not NON-2xx RESPONSES: the honest 422
+and 500 become `{ok:true}` one hop out. PDS-D496 recorded the same fact from the OPPOSITE direction — as proof
+the widening was "free" — never as a residual defect.
+
+**It does not ship this wave, and the reason is measured.** Both of `web/`'s local gates are RED on untouched
+origin/main in the dev environment: `npm run typecheck` fails with TS2580/TS2307 on `lib/use-live-search.ts`
+and `next.config.ts`, and `npm test` fails on untouched files including `__tests__/valueref.test.ts`.
+**Handing a builder a gate the decider could not run is the failure this epic files.** Filed as
+`pds-bl-w47-find-event-launders-the-honest-status`, whose FIRST obligation is the gate, not the fix.
+
+**THE HETZNER RIDER WAS ONE `git worktree prune` FROM UNRECOVERABLE.**
+`api/test/barkpark/pds_hetzner_offline_door_test.exs` (6,703 bytes, sha256 `4444bff7…c228800`) existed as a
+SINGLE UNTRACKED FILE inside `.claude/worktrees/wf_42737b38-0d2-22/`, added by no commit on any branch, and
+recorded nowhere in the ledger — its loss would have been invisible. It is committed verbatim by this wave's
+charter PR at `tooling/grip/ledger/salvage-pds-hetzner-offline-door-2026-08-04.md`, round-trip hash-verified.
+D673's warning is CONFIRMED: the unpushed `rescue/pds-w44-hetzner-offline-door-wf22` branch carries only
+2 files / 3 insertions and does NOT contain it. One moduledoc claim in the salvaged rider is FALSE at this
+base and must not be trusted — it asserts the instrument and `internal/cli/testdata/**` were added to
+`ELIXIR_TEST_ONLY_PATHS`; neither is, and the slice's own criterion 7 REFUSES the testdata entry outright.
+
+### The wave 47 plan — 8 slices, three rounds, ledger-first
+
+Fable was unavailable this wave; every slice builds on Opus. Round 1 slices have DISJOINT file sets. Rounds
+≥2 do NOT dispatch beside their dependency — each carries an `AFTER <task_id> MERGES` line as the first line
+of its brief.
+
+| # | round | task | surface | why it is here |
+|---|---|---|---|---|
+| 1 | 1 | `pds-w47-door-census-silences` | `pds-door-census.sh` + rider | D681 + D682, merged because they share the `run_census` tail, the rider and the re-price |
+| 2 | 1 | `pds-w47-d448-drift-refuses` | `pds-elixir-receipt-census.exs` + rider | D678 |
+| 3 | 1 | `pds-w47-citation-resolver-repair` | `pds-record-parity.sh` + harness + rider | D679 + D680 |
+| 4 | 1 | `pds-w47-ledger-denominator-and-blind-spots` | `pds-ledger-census.sh` + harness | D685 |
+| 5 | 1 | `pds-w47-n1-adjudication` | ledger row + board writes | D686 |
+| 6 | 1 | `pds-w47-interaction-receipt-pin` | new controller test | D687 — HIGH-FLIP-RISK: reachability |
+| 7 | 2 | `pds-w47-measure-and-host-axis` | `pds-door-census.sh` + rider | D684 — HIGH-FLIP-RISK: foreign-price provenance. AFTER #1 |
+| 8 | 3 | `pds-w47-price-column-retake` | `pds-door-census.sh` + rider | D683. AFTER #7 |
+
+Backlog filed this wave: `pds-bl-w47-find-event-launders-the-honest-status`,
+`pds-bl-w47-hetzner-offline-door-rescoped`, `pds-bl-w47-duplicate-d-allocation-pointer`,
+`pds-bl-w47-receipt-census-never-issues-a-request`, `pds-bl-w47-measure-all-content-key-price-stale`,
+`pds-bl-w47-stale-claim-third-shape-rescoped`.
+
+**COVERAGE**: every dispatched surveyor and every dispatched verifier reported. No slice below rests on an
+unanswered question. **ONE DEBT CARRIED FORWARD AND NAMED**: `api/test/barkpark/pds_door_census_test.exs`
+has still never been executed under `mix test` on any host — a standalone `elixir` runner gave 8 tests /
+0 failures, which is not the same thing. Slice 1's first criterion pays it.
+
+## WAVE 48 — THE HONESTY MUST SURVIVE THE HOP (decided 2026-08-05, paper `pds-wave-48-2026-08-05`)
+
+Allocation re-derived, not inherited: the maximum PDS-D in use on `origin/main` 467f7e283 was **688** —
+708 titled definitions over 688 distinct numbers, `unresolved: 0` over 219 cited numbers, max cited in
+3000 commits 678, zero PDS-D tokens in any open PR. **Wave 48 allocates from D689.** The only tokens above
+688 anywhere in the tree are `PDS-D777`/`PDS-D999`, synthetic fixtures inside `pds-record-parity.test.sh`.
+
+Wave 47 allocated ZERO numbers in its REVIEW block — so D680's law did not so much survive a wave as go
+unexercised. The arbiter (`pds-d-number-allocation-arbiter`) is still published, unclaimed, 0/4. Nothing in
+the repo would stop the collision recurring; one wave went by without testing it.
+
+### PDS-D689 — THE FIRST FOREIGN PRICE IS REFUSED, BECAUSE NOTHING A STRANGER CAN OPEN CARRIES A CPU FIGURE.
+
+Wave 47 wrote criterion 7 of `pds-w47-measure-and-host-axis` to demand a foreign price citing "the run URL,
+the run-id, the head sha, the derived cpu count and the load stamp", with "evidence quotes the metered line
+from the runner log". An independent second read MEASURED every leg of that against live GitHub on
+`FRIKKern/barkpark`, and the criterion is **unbuildable as written — not rot-prone, unverifiable the day it
+merges**:
+
+- **The stranger-access worry was REFUTED and it does not help.** The repo is public: unauthenticated
+  `GET /actions/runs/{id}` and `/actions/jobs/{id}` both return **200 at 100 days** old, and
+  `/runs/{id}/jobs` still carries per-step wall timings at 100 days. Budget 60 req/hr unauth.
+- **But logs are 403 TO A STRANGER AT EVERY AGE** — 403 on a 23-day run AND on a 100-day run. Not rot: a
+  closed door from minute zero. The anonymous WEB path is closed too — the per-step log URL the anon job
+  page itself embeds returns **404** to an anonymous fetch, plain and browser-shaped.
+- **And the log rots for the maintainer at ~90 days**: authenticated logs are **410 Gone** at 99–100 days,
+  200 at 77 days. Artifacts are worse — anon zip download **401**, `expires_at` +90d default, and
+  `ci.yml:141` pins `retention-days: 14`.
+- **NOTHING STRANGER-READABLE CONTAINS A CPU PRICE.** The durable anon surfaces carry WALL timings only, and
+  PDS-D648 forbids wall outright (`pds-door-census.sh:61`, "Never wall"). Worse:
+  `git grep -nE 'nproc|loadavg|uptime|/usr/bin/time' origin/main -- .github` is **EMPTY** — no workflow
+  emits a host measurement at all today, so the meter output would have to land in the one place a stranger
+  cannot read.
+- **And the row would be born in the class D683 proved rots.** A FOREIGN row taken once inside a PR's gate
+  is re-taken by NOTHING. The only mechanism that makes a price descend is a gate that re-takes it, and
+  that is exactly what D669 forbids for `--measure`.
+
+**RULING: wave 48 ships `--measure`, ships the `LOCAL`|`FOREIGN` grammar with its three-direction refusal
+arm, and ships NO FOREIGN ROW, on the record.** Criterion 7 is REWRITTEN from a citation demand into a
+refusal-with-reason. Arithmetically this changes zero rows: `git grep FOREIGN origin/main -- scripts` finds
+no price row, and all six priced rows on main are LOCAL. If a foreign row is ever wanted, the only
+stranger-available path is **REPRODUCTION, not citation** — publish the exact `--measure` invocation so
+anyone can re-take it on their own `ubuntu-latest` runner. That is a different criterion for a later wave.
+
+### PDS-D690 — THE RUN ID AND THE HEAD SHA ARE THE ONLY DURABLE RE-OPENERS; A JOB ID SILENTLY LOSES ITS STEPS AT 90 DAYS.
+
+Measured on six runs across a 100-day ladder. **DURABLE + ANONYMOUS**: the run id (run JSON keeps
+`head_sha`, `event`, `run_started_at`, `conclusion`, `html_url` at the oldest run this repo has) and the
+run's jobs LIST, which still carries steps and per-step wall timings at 100 days. **ROTS SILENTLY**: the JOB
+ID as a standalone citation — `/actions/jobs/{id}` drops `steps` to `[]` past ~90 days (0 steps at 99d and
+100d; 14/12/6/6/10/5 at 77d…23d) **while `/runs/{id}/jobs` for the SAME job still returns 13 and 9**. So a
+row citing only a job id loses its step detail with no error and no warning. **STRONGEST**: the head sha —
+a git object, durable forever, re-derivable offline. **DIES**: logs (403 forever to a stranger, 410 at 90d
+to anyone) and artifacts (401 to a stranger, 14d here).
+
+Corroborated by a committed instance already on the fuse: `tooling/grip/fixtures/evidence-corpus.json:4053`
+cites "step timings" from run 29261030044. It re-opens today and **stops re-opening around 2026-10-11**.
+The identical figure taken from the JOB envelope would survive. **LAW: a price whose re-opener reads
+`.steps`, a log, or an artifact is a dated cheque. Cite the run id and the head sha, and take the number
+from the job envelope or from a figure committed into the repo beside them.**
+
+### PDS-D691 — `LC_ALL=C` MUST PIN THE WHOLE RECIPE, BECAUSE HALF-PINNING FAILS SILENTLY TO ZERO.
+
+The pin is not cosmetic: on this host (`LANG=nb_NO.UTF-8`) `/usr/bin/time -p` prints `real 0,15` unpinned
+and `real 0.14` under `LC_ALL=C`; `uptime` behaves identically. **But it is load-bearing in BOTH directions,
+and half-pinning is the trap**: `awk` silently truncates the WRONG separator to zero — default-locale awk
+on `0.53 0.72` prints `0`, and `LC_ALL=C` awk on `0,53 0,72` prints `0`. Each parses only its own
+separator. `bc` is loud instead (`Parse error`). And the charter's documented `tr -d ,` mechanism reproduces
+exactly: `3364` where truth is `33.64`, a 100x inflation that also **destroys the decimal point**.
+
+**LAW: `LC_ALL=C` pins the meter AND every arithmetic step that consumes it, or the new failure mode is a
+silent `0` that reds nothing.** `--measure`'s selftest carries the mutant.
+
+### PDS-D692 — THE THREE-ARMS RESIDUAL IS A STALE PRICE THAT MUST BE RE-METERED, NOT A PROSE EDIT AND NOT A GATE HOLE.
+
+`scripts/pds-door-census.sh:286` prices "the **THREE GATED ARMS SUMMED**" at `CPU=26.47+2.26=28.73s` for a
+rider that carries **FOUR** arms on the same tree (`pds_elixir_census_test.exs` `:135 :145 :187 :210`).
+Both candidate fixes on offer are wrong:
+
+- **"Add the arm to the gate" is a NO-OP.** No workflow names the census at all; it rides the plain
+  `mix test` at `elixir.yml:455`. The rider's only module attribute is `@moduletag timeout: 600_000` — no
+  excludable tag — and none of `test_helper`'s ten excludes can reach it. `scripts/pds-elixir-receipt-census.exs`
+  sits in `ELIXIR_TEST_ONLY_PATHS` (`elixir-path-escape-check.sh:100`), so a census-only PR still dispatches
+  the job. **CI already runs four.**
+- **"Update the prose" DROPS A NUMBER.** The rider's own moduledoc (`:42-47`) records `28,9 s` wall for
+  three arms vs `42,0 s` for four — "The added arm is one more full census run over `api/lib`". The `28.73s`
+  figure is a number whose instrument grew ~45% underneath it.
+
+**RULING: the residual folds into round 2 as a MEASUREMENT taken by `--measure`, never as a text edit.**
+A prose-only fix is invisible to both instruments — PROVEN BY MUTATION: changing the row to "the SEVENTEEN
+GATED ARMS SUMMED" leaves the census `rc=0, UNDISPOSED 0 of 20, ERRORS 0` and the rider `9 tests, 0 failures`.
+
+**AND A UNIT CONFLICT THE WAVE MUST CARRY, MEASURED FOR THE FIRST TIME.** `/usr/bin/time -p` around
+`mix test` reports `1.81–1.94 s` of CPU for a run whose own port children cost **≈4.8 s** (`--check` 1.29 s
+once, `--selftest` 1.11 s twice, plus a mutant `--check`) — a **~2.6x under-report**, because the work is in
+port children the meter around the BEAM cannot see. D633's blindness, concrete. Wall for that rider is
+5.63/5.88/6.06 s at load1 4.07→5.88. **A price row obeying D648's CPU mandate for a port-child-heavy rider
+prints ~1.9 s for a ~5.9 s thing — "makes an expensive thing look gate-able", the exact direction D633
+warns about.** `--measure` must meter the WALL for port-child riders and say which unit it used, or it
+inherits the blindness.
+
+### PDS-D693 — PDS-D688'S DEFERRAL PREMISE WAS A HOST FACT WEARING A REPO'S CLOTHES, AND THREE DIFFERENT PARTIAL INSTALLS HAVE NOW BEEN MISTAKEN FOR REPO DEFECTS.
+
+D688 deferred the find-event repair because "both of web/'s local gates are RED on untouched origin/main".
+**Four independent measurements refute it.** From a genuine clean room (`git worktree add --detach`,
+`pnpm install --frozen-lockfile --ignore-scripts`, js core+react build, web install):
+`typecheck rc=0 with ZERO diagnostics`, `tests 288/288/0`, `lint rc=0`. CI agrees: run 30628247583 concluded
+**success** on `web/ typecheck + unit tests + lint`, and `git log 577f50be..origin/main -- web/` is EMPTY,
+so that green describes today's main.
+
+**THE HOST STATES, ALL THREE, so the next person stops re-discovering them:**
+1. `web/node_modules` EMPTY (0 entries) → TS2307/TS2503/TS2580 — what D688 saw.
+2. `pnpm install --frozen-lockfile` **exits 1** on darwin-arm64 at sharp's postinstall ("Please add
+   node-addon-api"), aborting BEFORE bin-linking, leaving `node_modules/.bin` absent → every gate fails
+   with `sh: tsc: command not found`. The lockfile DOES carry `@img/sharp-darwin-arm64@0.34.5`; CI is
+   ubuntu and never hits it.
+3. `@barkpark/react` is materialised as a store COPY, not a symlink — building it AFTER the web install
+   leaves `dist` absent and typecheck reds TS2307 on four files.
+
+**THE MANDATORY `web/` PREAMBLE, four steps, and every `web/` slice states it or its builder reports a red
+that isn't one:** `pnpm --dir js install --frozen-lockfile` → `pnpm --dir js --filter @barkpark/core build`
+→ `pnpm --dir js --filter @barkpark/react build` → `pnpm --dir web install --frozen-lockfile
+--ignore-scripts`. **D688's LAW STANDS; only its application to `web/` was wrong** — a gate that is red
+because of THIS host is not a red surface, and the obligation D688 created is to establish the gate, which
+a clean room now does. **LEG C is a preamble, not a slice.**
+
+**AND THE GATE IS NOT MERGE-BLOCKING, WHICH IS ITS OWN FINDING.** `web-checks` (`ci.yml:148`) is a real
+gate with no `continue-on-error` — but `ci.yml` carries a workflow-level `on: paths:` filter on BOTH
+triggers, which is verbatim the S4 disqualifier in `required-checks.json`: a paths-filtered workflow emits
+NO check run on a PR that misses the paths, and a required context that is ABSENT reports "expected"
+forever. Proven, not argued: the 35 check runs on main head 467f7e28 do not include the name at all, and
+`grep -i web` over `required-checks.json` returns NOTHING — it is not required and not even in the 24-row
+exclusions list, because the generator has never SEEN it. Filed, not built this wave.
+
+### PDS-D694 — THE SHIPPED-REFUSAL ENUMERATION IS EXHAUSTED AT n=1; THE LAW RE-POINTS AT THE DESCENT AND THE POPULATION IS AN ORDER OF MAGNITUDE LARGER.
+
+Wave 48's direction proposed enumerating the epic's own committed refusals and following each one hop to
+its caller. **The matrix was built across four consumer surfaces and it came back 20 cells: 3 BINDS,
+2 LAUNDERS, 15 NO CALLER.** D2/D9/D10 have exactly one consumer (the bp CLI) and it binds all three at a
+uniform, well-commented status guard; D12's consumer is a browser `<img>` that cannot bind by construction;
+D687's only caller launders. **The sharpest attack on the direction LANDED: enumerating shipped refusals
+yields find-event and nothing else.**
+
+**But the epic's LAW was never "refusals must be bound" — it is "a receipt lies when its value does not
+descend from the write return".** Re-pointing at THAT keeps the enumeration's whole virtue (no lens, no
+precision problem, a fully listable population) and grows the yield:
+
+| site | the lie |
+|---|---|
+| `web/app/api/find-event/route.ts` | `{ok:true}` at BOTH exits; `await fetch` unbound at `:54`/`:65`, and **`fetch` does not reject on 4xx/5xx**, so the honest 422/500 never even reaches the `catch` at `:73` |
+| `api/.../search_controller.ex` `correction/2` `:352-366` | hard-matches `{:ok, %{promoted: _}}` with NO honest-failure ending — the floor below find-event on the same hop |
+| `js/packages/react/src/Reference.tsx` `:150 :168 :176` | 401/403/429/500/502/503 collapse into the same `null` as a genuine 404, rendering NOTHING, in a published npm package with no 5xx test |
+| `internal/cli/migrate_cmd.go:382` | `written += len(batch)` — the REQUEST — with `respBody` bound and discarded on 2xx |
+| `internal/cli/tasks_create_cmd.go:120` | `born := body["lifecycle_status"]` — the request map — under a comment claiming "the body value the server accepted" |
+| `deploy.sh:318` | "Barkpark is running!" after a 30-attempt health loop with NO else branch, `go:embed`ed into `bp` |
+| `tooling/scaffy-duels/METER.md` | "24/24" over a corpus that is now 34, and NO CI workflow invokes the instrument |
+
+**LAW: the population for a hop audit is the SET OF ASSERTIONS, not the set of refusals. A refusal with no
+caller is not a hop; an assertion with a caller is.**
+
+**AND THE ENUMERATION'S BLIND SPOT IS NAMED RATHER THAN LEFT FOR WAVE 49**: it was structurally blind to
+endpoints that never EARNED a refusal. `correction/2` was invisible to it, is filed TWICE
+(`task-pds-correction-receipt-surfaces-status`, `pds-bl-record-correction-third-lie`), and neither row was
+ever dispatched. **The epic saw it, filed it twice, and built neither** — that is a stronger form of the
+blindness than "we never looked".
+
+### PDS-D695 — THE HONEST BEST-EFFORT SHAPE IS A UNIFORM 200 WITH A DESCENDING FIELD, AND THE REASON IS `res.ok`, NOT "BEST EFFORT".
+
+`400` for an unparsable body would ALSO descend from a measurement, so "honest vs dishonest" does not decide
+the status. **What decides it: if the status line carries the receipt for ONE exit and not the other five, a
+caller that checks `res.ok` sees RED for a malformed body and GREEN for an upstream 500 — the exact
+inversion this epic exists to kill.** Uniform 200 with a single `recorded` field is the only shape where one
+field answers all exits identically.
+
+And the repair PORTS A SIBLING'S PATTERN rather than arguing a manifesto: `web/app/api/find/route.ts:56-59`
+already returns 200 with a `message` DERIVED from the caught error, eleven lines from a launder of the same
+law at `:27-29`. Corroborating: the moduledoc's own defence ("a recording failure never blocks the user")
+justifies the STATUS and the non-throwing, and **does not reach the FIELD at all** — a field the sole caller
+never binds cannot block anything.
+
+**SIX EXITS, NOT TWO, AND A THIRD LIE CLASS FILED NOWHERE.** Both backlog rows describe two lying exits.
+There are six, in three classes: upstream non-2xx; upstream unreachable; and **the body parsed but NO WRITE
+WAS EVER ATTEMPTED** (`kind:"sideways"`, `kind:"correction"` with no `to`, `kind:"click"` with no
+`queryEventId`) — today identical `{ok:true}` to a recorded signal. A criterion written from either existing
+row's text drops that class silently.
+
+### PDS-D696 — AN HONEST FIELD WITH NO CONSUMER AND NO TEST IS INERT; THE TEST PLUS CI IS THE CONSUMER, AND THE CRITERION SAYS SO.
+
+`web/components/finder.tsx:49` is `void fetch(...).catch(() => {})` with `keepalive: true` — the browser is
+NOT the consumer and **should not be**: it cannot act on a dropped analytics signal, and a `console.debug`
+would be decoration. Repairing `finder.tsx` is the wrong fix and a criterion must forbid it explicitly or a
+builder will do it.
+
+**What makes the field non-inert is the test plus the gate**: `ci.yml` triggers on `web/**` and `web-checks`
+runs typecheck + test + lint, so a regression to a laundered green now reds a check run. The honest claim is
+that the field is **ENFORCED, not consumed** — and the criterion must say enforced, because claiming a
+consumer that does not exist would be this epic's own disease one level out.
+
+The harness is real cost the plan had not budgeted: **zero of the 39 files in `web/__tests__/` tests any of
+the five routes**, so there is no route-handler pattern to copy. It must be invented — import the `POST`
+export directly, stub `fetch` — and it needs two bundler-only resolutions replayed in the SHARED
+`__tests__/support/server-only-loader.mjs` (`@/` tsconfig paths with a `.ts` extension; `next/server` →
+`next/server.js`, because next's package.json has **no `exports` map at all**). That file is a collision
+fence for the whole wave.
+
+### PDS-D697 — THE INSTRUMENT IS NOT THE MECHANISM; BEING RUN IS. `METER.md` IS THE INVERTED CONTROL D683 ASKED FOR, AND IT ROTTED ANYWAY.
+
+`tooling/scaffy-duels/METER.md` is an eighth adjacent price ledger and the cleanest possible control: the
+instrument EXISTS, runs `verify` in **0.065 s**, is NON-VACUOUS by its own self-test (which deliberately
+proves a 1.25x-trap fixture reds), and is CORRECT on its frozen population. **And it is rotten now**: it
+prints `34 envelopes — 34 exact` while the doc says "24/24". The population grew 24 → 34 across six commits
+and the literal did not follow. `grep -rn meter .github/workflows/` returns **rc=1 over 41 workflow files** —
+zero gates call it. The epic's own 19-instrument price roster has never enumerated it
+(`git show origin/main:scripts/pds-door-census.sh | grep -c scaffy` → **0**).
+
+**That isolates the variable this epic has been circling: a fast, self-proving, non-vacuous instrument still
+rotted, purely because nothing RAN it.** The instrument is not the mechanism.
+
+Three further measurements the slice must carry:
+- **The median is not wrong; the COST-WEIGHTED picture INVERTS.** Over the original 24 the shares reproduce
+  `58.8 / 32.5 / 7.9` **byte-exactly**; over all 34 they are `55.0 / 36.8 / 9.5` (3.8pp median movement, not
+  material). But by DOLLARS: 24 envelopes ($17.08) = writes 46.9 / reads 43.5; **34 envelopes ($66.40) =
+  writes 24.2 / READS 66.4.** METER.md's top lever ("fewer spawns") is derived from short warm-worktree
+  duels and does not describe where the money goes on long sessions. **Publish a PAIR of statistics with
+  each population size stamped — a criterion pinning "58.8%" alone repeats D656 one ledger over.** The
+  `~$0.55 spawn floor` survives (median 24 = $0.5451, 34 = $0.5857).
+- **`rate_for()` is fail-closed on ONE path and fail-open on THREE**, mutation-proven: an unknown model in a
+  TWO-model envelope with cost TRIPLED → `1 identity-only`, rc=0; `modelUsage` deleted with cost x10 → rc=0;
+  an envelope nested one directory deeper → never walked (`cmd_verify` globs one level).
+- **THE HIGHER-BLAST-RADIUS HALF IS THE DUPLICATE.** `tally_wf.py:28-41` carries a SECOND rate table
+  "mirrored from meter.py (not imported)", with the same missing `claude-opus-5` prefix and WORSE handling:
+  `no_rate.add(model); continue` — tokens counted, **DOLLARS SILENTLY DROPPED**, rc always 0. Proven on a
+  two-model transcript: `total_usd_computed: 0.345` with the whole opus half missing. And
+  `/papers/epic-cycle-research-program-abcde` names `tally_wf.py` as **its cost axis**. A slice that fixes
+  only `meter.py` leaves the research programme's cost axis under-reporting opus spend to zero.
+
+### PDS-D698 — `pds-w46-load-stamp-provenance-doubt` IS REFUTED ON BOTH LEGS, AND THE PREMISE WAS THE EPIC'S OWN QUIET-HOST LAW READ BACKWARDS.
+
+The four suspect stamps are `load1=41.63 / 79.23 / 24.26 / 26.44`. **Leg 1 — the proposed mechanism cannot
+produce them**: `tr -d ,` DESTROYS the decimal point (yields `3364`, an integer); all four carry a dot and
+two decimals, so none is a `tr -d ,` artifact. **Leg 2 — "implausible next to this host's 2.1–3.4" is a
+QUIET-HOST premise.** Sampled live under wave load on a 10-CPU host: `47.43 / 46.84 / 46.84 / 45.97 / 45.89`
+sustained over 20 s. 24.26, 26.44 and 41.63 are directly bracketed by a live measurement; **79.23 is within
+1.7x of one and is the weaker rule-out — say so rather than closing all four with one sentence.** The row's
+own criterion 2 admits "a recorded rule-out with a reason is an acceptable outcome". Round 2 records it.
+
+### PDS-D699 — THE FIND-EVENT ROW IS FILED TWICE, TWELVE WAVES APART; WAVE 48 EXERCISES D680'S COLLISION PATH INSTEAD OF DESCRIBING IT.
+
+`pds-bl-w36-find-event-fourth-lie` (wave 36, priority 2, published, unclaimed) and
+`pds-bl-w47-find-event-launders-the-honest-status` (wave 47) name the SAME file and the SAME defect. Two open
+rows, one bug. D680's arbiter has never been exercised (wave 47's review allocated nothing, so the collision
+path was never walked and the arbiter is still 0/4). **Wave 48 FOLDS them: the w47 row is the slice, and the
+w36 row is folded into it — carrying forward the one axis on which w36 is BETTER, its criterion 3 demanding
+a repo-wide sweep of `web/app/api/**/route.ts` with the number stated.** That sweep is now cheap and its
+answer is known: **FIVE routes** (not the three a glob reported — `ls-tree` finds `admin/reindex` and
+`barkpark/webhook`), of which `admin/reindex` BINDS (transient→503, upstream→its real status, else→502) and
+`barkpark/webhook` BINDS on status. **A criterion written against "the 5 web routes" would send a builder to
+repair four things that are already honest.** A fully-enumerable population that was itself undercounted is
+this epic's own shape, twice in one wave.
+
+### The wave 48 plan — 8 slices, two rounds, outward
+
+Fable was unavailable this wave; every slice builds on Opus. Round-1 slices have DISJOINT file sets. The
+round-2 slice does NOT dispatch beside its dependency and carries an `AFTER <task_id> MERGES` line as the
+first line of its brief.
+
+| # | round | task | surface | why it is here |
+|---|---|---|---|---|
+| 1 | 1 | `pds-w47-measure-and-host-axis` | `pds-door-census.sh` + rider | D689 + D691 + D692 + D698. **HIGH-FLIP-RISK: foreign-price provenance** — criterion 7 REWRITTEN to a refusal |
+| 2 | 2 | `pds-w47-price-column-retake` | `pds-door-census.sh` + rider | D683. AFTER #1 merges |
+| 3 | 1 | `pds-bl-w47-find-event-launders-the-honest-status` | `web/app/api/find-event/` + new harness | D694 + D695 + D696 + D699; folds `pds-bl-w36-find-event-fourth-lie` |
+| 4 | 1 | `task-pds-correction-receipt-surfaces-status` | `search_controller.ex` + new test | D694 — the floor below #3 on the same hop; folds `pds-bl-record-correction-third-lie` |
+| 5 | 1 | `pds-w48-react-reference-error-collapse` | `js/packages/react/` | D694 — a published npm package renders NOTHING on a 500 |
+| 6 | 1 | `pds-w48-cli-count-and-birth-receipts` | `internal/cli/` + registry | D694 — enrollment in a gate that already exists |
+| 7 | 1 | `pds-w48-deploy-banner-descends-from-health` | `deploy.sh` + embedded twin + harness | D694 — the highest-stakes sentence in the product |
+| 8 | 1 | `pds-w48-meter-rot-and-duplicate-rate-table` | `tooling/scaffy-duels/` | D697 — the inverted control, and the research programme's cost axis |
+
+**COVERAGE**: every dispatched surveyor and every dispatched verifier reported; no coverage deficit in
+either round. No slice below rests on an unanswered question. **DEBTS PAID THIS WAVE, NOT CARRIED**: wave
+47's carried debt — "`pds_door_census_test.exs` has never been executed under `mix test`" — is
+**DISCHARGED**: CI run 30914991596 on PR #9524's head ran the full `mix test` to completion
+(`27 doctests, 13465 tests, 0 failures, 48 excluded`, 635.3s) with the rider's path in the dispatcher's
+changed-path set and the Test job concluding SUCCESS, and an independent local run from a fresh
+`origin/main` worktree gave `9 tests, 0 failures`. The rider declares **NINE** tests, not the eight carried
+forward. **DEBT CARRIED FORWARD AND NAMED**: `pds-w25-round-open`'s "every free close by content" conjunct
+is unpaid — its 12 cited shas are all ancestors of `origin/main`, but ancestry is not content, and PDS-D353
+records that two `pds-bl-scratch-pointer-*` rows re-check as "still broken" at their cited line.
+
+## WAVE 49 — THE FROZEN SIDE (decided 2026-08-05, paper `pds-wave-49-2026-08-05`)
+
+Allocation re-derived, not inherited: on `origin/main` **142cbbf5a** the maximum PDS-D definition heading is
+**699** (`### PDS-D699` at charter `:14494`; the file is 14534 lines). The only higher tokens anywhere in the
+tree are `PDS-D777`/`PDS-D999`, synthetic fixtures inside `scripts/pds-record-parity.test.sh` (`:155 :170
+:178 :191 :400`) plus one prose mention at charter `:14253` — neither is a definition. Zero PDS-D tokens in
+any of the ten open PRs. **Wave 49 allocates from D700.**
+
+Wave 48's REVIEW block allocated ZERO numbers, as did wave 47's. D680's collision path has therefore now gone
+**two consecutive waves unexercised**, and `PDS-D699`'s own heading claims wave 48 "EXERCISES D680'S
+COLLISION PATH INSTEAD OF DESCRIBING IT" while its body concedes the arbiter "is still 0/4" — what wave 48
+folded was two duplicate TASK ROWS, not two D-numbers. Wave 49 is the third opportunity and it DOES allocate.
+`pds-d-number-allocation-arbiter` remains published, unclaimed, 0/4.
+
+**THE THESIS.** Forty-eight waves audited hops between two LIVE ends. Between `main` and a user stands a
+FROZEN REPLICA — a published npm tarball, a `cli-v*` release binary, a `go:embed`-ed script, a committed price
+literal, an instrument nothing invokes. A live hop can be repaired at either end and reality eventually
+contradicts a lie. **A FROZEN side cannot be contradicted at all.** A REPAIR THAT CANNOT REACH THE ARTIFACT IS
+ITSELF A RECEIPT THAT DOES NOT DESCEND FROM A MEASUREMENT.
+
+### PDS-D700 — THE FROZEN SIDE REPRODUCES BY BYTES, NOT BY INFERENCE, AND EVERY PUBLISHED SDK TARBALL DIVERGES FROM MAIN.
+
+Every published `dist/*.map` ships `sourcesContent` — the exact TypeScript bytes the artifact was built from.
+That is a **free, offline, byte-exact source-vs-artifact oracle this epic has never used**. Measured by
+`npm pack` over all six published `@barkpark/{core,react}` tarballs plus `@barkpark/nextjs`:
+
+- `@barkpark/react@1.0.0-preview.1` (immutable since 2026-04-19T15:13:28Z) ships `src/Reference.tsx` at
+  **6094 b** against main's repaired **15468 b**, containing the collapse verbatim, and `dist/index.mjs:25-29`
+  carries `try { return await fetchRaw(...) } catch { return null }` in the SHIPPED JAVASCRIPT, not merely in
+  the map. `preview.0` and `preview.1` ship **byte-identical `Reference.tsx`** — there is no published react
+  version free of it.
+- `@barkpark/core@preview.3` publishes 16 source files; **15 differ from main**, the sole survivor being
+  `src/util/headers.ts` (2813 b). `client.ts` is 6433 b published vs 20027 b on main — **3.1x** — at **12x
+  react's download volume**.
+- **It is not zero-consumer.** Last-week downloads re-derived 2026-08-05: core **418**, nextjs **386**, react
+  **34**; since 2026-04-01: **6346 / 6177 / 374**. The "pre-release previews, nobody has them" attack on this
+  wave's crown is REFUTED BY MEASUREMENT.
+- **Five of five published files trace to an exact commit on main by blob equality** — `450c4e07d`,
+  `5c75f629a`, `cac998569`, all dated **2026-04-18**. The trace is exact, not fuzzy.
+
+**AND THE ORACLE HAS A HOLE THAT MUST BE HONOURED**: react's `server.cjs.map` and `server.mjs.map` carry NO
+`sourcesContent`. A door built naively on it would silently skip the react-server entry point. It must
+SKIP-WITH-REASON, never pass.
+
+### PDS-D701 — THE PUBLISHED-ARTIFACT DOOR'S REQUIRED LEG IS THE **SURFACE CLAUSE**. THE THREE OBVIOUS PREDICATES ARE ALL REFUTED.
+
+The direction proposed "refuse a change to shipped source whose `package.json` version literal is unchanged".
+Every candidate form of that was measured and every one fails:
+
+- **"Bump the literal in the PR" is UNSATISFIABLE BY ARCHITECTURE.** `.github/workflows/release.yml` runs
+  `pnpm changeset version` **inside the workflow** with `permissions: contents: read`, and
+  `.changeset/config.json` has `"commit": false` — it never commits versions back. React's literal has moved
+  **exactly twice in repo history** (`1fbd7b788`, `06cb72da1`, both 2026-04-19) across 47 subsequent commits
+  to `react/src`. Core's last move is `ff067514e` (2026-05-25), a **human hand-set** whose own message says
+  "align … so next changeset release lands preview.4 cleanly" — written **a month after** npm froze
+  core@preview.3 on 2026-04-27. The literal is a hand-maintained forecast that descends from nothing.
+- **"A changeset file names the package" is SILENT ON BOTH TARGET COMMITS.** #9601 ships
+  `js/.changeset/react-reference-error-not-notfound.md`; #3604 ships
+  `js/.changeset/react-client-media-hydration.md`. A changeset-presence leg greens on both. It also already
+  exists (`js-tests.yml` job `changesets`) and is advisory not by `continue-on-error` but because **js-tests
+  is not a required context** — main requires exactly `["Elixir gate","PR references an active task","Cloud
+  gate","Console gate"]`. Meanwhile `js/CLAUDE.md:23` asserts "the `changesets` CI job **blocks** PRs without
+  one." That sentence does not descend from the protection API — a free in-scope PDS finding.
+- **"main's literal must never name bytes npm has frozen" is CORRECT AS A REPORT, FATAL AS A REFUSAL.** It
+  fires on 4/4 public packages today with no remedy short of re-architecting `release.yml`, and `ff067514e`
+  *deliberately created* that state. **Report it; never refuse on it**, or it gets deleted within a week.
+
+**THE PREDICATE THAT WORKS, prototyped and REPLAYED OVER HISTORY, pure git, zero registry, offline:**
+
+> **main may not advertise an export subpath that the frozen artifact under main's own version literal cannot
+> serve** — `exports(HEAD) ⊆ exports(R)`, where `R` is the commit that last *changed* that package's version
+> literal.
+
+Replay results: `origin/main` → **REFUSE react**, `new_exports=['./client','./paper-surface.css']`, silent on
+core/nextjs/codegen/create-barkpark-app — **non-vacuous today**. `34750c6b8` (#3604) → REFUSE. `06cb72da1`
+(a genuine release commit) → PASS, debt counter resets to 0 — **silent on a real release**. `ff067514e` (the
+hand-set) → PASS — **no nuisance fire on version-alignment commits**. The registry confirms it without being
+needed: published `react@preview.1`'s exports are exactly `{".", "./package.json"}`, so
+`import '@barkpark/react/client'` → `ERR_PACKAGE_PATH_NOT_EXPORTED` under the version string main declares.
+**Honest correction to the direction: the first true positive is not #3604 but #3449 / `863193ce9`**, same day,
+which added `./paper-surface.css`; #3604 adds a second refusal reason to an already-red door.
+
+**THREE ESCAPE HATCHES ALREADY IN TREE, ALL MEASURED, ALL MANDATORY**: `"private": true` (5 packages);
+literal `0.0.0-placeholder` (groq, nextjs-query — **both actually PUBLISHED at that literal**, so the
+exclusion must key on the LITERAL, never on "unpublished"); and `.changeset/config.json`'s `ignore` list.
+`create-barkpark-app` is **UNSCOPED** — a registry arm building `@barkpark/$dir` 404s on it and, if 404 is
+read as "unpublished", greens vacuously on a drifted package.
+
+**PLACEMENT IS NON-NEGOTIABLE.** A js-only workflow CANNOT block. The door rides the epic's proven mechanism:
+a path declared in `ELIXIR_TEST_ONLY_PATHS` (`scripts/elixir-path-escape-check.sh:99-102` already lists the
+four pds instruments by exact path) plus an ExUnit rider that `System.cmd`s it → the REQUIRED "Elixir gate".
+Building the required leg out of network access would be the fourth law violated by the very door meant to
+enforce it.
+
+**THE RELEASE-DEBT CLAUSE IS REPORT-ONLY, BY RULING.** 342 pending `js/.changeset/*.md` on main, 340 added
+after the last real publish (2026-04-27), oldest 2026-04-19, and only 6 changeset files have ever been
+deleted repo-wide. As a REQUIRED leg it refuses **every js PR** until someone runs `release.yml` — a hard
+block on unrelated work that would be the leg that gets weakened. It reports; it does not refuse.
+
+### PDS-D702 — A VERSION NUMBER CAN BE **AHEAD** WHILE ITS BYTES ARE **BEHIND**. VERSION COMPARISON IS NOT A MEASUREMENT; BYTE COMPARISON IS.
+
+`@barkpark/nextjs@1.0.0-preview.3` is numerically ahead of main's declared `preview.2`, and its `src/index.ts`
+blob traces **exactly** to commit `450c4e07d` (2026-04-18) — a scaffold stub, `throw new Error
+("revalidateBarkpark not implemented in scaffold (Phase 3)")`, present in both `dist/index.mjs:3` and
+`dist/index.cjs:5`. Main DELETED that stub in `cd4fc992a` (#295) and added `export { barkparkMetadata }`,
+which the published root export lacks entirely. **The registry's version number is ~3.5 months older than its
+number implies.** `create-barkpark-app` drifts the same way (main preview.0, npm preview.1).
+
+Consequences the door must carry: (a) a one-directional door ("repo ahead of registry") **greens vacuously on
+two of five packages**; (b) the SURFACE clause does NOT fire on nextjs — its published `exports` keys are
+**identical** to main's nine — so the byte arm is not an optional nicety, it is the only thing that sees
+nextjs; (c) two immutable version numbers can cover one set of bytes: `core@preview.1` and `core@preview.2`
+have **identical extracted source trees** (digest `3b646c49…`), so `preview.2` asserts a difference that does
+not exist.
+
+Also unchosen by anyone: `@barkpark/core` and `@barkpark/nextjs` both carry `{latest: preview.3, preview:
+preview.2}`. **The mechanism is now known** — `getReleaseTag` returns `preState.tag` only when
+`publishedState !== "only-pre"`, and every one of these packages has published nothing but prereleases, so
+publish goes to `latest` and **the `preview` dist-tag is maintained by NOTHING**. It has been frozen since
+whoever last set it by hand. That is a class asserting something no mechanism produces.
+
+### PDS-D703 — `release.yml` ASSERTS IT EXERCISES THE AUTH PATH AND IT DOES NOT. `npm whoami` IS THE ONE-LINE PREFLIGHT THAT CONVERTS A PRESENCE-ASSERTION INTO A MEASUREMENT.
+
+`release.yml:158` reads, verbatim: *"Provide auth even for dry-run so the auth path itself is exercised."*
+**MEASURED FALSE.** `npm publish --dry-run --access public --tag preview` with the token literally set to
+`npm_BOGUS…` **SUCCEEDS** and prints `+ @barkpark/react@1.0.0-preview.99`. The only other token contact is
+`release.yml:88`'s `NPM_TOKEN present (40 bytes)` — a length check on a string, which discriminates nothing.
+**Both of the workflow's green receipts about the token survive an EXPIRED OR REVOKED token.** In the same
+bogus-token directory `npm whoami` returns `E401 Unauthorized`, so a one-line preflight makes it a
+measurement.
+
+**AND ONE COMMAND THE WAVE ALMOST USED AS PROOF IS A PUBLIC ENDPOINT.** `npm access list packages @barkpark`
+printed `@barkpark/react: read-write` while `npm whoami` said `ENEEDAUTH` **in the same shell** — because
+`curl -s https://registry.npmjs.org/-/org/barkpark/package` with **zero credentials** returns the identical
+permission map. Quoting it as proof of authorization would have been exactly the failure this epic hunts.
+
+State of the credential, for the record: `NPM_TOKEN` exists as a **repository** secret created
+2026-04-19T08:16:53Z; the inherited "it is an unset environment secret" blocker is REFUTED (neither
+`release.yml` nor `retag.yml` declares an `environment:` key, so the repo-level secret resolves). Validity is
+**UNPROVEN and unmeasurable by anything in this repo**: npm removed legacy tokens in Nov 2025, so a token
+created 2026-04-19 is granular and carries an expiry; it is 108 days old and its last PROVEN registry write
+was 100 days ago (`core@preview.3`, 2026-04-27T21:09:39Z, one minute after run `25019649888`). GH Actions
+logs for all five April publishes are **410 Gone** — the registry `time` field is the only surviving receipt
+of this repo's own release history.
+
+There is also **NO EXECUTION PATH FOR `npm deprecate` ANYWHERE**: `git grep -ln "npm deprecate" origin/main --
+.github` is EMPTY, and `~/.npmrc` does not exist on the operator host (`npm whoami` → `ENEEDAUTH`). The
+survey's "recommended floor" therefore requires a new workflow, not a command.
+
+### PDS-D704 — `changeset publish` SILENTLY SKIPS AN ALREADY-PUBLISHED VERSION AT **EXIT 0**, AND THE DRY-RUN LEG DOES NOT EVEN NAME THE PACKAGE.
+
+`pnpm changeset version` was RUN for real against `origin/main` in an isolated worktree and reverted. Result:
+core→preview.4 (**free**), react→preview.2 (**free**), codegen→preview.1 (**free**), **nextjs→preview.3
+(COLLIDES)**, **create-barkpark-app→preview.1 (COLLIDES)**. Neither colliding literal has EVER existed in git
+— `git log -L 3,3` on each `package.json` stops at preview.2 and preview.0 respectively. **The registry holds
+two versions the repo has no record of, and the repo's own release mechanism is about to re-mint them.**
+
+`release.yml`'s exact dry-run command (`pnpm publish -r --dry-run --access public --no-git-checks`) was run
+against the versioned tree: **rc=0, 67 lines, three `+ pkg@version` lines, and ZERO occurrences of "nextjs",
+"create-barkpark", or "groq" anywhere in the output.** The colliding packages are not skipped with a message;
+they are not mentioned at all. The REAL leg emits one warn (`${name} is not being published because version
+${localVersion} is already published on npm`) but the package never enters `publishedPackages`, so
+`unsuccessfulNpmPublishes` stays empty and no `ExitError(1)` is thrown. **The release workflow will green
+while silently shipping 3 of 5 packages.**
+
+Two more receipts destroyed in the same operation: `changeset version` **DELETES** `pre.json`'s record of
+previously-consumed changesets (the three historical ids are replaced by the current 342), and core's
+hand-bumped `preview.3` gets **no CHANGELOG heading, ever** — `changeset version` writes `## 1.0.0-preview.4`
+straight on top of an existing `## 1.0.0-preview.2`.
+
+**RULING: the fix is the `ff067514e` move applied to the two packages that were missed** — hand-align
+`nextjs`→`preview.3` and `create-barkpark-app`→`preview.1` so the next `changeset version` lands preview.4 /
+preview.2 cleanly — plus a leg asserting that the set of packages `changeset publish` reports EQUALS the set
+the release plan bumped. Note the mechanism is currently **unrunnable**: `pnpm changeset version` exits 1 even
+with a valid `GITHUB_TOKEN` (`FetchError: invalid json response body … Unexpected end of JSON input` from
+`@changesets/changelog-github`, unbisected). The wave does not promise a publish it cannot execute.
+
+### PDS-D705 — #9600's DISPOSITION IS **ENDING A**: A REPAIR THAT REMOVES THE LITERAL LEAVES THE LENS ENTIRELY, SO THE REGISTER ROW CANNOT BE RE-KEYED — ONLY RETIRED — AND THE ROSTER IS THE MECHANISM FOR A RECEIPT THIS LENS CANNOT KEY.
+
+Run at #9600's head `86a18df86`: **CENSUS RC=1**, three FAILs, exactly as filed. The four moved `@rederived`
+values are the predicted ones, now MEASURED: textual `104→103`, ast-literal `95→94`, emitted `91→90`,
+write-routed `54→53`; `phantom 9`, `consumer 4`, `read 14`, `unrouted 23` unmoved.
+
+**TWO PREMISES IN THE TASK BRIEF ARE REFUTED.** (1) "re-registering a fingerprint" is **not an available
+move**: `--keys` returns **zero** lines matching `correction`, because #9600 does not MOVE `ok: true`, it
+**deletes the literal** (`ok: status != :error`). `SearchController.correction/2` owns no emitted site at all.
+The only legal repairs are *delete the row* or *widen the lens*. (2) The `@rederived` amend is **NOT
+self-contained** — it breaks two selftest cases whose expectations are hardcoded literals
+(`census.exs:6395` `"0 stale + 8 unresolved of 8"`, `census.exs:6613` `"baseline  104  derived  104  =="`).
+Both must migrate in the same commit; neither is mentioned in the brief.
+
+**ENDING A IS PROVEN AVAILABLE AND GREEN.** A unique anchor exists — `ok: status != :error` occurs **exactly
+once** in `search_controller.ex` (`:375` post-#9600) — and the enclosing-def resolution yields the real
+fingerprint `anchor_mfa: "BarkparkWeb.SearchController.correction/2", def_fp: "94313079"`, **derived by
+planting a `def_fp: "PROBE"` row and reading the arm's own demotion message back, never typed**. With ending A
+the census is **RC=0, every arm PASS**, and `--selftest` is **RC=0, "SELFTEST OK — 36 cases, 25 of them
+mutants that went red as required"**.
+
+**ENDING B IS ALSO MECHANICALLY GREEN — AND THAT IS EXACTLY WHY IT IS REFUSED.** Two `@routed_excluded`
+5-tuples classed `:status_only_receipt` give RC=0 and let `DERIVATION-PARTITION-TOTAL` silently absorb them
+into `store_derived 105 → 107`. The ladder decides it: ending A gives judged-coverage **74**, VERDICTED **25**,
+PROVEN-BACKED **25**; ending B gives **72 / 23 / 23**. B files a mutation-attested honest receipt into the
+class the census's own prose calls "**THIS IS STILL THE POPULATION HOLE**", and the epic already has an open
+row saying that class is a misnomer (`pds-bl-w39-status-only-receipt-is-a-misnomer`: 99 of 106 residue pairs
+RENDER A BODY). **B buys the same exit code and throws away the evidence.** Ending C (widen the lens) takes
+the textual population from 98 to 177 occurrences in `api/lib` (+~80%) and re-keys every row — a wave, not a
+disposition.
+
+Deleting the orphan forfeits nothing: the row is `verdict: "UNJUDGED", basis: :unexamined`, and the census's
+own doctrine (`:2798-2806`) reds an orphan to stop "the register … silently re-point[ing] a **bought**
+judgment at a different receipt" — **no judgment was bought here**. The charter's direct precedent is `:4598`
+(`runHetznerVolumeResize` → `exitOK`, "its `volume/resize` disposition row deleted in the same edit").
+Two carries: roster rows have **no `evidence` field** (citations go in `note`), and `def_fp: "94313079"` is
+pinned to tree `86a18df86` — **any further edit to `correction/2`, INCLUDING `mix format`, moves it**, so the
+roster row must be authored LAST. That is the arm working; re-derive, never re-type.
+
+### PDS-D706 — THE SELF-ERASING LENS: THE CENSUS TOLERATES EVERY EDIT EXCEPT THE HONEST ONE, AND ITS NEIGHBOUR RE-CREDIT IS REAL.
+
+**The number is 91 of 91.** `pair_site/2` (`census.exs:1575-1589`) requires `{:lit, true, _}`; a computed `ok:`
+is not a site. So **every** emitted register row is erased from the population by a status-descending repair.
+There is no fraction — the population IS the defect. Underneath: **41** rows are WRITE-routed and not PROVEN
+(the shape #9600 repaired), **58** carry a bought basis beyond `unexamined`, **15** are PROVEN, and **26 of 91
+in 10 groups** share a `{path, mfa}` group with a sibling — **3 of the 15 PROVEN rows among them**.
+
+**THE DIRECTION'S "IT SHRINKS SILENTLY" IS REFUTED — IT SCREAMS.** One status-descending repair applied at
+`pulse_controller.ex:58`, a site with **no connection to #9600**, reproduced all three of #9600's failures at
+a different controller (`ORPHANED ROW … PulseController.create/2`, `UNDISPOSED ARRIVAL post
+/v1/plugins/pulse/:channel/events`, and the four-row drift). #9525's refusal is doing its job.
+
+**THE REAL DEFECT IS SHARPER, AND IT IS AN ASYMMETRY MEASURED THE SAME DAY AT THE SAME SITE.** Edit the
+receipt map but KEEP the literal → **rc 0, `CENSUS OK`**, the row re-points onto itself with a printed
+`basis_stale` demotion. Remove the literal (the repair) → **rc 1, three FAILs, committed-data migration in
+three places.** *An author can restructure a receipt arbitrarily and pay a printed note; an author who makes
+the receipt DESCEND FROM A MEASUREMENT pays the most.* **The instrument charges the highest price for the one
+change the epic exists to cause.**
+
+**AND THE NEIGHBOUR RE-CREDIT IS PROVED, NOT SUSPECTED.** `resolve_register/1` (`:2809-2837`) falls back to the
+unique non-exact candidate in the same group. Repairing `search_controller.ex:337` while editing its sibling
+at `:340` printed `recorded 79721084/115364326` — the register key of the site at **:337** — against the
+receipt at **:340**. It is honestly *demoted*, which is the mitigation, but the row now names the wrong
+receipt, and the natural "fix the red" move (re-key the orphan) would freeze the miscredit permanently.
+
+**RULING — NOT A LENS WIDENING.** Widening to computed `ok:` values reintroduces the guess the census forbids
+(`ok: not is_nil(id)` and `ok: user.is_admin` are indistinguishable to an AST lens without dataflow), and the
+census's own `PURE-ECHO 0 DETECTED — not separable from UNCLASSIFIED without dataflow; not guessed` is the
+precedent against it. Bare deletion is also refused: it loses the purchase and lets `REGISTER-COMPLETE` green
+on a smaller denominator. **The ruling is a `RETIRED` register-row form** (satisfying `REGISTER-COMPLETE`
+without a re-key, preserving the bought judgment as history), **a `repaired_computed_receipt` disposition
+class** (so a route that left BY REPAIR is never folded into `status_only_receipt`), **a conserved
+denominator** (`emitted 90 + retired-by-repair 1 = 91`, with `D448-DRIFT-REFUSES` comparing the conserved
+total), and **a fence on the single-candidate fallback** (refuse the re-point when the recorded row's group
+held more than one site at record time — free on the 65 solo rows, closes the proved miscredit on the 26).
+
+**THE LAW, worth the charter more than the code**: *a census of a defect must count its own cures, or every
+success it causes reads as a measurement going missing.* Note the post-repair shape ALREADY EXISTS on main and
+is invisible: `api/lib/barkpark/plugins/sheets/session.ex:707` emits `ok: ok?` and appears in **zero** of the
+91 sites. The population has never contained the honest shape at all.
+
+### PDS-D707 — D692's WALL CLAUSE IS **REFUSED** FOR PLAIN-BASH ROWS: `times` COUNTS CHILD CPU, AND D692'S MANDATE IS BEAM/PORT-CHILD SCOPED.
+
+D692 closes with "`--measure` must meter the WALL for **port-child riders** and say which unit it used". Both
+halves of its mechanism are confirmed at source: `run_measure` runs the subject as
+`bash -c "$cmd >/dev/null 2>&1; …; times"` (`pds-door-census.sh:1533-1537`) with no wall anywhere, and the
+rider `refute row =~ ~r/\bwall\b.*=/` sits at **`pds_door_census_test.exs:384`** (the brief said `:386`).
+
+But the CONCLUSION is declined on a measurement taken this session:
+
+```
+$ bash -c 'bash -c "i=0; while [ $i -lt 400000 ]; do i=$((i+1)); done" >/dev/null 2>&1; times'
+0m0.001s 0m0.001s      <- the metering shell itself
+0m0.871s 0m0.072s      <- ITS CHILDREN
+```
+
+`measure_sum` (`:1450-1454`) awk-accumulates over **both** records. **`times` is not blind to OS children.**
+D692's blindness is a property of a meter around a **BEAM** that fans out to child BEAMs (the census's own row
+measures that at 19.6x for `--via "mix test …"`). Neither condemned instrument is such a thing — both are
+plain bash harnesses whose entire cost is direct-descendant CPU that `times` counts. **D692's mandate does not
+reach these two rows.** Paying it here would require editing `run_measure` AND relaxing a required-gate refute,
+and would buy nothing. The wall requirement stays live only against future BEAM-parent rows.
+
+One carry: row `:290` currently reads `(rc=0, wall 68.24 s)` and survives `\bwall\b.*=` only because no `=`
+follows the word. **The re-take DROPS that wall figure entirely** (the old meter was `/usr/bin/time -p`;
+`--measure` is not). Reproduce the no-`=` prose shape or the required rider reds.
+
+### PDS-D708 — THE INSTRUMENT CANNOT WITNESS ITS OWN REMOVAL, AND `tooling/pds/**` IS NOT MERELY UNRUN — IT IS **UNCLASSIFIED**.
+
+The THROUGH class is **HONEST**, and the mechanism is now named end to end and mutation-proved: PR touches
+`scripts/pds-*` → `elixir.yml`'s Dispatch job EXECUTES `elixir-path-escape-check.sh --match test` →
+`ELIXIR_TEST_ONLY_PATHS:99-102` declares four pds paths **by exact path** → `mix test` → four ExUnit riders
+`System.cmd` the instrument → "Elixir gate" is REQUIRED. Deleting line `:99` flips `--match test` from `true`
+to `false` and reds `--check` at rc 1 with `UNCOVERED repo-root read: scripts/pds-door-census.sh / read from:
+api/test/barkpark/pds_door_census_test.exs`. **The direction's "a glob in shell-harnesses.yml" is REFUTED**:
+that workflow has NO glob — seven explicit `scripts/*.sh` entries, anti-D26 by design.
+
+**THE COMPLEMENTARY MUTATION, WHICH NOBODY HAD RUN, PASSES EVERY GATE.** `mv
+api/test/barkpark/pds_door_census_test.exs /tmp/` →  `elixir-path-escape-check --check` **rc 0**, read count
+silently 29 → 28 (floor is 8); `pds-elixir-receipt-census.exs` **rc 0, `CENSUS OK`**, zero mentions of "door".
+Only the door census itself catches it — `DEAD-DECLARATION … This is the one class no existing gate can see`
+— **but its SOLE executor is the very file whose deletion it exists to detect.** A PR deleting that one file
+touches `api/test/**`, so `test=true`, `mix test` passes with one fewer file, path-escape is green, and the
+Elixir gate greens. The declaration at `:99` survives pointing at nothing. *A guard that cannot be
+contradicted by the thing it guards is a frozen instrument.*
+
+**THE DENOMINATOR HOLE.** `pds-door-census.sh:983` enumerates `ls -1 scripts/pds-*.sh scripts/pds-*.exs` —
+directory-scoped. Live run: population **20**, 0 UNDISPOSED, 0 DEAD-DECLARATION, rc 0, and **zero occurrences
+of the string `tooling`** in the whole output. `tooling/pds/**` (9 files including `rerun-adjudicate.test.mjs`,
+executed by nothing) and `tooling/scaffy-duels/meter.py` are outside the population entirely.
+
+**RULING: WIDEN AND WIRE IN THE SAME PR — do not write RETIRED.** Retirement is refuted four ways:
+`tooling/pds` is **5 days old** (one commit, `c6da95f46`, #8516); it **passes today**
+(`117 checks, 0 failed / all green`, rc 0); the charter itself publishes a rerun command for it at `:8800`
+that nothing executes (*this epic's disease, one tree over*); and `pds-w28-bl-two-rerun-screens-drift` is
+OPEN 0/3 depending on it. Price measured so Decide is not blocked: `CPU=0.41+0.25=0.66s LOCAL
+meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=4.90-5.06 darwin 2026-08-05` (3 trials, **1.1%
+spread**) — **the cheapest instrument in the column**, half the door census's own 1.26s. Two constraints:
+`shell-harnesses.yml` is the WRONG venue (paths-filtered AND not required), and `node` is an **undeclared
+toolchain dependency** in the elixir lane (zero `setup-node` hits) — the rider must **fail closed** on a
+missing `node`, or it is a vacuous green inside the instrument built to abolish vacuous greens.
+
+### PDS-D709 — THE WEB GATE'S DEADLOCK IS **ABSENT**, NOT `skipped`; THE FILED ROW'S CRITERIA 1 AND 2 ARE BOTH UNSOUND AS WRITTEN.
+
+`ci.yml` carries a workflow-level `on: … paths:` on BOTH triggers, so it emits **no check run at all** on a
+non-web head — re-derived on PR #7805's docs-only head `f1c33790` (total_count=13, zero console names) and
+directly: `web/ typecheck + unit tests + lint` is PRESENT and green on the web-touching head `47d113bb`
+(#9599) and **ABSENT** from `b7202bea` (#9614) and from main's own tip. Registering that name today deadlocks
+main on every non-web PR via "expected, never reported" — **never via `skipped`**.
+
+**"Does `skipped` satisfy a required context" is UNVERIFIED-AT-MAIN and is NOT NEEDED for this slice.** Across
+200 merged PR heads the four required contexts concluded `success` **798** times, `failure` **2**, and
+`skipped` **ZERO** — by design, because all four required names are `if: always()` AGGREGATORS which
+structurally cannot skip. The surviving D19 probe (#6369, merged 2026-07-27) proves check-run CONCLUSIONS but
+NOT protection satisfaction: its base was `hg-probe-base`, not main, its head also carried `PR references an
+active task => failure` — a name required on main — **and it merged anyway**, so that base was unprotected;
+the branch is deleted (404) and cannot be re-derived.
+
+**RULING: criterion 1 is re-cut to a CONDITIONAL two-head quote** (the name renders on a web-touching head,
+is absent from a non-web head — quote both shas), because a single-head reading flips depending on what
+main's last merge touched. **Criterion 2 is re-cut from "re-measure skipped-counts-as-passing" to the
+mechanism that actually applies** (a paths-filtered workflow emits NO check run). And the two defects are
+COUPLED: registering the leaf after a shim transplant MOVES the vacuous green from "web/ absent" to "web/
+untouched", so the aggregator — never the leaf — is what gets registered, and the refuse-branch fix must land
+in the same PR. Separately confirmed: with `web/` absent the job's only ungated step is a bare `echo` → the
+job concludes **SUCCESS having typechecked nothing**; the branch is currently unreachable on main because
+`web/` exists.
+
+### PDS-D710 — `meter.py`'s §3 DOLLARS ARE A HAND-COMPUTED LITERAL WITH NO RE-TAKER, AND THE ROW'S OWN CRITERION 2 MANDATES A LANE BRANCH PROTECTION CAN NEVER REQUIRE.
+
+#9604's duplicate rate table is **genuinely fixed and mutation-proven in BOTH directions** (a `tally_wf.py`
+RATES drift reds meter's self-test at rc=1 AND tally's own at rc=1; a `meter.py` multiplier drift reds
+`tally_wf.py`). The population marker self-asserts and reds on drift — the surveyor's rc=0 was the
+pipe-eats-rc trap. Price is trivial: `--self-test` real 0.03-0.04s, `verify results` real 0.02s.
+
+**BUT THREE HOLES REMAIN, ALL MUTATION-PROVED.** (a) The population arm is guarded by
+`if os.path.isdir(CORPUS_DIR)` (`meter.py:336`): in a tree without `results/` the C2 mutation that reds in
+the full tree **GREENS at rc=0 — and the banner still prints "the population assertion fires from the corpus
+path AND an ancestor"**. *A receipt that names a measurement it did not take is this epic's disease inside
+the epic's own instrument.* (b) Renaming or deleting `tally_wf.py` gives rc=0 with a cheerful "parity
+unasserted"; in-repo deletion and legitimate copy-away are indistinguishable to the exit code. (c) **MUT_E**:
+add a 35th envelope, bump BOTH doc population markers, leave §3 untouched → **rc=0**. The population marker
+forces a doc touch; it does not force the DOLLARS to move. `meter.py` has exactly two verbs and NEITHER emits
+a corpus total or a component share, so `$66.40`, `$0.5857` and the four percentages are **hand-computed
+literals** — they re-derive to the digit today, by nothing in the repo. A dated cheque that has not yet
+bounced.
+
+**AND `pds-w49-meter-ci-decision`'s CRITERION 2 IS UNSOUND**: it demands "a workflow triggers on
+`tooling/scaffy-duels/**`", i.e. a paths-filtered workflow, which `required-checks.json`'s own S4 doctrine
+forbids from ever being required ("a required context that is ABSENT reports 'expected' forever", D18).
+Meeting it literally produces an advisory lane wearing a gate's name. It is re-cut to the Elixir door.
+`shell-harnesses.yml`'s own header claim "the harness rides its own required lane" is FALSE — a PDS-class
+assertion sitting inside the CI config.
+
+### PDS-D711 — THE SECOND DISTRIBUTION BOUNDARY: EVERY `curl | sh` INSTALLS THE PRE-#9603 BANNER, AND `bp upgrade` MEASURES THE RELEASE FEED RATHER THAN THE SHIPPED SOURCE.
+
+Proven at L1 by RUNNING the installer, not by reading tags: `curl … install-cli.sh | sh` → rc 0, pins
+**`cli-v1.16.0`** (2026-07-24), `bp --version` → `{"cli_version":"1.16.0","commit":"1291215"}`. **The
+"install-cli 404s NOW" memory premise is FALSE** — 200, 9897 bytes, byte-identical to main — and it was
+already adjudicated stale at `bp-agent-onramps-w2-charter.md:46`. The real live 404 is
+**`sdk/README.md:13`** (`npm install @barkpark/bulldocs-sdk`, E404, never published) — an agent-tier doc
+advertising a package that does not exist.
+
+The shipped lie was read **out of the artifact**: `strings -a` on the installed binary recovers the
+`go:embed`-ed `deploy.sh` and shows `echo "  Barkpark is running!"` immediately after `IP=$(hostname -I …)`
+with **no `HEALTHY` guard**. Marker counts on that binary: `Waiting for API on localhost` **0**,
+`HEALTH_ATTEMPTS` **0**, `NOT ANSWERING` **0** — all three are main-only. #9603 landed **twelve days after**
+the tag. `bp upgrade` on that binary prints `{"current":"1.16.0","latest":"1.16.0","updated":false}` and, under
+a pty, `bp is up to date (1.16.0)` — **true against its own basis (the release feed) and misleading about the
+thing a user means by "up to date" (the shipped source)**. 88 commits touch `internal/`+`cmd/` since the tag;
+61 touch `internal/cli`; exactly **1** touches `internal/cli/setup/assets/` and that 1 IS #9603.
+
+**ONE PREMISE REFUTED, SAVING A SLICE**: `bp upgrade` does NOT trust `releases/latest` and did not at
+1.16.0 — `cli-v1.16.0:internal/cli/upgrade.go` already prefers `latestReleaseVersionAPI`
+(`/releases?per_page=30`), citing `install-cli.sh:27-38` by name. That fix is load-bearing, not redundant:
+the live feed's first EIGHT entries are all `build-<sha>`. **No slice should be cut for it.**
+
+**AND THE DOOR'S SHAPE DOES NOT TRANSFER.** For the CLI there is no version literal in the repo at all — the
+version comes from the tag via ldflags — so the oracle is **TAG-vs-HEAD over the shipped-asset paths**
+(`git rev-list --count <newest cli-v tag>..HEAD -- internal/cli/setup/assets/` ≠ 0 today, and it became ≠ 0
+the moment #9603 merged), plus `strings` on the release binary as the byte arm. `cli-v1.17.0` is free —
+unlike npm, this boundary has no immutability wall. Scope note for whoever builds it: at
+`internal/cli/setup/assets/` the count is **1**; at `internal/cli` it is **61**, which as a required gate
+would be an always-red that gets weakened.
+
+### PDS-D712 — RULE-OUT, NOT A SLICE: THE `build-<sha>` RELEASE STAMP IS HONEST, AND THE POPULATION IS 15, NOT 37.
+
+`gh release list` yields exactly **15** `build-<sha>` releases, because `release-artifact.yml` ends with a
+"Prune old build-* releases (keep newest 15)" step. **15 build-\* + 22 `cli-v*` = 37** is the miscount.
+Every `stamp.json` field descends from the build that produced the tarball: `build-prebuilt.sh:26`
+`SHA=$(git rev-parse HEAD)`, and `:42-45` read elixir/otp/erts/arch from the **live toolchain that just ran
+`mix compile`** — nothing is pasted. Confirmed against the real published asset for `build-8ca0ad47…`. And
+`api-build.tar.zst.sha256` **IS verified consuming-side**, not merely published:
+`fetch-prebuilt.sh:60-64` recomputes and calls `fallback "checksum mismatch"`.
+
+**Two honest caveats recorded rather than a clean pass.** (1) It is INTEGRITY, not AUTHENTICITY — the
+`.sha256` rides the same channel as the tarball. (2) **The verifier may never run on a real box**:
+`fetch-prebuilt.sh:22-24` exits 3 *before any fetch* when `.slots` exists, and `/opt/barkpark/.slots` EXISTS
+on guerrilla, while `deploy/instance-deploy.sh` contains ZERO references to prebuilt. So CI mints an artifact
+per api-touching merge whose checksum gate is structurally unreached. Also: `stamp.json`'s `otp` field is
+read by nobody (`fetch-prebuilt.sh` gates on sha/elixir/erts/arch only), and
+`deploy/instance-deploy.sh:997`'s comment "guerrilla is ARM64" is **false** — `uname -m` → `x86_64`. Both are
+filed as backlog, not built.
+
+### PDS-D713 — THE WAVE PAPER'S OWN WRITE PATH: THE SERVER **DOES** NAME THE OFFENDING BLOCKS; THE OPERATOR'S FROZEN `bp` DISCARDED THEM. AND THE PUBLISH GATE ARMS ON A **KEY NAME**.
+
+Digest reported `invalid_paper_structure` "with NO block paths listed". **Half REFUTED.** A raw
+`POST /v1/data/mutate/production` returns `error.details.blocks` with **one exact path per offending cell**
+(`blocks[30].rows[0].cells[0] has no renderable inline content`, 100+ of them). The installed `bp` is built
+from `f59aaf717` (2026-07-31T06:54:48Z); at that commit `internal/cli/errors.go` contains the string
+`details` **ZERO** times and decodes only `{Code, Message, RequestID, Hint}` — exactly the four fields that
+printed. The fix, `ae0f917bb` (#8809), landed **one day after** the binary was built. **The wave's own
+diagnostic blindness is wave 49's disease inside the epic's own toolchain**; `make cli-build` is the whole
+fix for the operator.
+
+**THE SURVIVING HALF IS A GENUINE, UNFILED DEFECT.** `prepare_paper_render_shapes/2` matches ONLY
+`%Document{content: %{"blocks" => blocks}}`; anything else falls through to `{:ok, draft}`, **ungated**. The
+Strategize publish SUCCEEDED because its content had no top-level `"blocks"` key — and it carried the very
+string-cell tables the gate later condemned. A later write added the key and ARMED the gate on unchanged
+content. **Same server, same bytes, opposite verdict, decided by which key the writer used.** And the
+refusal's own sentence ("readers cannot render") is FALSE: the live reader renders those cells — 78 of 78
+`<td>` non-empty. `normalize_wrapped_table_cell/1` canonicalizes `%{"content" => …}` and `%{"text" => …}` and
+has **no clause for a bare string**, so the plainest authoring shape is neither normalized nor named.
+Prior art `task-9b3778f52ca05984` is OPEN at priority 1 with ZERO criteria; its proposed fix ("make the error
+enumerate the offending block ids") is REFUTED — that work was already done server-side.
+
+### PDS-D714 — THE POINTER ROW'S COUNT DOES NOT DESCEND FROM THE INSTRUMENT IT CITES.
+
+`pds-bl-w47-duplicate-d-allocation-pointer` is titled "**Nineteen** D-numbers name two findings each" and its
+body says "19 genuine collisions, **17** numbers where one token names two unrelated findings". The shipped
+instrument at `scripts/pds-record-parity.sh:251` baselines **18**
+(`DUP_BASELINE_GENUINE="397 398 399 400 492 493 494 495 553 554 555 556 570 571 572 573 664 665"`), the naive
+grep the row itself quotes returns **21**, and the sibling `pds-d-number-allocation-arbiter` also says 18.
+**Three numbers for one population, inside the epic's own backlog, in a dispatch a builder would follow.**
+The row is re-cut to 18 with the instrument named as its source. Correction to the wave-48 record while we
+are here: `pds-record-parity` is **THROUGH**, not advisory — its rider `System.cmd`s the harness at `:90,:119`
+— so the row's "the dup arm is advisory" premise is also refuted.
+
+### PDS-D715 — THE PRICE RE-TAKE IS QUOTED AGAINST ITS **OBSERVED BAND**, WITH THE LOAD-ROBUSTNESS SPREAD AS THE EVIDENCE; THE HOST-QUIET PREMISE IS REFUTED.
+
+Both condemned figures were re-taken BY `--measure`, three trials each, per-trial load stamp:
+
+| instrument | trials | spread | condemned | ratio |
+|---|---|---|---|---|
+| `pds-ledger-census_test.sh` | 23.66 / 23.89 / 23.62 s @ load1 11.99 / 11.65 / 9.05 | **1.14%** | 40.33 s @ load1 24.26 | 1.70x lower |
+| `pds-scratch-target_test.sh` | 0.53 / 0.52 / 0.55 s @ load1 6.98 / 6.50 / 6.06 | **5.8%** | 8.91 s @ load1 79.23 | **16.8x lower** |
+
+**THE DIGEST'S "the host is quieter now, load1 4.0-5.0" IS REFUTED**: every trial ran above it (9.05-11.99 and
+6.06-6.98). `pds-w47-price-column-retake` criterion 3 says a figure taken under wave load must be REFUSED.
+**RULING: quote against the OBSERVED BAND, do not refuse** — because the ledger figure moved **1.14% across a
+32% load swing** (9.05→11.99), which is itself a MEASUREMENT that the figure is quotable against its own stamp
+under D656 ("ship the local CPU figure LABELLED LOCAL"). The row must state `load1=9.05-11.99` and
+`load1=6.06-6.98` VERBATIM and cite the three-trial spread; a builder who writes "taken on a quiet host" is
+committing this epic's own disease. The two bands are **not** poolable — the instruments were measured at
+systematically different loads and must never be quoted against one common band.
+
+The 16.8x scratch-target collapse is NOT vacuity: the un-metered run executes all **34** arms and ends
+`---- 0 failure(s) / SCRATCH TEST PASSED`; `sys` fell 4.08→0.29 (14x) while `user` fell 4.83→0.23 (21x), which
+is contention, not a skipped path. **A criterion-4 correction the builder must carry**: `--measure` DISCARDS
+the subject's output, so the run tail needs a separate un-metered run — and the two harnesses do not agree on
+their tail. `pds-scratch-target_test.sh` prints `---- 0 failure(s)`; `pds-ledger-census_test.sh` prints
+`SELFTEST PASS: 173 checks.` and contains **no `failure(s)` string on the green path at all**. A criterion
+demanding a "`0 failure(s)`-class line" from the ledger harness is unsatisfiable as written.
+
+Two more blockers the dispatch did not name. **THE SLICE IS DOUBLY FILED**:
+`pds-w47-price-column-retake` (priority 1, 9 criteria) and `pds-w48-retake-price-classed-rows` (priority 2,
+2 criteria, #9582) describe the same work — **wave 49 keeps w47 and folds w48**, which is D680's collision
+path walked for the second time in this wave. And **criterion 1's rider leg cannot run in a fresh worktree**:
+`api/deps` and `api/_build` do not exist there, so `mix test` dies on ~40 Hex packages; the builder must
+budget a full `mix deps.get` + compile, and per the known-broken build-borrow may NOT borrow `api/_build`.
+
+### PDS-D716 — THE FENCE, WIDENED BY MEASUREMENT, WITH A TWO-FILE DISPENSATION.
+
+Wave 36's is the last standing path enumeration (`api/**`, `internal/**`, `deploy/**`, `scripts/pds-*`,
+`docs/**`, the `pds-*` namespace, plus a one-file dispensation for `.github/workflows/elixir.yml`; `cloud/**`
+and `.github/workflows/**` are OUT). Re-adjudicated against live branches, not open PRs:
+
+- **`deploy/instance-deploy.sh` and `deploy/cp-deploy.sh` ARE IN-FENCE** — letter and spirit agree. PDS has
+  already merged an edit to `instance-deploy.sh` (`c80130fb3`, #6421, wave 22), and a CONCURRENT epic reads the
+  fence the same way: `bp-cloud-console-hardening-charter.md:366` routes around them "so **no `deploy/**`
+  edit is needed and the PDS fence is not touched**". Neither file is hot; last commits 2026-07-28 / 2026-07-22.
+  **But merging any `deploy/**` byte deploys BOTH production hosts** (`deploy.yml`'s changes-job regexes route
+  `deploy/` to `cp=true` AND `instance=true`), so any such slice is HARNESS-FIRST and must state that
+  consequence in its brief. This wave does not cut one.
+- **`.github/workflows/{release,retag}.yml` GET A TWO-FILE DISPENSATION**, on the same logic as wave 36's
+  `elixir.yml` grant: they are npm-release-only, no concurrent cycle touches them, and D703's repair is
+  unbuildable without them.
+- **FENCED OUT THIS WAVE, MEASURED**: `cloud/**` (Console wave 32, in SURVEYING, zero tree footprint yet but
+  its whole declared rail is `cloud/**`); `deploy/site-deploy*` and `templates/search-starter/**` and
+  `api/lib/barkpark/{application.ex,content/schema.ex,search/documents_retriever.ex}` and
+  `api/lib/barkpark_web/plugs/public_read.ex` (deploy-reliability wave 1 — and **audit BRANCHES, not PRs**:
+  its `deploy/site-deploy-node.sh` slice has NO PR at all and is invisible to a PR-list sweep); and the
+  console path-escape scripts.
+
+### The wave 49 plan — 8 slices, two rounds, outward then inward
+
+**Fable is unavailable; every slice builds on Opus at medium.** Round-1 file sets are disjoint. Round-2 slices
+do NOT dispatch beside their dependency and each carries an `AFTER <task_id> MERGES` line as the first line of
+its brief. **One file is the whole reason for the round split**: `scripts/pds-door-census.sh` (slices 3 and 7)
+and `scripts/pds-elixir-receipt-census.exs` (slices 2 and 8), and `ELIXIR_TEST_ONLY_PATHS` is owned in round 1
+by slice 1 alone.
+
+| # | round | task | surface | why it is here |
+|---|---|---|---|---|
+| 1 | 1 | `pds-w49-published-artifact-door` | new `scripts/pds-published-artifact-door.sh` + rider + one `ELIXIR_TEST_ONLY_PATHS` line | D700 + D701 + D702. The crown. **HIGH-FLIP-RISK: the required-leg predicate** |
+| 2 | 1 | `task-9e2c61a0979657ae` | `scripts/pds-elixir-receipt-census.exs` | D705 — ending A, finishing #9600. **HIGH-FLIP-RISK: the disposition choice** |
+| 3 | 1 | `pds-w47-price-column-retake` | `scripts/pds-door-census.sh` rows 290-291 + rider | D707 + D715; folds `pds-w48-retake-price-classed-rows` |
+| 4 | 1 | `pds-w49-npm-publish-preflight` | `release.yml`, `retag.yml`, 2 `package.json` literals | D703 + D704. Two-file dispensation per D716 |
+| 5 | 1 | `pds-bl-w48-deploy-make-and-rebuild-receipts` | `Makefile`, `deploy-rebuild.sh`, `.githooks/post-merge` + new harness | D694's shape at the deploy boundary; three receipts, three refusals |
+| 6 | 1 | `pds-bl-w48-web-sibling-launders` | `web/app/api/{find,search-seed}/route.ts` | the two siblings of #9599's repaired exemplar |
+| 7 | 2 | `pds-w49-instrument-run-map` | `pds-door-census.sh` denominator + `tooling/pds` wiring | D708. AFTER #1 and #3 merge |
+| 8 | 2 | `pds-w49-self-erasing-lens` | `scripts/pds-elixir-receipt-census.exs` | D706. AFTER #2 merges |
+
+**COVERAGE**: every dispatched surveyor and every dispatched verifier reported; no coverage deficit in either
+round. **DEBTS PAID THIS WAVE**: wave 48's carried debt (`pds-w25-round-open`'s "every free close by content"
+conjunct) is NOT paid and is carried forward again, named. **DEBT CREATED AND NAMED**: `#9600`'s roster row
+carries a `PROVEN` verdict whose backing test (`correction_receipt_test.exs`) was NOT driven by the verifier
+(no local Postgres) — the builder MUST drive it before committing that verdict, or the row is itself a receipt
+that does not descend from a measurement, inside the instrument that measures receipts.

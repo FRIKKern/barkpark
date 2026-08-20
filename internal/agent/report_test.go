@@ -1,10 +1,17 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -53,14 +60,19 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 	}
 
 	r := gatherReport(ReportConfig{
-		Runner:        git,
-		Checkout:      "/opt/barkpark",
-		DiskProbe:     func() (int, error) { return 42, nil },
-		CPUProbe:      func() (int, error) { return 73, nil },
-		MemProbe:      func() (int, error) { return 61, nil },
-		LoadProbe:     func() (float64, error) { return 1.25, nil },
-		PGSizeProbe:   func() (int64, error) { return 1234567, nil },
-		ReqStatsProbe: func() (float64, int, error) { return 12.5, 87, nil },
+		Runner:      git,
+		Checkout:    "/opt/barkpark",
+		DiskProbe:   func() (int, error) { return 42, nil },
+		CPUProbe:    func() (int, error) { return 73, nil },
+		MemProbe:    func() (int, error) { return 61, nil },
+		LoadProbe:   func() (float64, float64, error) { return 1.25, 1.89, nil },
+		PGSizeProbe: func() (int64, error) { return 1234567, nil },
+		SwapProbe:   func() (int, int64, error) { return 99, 2147479552, nil },
+		BeamProbe:   func() (int64, int64, error) { return 1602224128, 1233125376, nil },
+		PGTopRelationsProbe: func() ([]RelationSize, error) {
+			return []RelationSize{{Name: "mutation_events", Bytes: 1510000000}}, nil
+		},
+		ReqStatsProbe: func() (float64, int, float64, error) { return 12.5, 87, 0.22, nil },
 		BackupProbe:   func() (bool, string, error) { return true, "last backup 2h ago", nil },
 
 		HealthBaseURL: "https://server.example.com",
@@ -93,14 +105,29 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 	if r.Load1 != 1.25 {
 		t.Errorf("Load1 = %v, want 1.25", r.Load1)
 	}
+	if r.Load15 != 1.89 {
+		t.Errorf("Load15 = %v, want 1.89 (the sustain signal, D67)", r.Load15)
+	}
 	if r.PGSizeBytes != 1234567 {
 		t.Errorf("PGSizeBytes = %d, want 1234567", r.PGSizeBytes)
+	}
+	if len(r.PGTopRelations) != 1 || r.PGTopRelations[0].Name != "mutation_events" {
+		t.Errorf("PGTopRelations = %+v, want the one named consumer", r.PGTopRelations)
+	}
+	if r.SwapUsedPercent != 99 || r.SwapTotalBytes != 2147479552 {
+		t.Errorf("swap = (%d, %d), want (99, 2147479552)", r.SwapUsedPercent, r.SwapTotalBytes)
+	}
+	if r.BeamPSSBytes != 1602224128 || r.BeamSwapBytes != 1233125376 {
+		t.Errorf("beam = (%d, %d), want (1602224128, 1233125376)", r.BeamPSSBytes, r.BeamSwapBytes)
 	}
 	if r.ReqPerS != 12.5 {
 		t.Errorf("ReqPerS = %v, want 12.5", r.ReqPerS)
 	}
 	if r.P95Ms != 87 {
 		t.Errorf("P95Ms = %d, want 87", r.P95Ms)
+	}
+	if r.Err5xxPerS != 0.22 {
+		t.Errorf("Err5xxPerS = %v, want 0.22", r.Err5xxPerS)
 	}
 	if !r.BackupOK || r.BackupDetail != "last backup 2h ago" {
 		t.Errorf("Backup = (%v, %q), want (true, last backup 2h ago)", r.BackupOK, r.BackupDetail)
@@ -141,6 +168,9 @@ func TestGatherReportHonestUnknowns(t *testing.T) {
 	if r.Load1 != -1 {
 		t.Errorf("Load1 = %v, want -1 (no probe)", r.Load1)
 	}
+	if r.Load15 != -1 {
+		t.Errorf("Load15 = %v, want -1 (no probe — never a fake idle 0)", r.Load15)
+	}
 	if r.PGSizeBytes != -1 {
 		t.Errorf("PGSizeBytes = %d, want -1 (no probe)", r.PGSizeBytes)
 	}
@@ -149,6 +179,18 @@ func TestGatherReportHonestUnknowns(t *testing.T) {
 	}
 	if r.P95Ms != -1 {
 		t.Errorf("P95Ms = %d, want -1 (no probe)", r.P95Ms)
+	}
+	if r.Err5xxPerS != -1 {
+		t.Errorf("Err5xxPerS = %v, want -1 (no probe — 'unmeasured', not 'no errors')", r.Err5xxPerS)
+	}
+	if r.SwapUsedPercent != -1 || r.SwapTotalBytes != -1 {
+		t.Errorf("swap = (%d, %d), want both -1 (no probe)", r.SwapUsedPercent, r.SwapTotalBytes)
+	}
+	if r.BeamPSSBytes != -1 || r.BeamSwapBytes != -1 {
+		t.Errorf("beam = (%d, %d), want both -1 (no probe)", r.BeamPSSBytes, r.BeamSwapBytes)
+	}
+	if r.PGTopRelations != nil {
+		t.Errorf("PGTopRelations = %+v, want nil (unmeasured is a JSON null, not an empty list)", r.PGTopRelations)
 	}
 	if r.HealthStatus != "unknown" {
 		t.Errorf("HealthStatus = %q, want unknown (no gate)", r.HealthStatus)
@@ -175,11 +217,44 @@ func TestGatherReportHealthGateDown(t *testing.T) {
 // fail-soft: a CPU probe that errors leaves CPUUsedPercent at the -1 sentinel
 // while a wired memory/load probe still lands its reading. A partial box phones
 // home whatever it can prove.
+// TestGatherReportLoadPairFailsAsOneUnit proves the two load averages land
+// TOGETHER or not at all: one read of /proc/loadavg produces both, so a failing
+// probe must leave BOTH at the -1 sentinel rather than a real load1 beside a
+// fabricated load15 — which would read as a box that is busy now but has been
+// quiet for fifteen minutes, the exact opposite of the truth the sustain fence
+// is looking for.
+func TestGatherReportLoadPairFailsAsOneUnit(t *testing.T) {
+	rErr := gatherReport(ReportConfig{
+		LoadProbe: func() (float64, float64, error) { return 0, 0, errors.New("no /proc/loadavg") },
+	})
+	if rErr.Load1 != -1 || rErr.Load15 != -1 {
+		t.Errorf("load = (%v, %v), want both -1 (probe errored)", rErr.Load1, rErr.Load15)
+	}
+
+	// A genuinely idle box reads 0 — real data, distinct from the sentinel.
+	rIdle := gatherReport(ReportConfig{
+		LoadProbe: func() (float64, float64, error) { return 0, 0, nil },
+	})
+	if rIdle.Load1 != 0 || rIdle.Load15 != 0 {
+		t.Errorf("load = (%v, %v), want (0, 0) — idle is real, not the -1 sentinel",
+			rIdle.Load1, rIdle.Load15)
+	}
+
+	// The live shape this field exists for: quiet right now, sustained-busy for
+	// the last fifteen minutes. Only load15 can say it.
+	rSustained := gatherReport(ReportConfig{
+		LoadProbe: func() (float64, float64, error) { return 0.64, 1.89, nil },
+	})
+	if rSustained.Load1 != 0.64 || rSustained.Load15 != 1.89 {
+		t.Errorf("load = (%v, %v), want (0.64, 1.89)", rSustained.Load1, rSustained.Load15)
+	}
+}
+
 func TestGatherReportVitalsFailSoft(t *testing.T) {
 	r := gatherReport(ReportConfig{
 		CPUProbe:  func() (int, error) { return 0, errors.New("no /proc/stat") },
 		MemProbe:  func() (int, error) { return 55, nil },
-		LoadProbe: func() (float64, error) { return 0.5, nil },
+		LoadProbe: func() (float64, float64, error) { return 0.5, 0.75, nil },
 	})
 
 	if r.CPUUsedPercent != -1 {
@@ -206,7 +281,7 @@ func TestGatherReportVitalsFailSoft(t *testing.T) {
 func TestGatherReportReqStatsWiring(t *testing.T) {
 	// Probe error → both sentinels.
 	rErr := gatherReport(ReportConfig{
-		ReqStatsProbe: func() (float64, int, error) { return 0, 0, errors.New("404") },
+		ReqStatsProbe: func() (float64, int, float64, error) { return 0, 0, 0, errors.New("404") },
 	})
 	if rErr.ReqPerS != -1 {
 		t.Errorf("ReqPerS = %v, want -1 (probe errored, not a fake 0)", rErr.ReqPerS)
@@ -217,7 +292,7 @@ func TestGatherReportReqStatsWiring(t *testing.T) {
 
 	// Success with null p95 → req/s lands, p95 stays the -1 sentinel.
 	rNull := gatherReport(ReportConfig{
-		ReqStatsProbe: func() (float64, int, error) { return 3.0, -1, nil },
+		ReqStatsProbe: func() (float64, int, float64, error) { return 3.0, -1, -1, nil },
 	})
 	if rNull.ReqPerS != 3.0 {
 		t.Errorf("ReqPerS = %v, want 3.0", rNull.ReqPerS)
@@ -228,7 +303,7 @@ func TestGatherReportReqStatsWiring(t *testing.T) {
 
 	// A real 0 req/s (idle box) is data, not the sentinel.
 	rIdle := gatherReport(ReportConfig{
-		ReqStatsProbe: func() (float64, int, error) { return 0, 0, nil },
+		ReqStatsProbe: func() (float64, int, float64, error) { return 0, 0, 0, nil },
 	})
 	if rIdle.ReqPerS != 0 {
 		t.Errorf("ReqPerS = %v, want 0 (idle is real, not the -1 sentinel)", rIdle.ReqPerS)
@@ -259,7 +334,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		if probe == nil {
 			t.Fatal("probe is nil, want a wired probe")
 		}
-		rps, p95, err := probe()
+		rps, p95, _, err := probe()
 		if err != nil {
 			t.Fatalf("probe error: %v", err)
 		}
@@ -280,7 +355,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		rps, p95, err := NewReqStatsProbe(srv.URL, "", nil)()
+		rps, p95, _, err := NewReqStatsProbe(srv.URL, "", nil)()
 		if err != nil {
 			t.Fatalf("probe error: %v", err)
 		}
@@ -292,13 +367,61 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		}
 	})
 
+	t.Run("err_5xx_per_s: real rate lands, null and ABSENT both → -1", func(t *testing.T) {
+		// A live 5xx rate lands verbatim, all the way into the Report.
+		srvLive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 12.0, "p95_ms": 90, "err_5xx_per_s": 0.22, "window_s": 60}`))
+		}))
+		defer srvLive.Close()
+		r := gatherReport(ReportConfig{ReqStatsProbe: NewReqStatsProbe(srvLive.URL, "", nil)})
+		if r.Err5xxPerS != 0.22 {
+			t.Errorf("Err5xxPerS = %v, want 0.22 (a live rate on a box called healthy)", r.Err5xxPerS)
+		}
+
+		// An EMPTY window reports null — not zero errors, no samples at all.
+		srvNull := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 0.0, "p95_ms": null, "err_5xx_per_s": null, "window_s": 60}`))
+		}))
+		defer srvNull.Close()
+		if _, _, e5, err := NewReqStatsProbe(srvNull.URL, "", nil)(); err != nil || e5 != -1 {
+			t.Errorf("(err5xx, err) = (%v, %v), want (-1, nil) on a null window", e5, err)
+		}
+
+		// VERSION SKEW: an instance built before this field omits the key
+		// entirely. That must read -1 (unmeasured), never 0 — otherwise every
+		// stale instance in the fleet starts claiming a perfect error rate.
+		srvOld := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 9.0, "p95_ms": 40, "window_s": 60}`))
+		}))
+		defer srvOld.Close()
+		rps, _, e5, err := NewReqStatsProbe(srvOld.URL, "", nil)()
+		if err != nil {
+			t.Fatalf("probe error: %v", err)
+		}
+		if rps != 9.0 {
+			t.Errorf("req/s = %v, want 9.0 (the fields it DOES have still land)", rps)
+		}
+		if e5 != -1 {
+			t.Errorf("err5xx = %v, want -1 (key absent — unmeasured, not 'no errors')", e5)
+		}
+
+		// A genuine 0.0 (measured window, no 5xx) is data and must survive.
+		srvZero := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 5.0, "p95_ms": 12, "err_5xx_per_s": 0.0, "window_s": 60}`))
+		}))
+		defer srvZero.Close()
+		if _, _, e5, _ := NewReqStatsProbe(srvZero.URL, "", nil)(); e5 != 0 {
+			t.Errorf("err5xx = %v, want 0 (measured clean window, not the -1 sentinel)", e5)
+		}
+	})
+
 	t.Run("404 (old instance) → error, sentinels via gatherReport", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "not found", http.StatusNotFound)
 		}))
 		defer srv.Close()
 
-		rps, p95, err := NewReqStatsProbe(srv.URL, "", nil)()
+		rps, p95, _, err := NewReqStatsProbe(srv.URL, "", nil)()
 		if err == nil {
 			t.Fatal("err = nil, want a non-nil error on 404")
 		}
@@ -317,7 +440,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		defer srv.Close()
-		if _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
+		if _, _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
 			t.Error("err = nil, want a non-nil error on 500")
 		}
 	})
@@ -327,7 +450,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 			w.Write([]byte(`not json`))
 		}))
 		defer srv.Close()
-		if _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
+		if _, _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
 			t.Error("err = nil, want a non-nil error on an undecodable body")
 		}
 	})
@@ -337,7 +460,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		url := srv.URL
 		srv.Close()
-		if _, _, err := NewReqStatsProbe(url, "", nil)(); err == nil {
+		if _, _, _, err := NewReqStatsProbe(url, "", nil)(); err == nil {
 			t.Error("err = nil, want a transport error against a closed server")
 		}
 	})
@@ -358,7 +481,12 @@ func TestReportJSONFieldNames(t *testing.T) {
 		t.Fatalf("marshal Report: %v", err)
 	}
 	s := string(blob)
-	for _, key := range []string{`"req_per_s":`, `"p95_ms":`} {
+	for _, key := range []string{
+		`"req_per_s":`, `"p95_ms":`,
+		`"swap_used_percent":`, `"swap_total_bytes":`,
+		`"beam_pss_bytes":`, `"beam_swap_bytes":`,
+		`"pg_top_relations":`,
+	} {
 		if !strings.Contains(s, key) {
 			t.Errorf("Report JSON missing %s — the CP reads this key verbatim; payload=%s", key, s)
 		}
@@ -424,4 +552,962 @@ func TestGatherReportBackupProbeError(t *testing.T) {
 	if r.BackupDetail == "" {
 		t.Error("BackupDetail empty, want the error noted")
 	}
+}
+
+// TestGatherReportSwapAndBeamFailSoftAsPairs proves swap and the BEAM footprint
+// each fold as ONE unit: an erroring probe leaves BOTH of its fields at -1, and
+// a swapless (0, 0) reading LANDS rather than being mistaken for the sentinel.
+// A half-landed percent against an unknown total cannot be interpreted.
+func TestGatherReportSwapAndBeamFailSoftAsPairs(t *testing.T) {
+	t.Run("erroring probes leave both sentinels", func(t *testing.T) {
+		r := gatherReport(ReportConfig{
+			SwapProbe: func() (int, int64, error) { return 55, 999, errors.New("no /proc/meminfo") },
+			BeamProbe: func() (int64, int64, error) { return 5, 6, errors.New("no beam.smp") },
+		})
+		if r.SwapUsedPercent != -1 || r.SwapTotalBytes != -1 {
+			t.Errorf("swap = (%d, %d), want both -1 — a percent must never land without its total",
+				r.SwapUsedPercent, r.SwapTotalBytes)
+		}
+		if r.BeamPSSBytes != -1 || r.BeamSwapBytes != -1 {
+			t.Errorf("beam = (%d, %d), want both -1 on probe error", r.BeamPSSBytes, r.BeamSwapBytes)
+		}
+	})
+
+	t.Run("swapless box lands zeros, not sentinels", func(t *testing.T) {
+		r := gatherReport(ReportConfig{
+			SwapProbe: func() (int, int64, error) { return 0, 0, nil },
+		})
+		if r.SwapUsedPercent != 0 || r.SwapTotalBytes != 0 {
+			t.Errorf("swap = (%d, %d), want (0, 0) — 'no swap configured' is a MEASUREMENT and must be "+
+				"distinguishable from 'could not measure' (-1, -1)", r.SwapUsedPercent, r.SwapTotalBytes)
+		}
+	})
+}
+
+// writeEnv drops a .env carrying an Ecto-style DATABASE_URL into a temp
+// checkout and returns the directory.
+func writeEnv(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestPGDatabaseURL pins the credential path proven on a live box: the agent
+// runs as root (a bare psql has no such role), so the URL comes from the
+// checkout's .env, and Ecto's scheme is rewritten to one libpq understands.
+func TestPGDatabaseURL(t *testing.T) {
+	t.Run("rewrites the ecto scheme", func(t *testing.T) {
+		dir := writeEnv(t, "SECRET_KEY_BASE=xyz\nexport DATABASE_URL=\"ecto://bp:pw@localhost/barkpark_prod\"\n")
+		got, err := pgDatabaseURL(dir)
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if got != "postgres://bp:pw@localhost/barkpark_prod" {
+			t.Errorf("url = %q, want the postgres:// rewrite — libpq does not understand ecto://", got)
+		}
+	})
+
+	t.Run("passes a postgres url through untouched", func(t *testing.T) {
+		dir := writeEnv(t, "DATABASE_URL=postgres://bp@localhost/barkpark_prod\n")
+		got, err := pgDatabaseURL(dir)
+		if err != nil || got != "postgres://bp@localhost/barkpark_prod" {
+			t.Errorf("got (%q, %v), want the url unchanged and no error", got, err)
+		}
+	})
+
+	t.Run("missing .env is an error, never a default connection", func(t *testing.T) {
+		if _, err := pgDatabaseURL(t.TempDir()); err == nil {
+			t.Error("err = nil, want an error — a default connection would measure the WRONG database")
+		}
+	})
+
+	t.Run("no DATABASE_URL is an error", func(t *testing.T) {
+		dir := writeEnv(t, "PHX_HOST=example.com\n")
+		if _, err := pgDatabaseURL(dir); err == nil {
+			t.Error("err = nil, want an error when DATABASE_URL is absent")
+		}
+	})
+}
+
+// TestPGProbesUnwiredWithoutCheckout proves an empty checkout yields nil probes
+// (unwired), mirroring NewReqStatsProbe's base=="" contract.
+func TestPGProbesUnwiredWithoutCheckout(t *testing.T) {
+	if NewPGSizeProbe("") != nil {
+		t.Error("NewPGSizeProbe(\"\") must return nil (unwired)")
+	}
+	if NewPGTopRelationsProbe("") != nil {
+		t.Error("NewPGTopRelationsProbe(\"\") must return nil (unwired)")
+	}
+}
+
+// TestPGSizeProbeShellOut covers the psql contract and, crucially, the FAILURE
+// path: on a box where psql is absent or the .env is unreadable the probe must
+// return an error so PGSizeBytes stays -1. No faked zero — that box reports
+// exactly what it reports today.
+func TestPGSizeProbeShellOut(t *testing.T) {
+	t.Run("happy path parses the size and carries the bounds", func(t *testing.T) {
+		var gotArgs []string
+		dir := writeEnv(t, "DATABASE_URL=ecto://bp@localhost/barkpark_prod\n")
+		probe := newPGSizeProbeWith(func(name string, args ...string) (string, error) {
+			if name != "psql" {
+				t.Errorf("ran %q, want psql", name)
+			}
+			gotArgs = args
+			return "3477617687\n", nil
+		}, dir)
+
+		got, err := probe()
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if got != 3477617687 {
+			t.Errorf("size = %d, want 3477617687", got)
+		}
+		joined := strings.Join(gotArgs, " ")
+		if !strings.Contains(joined, "postgres://bp@localhost/barkpark_prod") {
+			t.Errorf("argv %q missing the rewritten connection url", joined)
+		}
+		if !strings.Contains(joined, "statement_timeout") {
+			t.Errorf("argv %q missing the server-side statement_timeout bound", joined)
+		}
+	})
+
+	t.Run("psql absent leaves the sentinel", func(t *testing.T) {
+		dir := writeEnv(t, "DATABASE_URL=ecto://bp@localhost/barkpark_prod\n")
+		probe := newPGSizeProbeWith(func(string, ...string) (string, error) {
+			return "", errors.New(`exec: "psql": executable file not found in $PATH`)
+		}, dir)
+
+		got, err := probe()
+		if err == nil {
+			t.Fatal("err = nil, want an error when psql is absent")
+		}
+		if got != -1 {
+			t.Errorf("size = %d, want -1 — a box without psql must NOT report a faked zero", got)
+		}
+		r := gatherReport(ReportConfig{PGSizeProbe: probe})
+		if r.PGSizeBytes != -1 {
+			t.Errorf("PGSizeBytes = %d, want -1 through gatherReport", r.PGSizeBytes)
+		}
+	})
+
+	t.Run("unreadable .env leaves the sentinel", func(t *testing.T) {
+		probe := newPGSizeProbeWith(func(string, ...string) (string, error) {
+			t.Fatal("psql must not run when the .env is unreadable")
+			return "", nil
+		}, t.TempDir())
+		if got, err := probe(); err == nil || got != -1 {
+			t.Errorf("got (%d, %v), want (-1, an error)", got, err)
+		}
+	})
+
+	t.Run("unparseable output errors rather than inventing a number", func(t *testing.T) {
+		dir := writeEnv(t, "DATABASE_URL=postgres://bp@localhost/db\n")
+		probe := newPGSizeProbeWith(func(string, ...string) (string, error) {
+			return "ERROR:  permission denied\n", nil
+		}, dir)
+		if got, err := probe(); err == nil || got != -1 {
+			t.Errorf("got (%d, %v), want (-1, an error)", got, err)
+		}
+	})
+}
+
+// TestPGTopRelationsProbe proves the named-consumer breakdown parses, stays
+// bounded, and fails to nil (never an invented empty list).
+func TestPGTopRelationsProbe(t *testing.T) {
+	dir := writeEnv(t, "DATABASE_URL=ecto://bp@localhost/barkpark_prod\n")
+
+	t.Run("names the consumers", func(t *testing.T) {
+		probe := newPGTopRelationsProbeWith(func(_ string, args ...string) (string, error) {
+			joined := strings.Join(args, " ")
+			if !strings.Contains(joined, "LIMIT 10") {
+				t.Errorf("query %q missing the LIMIT bound", joined)
+			}
+			if !strings.Contains(joined, "statement_timeout") {
+				t.Errorf("query %q missing the statement_timeout bound", joined)
+			}
+			return "mutation_events|1510000000\nrevisions|1310000000\ndocuments|94000000\n", nil
+		}, dir)
+
+		rows, err := probe()
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if len(rows) != 3 {
+			t.Fatalf("rows = %d, want 3", len(rows))
+		}
+		if rows[0] != (RelationSize{Name: "mutation_events", Bytes: 1510000000}) {
+			t.Errorf("rows[0] = %+v, want mutation_events/1510000000", rows[0])
+		}
+	})
+
+	t.Run("client-side limit keeps the payload bounded", func(t *testing.T) {
+		var lines []string
+		for i := 0; i < 50; i++ {
+			lines = append(lines, "t|1")
+		}
+		probe := newPGTopRelationsProbeWith(func(string, ...string) (string, error) {
+			return strings.Join(lines, "\n"), nil
+		}, dir)
+		rows, err := probe()
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if len(rows) != pgTopRelationsLimit {
+			t.Errorf("rows = %d, want at most %d even when the query returns more",
+				len(rows), pgTopRelationsLimit)
+		}
+	})
+
+	t.Run("probe failure leaves PGTopRelations nil", func(t *testing.T) {
+		probe := newPGTopRelationsProbeWith(func(string, ...string) (string, error) {
+			return "", errors.New("psql: connection refused")
+		}, dir)
+		r := gatherReport(ReportConfig{PGTopRelationsProbe: probe})
+		if r.PGTopRelations != nil {
+			t.Errorf("PGTopRelations = %+v, want nil on probe error", r.PGTopRelations)
+		}
+	})
+}
+
+// TestPGProbeTimeoutIsShort pins that the per-beat Postgres probes do NOT
+// inherit the approved-command runner's five-minute lifetime, and that the
+// bound is real: a command sleeping past a lowered pgProbeTimeout returns
+// promptly with a timeout error. A space probe that can run for five minutes is
+// the runaway-diagnostic incident one layer down.
+func TestPGProbeTimeoutIsShort(t *testing.T) {
+	if pgProbeTimeout >= execRunnerTimeout {
+		t.Errorf("pgProbeTimeout = %s, must be far shorter than execRunnerTimeout = %s",
+			pgProbeTimeout, execRunnerTimeout)
+	}
+
+	orig := pgProbeTimeout
+	defer func() { pgProbeTimeout = orig }()
+	pgProbeTimeout = 50 * time.Millisecond
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := boundedPGRunner("sleep", "5")
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "timed out after") {
+			t.Errorf("err = %v, want a timeout error", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("boundedPGRunner did not return promptly after its deadline elapsed")
+	}
+}
+
+// TestReportCarriesCPUCores proves the beat reports the box's OWN core count —
+// the denominator the strained fence divides load by (D52). Without it the
+// fence has to assume a core count, and an assumed 2 is silently wrong on the
+// first 4-core box.
+func TestReportCarriesCPUCores(t *testing.T) {
+	r := gatherReport(ReportConfig{})
+	if r.CPUCores != runtime.NumCPU() {
+		t.Errorf("CPUCores = %d, want runtime.NumCPU() = %d", r.CPUCores, runtime.NumCPU())
+	}
+	if r.CPUCores < 1 {
+		t.Errorf("CPUCores = %d, want >= 1 — the fence's denominator may never be zero", r.CPUCores)
+	}
+	blob, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal Report: %v", err)
+	}
+	if !strings.Contains(string(blob), `"cpu_cores":`) {
+		t.Errorf("Report JSON missing \"cpu_cores\" — the CP reads this key verbatim; payload=%s", blob)
+	}
+}
+
+// spaceFakeRunner records every argv a space probe issues and answers from a
+// canned table keyed on the binary name, so the whole space payload is provable
+// with no real df/journalctl/du on the host running the test.
+type spaceFakeRunner struct {
+	out   map[string]string
+	err   map[string]error
+	calls [][]string
+}
+
+func (f *spaceFakeRunner) run(name string, args ...string) (string, error) {
+	f.calls = append(f.calls, append([]string{name}, args...))
+	return f.out[name], f.err[name]
+}
+
+func (f *spaceFakeRunner) callFor(name string) []string {
+	for _, c := range f.calls {
+		if c[0] == name {
+			return c
+		}
+	}
+	return nil
+}
+
+// TestGatherSpaceNamesEveryConsumer proves the space payload answers "WHO is
+// using the disk" by name: root used AND total (never a bare percent), the
+// journal, Postgres via the EXISTING pg probes, and the sites tree broken down
+// per slug — with the resolved sites directory carried alongside.
+func TestGatherSpaceNamesEveryConsumer(t *testing.T) {
+	s := gatherSpace(SpaceConfig{
+		RootProbe:    func() (int64, int64, error) { return 28812754944, 40193925120, nil },
+		JournalProbe: func() (int64, error) { return 3972844748, nil },
+		PGSizeProbe:  func() (int64, error) { return 3477617687, nil },
+		PGTopRelationsProbe: func() ([]RelationSize, error) {
+			return []RelationSize{{Name: "mutation_events", Bytes: 1510000000}}, nil
+		},
+		SitesDir: "/opt/barkpark/sites",
+		SitesProbe: func() (int64, []SiteSize, error) {
+			return 4294967296, []SiteSize{
+				{Slug: "search-ember", Bytes: 658505728},
+				{Slug: "next-proof", Bytes: 605028352},
+			}, nil
+		},
+	})
+
+	if s.Type != SpaceEventType {
+		t.Errorf("Type = %q, want %q — space must not ride the health beat's type (D58)", s.Type, SpaceEventType)
+	}
+	if s.Type == "health" {
+		t.Fatal("the space payload must never be typed health — metrics.ex folds health beats into the chart series")
+	}
+	if s.RootUsedBytes != 28812754944 || s.RootTotalBytes != 40193925120 {
+		t.Errorf("root = (%d, %d), want used AND total bytes — a bare percent cannot size the problem", s.RootUsedBytes, s.RootTotalBytes)
+	}
+	if s.JournalBytes != 3972844748 {
+		t.Errorf("JournalBytes = %d, want 3972844748", s.JournalBytes)
+	}
+	if s.PGSizeBytes != 3477617687 {
+		t.Errorf("PGSizeBytes = %d, want the existing pg probe's answer", s.PGSizeBytes)
+	}
+	if len(s.PGTopRelations) != 1 || s.PGTopRelations[0].Name != "mutation_events" {
+		t.Errorf("PGTopRelations = %+v, want the named db consumers", s.PGTopRelations)
+	}
+	if s.SitesDir != "/opt/barkpark/sites" {
+		t.Errorf("SitesDir = %q, want the resolved directory that was read", s.SitesDir)
+	}
+	if s.SitesBytes != 4294967296 || len(s.SitesTop) != 2 || s.SitesTop[0].Slug != "search-ember" {
+		t.Errorf("sites = (%d, %+v), want the total plus the named slugs", s.SitesBytes, s.SitesTop)
+	}
+}
+
+// TestGatherSpaceHonestUnknowns proves an unwired or failing consumer reports
+// UNMEASURED (-1 / nil), never 0 and never an empty list — and that the
+// resolved sites directory is reported even when its measurement failed, so a
+// wrong root is visible rather than silent.
+func TestGatherSpaceHonestUnknowns(t *testing.T) {
+	t.Run("nothing wired", func(t *testing.T) {
+		s := gatherSpace(SpaceConfig{SitesDir: "/opt/barkpark/sites"})
+		if s.RootUsedBytes != -1 || s.RootTotalBytes != -1 || s.JournalBytes != -1 ||
+			s.PGSizeBytes != -1 || s.SitesBytes != -1 {
+			t.Errorf("unwired space = %+v, want every number at the -1 sentinel", s)
+		}
+		if s.PGTopRelations != nil || s.SitesTop != nil {
+			t.Errorf("unwired lists = (%v, %v), want nil — an unmeasured list is null, never []", s.PGTopRelations, s.SitesTop)
+		}
+		if s.SitesDir != "/opt/barkpark/sites" {
+			t.Errorf("SitesDir = %q, want the resolved path even with no probe wired", s.SitesDir)
+		}
+	})
+
+	t.Run("every probe fails", func(t *testing.T) {
+		boom := errors.New("boom")
+		s := gatherSpace(SpaceConfig{
+			RootProbe:           func() (int64, int64, error) { return 0, 0, boom },
+			JournalProbe:        func() (int64, error) { return 0, boom },
+			PGSizeProbe:         func() (int64, error) { return 0, boom },
+			PGTopRelationsProbe: func() ([]RelationSize, error) { return []RelationSize{{Name: "x"}}, boom },
+			SitesDir:            "/srv/sites",
+			SitesProbe:          func() (int64, []SiteSize, error) { return 0, []SiteSize{{Slug: "half"}}, boom },
+		})
+		if s.RootUsedBytes != -1 || s.JournalBytes != -1 || s.PGSizeBytes != -1 || s.SitesBytes != -1 {
+			t.Errorf("failed space = %+v, want the -1 sentinels, never a zero", s)
+		}
+		if s.PGTopRelations != nil || s.SitesTop != nil {
+			t.Error("a failing probe's partial rows must be DISCARDED, never landed")
+		}
+		if s.SitesDir != "/srv/sites" {
+			t.Errorf("SitesDir = %q, want the path that was attempted", s.SitesDir)
+		}
+	})
+}
+
+// TestSitesProbeArgvIsDirect pins the sites argv shape (D59). The bound is a
+// LIFETIME bound, and it only holds for DIRECT argv: measured, an `sh -c`
+// wrapper under the same 200ms bound returned at 8.77s — 44x over budget —
+// with the identical `signal: killed` error, so the caller cannot tell. This
+// test exists so a future edit cannot quietly reintroduce a shell.
+func TestSitesProbeArgvIsDirect(t *testing.T) {
+	f := &spaceFakeRunner{out: map[string]string{"nice": "628M\t/opt/barkpark/sites/a\n4.0G\t/opt/barkpark/sites\n"}}
+	probe := newSitesSpaceProbeWith(f.run, "/opt/barkpark/sites")
+	if _, _, err := probe(); err != nil {
+		t.Fatalf("probe err = %v, want nil", err)
+	}
+
+	got := f.callFor("nice")
+	want := []string{"nice", "-n", "19", "ionice", "-c3", "du", "-hx", "-d1", "/opt/barkpark/sites"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("argv = %v, want %v", got, want)
+	}
+	for _, arg := range got {
+		for _, banned := range []string{"sh", "-c ", "|", "2>&1", ";", "$?", "&&"} {
+			if arg == "sh" || (banned != "sh" && strings.Contains(arg, banned)) {
+				t.Errorf("argv element %q carries %q — probe argv must be direct: no shell, no pipes, no redirections, no `; echo rc=$?`", arg, banned)
+			}
+		}
+	}
+	// -x and -d1 are mandatory (never cross a filesystem, bounded depth), and
+	// -s must NOT appear: it conflicts with -d1 in coreutils 9.4.
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "-hx") || !strings.Contains(joined, "-d1") {
+		t.Errorf("argv %q must carry -x (no filesystem crossing) and -d1 (bounded depth)", joined)
+	}
+	if strings.Contains(joined, " -s ") {
+		t.Errorf("argv %q carries -s, which conflicts with -d1 in coreutils 9.4", joined)
+	}
+}
+
+// TestSitesProbeNonZeroExitDiscardsPartialOutput is the honesty test that
+// matters most here. A killed du prints the rows it finished and THEN exits
+// non-zero: a 3s bound printed 5 site rows before rc=137. Those rows parse as a
+// perfectly plausible list silently missing half the tree, so a non-zero exit
+// must report UNMEASURED — under-reporting space is the exact failure the space
+// payload exists to prevent.
+func TestSitesProbeNonZeroExitDiscardsPartialOutput(t *testing.T) {
+	partial := "628M\t/opt/barkpark/sites/search-ember\n" +
+		"628M\t/opt/barkpark/sites/search-capstone\n" +
+		"577M\t/opt/barkpark/sites/next-proof\n" +
+		"412M\t/opt/barkpark/sites/docs-site\n" +
+		"120M\t/opt/barkpark/sites/blog\n"
+
+	// Two shapes, and the second is the one that keeps this test honest. The
+	// first is the real killed-du (rows, no root row — du prints its total
+	// last). The second ALSO carries a parseable total row: without it, a probe
+	// that ignored the error entirely would still pass here, because the parser
+	// would reject the truncated output on its own. The rule under test is that
+	// a NON-ZERO EXIT discards, independently of whether the output parses.
+	for _, c := range []struct {
+		name string
+		out  string
+	}{
+		{name: "killed mid-walk, no total row", out: partial},
+		{name: "killed with a parseable total row", out: partial + "4.0G\t/opt/barkpark/sites\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			probe := newSitesSpaceProbeWith(func(string, ...string) (string, error) {
+				// Exactly what runBounded hands back on a killed du: real
+				// output AND an error, indistinguishable in shape from a
+				// completed run.
+				return c.out, errors.New("signal: killed")
+			}, "/opt/barkpark/sites")
+
+			total, top, err := probe()
+			if err == nil {
+				t.Fatal("err = nil, want an error — a killed du is not a measurement")
+			}
+			if total != -1 || top != nil {
+				t.Fatalf("got (%d, %+v), want (-1, nil) — partial du output must NEVER land", total, top)
+			}
+
+			s := gatherSpace(SpaceConfig{SitesDir: "/opt/barkpark/sites", SitesProbe: probe})
+			if s.SitesBytes != -1 || s.SitesTop != nil {
+				t.Errorf("through gatherSpace: sites = (%d, %+v), want unmeasured", s.SitesBytes, s.SitesTop)
+			}
+		})
+	}
+}
+
+// TestSitesTopCappedAtTen proves the per-slug list is capped at the top 10 by
+// bytes. Uncapped, the compressed jsonb crosses Postgres's 2032-byte
+// TOAST_TUPLE_THRESHOLD between 20 and 25 realistic slugs, after which a
+// 14-day window per box goes 34MB→58MB (D58).
+func TestSitesTopCappedAtTen(t *testing.T) {
+	var b strings.Builder
+	for i := 1; i <= 25; i++ {
+		fmt.Fprintf(&b, "%dM\t/opt/barkpark/sites/site-%02d\n", i, i)
+	}
+	b.WriteString("40G\t/opt/barkpark/sites\n")
+
+	total, top, err := parseDuTree(b.String(), "/opt/barkpark/sites")
+	if err != nil {
+		t.Fatalf("parseDuTree: %v", err)
+	}
+	if total != 40*(1<<30) {
+		t.Errorf("total = %d, want the root row's bytes", total)
+	}
+	if len(top) != sitesTopLimit {
+		t.Fatalf("len(top) = %d, want %d", len(top), sitesTopLimit)
+	}
+	if top[0].Slug != "site-25" || top[len(top)-1].Slug != "site-16" {
+		t.Errorf("top = %+v, want the ten BIGGEST slugs, descending", top)
+	}
+	if top[0].Bytes != 25*(1<<20) {
+		t.Errorf("top[0].Bytes = %d, want 25 MiB", top[0].Bytes)
+	}
+}
+
+// TestParseDuTreeRequiresTotalRow proves output without du's own root row —
+// which is what a walk cut short looks like — is refused rather than parsed
+// into a confident-looking partial list.
+func TestParseDuTreeRequiresTotalRow(t *testing.T) {
+	out := "628M\t/opt/barkpark/sites/search-ember\n577M\t/opt/barkpark/sites/next-proof\n"
+	if total, top, err := parseDuTree(out, "/opt/barkpark/sites"); err == nil || total != -1 || top != nil {
+		t.Errorf("got (%d, %+v, %v), want (-1, nil, an error)", total, top, err)
+	}
+}
+
+// TestRootSpaceProbeReportsBytesNotPercent proves the root filesystem is
+// measured in BYTES used and total, with a `df -P -k /` argv whose block size
+// the parser does not have to guess.
+func TestRootSpaceProbeReportsBytesNotPercent(t *testing.T) {
+	f := &spaceFakeRunner{out: map[string]string{
+		"df": "Filesystem     1024-blocks     Used Available Capacity Mounted on\n" +
+			"/dev/sda1         39251880 28137456   9091612      76% /\n",
+	}}
+	used, total, err := newRootSpaceProbeWith(f.run)()
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if used != 28137456*1024 || total != 39251880*1024 {
+		t.Errorf("got (%d, %d), want (%d, %d) bytes", used, total, 28137456*1024, 39251880*1024)
+	}
+	if got, want := strings.Join(f.callFor("df"), " "), "df -P -k /"; got != want {
+		t.Errorf("argv = %q, want %q", got, want)
+	}
+
+	t.Run("non-zero exit leaves both sentinels", func(t *testing.T) {
+		bad := &spaceFakeRunner{
+			out: map[string]string{"df": "df: /: Permission denied\n"},
+			err: map[string]error{"df": errors.New("exit status 1")},
+		}
+		if u, tot, err := newRootSpaceProbeWith(bad.run)(); err == nil || u != -1 || tot != -1 {
+			t.Errorf("got (%d, %d, %v), want (-1, -1, an error)", u, tot, err)
+		}
+	})
+}
+
+// TestJournalSpaceProbe proves the journal is read from its own header line
+// (`journalctl --disk-usage`, ~8ms warm) rather than by walking
+// /var/log/journal, and that a failure keeps the -1 sentinel.
+func TestJournalSpaceProbe(t *testing.T) {
+	f := &spaceFakeRunner{out: map[string]string{
+		"journalctl": "Archived and active journals take up 3.7G in the file system.\n",
+	}}
+	got, err := newJournalSpaceProbeWith(f.run)()
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if want := int64(3972844749); got != want {
+		t.Errorf("journal = %d, want ~%d", got, want)
+	}
+	if argv, want := strings.Join(f.callFor("journalctl"), " "), "journalctl --disk-usage"; argv != want {
+		t.Errorf("argv = %q, want %q — a tree walk is not the same probe", argv, want)
+	}
+
+	t.Run("no journald leaves the sentinel", func(t *testing.T) {
+		bad := &spaceFakeRunner{err: map[string]error{"journalctl": errors.New(`exec: "journalctl": not found`)}}
+		if n, err := newJournalSpaceProbeWith(bad.run)(); err == nil || n != -1 {
+			t.Errorf("got (%d, %v), want (-1, an error)", n, err)
+		}
+	})
+}
+
+// TestParseHumanBytes pins the size vocabulary du and journalctl print. A
+// dropped magnitude is not a rounding error: reading "3.7G" as 3.7 would
+// under-report the journal by a billion bytes.
+func TestParseHumanBytes(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int64
+		bad  bool
+	}{
+		{in: "3.7G", want: int64(3972844749)},
+		{in: "628M", want: 628 * (1 << 20)},
+		{in: "4.0K", want: 4096},
+		{in: "512", want: 512},
+		{in: "12B", want: 12},
+		{in: "3.7GiB", want: int64(3972844749)},
+		{in: "take", bad: true},
+		{in: "up", bad: true},
+		{in: "", bad: true},
+		{in: "-4G", bad: true},
+	}
+	for _, c := range cases {
+		got, err := parseHumanBytes(c.in)
+		if c.bad {
+			if err == nil {
+				t.Errorf("parseHumanBytes(%q) = %d, want an error", c.in, got)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("parseHumanBytes(%q) = (%d, %v), want (%d, nil)", c.in, got, err, c.want)
+		}
+	}
+}
+
+// TestSpaceRidesItsOwnPathAndCadence proves the two halves of D58 at the
+// transport layer: the space payload is POSTed to its OWN route (never folded
+// into the 60s health beat), carrying its own event type, at a cadence
+// materially slower than the beat.
+func TestSpaceRidesItsOwnPathAndCadence(t *testing.T) {
+	if DefaultSpaceInterval <= DefaultInterval {
+		t.Fatalf("DefaultSpaceInterval = %s, must be slower than the %s health beat (D58)", DefaultSpaceInterval, DefaultInterval)
+	}
+	if spacePath == reportPath {
+		t.Fatal("the space payload must not ride the report route — its body would be landed as a health event")
+	}
+
+	var gotPath, gotAuth string
+	var gotBody SpaceReport
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	a := &Agent{
+		ControlURL: srv.URL,
+		Token:      "tok",
+		HTTPClient: srv.Client(),
+		SpaceProbes: SpaceConfig{
+			SitesDir:     "/opt/barkpark/sites",
+			RootProbe:    func() (int64, int64, error) { return 1, 2, nil },
+			JournalProbe: func() (int64, error) { return 3, nil },
+		},
+	}
+	if err := a.ReportSpaceOnce(context.Background()); err != nil {
+		t.Fatalf("ReportSpaceOnce: %v", err)
+	}
+	if gotPath != spacePath {
+		t.Errorf("POST path = %q, want %q", gotPath, spacePath)
+	}
+	if gotAuth != "Bearer tok" {
+		t.Errorf("Authorization = %q, want the agent bearer token", gotAuth)
+	}
+	if gotBody.Type != SpaceEventType {
+		t.Errorf("body type = %q, want %q carried inline for the landing route", gotBody.Type, SpaceEventType)
+	}
+	if gotBody.SitesDir != "/opt/barkpark/sites" {
+		t.Errorf("body sites_dir = %q, want the resolved directory", gotBody.SitesDir)
+	}
+
+	t.Run("a control plane without the route surfaces an honest error", func(t *testing.T) {
+		old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		}))
+		defer old.Close()
+		b := &Agent{ControlURL: old.URL, Token: "tok", HTTPClient: old.Client()}
+		err := b.ReportSpaceOnce(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "post space") {
+			t.Errorf("err = %v, want a post-space error — a dropped payload must not look like a landed one", err)
+		}
+	})
+}
+
+// TestSpaceJSONFieldNames pins the wire keys the control plane reads verbatim.
+func TestSpaceJSONFieldNames(t *testing.T) {
+	blob, err := json.Marshal(gatherSpace(SpaceConfig{SitesDir: "/opt/barkpark/sites"}))
+	if err != nil {
+		t.Fatalf("marshal SpaceReport: %v", err)
+	}
+	s := string(blob)
+	for _, key := range []string{
+		`"type":"space"`,
+		`"root_used_bytes":`, `"root_total_bytes":`,
+		`"journal_bytes":`, `"pg_size_bytes":`, `"pg_top_relations":`,
+		`"sites_dir":`, `"sites_bytes":`, `"sites_top":`,
+	} {
+		if !strings.Contains(s, key) {
+			t.Errorf("space JSON missing %s; payload=%s", key, s)
+		}
+	}
+	if !strings.Contains(s, `"pg_top_relations":null`) || !strings.Contains(s, `"sites_top":null`) {
+		t.Errorf("unmeasured lists must marshal as null, never []; payload=%s", s)
+	}
+}
+
+// TestSpaceProbeTimeoutsAreShortAndSeparate proves each space probe carries its
+// OWN lifetime bound and that none of them inherits the five-minute
+// approved-command budget — a per-beat probe that can run for five minutes is
+// the runaway-diagnostic incident again, one layer down.
+func TestSpaceProbeTimeoutsAreShortAndSeparate(t *testing.T) {
+	for name, d := range map[string]time.Duration{
+		"df":         dfProbeTimeout,
+		"journalctl": journalProbeTimeout,
+		"du":         duProbeTimeout,
+	} {
+		if d <= 0 || d >= execRunnerTimeout {
+			t.Errorf("%s probe timeout = %s, want a short bound well under execRunnerTimeout (%s)", name, d, execRunnerTimeout)
+		}
+	}
+	if duProbeTimeout <= dfProbeTimeout {
+		t.Error("the du walk needs a longer bound than the df header read — probe-specific means specific")
+	}
+
+	// And the bound is a real lifetime bound, not a hint: a runner built by
+	// boundedSpaceRunner returns promptly when its deadline elapses.
+	run := boundedSpaceRunner(50 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err := run("sleep", "5")
+		if err == nil {
+			t.Error("err = nil, want a timeout error")
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("boundedSpaceRunner did not return promptly after its deadline elapsed")
+	}
+}
+
+// buildInfoWith returns a ReadBuildInfo stand-in carrying the given vcs
+// settings — the shape `go build` embeds when it builds from a git checkout,
+// which is exactly how the fleet's agent is (re)built on-box.
+func buildInfoWith(mainVersion string, settings map[string]string) func() (*debug.BuildInfo, bool) {
+	return func() (*debug.BuildInfo, bool) {
+		bi := &debug.BuildInfo{}
+		bi.Main.Version = mainVersion
+		for k, v := range settings {
+			bi.Settings = append(bi.Settings, debug.BuildSetting{Key: k, Value: v})
+		}
+		return bi, true
+	}
+}
+
+// TestAgentVersionBothArms proves the beat dates its own producer in BOTH
+// directions: a build that carries a stamp emits that stamp, and a build that
+// carries none emits the explicit unknown marker — never "" and never a value
+// a reader could mistake for a measured version.
+func TestAgentVersionBothArms(t *testing.T) {
+	noBuildInfo := func() (*debug.BuildInfo, bool) { return nil, false }
+
+	for _, tc := range []struct {
+		name     string
+		injected string
+		read     func() (*debug.BuildInfo, bool)
+		want     string
+	}{
+		// STAMPED arm — a blessed release injects -X agentVersion.
+		{"ldflags stamp wins", "v0.2.26", buildInfoWith("(devel)", map[string]string{"vcs.revision": "abc123def4567890"}), "v0.2.26"},
+		{"ldflags stamp is trimmed", "  v0.2.26\n", noBuildInfo, "v0.2.26"},
+		// STAMPED arm — a plain on-box `go build` from the checkout.
+		{"vcs revision, clean", "", buildInfoWith("(devel)", map[string]string{"vcs.revision": "abc123def4567890abcd", "vcs.modified": "false"}), "git-abc123def456"},
+		{"vcs revision, dirty tree is carried", "", buildInfoWith("(devel)", map[string]string{"vcs.revision": "abc123def4567890abcd", "vcs.modified": "true"}), "git-abc123def456-dirty"},
+		{"tagged module build", "", buildInfoWith("v0.2.26", nil), "v0.2.26"},
+		// UNSTAMPED arm — every route to an identity is closed.
+		{"no build info at all", "", noBuildInfo, AgentVersionUnknown},
+		{"nil reader", "", nil, AgentVersionUnknown},
+		{"build info with nothing to say", "", buildInfoWith("(devel)", nil), AgentVersionUnknown},
+		{"blank revision is not a stamp", "", buildInfoWith("", map[string]string{"vcs.revision": "   "}), AgentVersionUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveAgentVersion(tc.injected, tc.read)
+			if got != tc.want {
+				t.Errorf("resolveAgentVersion = %q, want %q", got, tc.want)
+			}
+			if got == "" {
+				t.Error("resolveAgentVersion returned \"\" — an empty string reads as a measured value; the unknown arm must be explicit")
+			}
+		})
+	}
+
+	// The live resolver used by the real binary is held to the same floor.
+	if AgentVersion() == "" {
+		t.Error("AgentVersion() = \"\" — the agent must always date its own beat, even unstamped")
+	}
+}
+
+// TestReportCarriesAgentVersion proves the key the control plane reads out of
+// the raw jsonb payload — agent_version — is present on every beat with a
+// non-empty value, so a missing vital stops being indistinguishable from a
+// healthy one.
+func TestReportCarriesAgentVersion(t *testing.T) {
+	r := gatherReport(ReportConfig{})
+	if r.AgentVersion == "" {
+		t.Error("Report.AgentVersion = \"\" — never empty; unknown is spelled explicitly")
+	}
+	if r.AgentVersion != AgentVersion() {
+		t.Errorf("Report.AgentVersion = %q, want the binary's own stamp %q", r.AgentVersion, AgentVersion())
+	}
+
+	blob, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal Report: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(blob, &payload); err != nil {
+		t.Fatalf("unmarshal Report: %v", err)
+	}
+	v, ok := payload["agent_version"]
+	if !ok {
+		t.Fatalf("Report JSON missing \"agent_version\" — the CP reads this key verbatim out of raw jsonb; payload=%s", blob)
+	}
+	s, isString := v.(string)
+	if !isString {
+		t.Fatalf("agent_version = %T, want a string", v)
+	}
+	if s == "" {
+		t.Error("agent_version marshalled as \"\" — an absent-or-empty key means two things at once")
+	}
+
+	// The pre-existing version field is untouched by this addition.
+	if r.Version != Version {
+		t.Errorf("Report.Version = %q, want the unchanged %q", r.Version, Version)
+	}
+	if payload["version"] != Version {
+		t.Errorf("JSON version = %v, want the unchanged %q", payload["version"], Version)
+	}
+}
+
+// newTempGitRepo initialises a real git repository in a temp dir with one
+// committed file and returns its path. Identity and signing are pinned on the
+// command line so the test does not depend on the host's git config.
+func newTempGitRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+
+	runGitIn(t, dir, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	runGitIn(t, dir, "add", "tracked.txt")
+	runGitIn(t, dir, "commit", "--quiet", "--no-gpg-sign", "-m", "initial")
+	return dir
+}
+
+// runGitIn runs one git command in dir under a pinned identity and neutralised
+// global/system config, so the host's git settings can never change what these
+// tests measure. Any failure is fatal — a probe test over a half-built repo
+// would assert nothing.
+func runGitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// TestGitProbeDirtyIgnoresUntrackedFiles is the assertion that FAILS against
+// the unpatched probe (`git status --porcelain`, untracked counted). Every
+// working production box accrues untracked operational junk — a built `bp`
+// binary, .claude/worktrees/, .env backups, spawned sites/ — none of which any
+// deploy can clear. Counting it pins dirty_tree true forever, so the gauge can
+// never report the good state. This test is the proof it now can.
+func TestGitProbeDirtyIgnoresUntrackedFiles(t *testing.T) {
+	dir := newTempGitRepo(t)
+
+	// The exact shapes measured on guerrilla: a stray binary, a backup, a dir.
+	if err := os.WriteFile(filepath.Join(dir, "bp"), []byte("binary"), 0o755); err != nil {
+		t.Fatalf("write untracked binary: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env.bak-20260706221850"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write untracked backup: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "sites", "demo"), 0o755); err != nil {
+		t.Fatalf("mkdir untracked dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sites", "demo", "index.html"), []byte("<p>"), 0o644); err != nil {
+		t.Fatalf("write untracked dir file: %v", err)
+	}
+
+	g := gitProbe{runner: ExecRunner{}, checkout: dir}
+	if g.dirty() {
+		t.Error("dirty() = true with ONLY untracked files present — the gauge is pinned true on every live box and can never say clean")
+	}
+	if g.commit() == "" {
+		t.Error("commit() = \"\" over a real repo — the sha probe must still read HEAD")
+	}
+}
+
+// TestGitProbeDirtyReportsModifiedTrackedFile is the mirror assertion: it fails
+// against an OVER-correction (hard-coded false, or a flag combination that
+// suppresses tracked changes too). A one-sided test would let the same bug ship
+// inverted — a gauge that can never say DIRTY is exactly as useless as one that
+// can never say clean.
+func TestGitProbeDirtyReportsModifiedTrackedFile(t *testing.T) {
+	dir := newTempGitRepo(t)
+
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
+	}
+
+	g := gitProbe{runner: ExecRunner{}, checkout: dir}
+	if !g.dirty() {
+		t.Error("dirty() = false with a MODIFIED TRACKED file — the deploy-hygiene flag can no longer say dirty")
+	}
+}
+
+// TestGitProbeDirtyReportsIndexOnlyTrackedChanges pins the OTHER half of the
+// blast-radius claim: `--untracked-files=no` drops untracked files and NOTHING
+// else. A staged ADD (the file is in the index, so it is tracked) and a tracked
+// DELETION both still read dirty. Without these, "only untracked stops counting"
+// is asserted in prose and proven nowhere — and the next flag edit (`-uall`,
+// `--ignore-submodules=all`, a porcelain v2 switch) could quietly widen the
+// suppression with every existing test still green.
+func TestGitProbeDirtyReportsIndexOnlyTrackedChanges(t *testing.T) {
+	t.Run("staged add", func(t *testing.T) {
+		dir := newTempGitRepo(t)
+		if err := os.WriteFile(filepath.Join(dir, "added.txt"), []byte("new\n"), 0o644); err != nil {
+			t.Fatalf("write new file: %v", err)
+		}
+		runGitIn(t, dir, "add", "added.txt")
+
+		g := gitProbe{runner: ExecRunner{}, checkout: dir}
+		if !g.dirty() {
+			t.Error("dirty() = false with a STAGED ADD — a file in the index is tracked and must still read dirty")
+		}
+	})
+
+	t.Run("tracked deletion", func(t *testing.T) {
+		dir := newTempGitRepo(t)
+		if err := os.Remove(filepath.Join(dir, "tracked.txt")); err != nil {
+			t.Fatalf("delete tracked file: %v", err)
+		}
+
+		g := gitProbe{runner: ExecRunner{}, checkout: dir}
+		if !g.dirty() {
+			t.Error("dirty() = false with a DELETED TRACKED file — a missing committed file is the loudest hygiene red flag there is")
+		}
+	})
+}
+
+// TestGitProbeUnreadableStaysUnknown pins the contract documented on
+// Report.GitCommit: when the probe cannot read git at all, the sha is empty and
+// DirtyTree is false. "We could not measure" must not masquerade as "dirty" —
+// and the empty sha alongside it is what keeps unknown distinguishable from
+// clean.
+func TestGitProbeUnreadableStaysUnknown(t *testing.T) {
+	g := gitProbe{runner: errRunner{}, checkout: "/nonexistent-checkout"}
+
+	if sha := g.commit(); sha != "" {
+		t.Errorf("commit() = %q, want \"\" when the probe cannot read git", sha)
+	}
+	if g.dirty() {
+		t.Error("dirty() = true when the probe errored — we do not invent dirtiness")
+	}
+}
+
+// errRunner fails every command, standing in for a box where git is missing or
+// the checkout is unreadable.
+type errRunner struct{}
+
+func (errRunner) Run(string, ...string) (string, error) {
+	return "", errors.New("probe unreadable")
 }

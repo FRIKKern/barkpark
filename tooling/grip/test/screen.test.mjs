@@ -628,8 +628,17 @@ test("the cluster expander does not turn honest curl reads into false refusals",
 // So the pin stays — a silent change to this module's own reach is still the
 // finding — but it is stated as a DELTA with its membership accounted for,
 // which is what makes it a measurement rather than a magic number.
-const WAVE4_REACH = 240; // the shipped baseline this wave moved
-const WAVE5_REACH = 254; // +16 admitted, -2 refused; every one named below
+const WAVE4_REACH = 240; // the shipped baseline wave 5 moved
+const WAVE5_REACH = 254; // wave 5: +16 admitted, -2 refused; every one named below
+// tgw12-s1 — the value-taking-global collision fix. `firstNonFlag` no longer
+// misreads a value-consuming global's ARGUMENT as the sub-verb, which closes the
+// WRITE side (`git -C log push`, `go -C env run`, `npm --prefix ls install`) and,
+// as its mirror, ADMITS four `git -C <path> <read-verb>` corpus rows that were
+// FALSELY REFUSED before (their `-C` path read as the verb). Pure widening on the
+// corpus — no row is newly refused — and all four are named member-by-member in
+// the "value-taking-global collision" test below.
+const SCREEN_REACH = 258; // 254 + 4 false-refusal fixes; every one named below
+const COLLISION_FIX_REACH = SCREEN_REACH - WAVE5_REACH; // 4
 
 test("census reach is RE-MEASURED and its delta is accounted for, member by member", () => {
   const corpus = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures/evidence-corpus.json", import.meta.url)), "utf8"));
@@ -638,15 +647,17 @@ test("census reach is RE-MEASURED and its delta is accounted for, member by memb
   assert.equal(r.total, 651);
 
   console.log(
-    `\nCENSUS REACH, wave 4 -> wave 5 over the same ${r.total} frozen commands:\n` +
-      `  ${WAVE4_REACH} -> ${r.admitted}  (${r.admitted > WAVE4_REACH ? "+" : ""}${r.admitted - WAVE4_REACH})\n` +
-      `  WIDENINGS  +16  read-only \`sed\` (15 line-citation rows) and the host bound moved AFTER quote masking (1 row\n` +
-      `                  whose grep PATTERN names guerrilla and two prod IPs)\n` +
-      `  TIGHTENINGS  -2  both environment-assignment prefixes, both correctly refused (asserted individually below)`,
+    `\nCENSUS REACH, wave 4 -> wave 5 -> tgw12-s1 over the same ${r.total} frozen commands:\n` +
+      `  ${WAVE4_REACH} -> ${WAVE5_REACH} -> ${r.admitted}  (${r.admitted > WAVE4_REACH ? "+" : ""}${r.admitted - WAVE4_REACH} net)\n` +
+      `  WAVE 5 WIDENINGS  +16  read-only \`sed\` (15 line-citation rows) and the host bound moved AFTER quote masking (1 row\n` +
+      `                        whose grep PATTERN names guerrilla and two prod IPs)\n` +
+      `  WAVE 5 TIGHTENINGS  -2  both environment-assignment prefixes, both correctly refused (asserted individually below)\n` +
+      `  tgw12-s1 WIDENINGS  +${COLLISION_FIX_REACH}  four \`git -C <path> <read-verb>\` rows the value-global collision falsely refused\n` +
+      `                        (the eaten \`-C\` path read as the sub-verb); named member-by-member in the collision test`,
   );
 
-  assert.equal(r.admitted, WAVE5_REACH, "the screen's admission over the frozen corpus — re-derive and re-state, never re-baseline silently");
-  assert.ok(r.admitted > WAVE4_REACH, "wave 5's widenings must RAISE reach, not merely hold it");
+  assert.equal(r.admitted, SCREEN_REACH, "the screen's admission over the frozen corpus — re-derive and re-state, never re-baseline silently");
+  assert.ok(r.admitted > WAVE4_REACH, "the widenings must RAISE reach, not merely hold it");
 });
 
 test("every corpus row the tightenings newly REFUSE is named and justified", () => {
@@ -676,6 +687,96 @@ test("every corpus row the tightenings newly REFUSE is named and justified", () 
     assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
     assert.ok(r.reason.includes(why), `the refusal must name ${why} — got: ${r.reason}`);
   }
+});
+
+// ── 9b. THE VALUE-TAKING-GLOBAL COLLISION (tgw12-s1) ─────────────────────────
+//
+// `firstNonFlag` skipped flag TOKENS but did not model that a value-consuming
+// GLOBAL eats its NEXT token as a value. So `git -C log push` — `git push` run
+// in a directory named `log` — had `push` masked by the eaten value `log`, and
+// `gitRule` judged the read-verb `log` and ADMITTED a force-pushable write. The
+// same hole rode `go -C env run main.go` (code execution) and `npm --prefix ls
+// install` (postinstall code execution). This is the SOLE gate the live census
+// executes through (census.mjs: "the safety bound is screenCommand and NOTHING
+// ELSE"), so each false-admit is an EXECUTION against a shared checkout.
+//
+// The fix — `dropValueGlobals` feeding `firstNonFlag` — is ONE normaliser shared
+// by git/go/npm, not five hand-copies of the grammar (this epic's named defect
+// class). gh is NOT vulnerable (its two-level noun+sub-verb check catches the
+// same shape) and is deliberately left untouched.
+
+test("the value-taking-global collision is REFUSED — a global's eaten arg is not the sub-verb", () => {
+  // WRITE commands masked behind a value-global whose argument is a read-verb name.
+  const refused = [
+    // git — every value-taking git global, arg = a read-verb name, real verb a write.
+    "git -C log push origin main",
+    "git -c log push origin main",
+    "git --git-dir show reset --hard",
+    "git --work-tree status commit -m x",
+    "git --namespace diff push",
+    "git --exec-path log push",
+    "git --super-prefix show push",
+    "git --attr-source log push",
+    "git --config-env log push",
+    // go — `-C` is the only pre-verb global; the eaten dir hid `run`/`build`.
+    "go -C env run main.go",
+    "go -C list build",
+    // npm — `--prefix`/`-C` hid `install`/`publish` (postinstall code execution).
+    "npm --prefix ls install",
+    "npm -C ls publish",
+    "npm --workspace view add lodash",
+  ];
+  for (const cmd of refused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE the collision: ${cmd} → ${r.reason}`);
+  }
+
+  // gh is immune WITHOUT a change — its noun+sub-verb + write-verb scan catch it.
+  assert.equal(screenCommand("gh --repo pr issue create").ok, false, "gh stays refused, unchanged");
+});
+
+test("the collision fix does NOT over-refuse legitimate value-global reads", () => {
+  // The MIRROR of the hole: a value-global with an honest path/name argument is a
+  // READ, and was FALSELY REFUSED before (its eaten arg read as the sub-verb).
+  const admitted = [
+    "git -C /some/dir log",
+    "git -C /some/dir status",
+    "git -c core.pager=cat log",
+    "git -C /some/dir diff --cached -- api/lib/x.ex",
+    "git -C /some/dir rev-parse HEAD origin/main",
+    "npm --prefix /tmp/proj ls",
+    "npm -C /tmp/proj outdated",
+  ];
+  for (const cmd of admitted) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, true, `MUST ADMIT the honest read: ${cmd} → ${r.reason}`);
+  }
+  // And the same letters AFTER the verb keep their real (write) meaning: the
+  // pre-verb-only restriction must not strip `git branch -C` (COPY a branch).
+  assert.equal(screenCommand("git branch -C old new").ok, false, "git branch -C COPIES a branch — a write");
+  assert.equal(screenCommand("git branch -m old new").ok, false, "git branch -m MOVES a branch — a write");
+});
+
+test("the four corpus rows the collision fix newly ADMITS are named, member by member", () => {
+  // The +4 in the census-reach accounting above, pinned by identity rather than
+  // absorbed into a count. Every one is `git -C <worktree-path> <read-verb>` — an
+  // honest read the value-global collision falsely refused.
+  const NEWLY_ADMITTED = [
+    "git -C /Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_e3a3a728-f3c-19 diff --cached -- api/lib/barkpark_web/controllers/chat_controller.ex",
+    "git -C /Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_69c5ed79-8ea-23 diff --cached -- api/lib/barkpark_web/controllers/chat_controller.ex",
+    "git -C /Volumes/SATECHI/github/barkpark show origin/main:.claude/workflows/bp-connectors-charter.md | grep -n 'D10[7-9]\\|D11[0-5]' | head -20",
+    "git -C /Volumes/SATECHI/github/barkpark rev-parse HEAD origin/main",
+  ];
+  for (const cmd of NEWLY_ADMITTED) {
+    assert.equal(screenCommand(cmd).ok, true, `this row must ADMIT after the fix: ${cmd}`);
+  }
+  // And they are drawn from the frozen corpus — not invented for the test.
+  const corpus = JSON.parse(readFileSync(CORPUS, "utf8"));
+  const commands = new Set(corpus.proofs.map((p) => p?.command).filter((c) => typeof c === "string" && c.trim()));
+  for (const cmd of NEWLY_ADMITTED) {
+    assert.ok(commands.has(cmd), `named row must exist in the frozen corpus: ${cmd}`);
+  }
+  assert.equal(NEWLY_ADMITTED.length, COLLISION_FIX_REACH, "the named rows must account for the whole +4 delta");
 });
 
 // ── 10. THE ARBITRARY FILE-OVERWRITE PRIMITIVE (wave 4) ──────────────────────
@@ -863,10 +964,11 @@ test("the size of the gap is RE-DERIVED, never remembered", async () => {
 
   assert.equal(commands.length, 651);
   // THE SCREEN'S OWN NUMBER IS PINNED — this module is what this suite owns, and
-  // a silent change to its reach is the finding. Wave 5 moved it DELIBERATELY,
-  // 240 -> 254, and the move is accounted for member-by-member in the two
-  // "census reach" tests above rather than re-baselined here.
-  assert.equal(screenCorpus, WAVE5_REACH, "the screen's admission over the frozen corpus");
+  // a silent change to its reach is the finding. It moved DELIBERATELY twice,
+  // 240 -> 254 (wave 5) -> 258 (tgw12-s1's collision fix), and each move is
+  // accounted for member-by-member in the two "census reach" / "collision" tests
+  // above rather than re-baselined here.
+  assert.equal(screenCorpus, SCREEN_REACH, "the screen's admission over the frozen corpus");
 
   // classifySafety's NUMBER IS NOT PINNED, AND THAT IS THE POINT — found by
   // merging this wave's five branches into one tree, where each slice was green

@@ -319,18 +319,39 @@ func fleetRowState(meters map[string]cloudclient.UsageMeter) string {
 }
 
 // usageStateSeverity ranks a usageStateToken for the fleet row roll-up: a tripped
-// quota outranks everything, an unmetered (blind) meter outranks a plain live one
-// so a partially-dark row never poses as fully healthy, and "live" is the floor.
+// quota outranks everything, a BROKEN read outranks a deliberately-unmetered one
+// (the rung this table used to lack — a crashed headline meter rolled its row up
+// as if the pipe were merely dark, so a sick box could read calm), an unmetered
+// (blind) meter outranks a plain live one so a partially-dark row never poses as
+// fully healthy, and "live" is the floor.
+//
+// "live" is cased EXPLICITLY and the default is the ATTENTION side — an
+// unrecognised token ranks at the blind rung, above "live", so a state nobody
+// remembered to rank can never roll its row up as fully healthy. This mirrors
+// attentionBucket in cloud_status_cmd.go, the shipped precedent: its boundary is
+// a membership switch defaulting to "attention" for the same reason. An unknown
+// is BLIND, not TRIPPED, so it deliberately stays BELOW over_limit/near_limit —
+// it must not manufacture a breach either.
+//
+// Honest severity: today this is LATENT, not a live bug. usageStateToken can
+// only return the five tokens cased here, so nothing unknown reaches the switch
+// yet; the fail-open would go live the instant a sixth token is added.
 func usageStateSeverity(token string) int {
 	switch token {
 	case "over_limit":
-		return 3
+		return 4
 	case "near_limit":
+		return 3
+	case "unavailable":
 		return 2
 	case "unmetered":
 		return 1
-	default: // "live"
+	case "live":
 		return 0
+	default:
+		// An unranked token is a meter this build cannot read — blind, like
+		// "unmetered", never the healthy floor.
+		return 1
 	}
 }
 
@@ -604,6 +625,12 @@ func usageTrendCell(name string, history map[string][]cloudclient.UsageHistoryPo
 //     (warn/amber);
 //   - any other metered meter → "live" (green — the pipe is reporting, no limit
 //     tripped or no limit present, the v1 all-unmetered shape);
+//   - a meter whose read was ATTEMPTED and FAILED → "unavailable" (the envelope
+//     carried a typed unavailable_reason). This is the third state the CLI used
+//     to lose: the value degrades to "unmetered" on BOTH paths, so a CRASHED
+//     meter rendered in the product's own words for a DELIBERATE
+//     non-measurement. The reason rides the SOURCE cell so the operator sees
+//     which pipe broke and why;
 //   - an unmetered/absent meter → "unmetered" (neutral/dim — no truth here,
 //     never a fake zero, so a quiet pipe can never read as over/near-limit).
 //
@@ -613,6 +640,11 @@ func usageTrendCell(name string, history map[string][]cloudclient.UsageHistoryPo
 // extension in semrole.For (warn/danger).
 func usageStateToken(m cloudclient.UsageMeter, present bool) string {
 	if !present || !usageIsMetered(m) {
+		// A typed reason means the read RAN and BROKE — never conflate that with
+		// a meter nobody attempted to read.
+		if present && strings.TrimSpace(m.UnavailableReason) != "" {
+			return "unavailable"
+		}
 		return "unmetered"
 	}
 	n, _ := usageNumber(m.Value) // ok — usageIsMetered guaranteed a number
@@ -675,12 +707,20 @@ func usageAsOfCell(m cloudclient.UsageMeter, present bool) string {
 
 // usageSourceCell renders the meter's source label — always named, even on a
 // degraded meter, so the operator sees which pipe went quiet. An absent meter
-// (not in the envelope) has no source to name.
+// (not in the envelope) has no source to name. When the control plane carried a
+// typed unavailable_reason the source names the FAILURE too ("instance.documents
+// (unreachable)") — that is the whole point of carrying the reason: a broken
+// read has to say so in the operator's own view, not just decline to say a
+// number.
 func usageSourceCell(m cloudclient.UsageMeter, present bool) string {
 	if !present || strings.TrimSpace(m.Source) == "" {
 		return "—"
 	}
-	return sanitizeCell(m.Source)
+	src := sanitizeCell(m.Source)
+	if reason := strings.TrimSpace(m.UnavailableReason); reason != "" && !usageIsMetered(m) {
+		src += " (" + sanitizeCell(reason) + ")"
+	}
+	return src
 }
 
 // usageIsMetered reports whether a meter carries a real number — i.e. its value
@@ -777,8 +817,10 @@ ONE INSTANCE
     seats · instances                  your team's members + provisioned boxes
     api_requests · bandwidth           flow meters (not yet metered)
 
-  Every meter is a real number or an honest "unmetered" with its source named —
-  never a fake zero. A meter with a snapshot time shows "as of …"; a live read
+  Every meter is one of three honest states, never a fake zero: a real number
+  ("live"), a pipe nobody could read yet ("unmetered"), or a read that RAN and
+  BROKE ("unavailable" — the SOURCE cell names the reason, e.g. "unreachable").
+  A meter with a snapshot time shows "as of …"; a live read
   shows "live". Quotas ride as a fraction when a plan limit is present, and the
   STATE cell warns "near_limit" / "over_limit" as a metered value nears or
   crosses that ceiling. When the sampler has stored history a TREND column paints

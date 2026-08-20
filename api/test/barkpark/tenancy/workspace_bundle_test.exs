@@ -1401,6 +1401,210 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── catalog-membership guard on the import path (felix-w25-s3, D165) ─────────
+  #
+  # NAMED FAILURE MODE: a manifest-named table reaches the interpolated
+  # COPY/INSERT path with no membership check — `qi/1` quotes the identifier
+  # but never restricts WHICH table, and the import loop filters only by
+  # `table_exists?/1`. The export enumerates members PURELY from
+  # `[root] ++ live_e1/e2/e3 ++ allowlist keys`, so a manifest naming any
+  # other EXISTING table is crafted/foreign by construction. With the guard
+  # ABSENT these two tests red: the hostile one because the import proceeds
+  # into the write path instead of refusing, and that asymmetry is the
+  # RED-BEFORE proof this guard is graded against.
+
+  describe "import refuses tables the export could never have written (felix-w25-s3)" do
+    test "a crafted manifest naming users + schema_migrations is refused invalid_bundle BEFORE any COPY/INSERT" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      # Ground truth first: no export enumeration emits either hostile table —
+      # neither carries workspace_id, a workspaces-FK chain, nor `dataset`.
+      exported = Enum.map(manifest["tables"], & &1["name"])
+      refute "users" in exported
+      refute "schema_migrations" in exported
+
+      # Both dumps are VALID COPY text for their live table, so absent the
+      # guard neither would fail on shape — they would LAND.
+      hostile_version = 99_999_999_999_999
+      hostile_email = "hostile-#{System.unique_integer([:positive])}@example.com"
+
+      hostile_members = [
+        %{
+          "name" => "schema_migrations",
+          "partition" => "E1",
+          "import_strategy" => "copy",
+          "columns" => ["version", "inserted_at"],
+          "order_columns" => ["version"],
+          "row_count" => 1,
+          "md5" => "unchecked-on-import"
+        },
+        %{
+          "name" => "users",
+          "partition" => "E1",
+          "import_strategy" => "copy",
+          "columns" => [
+            "id",
+            "email",
+            "hashed_password",
+            "totp_enabled",
+            "recovery_codes_hashed",
+            "inserted_at",
+            "updated_at"
+          ],
+          "order_columns" => ["id"],
+          "row_count" => 1,
+          "md5" => "unchecked-on-import"
+        }
+      ]
+
+      hostile_dumps = %{
+        "schema_migrations" => "#{hostile_version}\t2026-01-01 00:00:00\n",
+        "users" =>
+          Enum.join(
+            [
+              Ecto.UUID.generate(),
+              hostile_email,
+              "$argon2id$fake",
+              "f",
+              "{}",
+              "2026-01-01 00:00:00",
+              "2026-01-01 00:00:00"
+            ],
+            "\t"
+          ) <> "\n"
+      }
+
+      hostile_bundle =
+        repack(
+          Map.put(manifest, "tables", manifest["tables"] ++ hostile_members),
+          Map.merge(dumps, hostile_dumps)
+        )
+
+      users_before = scalar("SELECT count(*) FROM users", [])
+
+      err =
+        assert_raise WorkspaceBundle.InvalidBundleError, fn ->
+          WorkspaceBundle.import_bundle(hostile_bundle, mode: :merge)
+        end
+
+      # The refusal rides the existing 422 invalid_bundle oracle and NAMES the
+      # foreign tables.
+      assert err.code == "invalid_bundle"
+      assert err.message =~ "schema_migrations"
+      assert err.message =~ "users"
+
+      # …and it fired BEFORE any write: neither hostile row exists.
+      assert scalar("SELECT count(*) FROM schema_migrations WHERE version = $1", [
+               hostile_version
+             ]) == 0
+
+      assert scalar("SELECT count(*) FROM users", []) == users_before
+    end
+
+    test "a member table ABSENT on the target keeps the cross-version 0-row skip — the guard gates membership, table_exists?/1 gates existence" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      # A future schema version's member: unknown to this target, 0 rows —
+      # exactly the cross-version shape today's import skips silently.
+      future_member = %{
+        "name" => "bp_future_member_table",
+        "partition" => "E1",
+        "import_strategy" => "copy",
+        "columns" => ["id"],
+        "order_columns" => ["id"],
+        "row_count" => 0,
+        "md5" => "d41d8cd98f00b204e9800998ecf8427e"
+      }
+
+      cross_version =
+        repack(Map.put(manifest, "tables", manifest["tables"] ++ [future_member]), dumps)
+
+      assert {:ok, stats} = WorkspaceBundle.import_bundle(cross_version, mode: :merge)
+      assert stats.tables["bp_future_member_table"] == 0
+    end
+  end
+
+  # ── the membership guard is not schema-blind (felix-w27, pg_catalog) ─────────
+  #
+  # NAMED FAILURE MODE: schema-blind existence filter. The felix-w25-s3 guard
+  # above rejects foreign PUBLIC tables, but `table_exists?/1` classified by
+  # `nspname = 'public'` while the unqualified COPY in the import path resolves
+  # via search_path (pg_catalog implicit-FIRST) — so a crafted manifest naming
+  # a pg_catalog relation (pg_authid, the role/password table) was FILTERED OUT
+  # of `assert_member_tables!/1`'s `foreign` set instead of refused.
+  #
+  # RED-BEFORE (recorded venue: this header comment; also the commit body):
+  # against the unmodified nspname='public' table_exists?/1, the probe below
+  # FAILS with "Expected exception Barkpark.Tenancy.WorkspaceBundle.
+  # InvalidBundleError but nothing was raised" — the hostile member imports
+  # (0-row silent skip). Green-after: the search-path-visibility rewrite keeps
+  # pg_authid in `foreign` and refuses it before any COPY/INSERT/DDL.
+  describe "import refuses pg_catalog relations — the membership guard is search-path-aware (felix-w27)" do
+    test "a crafted manifest appending pg_authid is refused invalid_bundle naming pg_authid" do
+      # Role-independent on purpose: row_count 0 means the refusal is asserted
+      # without ever writing (or reading) pg_authid, so the probe passes under
+      # non-superuser prod-host test roles.
+      %{ws_a: ws_a} = seed_two_workspaces!()
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      # Ground truth first: no export enumeration ever emits a pg_catalog
+      # relation — a manifest naming one is crafted/foreign by construction.
+      refute "pg_authid" in Enum.map(manifest["tables"], & &1["name"])
+
+      hostile_member = %{
+        "name" => "pg_authid",
+        "partition" => "E1",
+        "import_strategy" => "copy",
+        "columns" => ["rolname"],
+        "order_columns" => ["rolname"],
+        "row_count" => 0,
+        "md5" => "d41d8cd98f00b204e9800998ecf8427e"
+      }
+
+      hostile_bundle =
+        repack(Map.put(manifest, "tables", manifest["tables"] ++ [hostile_member]), dumps)
+
+      err =
+        assert_raise WorkspaceBundle.InvalidBundleError, fn ->
+          WorkspaceBundle.import_bundle(hostile_bundle, mode: :merge)
+        end
+
+      # The refusal rides the existing 422 invalid_bundle oracle and NAMES the
+      # pg_catalog relation.
+      assert err.code == "invalid_bundle"
+      assert err.message =~ "pg_authid"
+    end
+  end
+
+  # Re-pack a (possibly tampered) manifest + in-memory dumps into a bundle
+  # binary, through the SAME Archive.pack/3 the engine uses.
+  defp repack(manifest, dumps) do
+    dir = Archive.spill_dir()
+
+    files =
+      Map.new(dumps, fn {table, body} ->
+        spill = Archive.spill_path(dir, table)
+        File.write!(spill, body)
+        {table, spill}
+      end)
+
+    path = Archive.pack(manifest, files, dir: dir)
+
+    try do
+      File.read!(path)
+    after
+      File.rm(path)
+    end
+  end
+
   # md5 folded over a stream, never over File.read!/1 — the whole point is that
   # no member is ever a binary in the BEAM.
   defp md5_stream(path) do

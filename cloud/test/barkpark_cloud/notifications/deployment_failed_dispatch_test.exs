@@ -21,7 +21,7 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
   use Oban.Testing, repo: BarkparkCloud.Repo
   import Swoosh.TestAssertions
 
-  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.{Accounts, Notifications, Registry}
   alias BarkparkCloud.Registry.Deployment
   alias BarkparkCloud.Workers.StaleDeploymentReaper
 
@@ -218,33 +218,89 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
     end
   end
 
-  test "a mass reap alerts at most the cap, and LOGS the ones it suppressed" do
+  test "a mass reap alerts at most the cap, and RECORDS the ones it suppressed" do
     # One container site with neither an artifact nor a repo: pass (0a) fails
     # every queued row it owns in a single sweep.
-    {site, _owner} = setup_site()
+    {site, owner} = setup_site()
     over = 2
     n = Registry.reap_alert_cap() + over
 
-    # Distinct refs: `deployments_active_site_ref_index` allows one ACTIVE row
-    # per (site, ref), so a mass reap is many refs, not many retries of one.
+    # One queued row per SITE: deploy-truth W1 re-keyed the active index onto
+    # (site_id, environment), so a mass reap is many SITES on the box, not many
+    # concurrent builds of one site (which the DB now refuses outright).
+    bp = Registry.get_barkpark(site.barkpark_id)
+
+    # A SECOND member, so the withheld-row grain is measured as a product and not
+    # as a coincidence: a withheld alert is withheld from every person who would
+    # have received it, each under their own address.
+    team = Accounts.get_team(site.team_id)
+    m = System.unique_integer([:positive])
+
+    {:ok, second} =
+      Accounts.register_user(%{
+        email: "second-#{m}@example.com",
+        password: "correct-horse-battery"
+      })
+
+    {:ok, _} = Accounts.add_member(team, second, "member")
+    members = [owner.email, second.email]
+
     ids =
       for i <- 1..n do
-        {:ok, d} = Registry.create_deployment(site, %{git_ref: "ref-#{i}"})
+        site_i =
+          if i == 1 do
+            site
+          else
+            {:ok, s} =
+              Registry.create_site(bp, %{name: "Shop #{i}-#{n}", slug: "shop-#{i}-#{n}"})
+
+            s
+          end
+
+        {:ok, d} = Registry.create_deployment(site_i, %{git_ref: "ref-#{i}"})
         d.id
       end
 
-    log =
-      ExUnit.CaptureLog.capture_log(fn ->
-        assert {:ok, %{no_source_failed: ^n}} = perform_job(StaleDeploymentReaper, %{})
-      end)
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:ok, %{no_source_failed: ^n}} = perform_job(StaleDeploymentReaper, %{})
+    end)
 
     # FIRST: every row really is terminal — the console, which is the surface of
     # record, lost nothing. The cap suppresses the EMAIL, never the truth.
     for id <- ids, do: assert(Repo.get(Deployment, id).status == "failed")
 
-    assert drain_emails() == Registry.reap_alert_cap()
-    assert log =~ "#{over} deployment_failed alerts suppressed"
-    assert log =~ "the rows are terminal in the console"
+    # Both members are alerted for each of the first `cap` deployments.
+    assert drain_emails() == Registry.reap_alert_cap() * length(members)
+
+    # THE REWRITE (wave 32 S2). This test used to end on two `log =~` substrings —
+    # it PINNED the falsehood that a server-side Logger line is how the owner
+    # learns their alert was thrown away. It is not: the owner reads the console,
+    # not our logs, and the whole value of an alert is that nobody is looking.
+    # The cap stays (charter D349(g), resolved in favour of TRACING); the trace is
+    # now a row the owner can read, on the surface that answers "was I notified?".
+    suppressed = Notifications.list_deliveries(team, status: "suppressed", limit: 500)
+
+    assert length(suppressed) == over * length(members),
+           "the #{over} withheld alerts left no trace on the delivery log for " <>
+             "#{length(members)} members — got #{length(suppressed)} suppressed rows"
+
+    for row <- suppressed do
+      assert row.recipient in members,
+             "a suppressed row must name the PERSON it was withheld from, not a marker"
+
+      assert row.event == "deployment_failed"
+      assert row.last_error =~ "too many deployment alerts in one sweep"
+    end
+
+    # ...and EVERY member, not just the first: the row a person cannot find is
+    # the same silence this slice exists to end.
+    assert suppressed |> Enum.map(& &1.recipient) |> Enum.uniq() |> Enum.sort() ==
+             Enum.sort(members)
+
+    # The sent alerts are still on the same log, and the two outcomes are
+    # distinguishable — a filter that cannot separate them is not a filter.
+    assert length(Notifications.list_deliveries(team, status: "sent", limit: 500)) ==
+             Registry.reap_alert_cap() * length(members)
   end
 
   ## 6. THE EMAIL — a classified cause, not raw reaper jargon, and the site named.
@@ -268,6 +324,88 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
       # The honest capture is kept, below its heading (D310's ruling).
       assert email.text_body =~ "What the provider reported:"
       assert email.text_body =~ "no build source (upload an artifact"
+    end)
+  end
+
+  ## 7. WHICH DEPLOYMENT (wave 15 S4, charter D248) — the alert used to be a
+  ##    site name plus a cause, so three alerts in an hour were indistinguishable
+  ##    from three attempts at one push. All THREE producer paths now name the
+  ##    deployment, and each is driven here through a real write to `failed`.
+
+  test "the FENCED writer's alert names the deployment id, stage and git_ref" do
+    {site, _owner} = setup_site(%{github_repo: "octo/shop"})
+    {:ok, _d} = Registry.create_deployment(site, %{git_ref: "refs/heads/main"})
+    {:ok, claimed} = Registry.claim_next_deployment("builder-1")
+
+    assert {:ok, failed} =
+             Registry.transition_deployment_fenced(
+               claimed.id,
+               "builder-1",
+               claimed.claim_epoch,
+               %{status: "failed", failure_reason: "unauthorized: invalid token", stage: "BUILD"}
+             )
+
+    assert Repo.get(Deployment, claimed.id).status == "failed"
+
+    assert_email_sent(fn email ->
+      assert email.text_body =~
+               "Deployment #{failed.id} · stage BUILD · git_ref refs/heads/main"
+
+      # The identity leads, the cause follows it.
+      assert email.text_body =~ "A deployment for #{site.name} failed.\n\nDeployment #{failed.id}"
+    end)
+  end
+
+  test "the BORN-FAILED webhook alert names the deployment it just minted" do
+    {site, _owner} = setup_site(%{github_repo: "octo/shop"})
+
+    assert {:ok, d} =
+             Registry.create_failed_deployment(
+               site,
+               %{git_ref: "main", delivery_id: "delivery-#{System.unique_integer([:positive])}"},
+               "github push builds are not available yet"
+             )
+
+    assert Repo.get(Deployment, d.id).status == "failed"
+
+    assert_email_sent(fn email ->
+      assert email.text_body =~ "Deployment #{d.id} · git_ref main"
+    end)
+  end
+
+  test "the REAPER's fan-out names the deployment its select already held" do
+    # The id was SELECTED at the sweep and thrown away as `_id`; it now rides the
+    # payload. The reaper holds no struct, so stage/code identity are absent
+    # rather than filled in — the alert claims only what the producer had.
+    {site, _owner} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+
+    assert {:ok, %{no_source_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+    assert Repo.get(Deployment, d.id).status == "failed"
+
+    assert_email_sent(fn email ->
+      refute email.text_body =~ "stage "
+      refute email.text_body =~ "git_ref"
+      assert email.text_body =~ "Deployment #{d.id}"
+    end)
+  end
+
+  test "the alert invents no link and no build duration" do
+    {site, _owner} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+
+    assert {:ok, %{no_source_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+    assert Repo.get(Deployment, d.id).status == "failed"
+
+    assert_email_sent(fn email ->
+      # `deployments` carries no started_at/finished_at, and `became_live_at` is
+      # NULL on every failed row — any duration here would be fabricated.
+      for word <- ~w(duration took elapsed lasted commit) do
+        refute email.text_body =~ word
+      end
+
+      refute email.text_body =~ "http"
+      assert email.text_body =~ "Deployment #{d.id}"
     end)
   end
 end

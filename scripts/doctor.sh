@@ -103,7 +103,12 @@ if command -v bp >/dev/null 2>&1; then
   #                        here: merge-base errors, $base goes empty, the swallowed
   #                        error leaves an empty diff that reads ok)
   #   4. merge-base      → loud skip when empty (no common ancestry to compare)
-  #   5. diff            → RED iff Go inputs changed merge-base→origin/main
+  #   5. ancestry        → RED (DIVERGED) when origin/main does not CONTAIN the
+  #                        bp commit and the bp commit does not contain
+  #                        origin/main: the binary carries code main has never
+  #                        seen, so "predates" is FALSE and a rebuild from this
+  #                        same checkout reinstalls the same off-history binary
+  #   6. diff            → RED iff Go inputs changed merge-base→origin/main
   # The merge-base collapse is why a binary AHEAD with unpushed local Go commits
   # stays GREEN: its merge-base with origin/main IS origin/main, so the diff is
   # empty — a bare `git diff BP_COMMIT origin/main` would false-RED that case.
@@ -123,13 +128,36 @@ if command -v bp >/dev/null 2>&1; then
   elif ! BP_MERGE_BASE="$(git merge-base "$BP_COMMIT" origin/main 2>/dev/null)" \
        || [ -z "$BP_MERGE_BASE" ]; then
     skip "no merge-base between bp commit ($BP_COMMIT) and origin/main — staleness check skipped"
+  elif ! git merge-base --is-ancestor "$BP_COMMIT" origin/main 2>/dev/null \
+       && ! git merge-base --is-ancestor origin/main "$BP_COMMIT" 2>/dev/null; then
+    # DIVERGED — the rung, in the vocabulary of
+    # cloud/lib/barkpark_cloud/github/commit_distance.ex:120 (and its local twin
+    # tooling/grip/provenance.mjs). Neither commit contains the other, so the
+    # binary is not "behind": it is off origin/main's history, carrying commits
+    # main has never seen. The old branch below called this "predates Go
+    # changes" — false — and prescribed `make cli-install`, which is a LOOP:
+    # cli-build runs `go build ./cmd/barkpark` against THIS diverged checkout and
+    # reinstalls the same off-history binary. Only a rebase/pull can end it.
+    #
+    # --is-ancestor's rc=128 ("not in this object database") cannot reach here:
+    # guard 2 already proved BP_COMMIT is in this object database and guard 3
+    # proved origin/main resolves, so both calls answer 0 or 1. Were 128
+    # possible, `!` would read it as "not an ancestor" and turn "I could not
+    # look" into a confident refusal.
+    bad "installed bp ($BP_COMMIT) is DIVERGED from origin/main — it carries commits main does not have, so it does not merely predate main and rebuilding from this checkout reinstalls the same binary — run: git pull --rebase (then: make cli-install)"
   elif [ -n "$(git diff --name-only "$BP_MERGE_BASE" origin/main -- '*.go' go.mod go.sum internal cmd deploy.sh 2>/dev/null | head -1)" ]; then
     bad "installed bp ($BP_COMMIT) predates Go changes on origin/main — run: make cli-install"
   else
     ok "installed bp ($BP_COMMIT) is current with origin/main"
   fi
 else
-  skip "no bp on PATH — install: make cli-install"
+  # NOT a skip. `skip` prints nothing under --hook (line 20), and a missing bp is
+  # the single most likely failure in a second environment — a fresh clone on
+  # another machine has no bp at all, and the SessionStart hook staying silent
+  # about it is exactly the case the hook exists to catch. `bad` prints in both
+  # modes and counts toward the issue summary; the script still exits 0 below
+  # (doctor is advisory, never a gate).
+  bad "no bp on PATH — install: make cli-install"
 fi
 
 # ── 3. Pending migrations on the local dev DB? ──────────────────────────────

@@ -82,6 +82,17 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     {token, stored}
   end
 
+  defp session_token(user) do
+    {:ok, token} = Accounts.create_user_session_token(user)
+    token
+  end
+
+  # The session twin of `call/4` — the team-role and platform-operator gates are
+  # reachable only by a browser credential (a PAT carries no team role axis).
+  defp session_call(method, path, body, user) do
+    call(method, path, body, session_token(user))
+  end
+
   defp call(method, path, body, token) do
     conn =
       case body do
@@ -126,6 +137,21 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     ]
   end
 
+  # The two SESSION-TIER reads (deploy-reliability W14 S4). Neither is gated on an
+  # ability at all: both go through the 2-arity `with_team_site(conn, fun)`, which
+  # defaults to `:session` (router.ex:11065), so NO PAT of any tier reaches them —
+  # the refusal is 401 (no session token was ever seen), never the ability gate's
+  # 403. They were ABSENT from @driven_routes entirely, and the census's own
+  # anti-vacuity tripwire (`missing_routes/1`) only polices routes already IN the
+  # census — so an absent route is invisible to it and nothing asserted their tier
+  # in EITHER direction.
+  defp session_routes(%{site: site}) do
+    [
+      {:get, "/v1/sites/#{site.id}", nil},
+      {:get, "/v1/sites/#{site.id}/deployments", nil}
+    ]
+  end
+
   # The same census in router.ex's own spelling, checked against the source on
   # every run (§4 below).
   #
@@ -141,6 +167,10 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     {"get", "/v1/barkparks"},
     {"get", "/v1/sites"},
     {"get", "/v1/sites/:id/deployments/:dep_id"},
+    # The two session-tier reads — in the census so a deletion is loud, and driven
+    # below so their tier is asserted at all.
+    {"get", "/v1/sites/:id"},
+    {"get", "/v1/sites/:id/deployments"},
     {"patch", "/v1/sites/:id"},
     {"post", "/v1/sites/:id/deploy"},
     {"post", "/v1/sites/:id/rollback"},
@@ -268,6 +298,69 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     end
   end
 
+  ## 2a. The session tier (deploy-reliability W14 S4)
+
+  # These two reads carry every owner-facing deployment number in the
+  # deploy-reliability epic, and until now the grid did not mention them. The pin
+  # is deliberate and it has a cost, stated here so it is not folklore: freezing
+  # the 401 freezes "no automation credential can compute the owner's number",
+  # because `bp cloud site status` reads the ledger through the session-only list
+  # route (ListSpawnSiteDeployments). Re-tiering it to {:ability, "read"} is a
+  # cross-epic call inside cloud-console-hardening's auth fence — FILED, not made
+  # here (deploy-reliability charter D219). When it IS re-tiered, this test flips
+  # to admitted and the flip is the proof.
+  describe "session-tier reads (no PAT reaches them)" do
+    test "EVERY PAT tier is 401 on both session-tier reads — a credential class, not an ability" do
+      s = scope()
+
+      for abilities <- [["read"], ["write"], ["deploy"], ["root"]] do
+        {token, _} = pat(s, abilities)
+        who = "a #{Enum.join(abilities, "+")} PAT"
+
+        for {method, path, body} <- session_routes(s) do
+          conn = call(method, path, body, token)
+
+          assert conn.status == 401,
+                 "#{who} should be 401 (session-only route) at #{label(method, path)}, got #{conn.status}"
+
+          # 401, never 403: `Auth.require_user/2` never saw a session token, so the
+          # ability gate is not even consulted. A 403 here would mean the route had
+          # been re-tiered onto the ability axis.
+          assert Jason.decode!(conn.resp_body)["error"] == "unauthorized"
+        end
+      end
+
+      # ...while a root PAT DOES reach the one-deployment poll one segment deeper,
+      # so the refusal above is about the route's tier and not about the token.
+      {root_token, _} = pat(s, ["root"])
+
+      assert call(:get, "/v1/sites/#{s.site.id}/deployments/#{s.deployment.id}", nil, root_token).status ==
+               200
+    end
+
+    test "a session IS admitted by both — and by role BLINDNESS, not by an owner grant" do
+      s = scope()
+
+      for {method, path, body} <- session_routes(s) do
+        conn = session_call(method, path, body, s.user)
+        assert_admitted(conn.status, "a session", method, path)
+        assert conn.status == 200
+      end
+
+      # The role axis is not consulted at all: a plain member of the SAME team
+      # reads both. The mutation proof for this lives in router_sites_test.exs.
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(s.team, member, "member")
+
+      for {method, path, body} <- session_routes(s) do
+        conn = session_call(method, path, body, member)
+
+        assert conn.status == 200,
+               "a team MEMBER should read #{label(method, path)}, got #{conn.status}"
+      end
+    end
+  end
+
   describe "write-gated routes" do
     test "THE REJECTED WIDENING: a deploy PAT is refused by every write-gated route" do
       s = scope()
@@ -335,6 +428,197 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     test "an unauthenticated request to a read-gated GET is 401, not 403" do
       conn = Router.call(conn(:get, "/v1/sites"), @opts)
       assert conn.status == 401
+    end
+  end
+
+  ## 2b. THE REFUSAL NAMES THE AUTHORITY IT REQUIRED (cch w35 s1)
+
+  # A 403 whose whole body is `{"error":"forbidden"}` tells the caller nothing
+  # about WHAT would have admitted them, which is why the console had to guess a
+  # cause from one global slug map and printed "Only the team owner can manage
+  # billing" for an audit-trail read. Every refusal that flows through
+  # `Auth.forbidden/2` now carries the authority it actually required, plus the
+  # scope that authority lives in. These are the guards that can LOSE: delete an
+  # evidence pair from auth.ex and the matching assertion below reds by name.
+  #
+  # The pairs are asserted by FULL-MAP equality on purpose — an assertion that
+  # only keys into ["error"] cannot notice a field going missing.
+  describe "a refusal names the authority it required" do
+    test "require_ability names the ability and the token scope" do
+      s = scope()
+      {token, _} = pat(s, ["deploy"])
+
+      conn = call(:patch, "/v1/sites/#{s.site.id}", %{name: "Renamed"}, token)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "write",
+               "scope" => "token"
+             }
+    end
+
+    # cch-w37-s3: the label is "team", not "primary_team" — the gate reads
+    # conn.assigns[:current_team], which resolve_team/2 fills from the
+    # x-barkpark-team header, so it judges the SELECTED team, not the primary one.
+    test "require_primary_team_admin names admin on the current team (the audit-trail exhibit)" do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "member")
+
+      conn = session_call(:get, "/v1/audit", nil, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+    end
+
+    test "require_primary_team_owner names owner, so an ADMIN is told what they still lack" do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "admin")
+
+      conn = session_call(:post, "/v1/billing/checkout", %{}, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "owner",
+               "scope" => "team"
+             }
+    end
+
+    # cch-w38-s2: ONE CONDITION, ONE ANSWER. Both primary-team gates used to
+    # answer a TEAMLESS caller `422 {error: "no_team"}` — the status that means
+    # "your body was unprocessable" handed to a caller whose body was fine and
+    # who simply holds no grant. `gate_role/4` already answered the same
+    # condition 403. These two pins are the fail-before proof: against
+    # origin/main's bytes they red on `assert conn.status == 403` (got 422), and
+    # they are the ONLY pins that exist on these two arms — the rest of the
+    # suite is green in BOTH directions, which is exactly why the flip needed a
+    # test that can lose.
+    #
+    # `scope` is "team", matching the two required-role refusals
+    # above, so each gate emits ONE scope label. The 15 INLINE
+    # `json(conn, 422, %{error: "no_team"})` emitters in router.ex are a
+    # different contract and deliberately unchanged (`bp cloud support add` and
+    # app.js's envVarsFailureCopy both read that status).
+    test "require_primary_team_admin answers a TEAMLESS caller 403 no_team, not 422" do
+      user = user_fixture()
+
+      conn = session_call(:get, "/v1/audit", nil, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "reason" => "no_team",
+               "scope" => "team"
+             }
+    end
+
+    test "require_primary_team_owner answers a TEAMLESS caller 403 no_team, not 422" do
+      user = user_fixture()
+
+      conn = session_call(:post, "/v1/billing/checkout", %{}, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "reason" => "no_team",
+               "scope" => "team"
+             }
+    end
+
+    test "require_platform_operator names the platform allowlist, not a team role" do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "owner")
+
+      conn = session_call(:get, "/v1/operator/autoupdate", nil, user)
+
+      assert conn.status == 403
+
+      # A team OWNER is still refused here, and the body says why: this axis is
+      # the platform allowlist, which no team grant can reach.
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "platform_operator",
+               "scope" => "platform"
+             }
+    end
+
+    test "require_team_role names the min_role the route asked for, on the team scope" do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "member")
+
+      conn =
+        session_call(
+          :post,
+          "/v1/teams/#{team.id}/invitations",
+          %{"email" => "x@example.com"},
+          user
+        )
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+    end
+
+    test "gate_role names the label its opaque check cannot introspect" do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "member")
+
+      conn = session_call(:get, "/v1/barkparks/#{Ecto.UUID.generate()}/credentials", nil, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+    end
+
+    test "the no-team arm states a CAUSE and never an authority" do
+      # NOT `required: "admin"`. This user holds no team grant at all, so no role
+      # would have admitted them; naming one would be a second confidently-wrong
+      # sentence, which is the exact failure this slice exists to remove.
+      user = user_fixture()
+
+      conn = session_call(:get, "/v1/barkparks/#{Ecto.UUID.generate()}/credentials", nil, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "reason" => "no_team",
+               "scope" => "team"
+             }
+
+      refute Map.has_key?(Jason.decode!(conn.resp_body), "required")
+    end
+
+    test "evidence is ADDITIVE — the `forbidden` slug 21 assertions pin is untouched" do
+      s = scope()
+      {token, _} = pat(s, ["deploy"])
+
+      conn = call(:patch, "/v1/sites/#{s.site.id}", %{name: "Renamed"}, token)
+
+      assert Jason.decode!(conn.resp_body)["error"] == "forbidden"
     end
   end
 
@@ -420,8 +704,9 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
         deployment: %{id: "22222222-2222-2222-2222-222222222222"}
       }
 
-      # read (4) + write (6) + the one deploy-gated row, /v1/go-live.
-      assert length(@driven_routes) == length(read_routes(s)) + length(write_routes(s)) + 1
+      # read (4) + write (6) + session (2) + the one deploy-gated row, /v1/go-live.
+      assert length(@driven_routes) ==
+               length(read_routes(s)) + length(write_routes(s)) + length(session_routes(s)) + 1
     end
 
     test "the detector FAILS NAMING a route that has been deleted from router.ex" do

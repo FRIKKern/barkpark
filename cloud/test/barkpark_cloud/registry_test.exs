@@ -249,6 +249,117 @@ defmodule BarkparkCloud.RegistryTest do
     end
   end
 
+  describe "health honesty — a row is never green before anything reported (cch-w34-s2)" do
+    test "adopt_barkpark/3 lands health_status \"unknown\", not \"up\"" do
+      team = team_fixture()
+
+      assert {:ok, bp} =
+               Registry.adopt_barkpark(team, %{
+                 name: "Adopted",
+                 slug: "adopted-#{System.unique_integer([:positive])}",
+                 host: "203.0.113.77"
+               })
+
+      assert bp.host == "203.0.113.77"
+      # Adoption is an operator's intent, not a measurement: no agent report has
+      # arrived, so there is nothing to call healthy.
+      assert bp.health_status == "unknown"
+      assert is_nil(bp.last_seen_at)
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.health_status == "unknown"
+      assert is_nil(reloaded.last_seen_at)
+    end
+
+    test "succeed_job/2 lands health_status \"unknown\", not \"up\"" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, _job} = Registry.succeed_job(job.id, "203.0.113.51")
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.host == "203.0.113.51"
+      # A successful provision means the machine was CREATED — not that anything
+      # answered. The row goes green on the first agent report.
+      assert reloaded.health_status == "unknown"
+      assert reloaded.agent_status == "offline"
+      assert is_nil(reloaded.last_seen_at)
+    end
+
+    test "the first agent report is what turns the row green" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "203.0.113.52")
+
+      seen = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      assert {:ok, _} =
+               Registry.record_agent_report(Registry.get_barkpark(bp.id), %{
+                 health_status: "up",
+                 agent_status: "online",
+                 last_seen_at: seen
+               })
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.health_status == "up"
+      refute is_nil(reloaded.last_seen_at)
+    end
+  end
+
+  describe "agent_status \"online\" always co-writes last_seen_at (cch-w34-s2 guard)" do
+    # The never-reported arm of stale_online_barkparks/1 was unreachable for as
+    # long as the query ALSO required agent_status == "online", because no
+    # cloud/lib path can produce `online AND last_seen_at IS NULL`: the sole
+    # producer is the POST /v1/agent/report handler, which stamps last_seen_at in
+    # the same changeset. That invariant is now load-bearing in the OTHER
+    # direction (the arm is keyed on last_seen_at alone), so pin it: a new writer
+    # of "online" that forgets last_seen_at would resurrect a row the sweep can
+    # never see going stale.
+    @lib_root Path.expand("../../lib/barkpark_cloud", __DIR__)
+
+    test "every cloud/lib write of agent_status \"online\" co-writes last_seen_at" do
+      offenders =
+        @lib_root
+        |> Path.join("**/*.ex")
+        |> Path.wildcard()
+        |> Enum.flat_map(fn path ->
+          source = File.read!(path)
+
+          source
+          |> String.split("\n")
+          |> Enum.with_index(1)
+          |> Enum.filter(fn {line, _n} ->
+            String.contains?(line, ~s(agent_status: "online")) or
+              String.contains?(line, ~s("agent_status" => "online"))
+          end)
+          |> Enum.reject(fn {_line, n} -> co_writes_last_seen_at?(source, n) end)
+          |> Enum.map(fn {line, n} ->
+            "#{Path.relative_to(path, @lib_root)}:#{n}: #{String.trim(line)}"
+          end)
+        end)
+
+      assert offenders == [],
+             """
+             A cloud/lib path writes agent_status "online" without co-writing
+             last_seen_at in the same map. That makes `online AND last_seen_at IS
+             NULL` producible again — a row the staleness sweep's went-silent arm
+             will never flip, because it has no heartbeat to age out.
+
+             #{Enum.join(offenders, "\n")}
+             """
+    end
+
+    # `last_seen_at` counts as co-written when it appears within the same map
+    # literal — in practice within a few lines either side of the online write.
+    defp co_writes_last_seen_at?(source, line_no) do
+      lines = String.split(source, "\n")
+      window = Enum.slice(lines, max(line_no - 8, 0), 16)
+      Enum.any?(window, &String.contains?(&1, "last_seen_at"))
+    end
+  end
+
   describe "record_event/3 + recent_events/2" do
     test "appends events and returns them newest-first" do
       team = team_fixture()
@@ -704,6 +815,54 @@ defmodule BarkparkCloud.RegistryTest do
       assert Barkpark.subdomain_from_url(suff) == "gyldendal-71069eaa"
     end
 
+    # cch-w69-bl / D865 — subdomain_from_url/1 self-normalises (trim |> downcase)
+    # so the DNS label / Hetzner box name the worker mints never depends on
+    # upstream cleanliness. Each hostile spelling below (the D852 classes) must
+    # fold to the SAME clean label. RED ON PRE-FIX BYTES: without the fold, a
+    # leading space defeats the case-sensitive replace_prefix (yielding
+    # " https://gyldendal" or a whole dirty host), an uppercase scheme passes
+    # through unstripped ("HTTPS://gyldendal.barkpark.cloud"), and a mixed-case
+    # host escapes the lowercase suffix strip ("Gyldendal.BARKPARK.CLOUD").
+    test "subdomain_from_url self-normalises the D852 hostile spellings to the clean label" do
+      base = %Barkpark{slug: "x", team_id: Ecto.UUID.generate()}
+      clean = "gyldendal"
+
+      hostile = [
+        # leading / trailing whitespace
+        "  https://gyldendal.barkpark.cloud",
+        "https://gyldendal.barkpark.cloud  ",
+        "\thttps://gyldendal.barkpark.cloud\n",
+        # uppercase / mixed-case scheme
+        "HTTPS://gyldendal.barkpark.cloud",
+        "HtTpS://gyldendal.barkpark.cloud",
+        # mixed-case host + zone
+        "https://Gyldendal.barkpark.cloud",
+        "https://gyldendal.BARKPARK.CLOUD",
+        "https://GYLDENDAL.Barkpark.Cloud",
+        # the compound worst case: space + uppercase scheme + mixed host
+        "  HTTPS://Gyldendal.Barkpark.Cloud  "
+      ]
+
+      for url <- hostile do
+        assert Barkpark.subdomain_from_url(%{base | url: url}) == clean,
+               "expected #{inspect(url)} to fold to #{inspect(clean)}"
+      end
+
+      # The suffixed (team-disambiguated) shape survives the fold too — a
+      # mixed-case suffixed url still yields the correct suffixed label.
+      assert Barkpark.subdomain_from_url(%{
+               base
+               | url: "  HTTPS://Gyldendal-71069EAA.Barkpark.Cloud"
+             }) ==
+               "gyldendal-71069eaa"
+
+      # DIVERGENCE NOTE (fourth normaliser spelling): DomainStatus.platform_host/1
+      # (cloud/lib/barkpark_cloud/domain_status.ex) trims but does NOT downcase
+      # and additionally splits path/port — it is a private helper on a separate
+      # backlog row (cch-w71-bl-platform-host-fourth-normaliser-spelling). It is
+      # intentionally NOT converged here; convergence is tracked there.
+    end
+
     test "subdomain_from_url falls back to provisioning_subdomain when url is nil" do
       bp = %Barkpark{slug: "gyldendal", team_id: Ecto.UUID.generate(), url: nil}
       assert Barkpark.subdomain_from_url(bp) == Barkpark.provisioning_subdomain(bp)
@@ -893,6 +1052,74 @@ defmodule BarkparkCloud.RegistryTest do
       assert List.last(console)["line"] == "line 305"
     end
 
+    # cch-w33-s3: BOTH bounds must DISCLOSE what they discarded. A console that
+    # silently drops is indistinguishable from a complete one, and the panel
+    # renders a bare line count as though it were the whole log.
+
+    test "cch-w33-s3: a truncated line DISCLOSES its original length" do
+      d = deployment_fixture(team_fixture())
+      {:ok, d} = Registry.append_deployment_console(d.id, String.duplicate("x", 5_000))
+
+      # The chop itself is unchanged (the line stays exactly 2 KB) — what is new
+      # is that the entry says so.
+      assert [%{"line" => line, "truncated_from" => 5_000}] = d.console
+      assert String.length(line) == 2_000
+
+      # …and it PERSISTS: this is a jsonb column, not a computed field.
+      assert [%{"truncated_from" => 5_000}] = Repo.get(Deployment, d.id).console
+    end
+
+    test "cch-w33-s3: a line of EXACTLY 2 KB is untouched and carries NO marker" do
+      d = deployment_fixture(team_fixture())
+      {:ok, d} = Registry.append_deployment_console(d.id, String.duplicate("x", 2_000))
+
+      assert [%{"line" => line} = entry] = d.console
+      assert String.length(line) == 2_000
+      refute Map.has_key?(entry, "truncated_from")
+    end
+
+    test "cch-w33-s3: the ring drop DISCLOSES its cumulative count on the oldest survivor" do
+      d = deployment_fixture(team_fixture())
+
+      for i <- 1..305 do
+        {:ok, _} = Registry.append_deployment_console(d.id, "line #{i}")
+      end
+
+      console = Repo.get(Deployment, d.id).console
+      assert length(console) == 300
+      oldest = List.first(console)
+      assert oldest["line"] == "line 6"
+      assert oldest["dropped_before"] == 5
+
+      # CUMULATIVE, not per-call: ten more lines drop ten more, and the count on
+      # the new oldest survivor carries the running total forward.
+      for i <- 306..315 do
+        {:ok, _} = Registry.append_deployment_console(d.id, "line #{i}")
+      end
+
+      console = Repo.get(Deployment, d.id).console
+      assert length(console) == 300
+      assert List.first(console)["line"] == "line 16"
+      assert List.first(console)["dropped_before"] == 15
+
+      # The marker rides on the OLDEST survivor only — never on the newest line.
+      refute Map.has_key?(List.last(console), "dropped_before")
+    end
+
+    test "cch-w33-s3: BELOW the cap nothing is dropped and the count reads 0" do
+      d = deployment_fixture(team_fixture())
+
+      for i <- 1..10 do
+        {:ok, _} = Registry.append_deployment_console(d.id, "line #{i}")
+      end
+
+      console = Repo.get(Deployment, d.id).console
+      assert length(console) == 10
+      oldest = List.first(console)
+      refute Map.has_key?(oldest, "dropped_before")
+      assert Map.get(oldest, "dropped_before", 0) == 0
+    end
+
     test "best-effort: a late line after the deploy is terminal still records" do
       d = deployment_fixture(team_fixture())
       {:ok, _} = Registry.transition_deployment(d, %{status: "failed", failure_reason: "boom"})
@@ -942,6 +1169,47 @@ defmodule BarkparkCloud.RegistryTest do
                Registry.set_deployment_detail(Ecto.UUID.generate(), "hello")
 
       assert {:error, :not_found} = Registry.set_deployment_detail("not-a-uuid", "hello")
+    end
+
+    # cch-w33-s3: the THIRD consumer of validate_console_line/1. `detail` is a
+    # bare string column, so it can carry no marker — which is exactly why the
+    # validator kept its {:ok, binary} return shape and the console disclosure
+    # rides in a separate `console_line_meta/1` sibling. Changing the /1 return
+    # shape would have broken this with-chain silently.
+    test "cch-w33-s3: a caption at the column limit round-trips through the shared validator" do
+      d = detail_deployment_fixture(team_fixture())
+
+      assert {:ok, d} = Registry.set_deployment_detail(d.id, String.duplicate("y", 255))
+      assert String.length(d.detail) == 255
+      assert Repo.get(Deployment, d.id).detail == d.detail
+    end
+
+    # cch-w34-s5: the replacement the pinning test asked for. Its predecessor
+    # ("a caption ABOVE the column limit currently RAISES") certified the defect:
+    # the shared validator truncated at 2 KB while the column was varchar(255),
+    # so 256..2_000 chars raised Postgrex.Error 22001 inside Repo.update — out of
+    # a function whose @doc promises telemetry that never affects the build's
+    # outcome. `modify :detail, :text` (migration 20260806110000) makes the 2 KB
+    # validator the ONLY bound, so the same input now TRUNCATES AND STORES.
+    test "cch-w34-s5: a caption above the shared 2 KB cap truncates and STORES rather than raising" do
+      d = detail_deployment_fixture(team_fixture())
+
+      assert {:ok, d} = Registry.set_deployment_detail(d.id, String.duplicate("y", 5_000))
+      assert String.length(d.detail) == 2_000
+      assert Repo.get(Deployment, d.id).detail == d.detail
+    end
+
+    # cch-w34-s5: the band the old column silently owned — 256..2_000 — is now
+    # stored WHOLE, not truncated at 255 and not raised. This is the assertion a
+    # detail-specific 255 cap would have failed, which is why the remedy was the
+    # column and not a second cap.
+    test "cch-w34-s5: a caption between the old column width and the shared cap round-trips WHOLE" do
+      d = detail_deployment_fixture(team_fixture())
+
+      caption = String.duplicate("z", 300)
+      assert {:ok, d} = Registry.set_deployment_detail(d.id, caption)
+      assert d.detail == caption
+      assert Repo.get(Deployment, d.id).detail == caption
     end
   end
 
@@ -1040,6 +1308,177 @@ defmodule BarkparkCloud.RegistryTest do
       # test: the raise aborts the sandbox transaction, which ExUnit rolls back.)
       cs = Site.changeset(site_b, %{domains: ["example.com"]})
       assert_raise Postgrex.Error, fn -> Repo.update!(cs) end
+    end
+  end
+
+  # deploy-reliability W1 s4: the content-webhook registrar must send the box's
+  # `types` DOC-TYPE FILTER. Every site-autodeploy row on guerrilla carried the
+  # empty array — the box's MATCH-EVERYTHING sentinel — so all five spawned sites
+  # rebuilt on every mutation in a shared dataset, 90.3% of which were `task`
+  # writes from this repo's own bp ledger.
+  describe "content-webhook registration: doc-type filter (deploy-reliability W1 s4)" do
+    alias BarkparkCloud.StudioLinkFakeHttpClient
+    alias BarkparkCloud.Registry.Vault
+
+    defp live_bp(team) do
+      n = System.unique_integer([:positive])
+      {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+
+      bp
+      |> Ecto.Changeset.change(
+        url: "https://acme.barkpark.cloud",
+        git_commit: "abc123",
+        admin_token_encrypted: Vault.encrypt("instance-admin-token")
+      )
+      |> Repo.update!()
+    end
+
+    defp bound_site(bp, attrs \\ %{}) do
+      n = System.unique_integer([:positive])
+
+      {:ok, site} =
+        Registry.create_site(
+          bp,
+          Enum.into(attrs, %{
+            name: "Blog #{n}",
+            slug: "blog-#{n}",
+            kind: "static",
+            framework: "astro",
+            bootstrap_workspace: "acme",
+            bootstrap_project: "blog",
+            bootstrap_dataset: "production",
+            read_token: "bpt_read_#{n}"
+          })
+        )
+
+      site
+    end
+
+    defp webhook_write(method) do
+      StudioLinkFakeHttpClient.requests()
+      |> Enum.find(fn r ->
+        r.method == method and String.contains?(r.url, "/v1/webhooks/production")
+      end)
+    end
+
+    test "the CREATE registration carries the site's own doc_type as the box `types` filter" do
+      bp = team_fixture() |> live_bp()
+      StudioLinkFakeHttpClient.program([])
+
+      site = bound_site(bp, %{doc_type: "paper"})
+      assert site.doc_type == "paper"
+
+      post = webhook_write(:post)
+      assert post, "expected a POST /v1/webhooks/production registration call"
+
+      payload = Jason.decode!(post.body)
+
+      # THE DEFECT: this key was absent entirely, so the box stored `{}` and the
+      # row matched every document type in the dataset.
+      assert payload["types"] == ["paper"],
+             "the registration must filter to the type this site's build actually reads"
+    end
+
+    test "the RECONCILE (PUT) body carries types too — a later doc_type change REPAIRS the stale array" do
+      bp = team_fixture() |> live_bp()
+      StudioLinkFakeHttpClient.program([])
+
+      site = bound_site(bp, %{doc_type: "paper"})
+      hook_id = Ecto.UUID.generate()
+
+      # The operator re-points the site at a different type between deploys.
+      {:ok, site} = Registry.update_site_settings(site, %{doc_type: "post"})
+
+      # Second pass: the box now reports the row this site already registered, so
+      # the reconciler takes the PUT branch.
+      StudioLinkFakeHttpClient.program(%{
+        "/v1/webhooks/production" =>
+          {:ok,
+           %{
+             status: 200,
+             body:
+               Jason.encode!(%{
+                 "webhooks" => [%{"id" => hook_id, "name" => "site-autodeploy-#{site.id}"}]
+               })
+           }},
+        "/v1/webhooks/production/#{hook_id}" => {:ok, %{status: 200, body: "{}"}}
+      })
+
+      assert :ok = Registry.ensure_content_webhook(bp, site)
+
+      put = webhook_write(:put)
+      assert put, "expected a PUT update of the EXISTING webhook row"
+
+      # `Webhooks.update_webhook/2` on the box casts only the keys PRESENT in the
+      # body: a types omitted here survives untouched, which would leave this row
+      # filtered on "paper" forever. The filter lives in the SHARED body for
+      # exactly this reason.
+      assert Jason.decode!(put.body)["types"] == ["post"],
+             "reconciliation must REPAIR a stale types array, not only seed it"
+    end
+
+    test "a site with a blank doc_type registers `[]` — the box's match-everything sentinel, never a wrong filter" do
+      bp = team_fixture() |> live_bp()
+      StudioLinkFakeHttpClient.program([])
+
+      site = bound_site(bp)
+      # A row with no usable binding (the column is NOT NULL, so blank is the
+      # only shape this takes). Filtering such a site to a guessed type would
+      # silently stop its real rebuilds, so the fallback is today's unfiltered
+      # behaviour — the box's own match-everything sentinel.
+      site = site |> Ecto.Changeset.change(doc_type: "") |> Repo.update!()
+
+      hook_id = Ecto.UUID.generate()
+
+      StudioLinkFakeHttpClient.program(%{
+        "/v1/webhooks/production" =>
+          {:ok,
+           %{
+             status: 200,
+             body:
+               Jason.encode!(%{
+                 "webhooks" => [%{"id" => hook_id, "name" => "site-autodeploy-#{site.id}"}]
+               })
+           }},
+        "/v1/webhooks/production/#{hook_id}" => {:ok, %{status: 200, body: "{}"}}
+      })
+
+      assert :ok = Registry.ensure_content_webhook(bp, site)
+      assert Jason.decode!(webhook_write(:put).body)["types"] == []
+    end
+
+    test "the filter FILTERS: under the box's own selection predicate, `paper` matches and `task` does not" do
+      bp = team_fixture() |> live_bp()
+      StudioLinkFakeHttpClient.program([])
+
+      _site = bound_site(bp, %{doc_type: "paper"})
+      types = Jason.decode!(webhook_write(:post).body)["types"]
+
+      # This is the box's selection predicate verbatim from
+      # api/lib/barkpark/webhooks.ex:197 (`active_webhooks_for/4`):
+      #
+      #   fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.types, w.types, ^type)
+      #
+      # evaluated in Postgres against the array THIS registrar sends. It answers
+      # the only question the control plane controls: does the value we register
+      # select a paper mutation and reject a task mutation? (The box-side
+      # dispatch itself is covered by api/test/barkpark/webhooks_test.exs.)
+      selects? = fn type ->
+        %{rows: [[result]]} =
+          Repo.query!(
+            "SELECT ($1::varchar[] = '{}') OR ($1::varchar[] @> ARRAY[$2]::varchar[])",
+            [types, type]
+          )
+
+        result
+      end
+
+      assert selects?.("paper"), "a paper mutation must still rebuild the site"
+
+      refute selects?.("task"),
+             "a task mutation must NOT rebuild the site — 90.3% of deliveries were task writes"
+
+      refute selects?.("post")
     end
   end
 end

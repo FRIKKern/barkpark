@@ -1,0 +1,188 @@
+defmodule BarkparkCloud.Notifications.Withhold do
+  @moduledoc """
+  The one funnel through which a WITHHELD notification becomes a VISIBLE row.
+
+  ## The definition this module is built on (wave 32, charter D363)
+
+  A **silent withhold** is a branch where the system was positioned to send a
+  notification, does not send it, AND writes no `Delivery` row — i.e. it is
+  invisible on the only surface built to answer *"was I notified?"*. The lens
+  matters: a user's own disabled toggle is NOT a withhold (counting it would make
+  "withhold" mean "any switch that is off"); a decision the system made FOR the
+  user, without telling them, is.
+
+  Every branch that makes such a decision routes here, so the console grows one
+  honest vocabulary instead of one silence per branch.
+
+  ## The grain: ONE ROW PER MEMBER, with that member's own address
+
+  A withheld alert is withheld from PEOPLE. A single team-level marker row would
+  be unreadable by the member it concerns, because the delivery log is read
+  per-recipient — so `record/4` fans to `Accounts.list_team_member_emails/1` and
+  writes one `status: "suppressed"` row per member, `recipient` being that
+  member's real address. Never a synthetic recipient: a fabricated address is a
+  row that says a person was involved who was not.
+
+  ## The consented zero-recipient cases, named
+
+  Two withhold sites have NO recipient by construction, and `Delivery` requires
+  one (`validate_required([:recipient, :event])`):
+
+    * **a team with zero member emails** — there is nobody the alert was withheld
+      FROM, so there is nobody to show a row to; and
+    * **the fleet digest with no platform admins configured** — the same shape one
+      level up, an operator-scoped send with an empty operator list.
+
+  Both are CONSENTED withholds under the definition above: they are not the system
+  quietly deciding against a person, they are the absence of a person. `record/4`
+  therefore returns `0` for them rather than raising or inventing a recipient — a
+  count, so a caller can still log or assert on it.
+
+  ## The reason lands in `last_error`
+
+  `Delivery.changeset/2` clamps `last_error` to the union of `DeliveryReason`'s
+  FAILURE vocabulary and `labels/0` below. The two sets are disjoint on purpose:
+  every `DeliveryReason` sentence describes an attempted-and-failed send, and none
+  of them can honestly describe a send that never left.
+  """
+
+  require Logger
+
+  alias BarkparkCloud.Accounts
+  alias BarkparkCloud.Notifications.Delivery
+  alias BarkparkCloud.Repo
+
+  @status "suppressed"
+
+  # THE CLOSED VOCABULARY. `record/4` guards on `reason in @reasons` and the
+  # catch-all clause writes NO row — so a caller that invents a reason without
+  # adding it here is a silent withhold reintroduced INSIDE the fix. Two guards
+  # stand against that: the catch-all below LOGS instead of failing quietly, and
+  # `withhold_test.exs` derives every reason atom passed to `Withhold.record/4`
+  # from `notifications.ex`'s AST and asserts it is a member of this list.
+  @reasons [:reap_alert_cap, :dispatch_crashed, :chat_enqueue_failed, :chat_channel_gone]
+
+  @type reason :: :reap_alert_cap | :dispatch_crashed | :chat_enqueue_failed | :chat_channel_gone
+
+  @doc """
+  The `Delivery.status` a withheld notification is recorded under. One word, no
+  migration — see `Delivery`'s moduledoc.
+  """
+  @spec status() :: String.t()
+  def status, do: @status
+
+  @doc """
+  The closed WITHHOLD vocabulary — the reasons this system is willing to publish
+  for a notification it decided not to send.
+  """
+  @spec reasons() :: [reason()]
+  def reasons, do: @reasons
+
+  @doc """
+  The person-facing sentence for a withhold reason. Every arm is a CONSTANT:
+  nothing from the triggering event interpolates, so this text is safe to publish
+  on a row a team admin reads.
+  """
+  @spec label(reason()) :: String.t()
+  def label(:reap_alert_cap),
+    do:
+      "Withheld: too many deployment alerts in one sweep, so this one was not sent. " <>
+        "The deployment itself is failed in the console."
+
+  def label(:dispatch_crashed),
+    do:
+      "Withheld: the notification system failed while preparing this alert, so it " <>
+        "was not sent. The event that triggered it still happened."
+
+  def label(:chat_enqueue_failed),
+    do:
+      "Withheld: this alert could not be queued for its chat channel, so it was " <>
+        "never sent there. Email delivery for the same event is listed separately."
+
+  def label(:chat_channel_gone),
+    do:
+      "Withheld: the chat channel this alert was routed to was disconnected before " <>
+        "it could be sent, so it was not delivered there."
+
+  @doc """
+  Every withhold sentence, for the `last_error` clamp in `Delivery.changeset/2`.
+  """
+  @spec labels() :: [String.t()]
+  def labels, do: Enum.map(@reasons, &label/1)
+
+  @doc """
+  Record a withheld notification for one team: one `suppressed` `Delivery` row per
+  team member, with that member's own address as `recipient`.
+
+  `team_id` arrives ALREADY RESOLVED — the caller owns whatever hop (site → team,
+  barkpark → team) its own domain knows about; this module does not reach into
+  another context's resolver.
+
+  Options: `:channel` (default `"email"`) and `:kind` (default `"alert"`), both
+  from `Delivery`'s own closed vocabularies.
+
+  Returns the NUMBER of rows written. Zero is a legitimate answer (see the
+  consented zero-recipient cases in the moduledoc); it never raises, because every
+  caller is a notification side path that must not be able to break its trigger.
+  """
+  @spec record(binary() | nil, String.t(), reason(), keyword()) :: non_neg_integer()
+  def record(team_id, event, reason, opts \\ [])
+
+  def record(team_id, event, reason, opts)
+      when is_binary(team_id) and is_binary(event) and reason in @reasons do
+    channel = Keyword.get(opts, :channel, "email")
+    kind = Keyword.get(opts, :kind, "alert")
+    last_error = label(reason)
+
+    team_id
+    |> Accounts.list_team_member_emails()
+    |> Enum.reduce(0, fn recipient, written ->
+      %Delivery{}
+      |> Delivery.changeset(%{
+        team_id: team_id,
+        recipient: recipient,
+        event: event,
+        channel: channel,
+        kind: kind,
+        status: @status,
+        # Nothing was attempted, and the count must not read as one try that
+        # failed — `attempts: 0` is the honest number.
+        attempts: 0,
+        last_error: last_error
+      })
+      |> Repo.insert()
+      |> case do
+        {:ok, _delivery} ->
+          written + 1
+
+        {:error, changeset} ->
+          Logger.error(
+            "Notifications.Withhold: failed to record a suppressed delivery: " <>
+              "#{inspect(changeset.errors)}"
+          )
+
+          written
+      end
+    end)
+  rescue
+    # A withhold trace must never be able to break the branch it is tracing.
+    error ->
+      Logger.error("Notifications.Withhold.record/4 crashed: #{Exception.message(error)}")
+      0
+  end
+
+  # THE UNRECORDABLE WITHHOLD — loud, never quiet. Zero rows is the honest
+  # outcome for a caller with no team, no event name, or a reason outside
+  # `@reasons`, but a QUIET zero is this epic's own defect rebuilt inside its
+  # own fix: a withhold that writes nothing and says nothing. So this arm names
+  # what it refused and why, on the operator log, every time.
+  def record(team_id, event, reason, _opts) do
+    Logger.error(
+      "Notifications.Withhold: refused an unrecordable withhold and wrote NO row — " <>
+        "team_id=#{inspect(team_id)} event=#{inspect(event)} reason=#{inspect(reason)}. " <>
+        "A reason outside #{inspect(@reasons)} needs adding there and to label/1."
+    )
+
+    0
+  end
+end

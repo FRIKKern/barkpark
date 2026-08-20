@@ -3,9 +3,15 @@ defmodule Barkpark.Sharing.ShareLink do
   One ITEM share link (P7) — a direct, revocable `/s/<token>` link to a single
   document or media file. See `Barkpark.Sharing.Links` for the operations.
 
-  The raw token is never stored — only its SHA256 (`token_hash`), mirroring
-  `Barkpark.Auth.ApiToken`. Revocation/expiry are enforced in the resolve query,
-  so a dead link is indistinguishable from a missing one.
+  BOTH forms of the token are persisted: `token_hash` (the SHA256 digest the
+  resolve query matches on, mirroring `Barkpark.Auth.ApiToken`) AND the
+  PLAINTEXT `token` itself, which P7's stable re-copyable link needs so a later
+  `GET /v1/shares/links` can re-emit `/s/<token>`. That makes a ShareLink row a
+  LIVE CREDENTIAL at rest: any read path that serialises a row (see
+  `BarkparkWeb.ShareLinkController.link_json/1`, which emits `url:`) hands out
+  working access to the bound item, so every such path must be authorised
+  BEFORE it serialises. Revocation/expiry are enforced in the resolve query, so
+  a dead link is indistinguishable from a missing one.
   """
   use Ecto.Schema
 
