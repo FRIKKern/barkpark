@@ -306,12 +306,13 @@ defmodule BarkparkWeb.StudioChrome do
     proj = socket.assigns[:current_project]
 
     # The switcher's principal is the token OR the account session's user —
-    # the SAME seam as `ScopeResolver.principal/1` on the conn side. Reading
-    # `:api_token` alone made `list_workspaces_for(nil)` return `[]` for every
-    # signed-in account, so the menu showed only the workspace they were
-    # already in: teleported by the funnel AND no in-UI way back (#34).
+    # the SAME seam as the conn-side funnel, called rather than re-encoded.
+    # Reading `:api_token` alone made `list_workspaces_for(nil)` return `[]`
+    # for every signed-in account, so the menu showed only the workspace they
+    # were already in: teleported by the funnel AND no in-UI way back (#34).
     workspaces =
-      (socket.assigns[:api_token] || socket.assigns[:current_user])
+      socket.assigns
+      |> BarkparkWeb.Studio.ScopeResolver.principal_from_assigns()
       |> Tenancy.list_workspaces_for()
       |> ensure_current(ws)
 

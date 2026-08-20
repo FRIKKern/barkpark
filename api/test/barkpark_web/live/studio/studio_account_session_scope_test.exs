@@ -30,7 +30,7 @@ defmodule BarkparkWeb.Studio.StudioAccountSessionScopeTest do
         Assertion with == failed
         left:  "/w/default/p/default/d/production/studio/post/p1?desk=drafts"
         right: "/w/gfr-acct-a-4/p/gfr-acct-pa-36/d/production/studio/post/p1?desk=drafts"
-    * `(socket.assigns[:api_token] || socket.assigns[:current_user])` →
+    * `ScopeResolver.principal_from_assigns(socket.assigns)` →
       `socket.assigns[:api_token]` in `studio_chrome.ex` → 1 failure, the
       redirects still green:
         code:  assert html =~ ws_b.name

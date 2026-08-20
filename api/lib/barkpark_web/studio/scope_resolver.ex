@@ -76,7 +76,17 @@ defmodule BarkparkWeb.Studio.ScopeResolver do
   to Default (field report #34).
   """
   @spec principal(Plug.Conn.t()) :: principal()
-  def principal(%Plug.Conn{assigns: assigns}),
+  def principal(%Plug.Conn{assigns: assigns}), do: principal_from_assigns(assigns)
+
+  @doc """
+  The same precedence rule, for an assigns map that is NOT on a conn — a
+  LiveView socket's. `StudioChrome`'s scope switcher needs exactly this and
+  must not re-encode the rule: two copies of "token wins over user" drift, and
+  a switcher that disagrees with the funnel is #34's second half all over
+  again.
+  """
+  @spec principal_from_assigns(map()) :: principal()
+  def principal_from_assigns(assigns) when is_map(assigns),
     do: assigns[:api_token] || assigns[:current_user]
 
   @doc """
