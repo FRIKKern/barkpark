@@ -142,9 +142,16 @@ for line in open(cand_file):
 
 
 def content(doc):
-    """bp nests the document under `.doc`; a fixture may be the doc itself."""
+    """bp nests the document under `.doc`; a fixture may be the doc itself.
+
+    FAIL CLOSED. An absent `content` is NOT an empty content — reading the
+    envelope instead would silently drop the task from the candidate set, and a
+    shrinking denominator is how a liveness check turns into a green that cannot
+    go red. Return None and let the caller count it as unresolved.
+    """
     d = doc.get("doc", doc)
-    return d.get("content", d)
+    c = d.get("content")
+    return c if isinstance(c, dict) else None
 
 
 gated, stamped, unstamped, unresolved = [], [], [], []
@@ -157,6 +164,8 @@ for num, doc_id, merged, sha in rows:
     try:
         c = content(json.load(open(path)))
     except Exception:
+        c = None
+    if c is None:
         unresolved.append((num, doc_id))
         continue
 
