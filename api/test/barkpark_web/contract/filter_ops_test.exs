@@ -500,50 +500,70 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
   # chokepoint now (`apply_filter_map/2`), so a door that forgets to guard — the
   # Studio desk, a plugin filter, a door written next year — inherits it.
   describe "the builder is the chokepoint, not the controller door" do
-    test "an `in` filter whose value is a MAP is refused, not silently unfiltered",
-         %{conn: conn} do
-      # The controller guard checks the KEYS of an ops map, plus the values of
-      # `is`, `hasStrong`, and the range ops — but never the value of `in`/`nin`.
-      # `?filter[title][in][x]=Alpha` therefore walked straight past it, missed
-      # `apply_field_op(_, _, "in", vs) when is_list(vs)`, and landed in the
-      # catch-all: 200 OK carrying EVERY row, from a filter that never ran. That
-      # is the field report's #2b shape, reachable over plain HTTP.
-      #
-      # It is refused at the builder now, so the answer is a 400 — and the
-      # envelope is the SAME `invalid_filter` code the door emits, because the
-      # typed refusal carries its own status (Plug.Exception) and its own
-      # envelope (Content.Errors + ErrorJSON) to every door at once.
-      # `assert_error_sent/2` because the refusal ESCAPES the controller: Phoenix's
-      # RenderErrors renders and sends the response (the client gets the envelope
-      # below), then re-raises so the fault is visible in logs and in tests. That
-      # is the backstop path every unguarded door takes.
-      {400, _headers, body} =
-        assert_error_sent(400, fn ->
-          get(conn, "/v1/data/query/fops_http/post?filter%5Btitle%5D%5Bin%5D%5Bx%5D=Alpha")
-        end)
+    # THESE TWO ARE DELIBERATELY NOT HTTP TESTS, and that is a correction.
+    #
+    # They were written as `assert_error_sent(400, ...)` against
+    # `?filter[title][in][x]=Alpha` — a shape `QueryController`'s door happened
+    # not to inspect, so the refusal ESCAPED the controller and Phoenix's
+    # RenderErrors sent the envelope. That made them a test of the DOOR'S
+    # BLINDNESS, not of the builder's refusal: the sibling slice
+    # `gfr-w1-filter-and-composition` widened the door's scalar/list guard to
+    # every op, so the door refuses this shape cleanly through
+    # `action_fallback`, nothing raises — and both tests went red on the
+    # combined tree while the client-visible behaviour got BETTER (a clean 400
+    # instead of a logged fault). A test that reds when a defect is fixed
+    # elsewhere is pinned to the wrong thing.
+    #
+    # The claims are about the BUILDER, so they are asserted at the builder: it
+    # raises rather than returning the unfiltered set, the refusal carries 400
+    # (never a 500) through `Plug.Exception`, and the envelope every door
+    # inherits via `ErrorJSON` is the canonical `invalid_filter` one. Whether
+    # any given door pre-guards the shape first is that door's business.
+    test "an `in` filter whose value is a MAP raises at the builder, never the unfiltered set" do
+      # `apply_field_op(_, _, "in", vs)` is is_list-guarded, so a MAP value used
+      # to miss it and land in the catch-all: the query came back UNCHANGED and
+      # the caller got EVERY row from a filter that never ran — the field
+      # report's #2b shape.
+      err =
+        assert_raise Barkpark.Content.InvalidFilterError, fn ->
+          Barkpark.Content.list_documents("post", "fops_http",
+            perspective: :raw,
+            filter_map: %{"title" => %{"in" => %{"x" => "Alpha"}}}
+          )
+        end
 
-      error = Jason.decode!(body)["error"]
-      assert error["code"] == "invalid_filter"
-      assert error["details"]["op"] == "in"
-      assert error["message"] =~ "in"
-      assert is_binary(error["hint"]) and error["hint"] != ""
+      # Never a 500: an unsupported filter is the caller's fault, not the
+      # server's, and this is what a door WITHOUT a pre-guard inherits.
+      assert Plug.Exception.status(err) == 400
     end
 
-    test "the builder-raised refusal does not echo the FIELD name", %{conn: conn} do
+    test "the builder-raised refusal is a canonical invalid_filter envelope that omits the FIELD" do
       # `forbidden_query_field/4` — the field-visibility gate — runs BEFORE the
       # query is built, and at non-HTTP doors it never runs at all. A refusal
       # raised from INSIDE the builder does not inherit that ordering, so it
       # names the OP (what the caller must fix) and the accepted vocabulary, and
       # never the field. See `Barkpark.Content.InvalidFilterError`'s moduledoc.
-      {400, _headers, body} =
-        assert_error_sent(400, fn ->
-          get(conn, "/v1/data/query/fops_http/post?filter%5BsecretField%5D%5Bin%5D%5Bx%5D=Alpha")
-        end)
+      err =
+        assert_raise Barkpark.Content.InvalidFilterError, fn ->
+          Barkpark.Content.list_documents("post", "fops_http",
+            perspective: :raw,
+            filter_map: %{"secretField" => %{"in" => %{"x" => "Alpha"}}}
+          )
+        end
 
-      error = Jason.decode!(body)["error"]
-      assert error["code"] == "invalid_filter"
-      refute error["message"] =~ "secretField"
-      refute Map.has_key?(error["details"], "field")
+      # The exact envelope `ErrorJSON` renders for this struct (its
+      # `reason_for_template/2` pass-through hands `{:error, err}` to
+      # `Errors.to_envelope/2`), so this asserts what the CLIENT receives at any
+      # door that lets the refusal escape.
+      env = Barkpark.Content.Errors.to_envelope({:error, err}, nil)
+
+      assert env.code == "invalid_filter"
+      assert env.status == 400
+      assert env.details.op == "in"
+      assert is_binary(env.hint) and env.hint != ""
+      refute env.message =~ "secretField"
+      refute Map.has_key?(env.details, :field)
+      refute Map.has_key?(env.details, "field")
     end
 
     test "a legitimate `in` list is untouched by the new refusal", %{conn: conn} do
