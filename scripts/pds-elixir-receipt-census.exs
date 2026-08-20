@@ -218,6 +218,24 @@ defmodule PDS.Census do
   # aarch64-apple-darwin24.6.0, printed live by report_engine/0. command
   # `elixir scripts/pds-elixir-receipt-census.exs` from the repo root, 2026-08-17,
   # in the SAME commit as the create-on-push arm that moved the rows.
+  # RE-DERIVED AT THE CORRECTION-RECEIPT WAVE (4 rows, rides #9600) — the tree
+  # moved, same lens: SearchController.correction/2 stopped spelling the literal
+  # `ok: true` and now renders `ok: status != :error` beside a `status:`
+  # discriminator, because record_correction/3 answers FIVE causally different
+  # outcomes that all carried `promoted: false, distinct_sessions: 0`. The
+  # receipt got MORE honest and the site left this lens's population, which is
+  # the lens working: it keys on the literal, and there is no longer a literal.
+  #
+  #   textual   107 -> 106  the `ok: true` occurrence is gone; LENS-LOSES-NOTHING
+  #                         holds (106 == ast 97 + phantom 9).
+  #   ast        98 ->  97  the same one, as an AST-literal pair.
+  #   emitted    94 ->  93  the site no longer emits a literal on the wire.
+  #   write      57 ->  56  POST /v1/data/search/:dataset/correction leaves the
+  #                         literal write set. It does NOT leave the ROUTED-WRITE
+  #                         population — both of its route arrivals are disposed
+  #                         `status_only_receipt` in @routed_excluded below, which
+  #                         is the class for exactly this shape.
+  #
   # RE-DERIVED AT THE SELF-SERVICE PASSWORD-CHANGE WAVE (4 rows, rides #9530) —
   # the tree moved, same lens: PATCH /v1/auth/password adds ONE `ok: true`
   # receipt site (AuthController.change_password/2, the success arm after
@@ -240,14 +258,14 @@ defmodule PDS.Census do
   # engine of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) ·
   # aarch64-apple-darwin24.6.0, printed live by report_engine/0. command
   # `elixir scripts/pds-elixir-receipt-census.exs` from the repo root, 2026-08-20,
-  # in the SAME commit as the endpoint that moved the rows.
+  # in the SAME commit as the correction receipt that moved the rows.
   @rederived %{
-    textual: 108,
-    ast: 99,
+    textual: 107,
+    ast: 98,
     phantom: 9,
     consumer: 4,
-    emitted: 95,
-    write: 58,
+    emitted: 94,
+    write: 57,
     read: 14,
     unrouted: 23
   }
@@ -530,6 +548,7 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
+    {:post, "/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym, :status_only_receipt},
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create, :status_only_receipt},
@@ -570,6 +589,7 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/correction", "BarkparkWeb.SearchController", :correction, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},
@@ -1239,10 +1259,6 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.search_interaction/2", "79721084", "95315838"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/search_controller.ex:363
-    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
-            "BarkparkWeb.SearchController.correction/2", "57827587", "73264487"},
-      verdict: "UNJUDGED", basis: :unexamined},
     # barkpark_web/controllers/secret_controller.ex:67
     %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
             "BarkparkWeb.SecretController.update/2", "4060754", "17468236"},
@@ -1287,7 +1303,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:316
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.claim/2", "130674472", "21159066"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2435"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2505"},
     # barkpark_web/controllers/tasks_controller.ex:371
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.show/2", "107047617", "14030995"},
@@ -1307,7 +1323,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:652
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stage/2", "86501420", "84462998"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3147"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3217"},
     # barkpark_web/controllers/tasks_controller.ex:788
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stamp/2", "53080965", "119279425"},
@@ -1316,9 +1332,15 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.pulse/2", "62712851", "71420310"},
       verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:169"},
-    # barkpark_web/controllers/tasks_controller.ex:922
+    # barkpark_web/controllers/tasks_controller.ex:961
+    # RE-KEYED, NOT RE-JUDGED. edges/2 now parses `kind` and delegates the
+    # unchanged success body to edges_for_kind/3, so the emitting def moved and
+    # the head hash moved with it (29434876 -> 41908878). The receipt EXPRESSION
+    # is byte-identical — its fingerprint 113319186 is unchanged — so the
+    # verdict and basis carry over untouched. The 400 arm emits no `ok: true`
+    # and is therefore not a site this lens sees.
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
-            "BarkparkWeb.TasksController.edges/2", "29434876", "113319186"},
+            "BarkparkWeb.TasksController.edges_for_kind/3", "41908878", "113319186"},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:952
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
@@ -1351,7 +1373,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:1352
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.papers/2", "102968637", "84462998"},
-      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:1724"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:1794"},
     # barkpark_web/controllers/tasks_controller.ex:1379
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.sessions/2", "36243778", "84462998"},
