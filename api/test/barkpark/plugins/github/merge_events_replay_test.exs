@@ -66,7 +66,16 @@ defmodule Barkpark.Plugins.Github.MergeEventsReplayTest do
   end
 
   defp captured_payload do
-    Path.join([__DIR__, "..", "..", "..", "support", "fixtures", "github", "pr-12210-merged.json"])
+    Path.join([
+      __DIR__,
+      "..",
+      "..",
+      "..",
+      "support",
+      "fixtures",
+      "github",
+      "pr-12210-merged.json"
+    ])
     |> Path.expand()
     |> File.read!()
     |> Jason.decode!()
