@@ -39,6 +39,14 @@ api/_build/
 # Aside/slot build roots (post-merge hook's _build_next, blue/green _build_blue|green)
 api/_build_*/
 api/deps/
+# ...and the same path as a NON-directory. A trailing slash matches directories
+# ONLY, so neither this nor api/.gitignore's `/deps/` catches a SYMLINK named
+# api/deps — and PR #2907 committed exactly that (mode 120000, target
+# /opt/barkpark/api/deps, self-referential on the prod box and DANGLING
+# anywhere else, where it stops `mix` from running at all). It only ever
+# failed to reach main because a local, uncommitted .git/info/exclude line
+# happened to carry the slashless form. A fresh clone has no such guard.
+api/deps
 # deploy-rebuild.sh's repo-local build mutex (never /tmp — squattable)
 .deploy-build.lock
 
