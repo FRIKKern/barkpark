@@ -1421,3 +1421,74 @@ jobs:
             echo "::notice title=Console gate: green — nothing ran::NOTHING CONSOLE RAN on this head.%0AConsole gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Console job executed', never as 'the Console harness passed'."
           fi
           echo "Console gate: every upstream job either succeeded or was legitimately not dispatched."
+
+  report-main-failure:
+    # ── THE RED THAT REACHES A HUMAN ─────────────────────────────────────────
+    #
+    # `Console gate` went RED on NINE main pushes in the 2026-08-05T19:52Z ..
+    # 2026-08-07T05:26Z window — six of them consecutively, on `CSSOM parity`
+    # and `Overflow guard` — and told nobody. A post-merge red X is only visible
+    # to whoever thinks to open the Actions tab; main was broken for ~46 minutes,
+    # self-healed, and no record of it exists anywhere. `gh issue list --state
+    # all --search 'CI failure in:title'` returns exactly two issues in the
+    # entire repository's history, and neither is one of the nine.
+    #
+    # This job is the record. Everything about its shape is load-bearing:
+    #
+    #   * `needs: [console-gate]` — it reports on the AGGREGATOR'S verdict, the
+    #     same name branch protection reads, not on any single leaf.
+    #
+    #   * `if: failure() && …` — `failure()` is true when an ancestor FAILED and
+    #     is FALSE for `cancelled`. That is the wanted behaviour, not an
+    #     accident: a cancelled main-push run (queue-depth-1 displacement, the
+    #     CADENCE class of charter D115) executes zero substantive jobs and has
+    #     nothing to report; filing an issue for it would be noise that trains
+    #     people to ignore the real ones.
+    #
+    #   * `github.ref == 'refs/heads/main'` — a failing PR already has a human
+    #     attached to it. Only main's post-merge red is ownerless.
+    #
+    #   * `permissions:` is JOB-LEVEL, and must stay that way. The repository's
+    #     `default_workflow_permissions` is "read", so the issue POST 403s
+    #     without an explicit `issues: write` — but a WORKFLOW-level block would
+    #     silently re-scope the token of every other job in this file. The grant
+    #     lives here, on the one job that needs it, and nowhere else.
+    #
+    # It cannot warn-and-pass: scripts/file-ci-failure-issue.sh exits 1 whenever
+    # the alert was not delivered (empty token, non-2xx API, unparseable body).
+    # A red here means "main is broken AND nobody was told" — worse than
+    # the failure it was trying to report, so it is worth its own red. It never
+    # affects `Console gate`, which has already published its verdict by then.
+    name: Report main-push failure to a human
+    needs: [console-gate]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: console-harness-main
+          CI_FAILURE_DETAIL: |
+            The `Console gate` required context is RED on a push to `main`.
+            This is POST-MERGE: the breakage is already on the default branch,
+            and every PR branched from this tip inherits it.
+
+            Read the aggregator's "Decide (fail-closed over every upstream
+            result)" step first — it names which job failed AND, for the browser
+            instruments, which KIND of failure it was:
+
+              * a MEASURED defect (exit 1) accuses `cloud/priv/static` — fix the
+                CSS/markup, or revert the merge that introduced it;
+              * an environment REFUSAL (exit 2) means headless Chrome never
+                started after a bounded retry — nothing was measured, so nothing
+                is accused; re-run the job.
+
+            This issue is idempotent per key: an ongoing failure appends a
+            comment rather than opening a new issue. CLOSE IT once main is green
+            again — the next main-push failure opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh

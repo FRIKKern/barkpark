@@ -1169,7 +1169,14 @@
       teamName: (team && team.name) ? String(team.name) : "",
       teamId: s.team_id ? String(s.team_id) : (team && team.id ? String(team.id) : ""),
       role: me.role ? String(me.role) : "",
-      twoFactorEnabled: !!user.two_factor_enabled
+      // cch-w39-s2 — THREE-VALUED, and deliberately not a boolean. `me = me || {}`
+      // above means a /v1/me that never landed arrives here as {}, and
+      // `!!user.two_factor_enabled` then stated, as fact, that this account has
+      // no second factor — a SECURITY claim folded out of an envelope we never
+      // received. This is the ROOT coercion: the badge, the panel and
+      // openAccountModal's own re-derive all inherited it. `null` = we do not
+      // know, and every render site below branches on the three values.
+      twoFactorEnabled: me.user ? !!user.two_factor_enabled : null
     };
   }
 
@@ -1185,10 +1192,17 @@
     return left || right || "Signed in to Barkpark Cloud";
   }
 
-  function accountModalHtml(model) {
+  // meStateValue is the caller's meState() — "loading" | "failed" | "loaded" —
+  // and it is only ever consulted by the two-factor panel's unknown arm, which
+  // needs to tell "the answer hasn't come yet" from "the answer didn't arrive".
+  // Absent (an older caller, a test) it reads as "loading": still not a claim.
+  function accountModalHtml(model, meStateValue) {
     model = model || {};
     var name = model.name || "Account";
     var initial = (String(name).charAt(0) || "B").toUpperCase();
+    // ONE derivation of the two-factor phase for both the badge and the panel —
+    // the header pill and the body below it can no longer disagree.
+    var a2fPhase = accountTwoFactorPhase(model.twoFactorEnabled);
     return (
       // .am-modal is the :has() hook the width override keys off — the shared
       // .modal-card 420px base is never touched (GR57).
@@ -1227,10 +1241,10 @@
 
       '<div class="am-head">' +
         '<h3 class="modal-section">Two-factor authentication</h3>' +
-        accountTwoFactorBadgeHtml(model.twoFactorEnabled) +
+        accountTwoFactorBadgeHtml(a2fBadgeState(a2fPhase)) +
       "</div>" +
       '<div class="a2f-panel" id="a2f-panel">' +
-        accountTwoFactorPanelHtml({ phase: model.twoFactorEnabled ? "on" : "off" }) +
+        accountTwoFactorPanelHtml({ phase: a2fPhase, meState: meStateValue }) +
       "</div>" +
 
       '<div class="modal-actions">' +
@@ -1258,10 +1272,35 @@
   // challenge, so this route is genuinely unthrottled and a "try again in Ns"
   // sentence here would be a lie (GR52b).
 
-  function accountTwoFactorBadgeHtml(enabled) {
-    return enabled
-      ? '<span class="badge a2f-badge a2f-badge--on" id="a2f-badge">On</span>'
-      : '<span class="badge a2f-badge a2f-badge--off" id="a2f-badge">Off</span>';
+  // cch-w39-s2 — THE PHASE, from accountModel's three-valued read. true → "on",
+  // false → "off", and anything else (null: /v1/me never landed) → "unknown".
+  // The modal's first paint and openAccountModal's re-derive both come through
+  // here, so there is exactly ONE place the fact becomes a phase.
+  function accountTwoFactorPhase(enabled) {
+    if (enabled === true) return "on";
+    if (enabled === false) return "off";
+    return "unknown";
+  }
+
+  // The BADGE state for a panel phase. "codes" is on (the factor is confirmed;
+  // the one-shot sheet is merely being shown), "enroll" is not yet. Anything
+  // this does not name — "unknown", or a phase a later wave adds — is UNKNOWN,
+  // never Off. The shipped expression was a boolean OR, so every unnamed phase
+  // fell into the false arm and REPAINTED the determinate "Off" pill.
+  function a2fBadgeState(phase) {
+    if (phase === "on" || phase === "codes") return "on";
+    if (phase === "off" || phase === "enroll") return "off";
+    return "unknown";
+  }
+
+  // Three-valued, matching a2fBadgeState. "Off" is a claim about this account's
+  // security; the unknown pill makes none. It reuses the muted --off head on
+  // purpose — a third rule head would move the CSSOM baseline, and the honest
+  // difference here is the WORD, not the colour.
+  function accountTwoFactorBadgeHtml(state) {
+    if (state === "on") return '<span class="badge a2f-badge a2f-badge--on" id="a2f-badge">On</span>';
+    if (state === "off") return '<span class="badge a2f-badge a2f-badge--off" id="a2f-badge">Off</span>';
+    return '<span class="badge a2f-badge a2f-badge--off" id="a2f-badge">Unknown</span>';
   }
 
   // The secret in 4-char groups — the shape a human retypes without losing
@@ -1380,40 +1419,118 @@
     }
 
     // off / not enrolled
+    if (phase === "off") {
+      return err +
+        '<p class="a2f-off-line">Add a second step at sign-in with an authenticator app.</p>' +
+        '<button class="btn btn-sm" type="button" id="a2f-start"' + (view.busy ? " disabled" : "") + ">" +
+          (view.busy ? "Starting…" : "Set up two-factor authentication") + "</button>";
+    }
+
+    // cch-w39-s2 — THE EXPLICIT FALLTHROUGH, and the reason it had to become
+    // one. The four arms above used to end in an UNGUARDED return of the
+    // not-enrolled markup, so `{phase:"unknown"}` — and any phase a later wave
+    // adds — silently rendered "Set up two-factor authentication", an offer
+    // that asserts by existing that there is nothing set up. We do not know
+    // that. The unknown arm states the read, its consequence, and nothing else:
+    // no setup button, because offering setup IS the claim.
+    var failed = view.meState === "failed";
     return err +
-      '<p class="a2f-off-line">Add a second step at sign-in with an authenticator app.</p>' +
-      '<button class="btn btn-sm" type="button" id="a2f-start"' + (view.busy ? " disabled" : "") + ">" +
-        (view.busy ? "Starting…" : "Set up two-factor authentication") + "</button>";
+      '<p class="a2f-off-line" id="a2f-unknown-line">' +
+        esc(failed ? meFailureCopy() : "Checking your account…") + "</p>" +
+      '<p class="a2f-off-line dim" id="a2f-unknown-note">' + esc(failed
+        ? "Your two-factor status didn't load, so nothing here says whether it is on or off."
+        : "Your two-factor status hasn't loaded yet, so nothing here says whether it is on or off.") +
+      "</p>" +
+      (failed ? '<button class="btn btn-sm" type="button" id="a2f-retry">Retry</button>' : "");
   }
 
   // ---- the 2FA DOM mount. Pure renders above; this is the only stateful part,
   // and it never leaves the account modal (the disable confirm is the one
   // deliberate exception — it borrows the shared confirm modal, then comes back).
-  var a2fView = { phase: "off" };
+  // The pre-open default is UNKNOWN, not "off": before any modal has opened,
+  // nothing has been read, and a determinate default is the same lie one layer
+  // down (cch-w39-s2).
+  var a2fView = { phase: "unknown" };
 
   function a2fPaint(view) {
-    a2fView = view || { phase: "off" };
+    a2fView = view || { phase: "unknown" };
     var panel = $("#a2f-panel");
     if (!panel) return;
     panel.innerHTML = accountTwoFactorPanelHtml(a2fView);
     var badge = $("#a2f-badge");
     // Re-render through the PURE badge helper rather than patching a class head
     // — one owner for the badge's markup, and no dynamic class composition.
-    if (badge) badge.outerHTML = accountTwoFactorBadgeHtml(
-      a2fView.phase === "on" || a2fView.phase === "codes");
+    if (badge) badge.outerHTML = accountTwoFactorBadgeHtml(a2fBadgeState(a2fView.phase));
     // The one-shot sheet is the ONLY pinned state: the server will never serve
     // these codes again, so a reflex Escape must not throw them away.
     setModalPin(a2fView.phase === "codes");
     a2fWire();
   }
 
+  // cch-w39-s2 — the change THIS session's server confirmed, retained
+  // independently of meCache. The echo below used to be guarded by `meCache &&`
+  // alone, so a user whose /v1/me failed could enrol successfully — server
+  // confirmed, recovery codes in hand — and the console forgot it the moment
+  // the modal reopened, re-deriving unknown from the envelope that never came.
+  // A fact we watched the server confirm outranks a read that never landed.
+  //
+  // It is NOT written into meCache when meCache is null: meState() reads
+  // "loaded" iff meCache is truthy, so synthesising one would tell every
+  // authority predicate in the console that an unread /v1/me had answered.
+  // Scoped to the session token instead, so it can never outlive the account it
+  // was confirmed for — sign-out and the password rotation both change it.
+  var a2fConfirmed = null; // null | { token: <string>, enabled: <boolean> }
+
+  function sessionToken() {
+    var s = session();
+    return (s && s.token) ? String(s.token) : "";
+  }
+
   // Local echo of the /v1/me boolean so a disable/enroll inside this modal
   // doesn't need a refetch to stay honest on the next open.
   function a2fSetEnabled(on) {
+    a2fConfirmed = { token: sessionToken(), enabled: !!on };
     if (meCache && meCache.user) meCache.user.two_factor_enabled = !!on;
   }
 
+  // The model the account modal actually renders: accountModel's read of /v1/me
+  // with a server-confirmed two-factor change from this session layered over
+  // it. The ONLY value allowed to beat an unread envelope is one we watched the
+  // server confirm for THIS token.
+  function accountModalModel() {
+    var model = accountModel(session(), meCache);
+    // REVIEW (cch-w39-s2-r): the retained fact fills an UNKNOWN and never
+    // overrides a read that landed. `a2fSetEnabled` already writes the same
+    // truth into `meCache.user` whenever meCache exists, so on the normal path
+    // the two agree and this branch is inert. Where they can DIVERGE is the one
+    // case this retention exists for: enrol while /v1/me is unread, then land a
+    // later /v1/me that says something else (the factor was disabled from
+    // another device in between). Letting a stale local echo beat a fresh server
+    // read would re-create this slice's own defect pointed the other way — a
+    // determinate claim not supported by the newest thing we actually read.
+    if (model.twoFactorEnabled === null && a2fConfirmed && a2fConfirmed.token === sessionToken()) {
+      model.twoFactorEnabled = a2fConfirmed.enabled;
+    }
+    return model;
+  }
+
   function a2fWire() {
+    // The unknown arm's re-entry. NOT a second retry idiom: it is #9922's
+    // shipped shape — loadOperator()'s own failed-arm re-entry, which
+    // `grep -n "function loadOperator"` re-derives — ask the ONE loader
+    // again, then branch on meState() rather than on the call's own result. A
+    // read that LANDS repaints the whole account modal, because the identity
+    // row above was a placeholder too (the revoke-all handler reopens for the
+    // same reason); a read that does not land returns here saying so.
+    var retry = $("#a2f-retry");
+    if (retry) retry.addEventListener("click", function () {
+      a2fPaint({ phase: "unknown", meState: "loading" });
+      loadMe().then(function () {
+        if (meState() === "loaded") openAccountModal();
+        else a2fPaint({ phase: "unknown", meState: meState() });
+      });
+    });
+
     var start = $("#a2f-start");
     if (start) start.addEventListener("click", function () {
       a2fPaint({ phase: "off", busy: true });
@@ -1516,7 +1633,10 @@
   }
 
   function openAccountModal() {
-    openModal(accountModalHtml(accountModel(session(), meCache)));
+    // ONE read of the fact for this open — the badge, the panel and the a2fView
+    // seam at the tail of this function all fold from this same model.
+    var model = accountModalModel();
+    openModal(accountModalHtml(model, meState()));
 
     sessionsExpanded = false; // every open starts folded — the tail is opt-in
     loadSessions();
@@ -1579,7 +1699,13 @@
 
     // The on-state costs ZERO extra fetches: /v1/me has carried
     // two_factor_enabled all along and nothing read it until now.
-    a2fView = { phase: (meCache && meCache.user && meCache.user.two_factor_enabled) ? "on" : "off" };
+    //
+    // cch-w39-s2: this was a SECOND, independently written two-valued read of
+    // the same fact — `(meCache && meCache.user && …) ? "on" : "off"` — that
+    // bypassed accountModel entirely, so the paint above and this seam could
+    // (and did) disagree the moment either changed. It now folds from the ONE
+    // model this open already built, through the ONE phase mapper.
+    a2fView = { phase: accountTwoFactorPhase(model.twoFactorEnabled), meState: meState() };
     a2fWire();
 
     var out = $("#modal-logout");
@@ -24208,6 +24334,10 @@
       // GR52/GR55: the 2FA surface's pure renders + its EXACTLY-two error map.
       accountTwoFactorBadgeHtml: accountTwoFactorBadgeHtml,
       accountTwoFactorPanelHtml: accountTwoFactorPanelHtml,
+      // cch-w39-s2: the two pure mappers that stand between the three-valued
+      // /v1/me read and the two renders above — the seam a node test needs to
+      // prove an unread envelope can never paint a determinate badge.
+      accountTwoFactorPhase: accountTwoFactorPhase, a2fBadgeState: a2fBadgeState,
       accountTwoFactorQrHtml: accountTwoFactorQrHtml,
       accountTwoFactorErrorCopy: accountTwoFactorErrorCopy,
       secretGroups: secretGroups, recoveryCodesText: recoveryCodesText,
