@@ -8,7 +8,9 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
     1. read `:workspace_slug` from `conn.path_params`,
     2. `Barkpark.Tenancy.get_workspace_by_slug/1` — 404 (envelope) if unknown,
     3. `Barkpark.Tenancy.Auth.authorize(api_token, workspace.id, :read)` —
-       403 (envelope) on `{:error, :forbidden}`.
+       403 (envelope) on refusal — `{:error, :forbidden_membership}`, whose
+       message/hint name MEMBERSHIP rather than a permission tier (the
+       `forbidden` code and the 403 status are unchanged).
 
   Step 3 is the cross-dataset read-leak fix: even an authenticated token only
   reaches a workspace's content when it is a member with at least `:read`.
@@ -130,8 +132,12 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
         )
         |> halt()
 
+      # Not a member (and no share / demo / grant admitted it). The reason is
+      # MEMBERSHIP, never a permission tier — `:forbidden_membership` says so in
+      # the envelope. Same 403 status and same "forbidden" code as before; only
+      # the message/hint/reason changed (gyldendal #15).
       true ->
-        halt_envelope(conn, {:error, :forbidden})
+        halt_envelope(conn, {:error, :forbidden_membership})
     end
   end
 

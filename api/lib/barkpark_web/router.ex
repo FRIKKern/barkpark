@@ -152,6 +152,13 @@ defmodule BarkparkWeb.Router do
   # /w/:workspace_slug/p/:project_slug routes. Same base plugs as :api
   # (sans AssignDefaultScope — the resolvers set the real scope), then
   # resolves + membership-gates the workspace and resolves the project.
+  #
+  # Credential resolution is `:scoped_api_optional_credential` (below), NOT the
+  # plain OptionalToken this pipeline used to run — that is the gyldendal #15
+  # fix. Read its comment for the CSRF decision; the short version is that a
+  # browser session is admitted as a credential here, and on a state-changing
+  # method only behind the same `x-requested-with` check the media write
+  # pipelines already use.
   pipeline :scoped_api do
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
@@ -160,10 +167,88 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalToken)
+    plug(:scoped_api_optional_credential)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
+  end
+
+  # Soft credential resolution for :scoped_api — bearer ALWAYS, browser session
+  # only where it cannot drive a forged state change (gyldendal field report
+  # #15).
+  #
+  # THE BUG IT CLOSES. :scoped_api was the last media-adjacent pipeline with no
+  # `:fetch_session` and no `OptionalSessionToken`, so `ResolveWorkspace`'s
+  # `%User{}` arm was structurally unreachable on it: a signed-in Studio
+  # operator whose browser carries only the `user_session` cookie (no account
+  # login writes `session["api_token"]`, so the asset explorer renders
+  # `data-token=""`) resolved as ANONYMOUS and the membership gate 403'd every
+  # scoped media read. Proven live before the fix: anonymous flat
+  # `/v1/media/production` → 200, but `/w/default/p/default/v1/media/production`
+  # → 403 for the same operator. Media WRITES already authenticated a browser
+  # session (`:scoped_media_mutate` opens with fetch_session +
+  # OptionalSessionToken "so the membership gate below sees a session-only
+  # browser member too"); media READS did not.
+  #
+  # THE CSRF DECISION, stated here because :scoped_api — unlike
+  # :shared_media_api — also carries non-GET routes (search interaction, cycle
+  # opens, scoped secrets, media synonyms, and the [:scoped_api, :media_mutate]
+  # collections/checkout stack). We took BOTH halves of the constraint rather
+  # than picking one:
+  #
+  #   * GET/HEAD — the cookie is admitted unconditionally. These are
+  #     side-effect-free reads, which is precisely the justification
+  #     :shared_media_api and :session_token_root already carry; a read is not a
+  #     CSRF target, and `protect_from_forgery` is the wrong tool here (API and
+  #     Web-Component clients present no Phoenix CSRF token).
+  #   * every other method — the cookie is admitted ONLY when the request
+  #     carries `x-requested-with`, the identical check
+  #     `RequireBearerOrSessionToken` applies to its own cookie branch: a
+  #     cross-site form/img cannot set that header, and a cross-origin fetch
+  #     that sets it trips a CORS preflight the allowlist blocks. Without the
+  #     header the conn falls back to bearer-only resolution, so a forged
+  #     cross-site write sees exactly the anonymous request it saw before this
+  #     change.
+  #
+  # Bearer callers are untouched on every method (OptionalSessionToken prefers
+  # the Authorization header), and an anonymous conn still passes through
+  # unauthenticated to be denied by ResolveWorkspace — the fail-closed default
+  # is byte-identical.
+  #
+  # FREE BONUS: the [:scoped_api, :media_mutate] block (collections
+  # share/members, checkout) ran ResolveWorkspace BEFORE :media_mutate's
+  # `fetch_session`, so it 403'd a session-only browser member before its own
+  # cookie-aware gate could speak. Those routes are POST/DELETE and the Studio
+  # sends `x-requested-with`, so the header arm below now resolves the member's
+  # session token in time for the membership gate — and :media_mutate's
+  # RequireBearerOrSessionToken still runs afterwards as the hard gate.
+  #
+  # Sobelow Config.CSRF: the session is fetched on this pipeline, but every
+  # cookie-authorized request that can change state is header-checked above and
+  # then re-gated by the route's own write pipeline. Same posture as
+  # :shared_media_api / :media_mutate, both baselined.
+  defp scoped_api_optional_credential(%Plug.Conn{} = conn, _opts) do
+    if cookie_credential_admissible?(conn) do
+      conn
+      |> Plug.Conn.fetch_session()
+      |> BarkparkWeb.Plugs.OptionalSessionToken.call([])
+    else
+      BarkparkWeb.Plugs.OptionalToken.call(
+        conn,
+        BarkparkWeb.Plugs.OptionalToken.init([])
+      )
+    end
+  end
+
+  defp cookie_credential_admissible?(%Plug.Conn{method: method} = conn) do
+    method in ["GET", "HEAD"] or csrf_header?(conn)
+  end
+
+  defp csrf_header?(conn) do
+    case Plug.Conn.get_req_header(conn, "x-requested-with") do
+      [val | _] when is_binary(val) and val != "" -> true
+      _ -> false
+    end
   end
 
   # Public-share variant of :scoped_api for the scoped READ document routes
@@ -2077,8 +2162,20 @@ defmodule BarkparkWeb.Router do
   # fleet-support-<name>) so a remote support machine works the ledger as a
   # distinct, attributable actor; DELETE revokes it at teardown. Admin gate =
   # WHO may mint, not the minted token's scope. Secret returned ONCE.
+  #
+  # :flat_admin_api, NOT [:api, :require_admin] (gyldendal field report, the
+  # last Class A remnant #12826 did not reach). `:api` runs AssignDefaultScope,
+  # which stamps `current_workspace = <seeded Default>` before the admin gate —
+  # and `create/2` binds the MINTED CREDENTIAL to that assign. So a tenant admin
+  # whose only membership is workspace X minted a live write token bound to
+  # Default, plus a `member` row in Default (Auth.create_token/5 writes the
+  # membership alongside the token), and that token then read Default's
+  # documents: a durable credential manufactured inside a workspace the caller
+  # was never a member of. :flat_admin_api derives the workspace from the
+  # CALLER'S TOKEN before the Default fallback, so the mint lands in the
+  # minter's own workspace. Same admin gate, same 401/403 surface.
   scope "/v1/fleet/support-tokens", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:flat_admin_api)
 
     post("/", FleetSupportTokenController, :create)
     delete("/:token_id", FleetSupportTokenController, :delete)
