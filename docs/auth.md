@@ -6,8 +6,8 @@ backed by `api_tokens` (SHA256 hash + permission list per token).
 Browser LiveViews read the same token from `session["api_token"]` via
 `BarkparkWeb.LiveAuth` `on_mount` hooks.
 
-> User accounts, sessions, MFA, field encryption/visibility, and row
-> ownership are the **core-auth model** — see
+> User accounts, sessions, MFA, login tickets, field encryption/
+> visibility, and row ownership are the **core-auth model** — see
 > [docs/auth-user-sessions.md](auth-user-sessions.md) (canonical-for
 > core-auth-model).
 
@@ -29,8 +29,6 @@ both from the path and enforces tenancy **before** any permission check:
 | `:workspace_slug` doesn't resolve | `404 not_found` |
 | Workspace resolves, token has no `workspace_memberships` row for it | `403 forbidden` |
 | Workspace resolves, token is a member | proceed to permission checks |
-
-Every read and write is scoped to the resolved workspace; no cross-workspace read.
 
 ### Write gate
 
@@ -65,12 +63,10 @@ callers work unchanged.
 grants `ops` (and `read` + `write` for routes that check those plugs); `:ops`
 stays separate because Bokbasen operators need submission status/retry/errors
 but must not read the encrypted `client_secret` `/studio/settings` exposes.
-The `BarkparkWeb.LiveAuth.:ops` hook accepts either `ops` or `admin`.
 
 `admin` must never enter the hardcoded `chat` literal: `RequireChatAccess`
-checks `admin` first, resolving it to `:global`, which stamps
-`owner_workspace_id = NULL` and reopens the tenant-less-session bug
-(`chat_token_controller.ex:29-32`).
+resolves `admin` to `:global`, stamping `owner_workspace_id = NULL` and
+reopening the tenant-less-session bug (`chat_token_controller.ex:29-32`).
 
 ## LiveView `on_mount` hooks
 
@@ -83,29 +79,31 @@ on_mount :ops     # → requires "ops" OR "admin"
 Both halt with a flash + redirect to `/studio` when the session token
 is missing, malformed, or under-permissioned.
 
-### One-click login tickets (dwb-7)
-
-`POST /v1/auth/login-tickets` (bearer) mints a single-use 60s ticket bound
-to that raw token; `GET /login/ticket/:t` consumes it atomically (one
-winner), sets `session["api_token"]`, redirects to `/studio`. Unknown/used/
-expired are indistinguishable (no oracle); response `no-store` +
-`no-referrer`. See `BarkparkWeb.LoginTicketController`.
-
 ## Plug pipelines (HTTP)
 
 ```elixir
 # api/lib/barkpark_web/router.ex
-pipeline :require_token  # → BarkparkWeb.Plugs.RequireToken
-pipeline :require_admin  # → RequireToken + RequireAdmin
+pipeline :require_token   # → RequireToken
+pipeline :require_admin   # → RequireToken + RequireAdmin
+pipeline :flat_admin_api  # → RequireToken → DeriveWorkspaceFromToken
+                          #   → AssignDefaultScope → RequireAdmin
 ```
+
+Mount every **flat** (`/v1/…`) admin route on `:flat_admin_api`, which
+*replaces* `:api`. On `[:api, :require_admin]`, `AssignDefaultScope` stamps
+`current_workspace = Default` before the admin gate, so callers from every
+workspace converge on Default — answering `200` against the wrong tenant.
+
+**Order is the fix, and the wrong order fails silently.**
+`DeriveWorkspaceFromToken` is no-op-if-set, so appending it *after*
+`AssignDefaultScope` is a pure no-op. `FlatAdminTenancyTest` reds on a swap.
 
 ## Dev token
 
 `barkpark-dev-token` (seeded by the `demo` profile — `Barkpark.Seeds.Demo`;
 `clean` mints none) carries `["read", "write", "admin"]`, bound to the
 `Default` workspace (with a `workspace_memberships` row), so it satisfies
-every gate here on scoped and flat-alias routes. Production should issue
-narrower per-persona tokens for each workspace.
+every gate here on scoped and flat-alias routes.
 
 **MUST rotate before prod**: the dev token carries read + write + admin
 and must not run in production. Starter templates bake `barkpark-dev-token`
