@@ -4,13 +4,13 @@ export const meta = {
   whenToUse:
     'Run one wave of a Barkpark epic. INVOKE: Workflow({scriptPath: ".claude/workflows/bp-epic-cycle.workflow.js", args: {wish: "<the user\'s request, verbatim — REQUIRED, the run refuses to start without it (charter D68)>", charter_path: "<.claude/workflows/<epic>-charter.md — REQUIRED for any epic with a charter; default is the cloud charter>", charter_exists: true|false, epic_task_id: "<task-… slug, when the epic task exists>"}}). Launch from the repo root or pass an absolute scriptPath (it resolves against the session cwd); never launch by name (the name registry is a session-start snapshot). TWO SETTINGS ONLY — fable@high for thinking-focused work and for visual design/interface; opus@medium for everything else. Effort derives from the model; no xhigh, no max, anywhere. Shape: 1 Fable strategizes + OPENS the wave Paper → 5-20 Opus surveyors sweep (coverage-accounted) → 1 Fable digests + designs the verify fleet → mostly-Opus verifiers PROVE claims with run output → 1 Fable decides + files/perfects bp tasks → Opus builders (Fable on hard or visually-designed slices) claim their task, build in worktrees, stamp evidence, gate, commit → 1 Fable reviews everything, fixes in place, grades, closes the Paper as the debrief.',
   phases: [
-    { title: 'Strategize', detail: '1 Fable @ high — thinking-focused, the highest-leverage judgment in the wave: reads until reading stops changing its mind, weighs rival directions and commits to one, stress-tests it, sets 5-20 broad survey questions, OPENS the wave strategy Paper', model: 'fable' },
+    { title: 'Strategize', detail: '1 Fable @ high — thinking-focused, the highest-leverage judgment in the wave: reads until reading stops changing its mind, weighs rival directions and commits to one, stress-tests it, sets 5-20 broad survey questions, OPENS the wave strategy Paper, searches prior wave Papers first (answered questions become drift-checks)', model: 'fable' },
     { title: 'Survey', detail: '5-20 Opus surveyors @ medium, read-only, ~5 min each: wide sweep — bp search first, then the repo; report COVERAGE (every file checked, what for, found/not-found)', model: 'opus' },
-    { title: 'Digest', detail: '1 Fable @ high: synthesize, fold the survey digest into the Paper, design the LAST explore round — per assignment pick the verifier MODEL and what must be PROVEN by running tests; Paper states the verify plan BEFORE the fleet flies', model: 'fable' },
+    { title: 'Digest', detail: '1 Fable @ high: synthesize, fold the survey digest into the Paper, design the LAST explore round — per assignment pick the verifier MODEL and what must be PROVEN by running tests; Paper states the verify plan BEFORE the fleet flies; folds a journey card per surveyor into the Paper', model: 'fable' },
     { title: 'Verify', detail: 'Fable-designed fleet, mostly Opus @ medium with Fable @ high only on judgment-heavy digs: targeted deep answers with coverage accounting; claims that need proof get tests/gates actually RUN, output quoted', model: 'opus' },
     { title: 'Decide', detail: '1 Fable @ high: finalize choices, update Paper + charter, cut the wave (≤8 slices, builder model per slice — that one choice sets both model and depth), file + publish + PERFECT a bp task per slice (each linked to the Paper), seed the backlog', model: 'fable' },
     { title: 'Build', detail: 'Opus @ medium by default; Fable @ high for hard OR visually-designed slices. Worktree-isolated: CLAIM the bp task first, stamp evidence as each criterion is proven, gate, honest self-review, commit. Round-1 slices only — round ≥2 slices are deferred to the lead (sequenced-rounds law)' },
-    { title: 'Review', detail: '1 Fable, whatever time it needs: review every green slice + the ledger, FIX issues in place, re-gate, Cody-grade verdict, append wave log, CLOSE the wave Paper as the debrief, hand off', model: 'fable' },
+    { title: 'Review', detail: '1 Fable, whatever time it needs: review every green slice + the ledger, FIX issues in place, re-gate, Cody-grade verdict, append wave log, CLOSE the wave Paper as the debrief, hand off; persists wave telemetry (tokens/clock/interrupts) + a per-phase efficiency retro in the Paper debrief', model: 'fable' },
   ],
 }
 
@@ -117,6 +117,7 @@ const EFFORT_FOR = (model) => (model === 'fable' ? 'high' : 'medium')
 const JOINT_FALLBACK = 'opus'
 const CHARTER_EXISTS = !!A.charter_exists
 const LEAD_NOTES = A.lead_notes ? `\n\nLEAD NOTES THIS WAVE:\n${A.lead_notes}` : ''
+const SPENT = { t0: budget.spent() }
 
 const USER_WISH_BLOCK = `THE USER'S WISH (this is the focus — everything serves it, judged holistically, not as a checklist):
 """
@@ -157,8 +158,8 @@ const PAPER_BLOCK = `THE WAVE PAPER (the wave's living story — one Barkpark Pa
 - The Paper always states what is IN FLIGHT: Digest appends the survey digest + verify plan BEFORE the verifiers fly; Decide appends decisions + the wave plan BEFORE the builders fly; Review closes the story as the debrief. Someone opening the Paper mid-wave must see exactly where the wave stands.
 - Link both ways: the Paper's id lives on the epic task (flat wave_paper field) and on every slice task; the Paper names the task ids it drives.
 - THE WALL DIALECT (enforced at publish, not a style preference): the wave Paper carries tag \`epic-cycle-wave-paper\`, and that exact tag puts it behind the epic paper publish wall (api/lib/barkpark/content/papers/epic_quality.ex on origin/main). The enforced set: NEVER author an empty paragraph spacer ANYWHERE — hard failure :empty_paragraph_spacer, checked over the NESTED block tree, not just top level (this REPLACES the retired spacing doctrine for this cohort; the ruling is owned by open task cchi-w67-bl-the-epic-paper-floor-forbids-the-spacing-doctrine — teach the wall, never author spacers). Opening, within the first 8 meaningful blocks: an h1 (exactly one h1 in the WHOLE document), one \`ingress\` block, and one orientation block of byline|stats|toc|list|steps. No heading-level jumps (h2 followed by h4 fails). Ceilings: 80 top-level blocks, 16 top-level headings, 5000 primary words — closed expandables are EXCLUDED from the word count, so long evidence goes behind a collapsed expandable. Every table with rows carries a non-empty \`head\`. A refused publish answers 422 code=invalid_epic_paper_quality and details.failures names EVERY failed gate — fix each named failure and re-publish (the bp CLI renders details); a publish that keeps failing is a Paper defect, never a reason to drop the tag.
-- BEAUTIFUL BY CONTRACT: compose with real components, never walls of paragraphs — eyebrow/byline/ingress open the Paper; stat-grid for headline numbers; decisions as callout blocks; proofs as code blocks quoting REAL output; a diagram where flow beats prose.
-- CURATE, DON'T DUMP: keep turning points, surprises, refuted premises, real output; drop boilerplate. The Paper is the ONLY durable carrier of the wave's story — what you leave out is gone.`
+- BEAUTIFUL BY CONTRACT (epic-memory D2): compose with real components, never walls of paragraphs — eyebrow/byline/ingress open the Paper; stat-grid for headline numbers; journey CARDS per agent (cards block: mission → what they figured out → what it means); decisions as callout blocks; proofs as code blocks quoting REAL output; load-bearing facts as a table WITH their rerun commands; diagram (mermaid) where flow beats prose; divider between phase sections. Block-shape crib: .claude/skills/bp-epic-debrief/helpers/blocks.md.
+- CURATE, DON'T DUMP: keep turning points, surprises, refuted premises, real output; drop boilerplate. The Paper is the ONLY durable carrier of the wave's story (no dossiers, no per-agent papers — D3): what you leave out is gone.`
 
 const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system, never an afterthought):
 - Stamp state changes the MOMENT they happen — claim when you start, evidence the second a criterion is proven, a note the second you deviate or stall. Never batch honesty to the end of your run.
@@ -166,6 +167,9 @@ const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system,
 - Your CLAIMED task carries a claim-scoped now-line — pulse it so every board moves while you work: \`bp task pulse <task-id> <worker> --now "…" [--criterion N]\` (no epoch arg — one atomic write that refreshes the now-line AND renews your lease; it survives fences). Pulse right after you claim and at each phase boundary. This is DISTINCT from the epic-level \`wave_status\` heartbeat above: pulse = per-claim ("what THIS worker is doing right now"), wave_status = per-epic ("what phase the whole wave is in"). Never conflate them — pulse is a task write, wave_status is an epic-task patch.
 - Work discovered but NOT taken this wave gets filed NOW as a published child task (honest description, sane priority) — the visible backlog is part of the system being alive.
 - Patches to tasks go through /v1/data/mutate semantics: fields FLAT, patch merges into content, re-publish after mutating (boards read the published ledger only).`
+
+const JOURNEY_BLOCK = `YOUR JOURNEY (required — the epic's human story is assembled from these, and the debrief agent reads it days later):
+Return journey{}: mission (one line), 2-5 key_moments — each a turning point or surprise WITH the evidence that caused it; a step log is not a journey — outcome, and meaning (the so-what for this wave). Write it for a human reader who was not there. Padded moments are worse than fewer moments.`
 
 const PREMISE_SMOKE_BLOCK = `PREMISE SMOKE (E1, graduated into this cycle 2026-07-23 — a cheap pre-build check that caught the phantom-citation class for ~2% of a full survey's cost; DISTINCT from your own facts[].rerun discipline). Your facts[].rerun attaches a re-derivation command to facts YOU emit; this governs the INHERITED premises you are about to RELY ON but did not author — a charter D-number the direction/charter CITES, a candidate a prior phase NAMED reachable, a code site the wish points a builder at. A rerun string passes by being non-empty; a premise passes only when you RUN the check. Three obligations, each a cheap L1/L2 git-show (34-54ms — cheaper than being wrong):
 - CITATION EXISTS AND COVERS: git-show every cited charter D-number / prior decision on origin/main (\`git show origin/main:<path>\`) and read that it actually AUTHORIZES what it is cited for. Existence is not enough — the arm-D phantom-D32 miss was a REAL entry cited as authority it does not cover. A citation you did not git-show is unverified; one whose text you did not read for coverage is a phantom wearing a number.
@@ -178,14 +182,50 @@ const FLIP_RISK_BLOCK = `FLIP-RISK DUAL-REVIEW (E2, graduated into this cycle 20
 - REVIEW acts on it: for any slice flagged high-flip-risk, the single wave-reviewer performs a DISTINCT independent re-derivation of that judgment (not a re-read of the builder's reasoning), AND explicitly flags — in the slice verdict and in next_wave — that a genuinely INDEPENDENT second reviewer is warranted before merge.
 HONEST LIMIT: this workflow spawns exactly ONE reviewer, so the actual dispatch of that second reviewer is a MANUAL LEAD STEP — the lead already reviews the full diff and merges by hand. Review's job here is to NAME when independence is owed, not to auto-spawn it.`
 
+// The journey is the wave's human story at agent grain — the debrief agent's
+// raw material (epic-memory design D1). REQUIRED of every agent: the debrief
+// runs DAYS later, when this run's session files are gone; a journey that is
+// not in a report (and thence a Paper) does not exist.
+const JOURNEY_FIELD = {
+  type: 'object', additionalProperties: false,
+  required: ['mission', 'key_moments', 'outcome', 'meaning'],
+  properties: {
+    mission: { type: 'string', description: 'your assignment as you understood it, one line' },
+    key_moments: {
+      type: 'array',
+      description: '2-5 turning points or surprises, written for a human reader following the epic later — never a step log ("read A, then B" is a log; "expected X in warmpool.go, found the opposite — that killed direction A" is a moment). Fewer honest moments beat padded ones.',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['moment', 'evidence'],
+        properties: {
+          moment: { type: 'string', description: 'what turned or surprised you, and what it changed' },
+          evidence: { type: 'string', description: 'the file:line, command output, paper/task id, or observation that caused it' },
+        },
+      },
+    },
+    outcome: { type: 'string', description: 'where you landed, one or two lines' },
+    meaning: { type: 'string', description: 'the so-what for THIS wave: how your outcome should change what happens next' },
+  },
+}
+
+// Wall-clock telemetry (design D6). The script cannot call Date.now() (banned
+// for resume-safety), so the Fable phases carry the clock: fleets are
+// bracketed by Fable checkpoints, so phase boundaries are these stamps.
+const FABLE_STAMPS = {
+  started_at: { type: 'string', description: 'output of `date -u +%FT%TZ`, run as your FIRST command (wall-clock telemetry, epic-memory D6)' },
+  ended_at: { type: 'string', description: 'output of `date -u +%FT%TZ`, run as your LAST command before returning' },
+}
+
 const STRATEGY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'survey'],
+  required: ['direction', 'direction_debate', 'paper_id', 'paper_created', 'survey', 'journey', 'started_at', 'ended_at'],
   properties: {
     direction: { type: 'string', description: 'bold strategic direction for THIS wave: what the finished experience looks/feels like, the choices you are leaning toward, what matters most right now' },
     direction_debate: { type: 'string', description: 'the rival directions you seriously developed and argued against each other, why the winner won, and the sharpest attack on the winner you found (with how the wave absorbs it) — a direction that never faced a rival is usually the first idea, not the best one' },
     paper_id: { type: 'string', description: 'slug of the PUBLISHED wave strategy Paper you created (style=article)' },
     paper_created: { type: 'boolean', description: 'true only after you created AND published the Paper and read it back from the server' },
+    journey: JOURNEY_FIELD,
+    ...FABLE_STAMPS,
     survey: {
       type: 'array',
       description: '5-20 broad survey assignments; each becomes one Opus surveyor at medium effort. Cast a WIDE net — width now buys precise depth later',
@@ -196,6 +236,8 @@ const STRATEGY_SCHEMA = {
           key: { type: 'string', description: 'short kebab-case label' },
           question: { type: 'string', description: 'a concrete, answerable question about the repo/product/ledger — name suspected files, claims to check, seams to map' },
           why: { type: 'string', description: 'how the answer changes the plan' },
+          mode: { type: 'string', enum: ['research', 'drift-check'], description: "drift-check = a prior wave Paper already answered this; the surveyor re-runs its stored rerun commands and reports drift instead of re-deriving (epic-memory D4). Default: research." },
+          prior_paper: { type: 'string', description: 'REQUIRED when mode=drift-check: the paper id that answered it' },
         },
       },
     },
@@ -236,7 +278,7 @@ const FACTS_DESCRIPTION = 'load-bearing facts you actually verified, never assum
 
 const SURVEY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['key', 'findings', 'coverage', 'facts', 'risks', 'open_questions'],
+  required: ['key', 'findings', 'coverage', 'facts', 'risks', 'open_questions', 'journey'],
   properties: {
     key: { type: 'string' },
     findings: { type: 'string', description: 'the answer, honestly — including "the premise is wrong" when it is' },
@@ -252,15 +294,18 @@ const SURVEY_SCHEMA = {
     },
     risks: { type: 'array', items: { type: 'string' } },
     open_questions: { type: 'array', items: { type: 'string' }, description: 'what you could NOT settle in the timebox — candidates for the verify round' },
+    journey: JOURNEY_FIELD,
   },
 }
 
 const AIM_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['synthesis', 'verification', 'paper_updated', 'heartbeat_stamped'],
+  required: ['synthesis', 'verification', 'paper_updated', 'heartbeat_stamped', 'journey', 'started_at', 'ended_at'],
   properties: {
     synthesis: { type: 'string', description: 'what the survey established, where reports contradict each other or the direction, and what remains unknown that the Decide phase cannot live without' },
     paper_updated: { type: 'boolean', description: 'true only after you appended the survey digest (incl. coverage map + not-founds) AND the verify plan to the wave Paper and re-published it' },
+    journey: JOURNEY_FIELD,
+    ...FABLE_STAMPS,
     verification: {
       type: 'array',
       description: 'the LAST explore round: 1-15 targeted assignments. YOU pick the fleet — model per assignment, and which claims must be PROVEN by actually running tests/gates rather than read',
@@ -283,7 +328,7 @@ const AIM_SCHEMA = {
 
 const VERIFY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['key', 'findings', 'coverage', 'facts', 'proofs', 'risks'],
+  required: ['key', 'findings', 'coverage', 'facts', 'proofs', 'risks', 'journey'],
   properties: {
     key: { type: 'string' },
     findings: { type: 'string', description: 'the answer, honestly — including "the premise is wrong" when it is' },
@@ -312,6 +357,7 @@ const VERIFY_SCHEMA = {
       },
     },
     risks: { type: 'array', items: { type: 'string' } },
+    journey: JOURNEY_FIELD,
   },
 }
 
@@ -446,7 +492,7 @@ function gateFactProvenance(reports) {
 
 const PLAN_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['charter_written', 'charter_pr', 'wave_referent_task', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'wave'],
+  required: ['charter_written', 'charter_pr', 'wave_referent_task', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'doc_facts_routed', 'wave', 'journey', 'started_at', 'ended_at'],
   properties: {
     charter_written: { type: 'boolean', description: `true only after the docs-only PR carrying ${CHARTER_PATH} is OPEN and reporting its checks — a charter that never reached a PR is not published, and a direct push to main is REJECTED (GH006)` },
     charter_pr: { type: 'string', description: 'the docs-only charter PR — its number or URL (e.g. "#6123"); if no PR could be opened, the one-line reason instead, and charter_written stays false' },
@@ -457,6 +503,9 @@ const PLAN_SCHEMA = {
     backlog_filed: { type: 'string', description: 'discovered-but-deferred work you filed as published child tasks (ids), or "none"' },
     heartbeat_stamped: { type: 'boolean', description: 'true only after wave_status on the epic task says the wave is building' },
     decisions_summary: { type: 'string' },
+    doc_facts_routed: { type: 'string', description: 'durable repo-facts routed into their owning docs/ card this wave (path + one-line what, per fact), or "none — <why>". Facts that deserved docs but missed the byte budget were filed as backlog tasks instead — name them.' },
+    journey: JOURNEY_FIELD,
+    ...FABLE_STAMPS,
     wave: {
       type: 'array',
       description: 'this wave of build slices, ≤8, integration-ordered',
@@ -482,7 +531,7 @@ const PLAN_SCHEMA = {
 
 const BUILD_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['ok', 'task_id', 'task_claimed', 'branch', 'summary', 'gate_command', 'gate_passed', 'review', 'files_changed', 'ledger_stamps'],
+  required: ['ok', 'task_id', 'task_claimed', 'branch', 'summary', 'gate_command', 'gate_passed', 'review', 'files_changed', 'ledger_stamps', 'journey'],
   properties: {
     ok: { type: 'boolean' },
     task_id: { type: 'string' },
@@ -494,13 +543,16 @@ const BUILD_SCHEMA = {
     review: { type: 'string', description: 'honest self-review: what could break, blind spots' },
     files_changed: { type: 'array', items: { type: 'string' } },
     ledger_stamps: { type: 'string', description: 'the task mutations you made DURING the build — the claim, each `bp task stamp` (per-criterion --met evidence + honest --miss notes), each `bp task pulse` now-line at claim/phase boundaries, and deviation notes — proof the ledger stayed live and the now-line moved' },
+    journey: JOURNEY_FIELD,
   },
 }
 
 const REVIEW_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'paper_closed', 'heartbeat_stamped', 'next_wave', 'overall_verdict'],
+  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'paper_closed', 'heartbeat_stamped', 'next_wave', 'overall_verdict', 'retro', 'telemetry_appended', 'journey', 'started_at', 'ended_at'],
   properties: {
+    journey: JOURNEY_FIELD,
+    ...FABLE_STAMPS,
     reviewed: {
       type: 'array',
       description: 'one entry per built slice you reviewed',
@@ -527,7 +579,51 @@ const REVIEW_SCHEMA = {
     heartbeat_stamped: { type: 'boolean', description: 'true only after wave_status on the epic task says the wave is complete and names the wave Paper' },
     next_wave: { type: 'string', description: 'what the next wave should take and why — the direction handoff' },
     overall_verdict: { type: 'string', description: 'did this wave move the WISH forward; cross-slice coherence; risks' },
+    retro: {
+      type: 'array',
+      description: 'PROCESS RETRO (epic-memory D7): one honest efficiency verdict PER PHASE (strategize, survey, digest, verify, decide, build, review), each tied to a telemetry row or a journey moment — wasted surveys, duplicate verifies, builders burned on BLOCKED. "no waste seen" is a valid verdict; manufactured criticism is not.',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['phase', 'verdict', 'suggestion'],
+        properties: {
+          phase: { type: 'string' },
+          verdict: { type: 'string', description: 'what actually happened, tied to evidence' },
+          suggestion: { type: 'string', description: 'one concrete efficiency change, or "keep as is"' },
+        },
+      },
+    },
+    telemetry_appended: { type: 'boolean', description: 'true only after the wave telemetry (stat-grid headline + per-phase table, at measured grain) AND the retro landed in the Paper debrief and it re-published' },
   },
+}
+
+// Epic-memory tripwire (design D1): every report carries journey{} — the
+// debrief agent's raw material. An edit that drops one starves the debrief
+// SILENTLY, days later, when nothing else can notice. Identity check, not
+// truthiness: a forked copy of the field drifts exactly like a dropped one.
+for (const [name, schema] of [
+  ['STRATEGY_SCHEMA', STRATEGY_SCHEMA], ['SURVEY_SCHEMA', SURVEY_SCHEMA],
+  ['AIM_SCHEMA', AIM_SCHEMA], ['VERIFY_SCHEMA', VERIFY_SCHEMA],
+  ['PLAN_SCHEMA', PLAN_SCHEMA], ['BUILD_SCHEMA', BUILD_SCHEMA],
+  ['REVIEW_SCHEMA', REVIEW_SCHEMA],
+]) {
+  if (schema.properties.journey !== JOURNEY_FIELD) {
+    throw new Error(`${name}.journey is missing or forked — the epic-memory carrier (design D1) was dropped. Wire journey: JOURNEY_FIELD.`)
+  }
+  if (!(schema.required || []).includes('journey')) {
+    throw new Error(`${name} does not REQUIRE journey — an optional journey decays to absent under load (design D1).`)
+  }
+}
+
+// Same class of tripwire for the clock: telemetry.clock reads these stamps.
+for (const [name, schema] of [
+  ['STRATEGY_SCHEMA', STRATEGY_SCHEMA], ['AIM_SCHEMA', AIM_SCHEMA],
+  ['PLAN_SCHEMA', PLAN_SCHEMA], ['REVIEW_SCHEMA', REVIEW_SCHEMA],
+]) {
+  for (const key of ['started_at', 'ended_at']) {
+    if (!schema.properties[key] || !(schema.required || []).includes(key)) {
+      throw new Error(`${name}.${key} is missing or optional — the wall-clock telemetry carrier (design D6) was dropped; clock arrays would silently go null.`)
+    }
+  }
 }
 
 // ── Phase 1: Strategize — one Fable mind, unhurried; the direction sets the wave's ceiling ──
@@ -538,8 +634,8 @@ const strategist = await neverLose((m) => agent(
 ${USER_WISH_BLOCK}
 
 ${CHARTER_EXISTS
-    ? `The epic charter exists at ${CHARTER_PATH} — read it FULLY, plus the epic's bp task tree${EPIC_TASK_ID ? ` (bp task get ${EPIC_TASK_ID} carries children)` : ''} and the prior wave Papers/debriefs it names. Reconcile the charter with what actually landed, then set the direction for THIS wave: what matters most now, what should be finished vs started, where the quality bar (Kinsta/Vercel) is not yet met.`
-    : `This is the FOUNDING wave — no charter yet. Ground yourself honestly: \`bp search query "<terms>"\` for prior papers/tasks on this topic (the \`query\` sub-verb is REQUIRED; without it the command exits 2 and looks like "no prior art"), then read the surfaces the wish actually touches — verification is the fleets' job, but the DIRECTION is yours alone, and a direction set on an unread codebase is a guess.`}
+    ? `The epic charter exists at ${CHARTER_PATH} — read it FULLY, plus the epic's bp task tree${EPIC_TASK_ID ? ` (bp task get ${EPIC_TASK_ID} carries children)` : ''} and the prior wave Papers/debriefs it names. Reconcile the charter with what actually landed, then set the direction for THIS wave: what matters most now, what should be finished vs started, where the quality bar (Kinsta/Vercel) is not yet met. THEN SEARCH BEFORE ASKING (epic-memory D4): \`bp search query "<epic terms>"\` for prior wave Papers and debriefs on this topic. Any survey question a prior Paper already answered becomes a drift-check assignment (mode='drift-check', prior_paper=<id>) — verification is cheap, re-research is not.`
+    : `This is the FOUNDING wave — no charter yet. Ground yourself honestly: \`bp search query "<terms>"\` for prior papers/tasks on this topic (the \`query\` sub-verb is REQUIRED; without it the command exits 2 and looks like "no prior art"), then read the surfaces the wish actually touches — verification is the fleets' job, but the DIRECTION is yours alone, and a direction set on an unread codebase is a guess. If prior papers already answer a question you were going to ask, file it as mode='drift-check' with prior_paper set.`}
 
 WORK THE PROBLEM PROPERLY, in whatever order serves you:
 - GROUND: read until further reading stops changing your mind — the charter/ledger/prior papers above, the real code of the surfaces involved, adjacent systems that constrain the design. Depth is your call; a clock is not.
@@ -552,6 +648,8 @@ Your output:
 3. survey — 5-20 BROAD assignments for the Opus surveyor fleet. Cast a wide net: suspected files, prior art (in the repo AND in bp papers/tasks), claims to check, seams to map, adjacent systems that might constrain the design, and every load-bearing assumption your stress-test surfaced. Width is cheap here — ask everything you'd want a scout report on. The Digest phase distills; you do not need to be precise yet.
 4. OPEN THE WAVE PAPER: create + publish the wave strategy Paper (slug like <epic>-wave-<YYYY-MM-DD>, style=article): the wish, your direction, the direction debate (candidates weighed, why the winner won), the survey plan (every question + why). This Paper is the wave's living story — every later phase appends to it; someone opening it mid-wave sees exactly where the wave stands. Read it back before setting paper_created=true.
 5. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}: flat wave_status ("wave: surveying — <one-line direction>") + flat wave_paper (the Paper's id), then re-publish.` : 'if a published epic parent task already exists for this epic, stamp its wave_status + wave_paper; if none exists yet, skip (Decide creates it).'}
+CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
+${JOURNEY_BLOCK}
 ${PREMISE_SMOKE_BLOCK}
 ${PAPER_BLOCK}
 ${LEAD_NOTES}`,
@@ -563,6 +661,7 @@ if (surveyAssignments.length < SURVEY_FLOOR) {
   throw new Error(`Survey fan-out floor: the strategist returned ${surveyAssignments.length} survey assignment(s), below the floor of ${SURVEY_FLOOR}. Width is the cheapest part of a wave and a narrow survey is how a wave misses prior art it then rebuilds. Re-run Strategize with a wider net (5-20 assignments) rather than proceeding.`)
 }
 const WAVE_PAPER = strategist.paper_id
+SPENT.strategize = budget.spent()
 log(`Strategist set direction; wave paper ${WAVE_PAPER} (created=${strategist.paper_created}); ${surveyAssignments.length} survey assignments`)
 
 // ── Phase 2: Survey — wide Opus sweep at medium effort, ~5 minutes each ──
@@ -579,10 +678,13 @@ ${strategist.direction}
 
 YOUR ASSIGNMENT [${q.key}]: ${q.question}
 WHY IT MATTERS: ${q.why}
+${q.mode === 'drift-check' ? `
+DRIFT-CHECK MODE (epic-memory D4): prior wave Paper ${q.prior_paper || 'MISSING — the strategist omitted prior_paper; treat this as research mode and say so in findings'} already answered this. Read it, re-run its facts' rerun commands, and report each fact CONFIRMED or DRIFTED in your facts[] (with a fresh rerun command). Spend remaining time ONLY on the delta — what changed, what was never asked. Do not re-derive settled ground.` : ''}
 
 Search Barkpark FIRST (\`bp search query "<terms>"\` — the \`query\` sub-verb is REQUIRED; dropping it exits 2 with \`unknown command "search"\`, and that failure reads exactly like a real absence of prior art, so check the exit code — papers and tasks carry prior art the tree doesn't), then grep/read the repo${CHARTER_EXISTS ? `; the charter at ${CHARTER_PATH} is a fair source` : ''}. Answer honestly — "the premise is wrong" is a valid and valuable answer. Every load-bearing fact needs evidence you actually derived, and its \`rerun\` command.
 
-COVERAGE ACCOUNTING (your report is only trustworthy if its edges are visible): list EVERY file/paper/task you checked in coverage[] — the path, what you checked it for, and found / not_found / partial. NOT-FOUND IS A FINDING ("no existing rate limiter in api/" changes the plan as much as finding one). Anything you did not list is treated as unchecked — do not imply coverage you don't have. The wave Paper (${WAVE_PAPER}) will carry your coverage map; you do NOT write the Paper yourself.`,
+COVERAGE ACCOUNTING (your report is only trustworthy if its edges are visible): list EVERY file/paper/task you checked in coverage[] — the path, what you checked it for, and found / not_found / partial. NOT-FOUND IS A FINDING ("no existing rate limiter in api/" changes the plan as much as finding one). Anything you did not list is treated as unchecked — do not imply coverage you don't have. The wave Paper (${WAVE_PAPER}) will carry your coverage map; you do NOT write the Paper yourself.
+${JOURNEY_BLOCK}`,
       { label: `survey:${q.key}`, phase: 'Survey', schema: SURVEY_SCHEMA, model: m, effort: EFFORT_FOR(m) }
     ), { label: `survey:${q.key}`, model: M(SURVEY_MODEL), other: M('fable') })
   )
@@ -599,6 +701,7 @@ const surveyLost = surveyAssignments.filter((q, i) => !surveyResults[i])
 const SURVEY_DEFICIT = deficitBlock('survey', surveyLost)
 const surveyGrip = gateFactProvenance(surveys)
 log(`${surveys.length}/${surveyAssignments.length} surveyors reported${surveyLost.length ? ` — ${surveyLost.length} LOST after full recovery (${surveyLost.map((q) => q.key).join(', ')}); the wave continues and carries them as unanswered` : ''}; ${surveys.filter((s) => s.recovered_on).length} recovered cross-model; provenance gate: ${surveyGrip.demoted}/${surveyGrip.total} fact(s) DEMOTED (no rerun command)`)
+SPENT.survey = budget.spent()
 
 // ── Phase 3: Digest — one Fable mind, ~10 minutes, designs the verify fleet ──
 phase('Digest')
@@ -626,9 +729,12 @@ Your job:
    Do not re-ask what the survey settled with evidence. This round closes unknowns; it does not browse.
 3. UPDATE THE WAVE PAPER (${WAVE_PAPER}) — append, then re-publish, BEFORE your fleet flies:
    - Survey digest: the synthesis, plus a coverage map distilled from the surveyors' coverage[] — what was checked and found, and JUST AS PROMINENTLY what was checked and NOT found (absences are decisions-in-waiting). Name which corners of the repo no surveyor reached.
+   - JOURNEY ROSTER (epic-memory D2): one card per surveyor (cards block) — mission → what they figured out → what it means — distilled from each report's journey{}; keep the turning points and surprises, drop boilerplate. A reader must be able to follow every scout's arc without the raw reports.
    - Verify plan: every assignment (question, model, what will be RUN as proof) — so the Paper states what is in flight while the verifiers work.
    Set paper_updated=true only after you re-published and read it back.
 4. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}'s flat wave_status field ("wave: verifying — <one-line synthesis>") and re-publish.` : 'if a published epic parent task for this epic already exists, stamp its wave_status; if none exists yet, set heartbeat_stamped=true and move on (Decide creates it).'}
+CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
+${JOURNEY_BLOCK}
 ${PREMISE_SMOKE_BLOCK}
 ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
@@ -641,6 +747,7 @@ if (verifyAssignments.length < VERIFY_FLOOR) {
   throw new Error(`Verify fan-out floor: the digest returned ${verifyAssignments.length} verify assignment(s), below the floor of ${VERIFY_FLOOR}. Verify is the LAST round before the plan is cut — nobody checks after it. A wave that surveyed wide and then verified nothing is deciding on unproven claims. Re-run Digest with a real verify fleet (1-15 assignments, floor ${VERIFY_FLOOR}) rather than proceeding.`)
 }
 log(`Digest done; verify fleet: ${verifyAssignments.length} (${verifyAssignments.filter((v) => v.model === 'fable').length} fable@high, rest opus@medium; ${verifyAssignments.filter((v) => v.verify_commands).length} with live proofs)`)
+SPENT.digest = budget.spent()
 
 // ── Phase 4: Verify — the Fable-designed fleet closes the unknowns ──
 //
@@ -685,7 +792,8 @@ Run it (plus whatever else proves/refutes the claim), and QUOTE the decisive out
 
 Investigate sharply — grep/read${CHARTER_EXISTS ? `, the charter at ${CHARTER_PATH},` : ''} \`bp search query "<terms>"\` for prior art (the \`query\` sub-verb is REQUIRED — without it the command exits 2 and the empty result is indistinguishable from genuine absence). "The premise is wrong" remains a valid answer. Every fact needs evidence you actually derived plus its \`rerun\` command; every proof needs real output.
 
-COVERAGE ACCOUNTING: list EVERY file/paper/task you checked in coverage[] — path, what you checked it for, found / not_found / partial. Not-found is a finding. Unlisted = unchecked. The wave Paper (${WAVE_PAPER}) will carry your coverage; you do NOT write the Paper yourself.`,
+COVERAGE ACCOUNTING: list EVERY file/paper/task you checked in coverage[] — path, what you checked it for, found / not_found / partial. Not-found is a finding. Unlisted = unchecked. The wave Paper (${WAVE_PAPER}) will carry your coverage; you do NOT write the Paper yourself.
+${JOURNEY_BLOCK}`,
       { label: `verify:${q.key}`, phase: 'Verify', schema: VERIFY_SCHEMA, model: m, effort: EFFORT_FOR(m), ...(q.needs_worktree ? { isolation: 'worktree' } : {}) }
     // Recovery hops the OTHER way for a fable-assigned verifier, so a lost
     // judgment-heavy dig retries on opus rather than giving up on the question.
@@ -702,6 +810,7 @@ const verifyLost = verifyAssignments.filter((q, i) => !verifyResults[i])
 const VERIFY_DEFICIT = deficitBlock('verify — NOTHING RUNS AFTER THIS ROUND, so these stay open for the whole wave', verifyLost)
 const verifyGrip = gateFactProvenance(verifications)
 log(`${verifications.length}/${verifyAssignments.length} verifiers reported${verifyLost.length ? ` — ${verifyLost.length} LOST after full recovery (${verifyLost.map((q) => q.key).join(', ')}); these unknowns stay OPEN and Decide is told so` : ''}; ${verifications.filter((v) => v.recovered_on).length} recovered cross-model; ${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs; provenance gate: ${verifyGrip.demoted}/${verifyGrip.total} fact(s) DEMOTED (no rerun command)`)
+SPENT.verify = budget.spent()
 
 // ── Phase 5: Decide — one Fable mind finalizes charter + wave + tasks ──
 phase('Decide')
@@ -755,16 +864,20 @@ Your job:
    THEN OPEN THE PR: \`gh pr create --base main --head "$BR"\`, and its body MUST carry the line \`Task: <the wave referent id you just claimed>\` ON ITS OWN LINE — that is exactly what the pr-task-gate reads, and it reads it on EVERY pull request: \`.github/workflows/pr-task-gate.yml:43\` says verbatim "No paths filter: any change needs a task, so every PR is checked." THERE IS NO DOCS-ONLY SKIP FOR THIS GATE — a \`.md\`-only diff does NOT clear it (the paths-filtered skip you may be remembering belongs to the Elixir gate's dispatcher, a different workflow), so a charter PR carrying a lapsed or missing referent is unmergeable, permanently. Then \`git worktree remove\` the worktree (the primary checkout keeps its working copy of the charter, uncommitted, so THIS run can still read it — leave it alone, do not commit it to main).
    REPORT, DO NOT PUSH: set charter_written=true, charter_pr=<the PR number or URL>, and wave_referent_task=<the referent id you claimed and pulsed> once the PR is OPEN and reporting its checks. The success condition of this phase is THE PR EXISTING AND REPORTING, not a push succeeding — do not block the wave waiting on the merge; the lead merges it. And because the charter therefore may NOT be on origin/main while the builders fly, name the PR in decisions_summary and make sure this wave's decisions are in the wave Paper IN FULL (step 7) — the Paper is what a builder can read today.
    THE SAME PR CARRIES THIS RUN'S LEDGER ROWS: the verify fleet may have written re-derivation recipe rows under tooling/grip/ledger/ and it is forbidden to commit them — that is YOUR step. Run \`git status --porcelain tooling/grip/ledger/\` in the PRIMARY checkout; for each untracked *.json it names, copy that file into the charter worktree BY EXPLICIT PATH and \`git add\` it there — never \`git add -A\`, never a directory, never a glob you did not first expand and read, because other sessions share this checkout. Same commit as the charter, or a second docs-only commit on the same branch — either is fine, both ride the one PR, and nothing here ever touches main directly. If it names nothing, skip the step silently; touch nothing else under tooling/grip/.
+2b. ROUTE DURABLE REPO-FACTS INTO DOCS (epic-memory D5) — do this WHILE THE CHARTER WORKTREE STILL EXISTS, i.e. before the \`git worktree remove\` in step 2 (if it is already gone, \`git worktree add\` a fresh one on \`$BR\`): from this wave's verified facts, the FEW that are durable repo-truths (not wave-local findings) go into their OWNING docs/ card per the CLAUDE.md routing table — corrections and gap-fills only, never additive research dumps; byte budgets and the 7-card cap are sovereign. Gate before committing: bash scripts/check-doc-budgets.sh && bash scripts/docs-anchors-check.sh. The edit RIDES THE CHARTER PR — never a direct push to main: make the edit in the primary checkout, then copy the card into the charter worktree BY EXPLICIT PATH and \`git add\` it there, on the same branch and in the same PR as the charter (same commit or a second docs-only one, either is fine). A fact that deserves docs but misses budget becomes a published backlog task instead. Record everything in doc_facts_routed.
 3. FILE THE TASKS: ${EPIC_TASK_LINE} Every slice gets a published bp task with rubric-quality acceptance criteria (include a merge-gated criterion the lead closes) and the wave Paper's id on it (flat wave_paper field) so task → story is one hop. A slice without a published task does not exist — wave[].task_id is required.
 4. SEED THE BACKLOG: everything exploration surfaced that is real but NOT this wave gets filed now as a published child task (honest description, sane priority) — record the ids in backlog_filed. The ledger must show the future, not just the present.
 5. PERFECT THE TASKS (you are also the task reviewer — there is no one behind you): after filing, re-read every wave task back from the server and verify it is published (not a stranded draft), parented under the epic task, linked to the wave Paper, and reads to the rubric — outcome-shaped title, description a cold builder could start from, concrete evidence-bearing criteria, sane priority. Fix every defect via bp (patch, publish, re-parent, dedup stranded drafts). Set tasks_verified=true only after this read-back pass is clean.
 6. CUT THE WAVE: up to 8 slices, buildable in parallel by isolated builders (minimize file overlap; if two slices must touch the same region of a file, merge or sequence them). ROUNDS ARE LAW (three waves proved briefs alone don't stop the dispatcher): stamp every slice with \`round\`. round 1 = dependency-free, builds this run. A slice that needs another slice's code ON MAIN (imports its package, calls its seam, seeds its schema) is round ≥2 with \`after: [<dep task_ids>]\` — it will NOT build this run; the lead dispatches it after merging its deps (this exact manual-rounds recipe went 7-for-7 across two epics). Never mark a slice round 1 "optimistically" — a round-1 slice whose dep is unmerged burns a builder to produce a BLOCKED report. Write the same dependency as an "AFTER <task_id> merges" line at the TOP of the deferred task's brief so a manually-dispatched builder sees it first. Per slice pick builder_model, which sets BOTH the model and its depth ('opus' builds at medium, 'fable' at high — there is no separate effort knob and nothing above high, so this one choice is the whole decision and mis-classifying a hard slice as routine costs twice). TWO INDEPENDENT AXES, either one alone is enough to warrant fable. DIFFICULTY: 'opus' is the default and fits most well-specified building; reserve 'fable' for slices that are genuinely hard rather than merely large — subtle design judgment, cross-surface coupling, high blast radius. SURFACE: a VISUALLY DESIGNED slice gets 'fable' regardless of size — palette, layout, typography, CSS, LiveView/SPA chrome, anything judged against the Kinsta/Vercel bar; a small fully-specified CSS slice is easy on the difficulty axis and would wrongly fall to opus. (System/architecture design is not this axis — you already did that judgment here.) ${CHARTER_EXISTS ? 'Weight FINISHING what exists (quality, coherence, the Kinsta/Vercel bar) alongside net-new capability; prefer finishing journeys over starting new ones.' : 'Bold slices are fine.'} Each needs instructions complete enough to build without more context and exact local gate command(s) — DRY-RUN each gate command yourself before filing it (a gate that cannot run, or references paths/globs that don't exist, forces the builder to interpret instead of prove).
 7. UPDATE THE WAVE PAPER (${WAVE_PAPER}) — append, then re-publish, BEFORE the builders fly:
-   - Verification results: per assignment what was proven/refuted (quote the decisive proof lines), plus the verifiers' coverage — including not-founds.
+   - Verification results: per assignment what was proven/refuted (quote the decisive proof lines), plus the verifiers' coverage — including not-founds — render proofs as code blocks quoting the decisive output lines, and the verifiers' journeys as cards.
+   - FACTS TABLE (epic-memory D4): the load-bearing facts with their rerun commands (table block) — the next wave's strategist turns these into drift-checks instead of re-research.
    - Decisions: each with its one-line why (mirror the charter, don't fork it — the charter is the epic's memory, the Paper is this wave's story).
    - Wave plan: every slice with its task id, surface, builder model, gate — so the Paper states what is in flight while the builders work.
    Set paper_updated=true only after you re-published and read it back.
 8. HEARTBEAT: stamp the epic task's wave_status ("wave: building <n> slices — <one-line plan>") + wave_paper=${WAVE_PAPER} and re-publish. Set heartbeat_stamped=true only after you did.
+CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
+${JOURNEY_BLOCK}
 ${TASKS_BLOCK}
 ${PREMISE_SMOKE_BLOCK}
 ${FLIP_RISK_BLOCK}
@@ -777,8 +890,26 @@ ${GATES_BLOCK}${LEAD_NOTES}`,
 if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${ARCH_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; resume the run rather than restarting so neither round is re-bought.`)
 const wave = (architect.wave || []).slice(0, 8)
 log(`Architect cut ${wave.length} slices (${wave.filter((w) => w.builder_model === 'fable').length} fable); charter_written=${architect.charter_written} (PR ${architect.charter_pr || 'NONE — the charter is not published'}, referent ${architect.wave_referent_task || 'NONE — that PR cannot pass the task gate'}); tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}; backlog=${architect.backlog_filed}`)
+SPENT.decide = budget.spent()
 if (wave.length === 0) {
-  return { surveys: surveys.length, verifications: verifications.length, wave_paper: WAVE_PAPER, wave: 0, built: 0, note: 'architect cut no slices', decisions: architect.decisions_summary }
+  return {
+    surveys: surveys.length, verifications: verifications.length, wave_paper: WAVE_PAPER, wave: 0, built: 0, note: 'architect cut no slices', decisions: architect.decisions_summary,
+    telemetry: {
+      grain: 'partial — wave cut zero slices; build/review never ran',
+      tokens_by_phase: {
+        strategize: SPENT.strategize - SPENT.t0,
+        survey: SPENT.survey - SPENT.strategize,
+        digest: SPENT.digest - SPENT.survey,
+        verify: SPENT.verify - SPENT.digest,
+        decide: SPENT.decide - SPENT.verify,
+      },
+      interrupts: {
+        surveyors_lost: surveyAssignments.length - surveys.length,
+        verifiers_lost: verifyAssignments.length - verifications.length,
+        facts_demoted_no_rerun: surveyGrip.demoted + verifyGrip.demoted,
+      },
+    },
+  }
 }
 
 const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
@@ -822,6 +953,7 @@ Steps — task first, code second, and the ledger stays LIVE throughout:
 6. Honest self-review: what could break, what you didn't cover, blind spots.
 7. Only if the gate passes: branch 'loop-epic/${slug(item.title)}-${i}', one clear conventional commit. Do NOT push. Do NOT touch main.
 8. Final ledger state: every criterion you proved carries concrete evidence (gate output, test names, branch); merge-gated criteria stay open and lifecycle stays in_progress — the LEAD closes on merge. Your branch is named in the evidence.
+${JOURNEY_BLOCK}
 ${TASKS_BLOCK}
 ${LIVENESS_BLOCK}
 SCOPE DISCIPLINE — your slice is the deliverable, at the scope it was cut. Other builders are working other slices of this same wave RIGHT NOW, and the wave's whole parallel design rests on your slice staying inside its FILES list; widening it is how two builders collide and one of them loses work. Deliver what the brief asks: make routine judgment calls yourself, but do not quietly widen, narrow, or transform the slice. Don't refactor around your change, don't add abstractions or error handling for cases that can't happen, don't tidy neighbouring code — a bug fix does not need surrounding cleanup. If you conclude the brief is wrong or a better approach exists, say so in a sentence in your self-review and BUILD IT AS BRIEFED anyway; rescoping is the lead's call, not yours. Finish the WHOLE slice, not the easy part — report ok:true only when every criterion is actually met, and if something genuinely can't be done, do the rest and say plainly what is missing and why.
@@ -840,6 +972,46 @@ Catalog-first (measured law, /papers/scaffy-benchmark): before hand-editing a re
 
 const greenBuilt = built.filter((r) => r.ok && r.gate_passed && r.branch)
 log(`Build: ${greenBuilt.length}/${built.length} slices green`)
+SPENT.build = budget.spent()
+
+// Wave telemetry (design D6, honesty rule D9): measured grain ONLY. Tokens
+// are per-phase deltas of budget.spent() — the runtime exposes nothing finer;
+// per-agent splits DO NOT EXIST and must never be presented. Wall-clock comes
+// from the Fable stamps (fleets are bracketed by Fable checkpoints). Interrupts
+// are the countable frictions: lost agents (skips/API deaths), failed gates.
+const telemetry = {
+  grain: 'tokens = per-phase output-token deltas from budget.spent(); clock = Fable date -u stamps; per-agent token splits are NOT measured — never invent them',
+  tokens_by_phase: {
+    strategize: SPENT.strategize - SPENT.t0,
+    survey: SPENT.survey - SPENT.strategize,
+    digest: SPENT.digest - SPENT.survey,
+    verify: SPENT.verify - SPENT.digest,
+    decide: SPENT.decide - SPENT.verify,
+    build: SPENT.build - SPENT.decide,
+    review: 'in flight — lands in the run return, not the Paper (Review cannot know its own cost)',
+  },
+  clock: {
+    strategize: [strategist.started_at, strategist.ended_at],
+    survey_bracket: [strategist.ended_at, aim.started_at],
+    digest: [aim.started_at, aim.ended_at],
+    verify_bracket: [aim.ended_at, architect.started_at],
+    decide: [architect.started_at, architect.ended_at],
+    build_bracket: [architect.ended_at, 'review start — see Review stamps'],
+  },
+  fleet: {
+    surveyors: `${surveys.length}/${surveyAssignments.length} reported`,
+    verifiers: `${verifications.length}/${verifyAssignments.length} reported (${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs)`,
+    builders: `${built.length}/${buildNow.length} reported, ${greenBuilt.length} green`,
+    deferred_by_rounds_law: deferred.length,
+  },
+  interrupts: {
+    surveyors_lost: surveyAssignments.length - surveys.length,
+    verifiers_lost: verifyAssignments.length - verifications.length,
+    builders_lost: buildNow.length - built.length,
+    slices_not_green: built.length - greenBuilt.length,
+    facts_demoted_no_rerun: surveyGrip.demoted + verifyGrip.demoted,
+  },
+}
 
 // ── Phase 7: Review — one Fable mind reviews, fixes, grades, debriefs, hands off ──
 phase('Review')
@@ -863,6 +1035,9 @@ ${JSON.stringify(wave.map((w) => ({ title: w.title, task_id: w.task_id, round: w
 
 DEFERRED SLICES (round ≥2 — NOT built this run BY DESIGN, the sequenced-rounds law; do not grade their absence as a failure): ${deferred.length === 0 ? 'none' : deferred.map((w) => `${w.task_id} (round ${w.round}, after ${(w.after || []).join('+')})`).join('; ')}. Your next_wave handoff MUST spell out the dispatch order: merge round 1, then each deferred slice as its deps merge.
 
+WAVE TELEMETRY (measured in-script — persist it in the Paper debrief as a stat-grid headline + a per-phase table; the debrief agent runs DAYS later when this run's files are gone; honesty rule D9 — measured grain only, never per-agent token splits):
+${JSON.stringify(telemetry, null, 2)}
+
 For EACH green slice, in integration order:
 1. \`git checkout -b <branch>-r <branch>\` in your worktree; study the full diff vs its merge-base with origin/main. Chase the builder's own doubts first.
 2. Review adversarially for correctness (edge cases, escaping, stale-state, error paths) AND against the Kinsta/Vercel quality bar (honest loading/empty/error states, legibility, feedback, consistency with the charter's design decisions). Distrust vacuous green — spot-check that the load-bearing tests actually pin the behavior claimed.
@@ -874,13 +1049,15 @@ Then, once, for the wave:
 6. LEDGER AUDIT: for every slice task, verify the builder claimed it, stamped honest evidence AS THEY WORKED (their ledger_stamps claim vs the task's actual state), and left lifecycle truthful (in_progress, not done — merge-gated criteria stay open for the lead). Not-green slices' tasks must say so. Verify tasks NOT in this wave weren't touched. Fix ledger lies/omissions directly via bp and record them in ledger_fixes.
 7. GRADE (Cody mandate): a letter grade A+..F for the wave as it will merge, judged against the WISH — correctness, completeness, bloat, aesthetics; tree-tidiness has no value. The commentary must EARN the grade: name what is genuinely strong AND what falls short. Never a bare number. Do not manufacture criticism to look rigorous.
 8. WAVE LOG: APPEND a '### Wave <today>' entry to the charter's ## Wave log (Edit tool): what landed, what stalled, what the next wave should take. Set wave_log_appended=true only after you actually wrote it.
-9. CLOSE THE WAVE PAPER (${WAVE_PAPER}): append the final DEBRIEF section and re-publish — what shipped (per slice: task, final branch, verdict), what stalled and why, the grade + commentary, the ledger audit outcome, what the next wave should take. Read the Paper top to bottom first: it now tells the whole wave's story (direction → survey coverage → verification proofs → decisions → outcome) — fix any section a later phase invalidated (a decision reversed, a proof superseded) with a dated correction note rather than silent rewriting. Report the Paper id in paper_closed. If a session is open, log the seal: \`bp session log <session-slug> --kind epic-wave-complete --ref ${WAVE_PAPER}\` — a failed log never blocks the wave.
+9. CLOSE THE WAVE PAPER (${WAVE_PAPER}): append the final DEBRIEF section and re-publish — what shipped (per slice: task, final branch, verdict), what stalled and why, the grade + commentary, the ledger audit outcome, what the next wave should take. Read the Paper top to bottom first: it now tells the whole wave's story (direction → survey coverage → verification proofs → decisions → outcome) — fix any section a later phase invalidated (a decision reversed, a proof superseded) with a dated correction note rather than silent rewriting. Report the Paper id in paper_closed. The debrief section MUST carry builder journey cards (from every builder's journey{}, including not-green slices — a stall is a story), your own journey, and the telemetry + retro sections (see WAVE TELEMETRY above). Include the RETRO: one verdict per phase in retro[], mirrored into the Paper's debrief section. If a session is open, log the seal: \`bp session log <session-slug> --kind epic-wave-complete --ref ${WAVE_PAPER}\` — a failed log never blocks the wave.
 10. HEARTBEAT + HANDOFF: stamp the epic task's wave_status ("wave: complete — grade <g>, paper ${WAVE_PAPER}") and re-publish; set heartbeat_stamped accordingly.
    CLOSE THE WAVE REFERENT — it is the one task in this wave whose work IS finished when you finish, and nothing else will ever close it. Decide filed \`<epic-slug>-wave-<N>-log\`, claimed it so the charter PR could pass the task gate, and left it \`in_progress\`; you are the phase that appends the wave log and seals the Paper, i.e. the phase that completes exactly that paperwork. Left alone it is reaped by the TTL sweeper 45 minutes later and reads on the board as a STALLED claim rather than as finished work — a lie about a live system, filed by the machinery built to stop lying. The claim is Decide's and \`close\` is a CAS on the CURRENT claim, so: \`bp task claim <referent> <your worker id>\` (this returns a fresh \`doc.claim.epoch\`), then \`bp task close <referent> <your worker id> <that epoch> done "wave <N> paperwork complete: charter PR <#>, wave log appended, Paper ${WAVE_PAPER} sealed"\`. This is the ONE task Review closes outright — every SLICE task stays \`in_progress\` with its merge-gated criteria open for the lead. If the charter PR is still unmerged that is fine and changes nothing: the referent vouches for the paperwork being DONE, not for it being merged. Put the direction handoff in next_wave; per slice report final_branch (the -r branch if you changed anything), gate_passed on your final state, and an honest verdict incl. anything the lead must know before merging (the lead closes merge-gated criteria on merge — name them).
 11. **PUSH EVERY FINAL BRANCH AND OPEN ITS PR. THE WAVE IS NOT DONE UNTIL YOU DO.** This is step 11 because SIX consecutive waves ended with built, reviewed, gate-passing work sitting on local-only branches in a SHARED multi-session checkout that other cycles reset — roughly 20 slices that existed only because a human went looking for them. A branch you do not push is work this wave did not do. For each green slice, from your worktree:
    RE-CLAIM (OR PULSE) THE SLICE TASK IMMEDIATELY BEFORE ITS PR IS OPENED — one command per slice, in the same breath as the push, and NEVER in a batch at the start of step 11. You are opening these PRs HOURS after the builders stopped pulsing, and the pr-task-gate freezes its verdict at PR-open time (\`claim.expired_at >= pull_request.created_at\`, honest-gates charter D58): a slice claim that lapsed in the gap between "builder done" and "Review opens the PR" reds that PR PERMANENTLY — no re-run, no later claim, no close/reopen moves \`created_at\`, so the only escape is a brand-new PR. The lease is 2700s (\`api/lib/barkpark/tasks/ttl_sweeper.ex:158 @default_ttl_seconds 2700\`), and builders finish well outside that window. So per slice: \`bp task pulse <task_id> <your worker id> --now "opening the slice PR"\` if the task is still \`in_progress\` and held — pulse is a KEEP-ALIVE, never a resurrect (\`api/lib/barkpark/tasks/pulse.ex:130-136\` \`check_live/1\` refuses anything not \`in_progress\` with \`:not_holder\`) — otherwise \`bp task claim <task_id> <your worker id>\` first and pulse after. Then push and open the PR, and only then move to the next slice.
    \`git push -u origin <final_branch>\` then \`gh pr create --head <final_branch> --title "<conventional-commit title>" --body "<what it does + the gate you re-ran + Task: <task_id>>"\`.
    The body MUST carry a single canonical \`Task: <task_id>\` line (not \`Tasks: a + b\`) or the PR↔task gate fails — and it is checked on EVERY PR regardless of what the diff touches (\`.github/workflows/pr-task-gate.yml:43\`: "No paths filter: any change needs a task, so every PR is checked"). Do NOT merge — the lead merges. Report per slice \`pushed: true\` and \`pr\`; if a push or PR genuinely fails, report \`pushed: false\` with the verbatim error, and say so in overall_verdict — never silently. A wave that grades A with unpushed branches has not earned it, and you must say that in the commentary.
+CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
+${JOURNEY_BLOCK}
 ${TASKS_BLOCK}
 ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
@@ -894,6 +1071,7 @@ ${FLIP_RISK_BLOCK}`,
   // shared checkout, which is the one failure this wave log has recorded most.
   if (!review) log('LOST review: the wave built work that is NOT reviewed, NOT graded, and NOT pushed — the lead must review the branches and open the PRs by hand')
 }
+SPENT.review = budget.spent()
 
 const reviewedByTask = {}
 for (const r of (review && review.reviewed) || []) reviewedByTask[r.task_id] = r
@@ -941,4 +1119,7 @@ return {
   paper_closed: review ? review.paper_closed : null,
   next_wave: review ? review.next_wave : null,
   overall_verdict: review ? review.overall_verdict : null,
+  telemetry: { ...telemetry, tokens_by_phase: { ...telemetry.tokens_by_phase, review: SPENT.review - SPENT.build } },
+  retro: review ? review.retro : null,
+  telemetry_appended: review ? review.telemetry_appended : false,
 }
