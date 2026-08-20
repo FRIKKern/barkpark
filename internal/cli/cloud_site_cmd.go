@@ -2025,11 +2025,41 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 		if tr := strings.TrimSpace(dep.Trigger); tr != "" {
 			m["trigger"] = siteTriggerLabel(tr)
 		}
+		// THE BUILD IDENTITY (dr-w23-s6). The control plane has shipped these three
+		// on this payload all along — `site_deployment_json/3` pipes the narrow
+		// `deployment_json/1` — but `cloudclient.SiteDeployment` declared no field
+		// for them, so `json.Unmarshal` dropped them and this page could not print
+		// what `bp sites` prints from the narrow route. "Which build is this?" is
+		// the question a status header exists to answer.
+		//
+		// Guarded individually, like every other optional row here: a control plane
+		// that omits one (a static site has no image tag; a content deploy has no
+		// git ref) leaves that row out rather than printing an empty cell.
+		if gr := strings.TrimSpace(dep.GitRef); gr != "" {
+			m["git ref"] = hzCell(gr)
+		}
+		if it := strings.TrimSpace(dep.ImageTag); it != "" {
+			m["image tag"] = hzCell(it)
+		}
+		if au := strings.TrimSpace(dep.ArtifactURL); au != "" {
+			m["artifact"] = hzCell(au)
+		}
 		// A deploy that did not go live owes the reader a reason — the deployment's
 		// failure_reason, else the failed stage's streamed detail.
 		if strings.EqualFold(dep.Status, "failed") || siteDeployCancelled(dep.Status) {
 			_, reason := siteFailure(*dep)
 			m["reason"] = sanitizeCell(reason)
+		}
+		// THE DEPLOYMENT'S OWN CAPTION, and it is not `reason`. The wire's
+		// top-level `detail` is `Sites.Deploy.stage_caption(d.status, d.detail)` —
+		// the same string family the failure arms above render, which is exactly
+		// why it is printed only when it says something they did NOT already say.
+		// Printing both unconditionally would put the same sentence on the screen
+		// twice and teach a reader that one of the two rows is noise.
+		if dt := strings.TrimSpace(dep.Detail); dt != "" {
+			if existing, ok := m["reason"].(string); !ok || !strings.EqualFold(strings.TrimSpace(existing), dt) {
+				m["detail"] = sanitizeCell(dt)
+			}
 		}
 	} else {
 		m["status"] = "never deployed"
