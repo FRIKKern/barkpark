@@ -33,6 +33,7 @@ defmodule BarkparkWeb.WorkspaceController do
 
   require Logger
 
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
@@ -407,7 +408,7 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp clean_import(conn, path, receipt) do
-    case WorkspaceBundle.import_bundle_file(path) do
+    case WorkspaceBundle.import_bundle_file(path, grant_admin_to: operator_grant(conn)) do
       {:ok, stats} ->
         json(
           conn,
@@ -428,7 +429,10 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp merge_import(conn, path, receipt) do
-    case WorkspaceBundle.import_bundle_file(path, mode: :merge) do
+    case WorkspaceBundle.import_bundle_file(path,
+           mode: :merge,
+           grant_admin_to: operator_grant(conn)
+         ) do
       {:ok, stats} ->
         json(
           conn,
@@ -724,6 +728,38 @@ defmodule BarkparkWeb.WorkspaceController do
   # created — `spill_dir/0` (operator config) plus System.unique_integer/1. No
   # request input reaches the path, same basis as archive.ex:229-231.
   # sobelow_skip ["Traversal.FileModule"]
+  # THE OPERATOR GRANT (task-ed7ae8110c7c8b41). An imported workspace arrives on
+  # this instance with ZERO valid administrators: the bundle carries only the
+  # SOURCE instance's `workspace_memberships` rows, naming principals that do
+  # not exist here. Nothing else on the import path writes one, so absent this
+  # the operator that just landed the workspace cannot push its blobs
+  # (`TenancyAuth.member?/2` -> 404 on PUT /media/blob/*path), re-export it or
+  # delete it (`TenancyAuth.workspace_admin?/2` on the two sibling routes) —
+  # `bp cloud workspace import --with-blobs` reports the import and then a wall
+  # of 404s.
+  #
+  # The gap PREDATES the tenancy binding (PRs #12824/#12826/#12827); the old
+  # workspace-blind `require_admin` was papering over it. NOT fixed with a
+  # global-admin bypass in `member?/2`, which would reinstate exactly the
+  # workspace-blind hole those PRs closed — this grants ONE principal ONE
+  # membership on ONE workspace, at the single moment that workspace enters the
+  # instance, and the engine writes it inside the import transaction so a failed
+  # import grants nothing.
+  #
+  # `:require_admin` runs `RequireToken`, so `:api_token` is always assigned on
+  # this route and the principal kind is always `"api_token"`; it is threaded
+  # explicitly anyway because the type is a discriminator column with an
+  # implicit default (see `TenancyAuth.create_membership/4`). The `nil` arm is
+  # unreachable through the router and exists so the grant fails CLOSED —
+  # granting nothing — rather than raising, if this action is ever mounted on a
+  # pipeline that does not resolve a token.
+  defp operator_grant(conn) do
+    case conn.assigns[:api_token] do
+      %ApiToken{id: id} when is_binary(id) -> {id, "api_token"}
+      _ -> nil
+    end
+  end
+
   defp with_spilled_body(conn, fun) do
     scratch = Archive.open_scratch_dir!()
 
