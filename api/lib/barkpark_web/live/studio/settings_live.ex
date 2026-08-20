@@ -20,6 +20,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   them back. A reveal-on-click control re-fetches the unmasked value and
   records a `reveal` audit row.
 
+  EVERY handler in this sub-panel — `load` included — re-gates on
+  INSTALLATION-admin authority (`guard_installation_admin/2`). The mount only
+  proves the actor administers the URL workspace, while `plugin_settings` is
+  installation-GLOBAL, and even the masked read projection is partial rather
+  than anonymous. The rest of the page (theme, plugin surfacing, execution
+  profile) stays workspace-admin business.
+
   ## Typed-form vs raw-JSON path
 
   When the named plugin contributes a `settings_schema/0` (via the resolver
@@ -139,14 +146,25 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     {:noreply, assign(socket, plugin_name: name)}
   end
 
+  # `load` is a READ of the installation-global credential store, so it carries
+  # the same authority requirement as its four siblings (D274 follow-up). The
+  # masked projection is NOT anonymous: `Masking.mask/1` emits the last FOUR
+  # characters of every secret verbatim, the typed projection renders every
+  # non-`:masked` field (api_base, oauth_token_url, client_role) in FULL
+  # plaintext, and the found/not-found split ("No settings yet for …") is a
+  # presence oracle over the whole installation's plugin inventory. Fail-closed
+  # with ZERO `Settings.*` calls — a refused load must not even prove whether
+  # the named plugin has a row.
   def handle_event("load", %{"plugin_name" => name}, socket) do
-    fields = fields_for(name)
+    guard_installation_admin(socket, fn ->
+      fields = fields_for(name)
 
-    if fields == [] do
-      load_generic(socket, name)
-    else
-      load_typed(socket, name, fields)
-    end
+      if fields == [] do
+        load_generic(socket, name)
+      else
+        load_typed(socket, name, fields)
+      end
+    end)
   end
 
   def handle_event("reveal", %{"plugin_name" => name}, socket) do
@@ -454,7 +472,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # workspace — an admin of workspace B and ONLY B cleared it and could
   # reveal / overwrite / delete every tenant's credentials (#5972 explicitly
   # scoped credentials OUT of its per-write belt; this guard supplies the
-  # missing authority check). So each credential handler (reveal /
+  # missing authority check). So each credential handler (load / reveal /
   # reveal_field / save / delete) re-gates on INSTALLATION-level admin
   # authority: a token principal must hold the global "admin" permission
   # (`Auth.has_permission?/2` — the pre-W26 flat-:admin invariant restored for
@@ -462,7 +480,14 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # Default (installation) workspace, via the `TenancyAuth.authorize/3`
   # chokepoint. Fail-closed, negated-cond-first: a missing/unknown principal,
   # an unseeded Default workspace, or insufficient authority is REFUSED with
-  # ZERO `Settings.*` calls — nothing revealed, written, or deleted.
+  # ZERO `Settings.*` calls — nothing read, revealed, written, or deleted.
+  #
+  # `load` joined this set in the D274 follow-up: it is the READ half of the
+  # same authority, and the mask it renders is partial, not anonymous (see the
+  # handler's own comment). The guard is deliberately the WHOLE handler set, not
+  # a mask-strength tweak — the leak is a SCOPE MISMATCH (mount authorizes
+  # workspace-admin-of-the-URL, the store is installation-global), and only an
+  # authority check closes a scope mismatch.
   defp guard_installation_admin(socket, fun) do
     principal = socket.assigns[:api_token] || socket.assigns[:current_user]
 
@@ -472,7 +497,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          put_flash(
            socket,
            :error,
-           "Plugin credentials are installation-wide — managing them requires installation-admin authority."
+           "Plugin credentials are installation-wide — viewing or managing them requires installation-admin authority."
          )}
 
       true ->
