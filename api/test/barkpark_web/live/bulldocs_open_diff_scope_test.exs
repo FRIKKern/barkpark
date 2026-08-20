@@ -81,10 +81,24 @@ defmodule BarkparkWeb.BulldocsOpenDiffScopeTest do
       # workspace AND project so they match the rail scope
       # (paper_scope_opts/1 = [workspace_id: …, project_id: …]).
       own_a =
-        seed_event(goal_id, slug, "snapshot-a", "<p>OWN-RAIL-ALPHA</p>", paper.workspace_id, paper.project_id)
+        seed_event(
+          goal_id,
+          slug,
+          "snapshot-a",
+          "<p>OWN-RAIL-ALPHA</p>",
+          paper.workspace_id,
+          paper.project_id
+        )
 
       own_b =
-        seed_event(goal_id, slug, "snapshot-b", "<p>OWN-RAIL-BETA</p>", paper.workspace_id, paper.project_id)
+        seed_event(
+          goal_id,
+          slug,
+          "snapshot-b",
+          "<p>OWN-RAIL-BETA</p>",
+          paper.workspace_id,
+          paper.project_id
+        )
 
       # A foreign-workspace event on a DIFFERENT goal — never on this rail.
       foreign_ws = create_workspace!()
