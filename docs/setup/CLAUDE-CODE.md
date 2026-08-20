@@ -113,6 +113,22 @@ The `env` block is the whole instance override. `bp`'s environment layer sits
 instance, a teammate's, or `http://localhost:4000` — no matter what `bp setup`
 saved.
 
+## Claude Code on the web (cloud sessions)
+
+Web sessions run in a fresh remote container, so this repo ships the wiring:
+the committed `.mcp.json` (stanza B above) plus a `SessionStart` hook
+(`scripts/ensure-bp.sh`) that installs the prebuilt `bp` binary when missing —
+fail-soft, never blocks session start. Two things only the **environment
+settings** (web UI) can provide:
+
+- **Network egress allowlist** — add `guerrilla.barkpark.cloud` (and
+  `github.com` for the installer); a blocked host fails with "Host not in
+  allowlist".
+- **Env vars** — `BARKPARK_API_URL` and `BARKPARK_API_TOKEN` (scoped token,
+  never admin — [Token scoping](REMOTE.md#token-scoping)).
+
+Verify inside a session: `bp task ready` (empty list = connected, no open work).
+
 ## Teach Claude Code the task contract
 
 The MCP tools carry the claim-first contract in their own descriptions, but you

@@ -1,0 +1,3 @@
+{
+  "install": "curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh"
+}
