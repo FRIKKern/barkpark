@@ -677,12 +677,43 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # Mount no longer spawns (the eager-spawn contract is inverted): the tab is
     # a new-chat empty state, the composer is enabled immediately, and NO
     # subprocess exists until the first send.
+    # HOTFIX PIN (task-e277b8fcff7915f7). w1 disabled the composer until the CLI
+    # emitted system/init — but init fires only when the FIRST TURN STARTS, and a
+    # turn can only start from a send, and a send can only come from the composer.
+    # A real browser therefore deadlocked; LiveViewTest did not, because
+    # `render_submit` bypasses the `disabled` attribute entirely and spawned a
+    # session straight through a `disabled=""` input. So the pin CANNOT be a send:
+    # it has to be on the rendered composer, in the pre-init window.
+    #
+    # Both halves below are load-bearing, and the ORDER matters:
+    #
+    #   a) `assert has_element?` on the composer + submit button — WITHOUT this,
+    #      the two `refute`s below pass vacuously the moment a future readiness
+    #      gate hides the composer by ABSENCE (`:if={... and not is_nil(@init)}`)
+    #      instead of by attribute. That variant deadlocks the tab identically
+    #      and the pre-hardening version of this test stayed GREEN through it.
+    #   b) `refute` on `[disabled]` — catches the literal w1 shape.
+    #
+    # And `init == nil` is asserted FIRST: it proves these assertions are made
+    # inside the deadlock window. Without it the test could pass because init
+    # arrived, never because the gate is gone.
     test "mount is a new-chat state with an enabled composer and no subprocess", %{view: view} do
       assert render(view) =~ ~s(data-chat-status="new")
-      refute has_element?(view, "input[name=message][disabled]")
-      refute has_element?(view, "button[type=submit][disabled]")
+
+      # The deadlock window: no init has arrived, and nothing exists that could
+      # emit one. Anything gating the composer on @init is unlockable ONLY by a
+      # send that the gate itself prevents.
+      assert lv_assigns(view)[:init] == nil
       assert session_pid(view) == nil
       assert store_id(view) == nil
+
+      # (a) the composer is actually RENDERED — a gate by absence is a deadlock too.
+      assert has_element?(view, "input#chat-composer[name=message]")
+      assert has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
+
+      # (b) …and it is not disabled.
+      refute has_element?(view, "input[name=message][disabled]")
+      refute has_element?(view, "button[type=submit][disabled]")
     end
 
     test "renders the composer and the chat tab in the top menu", %{html: html} do
