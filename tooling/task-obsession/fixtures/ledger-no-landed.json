@@ -1,0 +1,10 @@
+{
+ "_fixture": "The live corpus shape as of 2026-08-17: published tasks, NOT ONE carrying a content.landed digest (measured 6212 docs / 0 landed). Scanning it yields 0 findings while scanning nothing meaningful — docs_scanned > 0 with digests_scanned == 0, which must read as hollow, not clean.",
+ "result": {
+  "documents": [
+   {"doc_id": "reland-check-silent-falsegreen", "content": {"kind": "task", "lifecycle_status": "in_progress", "title": "reland-check loud-fail"}},
+   {"doc_id": "anon-register-unauth-write", "content": {"kind": "task", "lifecycle_status": "open", "title": "anonymous POST /v1/auth/register"}},
+   {"doc_id": "api-schemas-anon-field-disclosure", "content": {"kind": "task", "lifecycle_status": "done", "title": "schemas anon field disclosure"}}
+  ]
+ }
+}

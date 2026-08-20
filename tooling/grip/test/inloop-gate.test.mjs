@@ -322,17 +322,17 @@ test("BOTH Digest sites tell the fleet that a ledger-writing assignment must not
 });
 
 test("Decide is told to commit ledger rows BY EXPLICIT PATH, and to skip cleanly when there are none", () => {
-  const at = SOURCE.indexOf("THEN COMMIT THIS RUN'S LEDGER ROWS");
+  const at = SOURCE.indexOf("THE SAME PR CARRIES THIS RUN'S LEDGER ROWS");
   assert.notEqual(at, -1, "Decide's ledger-commit instruction is missing — Verify's rows would be written and never committed");
   const step = SOURCE.slice(at, SOURCE.indexOf("\n", at));
   assert.match(step, /git status --porcelain tooling\/grip\/ledger\//, "Decide must DISCOVER the rows, not guess at filenames it never saw");
   assert.match(step, /BY EXPLICIT PATH/, "staging by anything but explicit path sweeps other sessions' work in this shared checkout");
-  assert.match(step, /never git add -A/);
+  assert.match(step, /never \\?`?git add -A/);
   assert.match(step, /skip the step silently/, "a run whose verifiers wrote nothing must not read as a failure");
 });
 
 test("'never git add -A' is restated at the ledger commit, not left to carry over from the charter commit", () => {
-  const bans = [...SOURCE.matchAll(/never git add -A/g)];
+  const bans = [...SOURCE.matchAll(/never \\?`?git add -A/g)];
   assert.equal(
     bans.length,
     2,

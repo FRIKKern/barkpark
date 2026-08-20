@@ -35,7 +35,14 @@ type DeprovisionFunc func(ctx context.Context, spec DeprovisionSpec) error
 
 // DeprovisionWith deletes the box behind spec via the seams' provider+DNS. Thin
 // bridge to cloud.WarmPool.DeprovisionByIP — finds the managed server whose IP
-// matches spec.IP, deletes it, deletes the DNS A record. Idempotent.
+// matches spec.IP, deletes it, then sweeps the box's DNS BY VALUE. Idempotent.
+//
+// The by-value sweep is load-bearing here, not a detail: AttachDomainWith
+// upserts a SECOND A record (the customer's custom host) into the platform zone
+// at this same IP, and the deprovision claim payload carries only the PLATFORM
+// dns_label — so a by-name delete would release the address while the custom
+// host kept pointing at it. cloud.WarmPool.deprovisionDNS documents the
+// mechanism and the wider-delete tradeoff the sweep accepts.
 func DeprovisionWith(ctx context.Context, seams Seams, spec DeprovisionSpec) error {
 	if seams.Provider == nil {
 		return fmt.Errorf("provisioner: a CloudProvider must be set to deprovision")

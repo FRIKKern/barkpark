@@ -44,6 +44,37 @@ const FONT_LITERALS = {
 
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ");
 
+// The ONE non-custom-property exception on the bare `.bp-paper-surface` scope:
+// the reading surface's own TYPE (pe-w1-reader-editorial-typography). It has to
+// live on that exact selector because three sinks carry the class ALONE and
+// nothing else — the sheets export `<div>`, the quiz `<body>` and the standalone
+// PortableDoc export `<body>` — so a wrapper-qualified selector would silently
+// leave those three at the browser's 16px, which is the very defect that slice
+// exists to close.
+//
+// The mirror cannot DE-SCOPE these to `:root` (inherited type on the root would
+// repaint an embedder's whole host page), so they are not copied — they are
+// CHECKED. The bundle's own `.bp-paper-editor-body` wrapper is the standalone
+// equivalent of the surface, and `assertBundleCarriesType` proves it declares
+// every one of them byte-identically. That keeps the guard's contract intact:
+// nothing here is skipped in silence, and a type declaration added to the reader
+// without the bundle twin fails the mirror instead of shipping a bundle whose
+// prose is a different size than the reader's.
+const SURFACE_TYPE_PROPS = new Set([
+  "font-size",
+  "line-height",
+  "letter-spacing",
+  "font-feature-settings",
+  "text-rendering",
+  "-webkit-font-smoothing",
+  "-moz-osx-font-smoothing",
+]);
+
+const isBareSurfaceScope = (sel) =>
+  stripComments(sel)
+    .split(",")
+    .every((p) => p.trim() === ".bp-paper-surface");
+
 // Classify a paper-surface TOKEN scope (not an element/class rule): every
 // comma-part must resolve to `.bp-paper-surface` / `.bp-paper-body`, optionally
 // under an `html[data-theme=…]` mode ancestor AND/OR an `html[data-bp-theme="X"]`
@@ -91,11 +122,13 @@ function tokenScope(sel) {
   return agreed;
 }
 
-// Ordered [name, value] custom-property declarations. A token scope must be PURE
-// custom properties: a non-custom declaration is a hard error, never a silent skip
-// (a skipped block would mean its tokens NEVER reach the mirror while the gate
-// stays green — the exact drift this exists to prevent).
-function parseDecls(sel, body) {
+// Ordered [name, value] custom-property declarations, plus the surface-type
+// declarations the bare scope is allowed to carry (returned separately, for
+// checking rather than copying — see SURFACE_TYPE_PROPS). A token scope is
+// otherwise PURE custom properties: any other non-custom declaration is a hard
+// error, never a silent skip (a skipped block would mean its tokens NEVER reach
+// the mirror while the gate stays green — the exact drift this exists to prevent).
+function parseDecls(sel, body, type) {
   const out = [];
   for (let decl of stripComments(body).split(";")) {
     decl = decl.trim();
@@ -106,11 +139,18 @@ function parseDecls(sel, body) {
     name = name.trim();
     value = value.trim();
     if (!name.startsWith("--")) {
+      if (SURFACE_TYPE_PROPS.has(name) && isBareSurfaceScope(sel)) {
+        type.set(name, value);
+        continue;
+      }
       throw new MirrorError(
         `paper-surface.css token scope \`${sel.trim()}\` carries a non-custom-property ` +
           `declaration (\`${decl}\`).\n  Token scopes (.bp-paper-surface/.bp-paper-body, ` +
           `themed or not) must hold ONLY \`--*\` custom properties — move element/chrome ` +
-          `declarations to an element selector, or the generated mirror cannot represent it.`
+          `declarations to an element selector, or the generated mirror cannot represent it.` +
+          `\n  (The one exception is the reading surface's own type — ` +
+          `${[...SURFACE_TYPE_PROPS].join(", ")} — and only on a bare ` +
+          `\`.bp-paper-surface\` selector.)`
       );
     }
     const m = value.match(/^var\((--font[\w-]*)\)$/);
@@ -118,6 +158,45 @@ function parseDecls(sel, body) {
     out.push([name, value]);
   }
   return out;
+}
+
+// The surface type is CHECKED into the bundle, not copied into it. The bundle's
+// `.bp-paper-editor-body` wrapper is the standalone host's paper surface — it
+// already declares this set by hand — so assert it declares every one of them
+// with the same value. A reader-side type change without the bundle twin fails
+// here, which is the whole reason the exception above is allowed to exist.
+function assertBundleCarriesType(type, bundleText) {
+  if (type.size === 0) return;
+  const bundle = stripComments(bundleText);
+  let wrapper = null;
+  for (const m of bundle.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+    if (m[1].split(",").every((p) => p.trim() === ".bp-paper-editor-body")) wrapper = m[2];
+  }
+  if (wrapper === null) {
+    throw new MirrorError(
+      "styles.css has no bare `.bp-paper-editor-body` rule, so the reading surface's " +
+        "own type has nowhere to be mirrored. The bundle wrapper is the standalone " +
+        "host's paper surface; it must carry the same type the reader does."
+    );
+  }
+  const have = new Map();
+  for (const decl of wrapper.split(";")) {
+    const i = decl.indexOf(":");
+    if (i === -1) continue;
+    have.set(decl.slice(0, i).trim(), decl.slice(i + 1).trim());
+  }
+  const drift = [];
+  for (const [prop, value] of type) {
+    if (have.get(prop) !== value) drift.push(`  ${prop}: reader \`${value}\`, bundle \`${have.get(prop) ?? "(absent)"}\``);
+  }
+  if (drift.length) {
+    throw new MirrorError(
+      "the reading surface's type is not mirrored on the bundle wrapper " +
+        "(`.bp-paper-editor-body` in styles.css). An embedded editor would set its " +
+        "prose at a different size than the /papers reader:\n" +
+        drift.join("\n")
+    );
+  }
 }
 
 function emitScope(selector, order, bucket) {
@@ -144,12 +223,16 @@ export function computeMirror(surfaceText, bundleText) {
   };
   bucketFor(""); // the base fallback scope always exists (and emits first)
 
+  // Non-custom type declarations lifted off the bare surface scope. Not copied
+  // into the generated region — checked against the bundle wrapper below.
+  const surfaceType = new Map();
+
   for (const m of surface.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
     const sel = m[1];
     const body = m[2];
     const scope = tokenScope(sel);
     if (scope === null) continue;
-    const decls = parseDecls(sel, body);
+    const decls = parseDecls(sel, body, surfaceType);
     const b = bucketFor(scope.theme);
     const bucket = scope.dark ? b.dark : b.light;
     const order = scope.dark ? b.darkOrder : b.lightOrder;
@@ -172,6 +255,8 @@ export function computeMirror(surfaceText, bundleText) {
     parts.push(emitScope(darkSel, b.darkOrder, b.dark));
   }
   const generated = parts.join("\n\n");
+
+  assertBundleCarriesType(surfaceType, bundleText);
 
   const markerRe =
     /(\/\* BEGIN GENERATED: paper-surface[^\n]*\*\/\n)([\s\S]*?)(\n\/\* END GENERATED: paper-surface \*\/)/;

@@ -1,0 +1,2013 @@
+{
+  "_id": "portabledoc-showcase",
+  "blocks": [
+    {
+      "id": "fd-001",
+      "text": "PortableDoc · the full deck",
+      "type": "eyebrow"
+    },
+    {
+      "id": "fd-002",
+      "level": 1,
+      "text": "Every component, on every surface",
+      "type": "heading"
+    },
+    {
+      "id": "fd-003",
+      "items": [
+        "One document",
+        "Three renderers",
+        "Zero screenshots"
+      ],
+      "type": "byline"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "This paper is a living inventory: every block type PortableDoc ships, rendered live, plus the compositions they unlock. Open it three ways and it is the same document each time — "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "view"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (this reader), "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "edit"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (the Studio canvas, where every block below is directly editable), and "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "TUI"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (the terminal renderer — flip the reader's TUI toggle, or read it over "
+        },
+        {
+          "type": "code",
+          "value": "bp"
+        },
+        {
+          "type": "text",
+          "value": ")."
+        }
+      ],
+      "id": "fd-004",
+      "type": "ingress"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Nothing on this page is a picture of a component — each section IS the component, live. Where a surface has a lower ceiling (a terminal cannot play video; a browser does not draw braille charts), the block degrades honestly into a labeled box instead of faking it."
+        }
+      ],
+      "id": "fd-005",
+      "title": "How to read this",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "fd-006",
+      "type": "divider"
+    },
+    {
+      "id": "fd-007",
+      "level": 2,
+      "text": "1 · Prose — the elements",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A paragraph carries every inline mark: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "strong"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "emphasis"
+            }
+          ],
+          "type": "em"
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "struck-through"
+            }
+          ],
+          "type": "strike"
+        },
+        {
+          "type": "text",
+          "value": ", inline "
+        },
+        {
+          "type": "code",
+          "value": "code()"
+        },
+        {
+          "type": "text",
+          "value": ", and a "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "link to the doctrine"
+            }
+          ],
+          "href": "https://guerrilla.barkpark.cloud/papers/composition-doctrine-plan",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": ". The same marks survive the trip to the terminal as ANSI styling."
+        }
+      ],
+      "id": "fd-008",
+      "type": "paragraph"
+    },
+    {
+      "id": "fd-009",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "an unordered list — the workhorse"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "with inline marks: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "bold"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " and "
+          },
+          {
+            "type": "code",
+            "value": "code"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "and honest wrapping at every width"
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "fd-010",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "ordered when sequence carries meaning"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "measured, then arranged"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "projected onto each surface"
+          }
+        ]
+      ],
+      "ordered": true,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The block is the unit of meaning; the surface is just the projection."
+        }
+      ],
+      "id": "fd-011",
+      "type": "pullquote"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Callouts carry a tone vocabulary — the same four tones tint cards, notes and grid items everywhere:"
+        }
+      ],
+      "id": "fd-012",
+      "type": "paragraph"
+    },
+    {
+      "blocks": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Context worth knowing."
+            }
+          ],
+          "id": "fd-013-0",
+          "title": "info",
+          "tone": "info",
+          "type": "callout"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "The gate is green."
+            }
+          ],
+          "id": "fd-013-1",
+          "title": "success",
+          "tone": "success",
+          "type": "callout"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Mind the ceiling."
+            }
+          ],
+          "id": "fd-013-2",
+          "title": "warning",
+          "tone": "warning",
+          "type": "callout"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Stop before you push."
+            }
+          ],
+          "id": "fd-013-3",
+          "title": "danger",
+          "tone": "danger",
+          "type": "callout"
+        }
+      ],
+      "id": "fd-013",
+      "layout": {
+        "mode": "grid",
+        "tracks": 2
+      },
+      "type": "section"
+    },
+    {
+      "id": "fd-014",
+      "type": "divider"
+    },
+    {
+      "id": "fd-015",
+      "level": 2,
+      "text": "2 · Rich blocks — code, tables, media",
+      "type": "heading"
+    },
+    {
+      "id": "fd-016",
+      "lang": "go",
+      "type": "code",
+      "value": "lines := reg.RenderDoc(doc, RenderCtx{Width: 80})\nfor _, l := range lines {\n\tfmt.Println(l) // every line padded to width — a rectangle\n}"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Surface"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Renderer"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Medium"
+          }
+        ]
+      ],
+      "id": "fd-017",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "view"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "compose.ex → HTML"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "browser DOM"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "edit"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Studio canvas nodes"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "LiveView + JS"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "tui"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "pdrender (Go, wasm-shared)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "box-drawing + ANSI"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "caption": "A figure wraps any single child block and captions it — here, an image.",
+      "child": {
+        "alt": "The element inventory",
+        "src": "/media/files/2026/07/elements-c94b8cbc.png",
+        "type": "image"
+      },
+      "id": "fd-018",
+      "type": "figure"
+    },
+    {
+      "alt": "Code and diagram blocks, side by side",
+      "id": "fd-019",
+      "src": "/media/files/2026/07/codediag-682da4f1.png",
+      "type": "image"
+    },
+    {
+      "href": "https://guerrilla.barkpark.cloud/papers/component-reference",
+      "id": "fd-020",
+      "label": "Actions are call-to-action buttons",
+      "priority": "primary",
+      "type": "action"
+    },
+    {
+      "html": "<em>an embed block carries sanitized external HTML — this italic line is it</em>",
+      "id": "fd-021",
+      "type": "embed"
+    },
+    {
+      "id": "fd-022",
+      "src": "https://asciinema.org/a/1.cast",
+      "type": "asciicast"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Diagrams are Mermaid source, drawn natively per surface: the browser runs mermaid.js; the terminal lays the same graph out with its own engine — and picks its strategy from measured shape (wide chains go left-to-right, tight meshes become a tree):"
+        }
+      ],
+      "id": "fd-023",
+      "type": "paragraph"
+    },
+    {
+      "caption": "One Mermaid source, two native renderers.",
+      "id": "fd-024",
+      "source": "flowchart TD\n  Doc[PortableDoc] --> View(Reader)\n  Doc --> Edit([Studio])\n  Doc --> Tui{{Terminal}}\n  View --> Same[(One document)]\n  Edit --> Same\n  Tui --> Same",
+      "type": "diagram"
+    },
+    {
+      "caption": "A sequence diagram rides the lifeline ladder in the terminal.",
+      "id": "fd-025",
+      "source": "sequenceDiagram\n  Author->>Studio: edit block\n  Studio->>API: patch content\n  API-->>Reader: publish\n  API-->>TUI: same document",
+      "type": "diagram"
+    },
+    {
+      "id": "fd-026",
+      "type": "divider"
+    },
+    {
+      "id": "fd-027",
+      "level": 2,
+      "text": "3 · Fields — the document is the form",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Field blocks carry a label and an editable datum. In view they render as definition rows; in edit they are real controls; in the TUI they align into a definition list."
+        }
+      ],
+      "id": "fd-028",
+      "type": "paragraph"
+    },
+    {
+      "id": "fd-029",
+      "label": "Title",
+      "type": "field-string",
+      "value": "The Full Deck"
+    },
+    {
+      "id": "fd-030",
+      "label": "Slug",
+      "type": "field-slug",
+      "value": "portabledoc-showcase"
+    },
+    {
+      "id": "fd-031",
+      "label": "Summary",
+      "type": "field-text",
+      "value": "Every component live, on all three surfaces."
+    },
+    {
+      "id": "fd-032",
+      "label": "Published",
+      "type": "field-boolean",
+      "value": true
+    },
+    {
+      "id": "fd-033",
+      "label": "Audience",
+      "options": [
+        {
+          "label": "Engineering",
+          "value": "eng"
+        },
+        {
+          "label": "Design",
+          "value": "design"
+        }
+      ],
+      "type": "field-select",
+      "value": "eng"
+    },
+    {
+      "id": "fd-034",
+      "label": "Ratified",
+      "type": "field-datetime",
+      "value": "2026-07-08T21:00:00Z"
+    },
+    {
+      "id": "fd-035",
+      "label": "Accent",
+      "type": "field-color",
+      "value": "#2f9e73"
+    },
+    {
+      "id": "fd-036",
+      "label": "Companion paper",
+      "type": "field-reference",
+      "value": "terminal-mermaid-diagrams"
+    },
+    {
+      "id": "fd-037",
+      "label": "Cover",
+      "type": "field-image",
+      "value": "/media/files/2026/07/elements-c94b8cbc.png"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The v2 field types compose structure inside one block:"
+        }
+      ],
+      "id": "fd-038",
+      "type": "paragraph"
+    },
+    {
+      "fields": [
+        {
+          "name": "version",
+          "title": "Version"
+        },
+        {
+          "name": "channel",
+          "title": "Channel"
+        }
+      ],
+      "id": "fd-039",
+      "label": "Release",
+      "type": "composite",
+      "value": {
+        "channel": "stable",
+        "version": "5.0.1"
+      }
+    },
+    {
+      "id": "fd-040",
+      "label": "Surfaces",
+      "type": "arrayOf",
+      "value": [
+        "reader",
+        "studio",
+        "tui",
+        "print"
+      ]
+    },
+    {
+      "id": "fd-041",
+      "label": "Language",
+      "type": "codelist",
+      "value": "nb"
+    },
+    {
+      "id": "fd-042",
+      "label": "Tagline",
+      "languages": [
+        "en",
+        "nb"
+      ],
+      "type": "localizedText",
+      "value": {
+        "en": "One document, every surface.",
+        "nb": "Ett dokument, alle flater."
+      }
+    },
+    {
+      "id": "fd-043",
+      "kind": "questionnaire",
+      "questions": [
+        {
+          "id": "q1",
+          "options": [
+            "reader",
+            "studio",
+            "tui"
+          ],
+          "prompt": "Which surface do you read most?",
+          "rationale": "Steers where polish lands first.",
+          "type": "single"
+        },
+        {
+          "id": "q2",
+          "prompt": "Does edit mode feel like the reader?",
+          "type": "yesno"
+        },
+        {
+          "id": "q3",
+          "prompt": "Rate the terminal render",
+          "scale": {
+            "max": 5,
+            "min": 1
+          },
+          "type": "scale"
+        },
+        {
+          "id": "q4",
+          "options": [
+            "cards",
+            "pipeline",
+            "terminal",
+            "diagram"
+          ],
+          "prompt": "Which blocks do you compose with?",
+          "type": "multi"
+        },
+        {
+          "id": "q5",
+          "prompt": "What is still missing?",
+          "type": "text"
+        }
+      ],
+      "type": "form"
+    },
+    {
+      "id": "fd-044",
+      "type": "divider"
+    },
+    {
+      "id": "fd-045",
+      "level": 2,
+      "text": "4 · Widgets — note, stage, card and their grids",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The singular widgets are the editable atoms; each plural grid renders N of them identically. A widget is a composition, never new code."
+        }
+      ],
+      "id": "fd-046",
+      "type": "paragraph"
+    },
+    {
+      "id": "fd-047",
+      "label": "N1",
+      "lead": "A note is a definition row.",
+      "text": "Label chip, bold lead, wrapped body — one honest line of structure.",
+      "type": "note"
+    },
+    {
+      "detail": "one node of a pipeline, standing alone",
+      "id": "fd-048",
+      "kind": "render",
+      "source": true,
+      "title": "a stage",
+      "type": "stage"
+    },
+    {
+      "id": "fd-049",
+      "slots": {
+        "action": [
+          {
+            "href": "https://guerrilla.barkpark.cloud/papers/composition-doctrine-plan",
+            "label": "Open the doctrine",
+            "type": "action"
+          }
+        ],
+        "body": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Media, title, body and action are typed slots holding real blocks — every one editable in place."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "media": [
+          {
+            "alt": "diagram sample",
+            "src": "/media/files/2026/07/codediag-682da4f1.png",
+            "type": "image"
+          }
+        ],
+        "title": [
+          {
+            "level": 3,
+            "text": "A card composes slots",
+            "type": "heading"
+          }
+        ]
+      },
+      "tone": "info",
+      "type": "card"
+    },
+    {
+      "id": "fd-050",
+      "items": [
+        {
+          "label": "P1",
+          "lead": "One vocabulary.",
+          "text": "New widgets are compositions."
+        },
+        {
+          "label": "P4",
+          "lead": "Content ⊥ layout.",
+          "text": "Rearrange without breaking meaning."
+        },
+        {
+          "label": "P7",
+          "lead": "Parity by construction.",
+          "text": "Edit equals read equals terminal."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "id": "fd-051",
+      "items": [
+        {
+          "text": "Prose-first, article chrome.",
+          "title": "Reader",
+          "tone": "info"
+        },
+        {
+          "text": "The same layout, editable.",
+          "title": "Studio",
+          "tone": "ok"
+        },
+        {
+          "text": "Box-drawing, 80 columns.",
+          "title": "Terminal",
+          "tone": "warn"
+        }
+      ],
+      "type": "cards"
+    },
+    {
+      "id": "fd-052",
+      "nodes": [
+        {
+          "detail": "blocks in Studio",
+          "kind": "author",
+          "source": true,
+          "title": "write"
+        },
+        {
+          "detail": "one atomic document",
+          "kind": "publish",
+          "title": "commit"
+        },
+        {
+          "detail": "reader · tui · print",
+          "kind": "project",
+          "title": "render"
+        }
+      ],
+      "type": "pipeline"
+    },
+    {
+      "id": "fd-053",
+      "type": "status-legend"
+    },
+    {
+      "id": "fd-054",
+      "type": "divider"
+    },
+    {
+      "id": "fd-055",
+      "level": 2,
+      "text": "5 · Containers — sections, columns, terminal",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Layout is data, not pixels. A section declares a grid; children can span tracks; the terminal collapses the same spec to a stack when width runs out."
+        }
+      ],
+      "id": "fd-056",
+      "type": "paragraph"
+    },
+    {
+      "blocks": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "This callout declares span:2 — it takes two of the three tracks. The spec describes intent; each surface honors it to its ceiling."
+            }
+          ],
+          "id": "fd-057-0",
+          "span": 2,
+          "tone": "neutral",
+          "type": "callout"
+        },
+        {
+          "id": "fd-057-1",
+          "label": "1×",
+          "lead": "Third track.",
+          "text": "A note beside it.",
+          "type": "note"
+        },
+        {
+          "detail": "two-pass solver",
+          "id": "fd-057-2",
+          "kind": "measure",
+          "title": "measure",
+          "type": "stage"
+        },
+        {
+          "detail": "same divide formula",
+          "id": "fd-057-3",
+          "kind": "arrange",
+          "title": "arrange",
+          "type": "stage"
+        },
+        {
+          "detail": "glyphs or DOM",
+          "id": "fd-057-4",
+          "kind": "paint",
+          "title": "paint",
+          "type": "stage"
+        }
+      ],
+      "id": "fd-057",
+      "layout": {
+        "mode": "grid",
+        "tracks": 3
+      },
+      "title": "A 3-track grid with a spanning child",
+      "type": "section"
+    },
+    {
+      "columns": [
+        [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Columns hold arbitrary block children. Left: prose. Right: a list. In the terminal these share the exact "
+              },
+              {
+                "type": "code",
+                "value": "Measure/Arrange"
+              },
+              {
+                "type": "text",
+                "value": " width math as every other side-by-side surface."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        [
+          {
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "no bespoke width math"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "collapse when narrow"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "rectangles all the way down"
+                }
+              ]
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ]
+      ],
+      "id": "fd-058",
+      "type": "columns"
+    },
+    {
+      "children": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp doc query paper | grep portabledoc-showcase"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "→ 1 document · 3 surfaces · 0 divergences"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "footer": "q quit · t toggle tui",
+      "id": "fd-059",
+      "live": true,
+      "title": "guerrilla · showcase",
+      "type": "terminal"
+    },
+    {
+      "id": "fd-060",
+      "type": "divider"
+    },
+    {
+      "id": "fd-061",
+      "level": 2,
+      "text": "6 · Task widgets — live data as blocks",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Task widgets carry a query, not a snapshot; the server resolves it at render time, so this paper shows the real state of the Mermaid-engine epic every time it loads:"
+        }
+      ],
+      "id": "fd-062",
+      "type": "paragraph"
+    },
+    {
+      "id": "fd-063",
+      "query": {
+        "parent_id": "tui-mermaid-diagrams"
+      },
+      "type": "task-list"
+    },
+    {
+      "id": "fd-064",
+      "query": {
+        "parent_id": "composition-doctrine"
+      },
+      "type": "task-board"
+    },
+    {
+      "id": "fd-065",
+      "query": {
+        "parent_id": "tui-mermaid-diagrams"
+      },
+      "type": "task-detail"
+    },
+    {
+      "id": "fd-066",
+      "query": {
+        "parent_id": "composition-doctrine"
+      },
+      "type": "roadmap"
+    },
+    {
+      "id": "fd-067",
+      "ref": "showcase-demo",
+      "snapshot": {
+        "cells": {
+          "A1": "Block",
+          "A2": "prose",
+          "A3": "widgets",
+          "A4": "slate",
+          "B1": "View",
+          "B2": "✓",
+          "B3": "✓",
+          "B4": "honest box",
+          "C1": "Edit",
+          "C2": "✓",
+          "C3": "✓",
+          "C4": "opaque",
+          "D1": "TUI",
+          "D2": "✓",
+          "D3": "✓",
+          "D4": "native"
+        }
+      },
+      "type": "sheet"
+    },
+    {
+      "id": "fd-068",
+      "type": "divider"
+    },
+    {
+      "id": "fd-069",
+      "level": 2,
+      "text": "7 · The terminal-first slate",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The four data-viz blocks below are drawn natively by BOTH surfaces from the same block data: the browser as token-colored SVG and CSS grids, the terminal as braille plots, eighth-block sparklines and shade-ramp cells. Flip the TUI toggle and compare — same numbers, each medium at its best."
+        }
+      ],
+      "id": "fd-070",
+      "title": "Two native reads of one dataset",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "fd-071",
+      "label": "block renderers at parity",
+      "spark": [
+        3,
+        5,
+        8,
+        9,
+        11,
+        13,
+        14
+      ],
+      "type": "stat",
+      "value": "14/14"
+    },
+    {
+      "id": "fd-072",
+      "items": [
+        {
+          "label": "Mermaid waves",
+          "value": "6"
+        },
+        {
+          "label": "column standard",
+          "value": "80"
+        },
+        {
+          "label": "golden coverage",
+          "spark": [
+            70,
+            78,
+            85,
+            91,
+            94,
+            97
+          ],
+          "value": "97%"
+        },
+        {
+          "label": "width mismatches",
+          "value": "0"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "cells": [
+        [
+          2,
+          5,
+          7,
+          9,
+          4
+        ],
+        [
+          1,
+          3,
+          6,
+          8,
+          5
+        ],
+        [
+          4,
+          7,
+          9,
+          9,
+          8
+        ]
+      ],
+      "colLabels": [
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri"
+      ],
+      "id": "fd-073",
+      "max": 9,
+      "ramp": "truecolor",
+      "rowLabels": [
+        "reader",
+        "studio",
+        "tui"
+      ],
+      "type": "heatmap"
+    },
+    {
+      "axes": {
+        "min": 0,
+        "xLabels": [
+          "w1",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "w7"
+        ]
+      },
+      "caption": "Blocks at parity, by week",
+      "id": "fd-074",
+      "kind": "line",
+      "series": [
+        {
+          "label": "renderers",
+          "points": [
+            3,
+            5,
+            8,
+            9,
+            11,
+            13,
+            14
+          ]
+        },
+        {
+          "label": "goldens",
+          "points": [
+            1,
+            4,
+            6,
+            8,
+            10,
+            12,
+            14
+          ]
+        }
+      ],
+      "type": "chart"
+    },
+    {
+      "id": "fd-075",
+      "type": "divider"
+    },
+    {
+      "id": "fd-076",
+      "level": 2,
+      "text": "8 · Compositions — what the deck is for",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Components earn their keep when they stack. Three scenes, each built purely from the blocks above — no new code, no custom chrome."
+        }
+      ],
+      "id": "fd-077",
+      "type": "paragraph"
+    },
+    {
+      "id": "fd-078",
+      "level": 3,
+      "text": "The release console",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A terminal frame around live task data: the `bp tasks` board look, inside a paper."
+        }
+      ],
+      "id": "fd-079",
+      "type": "paragraph"
+    },
+    {
+      "children": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp task ls --parent tui-mermaid-diagrams"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "query": {
+            "parent_id": "tui-mermaid-diagrams"
+          },
+          "type": "task-list"
+        }
+      ],
+      "footer": "epic: tui-mermaid-diagrams",
+      "id": "fd-080",
+      "live": true,
+      "title": "barkpark · release",
+      "type": "terminal"
+    },
+    {
+      "id": "fd-081",
+      "level": 3,
+      "text": "The product shelf",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A grid section of slot-cards — media, copy and a call-to-action per card. This is a landing page fragment, authored as content:"
+        }
+      ],
+      "id": "fd-082",
+      "type": "paragraph"
+    },
+    {
+      "blocks": [
+        {
+          "id": "fd-083-0",
+          "slots": {
+            "action": [
+              {
+                "href": "https://guerrilla.barkpark.cloud/papers/terminal-mermaid-diagrams",
+                "label": "Read",
+                "type": "action"
+              }
+            ],
+            "body": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Article chrome, dark-mode legible, zero setup."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": [
+              {
+                "level": 4,
+                "text": "Reader",
+                "type": "heading"
+              }
+            ]
+          },
+          "tone": "info",
+          "type": "card"
+        },
+        {
+          "id": "fd-083-1",
+          "slots": {
+            "action": [
+              {
+                "href": "https://guerrilla.barkpark.cloud/studio",
+                "label": "Edit",
+                "type": "action"
+              }
+            ],
+            "body": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "The same canvas, editable in place — no mode gap."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": [
+              {
+                "level": 4,
+                "text": "Studio",
+                "type": "heading"
+              }
+            ]
+          },
+          "tone": "ok",
+          "type": "card"
+        },
+        {
+          "id": "fd-083-2",
+          "slots": {
+            "action": [
+              {
+                "href": "https://github.com/frikkern/barkpark",
+                "label": "bp",
+                "type": "action"
+              }
+            ],
+            "body": [
+              {
+                "content": [
+                  {
+                    "type": "text",
+                    "value": "Box-drawing parity over SSH, byte-stable goldens."
+                  }
+                ],
+                "type": "paragraph"
+              }
+            ],
+            "title": [
+              {
+                "level": 4,
+                "text": "Terminal",
+                "type": "heading"
+              }
+            ]
+          },
+          "tone": "warn",
+          "type": "card"
+        }
+      ],
+      "id": "fd-083",
+      "layout": {
+        "mode": "grid",
+        "tracks": 3
+      },
+      "type": "section"
+    },
+    {
+      "id": "fd-084",
+      "level": 3,
+      "text": "The runbook spine",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A diagnosis flow as content: a sequence diagram sets the scene, a pipeline names the stages, notes carry the gotchas."
+        }
+      ],
+      "id": "fd-085",
+      "type": "paragraph"
+    },
+    {
+      "caption": "The incident path this runbook walks.",
+      "id": "fd-086",
+      "source": "sequenceDiagram\n  Pager->>Oncall: fires\n  Oncall->>Prod: inspect slot\n  Prod-->>Oncall: blue is stale\n  Oncall->>Prod: flip + verify",
+      "type": "diagram"
+    },
+    {
+      "id": "fd-087",
+      "nodes": [
+        {
+          "detail": "smoke test reds",
+          "kind": "detect",
+          "title": "alert"
+        },
+        {
+          "detail": "caddy upstream = slot truth",
+          "kind": "diagnose",
+          "source": true,
+          "title": "inspect"
+        },
+        {
+          "detail": "blue/green hot-swap",
+          "kind": "fix",
+          "title": "flip"
+        },
+        {
+          "detail": "schemas + studio + query",
+          "kind": "verify",
+          "title": "curl"
+        }
+      ],
+      "type": "pipeline"
+    },
+    {
+      "id": "fd-088",
+      "items": [
+        {
+          "label": "G1",
+          "lead": "Never partial-clean.",
+          "text": "Nuke all of _build/prod or HEEx goes stale."
+        },
+        {
+          "label": "G2",
+          "lead": "Restart the BEAM.",
+          "text": "Compiled code is not running code."
+        },
+        {
+          "label": "G3",
+          "lead": "Test after deploy.",
+          "text": "curl the schemas endpoint at minimum."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "id": "fd-092",
+      "type": "divider"
+    },
+    {
+      "id": "fd-093",
+      "level": 2,
+      "text": "9 · Slate 2 — the fidelity pass",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The slate types learned their richest tricks in the terminal first; this section proves the browser kept up. Every exhibit below renders from the same document on every surface: a contribution calendar that dual-encodes its quantiles, a matrix with Σ marginals and exact values, a stat tile with a dim denominator, and a chart whose y-axis reads 45.5M instead of 45500000."
+        }
+      ],
+      "id": "fd-094",
+      "type": "paragraph"
+    },
+    {
+      "cells": [
+        [
+          3,
+          5,
+          0,
+          7,
+          1,
+          4,
+          4,
+          0,
+          3,
+          4,
+          0,
+          2,
+          4,
+          0,
+          7,
+          8,
+          0,
+          1,
+          0,
+          0,
+          25,
+          4,
+          19,
+          38,
+          1,
+          4,
+          0,
+          0,
+          0,
+          3,
+          0,
+          4,
+          9,
+          2,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          3,
+          0,
+          0,
+          3,
+          3,
+          1,
+          5,
+          0,
+          8,
+          3,
+          2,
+          4,
+          0,
+          4,
+          2,
+          0,
+          5,
+          5,
+          3,
+          24,
+          8,
+          23,
+          0,
+          3,
+          0,
+          7,
+          4,
+          0,
+          4,
+          0,
+          2,
+          0,
+          0,
+          0,
+          1,
+          7,
+          4
+        ],
+        [
+          0,
+          7,
+          0,
+          4,
+          3,
+          0,
+          4,
+          0,
+          1,
+          1,
+          0,
+          2,
+          4,
+          4,
+          4,
+          3,
+          0,
+          9,
+          5,
+          4,
+          15,
+          41,
+          1,
+          25,
+          3,
+          9,
+          0,
+          8,
+          2,
+          5,
+          0,
+          0,
+          4,
+          1,
+          3,
+          0,
+          9,
+          0
+        ],
+        [
+          5,
+          0,
+          0,
+          0,
+          6,
+          6,
+          0,
+          0,
+          3,
+          4,
+          2,
+          2,
+          3,
+          4,
+          7,
+          4,
+          2,
+          0,
+          3,
+          3,
+          28,
+          0,
+          38,
+          28,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          4,
+          0,
+          2,
+          0,
+          3,
+          0,
+          6,
+          0
+        ],
+        [
+          8,
+          0,
+          3,
+          7,
+          4,
+          0,
+          8,
+          3,
+          0,
+          0,
+          9,
+          6,
+          0,
+          0,
+          2,
+          3,
+          0,
+          1,
+          4,
+          3,
+          4,
+          30,
+          21,
+          27,
+          0,
+          3,
+          9,
+          0,
+          4,
+          3,
+          0,
+          9,
+          4,
+          3,
+          8,
+          5,
+          4,
+          6
+        ],
+        [
+          0,
+          0,
+          3,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          3,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          3,
+          0,
+          3
+        ]
+      ],
+      "colLabels": [
+        "Jan",
+        "",
+        "",
+        "",
+        "Feb",
+        "",
+        "",
+        "",
+        "Mar",
+        "",
+        "",
+        "",
+        "Apr",
+        "",
+        "",
+        "",
+        "May",
+        "",
+        "",
+        "",
+        "Jun",
+        "",
+        "",
+        "",
+        "Jul",
+        "",
+        "",
+        "",
+        "Aug",
+        "",
+        "",
+        "",
+        "Sep",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "id": "fd-095",
+      "mode": "calendar",
+      "rowLabels": [
+        "M",
+        "",
+        "W",
+        "",
+        "F",
+        "",
+        ""
+      ],
+      "type": "heatmap"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The same heatmap type in matrix mode: marginals adds Σ row and column sums, values prints the exact number in every cell — so color is never the only channel carrying the data."
+        }
+      ],
+      "id": "fd-096",
+      "type": "paragraph"
+    },
+    {
+      "cells": [
+        [
+          12,
+          34,
+          6,
+          9,
+          3
+        ],
+        [
+          4,
+          18,
+          2,
+          21,
+          0
+        ],
+        [
+          0,
+          7,
+          11,
+          4,
+          8
+        ],
+        [
+          9,
+          2,
+          0,
+          15,
+          1
+        ]
+      ],
+      "colLabels": [
+        "Expl",
+        "Buil",
+        "Rev",
+        "Ship",
+        "Docs"
+      ],
+      "id": "fd-097",
+      "marginals": true,
+      "rowLabels": [
+        "Ada",
+        "Lin",
+        "Sam",
+        "Ravi"
+      ],
+      "type": "heatmap",
+      "values": true
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A stat tile carries an optional dim denominator: the accent value reads as a share of a total, not a bare number."
+        }
+      ],
+      "id": "fd-098",
+      "type": "paragraph"
+    },
+    {
+      "denom": 512,
+      "id": "fd-099",
+      "label": "storage used (MB)",
+      "type": "stat",
+      "value": 340
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Large-value charts keep a narrow gutter because the y-axis learns compact units. Two series — the ceiling both renderers agree on."
+        }
+      ],
+      "id": "fd-100",
+      "type": "paragraph"
+    },
+    {
+      "axes": {
+        "xLabels": [
+          "W1",
+          "W6"
+        ]
+      },
+      "caption": "Revenue vs cost over six weeks (NOK)",
+      "id": "fd-101",
+      "series": [
+        {
+          "label": "revenue",
+          "points": [
+            12500000,
+            21000000,
+            33000000,
+            28000000,
+            45500000,
+            41000000
+          ]
+        },
+        {
+          "label": "cost",
+          "points": [
+            8000000,
+            11000000,
+            14000000,
+            19000000,
+            22000000,
+            30000000
+          ]
+        }
+      ],
+      "type": "chart"
+    },
+    {
+      "id": "fd-089",
+      "type": "divider"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Edit mode, view mode, terminal — not three products to keep in sync, but one document wearing three renderers."
+        }
+      ],
+      "id": "fd-090",
+      "type": "pullquote"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The inventory behind this page: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "component reference"
+            }
+          ],
+          "href": "https://guerrilla.barkpark.cloud/papers/component-reference",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "composition doctrine"
+            }
+          ],
+          "href": "https://guerrilla.barkpark.cloud/papers/composition-doctrine-plan",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "terminal diagrams"
+            }
+          ],
+          "href": "https://guerrilla.barkpark.cloud/papers/terminal-mermaid-diagrams",
+          "type": "link"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "fd-091",
+      "type": "paragraph"
+    },
+    {
+      "id": "nb-000",
+      "type": "divider"
+    },
+    {
+      "id": "nb-001",
+      "level": 2,
+      "text": "The newborn blocks — born via bp scaffy run",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "diff and filetree joined the deck in W7, scaffolded across all three surfaces by the add-block-type command in 9ms — then grown into full renderers. They demonstrate themselves below."
+        }
+      ],
+      "id": "nb-002",
+      "type": "paragraph"
+    },
+    {
+      "diff": "diff --git a/internal/pdrender/pdrender.go b/internal/pdrender/pdrender.go\nindex 7cbcead53..02bb15049 100644\n--- a/internal/pdrender/pdrender.go\n+++ b/internal/pdrender/pdrender.go\n@@ -247,4 +247,8 @@ func DefaultRegistry(theme Theme) *Registry {\n \tir := r.inline\n \tr.blocks[\"heading\"] = headingRenderer{ir: ir}\n+\t// scaffy:add-block-type Diff MARK:go-registry-diff\n+\tr.blocks[\"diff\"] = diffRenderer{ir: ir}\n+\t// scaffy:add-block-type Filetree MARK:go-registry-filetree\n+\tr.blocks[\"filetree\"] = filetreeRenderer{ir: ir}",
+      "id": "nb-003",
+      "type": "diff"
+    },
+    {
+      "id": "nb-004",
+      "legend": "● created · ○ injected",
+      "text": "internal/pdrender/\n├── diff.go ● created — verbatim unified-diff renderer\n├── filetree.go ● created — annotation spans + legend row\n└── pdrender.go ○ injected  MARK:go-registry-diff / -filetree",
+      "type": "filetree"
+    }
+  ],
+  "source_rev": "ba2b7e477aaec671ecbd0c7065b72c22",
+  "style": "article",
+  "title": "Every component, on every surface"
+}

@@ -3,7 +3,7 @@
   "manifestVersion": "1",
   "name": "search-starter",
   "title": "Search Starter",
-  "description": "The flagship search site: instant typo-tolerant live search, an interactive corpus graph, and canonical PortableDoc document pages — over any Barkpark dataset.",
+  "description": "The flagship search site: instant live search with misspellings widened server-side by Postgres trigram, an interactive corpus graph, and canonical PortableDoc document pages — over any Barkpark dataset.",
   "framework": "nextjs",
   "dataset": "production",
   "demoContent": true,

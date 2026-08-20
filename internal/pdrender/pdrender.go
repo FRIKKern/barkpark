@@ -86,11 +86,6 @@ type RenderCtx struct {
 	Depth   int     // nesting depth (section recursion); drives indent/rule weight
 	Profile Profile // color/capability profile
 
-	// figureN is a shared mutable counter for "Figure N." captions across a
-	// whole document render. A pointer so the increment is visible to sibling
-	// figures rendered later in the same RenderDoc pass.
-	figureN *int
-
 	// RefResolver is the caller-supplied seam for field-reference: given a
 	// referenced doc id and its refType, it returns the doc's TITLE for display.
 	// Nil → field-reference falls back to the raw id (the no-fetch rendering of
@@ -151,17 +146,6 @@ func (c RenderCtx) WithWidth(w int) RenderCtx { c.Width = w; return c }
 
 // Deeper returns a copy of the ctx one nesting level deeper.
 func (c RenderCtx) Deeper() RenderCtx { c.Depth++; return c }
-
-// nextFigure returns the next figure number, allocating the shared counter
-// lazily so a ctx built by hand (e.g. in a test) still works.
-func (c *RenderCtx) nextFigure() int {
-	if c.figureN == nil {
-		n := 0
-		c.figureN = &n
-	}
-	*c.figureN++
-	return *c.figureN
-}
 
 // Renderer is the per-block-type unit. It returns lines laid out to fit
 // ctx.Width columns, ANSI-styled, ready for lipgloss.JoinVertical. Height is
@@ -238,11 +222,9 @@ func hardBoundDisplayLines(lines []string, width int) []string {
 }
 
 // RenderDoc stacks every top-level block with one blank line between them,
-// joined into a single string via lipgloss.JoinVertical. A shared figure
-// counter is seeded here so "Figure N." numbering is document-global.
+// joined into a single string via lipgloss.JoinVertical. It numbers nothing:
+// figure captions carry exactly what the author typed (see figureCaption).
 func (r *Registry) RenderDoc(blocks []Block, ctx RenderCtx) string {
-	figN := 0
-	ctx.figureN = &figN
 	if ctx.Theme.isZero() {
 		ctx.Theme = r.theme
 	}

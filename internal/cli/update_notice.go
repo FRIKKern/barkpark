@@ -176,6 +176,11 @@ func startUpdateCheck(subcommand string) *pendingUpdateCheck {
 		c := loadUpdateCache()
 		c.Latest = latest
 		saveUpdateCache(c)
+		// This background resolve is network-bearing too, so route its result
+		// into the release cache whoami reads its freshness verdict from — any
+		// network-touching invocation refreshes the whoami leg, not just the
+		// doctor. Best-effort: a write failure never blocks the notice.
+		_ = writeReleaseCache(latest)
 		ch <- latest
 	}()
 	return &pendingUpdateCheck{cache: cache, fetch: ch}

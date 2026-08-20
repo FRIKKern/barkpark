@@ -20,22 +20,30 @@ defmodule Barkpark.Pulse.MetricsTest do
     :ok
   end
 
-  defp tick! do
+  # DEFLAKE (felix-w28-s4): the globally-supervised sampler has its OWN 2 s
+  # autonomous `Process.send_after(:tick)` loop. The old helper `send(pid,
+  # :tick)` competed with it: an autonomous tick firing between a test's bump
+  # loop and its explicit tick would DRAIN the counters (`:counters.put(…, 0)`),
+  # so `snapshot().cursor_per_s` read 0.0 (this reds #12039 attempt-1 —
+  # `assert snap.cursor_per_s > 0`, left: 0.0, at line 40 — while attempt-2 on
+  # the SAME sha was green: a load-sensitive race, not a real regression).
+  # `Metrics.sample_now/0` samples SYNCHRONOUSLY and cancels the pending
+  # autonomous tick without re-arming, so once we call it the 2 s timer can no
+  # longer drain the counter mid-test. Re-introducing the race (swap `sample!`
+  # back to `send(pid, :tick)` and remove the sync barrier) reds this test.
+  defp sample! do
     pid = Process.whereis(Metrics)
     assert is_pid(pid), "Metrics should be supervised via the pulse plugin"
-    send(pid, :tick)
-    _ = :sys.get_state(pid)
-    pid
+    Metrics.sample_now()
   end
 
   test "bumps flow into per-interval rates and vitals are sane" do
-    tick!()
+    sample!()
 
     for _ <- 1..10, do: Metrics.bump(:cursor)
     for _ <- 1..3, do: Metrics.bump(:strike)
-    tick!()
+    snap = sample!()
 
-    snap = Metrics.snapshot()
     assert snap.sampled
     assert snap.cursor_per_s > 0
     assert snap.strikes_per_min > 0
@@ -45,14 +53,14 @@ defmodule Barkpark.Pulse.MetricsTest do
 
   test "a quiet interval decays the rates back to zero" do
     Metrics.bump(:cursor)
-    tick!()
-    tick!()
-    assert Metrics.snapshot().cursor_per_s == 0.0
+    sample!()
+    snap = sample!()
+    assert snap.cursor_per_s == 0.0
   end
 
   test "every tick broadcasts public vitals on each configured channel topic" do
     Phoenix.PubSub.subscribe(Barkpark.PubSub, "pulse:test-storm")
-    tick!()
+    sample!()
 
     assert_receive %Phoenix.Socket.Broadcast{event: "vitals", payload: p}, 500
     assert p.cpu >= 0.0 and p.cpu <= 1.0
@@ -70,10 +78,8 @@ defmodule Barkpark.Pulse.MetricsTest do
   end
 
   test "the snapshot carries a monotonic cost-so-far total" do
-    tick!()
-    a = Barkpark.Pulse.Metrics.snapshot().cost_eur_total
-    tick!()
-    b = Barkpark.Pulse.Metrics.snapshot().cost_eur_total
+    a = sample!().cost_eur_total
+    b = sample!().cost_eur_total
     assert is_number(a) and is_number(b)
     assert b >= a
   end

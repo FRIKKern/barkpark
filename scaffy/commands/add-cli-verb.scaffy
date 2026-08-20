@@ -1,7 +1,7 @@
 COMMAND "Add a bp CLI Verb" DESCRIPTION "Give a plugin a working `bp <noun> <verb>` by planting one data map at the head of its cli_commands/0 list. Variable-target (the add-plugin-route idiom): anchors on the `def cli_commands do` + `[` opener that add-plugin ships OPEN in every generated plugin module, so the verb composes on add-plugin's own output with zero hand-bridging. Zero Go: the manifest-driven CLI grows the verb for free." LAST_UPDATED "18-07-2026-00-00-00" DOMAIN "barkpark" TAGS "cli", "plugin", "verb" CONCEPT "cli-verb" VARIANT "read-list" DIRECTION "add" VARIABLES
   VARIABLE 1 "Plugin" TITLE "The target plugin (ships the cli_commands seam)" DESCRIPTION "Lowercase plugin name, referenced as {{.plugin}} in the target path api/lib/barkpark/plugins/{{.plugin}}.ex. Must be a plugin whose module opens `def cli_commands do` on `[` on two bare lines -- exactly what add-plugin plants OPEN in every generated plugin. A plugin that routes cli_commands through a different shape (tickets delegates to a sibling CLI module; sheets rebinds first) refuses loud at anchor resolution, and a typo'd plugin dies as the engine's typed PathMissingError (exit 4, nothing written)." EXAMPLES "bookmarks", "analytics"
-  VARIABLE 2 "Noun" TITLE "Plugin noun the verb hangs off" DESCRIPTION "The noun `bp <noun> <verb>` answers to -- the lookup KEY the capabilities fold stamps with this plugin's provenance. Lowercase single word -- the four casings coincide." EXAMPLES "bookmark", "ticket"
-  VARIABLE 3 "Verb" TITLE "The new verb" DESCRIPTION "The verb `bp <noun> <verb>` will answer to. Lowercase single word -- the four casings coincide." EXAMPLES "stats", "waiting", "unassigned"
+  VARIABLE 2 "Noun" TITLE "Plugin noun the verb hangs off" DESCRIPTION "The noun `bp <noun> <verb>` answers to -- the lookup KEY the capabilities fold stamps with this plugin's provenance. Lowercase single word -- the lowercase casings coincide." EXAMPLES "bookmark", "ticket"
+  VARIABLE 3 "Verb" TITLE "The new verb" DESCRIPTION "The verb `bp <noun> <verb>` will answer to. Lowercase single word -- the lowercase casings coincide." EXAMPLES "stats", "waiting", "unassigned"
   VARIABLE 4 "Summary" OPAQUE TITLE "One-line operator summary (manifest + --help text)" DESCRIPTION "Shown in `bp <noun> --help` and the capabilities manifest. OPAQUE: never re-cased, one spelling per file." EXAMPLES "Operator dashboard: open / answered / closed counts, oldest-waiting age."
   VARIABLE 5 "PathTemplate" OPAQUE TITLE "The HTTP route the verb calls (GET)" DESCRIPTION "The path_template the generic HTTP builder calls. Must be a route the API actually serves. OPAQUE: never re-cased and exempt from path-casing lints; this file spells it {{.path_template}}." EXAMPLES "/v1/bookmarks/stats"
 
@@ -78,9 +78,11 @@ COMMAND "Add a bp CLI Verb" DESCRIPTION "Give a plugin a working `bp <noun> <ver
 # was born empty or already holds verbs.
 
 # Token spellings-as-transforms (D3d / A1). Noun and verb are single lowercase
-# words, so the four canonical casings coincide -- declared for completeness:
+# words, so only the lowercase casings coincide (Pascal and SCREAMING differ) --
+# declared for completeness:
 #   {{.Verb}}   → Stats     (Pascal)
 #   {{.verb}}   → stats     (kebab == camel == snake, lowercase)
+#   {{.VERB}}   → STATS     (SCREAMING)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OP -- plant the verb map at the head of cli_commands/0 (A3)

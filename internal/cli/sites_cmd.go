@@ -85,7 +85,9 @@ func runSites(out *writer, args []string) int {
 // runSitesList renders `bp sites` — the fleet of hosted sites under the user's
 // team. Columns: NAME · DOMAINS · STATUS · LAST DEPLOY. STATUS reflects the
 // current deployment row (or "—" when none); LAST DEPLOY is the inserted_at
-// timestamp the server stamped.
+// timestamp the server stamped. Under the table it prints the SITE-OUTCOME
+// COHORT — the fleet counted by site rather than by deployment row, split
+// settled / in flight / never deployed (see renderSiteCohort).
 func runSitesList(out *writer, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
@@ -108,23 +110,24 @@ func runSitesList(out *writer, args []string) int {
 		return useError(out, "failed", "list sites: "+err.Error(), exitGeneric)
 	}
 
-	// For STATUS + LAST DEPLOY columns, walk each site's deployments once and
-	// take the newest. This is a cheap N+1 — the table fits on one screen and
-	// the per-site cost is one GET; we keep the call structure obvious rather
-	// than adding a server aggregate route just for the table.
-	statuses := make(map[string]Deployment, len(sites))
-	for _, s := range sites {
-		if dep, ok := latestDeployment(client, s.ID); ok {
-			statuses[s.ID] = dep
-		}
-	}
+	// STATUS + LAST DEPLOY come from the `last_deployment` embed the ONE
+	// /v1/sites response already carries (see cloudclient.SiteDeploymentEmbed).
+	//
+	// deploy-reliability W17: this used to be a deliberate N+1 — one
+	// ListDeployments per site — which cost 13 extra round trips for 13 sites
+	// AND, worse, read every site's status at a DIFFERENT INSTANT. A fleet
+	// cohort assembled from 13 different instants is not a snapshot of anything;
+	// it is 13 snapshots stapled together, which is how the same query five
+	// minutes apart produced two different, both-true cohorts. One response, one
+	// instant, zero extra requests.
+	cohort := summarizeSiteCohort(sites)
 
 	if out.output == "json" || out.output == "yaml" {
 		rows := make([]map[string]any, 0, len(sites))
 		for _, s := range sites {
-			rows = append(rows, siteRow(s, statuses[s.ID]))
+			rows = append(rows, siteListRow(s))
 		}
-		out.emitStructured(map[string]any{"sites": rows})
+		out.emitStructured(map[string]any{"sites": rows, "cohort": cohort.row()})
 		return exitOK
 	}
 
@@ -133,8 +136,225 @@ func runSitesList(out *writer, args []string) int {
 		return exitOK
 	}
 
-	renderSitesTable(out, sites, statuses)
+	renderSitesTable(out, sites)
+	out.outf("")
+	renderSiteCohort(out, cohort)
 	return exitOK
+}
+
+// siteOutcome names the bucket exactly ONE site lands in. Every site in the
+// list lands in one and only one of these — see summarizeSiteCohort.
+const (
+	siteOutcomeLive          = "live"
+	siteOutcomeFailed        = "failed"
+	siteOutcomeCancelled     = "cancelled"
+	siteOutcomeDeferred      = "deferred"
+	siteOutcomeBuilding      = "building"
+	siteOutcomeOtherInFlight = "other_in_flight"
+	siteOutcomeNeverDeployed = "never_deployed"
+	siteOutcomeUnreported    = "unreported"
+)
+
+// classifySiteStatus buckets the ONE status word the /v1/sites embed carries.
+//
+// It is deliberately NOT classifyDeployment: that function also reads
+// `failure_class` to catch the BOX_*_DEFERRED spellings, and the embed does not
+// carry failure_class (D24 fences its keyset at four keys). So this reads the
+// status word alone — which is enough, because `deferred` is a real terminal
+// status in the control plane's transition map and is what the embed reports.
+// A deferral spelled ONLY in failure_class would land in "other in flight"
+// here, which is still on the honest side of the line: it is not counted as an
+// outcome either way.
+func classifySiteStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "deferred":
+		return siteOutcomeDeferred
+	case "live", "running", "ready", "active":
+		return siteOutcomeLive
+	case "failed", "error":
+		return siteOutcomeFailed
+	case "cancelled", "canceled":
+		return siteOutcomeCancelled
+	case "queued", "building", "pushing":
+		return siteOutcomeBuilding
+	case "":
+		// The embed object arrived with no status word. That is not "never
+		// deployed" and it is not an outcome — it is the control plane failing
+		// to report, and it gets the bucket that says so.
+		return siteOutcomeUnreported
+	default:
+		return siteOutcomeOtherInFlight
+	}
+}
+
+// classifySite buckets one SITE. The nil embed is the interesting case and it
+// means two different things, which this epic refuses to conflate:
+//
+//   - no embed AND no current deployment → the site has never had a production
+//     deploy (site `auto-proof` on the live fleet). That is its own bucket, not
+//     an absence to be dropped: a site silently dropped from the cohort makes
+//     the printed buckets disagree with the team's site count forever, and the
+//     reader has no way to see the gap.
+//   - no embed BUT a current_deployment_id → the site HAS deployed, so the
+//     control plane owed us a status and did not send one (a server predating
+//     the embed). Calling that "never deployed" would be a fabrication; it gets
+//     the UNREPORTED bucket and the render says so out loud.
+func classifySite(s cloudclient.Site) string {
+	if s.LastDeployment == nil {
+		if strings.TrimSpace(s.CurrentDeploymentID) != "" {
+			return siteOutcomeUnreported
+		}
+		return siteOutcomeNeverDeployed
+	}
+	return classifySiteStatus(s.LastDeployment.Status)
+}
+
+// siteCohort is the fleet counted by SITE rather than by deployment row. The
+// unit change is the whole point: a row rate is gameable (the deferral loop
+// burns 3.7–8.6 attempts per live deploy, so retrying LESS improves the row
+// rate without a single site going live one second sooner), while "how many of
+// my sites are actually up" is not.
+//
+// THE BUCKETS SUM TO THE SITE COUNT, AND THAT IS A CONTRACT, NOT AN ACCIDENT —
+// the same discipline internal/cli/cloud_site_cmd.go:2013 states for the
+// per-site window, one layer up. TestSiteCohortBucketsSumToSiteCount pins it.
+type siteCohort struct {
+	Sites int
+
+	// Settled: these rows will not move again.
+	Live      int
+	Failed    int
+	Cancelled int // a person or a superseding deploy stopped it — settled, but not a build OUTCOME
+
+	// In flight: these are TRANSIENT states that a latest-per-site query
+	// happily reports as if they were outcomes. They are not.
+	Deferred      int
+	Building      int
+	OtherInFlight int // a status word the control plane may add tomorrow
+
+	NeverDeployed int // zero production deployment rows — neither settled nor in flight
+	Unreported    int // deployed, but this control plane sent no status
+}
+
+// Settled counts the sites whose latest production deployment is finished —
+// it will never change on its own. Live + Failed are the outcomes; Cancelled is
+// settled too (nothing is still running) but is NOT an outcome, so it is kept
+// out of Outcomes below.
+func (c siteCohort) Settled() int { return c.Live + c.Failed + c.Cancelled }
+
+// Outcomes is the only honest denominator for "how many of my sites are up":
+// sites whose latest production deploy actually DECIDED something.
+func (c siteCohort) Outcomes() int { return c.Live + c.Failed }
+
+// InFlight counts sites whose latest production deployment has not settled.
+// `deferred` lives HERE, never in an outcome bucket: 1,837 of 2,124 deferred
+// rows are followed by a same-site live within the hour, and 0 of 2,124 ever
+// set became_live_at. Deferral is terminal for the ROW and usually transient
+// for the SITE — it is a COST, and folding a cost into a reliability rate is
+// exactly the mis-report this epic exists to remove.
+func (c siteCohort) InFlight() int { return c.Deferred + c.Building + c.OtherInFlight }
+
+// Accounted is what the buckets add up to. It must equal Sites; if it ever
+// does not, a site fell out of the census with no name, which is the silent
+// denominator lie in miniature.
+func (c siteCohort) Accounted() int {
+	return c.Settled() + c.InFlight() + c.NeverDeployed + c.Unreported
+}
+
+// row is the -o json projection, carrying the same buckets and the same
+// denominators the human line prints — a machine reader cannot get a bare rate
+// here either, because no rate is computed anywhere.
+func (c siteCohort) row() map[string]any {
+	return map[string]any{
+		"sites":           c.Sites,
+		"settled":         c.Settled(),
+		"live":            c.Live,
+		"failed":          c.Failed,
+		"cancelled":       c.Cancelled,
+		"outcomes":        c.Outcomes(),
+		"in_flight":       c.InFlight(),
+		"deferred":        c.Deferred,
+		"building":        c.Building,
+		"other_in_flight": c.OtherInFlight,
+		"never_deployed":  c.NeverDeployed,
+		"unreported":      c.Unreported,
+		"accounted":       c.Accounted(),
+		"rate":            nil, // deliberately absent — see renderSiteCohort
+		"snapshot":        true,
+	}
+}
+
+// summarizeSiteCohort counts every site into exactly one bucket, off the ONE
+// list response — so the whole cohort is read at ONE instant.
+func summarizeSiteCohort(sites []cloudclient.Site) siteCohort {
+	c := siteCohort{Sites: len(sites)}
+	for _, s := range sites {
+		switch classifySite(s) {
+		case siteOutcomeLive:
+			c.Live++
+		case siteOutcomeFailed:
+			c.Failed++
+		case siteOutcomeCancelled:
+			c.Cancelled++
+		case siteOutcomeDeferred:
+			c.Deferred++
+		case siteOutcomeBuilding:
+			c.Building++
+		case siteOutcomeNeverDeployed:
+			c.NeverDeployed++
+		case siteOutcomeUnreported:
+			c.Unreported++
+		default:
+			c.OtherInFlight++
+		}
+	}
+	return c
+}
+
+// renderSiteCohort prints the two-line site-outcome cohort:
+//
+//	site outcomes (one snapshot of 13 sites): 12 settled — 10 live, 2 failed; 0 in flight; 1 never deployed
+//	10 live of 12 settled sites — counts, not a rate: this cohort is ONE INSTANT (two reads minutes apart disagree) and deferred/building are in-flight COST, never outcomes
+//
+// NO PERCENTAGE IS PRINTED, at any n. `deploymentSummary`'s minDeploymentSample
+// floor is the sibling discipline — but a floor alone would not save this
+// surface, because the problem here is not sample SIZE, it is that the sample
+// is an INSTANT of a moving system: two identical calls five minutes apart
+// returned {live 8, failed 2, deferred 1, building 1} and {live 10, failed 2},
+// and a 48-hour replay produced 22 distinct (live, failed, deferred) triples
+// over 97 samples with the modal one holding only 19.6% of the time. So every
+// count ships WITH ITS DENOMINATOR beside it (charter D3) and the reader does
+// the division themselves, knowing what they are dividing.
+func renderSiteCohort(out *writer, c siteCohort) {
+	settled := fmt.Sprintf("%d settled — %d live, %d failed", c.Settled(), c.Live, c.Failed)
+	if c.Cancelled > 0 {
+		settled += fmt.Sprintf(", %d cancelled", c.Cancelled)
+	}
+
+	inFlight := fmt.Sprintf("%d in flight", c.InFlight())
+	if c.InFlight() > 0 {
+		parts := []string{}
+		if c.Deferred > 0 {
+			parts = append(parts, fmt.Sprintf("%d deferred", c.Deferred))
+		}
+		if c.Building > 0 {
+			parts = append(parts, fmt.Sprintf("%d building", c.Building))
+		}
+		if c.OtherInFlight > 0 {
+			parts = append(parts, fmt.Sprintf("%d in another state", c.OtherInFlight))
+		}
+		inFlight += " — " + strings.Join(parts, ", ")
+	}
+
+	line := fmt.Sprintf("site outcomes (one snapshot of %d sites): %s; %s; %d never deployed",
+		c.Sites, settled, inFlight, c.NeverDeployed)
+	if c.Unreported > 0 {
+		line += fmt.Sprintf("; %d deployed but UNREPORTED (this control plane sent no last_deployment)", c.Unreported)
+	}
+	out.outf("%s", line)
+
+	out.outf("%d live of %d settled sites — counts, not a rate: this cohort is ONE INSTANT (the same call minutes apart disagrees) and deferred/building are in-flight COST, never outcomes",
+		c.Live, c.Settled())
 }
 
 // Deployment re-exposes cloudclient.Deployment so the local helpers can speak
@@ -202,7 +422,7 @@ func statusColor(out *writer, status string) string {
 // renderSitesTable prints the aligned `bp sites` table. The four columns
 // (NAME · DOMAINS · STATUS · LAST DEPLOY) are width-driven from the data so
 // the output is stable for golden compare. Empty domains print "—".
-func renderSitesTable(out *writer, sites []cloudclient.Site, statuses map[string]Deployment) {
+func renderSitesTable(out *writer, sites []cloudclient.Site) {
 	const (
 		hName   = "NAME"
 		hDom    = "DOMAINS"
@@ -216,14 +436,14 @@ func renderSitesTable(out *writer, sites []cloudclient.Site, statuses map[string
 		if dom == "" {
 			dom = "—"
 		}
-		dep := statuses[s.ID]
-		status := dep.Status
-		if status == "" {
-			status = "—"
-		}
-		when := dep.InsertedAt
-		if when == "" {
-			when = "—"
+		status, when := "—", "—"
+		if s.LastDeployment != nil {
+			if v := strings.TrimSpace(s.LastDeployment.Status); v != "" {
+				status = v
+			}
+			if v := strings.TrimSpace(s.LastDeployment.InsertedAt); v != "" {
+				when = v
+			}
 		}
 		rows[i] = [4]string{s.Name, dom, status, when}
 		if n := len(s.Name); n > nameW {
@@ -246,11 +466,12 @@ func renderSitesTable(out *writer, sites []cloudclient.Site, statuses map[string
 	}
 }
 
-// siteRow projects a site + its latest deployment onto the stable JSON shape
-// `bp sites -o json` emits. The deployment fields are flattened under
-// last_deployment so the consumer doesn't have to walk a nested map.
-func siteRow(s cloudclient.Site, dep Deployment) map[string]any {
-	row := map[string]any{
+// siteBaseRow is the site's own fields, shared by the list and show
+// projections so the two views can never drift on the site half. Only the
+// deployment half differs between them — and it differs because the two
+// endpoints genuinely carry different keysets.
+func siteBaseRow(s cloudclient.Site) map[string]any {
+	return map[string]any{
 		"id":                    s.ID,
 		"barkpark_id":           s.BarkparkID,
 		"team_id":               s.TeamID,
@@ -264,6 +485,44 @@ func siteRow(s cloudclient.Site, dep Deployment) map[string]any {
 		"inserted_at":           s.InsertedAt,
 		"updated_at":            s.UpdatedAt,
 	}
+}
+
+// siteListRow projects one site onto the JSON shape `bp sites -o json` emits.
+// `last_deployment` here is the SERVER's embed, verbatim and unwidened —
+// status/trigger/inserted_at/updated_at — so the machine reader sees exactly
+// the four keys the control plane measured, and no key invented by the CLI.
+//
+// It is ABSENT (not null, not an empty object) when the site has no production
+// deployment, and `never_deployed` says which absence that is: `true` means the
+// site genuinely has no production deploy, `false` means the site HAS one
+// (current_deployment_id is set) and the control plane sent no embed for it.
+// Those are different facts and a consumer that cannot tell them apart will
+// eventually print one as the other.
+func siteListRow(s cloudclient.Site) map[string]any {
+	row := siteBaseRow(s)
+	if s.LastDeployment != nil {
+		last := map[string]any{
+			"status":      s.LastDeployment.Status,
+			"trigger":     nil,
+			"inserted_at": s.LastDeployment.InsertedAt,
+			"updated_at":  s.LastDeployment.UpdatedAt,
+		}
+		if s.LastDeployment.Trigger != nil {
+			last["trigger"] = *s.LastDeployment.Trigger
+		}
+		row["last_deployment"] = last
+	} else {
+		row["never_deployed"] = strings.TrimSpace(s.CurrentDeploymentID) == ""
+	}
+	row["outcome"] = classifySite(s)
+	return row
+}
+
+// siteRow projects a site + its latest deployment onto the stable JSON shape
+// `bp sites show -o json` emits. The deployment fields are flattened under
+// last_deployment so the consumer doesn't have to walk a nested map.
+func siteRow(s cloudclient.Site, dep Deployment) map[string]any {
+	row := siteBaseRow(s)
 	if dep.ID != "" {
 		row["last_deployment"] = map[string]any{
 			"id":          dep.ID,
@@ -1226,6 +1485,23 @@ USAGE
 WHAT IT DOES
   drives the Barkpark Cloud control plane's hosted-site surface — a site is a
   website running co-located with a Barkpark instance. Requires 'bp login'.
+
+WHAT 'bp sites' PRINTS
+  the table (NAME · DOMAINS · STATUS · LAST DEPLOY), then the SITE-OUTCOME
+  COHORT — the fleet counted by SITE, in ONE request read at ONE instant:
+
+    site outcomes (one snapshot of 13 sites): 12 settled — 10 live, 2 failed; 0 in flight; 1 never deployed
+
+  counts, never a rate, at any n: the cohort is an instant of a moving system
+  (the same call minutes apart disagrees), and 'deferred'/'building' are
+  IN-FLIGHT COST, never outcomes. A site that has never deployed to production
+  gets its own bucket rather than being dropped, so the buckets always sum to
+  the site count.
+
+  -o json carries the same buckets under 'cohort' (with 'rate': null, on
+  purpose). NOTE: each site's 'last_deployment' in the LIST view is the
+  server's four-key embed — status/trigger/inserted_at/updated_at. It no longer
+  carries 'id' or 'image_tag'; 'bp sites show -o json' still does.
 
   'bp sites env set' REPLACES the whole env blob (the blob is stored encrypted
   and never echoed back, so there is no per-key merge); list every key you

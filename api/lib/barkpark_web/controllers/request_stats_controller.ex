@@ -11,8 +11,13 @@ defmodule BarkparkWeb.RequestStatsController do
   unauthenticated: a raw request-rate/latency read is instance-operational data,
   not public.
 
-  Wire contract — FOUR keys: `200 {"req_per_s": float, "p95_ms": int|null,
-  "err_5xx_per_s": float|null, "window_s": int}`. The shape is owned by
+  Wire contract — EIGHT keys (anonymous-metering W1, additive over the original
+  four): `200 {"req_per_s": float, "p95_ms": int|null, "err_5xx_per_s":
+  float|null, "window_s": int, "count": int, "elapsed_s": float, "sampled_at":
+  iso8601-utc string, "classes": {class: {"count": int, "req_per_s": float,
+  "authed": int, "anon": int, "auth_unknown": int}}}`. `classes` is keyed by
+  the five-class route enum (`lv_dead|browser|api|unrouted|pre_router`, charter
+  D9) and is `{}` on an empty window. The shape is owned by
   `BarkparkWeb.RequestStats` (this controller only serialises what `stats/1`
   returns) and pinned on the wire by
   `BarkparkWeb.RequestStatsControllerTest`. `p95_ms` and `err_5xx_per_s` are

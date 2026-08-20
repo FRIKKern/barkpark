@@ -14,13 +14,20 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.{Auth, Sharing}
+  alias Barkpark.Repo
+  alias Barkpark.Sharing.{Links, ShareLink}
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
+
+  import Barkpark.TenancyFixtures
 
   @dataset "production"
   @admin "shares-studio-admin"
   @junior "shares-studio-junior"
 
   setup %{conn: conn} do
-    {:ok, _} = Auth.create_token(@admin, "shares admin", "production", ["read", "write", "admin"])
+    {:ok, admin_tok} =
+      Auth.create_token(@admin, "shares admin", "production", ["read", "write", "admin"])
+
     {:ok, _} = Auth.create_token(@junior, "shares junior", "production", ["read", "write"])
 
     prior_shares = Application.get_env(:barkpark, :shares)
@@ -33,7 +40,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
       restore(:shares_env, prior_env)
     end)
 
-    {:ok, conn: conn}
+    {:ok, conn: conn, admin_tok: admin_tok}
   end
 
   defp restore(key, nil), do: Application.delete_env(:barkpark, key)
@@ -273,6 +280,127 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
       render_hook(view, "item-share-create", %{"access" => "read"})
 
       assert Barkpark.Sharing.Links.list_for(ws.id, "doc", "paper", "x") == []
+    end
+  end
+
+  # ── item-share revoke: cross-tenant confinement ───────────────────────────
+  #
+  # arpss-item-share-revoke-unscoped-revoke. `item-share-revoke` carries a RAW
+  # CLIENT `phx-value-id` into `Sharing.Links.revoke/1`, which is an unscoped
+  # `Repo.get(ShareLink, uuid)`. `Caps.admin?/1` gates WHO the actor is on the
+  # workspace it MOUNTED (workspace-scoped SEAT authority since #12695) — it
+  # never constrains WHICH row the id names, so a seated admin of A could
+  # revoke B's link. The handler now authorizes against the ROW's OWN workspace.
+  describe "item share revoke — cross-tenant confinement" do
+    setup %{admin_tok: admin_tok} do
+      # Victim workspace B and a LIVE credential in it. B is a real foreign
+      # tenant: nothing about it is reachable from the mounted (default) scope.
+      ws_b = create_workspace!("item-revoke-victim-#{System.unique_integer([:positive])}")
+      proj_b = create_project!(ws_b, "victim-proj-#{System.unique_integer([:positive])}")
+
+      {:ok, {raw_b, link_b}} =
+        Links.create(%{
+          workspace_id: ws_b.id,
+          project_id: proj_b.id,
+          dataset: @dataset,
+          kind: "doc",
+          ref_type: "paper",
+          ref_id: "victim-paper",
+          access: "read"
+        })
+
+      # THE ATTACKER SHAPE the predicate choice turns on: @admin is a seat admin
+      # of its OWN home workspace (the seeded default, written by
+      # `Auth.create_token/5` — never a hand-inserted %ApiToken{workspace_id:
+      # nil}), and holds a REAL but plain `member` membership in B. A total
+      # stranger to B would be denied under BOTH candidate predicates and would
+      # prove nothing.
+      {:ok, _} = TenancyAuth.create_membership(ws_b.id, admin_tok.id, "member")
+
+      # Preconditions asserted inline so the predicate choice is provably
+      # load-bearing: this actor PASSES `authorize/3` in B (its api_token arm
+      # ORs the token's GLOBAL permissions[] with membership) and FAILS
+      # `workspace_admin?/2`. Swap the new gate to `authorize/3` and the leak
+      # test below goes green on a leaking handler.
+      assert TenancyAuth.membership_role(admin_tok, ws_b.id) == "member"
+      assert TenancyAuth.authorize(admin_tok, ws_b.id, :admin) == :ok
+      refute TenancyAuth.workspace_admin?(admin_tok, ws_b.id)
+
+      %{ws_b: ws_b, link_b: link_b, raw_b: raw_b}
+    end
+
+    test "LEAK CLOSED: a seated admin of A cannot revoke workspace B's link", %{
+      conn: conn,
+      link_b: link_b,
+      raw_b: raw_b
+    } do
+      {:ok, view, _html} = admin_view(conn)
+
+      # The actor really does clear the handler's own admin gate on the mounted
+      # workspace — without this the denial could come from `Caps.admin?/1` and
+      # the test would pass for the wrong reason. The positive control below
+      # drives the SAME socket to a successful revoke to prove exactly that.
+      render_hook(view, "item-share-open", %{
+        "kind" => "doc",
+        "ref-type" => "paper",
+        "ref-id" => "victim-paper"
+      })
+
+      render_hook(view, "item-share-revoke", %{"id" => link_b.id})
+
+      # ASSERT THE ROW, not a flash: a "denial" that still stamped revoked_at
+      # would be the same cross-tenant write in disguise.
+      row = Repo.get(ShareLink, link_b.id)
+      refute is_nil(row)
+      assert is_nil(row.revoked_at)
+
+      # ...and B's credential is still LIVE — the tenant's `/s/<token>` URL did
+      # not go dark.
+      assert {:ok, _} = Links.resolve(raw_b)
+
+      # The denial is indistinguishable from a missing row: same message, no
+      # existence oracle.
+      foreign = render(view)
+      render_hook(view, "item-share-revoke", %{"id" => Ecto.UUID.generate()})
+      assert render(view) == foreign
+    end
+
+    test "POSITIVE CONTROL: the same socket DOES revoke a link in its own workspace", %{
+      conn: conn,
+      link_b: link_b
+    } do
+      {:ok, view, _html} = admin_view(conn)
+      ws = Barkpark.Tenancy.get_default_workspace()
+
+      render_hook(view, "item-share-open", %{
+        "kind" => "doc",
+        "ref-type" => "paper",
+        "ref-id" => "own-paper",
+        "title" => "Own Paper"
+      })
+
+      render_hook(view, "item-share-create", %{"access" => "read"})
+      assert [own] = Links.list_for(ws.id, "doc", "paper", "own-paper")
+      assert is_nil(own.revoked_at)
+
+      render_hook(view, "item-share-revoke", %{"id" => own.id})
+
+      refute is_nil(Repo.get(ShareLink, own.id).revoked_at)
+      # ...while B's row, untouched by this legitimate revoke, still stands.
+      assert is_nil(Repo.get(ShareLink, link_b.id).revoked_at)
+    end
+
+    test "a non-castable link id is a denial, never a crash", %{conn: conn} do
+      {:ok, view, _html} = admin_view(conn)
+
+      render_hook(view, "item-share-open", %{
+        "kind" => "doc",
+        "ref-type" => "paper",
+        "ref-id" => "own-paper"
+      })
+
+      render_hook(view, "item-share-revoke", %{"id" => "not-a-uuid"})
+      assert render(view) =~ "item-share-create"
     end
   end
 end

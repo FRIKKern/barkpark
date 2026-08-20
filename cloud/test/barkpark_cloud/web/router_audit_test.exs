@@ -13,6 +13,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
   use BarkparkCloud.DataCase, async: false
   import Plug.Test
   import Plug.Conn
+  import ExUnit.CaptureLog, only: [with_log: 1]
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Billing
@@ -1361,6 +1362,154 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
 
       assert [ev] = events(team, "site.github_disconnected")
       assert ev.metadata["repo"] == "octo/app"
+    end
+  end
+
+  ## Account security — the 2FA pair (cch-w53-s3)
+  ##
+  ## Turning 2FA on/off is the most security-relevant act a PLAIN MEMBER can
+  ## perform, and it is the only audited seam here that is NOT admin-gated on
+  ## the write side. Both producers are post-commit best-effort by design: the
+  ## account state has already changed, so nothing below may 500.
+
+  # Enroll `user` and return the raw TOTP secret so a test can compute a code.
+  defp enroll_two_factor(user) do
+    {:ok, %{secret_base32: b32}} = Accounts.start_two_factor_enrollment(user)
+    {:ok, secret} = Base.decode32(b32, padding: false)
+    secret
+  end
+
+  describe "the two-factor pair writes to the team trail" do
+    test "POST /v1/account/two-factor/confirm writes twofa.enabled" do
+      {user, team, token} = logged_in()
+      secret = enroll_two_factor(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/account/two-factor/confirm",
+          %{code: NimbleTOTP.verification_code(secret)},
+          token
+        )
+
+      assert conn.status == 200
+
+      assert [ev] = events(team, "twofa.enabled")
+      assert ev.team_id == team.id
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "user"
+      assert ev.target_id == user.id
+      # Nothing about the secret or the recovery codes reaches the row.
+      assert ev.metadata in [nil, %{}]
+    end
+
+    test "a WRONG code 422s and writes NO twofa.enabled row" do
+      {user, team, token} = logged_in()
+      _secret = enroll_two_factor(user)
+
+      conn = call(:post, "/v1/account/two-factor/confirm", %{code: "000000"}, token)
+      assert conn.status == 422
+      assert events(team, "twofa.enabled") == []
+    end
+
+    test "a PLAIN MEMBER (not admin) can write the row — the write side is not RBAC-gated" do
+      {_owner, team, _owner_token} = logged_in()
+      {member, member_token} = member_of(team, "member")
+      secret = enroll_two_factor(member)
+
+      conn =
+        call(
+          :post,
+          "/v1/account/two-factor/confirm",
+          %{code: NimbleTOTP.verification_code(secret)},
+          member_token
+        )
+
+      assert conn.status == 200
+      assert [ev] = events(team, "twofa.enabled")
+      assert ev.actor_user_id == member.id
+    end
+
+    test "DELETE /v1/account/two-factor writes twofa.disabled" do
+      {user, team, token} = logged_in()
+      secret = enroll_two_factor(user)
+
+      {:ok, _codes} =
+        Accounts.confirm_two_factor(
+          Accounts.get_user(user.id),
+          NimbleTOTP.verification_code(secret)
+        )
+
+      conn = call(:delete, "/v1/account/two-factor", nil, token)
+      assert conn.status == 200
+
+      assert [ev] = events(team, "twofa.disabled")
+      assert ev.team_id == team.id
+      assert ev.actor_user_id == user.id
+      assert ev.target_id == user.id
+    end
+
+    test "DELETE when 2FA was never ON writes NO row — the route is idempotent, the trail is not" do
+      {_user, team, token} = logged_in()
+
+      conn = call(:delete, "/v1/account/two-factor", nil, token)
+      assert conn.status == 200
+      assert events(team, "twofa.disabled") == []
+    end
+  end
+
+  # THE FAIL-CLOSED ARM. `Auth.require_user/2` assigns :current_team through
+  # `Accounts.primary_team/1`, which is `List.first/1` and returns nil for a
+  # user who belongs to no team — while `audit_events.team_id` is `null: false`.
+  # An unguarded producer would raise there and make ENABLING 2FA return 500:
+  # a security regression far worse than the missing row it was added to fix.
+  describe "a team-less user still gets 2FA (the audit write is skipped, LOGGED, never fatal)" do
+    setup do
+      user = user_fixture()
+      {:ok, token} = Accounts.create_user_session_token(user)
+      assert Accounts.primary_team(user) == nil
+      %{user: user, token: token}
+    end
+
+    test "confirm answers 200 and logs the skip", %{user: user, token: token} do
+      secret = enroll_two_factor(user)
+
+      {conn, log} =
+        with_log(fn ->
+          call(
+            :post,
+            "/v1/account/two-factor/confirm",
+            %{code: NimbleTOTP.verification_code(secret)},
+            token
+          )
+        end)
+
+      assert conn.status == 200
+      assert %{"recovery_codes" => codes} = json_body(conn)
+      assert length(codes) > 0
+      # 2FA is genuinely ON — the missing audit row cost the user nothing.
+      assert Accounts.two_factor_enabled?(Accounts.get_user(user.id))
+
+      # Skipped AND LOGGED, never silently discarded.
+      assert log =~ "audit twofa.enabled SKIPPED"
+      assert log =~ user.id
+    end
+
+    test "disable answers 200 and logs the skip", %{user: user, token: token} do
+      secret = enroll_two_factor(user)
+
+      {:ok, _} =
+        Accounts.confirm_two_factor(
+          Accounts.get_user(user.id),
+          NimbleTOTP.verification_code(secret)
+        )
+
+      {conn, log} = with_log(fn -> call(:delete, "/v1/account/two-factor", nil, token) end)
+
+      assert conn.status == 200
+      assert json_body(conn) == %{"ok" => true}
+      refute Accounts.two_factor_enabled?(Accounts.get_user(user.id))
+      assert log =~ "audit twofa.disabled SKIPPED"
     end
   end
 end

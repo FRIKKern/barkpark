@@ -14,6 +14,14 @@ defmodule BarkparkCloud.Web.RouterStudioLinkTest do
     * unauthenticated → 401; malformed (non-UUID) id → 404, not 500
     * not-live instance → 409; missing admin token → 404 no_admin_token
     * instance failure → 502 instance_unreachable
+
+  cch-w54-s2 adds the SUSPENSION half: a box suspended through the real
+  producer (`Registry.suspend_team_barkparks/2`) mints nothing on any of the
+  three admin-credential-backed routes — studio-link, app-token, credentials —
+  and the refusal fires BEFORE the stored admin token is decrypted, so the
+  instance is never called. These tests assert the REFUSAL; there is
+  deliberately no test here asserting 200 for a suspended box, because that
+  would pin the defect this slice closes.
   """
   use BarkparkCloud.DataCase, async: true
   import Plug.Test
@@ -80,6 +88,15 @@ defmodule BarkparkCloud.Web.RouterStudioLinkTest do
   end
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
+
+  # A SUSPENDED live instance, suspended through the REAL producer both billing
+  # paths call (`billing.ex:855`/`:882`) rather than a hand-set column — so the
+  # tests prove the state a paying-then-lapsing team actually lands in.
+  defp suspended_live_barkpark(team) do
+    bp = live_barkpark(team)
+    {:ok, 1} = Registry.suspend_team_barkparks(team, "billing_lapsed")
+    Registry.get_barkpark(bp.id)
+  end
 
   describe "POST /v1/barkparks/:id/studio-link" do
     test "member of owning team → 200 {url}; instance called with the admin bearer; token never leaks" do
@@ -202,6 +219,179 @@ defmodule BarkparkCloud.Web.RouterStudioLinkTest do
       StudioLinkFakeHttpClient.program([{:ok, %{status: 401, body: ~s({"error":"nope"})}}])
       denied = call(:post, "/v1/barkparks/#{bp.id}/studio-link", token)
       assert denied.status == 502
+    end
+  end
+
+  # cch-w54-s2 — SUSPENSION CLOSES THE THREE ADMIN-CREDENTIAL-BACKED PATHS.
+  #
+  # Suspension is billing's "data retained, access revoked" (billing.ex
+  # cancel_subscription/1). Before this block, a box suspended through the REAL
+  # producer still handed a team member a redeemable Studio ticket, a durable
+  # read+write+chat app token, and — to an admin — the PLAINTEXT instance admin
+  # token. Every test here asserts the REFUSAL and, where the route calls the
+  # instance, that the instance was NEVER called: the guard sits above
+  # `reveal_admin_token/1`, so a suspended box costs the control plane one
+  # boolean and leaks nothing.
+  describe "suspension closes the mint and reveal paths" do
+    test "studio-link on a suspended box → 409 suspended, and the instance is never called" do
+      {user, team} = user_with_team()
+      bp = suspended_live_barkpark(team)
+      assert bp.suspended
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # Programmed to succeed on purpose: if the guard were missing, this box
+      # would mint a real ticket. It must never be consumed.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 201, body: ~s({"ticket":"bplt_must-not-mint","expires_in":60})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/studio-link", token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "suspended"
+      assert json_body(conn)["detail"] =~ "suspended"
+      refute conn.resp_body =~ "bplt_must-not-mint"
+      refute conn.resp_body =~ @instance_admin_token
+
+      # The refusal beat the decrypt: no byte left the control plane.
+      assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    test "app-token on a suspended box → 409 suspended; no durable credential is issued" do
+      {user, team} = user_with_team()
+      bp = suspended_live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok,
+         %{
+           status: 201,
+           body:
+             ~s({"token":"bpapp_must-not-mint","permissions":["read","write","chat"],"expires_at":"2030-01-01T00:00:00Z"})
+         }}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/app-token", token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "suspended"
+      assert json_body(conn)["detail"] =~ "suspended"
+      refute conn.resp_body =~ "bpapp_must-not-mint"
+      assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    test "credentials on a suspended box → 409 suspended; the plaintext admin token stays hidden" do
+      {user, team} = user_with_team()
+      bp = suspended_live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", token)
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "suspended"
+      refute conn.resp_body =~ @instance_admin_token
+    end
+
+    # REVIEW (cch-w54 wave review) — this test used to pin the phrase
+    # "subscription is current" on all three details. That phrase is only true on
+    # ONE of the two axes that write the `suspended` column:
+    # Billing.cancel_subscription/1 and the grace-elapsed arm of mark_past_due/2
+    # write a billing reason, but Billing.reconcile_plan_limit/1 writes
+    # `quota_exceeded` on a team whose subscription IS current and whose invoices
+    # are all paid. cch-w54-s1 removed exactly that falsehood from the console's
+    # instance-card banner in the same wave; leaving it in the API's own refusal
+    # would have re-emitted it one layer down. So the pin is now the CLOSED SET:
+    # every one of the three details is checked, and none of them may claim a
+    # money cause the boolean does not carry.
+    test "no 409 detail claims a money cause the `suspended` boolean does not carry" do
+      {user, team} = user_with_team()
+      bp = suspended_live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      details =
+        for {method, path} <- [
+              {:post, "/v1/barkparks/#{bp.id}/studio-link"},
+              {:post, "/v1/barkparks/#{bp.id}/app-token"},
+              {:get, "/v1/barkparks/#{bp.id}/credentials"}
+            ] do
+          conn = call(method, path, token)
+          assert conn.status == 409, "#{method} #{path} did not refuse"
+          assert json_body(conn)["error"] == "suspended"
+          json_body(conn)["detail"]
+        end
+
+      assert length(details) == 3
+
+      for detail <- details do
+        assert is_binary(detail) and detail != ""
+        # THE HONEST CAUSE: the control plane has withdrawn access, which is true
+        # on both axes and is the console's own ERRORS.suspended vocabulary.
+        assert detail =~ "suspension is cleared"
+        # NOT a money claim: a quota-suspended team is fully paid.
+        refute detail =~ "subscription"
+        refute detail =~ "payment"
+        refute detail =~ "invoice"
+        # The card banner already carries the restoration promise (app.js
+        # suspendedCardBannerHtml); an error toast repeating it would answer a
+        # question nobody asked instead of saying why THIS click failed.
+        refute detail =~ "comes back"
+        refute detail =~ "exactly as it was"
+        # And it never claims a power state — nothing on the suspension path
+        # reaches the host (cch-w54-s1's LIFECYCLE_PILL_LABEL note).
+        refute detail =~ "stopped"
+        refute detail =~ "powered off"
+      end
+    end
+
+    test "resuming the team re-opens all three paths (the guard can lose)" do
+      {user, team} = user_with_team()
+      bp = suspended_live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      assert call(:post, "/v1/barkparks/#{bp.id}/studio-link", token).status == 409
+
+      {:ok, 1} = Registry.resume_team_barkparks(team)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 201, body: ~s({"ticket":"bplt_after-resume","expires_in":60})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/studio-link", token)
+      assert conn.status == 200
+      assert json_body(conn)["url"] == @instance_url <> "/login/ticket/bplt_after-resume"
+
+      creds = call(:get, "/v1/barkparks/#{bp.id}/credentials", token)
+      assert creds.status == 200
+      assert json_body(creds)["admin_token"] == @instance_admin_token
+    end
+
+    test "a LIVE (unsuspended) box is untouched by the guard on all three routes" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 201, body: ~s({"ticket":"bplt_healthy","expires_in":60})}},
+        {:ok, %{status: 201, body: ~s({"token":"bpapp_healthy","permissions":["read"]})}}
+      ])
+
+      assert call(:post, "/v1/barkparks/#{bp.id}/studio-link", token).status == 200
+      assert call(:post, "/v1/barkparks/#{bp.id}/app-token", token).status == 200
+      assert call(:get, "/v1/barkparks/#{bp.id}/credentials", token).status == 200
+    end
+
+    test "a suspended box in ANOTHER team is still the plain 404 — the 409 leaks no existence" do
+      {_user_b, team_b} = user_with_team()
+      bp_b = suspended_live_barkpark(team_b)
+
+      {user_a, _team_a} = user_with_team()
+      {:ok, token_a} = Accounts.create_user_session_token(user_a)
+
+      wrong_team = call(:post, "/v1/barkparks/#{bp_b.id}/studio-link", token_a)
+      nonexistent = call(:post, "/v1/barkparks/#{Ecto.UUID.generate()}/studio-link", token_a)
+
+      assert wrong_team.status == 404
+      assert json_body(wrong_team) == json_body(nonexistent)
     end
   end
 end

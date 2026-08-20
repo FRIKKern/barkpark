@@ -18,9 +18,23 @@ defmodule BarkparkWeb.ErrorJSON do
       %{error: %{code: ..., message: ..., hint: ..., request_id: ...}}
 
   * `500.json` (and any other unhandled fault) → `internal_error`, message is the
-    generic builder text — NO exception detail is ever leaked.
+    generic builder text plus the FAULT FAMILY in parentheses — the exception
+    module name, or an allowlisted exit head atom. NO exception *message*,
+    inspected reason, or stack detail is ever leaked.
   * `404.json` → `not_found`.
   * catch-all clause handles any `<status>.json` template name.
+
+  ## Why the family, and why the code never moves
+
+  Every crash-path 500 used to read `"unknown error"`, so an operator reading a
+  deploy log could not tell a pool blip from a code defect. The family is the
+  smallest disclosure that separates them (`DBConnection.ConnectionError` vs
+  `FunctionClauseError`) while leaking nothing caller-supplied.
+
+  The `code` stays byte-identical `"internal_error"`: the cloud deploy poller
+  (`BarkparkCloud.Sites.Deploy.transient_refusal?/1`) grants its retry grace by
+  matching the CODE, never the message. Moving the code — even to a "better"
+  one — turns that grace terminal. Only the message changes here.
   """
 
   alias Barkpark.Content.Errors
@@ -35,12 +49,44 @@ defmodule BarkparkWeb.ErrorJSON do
 
     env =
       template
-      |> reason_for_template()
+      |> reason_for_template(assigns)
       |> Errors.to_envelope(conn)
 
     %{error: Map.delete(env, :status)}
   end
 
-  defp reason_for_template("404" <> _), do: {:error, :not_found}
-  defp reason_for_template(_), do: {:error, :unknown}
+  defp reason_for_template("404" <> _, _assigns), do: {:error, :not_found}
+
+  defp reason_for_template(_template, assigns) do
+    # A BINARY reason is carried verbatim as the message under the SAME
+    # `internal_error` code (Errors.build/1); anything else falls back to the
+    # generic builder text. Rendering with an empty assigns map (no fault in
+    # scope at all) therefore still says exactly "unknown error".
+    case fault_family(Map.get(assigns, :kind), Map.get(assigns, :reason)) do
+      nil -> {:error, :unknown}
+      family -> {:error, "unknown error (#{family})"}
+    end
+  end
+
+  # RenderErrors passes `:kind` alongside `:reason`, and the two are NOT
+  # interchangeable: for `:error` it has already run `Exception.normalize/3`, so
+  # the reason is an exception STRUCT, while `:exit` and `:throw` hand over a
+  # BARE TERM. Branching on the kind is what keeps this function total — a
+  # struct-field read against a bare term would raise inside the error renderer
+  # itself, the one place a raise costs the client its response entirely.
+  # (No unwrap step for Plug.Conn.WrapperError: RenderErrors destructures it
+  # before the view is ever called, so the inner exception is what arrives.)
+  defp fault_family(_kind, nil), do: nil
+  defp fault_family(:error, %{__struct__: mod}), do: inspect(mod)
+  defp fault_family(:exit, reason), do: exit_family(reason)
+  defp fault_family(_kind, _reason), do: nil
+
+  # An exit payload is caller data (`GenServer.call` argument lists ride in the
+  # tail), so only a fixed allowlist of HEAD atoms is ever spoken; anything else
+  # degrades to the bare word "exit".
+  @exit_heads [:timeout, :noproc, :noconnection, :shutdown, :killed]
+
+  defp exit_family({head, _payload}) when head in @exit_heads, do: "exit: #{head}"
+  defp exit_family(head) when head in @exit_heads, do: "exit: #{head}"
+  defp exit_family(_other), do: "exit"
 end

@@ -65,6 +65,23 @@ type onrampWriteResult struct {
 	Target  string         `json:"target"`
 	Actions []onrampAction `json:"actions"`
 	DryRun  bool           `json:"dryRun,omitempty"`
+	// Partial is set ONLY when a merge error stopped the run mid-loop: the honest
+	// receipt for a partial write — how many of how many files landed, which file
+	// failed, and that a re-run heals. nil (omitted) on a clean run.
+	Partial *onrampPartial `json:"partial,omitempty"`
+}
+
+// onrampPartial is the machine-readable partial-write receipt: on a mid-loop
+// failure, earlier files are already committed and NOT rolled back (there is no
+// cross-file transaction). Because every per-file merge is idempotent and atomic,
+// re-running the same command after fixing the failing file heals the rest —
+// already-written files report 'unchanged'. Heals is always true here; it names
+// the property so a machine consumer need not infer it.
+type onrampPartial struct {
+	Written    int    `json:"written"`
+	Total      int    `json:"total"`
+	FailedPath string `json:"failedPath"`
+	Heals      bool   `json:"heals"`
 }
 
 // runOnrampWrite performs the safe JSON merge for every file in the spec and
@@ -77,18 +94,33 @@ type onrampWriteResult struct {
 func runOnrampWrite(out *writer, spec onrampSpec, force, dryRun bool) int {
 	var actions []onrampAction
 	var failed error
+	var failedPath string
 	for _, f := range spec.Files {
 		act, err := mergeOnrampFile(f, force, dryRun)
 		if err != nil {
 			failed = err
+			failedPath = f.Path
 			actions = append(actions, onrampAction{Path: f.Path, Action: "error", Note: err.Error()})
 			break
 		}
 		actions = append(actions, act)
 	}
 
+	// On a mid-loop failure the earlier files are already committed (no cross-file
+	// transaction). The receipt must not lie about that: it names how many of how
+	// many landed, which file failed, and that a re-run heals the rest.
+	var partial *onrampPartial
+	if failed != nil {
+		partial = &onrampPartial{
+			Written:    onrampWrittenCount(actions),
+			Total:      len(spec.Files),
+			FailedPath: failedPath,
+			Heals:      true,
+		}
+	}
+
 	if out.machineOut() {
-		out.renderJSON(onrampWriteResult{Target: spec.Target, Actions: actions, DryRun: dryRun})
+		out.renderJSON(onrampWriteResult{Target: spec.Target, Actions: actions, DryRun: dryRun, Partial: partial})
 		if failed != nil {
 			return exitGeneric
 		}
@@ -111,6 +143,12 @@ func runOnrampWrite(out *writer, spec onrampSpec, force, dryRun bool) int {
 	if failed != nil {
 		out.outf("")
 		out.userErr("onramp --write failed: %v", failed)
+		// Honest partial-write receipt: name N of M written + the failing file +
+		// that a re-run heals (per-file merges are idempotent + atomic).
+		out.outf("")
+		out.outf("# partial write: %d of %d files written before %s failed.", partial.Written, partial.Total, failedPath)
+		out.outf("# the writes above are committed and NOT rolled back; per-file merges are idempotent and atomic,")
+		out.outf("# so once %s is fixed, re-running `bp onramp %s --write` heals the rest (already-written files report 'unchanged').", failedPath, spec.Target)
 		return exitGeneric
 	}
 	if onrampAnySkipped(actions) {
@@ -136,6 +174,19 @@ func onrampAnySkipped(actions []onrampAction) bool {
 		}
 	}
 	return false
+}
+
+// onrampWrittenCount reports how many files actually reached disk — 'created' or
+// 'updated' actions. 'unchanged' and 'skipped' touched no bytes, and the 'error'
+// row is the failure itself, so none of those count toward a partial-write total.
+func onrampWrittenCount(actions []onrampAction) int {
+	n := 0
+	for _, a := range actions {
+		if a.Action == "created" || a.Action == "updated" {
+			n++
+		}
+	}
+	return n
 }
 
 // mergeOnrampFile dispatches one file by its stamped merge kind. dryRun (the
@@ -527,10 +578,19 @@ func desiredServerEntry(f onrampFile) (json.RawMessage, error) {
 	return entry, nil
 }
 
+// onrampUTF8BOM is the UTF-8 byte-order mark (EF BB BF). Windows editors (Notepad, some
+// VS Code / Cursor configurations) prepend it to files they save; Go's json
+// decoder does NOT skip it and rejects the otherwise-valid file with "invalid
+// character 'ï'". Stripping it at the parse boundary (BP-ONB-12) is what lets a
+// Windows-edited Cursor/VS Code mcp.json merge instead of bricking onboarding.
+var onrampUTF8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 // unmarshalObject parses raw JSON into an ordered-agnostic key→RawMessage map,
 // giving a clear error tied to what was being parsed. A nil map (from `null`) is
-// normalised to an empty map so callers can insert into it.
+// normalised to an empty map so callers can insert into it. A leading UTF-8 BOM
+// is tolerated (stripped before decode) so Windows-edited config files parse.
 func unmarshalObject(raw []byte, what string) (map[string]json.RawMessage, error) {
+	raw = bytes.TrimPrefix(raw, onrampUTF8BOM)
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, fmt.Errorf("parse %s as a JSON object: %w", what, err)
@@ -716,6 +776,20 @@ func mergeMarkdownFile(f onrampFile, force, dryRun bool) (onrampAction, error) {
 		}, nil
 	}
 
+	// No markers at all: this is the APPEND path. Before stacking Barkpark's
+	// "all task tracking uses Barkpark" block onto the file, guard against an
+	// existing competing tracker mandate (BP-ONB-14) — appending under a "log
+	// every task in Jira" line would leave the agent with two mutually exclusive
+	// authoritative policies. Warn (skip, --force hint) instead of silently
+	// creating that contradiction; --force appends anyway.
+	if tracker := competingTrackerMandate(text); tracker != "" && !force {
+		return onrampAction{
+			Path:   f.Path,
+			Action: "skipped",
+			Note:   fmt.Sprintf("this file already mandates %q for task tracking — appending Barkpark's block would leave two competing tracker mandates; re-run with --force to append anyway", tracker),
+		}, nil
+	}
+
 	// No markers at all: append the block after a blank-line separator, preserving
 	// every existing byte verbatim (a consumer's own AGENTS.md content).
 	buf := append([]byte{}, existing...)
@@ -728,4 +802,54 @@ func mergeMarkdownFile(f onrampFile, force, dryRun bool) (onrampAction, error) {
 		return onrampAction{}, err
 	}
 	return onrampAction{Path: f.Path, Action: "updated"}, nil
+}
+
+// competingTrackerNames are third-party task/issue trackers whose appearance in a
+// mandate line means the file already declares an authoritative task-tracking
+// policy. "beads" is included deliberately: it is Barkpark's own RETIRED
+// predecessor, so a stale "track everything in beads" line is exactly the kind of
+// contradiction BP-ONB-14 exists to catch.
+var competingTrackerNames = []string{
+	"jira", "linear", "asana", "trello", "clickup", "shortcut",
+	"todoist", "basecamp", "youtrack", "pivotal tracker",
+	"github issues", "gh issues", "beads",
+}
+
+// trackerMandateWords are the imperative / universal words that turn a line
+// merely MENTIONING a tracker into a MANDATE to use it. Requiring one on the SAME
+// line as the tracker name keeps the heuristic tight enough that prose which only
+// name-drops a tool without an obligation is far less likely to trip it. The
+// trailing spaces avoid matching inside longer words ("usual", "wall").
+var trackerMandateWords = []string{
+	"all ", "must ", "always ", "only ", "every ", "use ", "track",
+}
+
+// competingTrackerMandate scans prose for a single line that BOTH names a
+// competing tracker AND reads as a mandate to use it, returning that tracker's
+// name ("" when none). It is the guard mergeMarkdownFile consults on the
+// no-markers APPEND path: silently stacking Barkpark's tracker block under a "log
+// every task in Jira" line makes an agent's instructions self-contradictory, so
+// the merge warns (skips with a --force hint) instead of appending blind.
+// Detection is line-scoped and case-insensitive; it fails toward WARNING (a rare
+// false positive is a skip the user clears with --force, never lost data).
+func competingTrackerMandate(text string) string {
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.ToLower(raw)
+		mandate := false
+		for _, w := range trackerMandateWords {
+			if strings.Contains(line, w) {
+				mandate = true
+				break
+			}
+		}
+		if !mandate {
+			continue
+		}
+		for _, name := range competingTrackerNames {
+			if strings.Contains(line, name) {
+				return name
+			}
+		}
+	}
+	return ""
 }

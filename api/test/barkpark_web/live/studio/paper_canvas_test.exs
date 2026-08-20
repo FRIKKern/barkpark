@@ -1867,8 +1867,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       reader_btn = button_decls(reader, ".bp-paper-surface .bp-button")
       reader_primary = button_decls(reader, ".bp-paper-surface .bp-button--primary")
 
-      # distrust-vacuous-green: the reader rules are real + non-empty.
-      assert reader_btn =~ "border: 2px solid var(--paper-accent)"
+      # distrust-vacuous-green: the reader rules are real + non-empty. The frame
+      # reads its weight from the rule ladder (space.rule → --bp-rule-hairline);
+      # it was a 2px literal until the heavy-rule census ruled that the
+      # structural weight belongs to a section boundary alone, and a button
+      # outline is chrome.
+      assert reader_btn =~ "border: var(--bp-rule-hairline) solid var(--paper-accent)"
       assert reader_primary =~ "background: var(--paper-accent)"
 
       for {sink, path} <- [{"styles.css", @bundle_css}, {"root.html.heex", @heex_css}] do

@@ -284,6 +284,103 @@ defmodule BarkparkWeb.BulldocsIngestWallTest do
     assert Content.get_paper(slug, @dataset).status == "published"
   end
 
+  # ── the epic-quality wall reaches the wire (deploy-reliability D541/D542) ───
+  #
+  # AuthoringWall.enforce/5 returns SIX rejection shapes; the ingest controller
+  # hand-routed only four and fell into a BARE `{:error, changeset}` catch-all,
+  # which handed the wall TUPLE to Ecto.Changeset.traverse_errors/2 (one clause,
+  # `%Changeset{}`) → FunctionClauseError → 500 `unknown error`. 33 of 299
+  # distinct trailing-24h 500s on guerrilla's live slot were this one defect,
+  # and it 500s the epic cycle's OWN wave-Paper publish. The wall had ALREADY
+  # computed the named failures; the wire must carry them.
+
+  defp epic_tags do
+    LabelFixtures.register_tags!(@dataset, ["epic-cycle-wave-paper"])
+    %{"tags" => tags, "description" => description} = labels()
+    [strongest | rest] = tags
+
+    %{
+      "tags" => [Map.put(strongest, "tag", "epic-cycle-wave-paper") | rest],
+      "description" => description
+    }
+  end
+
+  test "a canonical Epic Paper that fails the quality floor is a 422 naming the failures, NOT a 500",
+       %{conn: conn} do
+    slug = "ingest-wall-epic-quality-#{System.unique_integer([:positive])}"
+    %{"tags" => tags, "description" => description} = epic_tags()
+
+    # No ingress, no orientation block, two meaningful blocks: the exact
+    # opening-shape refusal EpicQuality computes. Before the fix this request
+    # raised FunctionClauseError in Ecto.Changeset.traverse_errors/2.
+    conn =
+      authed(conn)
+      |> post(@path, %{
+        "slug" => slug,
+        "blocks" => [
+          title_block("Epic quality floor paper #{System.unique_integer([:positive])}"),
+          %{
+            "id" => "p1",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "A body with no honest opening."}]
+          }
+        ],
+        "tags" => tags,
+        "description" => description
+      })
+
+    resp = json_response(conn, 422)
+    assert resp["error"]["code"] == "invalid_epic_paper_quality"
+    failures = resp["error"]["details"]["failures"]
+    assert is_list(failures) and failures != []
+    assert "opening_missing_ingress" in failures
+    assert "opening_missing_orientation" in failures
+    refute Content.get_paper(slug, @dataset)
+  end
+
+  test "the wave-30 shape: 17 top-level headings answers 422 with top_level_heading_overload", %{
+    conn: conn
+  } do
+    slug = "ingest-wall-epic-headings-#{System.unique_integer([:positive])}"
+    %{"tags" => tags, "description" => description} = epic_tags()
+
+    # 1 title h1 + 16 level-2 headings = 17 top-level headings, one past
+    # EpicQuality's @max_top_level_headings (16).
+    headings =
+      for i <- 1..16 do
+        %{"id" => "h#{i}", "type" => "heading", "level" => 2, "text" => "Section #{i}"}
+      end
+
+    blocks =
+      [
+        title_block("Heading overload paper #{System.unique_integer([:positive])}"),
+        %{
+          "id" => "ingress",
+          "type" => "ingress",
+          "content" => [%{"type" => "text", "value" => "Why this wave exists, in one breath."}]
+        },
+        %{
+          "id" => "stats",
+          "type" => "stats",
+          "items" => [%{"label" => "sections", "value" => "16"}]
+        }
+      ] ++ headings
+
+    conn =
+      authed(conn)
+      |> post(@path, %{
+        "slug" => slug,
+        "blocks" => blocks,
+        "tags" => tags,
+        "description" => description
+      })
+
+    resp = json_response(conn, 422)
+    assert resp["error"]["code"] == "invalid_epic_paper_quality"
+    assert "top_level_heading_overload" in resp["error"]["details"]["failures"]
+    refute Content.get_paper(slug, @dataset)
+  end
+
   # ── spacing_norm (reader-owned section rhythm) ──────────────────────────────
   #
   # The pair below is the mutation proof: the SAME sectioned article is clean

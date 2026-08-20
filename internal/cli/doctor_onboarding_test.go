@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -444,21 +445,23 @@ func TestWhoamiInstanceReadsServerEntryIdentity(t *testing.T) {
 	}
 }
 
-// TestOnboardingInstancePrefersLocalOffline is the D15 offline win: when the
-// active target's saved ServerEntry carries the stamped InstanceID (wave-2
-// slice-1), onboardingInstance resolves the identity from local config ALONE
-// (Source "local") and NEVER reaches the cross-team fleet — so the doctor receipt
-// names the instance offline, round-trip-free. A Cloud token is deliberately
-// present so the fleet branch WOULD fire if local-first were broken; the
-// fail-if-called fake is the tripwire proving it does not.
+// TestOnboardingInstancePrefersLocalOffline is the D15 offline win: with NO Cloud
+// token (the genuinely-offline / self-hosted condition), a saved ServerEntry
+// carrying the stamped InstanceID resolves the identity from local config ALONE
+// (Source "local") and NEVER touches the network — neither the identity fetch nor
+// the D39 alias-shadow advisory (which is token-gated). The fail-if-called fake is
+// the tripwire proving no round-trip happens. (The token-present path — identity
+// still local, advisory compare fires fail-open — is proven by the alias-shadow
+// tests below.)
 func TestOnboardingInstancePrefersLocalOffline(t *testing.T) {
 	const server = "https://gyldendal.barkpark.cloud"
 	const alias = "https://cms.gyldendal.no"
 
 	cfg := &Config{
-		Server:     server,
-		CloudToken: onbCloudSecret, // HasCloudToken() → true: the fleet branch is armed
-		CloudTeam:  "active-team",
+		Server:    server,
+		CloudTeam: "active-team",
+		// No CloudToken → HasCloudToken() is false: the offline path never touches
+		// the network, and the token-gated advisory compare stays dormant.
 		KnownServers: []ServerEntry{
 			{Server: server, InstanceID: "inst-gyld", Aliases: []string{alias}, Team: "Gyldendal"},
 		},
@@ -487,8 +490,145 @@ func TestOnboardingInstancePrefersLocalOffline(t *testing.T) {
 	if inst.Team != "Gyldendal" {
 		t.Fatalf("instance team = %q, want the entry's owning team Gyldendal", inst.Team)
 	}
+	if inst.AliasShadow != "" {
+		t.Fatalf("alias-shadow advisory = %q, want empty on the no-token offline path", inst.AliasShadow)
+	}
 	if fleetCalls != 0 {
 		t.Fatalf("fleet seam invoked %d time(s), want 0 — the offline path must not touch the network", fleetCalls)
+	}
+}
+
+// TestOnboardingAliasShadowAdvisoryFires is the D39 compare-only reconcile: a
+// local entry stamped with an InstanceID whose ONLY known host is the OLD one,
+// against a fleet that has renamed that same instance's canonical target (matched
+// by Barkpark.ID equality, never URL). The receipt keeps the LOCAL identity
+// (Source "local") but adds an advisory naming the new canonical target and the
+// `bp connect <newURL>` remedy — and mutates nothing.
+func TestOnboardingAliasShadowAdvisoryFires(t *testing.T) {
+	const oldHost = "https://old.gyldendal.barkpark.cloud"
+	const newHost = "https://new.gyldendal.barkpark.cloud"
+
+	cfg := &Config{
+		Server:     oldHost,
+		CloudToken: onbCloudSecret, // HasCloudToken() → the compare is armed
+		KnownServers: []ServerEntry{
+			{Server: oldHost, InstanceID: "inst-gyld", Team: "Gyldendal"},
+		},
+	}
+	t.Cleanup(swapVar(&onboardingListFleet, func(c *Config) ([]cloudclient.Barkpark, error) {
+		return []cloudclient.Barkpark{{
+			ID:   "inst-gyld", // SAME InstanceID — matched by ID equality, not URL
+			Name: "gyldendal",
+			URL:  newHost, // the renamed canonical target
+			Host: "new.gyldendal.barkpark.cloud",
+		}}, nil
+	}))
+
+	inst := onboardingInstance(cfg, manifest.Context{Server: oldHost})
+	if inst == nil {
+		t.Fatal("onboardingInstance returned nil for an active target carrying a stamped identity")
+	}
+	if inst.Source != "local" {
+		t.Fatalf("instance source = %q, want \"local\" — the advisory must not override local identity", inst.Source)
+	}
+	if inst.ID != "inst-gyld" {
+		t.Fatalf("instance ID = %q, want the stamped inst-gyld", inst.ID)
+	}
+	if inst.AliasShadow == "" {
+		t.Fatal("expected an alias-shadow advisory when the fleet renamed the canonical target away from local aliases")
+	}
+	if !strings.Contains(inst.AliasShadow, newHost) {
+		t.Fatalf("advisory %q must name the new canonical target %q", inst.AliasShadow, newHost)
+	}
+	if !strings.Contains(inst.AliasShadow, "bp connect "+newHost) {
+		t.Fatalf("advisory %q must name the remedy `bp connect %s`", inst.AliasShadow, newHost)
+	}
+	// The advisory is compare-only: local config is untouched (no new alias folded
+	// in). Re-reading the saved entry proves no mutation happened.
+	if got := cfg.KnownServers[0].Aliases; len(got) != 0 {
+		t.Fatalf("KnownServers[0].Aliases = %v, want empty — the advisory must NOT mutate config", got)
+	}
+}
+
+// TestOnboardingAliasShadowFailOpen proves the fail-open contract across all three
+// silent conditions — no Cloud token, a fleet error, and no fleet row matching the
+// InstanceID — plus the no-shadow case where the fleet's canonical target is
+// already a known local alias. In every case the identity resolves local-first and
+// NO advisory appears (the receipt stays byte-identical to the baseline).
+func TestOnboardingAliasShadowFailOpen(t *testing.T) {
+	const host = "https://gyldendal.barkpark.cloud"
+	base := func() *Config {
+		return &Config{
+			Server: host,
+			KnownServers: []ServerEntry{
+				{Server: host, InstanceID: "inst-gyld", Team: "Gyldendal"},
+			},
+		}
+	}
+
+	cases := []struct {
+		name  string
+		cfg   func() *Config
+		fleet func(*Config) ([]cloudclient.Barkpark, error)
+	}{
+		{
+			name: "no cloud token",
+			cfg:  base, // HasCloudToken() false
+			fleet: func(*Config) ([]cloudclient.Barkpark, error) {
+				t.Errorf("fleet must not be fetched without a Cloud token")
+				return nil, nil
+			},
+		},
+		{
+			name: "fleet error",
+			cfg: func() *Config {
+				c := base()
+				c.CloudToken = onbCloudSecret
+				return c
+			},
+			fleet: func(*Config) ([]cloudclient.Barkpark, error) {
+				return nil, errors.New("fleet unreachable")
+			},
+		},
+		{
+			name: "no matching row",
+			cfg: func() *Config {
+				c := base()
+				c.CloudToken = onbCloudSecret
+				return c
+			},
+			fleet: func(*Config) ([]cloudclient.Barkpark, error) {
+				return []cloudclient.Barkpark{{ID: "inst-other", URL: "https://other.barkpark.cloud"}}, nil
+			},
+		},
+		{
+			name: "canonical target already a known alias",
+			cfg: func() *Config {
+				c := base()
+				c.CloudToken = onbCloudSecret
+				return c
+			},
+			fleet: func(*Config) ([]cloudclient.Barkpark, error) {
+				// Same ID, and its canonical target IS the active local URL → no shadow.
+				return []cloudclient.Barkpark{{ID: "inst-gyld", URL: host, Host: "gyldendal.barkpark.cloud"}}, nil
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(swapVar(&onboardingListFleet, tc.fleet))
+			inst := onboardingInstance(tc.cfg(), manifest.Context{Server: host})
+			if inst == nil {
+				t.Fatal("onboardingInstance returned nil for an active target")
+			}
+			if inst.Source != "local" || inst.ID != "inst-gyld" {
+				t.Fatalf("identity = %+v, want local inst-gyld", inst)
+			}
+			if inst.AliasShadow != "" {
+				t.Fatalf("alias-shadow advisory = %q, want empty (fail-open)", inst.AliasShadow)
+			}
+		})
 	}
 }
 
@@ -512,6 +652,206 @@ func TestWhoamiInstanceTeamFallsBackToCloudTeam(t *testing.T) {
 	if inst.Team != "active-team" {
 		t.Fatalf("instance team = %q, want the cfg.CloudTeam fallback", inst.Team)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The CLI-freshness leg on the whoami spine (charter D28): cache-mediated and
+// NETWORK-FREE. whoami reports the SAME tri-state the doctor renders, but reads
+// ONLY the on-disk release cache the doctor refreshes — it must never make the
+// uncached 10s HTTP GET on its always-run hot path.
+// ---------------------------------------------------------------------------
+
+// TestWhoamiCLIFreshnessIsNetworkFree is the load-bearing proof: with a COLD
+// cache and the network release resolver rigged to FAIL LOUDLY if invoked (plus
+// an unroutable release base), `bp whoami -o json` still returns sub-second,
+// carries the additive `cli` leg as an honest "unreported" pointing at
+// `bp doctor`, and leaks no bearer. A whoami that paid the 10s GET would blow the
+// deadline and trip the tripwire.
+func TestWhoamiCLIFreshnessIsNetworkFree(t *testing.T) {
+	withTempConfigHome(t)       // cold cache: nothing written yet
+	withCLIVersion(t, "1.14.0") // non-dev, so only the cache could yield a reading
+
+	// Tripwire: whoami must never call the network release resolver.
+	t.Cleanup(swapVar(&onboardingLatestRelease, func() (string, error) {
+		t.Error("whoami invoked the network release resolver — the freshness leg must read the cache only")
+		return "", errors.New("network resolver must not be reached on the whoami path")
+	}))
+	// Belt-and-suspenders: point the release feed at an unroutable base so any
+	// stray resolve would hang on the 10s timeout, not answer instantly.
+	t.Setenv("BARKPARK_CLI_RELEASE_BASE", "http://127.0.0.1:1/")
+
+	// Seed a Cloud session whose token must not leak.
+	if err := SaveConfig(&Config{CloudURL: "http://127.0.0.1:1", CloudToken: onbCloudSecret, CloudTeam: "gyldendal"}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	// An unreachable content target (connection refused is instant) so whoami's
+	// tool-call proof is skipped and the run stays fast and focused.
+	ctx := manifest.Context{Server: "http://127.0.0.1:1", Token: onbContentSecret, Workspace: "default", Project: "default", Dataset: "production"}
+
+	start := time.Now()
+	stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
+		return runWhoami(out, globals{yes: true}, ctx)
+	})
+	elapsed := time.Since(start)
+	if code != exitOK {
+		t.Fatalf("runWhoami exit = %d\n%s", code, stdout)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("whoami took %s — the freshness leg must not pay a network round-trip (sub-second expected)", elapsed)
+	}
+	if strings.Contains(stdout, onbCloudSecret) || strings.Contains(stdout, onbContentSecret) {
+		t.Fatalf("whoami spine leaked a bearer token:\n%s", stdout)
+	}
+
+	var env struct {
+		CLI struct {
+			Installed string `json:"installed"`
+			Latest    string `json:"latest"`
+			Status    string `json:"status"`
+			UpToDate  *bool  `json:"up_to_date"`
+			Detail    string `json:"detail"`
+		} `json:"cli"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("unmarshal whoami spine: %v\n%s", err, stdout)
+	}
+	if env.CLI.Status != onbCLIUnreported {
+		t.Fatalf("cold-cache cli leg status = %q, want %q", env.CLI.Status, onbCLIUnreported)
+	}
+	if env.CLI.UpToDate != nil {
+		t.Fatalf("cold-cache cli leg up_to_date = %v, want null (no reading)", *env.CLI.UpToDate)
+	}
+	if !strings.Contains(env.CLI.Detail, "bp doctor") {
+		t.Fatalf("cold-cache cli leg detail = %q, want it to name the `bp doctor` refresh remedy", env.CLI.Detail)
+	}
+}
+
+// TestWhoamiCLIFreshnessColdCacheUnreported: with no cache and a tripwire
+// resolver, the leg reports unreported without touching the network. Direct on
+// the unit so the read-only contract is pinned without the whoami plumbing.
+func TestWhoamiCLIFreshnessColdCacheUnreported(t *testing.T) {
+	withTempConfigHome(t)
+	withCLIVersion(t, "1.14.0")
+	t.Cleanup(swapVar(&onboardingLatestRelease, func() (string, error) {
+		t.Error("whoamiCLIFreshness invoked the network release resolver — it must read the cache only")
+		return "", errors.New("must not be reached")
+	}))
+
+	c := whoamiCLIFreshness()
+	if c.Status != onbCLIUnreported || c.UpToDate != nil {
+		t.Fatalf("cold cache leg = %+v, want unreported + nil up_to_date", c)
+	}
+	if !strings.Contains(c.Detail, "bp doctor") {
+		t.Fatalf("cold cache detail = %q, want the `bp doctor` remedy", c.Detail)
+	}
+}
+
+// TestWhoamiCLIFreshnessReadsFreshCache: a fresh cache yields a real reading —
+// behind when installed < cached latest, up-to-date when installed >= it.
+func TestWhoamiCLIFreshnessReadsFreshCache(t *testing.T) {
+	withTempConfigHome(t)
+
+	// Behind: installed 1.14.0, cached latest 1.15.0.
+	withCLIVersion(t, "1.14.0")
+	if err := writeReleaseCache("1.15.0"); err != nil {
+		t.Fatalf("writeReleaseCache: %v", err)
+	}
+	c := whoamiCLIFreshness()
+	if c.Status != onbCLIBehind || c.Latest != "1.15.0" {
+		t.Fatalf("behind leg = %+v, want status behind latest 1.15.0", c)
+	}
+	if c.UpToDate == nil || *c.UpToDate {
+		t.Fatalf("behind leg up_to_date = %v, want a taken reading of false", c.UpToDate)
+	}
+
+	// Up-to-date: installed now equals the cached latest.
+	withCLIVersion(t, "1.15.0")
+	c = whoamiCLIFreshness()
+	if c.Status != onbCLIUpToDate {
+		t.Fatalf("up-to-date leg = %+v, want status up-to-date", c)
+	}
+	if c.UpToDate == nil || !*c.UpToDate {
+		t.Fatalf("up-to-date leg up_to_date = %v, want a taken reading of true", c.UpToDate)
+	}
+}
+
+// TestWhoamiCLIFreshnessStaleCacheUnreported: a cache older than the TTL is
+// treated as absent — an honest unreported, never a day-stale verdict.
+func TestWhoamiCLIFreshnessStaleCacheUnreported(t *testing.T) {
+	withTempConfigHome(t)
+	withCLIVersion(t, "1.14.0")
+
+	path, err := releaseCachePath()
+	if err != nil {
+		t.Fatalf("releaseCachePath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	stale := releaseCache{Latest: "1.15.0", CheckedAt: time.Now().Add(-releaseCacheTTL - time.Hour)}
+	b, _ := json.Marshal(stale)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatalf("write stale cache: %v", err)
+	}
+
+	c := whoamiCLIFreshness()
+	if c.Status != onbCLIUnreported || c.UpToDate != nil {
+		t.Fatalf("stale cache leg = %+v, want unreported (a stale reading must not become a verdict)", c)
+	}
+	if !strings.Contains(c.Detail, "bp doctor") {
+		t.Fatalf("stale cache detail = %q, want the `bp doctor` remedy", c.Detail)
+	}
+}
+
+// TestWhoamiCLIFreshnessDevBuildUnreported: a dev build cannot be compared, so
+// the leg reports unreported and names the dev remedy — regardless of any cache.
+func TestWhoamiCLIFreshnessDevBuildUnreported(t *testing.T) {
+	withTempConfigHome(t)
+	withCLIVersion(t, "dev")
+	if err := writeReleaseCache("1.15.0"); err != nil { // even WITH a fresh cache
+		t.Fatalf("writeReleaseCache: %v", err)
+	}
+	c := whoamiCLIFreshness()
+	if c.Status != onbCLIUnreported || c.UpToDate != nil {
+		t.Fatalf("dev build leg = %+v, want unreported", c)
+	}
+	if !strings.Contains(c.Detail, "make cli-install") {
+		t.Fatalf("dev build detail = %q, want the dev remedy `git pull && make cli-install`", c.Detail)
+	}
+}
+
+// TestDoctorRefreshesCacheForWhoami is the composition proof: the network-bearing
+// doctor resolves the latest release and writes the cache, and a subsequent
+// network-free whoami reads THAT cache to render the same verdict — the two
+// surfaces share one truth without whoami ever leaving the process.
+func TestDoctorRefreshesCacheForWhoami(t *testing.T) {
+	_, ctx, _ := onbTestFixture(t) // swaps onboardingLatestRelease → "1.15.0", cliVersion 1.14.0
+
+	// Cold to start.
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("expected a cold cache before the doctor runs")
+	}
+
+	// The doctor's freshness leg pays the network cost and refreshes the cache.
+	if leg := onboardingCLIFreshness(); leg.Status != onbCLIBehind {
+		t.Fatalf("doctor cli leg = %+v, want behind (1.14.0 < 1.15.0)", leg)
+	}
+	rc, fresh := readReleaseCache()
+	if !fresh || rc.Latest != "1.15.0" {
+		t.Fatalf("cache after doctor = %+v fresh=%v, want fresh latest 1.15.0", rc, fresh)
+	}
+
+	// whoami now renders the same verdict from the cache alone. Rig the resolver
+	// as a tripwire to prove whoami does not re-resolve.
+	t.Cleanup(swapVar(&onboardingLatestRelease, func() (string, error) {
+		t.Error("whoami re-resolved the release over the network — it must read the doctor-refreshed cache")
+		return "", errors.New("must not be reached")
+	}))
+	c := whoamiCLIFreshness()
+	if c.Status != onbCLIBehind || c.Latest != "1.15.0" {
+		t.Fatalf("whoami leg after doctor refresh = %+v, want behind latest 1.15.0", c)
+	}
+	_ = ctx
 }
 
 // ---------------------------------------------------------------------------

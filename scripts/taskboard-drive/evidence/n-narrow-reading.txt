@@ -1,0 +1,23 @@
+
+  ──────────────────────────────────────────────────────────────── 
+ │ The drive harness goes hermetic — fixture-served, byte-        │
+ │ deterministic geometry proofs                                  │
+ │ ⠿ in_progress · P1 · C5/7 · task · epic-builder-the-drive-har… │
+ │                                                                │
+ │ criteria 2/5                                                   │
+ │   ✓ A dependency-free fixture server under scripts/taskboard-  │
+ │     drive/ serves the three-endpoint LIVE-pinned surface       │
+ │     (list, prime, streaming listen with a welcome frame) plus  │
+ │     the D115 in_progress filter route, and bp tasks pointed at │
+ │     it via BARKPARK_SERVER boots and paints the fixture corpus │
+ │     — the run transcript is quoted in evidence                 │
+ │     ↳ scripts/taskboard-drive/fixture/main.go (stdlib-only ne… │
+ │   ✓ drive.sh gains a hermetic mode that starts the fixture,    │
+ │     runs the churn-independent assert subset (the D118         │
+ │     geometry/grammar/file-state class) against it, DROPS the   │
+ │     CONN mask there, and asserts the literal live glyph in the │
+ │     header                                                     │
+ │     ↳ DRIVE_MODE=hermetic bash drive.sh -> 18 pass, 0 fail: f… │
+ │   ○ Two consecutive hermetic runs produce identical assert     │
+ │   ↓ more below                                                 │
+ jk move · enter open · esc back · space scroll · M mouse      

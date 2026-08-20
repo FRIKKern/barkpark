@@ -15,6 +15,16 @@ import (
 // ldflags-injected cliVersion at init; "dev" for plain go-build binaries.
 var BPVersion = "dev"
 
+// cloudLoginOrigin is the CONTROL-PLANE ORIGIN CONSTANT that arms the "Log in
+// with Barkpark Cloud" button on an instance's /login (deploy.sh persists it as
+// BARKPARK_CLOUD_URL; runtime.exs → :cloud_login_url; session_controller deep-
+// links to <origin>/#/instance-login?url=<this instance's own origin>). It is
+// NOT derived from PHX_SCHEME://DOMAIN — that would ship a self-referential
+// deep-link pointing the button back at the instance itself. It mirrors the
+// literal caddy.go's setEnvVarStep already stamps on NEW go-live provisions;
+// threading it here backfills the same value onto plain `bp setup deploy` runs.
+const cloudLoginOrigin = "https://barkpark.cloud"
+
 // executeDeploy deploys Barkpark to a server the operator already owns over SSH,
 // by streaming the repo's deploy.sh into `bash -s` on the remote with the
 // DOMAIN / PHX_SCHEME / BARKPARK_PLUGINS env the script reads.
@@ -54,6 +64,7 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 		"DOMAIN=" + plan.Domain,
 		"PHX_SCHEME=" + scheme,
 		"BARKPARK_SEED_PROFILE=" + profile,
+		"BARKPARK_CLOUD_URL=" + cloudLoginOrigin,
 	}
 	if profile == ProfileClean {
 		envParts = append(envParts, "BARKPARK_SEED_ADMIN_TOKEN=****")
@@ -79,6 +90,7 @@ func executeDeploy(plan SetupPlan, opts Options) error {
 			fmt.Fprintf(w, "      DOMAIN=%s\n", plan.Domain)
 			fmt.Fprintf(w, "      PHX_SCHEME=%s\n", scheme)
 			fmt.Fprintf(w, "      BARKPARK_SEED_PROFILE=%s\n", profile)
+			fmt.Fprintf(w, "      BARKPARK_CLOUD_URL=%s (arms \"Log in with Barkpark Cloud\" on /login)\n", cloudLoginOrigin)
 			if profile == ProfileClean {
 				fmt.Fprintf(w, "      BARKPARK_SEED_ADMIN_TOKEN=**** (generated at run time, never shown in a plan)\n")
 			}
@@ -233,7 +245,7 @@ func buildDeployPlan(plan SetupPlan, _ Options) (Plan, error) {
 		displayScript = fmt.Sprintf("deploy.sh (embedded in bp %s)", BPVersion)
 	}
 
-	envParts := []string{"DOMAIN=" + plan.Domain, "PHX_SCHEME=" + scheme, "BARKPARK_SEED_PROFILE=" + profile}
+	envParts := []string{"DOMAIN=" + plan.Domain, "PHX_SCHEME=" + scheme, "BARKPARK_SEED_PROFILE=" + profile, "BARKPARK_CLOUD_URL=" + cloudLoginOrigin}
 	if profile == ProfileClean {
 		envParts = append(envParts, "BARKPARK_SEED_ADMIN_TOKEN=****")
 	}
@@ -257,6 +269,7 @@ func buildDeployPlan(plan SetupPlan, _ Options) (Plan, error) {
 			"DOMAIN":                plan.Domain,
 			"PHX_SCHEME":            scheme,
 			"BARKPARK_SEED_PROFILE": profile,
+			"BARKPARK_CLOUD_URL":    cloudLoginOrigin,
 		},
 	}
 	if profile == ProfileClean {

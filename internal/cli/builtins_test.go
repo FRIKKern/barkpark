@@ -257,10 +257,12 @@ func TestBashCompletionVerbsStructural(t *testing.T) {
 		`task) __bpverbs="close next ready";;`,
 		`doc) __bpverbs="create delete get";;`,
 		`compgen -W "$__bpverbs $globals"`,
-		// position-3+ flag completion keyed on the "noun verb" pair
+		// position-3+ flag completion keyed on the "noun verb" pair. Flag tokens
+		// are untrusted, so they are single-quoted at assignment and matched
+		// manually — never handed to compgen -W, which would re-expand them.
 		`case "${COMP_WORDS[1]} ${COMP_WORDS[2]}" in`,
-		`"doc create") __bpflags="--publish --set";;`,
-		`compgen -W "$__bpflags $globals"`,
+		`"doc create") __bpflags='--publish --set';;`,
+		`for __bpword in $__bpflags $globals; do`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("bash script missing %q:\n%s", want, script)
@@ -275,7 +277,9 @@ func TestZshCompletionVerbsStructural(t *testing.T) {
 		`task) verbs=(close next ready);;`,
 		`compadd -- $verbs $globals`,
 		`case "${words[2]} ${words[3]}" in`,
-		`"doc create") flags=(--publish --set);;`,
+		// flag tokens are untrusted → each element single-quoted in the array
+		// literal (zsh command-substitutes an unquoted `flags=(...)` on assignment).
+		`"doc create") flags=('--publish' '--set');;`,
 		`compadd -- $flags $globals`,
 	} {
 		if !strings.Contains(script, want) {
@@ -349,6 +353,86 @@ func TestBashCompletionVerbExec(t *testing.T) {
 	outEmptyFlags := run(t, nil, nil, "doc create", 3)
 	if !strings.Contains(outEmptyFlags, "--dataset") {
 		t.Errorf("empty-flagMap position-3 should offer globals; COMPREPLY:\n%s", outEmptyFlags)
+	}
+}
+
+// TestBashCompletionFlagInjectionNeutralized is the mutation-proof for the flag
+// path: it plants a HOSTILE flag name carrying a `$(...)` command substitution
+// (the shape a poisoned manifest cache would deliver, since manifest.Parse's
+// safeName never validates Flag.Name), generates the bash script, and drives a
+// REAL bash to `bp doc create --<TAB>`. If the emitter fails to single-quote the
+// token, the case-body assignment (or a compgen -W re-expansion) runs the payload
+// and the sentinel file appears. The assertion is on the sentinel's ABSENCE and
+// on the raw payload bytes SURVIVING as a literal completion candidate — a correct
+// single-quote fix preserves the `$(...)` bytes while neutralizing them, so this
+// is deliberately NOT "the payload bytes are gone".
+func TestBashCompletionFlagInjectionNeutralized(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	dir := t.TempDir()
+	// `$(>pwned)` truncates/creates ./pwned via a bare redirection — a side effect
+	// with NO space, so the neutralized token also survives as ONE literal
+	// candidate (a spaced payload would word-split and muddy the second assertion).
+	payload := "--x$(>pwned)"
+	flagMap := map[string][]string{"doc create": {payload}}
+	script := bashCompletionScript(strings.Join(completionNouns, " "),
+		strings.Join(completionGlobals, " "), sampleVerbMap, flagMap)
+	harness := script + "\nCOMP_WORDS=(bp doc create '')\nCOMP_CWORD=3\n" +
+		"_bp_complete\nprintf '%s\\n' \"${COMPREPLY[@]}\"\n"
+	cmd := exec.Command(bashPath, "-c", harness)
+	cmd.Dir = dir
+	outb, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash exec failed: %v\n--- harness ---\n%s\n--- output ---\n%s", err, harness, outb)
+	}
+	if _, statErr := os.Stat(dir + "/pwned"); statErr == nil {
+		t.Fatalf("INJECTION: hostile flag %q executed on TAB — sentinel ./pwned was created;\nscript:\n%s", payload, script)
+	}
+	// The literal payload bytes must survive as a neutralized candidate (proves the
+	// completion ran and offered the token, not that it was silently dropped).
+	if !strings.Contains(string(outb), payload) {
+		t.Errorf("expected neutralized literal %q among candidates; COMPREPLY:\n%s", payload, outb)
+	}
+}
+
+// TestZshCompletionFlagInjectionQuoted proves the zsh emitter wraps a hostile flag
+// token in single quotes INSIDE the `flags=(...)` array literal, so zsh's
+// assignment-time command substitution can never fire. Structural assertion (the
+// quote wrapping), not a payload-absence substring check.
+func TestZshCompletionFlagInjectionQuoted(t *testing.T) {
+	payload := "--x$(touch pwned)"
+	flagMap := map[string][]string{"doc create": {payload}}
+	script := zshCompletionScript("doc", "--dataset", sampleVerbMap, flagMap)
+	want := `flags=('--x$(touch pwned)')`
+	if !strings.Contains(script, want) {
+		t.Errorf("zsh emitter did not single-quote hostile flag token; want %q in:\n%s", want, script)
+	}
+	// An embedded single quote must be escaped via the '\'' splice, not left bare.
+	q := map[string][]string{"doc create": {"--a'b"}}
+	s2 := zshCompletionScript("doc", "--dataset", sampleVerbMap, q)
+	if !strings.Contains(s2, `flags=('--a'\''b')`) {
+		t.Errorf("zsh emitter did not escape embedded single quote; got:\n%s", s2)
+	}
+}
+
+// TestFishCompletionFlagInjectionQuoted proves the fish emitter escapes `'` and
+// `\` inside the single-quoted `-a '...'` list, so a hostile token cannot break
+// out of the quote. fish single quotes make `$`/`(...)` literal, so those need no
+// escaping and are asserted to survive verbatim (neutralized), not to be removed.
+func TestFishCompletionFlagInjectionQuoted(t *testing.T) {
+	// `$(...)` is inert inside fish single quotes → preserved literally.
+	flagMap := map[string][]string{"doc create": {"--x$(touch pwned)"}}
+	script := fishCompletionScript("doc", "--dataset", sampleVerbMap, flagMap)
+	if !strings.Contains(script, `-a '--x$(touch pwned)'`) {
+		t.Errorf("fish emitter mangled inert token; got:\n%s", script)
+	}
+	// An embedded single quote must become \' so it cannot terminate the -a string.
+	q := map[string][]string{"doc create": {`--a'b`, `--c\d`}}
+	s2 := fishCompletionScript("doc", "--dataset", sampleVerbMap, q)
+	if !strings.Contains(s2, `-a '--a\'b --c\\d'`) {
+		t.Errorf("fish emitter did not escape ' and \\; got:\n%s", s2)
 	}
 }
 

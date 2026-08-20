@@ -51,7 +51,7 @@ func innerWidth(ctx RenderCtx) int {
 // ── diagram (Mermaid) ───────────────────────────────────────────────────────
 // Mirrors compose_block(diagram)'s EMAIL-mode degradation: a bordered box with
 // a header naming the detected Mermaid kind, the complete wrapped source, and a
-// "Figure N." caption noting the limit. The article-mode `<pre class="mermaid">`
+// caption noting the limit. The article-mode `<pre class="mermaid">`
 // browser render has no full terminal analogue, so the box is the honest
 // complete-source ceiling for kinds the native renderer cannot draw.
 //
@@ -65,7 +65,6 @@ func innerWidth(ctx RenderCtx) int {
 type diagramRenderer struct{}
 
 func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
-	n := ctx.nextFigure()
 	source := attrStr(b.Attrs, "source")
 	caption := sanitizeText(attrStr(b.Attrs, "caption"))
 	kind := mermaidKind(source)
@@ -86,7 +85,7 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 			art = renderSequence(doc.seq, ctx)
 		}
 		if len(art) > 0 {
-			return append(art, diagramCaption(n, caption, ctx)...)
+			return append(art, diagramCaption(caption, ctx)...)
 		}
 	}
 
@@ -108,30 +107,34 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 		}
 	}
 
-	// "Figure N." caption — shares the document-global counter, like figure —
-	// and states the limit so the box isn't mistaken for a render bug.
-	cap := "Figure " + itoa(n) + "."
-	if caption != "" {
-		cap += " " + caption
+	// Caption: the author's text (an author-typed "Figure N." lead emphasised,
+	// never one we invent) plus the limit, so the box isn't mistaken for a render
+	// bug. With no caption the limit note stands alone.
+	capLine := figureCaption(caption, ctx)
+	studio := ctx.Theme.Caption.Render("(view in Studio)")
+	if capLine == "" {
+		capLine = studio
+	} else {
+		capLine += ctx.Theme.Caption.Render(" ") + studio
 	}
-	cap += " (view in Studio)"
 	sb.WriteString("\n")
-	sb.WriteString(strings.Join(wrapLines(ctx.Theme.Caption.Render(cap), inner), "\n"))
+	sb.WriteString(strings.Join(wrapLines(capLine, inner), "\n"))
 
 	return boxLines(sb.String(), ctx)
 }
 
-// diagramCaption is the "Figure N. <caption>" line beneath a drawn diagram —
-// the same document-global figure counter figure/asciicast share. A drawn
-// diagram needs no "view in Studio" suffix (it IS the render), unlike the folded
-// fallback box which states its ceiling.
-func diagramCaption(n int, caption string, ctx RenderCtx) []string {
-	cap := "Figure " + itoa(n) + "."
-	if caption != "" {
-		cap += " " + caption
+// diagramCaption is the caption line beneath a drawn diagram: the AUTHOR'S
+// caption, with an author-typed "Figure N." lead emphasised the way the web
+// reader does — pdrender numbers nothing (figureCaption). No caption → no line.
+// A drawn diagram needs no "view in Studio" suffix (it IS the render), unlike
+// the folded fallback box which states its ceiling.
+func diagramCaption(caption string, ctx RenderCtx) []string {
+	styled := figureCaption(caption, ctx)
+	if styled == "" {
+		return nil
 	}
 	return hardBoundDisplayLines(
-		wrapLines(ctx.Theme.Caption.Render(cap), clampWidth(ctx.Width)),
+		wrapLines(styled, clampWidth(ctx.Width)),
 		ctx.Width,
 	)
 }

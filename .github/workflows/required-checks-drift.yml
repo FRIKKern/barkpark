@@ -6,19 +6,30 @@
 #
 # TWO JOBS, SPLIT ON WHETHER THEY NEED A CREDENTIAL (wave 10)
 #
-#   `Required-check spec gate`          BLOCKING. Hermetic: no network, no token,
-#                                       no writes. Runs the mutation suite with
-#                                       --hermetic (72 assertions, ~40s).
+#   `Required-check spec gate`          Hermetic: no network, no token, no
+#                                       writes. Runs the mutation suite with
+#                                       --hermetic (166 assertions, ~40s).
 #   `Required-check spec drift (advisory)`  ADVISORY. Everything that reads the
 #                                       GitHub API on a BREAKGLASS credential.
 #
-# Until wave 10 the whole workflow was advisory, and it was the exact defect
-# class this epic exists to attack, one layer up: the catch-all poison detector
-# that guards branch protection could not itself stop anything. The half that
-# needs no credential now can.
+# WHAT THE SPEC GATE'S RED ACTUALLY DOES — AND THE HEADER USED TO OVERSTATE IT
+#
+# Until wave 53 this header labelled the spec-gate job BLOCKING. It is not, and
+# saying so here was the epic's own defect class in the epic's own workflow.
+# `.github/required-checks.json` holds the context out under `S7 EXCLUDED BY
+# DECISION` (replacement trigger: cch-w36-bl-register-spec-gate-after-census-
+# green), and docs/ops/merge-gates.md already states the truth this header now
+# matches rather than inventing a third phrasing: the job "is in no required
+# aggregator's `needs:` and carries no required name, so it cannot block a
+# merge." Its red is a signal a human must read, not a stop.
+#
+# Wave 10 did split the workflow on the credential boundary, and that split is
+# what makes the hermetic half REGISTRABLE at all — but registering it is a
+# branch-protection change and a lead call, not something this comment can
+# assert into being.
 #
 # THE WORKFLOW IS DELIBERATELY UNFILTERED — THAT IS THE PAYMENT, AND IT IS THE
-# PART THAT MATTERS MORE THAN THE BLOCKING FLAG
+# PART THAT MATTERS MORE THAN WHETHER THE JOB IS REGISTERED
 #
 # There is no `on:.paths` key on either trigger, and adding one back would undo
 # this change. A paths-filtered workflow emits NO check run on a PR that misses
@@ -85,7 +96,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  # ── the blocking half ───────────────────────────────────────────────────────
+  # ── the hermetic half (see the header: not a required context today) ────────
   # Unmatrixed (one job, one rendered name — no `(27.0, 1.18.1)` tuple to pin),
   # path-unfiltered, and it depends on NO dispatcher job: a `needs:` on a
   # dispatch job would reintroduce exactly the conditional-absence shape the

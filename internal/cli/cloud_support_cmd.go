@@ -640,7 +640,15 @@ func (r *supportAddRun) stepBind() (int, bool) {
 				written,
 				"the Cloud session is missing or dead — not logged in; run `bp login` first, then re-run `bp cloud support add "+r.name+"`",
 				exitAuth)
-		case status == http.StatusUnprocessableEntity && supportCPErrorCode(resp) == "no_team":
+		// The teamless refusal, on BOTH sides of the control plane's status
+		// conversion: today 422 {"error":"no_team"}, after #9956
+		// 403 {"error":"forbidden","reason":"no_team","scope":"team"}. Reading the
+		// STATUS alone would drop this caller into the 403 arm below and hand a
+		// user who HAS NO TEAM a sentence about a team-admin ROLE — which cannot be
+		// granted without a team, and which points at re-authenticating a
+		// credential that is fine. The CAUSE the server named decides, so the
+		// sentence, the fix and the exit code are identical across the flip.
+		case supportCPNoTeam(status, resp):
 			return r.fail("bind", "control-plane support registration refused: "+reason,
 				written,
 				"your Cloud login has no active team — run `bp team use <team>`, then re-run `bp cloud support add "+r.name+"`",
@@ -1495,6 +1503,40 @@ func supportCPErrorCode(body []byte) string {
 		return ""
 	}
 	return m.Error
+}
+
+// supportCPRefusalReason reads the CAUSE an authority gate names alongside the
+// generic code — {"error":"forbidden","reason":"no_team","scope":"team"}. Decoded
+// SEPARATELY from the code (the cloudclient idiom) so a route sending a non-string
+// reason costs only the reason, never the code the branch above keys on.
+func supportCPRefusalReason(body []byte) string {
+	var m struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(m.Reason)
+}
+
+// supportCPNoTeam reports whether the control plane refused because the caller's
+// login has NO ACTIVE TEAM, in either shape the team gate emits: the 422 whose
+// code IS the cause, and the 403 whose code is the generic "forbidden" and whose
+// `reason` names it. One predicate, so the two shapes cannot drift into two
+// different narrations.
+func supportCPNoTeam(status int, body []byte) bool {
+	switch status {
+	case http.StatusUnprocessableEntity:
+		return supportCPErrorCode(body) == "no_team"
+	case http.StatusForbidden:
+		// Either shape at the new status: the cause in `reason` beside the generic
+		// code, or the cause AS the code. Reading only the first would drop a flat
+		// 403 {"error":"no_team"} into the role arm — the exact mis-narration this
+		// predicate exists to prevent, one status later.
+		return supportCPRefusalReason(body) == "no_team" || supportCPErrorCode(body) == "no_team"
+	default:
+		return false
+	}
 }
 
 // supportParseCPRowID reads the created row id out of the CP's 201 {barkpark}.

@@ -527,7 +527,7 @@ func Execute(args []string) int {
 				usageNoun(out, tree, verb)
 				return exitOK
 			}
-			return usageErrHintf(out, func() { usageSuggestNouns(out, tree, verb) }, nounHint(tree, verb), "unknown command %q", verb)
+			return suggestUnknownNoun(out, tree, m.AuthTier, verb)
 		}
 		usageTreeTop(out, m, tree)
 		return exitOK
@@ -536,7 +536,7 @@ func Execute(args []string) int {
 	if verb == "" || g.help {
 		// `barkpark <noun>` or `barkpark <noun> -h` → list the noun's verbs.
 		if _, ok := lookupNoun(tree, noun); !ok {
-			return usageErrHintf(out, func() { usageSuggestNouns(out, tree, noun) }, nounHint(tree, noun), "unknown command %q", noun)
+			return suggestUnknownNoun(out, tree, m.AuthTier, noun)
 		}
 		// `barkpark <noun> <verb> -h` → that command's own arg/flag help
 		// (like git/gh/stripe), not the whole noun overview.
@@ -602,9 +602,7 @@ func Execute(args []string) int {
 				usageSuggestVerb(out, tree, noun, verb)
 			}, verbHint(tree, noun, verb), "%s", noVerbMsg(n, noun, verb))
 		}
-		return usageErrHintf(out, func() {
-			usageSuggestNouns(out, tree, noun)
-		}, nounHint(tree, noun), "unknown command %q", noun)
+		return suggestUnknownNoun(out, tree, m.AuthTier, noun)
 	}
 
 	// `bp task stamp` — client-side ergonomic wrapper: echo the 0-based

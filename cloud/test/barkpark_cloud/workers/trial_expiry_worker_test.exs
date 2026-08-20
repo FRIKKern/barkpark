@@ -226,7 +226,19 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
     assert body =~ "Your free trial ends in 3 days"
   end
 
-  test "a muted team gets NEITHER the email nor the chat notice" do
+  ## 8. cch-w52-s2 — a mute must not SPEND the warning
+  ##
+  ## This block REVERSES a prior decision recorded here in a comment reading "the
+  ## stamp is the idempotency key, not a delivery receipt", which asserted
+  ## `noticed_3d: 1` for a muted team. That reading only holds if the stamp is a
+  ## de-dup key over deliveries that happened. It is not: `claim_notice/3` only
+  ## ever matches NULL, so the stamp is the warning's ENTIRE budget and it has no
+  ## reader anywhere outside this worker's own claim. Spending it on a notice
+  ## that was never sent costs the team the warning permanently and shows that
+  ## loss on no surface. The contract now: a team that cannot receive the alert
+  ## claims nothing, and un-muting recovers the warning.
+
+  test "a muted team gets NEITHER the email nor the chat notice, and SPENDS NO STAMP" do
     {team, _sub} = trial_team(2 * 86_400)
 
     {:ok, _} =
@@ -236,11 +248,50 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
 
     {:ok, _} = BarkparkCloud.Notifications.update_settings(team, %{"alerts_enabled" => false})
 
-    # The worker still CLAIMS the notice (the stamp is the idempotency key, not a
-    # delivery receipt) — what must not happen is a delivery.
-    assert {:ok, %{noticed_3d: 1}} = perform_job(TrialExpiryWorker, %{})
+    # Nothing was sent, so nothing was counted and — the point of this slice —
+    # nothing was claimed.
+    assert {:ok, %{noticed_3d: 0, noticed_1d: 0}} = perform_job(TrialExpiryWorker, %{})
+
+    t = Repo.get(Team, team.id)
+    refute t.trial_notice_3d_sent_at
+    refute t.trial_notice_1d_sent_at
 
     assert notice_count(team.id) == 0
     refute_enqueued(worker: BarkparkCloud.Workers.ChatNotificationWorker)
+  end
+
+  test "a muted team inside the T-1 window burns NEITHER stamp (no free supersede)" do
+    # The T-1 arm claims the 3-day stamp as well, to suppress a stale T-3. That
+    # supersede is only legitimate when a 1-day notice actually went out — a
+    # muted run must leave BOTH stamps intact.
+    {team, _sub} = trial_team(div(86_400, 2))
+
+    {:ok, _} = BarkparkCloud.Notifications.update_settings(team, %{"alerts_enabled" => false})
+
+    assert {:ok, %{noticed_1d: 0, noticed_3d: 0}} = perform_job(TrialExpiryWorker, %{})
+
+    t = Repo.get(Team, team.id)
+    refute t.trial_notice_1d_sent_at
+    refute t.trial_notice_3d_sent_at
+    assert notice_count(team.id) == 0
+  end
+
+  test "un-muting RECOVERS the warning: the next run delivers the T-3 notice" do
+    {team, _sub} = trial_team(2 * 86_400)
+
+    {:ok, _} = BarkparkCloud.Notifications.update_settings(team, %{"alerts_enabled" => false})
+
+    assert {:ok, %{noticed_3d: 0}} = perform_job(TrialExpiryWorker, %{})
+    assert notice_count(team.id) == 0
+
+    {:ok, _} = BarkparkCloud.Notifications.update_settings(team, %{"alerts_enabled" => true})
+
+    assert {:ok, %{noticed_3d: 1}} = perform_job(TrialExpiryWorker, %{})
+    assert Repo.get(Team, team.id).trial_notice_3d_sent_at
+    assert notice_count(team.id) == 1
+
+    # And it is still exactly-once afterward.
+    assert {:ok, %{noticed_3d: 0}} = perform_job(TrialExpiryWorker, %{})
+    assert notice_count(team.id) == 1
   end
 end

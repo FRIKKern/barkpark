@@ -1312,4 +1312,40 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd["writes"] == false
     end
   end
+
+  describe "root `bpml` vocabulary block (BPML masterplan W0, ?bpml=1 opt-in)" do
+    test "default manifest carries NO root bpml key", %{conn: conn} do
+      body = caps_conn(conn) |> json_response(200)
+
+      refute Map.has_key?(body, "bpml"),
+             "default manifest leaked the root bpml key — it must be withheld unless ?bpml=1"
+    end
+
+    test "?bpml=1 serves the grammar with a derived digest", %{conn: conn} do
+      body = caps_conn(conn, "?bpml=1") |> json_response(200)
+
+      assert %{"blocks" => blocks, "inline" => inline, "formats" => formats, "digest" => digest} =
+               body["bpml"]
+
+      # the attribute contract agents generate types from
+      assert blocks["callout"] == ["id", "tone", "title"]
+      assert blocks["stat"] == ["label", "value", "denom"]
+      assert blocks["paper"] == ["slug", "title"]
+      # aliases ride the table — <strong> teaches nothing new
+      assert inline["b"] == "strong"
+      assert inline["strong"] == "strong"
+      assert formats == ["json", "bpml"]
+      # derived, stable, prefixed — clients echo it to detect stale types
+      assert String.starts_with?(digest, "bpml-")
+      assert body["bpml"]["digest"] == Barkpark.PortableDoc.Bpml.vocabulary()["digest"]
+    end
+
+    test "anonymous ?bpml=1 STILL gets the vocabulary (public format, not a capability)",
+         %{conn: conn} do
+      body = conn |> get("/v1/capabilities?bpml=1") |> json_response(200)
+
+      assert body["auth_tier"] == "none"
+      assert %{"digest" => "bpml-" <> _} = body["bpml"]
+    end
+  end
 end

@@ -16,7 +16,17 @@ defmodule Barkpark.Media.Storage.Checkout do
     end
   end
 
-  @doc "Release checkout lock. Admin or lock holder only."
+  @doc """
+  Release the checkout lock.
+
+  `admin?` is the caller's force-release privilege as decided by the controller
+  (`BarkparkWeb.MediaController.admin?/1`), which folds write==admin: on the API
+  path any write token force-releases ANY actor's lock — see `ensure_can_release/3`.
+  The holder-only branch (`holder == actor`) is reached only when the caller is
+  neither write nor admin, which the `require_write` gate on `undo_checkout`
+  makes unreachable via the API. A force-release (actor -> nil) also drops the
+  file's renditions — see `patch_checkout/5`.
+  """
   @spec undo_checkout(%MediaFile{}, String.t(), String.t(), boolean()) ::
           {:ok, Document.t()} | {:error, term()}
   def undo_checkout(%MediaFile{} = file, actor, dataset, admin?) do
@@ -74,6 +84,9 @@ defmodule Barkpark.Media.Storage.Checkout do
            [source: :api] ++ Barkpark.Plugins.Media.Assets.file_scope_opts(file)
          ) do
       {:ok, updated} ->
+        # Force-release side effect: clearing the holder (actor == nil, the
+        # release path) drops the file's cached renditions so a re-edit
+        # regenerates them from the current bytes rather than serving stale ones.
         if actor == nil, do: Barkpark.Media.Renditions.delete_for_file(file.id)
         {:ok, updated}
 

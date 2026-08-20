@@ -46,6 +46,16 @@ func fixtureServer(t *testing.T, listStatus, primeStatus int) *httptest.Server {
 		}
 		switch r.URL.Path {
 		case "/v1/tasks":
+			// Serves BOTH list legs — the window fetch and the D120 in-flight
+			// fetch (?lifecycle_status=in_progress) — with the SAME full body,
+			// deliberately simulating an older server that ignores the filter:
+			// the union dedup must keep the composed snapshot identical (the
+			// fixture's prime in_progress count matches its corpus, so the
+			// collapsed recount is invariant here). The filter-honoring path is
+			// exercised by now_truth_test.go's own server.
+			if got := r.URL.Query().Get("limit"); got != "1000" {
+				t.Errorf("%s request limit = %q, want \"1000\"", r.URL.RawQuery, got)
+			}
 			w.WriteHeader(listStatus)
 			if listStatus == http.StatusOK {
 				_, _ = w.Write(listBody)

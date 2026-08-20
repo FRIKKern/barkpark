@@ -1,7 +1,8 @@
 package cli
 
 // cloud_deploy_census_cmd.go is `bp cloud deployments` — the FIRST human reader
-// of the fleet deploy census (GET /v1/operator/deploy-ledger/census). Seven
+// of the deploy census (GET /v1/deploy-ledger/census, the TEAM-scoped read; the
+// operator route it used to call is empty by construction in production). Seven
 // waves of the deploy-reliability epic built a ledger that computes a failure
 // rate WITH its denominator, and until this file no surface anywhere — CLI, SDK,
 // console — read a number out of it. Five surfaces show deployments today (bp
@@ -21,10 +22,13 @@ package cli
 // ZERO if a reader coalesces nils instead of branching:
 //
 //   - 401 unauthorized — no session, or a dead one.
-//   - 403 forbidden — authenticated, not a platform operator. It names the
-//     authority (scope=platform, required=platform_operator) and structurally
-//     CANNOT say whether the operator allowlist is empty, so this reader does not
-//     claim to know which it was; it says both are possible.
+//   - 403 forbidden — authenticated, but the credential does not carry ability
+//     "read" on this team. It names whatever authority the body reports, and
+//     does NOT tell the reader to edit PLATFORM_ADMIN_EMAILS: on the team route
+//     the operator allowlist has nothing to do with the refusal.
+//   - 422 no_team — the credential belongs to no team, so there is no
+//     population to take a census over. Widening the window cannot fix it, so
+//     this is a DIFFERENT sentence from the window refusal below.
 //   - 422 invalid_window — the window did not parse, or was not pinned.
 //   - the IN-BAND refusal inside a 200: failure_rate.refused, because the sample
 //     is below min_sample. The counts are real; the PERCENTAGE is refused, and
@@ -67,9 +71,9 @@ const deployCensusSiteRows = 10
 var deployCensusNow = func() time.Time { return time.Now().UTC() }
 
 // runCloudDeployments is `bp cloud deployments [--from X --to Y | --days N]
-// [--sites N]`: read the fleet deploy census over a pinned window and render the
-// rate WITH its denominator — or the refusal, named. Requires `bp login` AND a
-// platform-operator account.
+// [--sites N]`: read the team deploy census over a pinned window and render the
+// rate WITH its denominator — or the refusal, named. Requires `bp login` and a
+// credential carrying ability "read" on a team; no operator grant is involved.
 func runCloudDeployments(out *writer, g globals, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
@@ -105,7 +109,7 @@ func runCloudDeployments(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "read config: "+cerr.Error(), exitGeneric)
 	}
 	if !cfg.HasCloudToken() {
-		return useError(out, "auth", "not logged in — run `bp login` to read the fleet deploy census", exitAuth)
+		return useError(out, "auth", "not logged in — run `bp login` to read the deploy census for your team", exitAuth)
 	}
 
 	census, derr := cfg.CloudClient().FleetDeployCensus(cloudCtx(), from, to)
@@ -120,8 +124,18 @@ func runCloudDeployments(out *writer, g globals, args []string) int {
 		emitDeployCensusRaw(out, census)
 		return exitOK
 	}
-	renderDeployCensus(out, from, to, census, sites)
+	renderDeployCensus(out, from, to, census, sites, deployCensusWindowPinned(a))
 	return exitOK
+}
+
+// deployCensusWindowPinned reports whether the caller pinned BOTH edges with
+// --from/--to. A --days window (and the 7-day default) pins only its width: its
+// right edge is now and its left edge slides with the clock, which is exactly
+// the property the coverage reading has to disclose — the same fleet answers a
+// different never-covered count at --days 7 and --days 27 with no row changing.
+func deployCensusWindowPinned(a *hzArgs) bool {
+	_, hasFrom := lastVal(a, "from")
+	return hasFrom
 }
 
 // deployCensusWindow resolves the PINNED window: --from/--to together, or a
@@ -226,11 +240,18 @@ func emitDeployCensusRaw(out *writer, census cloudclient.DeployCensus) {
 
 // deployCensusFail renders a census that could NOT be read. Every branch names
 // what refused and prints the window anyway, so the operator can tell a healthy
-// fleet from a fleet nobody was allowed to look at.
+// population from a population nobody was allowed to look at.
+//
+// A REFUSAL HAS NO SCOPE LINE TO CORRECT IT. On a 200 the render prints the
+// population under the window; on a refusal there is nothing to print, because
+// the control plane never told us which team it would have covered. Every
+// sentence below therefore says "the deploy census for your team" and NEVER
+// "the fleet" — over-claiming scope on the one render that has no scope line
+// beneath it is the same defect this epic exists to kill.
 func deployCensusFail(out *writer, from, to time.Time, err error) int {
 	var ce *cloudclient.DeployCensusError
 	if !errors.As(err, &ce) {
-		return cloudFail(out, "read the fleet deploy census", err)
+		return cloudFail(out, "read the deploy census for your team", err)
 	}
 	return useError(out, deployCensusErrLabel(ce), deployCensusMessage(from, to, ce), deployCensusExit(ce.HTTPStatus))
 }
@@ -270,14 +291,24 @@ func deployCensusMessage(from, to time.Time, ce *cloudclient.DeployCensusError) 
 	window := deployCensusWindowPhrase(from, to)
 	switch {
 	case ce.HTTPStatus == 401:
-		return "could not read the fleet deploy census for " + window +
-			" — the control plane did not recognise this session (401 unauthorized). Nothing was read: this is NOT a fleet with zero failures. Run `bp login` and try again."
+		return "could not read the deploy census for your team for " + window +
+			" — the control plane did not recognise this session (401 unauthorized). Nothing was read: this is NOT a population with zero failures. Run `bp login` and try again."
 	case ce.HTTPStatus == 403:
 		authority := deployCensusAuthority(ce)
-		return "could not read the fleet deploy census for " + window +
-			" — the control plane refused this account (403 forbidden" + authority + "). Nothing was read: this is NOT a fleet with zero failures. " +
-			"The gate cannot tell you which of the two it is: either PLATFORM_ADMIN_EMAILS names nobody, or it does not name you. " +
-			"Ask a platform operator to add your account's email to PLATFORM_ADMIN_EMAILS on the SERVING control-plane container and redeploy."
+		return "could not read the deploy census for your team for " + window +
+			" — the control plane refused this credential (403 forbidden" + authority + "). Nothing was read: this is NOT a population with zero failures. " +
+			"This read needs a token carrying ability \"read\" on your team; an operator allowlist is not involved. " +
+			"Run `bp login` again, or ask a team owner for a token with read access."
+	// THE 422s ARE TWO DIFFERENT REFUSALS AND MUST NOT SHARE A SENTENCE. This
+	// arm discriminates on the control plane's error CODE, never on the status
+	// family: `no_team` says the credential has no population at all, and
+	// telling that caller to widen the window sends them round a loop that
+	// cannot terminate.
+	case ce.HTTPStatus == 422 && ce.Code == "no_team":
+		return "could not read the deploy census for " + window +
+			" — this credential belongs to no team (422 no_team), so there is no population to take a census over. " +
+			"Nothing was read: this is NOT a population with zero failures, and no window can fix it. " +
+			"Join or create a team, then run `bp login` again."
 	case ce.HTTPStatus == 422:
 		detail := ce.Detail
 		if detail == "" {
@@ -287,10 +318,10 @@ func deployCensusMessage(from, to time.Time, ce *cloudclient.DeployCensusError) 
 			" (422 " + deployCensusErrLabel(ce) + "): " + sanitizeCell(detail) +
 			". Nothing was read. Pin the window with --from/--to (an ISO date or instant) or widen it with --days."
 	case ce.HTTPStatus >= 500:
-		return "the control plane failed to compute the fleet deploy census for " + window +
+		return "the control plane failed to compute the deploy census for your team for " + window +
 			" (HTTP " + strconv.Itoa(ce.HTTPStatus) + ": " + sanitizeCell(ce.Error()) + "). Nothing was read — retry, and if it persists the census query itself is the fault."
 	default:
-		return "could not read the fleet deploy census for " + window +
+		return "could not read the deploy census for your team for " + window +
 			" (HTTP " + strconv.Itoa(ce.HTTPStatus) + ": " + sanitizeCell(ce.Error()) + "). Nothing was read."
 	}
 }
@@ -311,23 +342,53 @@ func deployCensusAuthority(ce *cloudclient.DeployCensusError) string {
 	return " — " + strings.Join(parts, ", ")
 }
 
+// deployCensusScopeLine names the POPULATION the census was taken over, on
+// every human render, directly under the window.
+//
+// A window without a population is half a claim: "37.5% failed over seven days"
+// reads identically whether it covers the whole fleet or one team's thirteen
+// sites, and those are different sentences. The team route sends a `scope` node
+// for exactly this reason.
+//
+// A NIL SCOPE SAYS SO OUT LOUD. An older control plane (and the operator route)
+// sends no scope key at all, and DeployCensus.Scope is a pointer so that case
+// arrives as nil rather than as team "". This prints "population NOT NAMED" —
+// never a silent omission (a reader cannot notice a line that is not there) and
+// never an empty team slug dressed as an answer.
+//
+// THE COUNT IS LABELLED. registered_sites counts sites REGISTERED to the team
+// and in scope, which deliberately EXCEEDS len(sites) — a site that has never
+// deployed is registered and absent from the sites table below. Printing a bare
+// "13" beside twelve site rows is the first thing an operator would have to
+// explain away, so the label travels with the number.
+func deployCensusScopeLine(scope *cloudclient.DeployCensusScope) string {
+	if scope == nil || strings.TrimSpace(scope.Team) == "" {
+		return "  scope: population NOT NAMED — this control plane sent no scope node, so which sites these numbers cover is unknown. The numbers are real; the population is not stated."
+	}
+	return fmt.Sprintf("  scope: team %s · %d sites registered to this team and in scope (not the number that deployed in the window — a site that never deployed is counted here and absent below)",
+		sanitizeCell(scope.Team), scope.RegisteredSites)
+}
+
 // renderDeployCensus is the human view: the window, the headline rate line (rate
 // + volume + denominator, on ONE line, always), then the failure classes, the
 // deferrals and the worst sites.
-func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.DeployCensus, siteLimit int) {
-	out.outf("fleet deploy census · %s", deployCensusWindowPhrase(from, to))
+func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.DeployCensus, siteLimit int, pinnedWindow bool) {
+	out.outf("deploy census · %s", deployCensusWindowPhrase(from, to))
 	out.outf("  the window is pinned by this command, not defaulted by the server — every number below is about THIS population.")
+	out.outf("%s", deployCensusScopeLine(census.Scope))
 	out.outf("")
 	out.outf("%s", deployCensusHeadline(census))
-	if b := strings.TrimSpace(census.FailureRate.Basis); b != "" {
-		out.outf("  basis: %s", sanitizeCell(b))
-	}
+	out.outf("  basis: %s", deployCensusBasis(census.FailureRate.Basis))
 	out.outf("")
 
+	boundaries := deployCensusBoundaries(census.Raw)
 	if len(census.Classes) > 0 {
 		out.outf("failure classes (share of the %d failed)", census.Failed)
 		for _, c := range census.Classes {
 			out.outf("  %-28s %6d  %-7s %s", sanitizeCell(c.Class), c.Count, deployCensusShare(c.Share), sanitizeCell(c.Label))
+		}
+		for _, line := range deployCensusShareNotes(census.Classes, boundaries, from, to, census.MinSample) {
+			out.outf("%s", line)
 		}
 		out.outf("")
 	}
@@ -336,8 +397,19 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		for _, c := range census.Deferred {
 			out.outf("  %-28s %6d  %-7s %s", sanitizeCell(c.Class), c.Count, deployCensusShare(c.Share), sanitizeCell(c.Label))
 		}
+		// THE DEFERRAL SHARES GET THEIR OWN NOTE, COMPUTED OVER THEIR OWN ROWS.
+		// Failure-class shares divide by the settled failures; deferral shares
+		// divide by the attempted rows. They are different denominators over the
+		// same window, so one merged note would attach a refusal to a population
+		// that never produced it.
+		for _, line := range deployCensusShareNotes(census.Deferred, boundaries, from, to, census.MinSample) {
+			out.outf("%s", line)
+		}
 		out.outf("")
 	}
+	renderDeployDeferralWait(out, census.DeferralWait)
+	renderDeployCoverageCohorts(out, census.CoverageCohorts, pinnedWindow)
+
 	if len(census.NotAttempted) > 0 {
 		out.outf("never attempted (outside every denominator)")
 		for _, c := range census.NotAttempted {
@@ -345,6 +417,8 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		}
 		out.outf("")
 	}
+
+	renderDeployDelivery(out, census.Delivery, siteLimit)
 
 	rows := census.Sites
 	if siteLimit > 0 && len(rows) > siteLimit {
@@ -371,12 +445,27 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 // deployCensusHeadline builds THE line: the rate, its volume, and the
 // denominator it was taken against, all together, never apart.
 //
+// LIVE-PER-ATTEMPT LEADS IT, AND THE FAILURE RATE IS A LABELLED SIBLING. A
+// headline that leads with the failure rate answers "how bad is it" and never
+// answers "did anything ship" — on 2026-08-07 that number read 1.1% on a day
+// where 72% of attempts produced nothing at all. The live term is rendered by
+// deployCensusLiveTerm in BOTH branches below (the ok-rate branch AND the
+// refused branch): a prepend on the ok branch only silently drops the live rate
+// exactly when the failure rate is refused, which is the case an operator most
+// needs it, and it passes a guard vacuously because the refused branch never
+// renders the term at all.
+//
 // It renders BOTH D34 conventions when the control plane sends both (the
 // attempted-row rate the ledger has always had, and the dr-w8-s1
 // terminal_failure_rate), and exactly one — SAYING which denominator it is —
 // against today's payload, which carries neither `live` nor
 // `terminal_failure_rate`. A refusing rate node prints its refusal here, in the
 // headline's own place, so a reader cannot miss it.
+//
+// Everything rides ONE line on purpose: the live rate on a line of its own
+// would also be a second line carrying "of N attempted", and a reader (human or
+// test) that reaches for the headline by that phrase would find whichever came
+// first.
 func deployCensusHeadline(census cloudclient.DeployCensus) string {
 	cohorts := []string{fmt.Sprintf("%d failed", census.Failed)}
 	if d := deployCensusDeferredTotal(census); d > 0 {
@@ -385,14 +474,16 @@ func deployCensusHeadline(census cloudclient.DeployCensus) string {
 	if census.Live != nil {
 		cohorts = append(cohorts, fmt.Sprintf("%d live", *census.Live))
 	}
+	cohorts = append(cohorts, deployCensusEndStates(census)...)
 	breakdown := " (" + strings.Join(cohorts, " · ") + ")"
 
+	live := deployCensusLiveTerm(census)
 	var head string
 	if pct, okRate := deployCensusPct(census.FailureRate); okRate {
-		head = fmt.Sprintf("%s of %d attempted%s", pct, census.FailureRate.Sample, breakdown)
+		head = fmt.Sprintf("%s · failure %s of %d attempted%s", live, pct, census.FailureRate.Sample, breakdown)
 	} else {
-		head = fmt.Sprintf("NO RATE — %s · %d attempted%s",
-			deployCensusRefusal(census.FailureRate, census.MinSample), census.FailureRate.Sample, breakdown)
+		head = fmt.Sprintf("%s · failure NO RATE — %s · %d attempted%s",
+			live, deployCensusRefusal(census.FailureRate, census.MinSample), census.FailureRate.Sample, breakdown)
 	}
 
 	if census.TerminalFailureRate == nil {
@@ -405,6 +496,82 @@ func deployCensusHeadline(census cloudclient.DeployCensus) string {
 	}
 	return head + fmt.Sprintf(" · terminal rate: NO RATE — %s (%d terminal)",
 		deployCensusRefusal(*census.TerminalFailureRate, census.MinSample), census.TerminalFailureRate.Sample)
+}
+
+// deployCensusLiveTerm renders the live-per-attempt node — the headline's
+// leading term. It is a rate node like any other, so it has the same three
+// endings, and NONE of them is a zero:
+//
+//   - the control plane does not send `live_rate` at all (every control plane
+//     older than dr-w16-s2): it says so. Silence there would read as a fleet
+//     that ships nothing, which is a different and much worse claim;
+//   - the node REFUSES (below min_sample): it prints the refusal, with no
+//     percentage, exactly as the failure rate does;
+//   - it has a percentage: the rate WITH the sample it was taken over.
+func deployCensusLiveTerm(census cloudclient.DeployCensus) string {
+	if census.LivePerAttempt == nil {
+		return "live per attempt: NOT SENT — this control plane does not compute it (nothing here says whether the fleet ships)"
+	}
+	rate := *census.LivePerAttempt
+	if pct, okRate := deployCensusPct(rate); okRate {
+		return fmt.Sprintf("live %s of %d attempted", pct, rate.Sample)
+	}
+	return "live per attempt: NO RATE — " + deployCensusRefusal(rate, census.MinSample)
+}
+
+// deployCensusEndStates renders the dr-w16-s2 cohorts that make success stop
+// being the unnamed remainder of Volume: in-flight rows, cancelled rows, and
+// the RESIDUAL — attempted rows whose status the census does not name.
+//
+// in_flight and cancelled print only when the control plane sent them AND they
+// are non-zero (a zero cohort is noise in a headline). The residual prints
+// whenever it was sent, INCLUDING zero: "0 residual" is the census asserting it
+// named every row, and a residual that starts rising is the signal this field
+// exists for — hiding it at zero would hide the day it stops being zero.
+//
+// `cancelled` HAS NEVER EXISTED ON PROD: 0 of 31,137 deployment rows all-time
+// (both spellings, since 2026-07-14); the lifetime status vocabulary is exactly
+// failed / live / deferred. Two producers exist and neither has ever fired. So
+// this branch is proved on a hand-made envelope in the test beside it, and a
+// prod render of it is unobtainable — any acceptance that implies one is
+// vacuous.
+func deployCensusEndStates(census cloudclient.DeployCensus) []string {
+	var out []string
+	if census.InFlight != nil && *census.InFlight > 0 {
+		out = append(out, fmt.Sprintf("%d in flight", *census.InFlight))
+	}
+	if census.Cancelled != nil && *census.Cancelled > 0 {
+		out = append(out, fmt.Sprintf("%d cancelled", *census.Cancelled))
+	}
+	if census.Residual != nil {
+		out = append(out, fmt.Sprintf("%d residual (attempted rows this census does not name)", *census.Residual))
+	}
+	return out
+}
+
+// deployCensusBasis names the DENOMINATOR every rate above it was taken over,
+// and corrects the one word the control plane's own basis gets wrong.
+//
+// The census calls its denominator "attempted rows". It is rows, and it is NOT
+// attempts: the (site_id, environment) active index refuses a second concurrent
+// production build, so an attempt that coalesces onto an in-flight build
+// completes having minted NO deployment row. Measured on cloud-db-1, auto-deploy
+// worker jobs against `trigger='content-auto'` rows: 2026-08-05 excluded 171,
+// 2026-08-06 excluded 1,584 against 2,182 counted rows, 2026-08-07 excluded 106.
+// Every excluded attempt is non-live, so including them can only LOWER the live
+// rate — which makes live-per-attempt as computed here a CEILING, in the
+// flattering direction.
+//
+// It prints on EVERY render, including the payload that sends no basis at all,
+// and it carries no percentage — the basis line must be safe to print beside a
+// rate that refused one.
+func deployCensusBasis(sent string) string {
+	const correction = "denominator = deployment ROWS, not attempts. An attempt that coalesces onto an in-flight build completes without minting a row, so it is never counted here " +
+		"(measured 2026-08-06: 3,766 auto-deploy worker jobs against 2,182 rows — 1,584 attempts excluded). Every excluded attempt is non-live, so the live rate above is a CEILING."
+	if b := strings.TrimSpace(sent); b != "" {
+		return sanitizeCell(b) + " — " + correction
+	}
+	return correction
 }
 
 // deployCensusDeferredTotal sums the deferral class counts — the third cohort,
@@ -454,6 +621,245 @@ func deployCensusShare(r cloudclient.DeployRate) string {
 	return "—"
 }
 
+// ─── A REFUSED SHARE SAYS WHICH WINDOW WOULD UN-REFUSE IT ────────────────────
+//
+// A share cell that refuses prints an em-dash (deployCensusShare) — honest, and
+// a DEAD END: the operator learns that no percentage is available and nothing
+// about how to obtain one. Measured on the live control plane: over the 7-day
+// default window EVERY one of the fourteen failure-class shares refuses, while
+// the same instrument over a window starting AT the deferred-settle boundary
+// answers all fourteen (5,919 attempted, failure rate 17.7%). Same data, same
+// classifier; only the window moved, and no render said so.
+//
+// NO INSTANT IS WRITTEN DOWN HERE, deliberately. The boundary is a fact about
+// the DATA, not about this code: it moved once already (a second schema-commit
+// boundary now rides the same list), and a constant baked into a renderer is
+// stale the moment the ledger's vocabulary changes again.
+//
+// So each SECTION of shares that refused prints, once, beneath its rows: the
+// control plane's own refusal reason, and — where the envelope supports one —
+// the window that could answer instead.
+//
+// EVERY FACT IN THAT SUGGESTION IS READ, NEVER INVENTED. The boundary instant
+// comes out of the refusal reason the control plane wrote ("… boundary at
+// <instant> …") or out of the envelope's own `boundaries` list; a boundary this
+// reader could not read is rendered as "the control plane named no boundary",
+// because a fabricated --from is worse than none — it sends an operator to a
+// window that answers nothing and looks like the tool's promise.
+//
+// AND IT PROMISES NOTHING IT CANNOT KNOW. Trimming a window to start at the
+// boundary removes the straddle; whether the SMALLER population it leaves still
+// clears min_sample is a fact only the re-run can report, and this line says so
+// rather than implying an answer.
+//
+// THE CREDENTIAL REFUSAL IS NOT REACHED FROM HERE. A 403 never produces a
+// census body, so it renders through deployCensusMessage's own arm and keeps its
+// own wording: no window suggestion is attached to a refusal no window can fix.
+
+// deployCensusBoundary is ONE row of the census envelope's `boundaries` list:
+// an instant at which the ledger's own vocabulary changed, with the derivation
+// that fixed it (method + source), so a suggestion built on it can show its
+// provenance.
+//
+// It is decoded HERE, out of the raw envelope, rather than off a typed field:
+// cloudclient.DeployCensus does not model `boundaries`, and this render must
+// only ever repeat what the control plane actually sent.
+type deployCensusBoundary struct {
+	Subject string `json:"subject"`
+	Instant string `json:"instant"`
+	Method  string `json:"method"`
+	Source  string `json:"source"`
+}
+
+// deployCensusBoundaries decodes the envelope's boundary list. A row whose
+// instant does not parse is DROPPED: a boundary this reader cannot place on the
+// timeline cannot support a `--from`, and half a boundary is not evidence.
+func deployCensusBoundaries(raw []byte) []deployCensusBoundary {
+	if len(raw) == 0 {
+		return nil
+	}
+	var env struct {
+		Boundaries []deployCensusBoundary `json:"boundaries"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil
+	}
+	kept := make([]deployCensusBoundary, 0, len(env.Boundaries))
+	for _, b := range env.Boundaries {
+		if _, ok := deployCensusInstant(b.Instant); ok {
+			kept = append(kept, b)
+		}
+	}
+	return kept
+}
+
+// deployCensusInstant parses an instant the control plane sent, in the one
+// format it sends (RFC3339, UTC).
+func deployCensusInstant(raw string) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t.UTC(), true
+}
+
+// deployCensusShareNotes renders the lines a section of refused shares owes its
+// reader: one pair per DISTINCT refusal reason (the control plane's words, then
+// the window that could answer). A section where nothing refused prints nothing
+// — this is a note about refusals, not a caption.
+//
+// The sample the shares were denominated on travels on the reason line, so this
+// block can never be read as a claim about some other population.
+func deployCensusShareNotes(rows []cloudclient.DeployCensusClass, boundaries []deployCensusBoundary, from, to time.Time, minSample int) []string {
+	type group struct {
+		reason string
+		sample int
+		rows   int
+	}
+	var groups []group
+	refused := 0
+	for _, r := range rows {
+		if !r.Share.Refused && r.Share.Pct != nil {
+			continue
+		}
+		refused++
+		reason := deployCensusRefusal(r.Share, minSample)
+		// Grouped by (reason, SAMPLE), never by reason alone. The reason the
+		// control plane writes for a straddle does not carry the denominator,
+		// so two rows can share a reason and have been denominated over
+		// different populations — and printing the first row's n beside a
+		// count that includes the second would state a denominator no row was
+		// actually taken over. Splitting the group is the honest render.
+		found := false
+		for i := range groups {
+			if groups[i].reason == reason && groups[i].sample == r.Share.Sample {
+				groups[i].rows++
+				found = true
+				break
+			}
+		}
+		if !found {
+			groups = append(groups, group{reason: reason, sample: r.Share.Sample, rows: 1})
+		}
+	}
+	if refused == 0 {
+		return nil
+	}
+
+	lines := make([]string, 0, 2*len(groups))
+	for _, g := range groups {
+		lines = append(lines,
+			fmt.Sprintf("  NO SHARE for %d of %d rows above (share denominator n=%d) — %s",
+				g.rows, len(rows), g.sample, g.reason))
+		lines = append(lines, "  "+deployCensusShareRemedy(g.reason, boundaries, from, to, minSample))
+	}
+	return lines
+}
+
+// deployCensusShareRemedy is the actionable half: the window that could answer
+// where the envelope supports naming one, and an explicit refusal to guess
+// where it does not.
+//
+// TWO REFUSALS, TWO DIFFERENT REMEDIES, and confusing them would send the
+// operator in a circle:
+//
+//   - the window STRADDLES a vocabulary boundary — the control plane names the
+//     instant inside its own reason, and a window that STARTS at that instant
+//     is the narrowest trim that keeps one vocabulary. That is a real `--from`;
+//   - the sample is below min_sample — a NARROWER window can only shrink the
+//     sample further, so no `--from` un-refuses this one and this line says so
+//     rather than offering a trim that would make it worse.
+func deployCensusShareRemedy(reason string, boundaries []deployCensusBoundary, from, to time.Time, minSample int) string {
+	if inst, ok := deployCensusReasonBoundary(reason); ok {
+		caveat := ""
+		if minSample > 0 {
+			caveat = fmt.Sprintf(" Whether the smaller population that leaves still clears min_sample %d only the re-run can report — this line does not predict it.", minSample)
+		}
+		return fmt.Sprintf("A WINDOW THAT COULD ANSWER: `bp cloud deployments --from %s --to %s`%s — starting AT the boundary is the narrowest trim that keeps the window inside one vocabulary.%s",
+			inst.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339),
+			deployCensusBoundaryProvenance(boundaries, inst), caveat)
+	}
+	if b, rel, ok := deployCensusNearestBoundary(boundaries, from, to); ok {
+		inst, _ := deployCensusInstant(b.Instant)
+		return fmt.Sprintf("NO --from CAN UN-REFUSE THIS: a narrower window can only SHRINK the sample, and this window already sits %s the %s boundary at %s (method: %s, source: %s). The sample has to GROW — a wider --from, or more time.",
+			rel, sanitizeCell(b.Subject), inst.UTC().Format(time.RFC3339), sanitizeCell(b.Method), sanitizeCell(b.Source))
+	}
+	return "NO WINDOW SUGGESTION: this control plane named no vocabulary boundary in its envelope, so nothing here can say which --from would answer. Nothing was invented in its place."
+}
+
+// deployCensusReasonBoundary extracts the instant the control plane NAMED in
+// its own refusal reason ("… boundary at <RFC3339 instant> (method: …)").
+// It returns false unless that instant parses: a suggestion is only ever built
+// on an instant this reader actually read.
+func deployCensusReasonBoundary(reason string) (time.Time, bool) {
+	const marker = "boundary at "
+	i := strings.Index(reason, marker)
+	if i < 0 {
+		return time.Time{}, false
+	}
+	rest := reason[i+len(marker):]
+	fields := strings.FieldsFunc(rest, func(r rune) bool {
+		return r == ' ' || r == '(' || r == ',' || r == '\n'
+	})
+	if len(fields) == 0 {
+		return time.Time{}, false
+	}
+	return deployCensusInstant(strings.TrimRight(fields[0], ".,;"))
+}
+
+// deployCensusBoundaryProvenance names the derivation behind a suggested
+// `--from` when the envelope's boundary list carries that instant, and says
+// plainly when it does not — a suggestion whose provenance is unstated is still
+// usable, but it must not LOOK corroborated.
+func deployCensusBoundaryProvenance(boundaries []deployCensusBoundary, inst time.Time) string {
+	for _, b := range boundaries {
+		if t, ok := deployCensusInstant(b.Instant); ok && t.Equal(inst) {
+			return fmt.Sprintf(" (the %s boundary — method: %s, source: %s)",
+				sanitizeCell(b.Subject), sanitizeCell(b.Method), sanitizeCell(b.Source))
+		}
+	}
+	return " (the control plane named this instant in its refusal; its `boundaries` list does not carry it)"
+}
+
+// deployCensusNearestBoundary picks the boundary a window sits NEXT TO, with
+// the word for where it sits: the latest boundary at or before the window's
+// start, else the earliest one after its end. A boundary strictly inside the
+// window is reported as such — it should have produced a straddle refusal, and
+// saying "inside" is better than silently calling it "after".
+func deployCensusNearestBoundary(boundaries []deployCensusBoundary, from, to time.Time) (deployCensusBoundary, string, bool) {
+	var before, inside, after *deployCensusBoundary
+	var beforeAt, insideAt, afterAt time.Time
+	for i := range boundaries {
+		t, ok := deployCensusInstant(boundaries[i].Instant)
+		if !ok {
+			continue
+		}
+		switch {
+		case t.After(from) && t.Before(to):
+			if inside == nil || t.After(insideAt) {
+				inside, insideAt = &boundaries[i], t
+			}
+		case !t.After(from):
+			if before == nil || t.After(beforeAt) {
+				before, beforeAt = &boundaries[i], t
+			}
+		default:
+			if after == nil || t.Before(afterAt) {
+				after, afterAt = &boundaries[i], t
+			}
+		}
+	}
+	switch {
+	case inside != nil:
+		return *inside, "ACROSS", true
+	case before != nil:
+		return *before, "wholly after", true
+	case after != nil:
+		return *after, "wholly before", true
+	}
+	return deployCensusBoundary{}, "", false
+}
+
 // deployCensusWindowPhrase renders the window as the two RFC3339 UTC instants
 // the route was actually asked for, plus its width — the population, stated.
 func deployCensusWindowPhrase(from, to time.Time) string {
@@ -474,6 +880,433 @@ func deployCensusWidth(d time.Duration) string {
 	}
 }
 
+// renderDeployDelivery prints the DELIVERY census: how long content waited to
+// reach the web, every percentile beside the window width and the sample that
+// produced it, and the still-waiting cohort named.
+//
+// THE THREE WAYS THIS SECTION REFUSES, and none of them is a zero:
+//
+//   - the control plane sends no `delivery` node at all (today's payload) — the
+//     section says NOT MEASURED rather than printing nothing, because a missing
+//     latency line reads as an absent problem;
+//   - a percentile REFUSED (below min_sample, or more of the sample is still
+//     waiting than the quantile has headroom for, or the row at the quantile is
+//     itself still waiting) — it prints NO NUMBER and the control plane's own
+//     reason, never a percentile;
+//   - rows the clock could not reach at all — printed as their own UNMETERED
+//     count, so the denominator can be audited.
+//
+// The still-waiting cohort NEVER prints as a bare count. It prints
+// "STILL WAITING >= <bound>" beside the instant it was taken, because the same
+// pinned window answered 3 → 2 → 0 in five minutes: a bare number there is
+// reporting the measurement's own latency as a fact about the fleet.
+func renderDeployDelivery(out *writer, d *cloudclient.DeployDelivery, siteLimit int) {
+	if d == nil {
+		out.outf("delivery — how long content waited to reach the web")
+		out.outf("  NOT MEASURED — this control plane sends no delivery census. Nothing was read: this is NOT a fleet that delivers instantly.")
+		out.outf("")
+		return
+	}
+
+	scope := strings.TrimSpace(d.Environment)
+	if scope == "" {
+		scope = "unscoped"
+	}
+	out.outf("delivery — how long content waited to reach the web (%s · %s only)",
+		deployCensusWidth(time.Duration(d.Window.WidthSeconds)*time.Second), sanitizeCell(scope))
+	if clock := strings.TrimSpace(d.Clock); clock != "" {
+		out.outf("  clock: %s", sanitizeCell(clock))
+	}
+	for _, q := range []cloudclient.DeployDeliveryQuantile{d.P50, d.P95, d.Max} {
+		label := strings.TrimSpace(q.Label)
+		if label == "" {
+			label = fmt.Sprintf("q%.2f", q.Quantile)
+		}
+		out.outf("  %-4s %s", sanitizeCell(label), deployDeliveryValue(q))
+	}
+	out.outf("  %s", deployDeliveryWaiting(d.Censored))
+	if d.Unmetered > 0 {
+		out.outf("  %d row(s) the clock could not reach (live, with no became_live_at) — counted here, never dropped from the denominator", d.Unmetered)
+	}
+
+	waiting := make([]cloudclient.DeployDeliverySite, 0, len(d.Sites))
+	for _, s := range d.Sites {
+		if s.StillWaiting {
+			waiting = append(waiting, s)
+		}
+	}
+	if len(waiting) > 0 {
+		shown := waiting
+		if siteLimit > 0 && len(shown) > siteLimit {
+			shown = shown[:siteLimit]
+		}
+		out.outf("  sites still waiting (who is waiting, and since when)")
+		for _, s := range shown {
+			out.outf("    %-38s %s  · %d measured · %d still waiting · %d delivered",
+				sanitizeCell(s.SiteID), deployDeliverySiteWaiting(s), s.Sample, s.Censored, s.Delivered)
+		}
+		if n := len(waiting) - len(shown); n > 0 {
+			out.outf("    … and %d more site(s) still waiting (raise the display clamp with --sites 0)", n)
+		}
+	}
+	out.outf("")
+}
+
+// deployDeliveryValue renders ONE percentile INSEPARABLY: the value (or the
+// refusal) always followed by the sample, the still-waiting share and the window
+// width that produced it. There is no branch of this function that prints a bare
+// number.
+func deployDeliveryValue(q cloudclient.DeployDeliveryQuantile) string {
+	population := fmt.Sprintf("(n=%d · %d still waiting · window %s)",
+		q.Sample, q.Censored, deployCensusWidth(time.Duration(q.WindowSeconds)*time.Second))
+
+	if q.Refused || q.Seconds == nil {
+		reason := strings.TrimSpace(q.Reason)
+		if reason == "" {
+			reason = fmt.Sprintf("the control plane sent no value for a sample of %d", q.Sample)
+		}
+		return "NO NUMBER — " + sanitizeCell(reason) + " " + population
+	}
+	return deployDeliveryDuration(*q.Seconds) + " " + population
+}
+
+// deployDeliveryWaiting renders the fleet still-waiting cohort. A zero count is
+// stated as a reading taken at an instant, never as the standing fact "nobody is
+// waiting" — and a non-zero one is always a LOWER BOUND with its as-of.
+func deployDeliveryWaiting(c cloudclient.DeployDeliveryCensored) string {
+	asOf := deployDeliveryAsOf(c.AsOf)
+	if c.Count == 0 {
+		return "nothing was still waiting " + asOf + " — a reading taken at that instant, not a standing fact"
+	}
+	bound := "an unstated bound"
+	if c.StillWaitingAtLeastSeconds != nil {
+		bound = deployDeliveryDuration(*c.StillWaitingAtLeastSeconds)
+	}
+	return fmt.Sprintf("STILL WAITING >= %s · %d row(s) not delivered %s", bound, c.Count, asOf)
+}
+
+// deployDeliverySiteWaiting is one site's still-waiting line — the same
+// "STILL WAITING >= X (as of …)" shape as the fleet cohort, so a site row can
+// never be read as a bare zero either.
+func deployDeliverySiteWaiting(s cloudclient.DeployDeliverySite) string {
+	bound := "an unstated bound"
+	if s.OldestWaitingSeconds != nil {
+		bound = deployDeliveryDuration(*s.OldestWaitingSeconds)
+	}
+	return "STILL WAITING >= " + bound + " " + deployDeliveryAsOf(s.AsOf)
+}
+
+// deployDeliveryAsOf renders the instant a still-waiting reading was taken,
+// normalised to RFC3339 UTC where it parses and passed through verbatim where it
+// does not — an unparseable stamp is still evidence and is never dropped.
+func deployDeliveryAsOf(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "(as of an instant the control plane did not name)"
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return "(as of " + t.UTC().Format(time.RFC3339) + ")"
+	}
+	return "(as of " + sanitizeCell(s) + ")"
+}
+
+// deployDeliveryDuration renders a wait in the largest honest unit, at
+// second resolution — 22638s reads as 6h17m18s, which is the sentence this
+// epic needed and could not say.
+func deployDeliveryDuration(seconds float64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	d := (time.Duration(seconds * float64(time.Second))).Round(time.Second)
+	if d < time.Second {
+		return fmt.Sprintf("%.1fs", seconds)
+	}
+	return d.String()
+}
+
+// renderDeployDeferralWait prints the DEFERRAL WAIT census: the clock behind the
+// sentence "a deferral is re-queued, not lost". Until this section existed the
+// `deferrals` block above was a COUNT WITH NO CLOCK — a fleet that improved its
+// failure rate by relabelling every 409 `deferred` read as a fleet getting
+// better even when the rebuild landed six hours later.
+//
+// It refuses the same three ways renderDeployDelivery does, and none of them is
+// a zero:
+//
+//   - no `deferral_wait` node at all (every control plane older than #11207) —
+//     the section says NOT MEASURED, because a missing wait reads as no wait;
+//   - a quantile REFUSED (below min_sample, or the unresolved mass exceeds the
+//     1-q headroom it needs) — it prints NO NUMBER and the control plane's own
+//     reason, VERBATIM, never a percentile;
+//   - the unresolved mass itself, printed in max's place as a censored LOWER
+//     BOUND — and when that mass is entirely UNREADABLE there is no bound to
+//     state, so the UNREADABLE count prints with the control plane's own label
+//     rather than as an empty cell.
+//
+// UnresolvedFraction and Headroom print BESIDE the reason on every line, never
+// inside it. The server's `cond` tests `n < min_sample` FIRST, so a small window
+// reports only "sample 23 below min_sample 200" while the very same node carries
+// unresolved_fraction 0.2581 against p95's 0.05 headroom — 5.2x over, and
+// invisible to a renderer that prints Reason alone.
+func renderDeployDeferralWait(out *writer, w *cloudclient.DeployDeferralWait) {
+	if w == nil {
+		out.outf("deferral wait — how long a deferred deploy waited to be re-queued")
+		out.outf("  NOT MEASURED — this control plane sends no deferral-wait census. Nothing was read: the deferrals above are a COUNT WITH NO CLOCK, and this is NOT a fleet that re-queues instantly.")
+		out.outf("")
+		return
+	}
+
+	out.outf("deferral wait — how long a deferred deploy waited to be re-queued")
+	if clock := strings.TrimSpace(w.Clock); clock != "" {
+		out.outf("  clock: %s", sanitizeCell(clock))
+	}
+	if basis := strings.TrimSpace(w.Basis); basis != "" {
+		out.outf("  basis: %s", sanitizeCell(basis))
+	}
+	for _, q := range []cloudclient.DeployDeferralWaitQuantile{w.P50, w.P95, w.Max} {
+		label := strings.TrimSpace(q.Label)
+		if label == "" {
+			label = fmt.Sprintf("q%.2f", q.Quantile)
+		}
+		line := "  " + fmt.Sprintf("%-4s", sanitizeCell(label)) + " " + deployDeferralWaitValue(w, q)
+		if q.Quantile >= 1.0 {
+			line += " · " + deployDeferralWaitBound(w)
+		}
+		out.outf("%s", line)
+	}
+	if len(w.Outcomes) > 0 {
+		out.outf("  outcomes (the control plane's own words — COVERED means the site has since rebuilt, never that your edit shipped)")
+		for _, o := range w.Outcomes {
+			out.outf("    %-12s %6d  %s", sanitizeCell(o.Outcome), o.Count, sanitizeCell(o.Label))
+		}
+	}
+	out.outf("")
+}
+
+// deployDeferralWaitValue renders ONE deferral-wait quantile INSEPARABLY: the
+// value (or the refusal, with the control plane's reason verbatim) always
+// followed by the identifiability facts and by the population it was taken over.
+// There is no branch of this function that prints a bare number, and none that
+// prints an empty cell: a zero counter still prints its denominator and its
+// as-of.
+func deployDeferralWaitValue(w *cloudclient.DeployDeferralWait, q cloudclient.DeployDeferralWaitQuantile) string {
+	p := w.Population
+	population := fmt.Sprintf("(n=%d · covered %d / pending %d / unreadable %d of %d deferred · %s)",
+		q.Sample, p.Covered, p.Pending, p.Unreadable, p.Deferred, deployDeferralWaitAsOf(w.AsOf))
+	identifiability := fmt.Sprintf("unresolved %d = %.2f%% vs headroom %.2f%%",
+		q.Unresolved, q.UnresolvedFraction*100, q.Headroom*100)
+
+	if q.Refused || q.Seconds == nil {
+		reason := strings.TrimSpace(q.Reason)
+		if reason == "" {
+			reason = fmt.Sprintf("the control plane sent no value for a sample of %d", q.Sample)
+		}
+		return "NO NUMBER — " + sanitizeCell(reason) + " · " + identifiability + " " + population
+	}
+	return deployDeliveryDuration(*q.Seconds) + " · " + identifiability + " " + population
+}
+
+// deployDeferralWaitBound renders, in max's place, what is known about the waits
+// that are STILL RUNNING. A pending row is a wait whose end has not happened
+// yet, so its elapsed time is a LOWER BOUND, never a measurement.
+//
+// THE HOLE THIS CLOSES: when the unresolved mass is entirely UNREADABLE —
+// pending 0, unreadable > 0 — max refuses AND OldestPendingSeconds is nil, so a
+// naive "if refused, print the bound" renderer emits an EMPTY CELL: a new silent
+// mis-report inside the section built to end them. That branch prints the
+// UNREADABLE count with the control plane's own label for it.
+func deployDeferralWaitBound(w *cloudclient.DeployDeferralWait) string {
+	p := w.Population
+	asOf := deployDeliveryAsOf(w.AsOf)
+
+	if w.OldestPendingSeconds != nil {
+		return fmt.Sprintf("STILL WAITING >= %s · %d row(s) not covered %s",
+			deployDeliveryDuration(*w.OldestPendingSeconds), p.Pending, asOf)
+	}
+	if p.Pending > 0 {
+		return fmt.Sprintf("STILL WAITING >= an unstated bound · %d row(s) not covered %s", p.Pending, asOf)
+	}
+	if p.Unreadable > 0 {
+		return fmt.Sprintf("NO BOUND — nothing is pending, yet %d row(s) are UNREADABLE (%s) %s",
+			p.Unreadable, deployDeferralWaitOutcomeLabel(w, "unreadable"), asOf)
+	}
+	return fmt.Sprintf("nothing was unresolved %s — %d of %d deferred row(s) unreadable, a reading taken at that instant, not a standing fact",
+		asOf, p.Unreadable, p.Deferred)
+}
+
+// renderDeployCoverageCohorts prints the COVERAGE PARTITION over both never-live
+// cohorts: the same later-live clock the deferral wait uses, applied to the
+// `deferred` rows AND to the rows that terminated `failed`.
+//
+// WHY IT IS A SECOND SECTION AND NOT A COLUMN ON THE FIRST: the deferral wait's
+// population is `status == "deferred"` and nothing else, so a reader who took it
+// as the coverage gauge was reading a number that structurally could not see the
+// failed tail — a third of the never-live chains on the corpus that motivated
+// this key. The two cohorts print side by side and are never summed: a failed
+// row is not a deferral.
+//
+// It refuses the same way its neighbour does, and none of the refusals is a
+// zero: no node at all prints NOT MEASURED (an absent key is not an empty
+// backlog), a cohort with no rows prints "no rows" and never a percentage, and
+// the counts that are neither covered nor never-covered — too young to judge,
+// unreadable — print by name so a silence can never pass for health.
+//
+// COVERED is the control plane's word, rendered with the control plane's meaning
+// attached: the SITE has since rebuilt. Not "your edit shipped".
+func renderDeployCoverageCohorts(out *writer, c *cloudclient.DeployCoverageCohorts, pinnedWindow bool) {
+	out.outf("coverage — did the site ever rebuild after a row that never went live")
+	if c == nil {
+		out.outf("  NOT MEASURED — this control plane sends no coverage census. Nothing was read: the rows that never reached live are UNCOUNTED here, and that is NOT the same as none.")
+		out.outf("")
+		return
+	}
+
+	if clock := strings.TrimSpace(c.Clock); clock != "" {
+		out.outf("  clock: %s", sanitizeCell(clock))
+	}
+	if basis := strings.TrimSpace(c.Basis); basis != "" {
+		out.outf("  basis: %s", sanitizeCell(basis))
+	}
+	// THE ONE INFERENCE THE SHARED VOCABULARY CANNOT STOP ON ITS OWN (review,
+	// wave 32). "A deferral was covered" reads as "the re-queue worked", which is
+	// true. "A FAILED row was covered" reads as "that failure turned out fine",
+	// which is NOT what was measured: the clock only ever says the SITE rebuilt
+	// afterwards. The basis line above states what COVERED means; this one states
+	// what it does not, because the failed cohort is new here and the wrong
+	// reading of it is the comforting one.
+	out.outf("  and NOT: a COVERED row in the failed cohort means the site is not stuck — never that the failure was repaired or its content shipped")
+	out.outf("  fence: a row is only counted NEVER COVERED once it is older than %s %s",
+		deployDeliveryDuration(float64(c.MaturitySeconds)), deployDeliveryAsOf(c.AsOf))
+	out.outf("%s", deployCoverageBoundLine(c.CoveringBound))
+	out.outf("%s", deployCoverageWindowLine(pinnedWindow))
+
+	if len(c.Cohorts) == 0 {
+		out.outf("  NOT MEASURED — the control plane named no cohorts at all, which is not the same as no uncovered rows.")
+		out.outf("")
+		return
+	}
+
+	for _, cohort := range c.Cohorts {
+		out.outf("  %-10s %s", sanitizeCell(cohort.Cohort), deployCoverageCohortLine(cohort))
+		for _, env := range cohort.NeverCoveredByEnvironment {
+			out.outf("             never covered in %s: %d", sanitizeCell(env.Environment), env.NeverCovered)
+		}
+	}
+	renderDeployCoverageSites(out, c)
+	out.outf("")
+}
+
+// deployCoverageBoundLine states the covering query's bound. The control plane
+// sends it as one token; an absent token is NOT a claim that both edges were
+// bounded, so it says which it is.
+func deployCoverageBoundLine(bound string) string {
+	switch strings.TrimSpace(bound) {
+	case "left_only":
+		return "  covering bound: LEFT ONLY — a live build minted AFTER this window's end still counts as coverage, so this reading answers \"is the site stuck NOW\" and is never a retrospective of the window."
+	case "":
+		return "  covering bound: NOT STATED — this control plane does not say whether the covering query was bounded on the right. Which of the two questions the counts below answer is UNKNOWN, and that is not the same as both edges being pinned."
+	default:
+		return "  covering bound: " + sanitizeCell(bound) + " — a bound this reader does not know; read it as stated, not as \"left only\"."
+	}
+}
+
+// deployCoverageWindowLine discloses what the WINDOW does to these counts. It
+// is not a refusal — the numbers are real — it is the sentence that stops the
+// same fleet's 0 at --days 7 and 5 at --days 27 from reading as a change.
+func deployCoverageWindowLine(pinned bool) string {
+	if pinned {
+		return "  window: BOTH edges pinned by --from/--to, so this population does not move when you run it again."
+	}
+	return "  window: LEFT-TRUNCATED — a --days window (7 by default) has its right edge at NOW and its left edge sliding with the clock, so rows older than the width are not in this population AT ALL. A wider --days finds more never-covered rows without one row of the fleet changing; only --from/--to pins both edges."
+}
+
+// renderDeployCoverageSites NAMES the never-covered tail. A count that cannot
+// say which site is dark sends an operator looking through the whole fleet, and
+// that anonymity is the defect this whole section exists to end.
+//
+// Three states, kept apart: no key at all (an older control plane MEASURED
+// nothing), an empty list with a zero total (nothing is dark — a real answer),
+// and a list that was CUT, which prints its own unbounded total so a top-20 can
+// never be read as the whole tail.
+func renderDeployCoverageSites(out *writer, c *cloudclient.DeployCoverageCohorts) {
+	if c.NeverCoveredSites == nil && c.NeverCoveredSitesTotal == 0 && !c.NeverCoveredSitesTruncated {
+		out.outf("  sites: NOT NAMED — this control plane sends no per-site breakdown. The counts above are real; WHICH sites they belong to was not read, and that is not the same as none.")
+		return
+	}
+	if len(c.NeverCoveredSites) == 0 {
+		out.outf("  sites: none — no {site, environment} pair is never-covered in this window.")
+		return
+	}
+
+	// The header counts {site, environment} PAIRS, not distinct sites, because
+	// that is what the total beside it counts — one site dark in both production
+	// and preview is TWO rows here and TWO in the total. Saying "sites" would
+	// make "7" mean one thing in the header and another in the cut marker below,
+	// which is the exact ambiguity this section exists to end.
+	out.outf("  never-covered {site, environment} pairs (%d of %d)", len(c.NeverCoveredSites), c.NeverCoveredSitesTotal)
+	for _, s := range c.NeverCoveredSites {
+		out.outf("    %-28s %-12s %d row(s) never covered", deployCoverageSiteName(s), sanitizeCell(s.Environment), s.NeverCovered)
+	}
+	if c.NeverCoveredSitesTruncated {
+		out.outf("    … the list is CUT: %d {site, environment} pair(s) are never-covered and %d are printed. The counts above are over ALL of them.",
+			c.NeverCoveredSitesTotal, len(c.NeverCoveredSites))
+	}
+}
+
+// deployCoverageSiteName is the site's most useful identifier that actually
+// arrived. A deleted site row resolves to no name and no slug, and the id is
+// then the only true thing there is to print — never a blank cell, which reads
+// as a site with no name rather than as a site that is gone.
+func deployCoverageSiteName(s cloudclient.DeployCoverageSite) string {
+	if slug := strings.TrimSpace(s.Slug); slug != "" {
+		return sanitizeCell(slug)
+	}
+	if name := strings.TrimSpace(s.Name); name != "" {
+		return sanitizeCell(name)
+	}
+	if id := strings.TrimSpace(s.SiteID); id != "" {
+		return sanitizeCell(id) + " (no site row)"
+	}
+	return "(unidentified)"
+}
+
+// deployCoverageCohortLine renders ONE cohort INSEPARABLY: the covered count
+// never travels without the population it came from, nor without the rows that
+// are neither covered nor overdue.
+func deployCoverageCohortLine(c cloudclient.DeployCoverageCohort) string {
+	if c.Population == 0 {
+		return "no rows in this window — nothing to cover, which is not the same as full coverage"
+	}
+
+	line := fmt.Sprintf("%d of %d covered (the site has since rebuilt) · %d NEVER COVERED · %d too young to judge · %d unreadable",
+		c.Covered, c.Population, c.NeverCovered, c.TooYoung, c.Unreadable)
+	if c.OldestPendingSeconds != nil {
+		line += fmt.Sprintf(" · oldest still uncovered >= %s", deployDeliveryDuration(*c.OldestPendingSeconds))
+	}
+	return line
+}
+
+// deployDeferralWaitAsOf is deployDeliveryAsOf's wording without the enclosing
+// parentheses, for the cells that already sit inside a parenthetical. An instant
+// the control plane did not name is still stated, never blanked.
+func deployDeferralWaitAsOf(raw string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(deployDeliveryAsOf(raw), "("), ")")
+}
+
+// deployDeferralWaitOutcomeLabel returns the control plane's own wording for one
+// outcome, VERBATIM. A reader that invents a gloss here is the mis-report:
+// COVERED means "the site has since rebuilt", never "your edit shipped".
+func deployDeferralWaitOutcomeLabel(w *cloudclient.DeployDeferralWait, outcome string) string {
+	for _, o := range w.Outcomes {
+		if strings.EqualFold(strings.TrimSpace(o.Outcome), outcome) {
+			if label := strings.TrimSpace(o.Label); label != "" {
+				return sanitizeCell(label)
+			}
+		}
+	}
+	return "the control plane named no label for " + sanitizeCell(outcome)
+}
+
 // printCloudDeploymentsHelp writes `bp cloud deployments` usage.
 func printCloudDeploymentsHelp(out *writer) {
 	const help = `bp cloud deployments — the FLEET deploy rate, with the denominator it was taken over.
@@ -482,12 +1315,34 @@ USAGE
   bp cloud deployments [--days N | --from <date> --to <date>] [--sites N]
 
 WHAT IT PRINTS
-  One line carrying the rate, the volume and the denominator together:
+  One line carrying BOTH rates, the volume and the denominator together — the
+  live-per-attempt rate first, the failure rate as its labelled sibling:
 
-    37.6% of 2216 attempted (832 failed · 793 deferred · 591 live) · 58.5% of 1423 terminal
+    live 26.7% of 2216 attempted · failure 37.5% of 2216 attempted (832 failed · 793 deferred · 591 live) · 58.5% of 1423 terminal
 
-  then the failure classes, the deferrals (counted in the volume, never in the
-  failure numerator) and the sites, worst-volume first.
+  then the basis line, which names the denominator: it is deployment ROWS, not
+  attempts — an attempt that coalesces onto an in-flight build mints no row, so
+  the live rate is a CEILING.
+
+  Then the failure classes, the deferrals (counted in the volume, never in the
+  failure numerator), the DEFERRAL WAIT census (how long a deferred deploy
+  waited to be re-queued — the clock the deferral COUNT never had, each
+  percentile beside covered / pending / unreadable out of the deferred total),
+  the DELIVERY census (how long content waited to reach the web, each percentile
+  beside the sample and window width that produced it) and the sites,
+  worst-volume first.
+
+  The parenthetical names every state an attempt ended in, so success is never
+  the unnamed remainder: it also carries "N in flight", "N cancelled" and
+  "N residual" when the control plane sends them.
+
+  A percentile that cannot be identified prints NO NUMBER and the reason — on a
+  fleet where 40% of rows are still waiting, no p95 exists to report. The
+  still-waiting cohort prints as "STILL WAITING >= <bound> (as of <instant>)",
+  never as a bare count. On the deferral wait, the unresolved fraction and the
+  headroom print BESIDE the reason, so a min_sample refusal cannot mask an
+  identifiability problem — and when the unresolved mass is entirely UNREADABLE
+  there is no bound to state, so the UNREADABLE count prints in its place.
 
 FLAGS
   --days N            window width ending now (default 7)
@@ -501,12 +1356,26 @@ on purpose: daily deploy volume moved by a factor of eight in six days, so an
 unpinned window compares two different populations and reports a volume collapse
 as a repair.
 
-IT REFUSES OUT LOUD. A census this command could not read NEVER renders as a
-fleet with zero failures — a 401, a 403 (you are not a platform operator, or
-nobody is), a 422 (bad window) and the control plane's own below-min_sample
-refusal each print as a named refusal instead of a number.
+THE POPULATION IS ALWAYS NAMED. Under the window every render prints a scope
+line — "team <slug> · N sites registered to this team and in scope". A control
+plane that sends no scope node prints "population NOT NAMED" instead: a rate
+whose population is unstated says so, rather than looking fleet-wide.
 
-NEEDS 'bp login' AND a platform-operator account (PLATFORM_ADMIN_EMAILS on the
-control plane must name your account's email).`
+IT REFUSES OUT LOUD. A census this command could not read NEVER renders as a
+fleet with zero failures — a 401, a 403 (your token lacks ability "read"), a 422
+no_team (this credential belongs to no team), a 422 invalid_window (bad window)
+and the control plane's own below-min_sample refusal each print as a named
+refusal instead of a number.
+
+A REFUSED SHARE SAYS WHICH WINDOW WOULD ANSWER. Where the class or deferral
+shares refuse, the section prints the control plane's own reason with the
+denominator it was taken over, and — when the envelope names a vocabulary
+boundary — the --from that would keep the window inside ONE vocabulary. Where
+the envelope names no boundary, it says exactly that rather than inventing a
+window: a suggested window that answers nothing is worse than none.
+
+NEEDS 'bp login' and a credential carrying ability "read" on a team. It reads
+GET /v1/deploy-ledger/census — the team-scoped census — so no operator grant is
+involved and PLATFORM_ADMIN_EMAILS has no bearing on whether you can look.`
 	out.outf("%s", help)
 }
