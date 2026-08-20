@@ -403,9 +403,28 @@ defmodule BarkparkWeb.BulldocsLive do
   # Load both events; if both exist, line-diff their `payload_html` and open
   # the modal. A missing event is a no-op (no crash) with a gentle flash — the
   # rail row could have been for an event that has since been pruned.
+  #
+  # SECURITY (cross-tenant IDOR, fail-closed): `from_id`/`to_id` are client-
+  # supplied and reach here over ANY authenticated-or-anonymous socket, so a
+  # malicious client can push arbitrary UUIDs. `Events.get_event/1` is UNSCOPED
+  # (bare `Repo.get`), so an unconstrained lookup would leak another workspace's
+  # event `payload_html` into this paper's diff modal. The socket's
+  # `:rail_events` was built by `load_rail_events/1` via the already-workspace-
+  # scoped `Events.list_for_goal(goal_id, paper_scope_opts(paper))`, so it holds
+  # ONLY this paper's own rail (or, for a NULL-workspace pre-tenancy paper, its
+  # own unscoped rail — back-compat). We therefore require BOTH ids to be
+  # members of that rail before touching `Events.get_event/1`; a foreign id is
+  # not on the rail and falls through to the existing "no longer exists" flash.
+  # `reader_scope(socket)` is nil on this flat public surface, so rail
+  # membership — not scope threading — is the correct fence.
   def handle_event("open-diff", %{"from" => from_id, "to" => to_id}, socket) do
-    from = Events.get_event(from_id)
-    to = Events.get_event(to_id)
+    rail_ids = MapSet.new(socket.assigns.rail_events, & &1.id)
+
+    from =
+      if MapSet.member?(rail_ids, from_id), do: Events.get_event(from_id), else: nil
+
+    to =
+      if MapSet.member?(rail_ids, to_id), do: Events.get_event(to_id), else: nil
 
     if from && to do
       chunks = TextDiff.diff_lines(from.payload_html, to.payload_html)

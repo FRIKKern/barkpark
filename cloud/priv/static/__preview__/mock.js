@@ -232,7 +232,12 @@
         // on-state render from real data instead of the placeholder.
         var chip = document.getElementById("acct-email");
         var ready = chip && chip.textContent;
-        if ((ready || tries > 40) && appHooks && appHooks.openAccountModal) {
+        // `>= 40`, not `> 40`: the increment below lives inside `tries++ < 40`,
+        // so `tries` never exceeds 40 and the give-up branch was UNREACHABLE —
+        // a scenario whose /v1/me does not land simply stopped, silently, with
+        // no modal to photograph. Fixed with cch-w39-s2, which is the first
+        // change to make that path worth reaching.
+        if ((ready || tries >= 40) && appHooks && appHooks.openAccountModal) {
           appHooks.openAccountModal();
           // Scenario-specific post-open drive. Keyed on the scenario NAME, the
           // same convention shoot.sh uses to derive ?modal=account at all.

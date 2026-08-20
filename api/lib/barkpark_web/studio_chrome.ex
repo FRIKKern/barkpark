@@ -30,12 +30,64 @@ defmodule BarkparkWeb.StudioChrome do
       navigation handlers want `.name`/`.slug`); flat surfaces fall back
       to the seeded Default scope, mirroring the flat Studio's
       `ensure_tenancy_scope`.
-    * `shares_admin?` — the same nil-safe admin predicate StudioLive
-      re-checks in every shares-* handler (the button is chrome; the
-      HANDLER gate stays the security boundary).
+    * `shares_admin?` — WORKSPACE-SCOPED. Delegates to
+      `BarkparkWeb.Studio.Caps.admin?/1`, the same seat-authority oracle
+      StudioLive derives its `caps.admin` from and re-checks in every
+      shares-* handler (the button is chrome; the HANDLER gate stays the
+      security boundary).
+    * `instance_admin?` — HOST-LEVEL, deliberately NOT workspace-scoped.
+      The self-update banner's oracle (see below).
     * `nav_section` / `current_path` / `create_open` / `api_token` —
       nil-safe defaults so the layout never KeyErrors on a surface that
       doesn't care.
+
+  ## Two admin oracles, split deliberately (arpss-w10)
+
+  `shares_admin?` used to be `token_admin? or account_admin?`, where the
+  account arm authorized against `Tenancy.get_default_workspace()` — NOT
+  the workspace `hydrate_scope/1` had just resolved two lines earlier.
+  That was wrong in both directions, and neither is an authorization
+  bypass (every consumer re-gates; the scoped routes are gated by
+  `LiveAuth :scoped_admin` and StudioLive by the `Caps` deny-gate) — both
+  are display defects:
+
+    * FALSE-SHOW — an admin of Default who is a plain `member` of B saw
+      Share / Settings / tmux chrome while browsing `/w/B/…`, which the
+      scoped gate then refused. On the flat `/studio/*` routes it was
+      worse: an `admin`-permissioned api_token with ZERO membership rows
+      anywhere got `shares_admin? == true` against the Default workspace
+      `default_scope_fallback/1` had just pinned for it — a phantom
+      admin affordance for a non-member.
+    * FALSE-HIDE, the operationally worse one — an admin or OWNER of B
+      holding no role on Default saw no admin chrome anywhere, including
+      on B's own scoped surfaces, so they could not discover the Settings
+      tab for a workspace they own.
+
+  The fix splits the assign in two rather than picking one oracle:
+
+    * `shares_admin?` — every WORKSPACE-scoped affordance (Share button,
+      Settings/tmux/chat tabs). Now literally `Caps.admin?/1`, the
+      seat-authority predicate: `role_permits?(membership_role, ws_id,
+      :admin)` on the MOUNTED workspace, for BOTH principal kinds (an
+      `admin`-permissioned token must ALSO hold an admin-conferring
+      membership ROLE here). Calling Caps rather than re-spelling it is
+      the point — chrome and the deny-gate must never be able to drift,
+      and a nil/unresolved workspace DENIES, which is what retires the
+      phantom flat-route affordance.
+    * `instance_admin?` — the HOST-level oracle, kept verbatim: an admin
+      api_token OR an account with admin authority on the Default
+      workspace. The self-update banner is genuinely instance-wide (it
+      offers to upgrade the BEAM everyone is running, not a tenant's
+      content), so narrowing it to the mounted workspace would hide it
+      from the host operator the moment they browsed a workspace they
+      merely belong to. `LiveAuth.on_mount(:admin)` uses the same
+      default-workspace bar, so this arm stays its mirror.
+
+  > NOTE: `layouts/studio.html.heex` still passes `shares_admin?` to
+  > `studio_update_banner`. Re-pointing that one attribute at
+  > `instance_admin?` is a layout change, outside this fence, filed as
+  > `task-4cfc68a1e3bec452`. Until it lands the banner rides the narrowed
+  > flag.
 
   It also attaches a `handle_event` hook to EVERY chrome surface:
 
@@ -58,6 +110,7 @@ defmodule BarkparkWeb.StudioChrome do
   import Phoenix.LiveView, only: [attach_hook: 4, push_navigate: 2, put_flash: 3]
 
   alias Barkpark.{Content, Tenancy}
+  alias BarkparkWeb.Studio.Caps
 
   @studio_live BarkparkWeb.Studio.StudioLive
 
@@ -80,8 +133,16 @@ defmodule BarkparkWeb.StudioChrome do
       |> then(fn s ->
         assign(s, :bp_theme, Tenancy.workspace_theme(s.assigns[:current_workspace]))
       end)
+      # Two oracles, one resolved scope (see "Two admin oracles" above).
+      # `shares_admin?` is workspace-scoped seat authority on the MOUNTED
+      # workspace; `instance_admin?` stays the host-level one.
       |> then(fn s ->
-        assign(s, :shares_admin?, admin?(s.assigns[:api_token], s.assigns[:current_user]))
+        s
+        |> assign(:shares_admin?, Caps.admin?(s))
+        |> assign(
+          :instance_admin?,
+          instance_admin?(s.assigns[:api_token], s.assigns[:current_user])
+        )
       end)
       |> assign_new(:nav_section, fn -> nil end)
       |> assign_new(:current_path, fn -> nil end)
@@ -465,17 +526,26 @@ defmodule BarkparkWeb.StudioChrome do
     end
   end
 
-  # "Admin" for chrome (Share button, self-update banner, tmux console tab) =
-  # an admin API token OR an account whose role on the default workspace is
-  # admin-grade. These are the SAME two paths the admin `on_mount` gate accepts
-  # (LiveAuth :admin). Without the account arm, a cloud/SSO session — which
-  # carries no api_token — would see no admin chrome even as the owner (this is
-  # why the tmux tab was invisible on cloud-login instances).
-  defp admin?(token, user), do: token_admin?(token) or account_admin?(user)
+  # HOST-LEVEL admin, for the self-update banner ONLY (arpss-w10): an admin
+  # API token OR an account whose role on the DEFAULT workspace is admin-grade.
+  # These are the SAME two paths `LiveAuth.on_mount(:admin)` accepts
+  # (live_auth.ex:199-211), and mirroring it is deliberate — the banner offers
+  # to upgrade the instance, which is not a tenant-scoped act. Without the
+  # account arm, a cloud/SSO session — which carries no api_token — would see
+  # no host chrome even as the owner (this is why the tmux tab was invisible on
+  # cloud-login instances). The tmux TAB itself is NOT on this flag — it is a
+  # workspace-scoped affordance and rides `shares_admin?`, so a workspace admin
+  # now reaches it on their own workspace with no Default role at all. What this
+  # arm still carries is the self-update banner.
+  #
+  # NOT used for any workspace-scoped affordance — that is `shares_admin?`,
+  # which is `Caps.admin?/1`. Do not re-merge these two.
+  defp instance_admin?(token, user), do: token_admin?(token) or account_admin?(user)
 
   defp token_admin?(%_{} = token), do: Barkpark.Auth.has_permission?(token, "admin")
   defp token_admin?(_), do: false
 
+  # The DEFAULT-workspace arm — correct HERE (host-level) and only here.
   defp account_admin?(%Barkpark.Accounts.User{} = user) do
     case Tenancy.get_default_workspace() do
       %{id: ws_id} -> Tenancy.Auth.authorize(user, ws_id, :admin) == :ok

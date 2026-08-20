@@ -25,6 +25,31 @@ describe('toPackageName', () => {
     expect(toPackageName('foo_bar.baz')).toBe('foo_bar.baz')
   })
 
+  it('never emits a blacklisted npm name (yarn classic exits 1 on these)', () => {
+    // origin/main returned these byte-for-byte; both are validForOldPackages:false
+    expect(toPackageName('node_modules')).not.toBe('node_modules')
+    expect(toPackageName('node_modules')).toBe('node_modules-app')
+    expect(toPackageName('favicon.ico')).not.toBe('favicon.ico')
+    expect(toPackageName('favicon.ico')).toBe('favicon.ico-app')
+    // the blacklist is exactly two literals — reached via slugification too
+    expect(toPackageName('Node_Modules')).toBe('node_modules-app')
+  })
+
+  it('clamps at npm’s 214-character ceiling (exact boundary)', () => {
+    expect(toPackageName('a'.repeat(214))).toBe('a'.repeat(214))
+    expect(toPackageName('a'.repeat(215))).toHaveLength(214)
+    // a cut landing on '-' / '.' is re-trimmed
+    expect(toPackageName(`${'a'.repeat(213)}-b`)).toBe('a'.repeat(213))
+  })
+
+  it('leaves plausible names that npm only warns about (or accepts) unchanged', () => {
+    // core-module names are warnings with validForOldPackages:true; 'test' is valid
+    expect(toPackageName('test')).toBe('test')
+    expect(toPackageName('stream')).toBe('stream')
+    expect(toPackageName('http')).toBe('http')
+    expect(toPackageName('my-site')).toBe('my-site')
+  })
+
   it('falls back to barkpark-site when nothing survives', () => {
     expect(toPackageName('   ')).toBe('barkpark-site')
     expect(toPackageName('!!!')).toBe('barkpark-site')

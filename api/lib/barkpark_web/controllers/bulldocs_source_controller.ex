@@ -14,7 +14,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
   alias Barkpark.PortableDoc.Bpml.UnprintableError
 
   def show(conn, %{"slug" => slug} = params) do
-    dataset = Map.get(params, "dataset") || Content.paper_default_dataset()
+    dataset = requested_dataset(params)
     scope = paper_scope(conn, params)
     perspective = BarkparkWeb.AnonPerspective.resolve(conn, params)
     format = Map.get(params, "format", "json")
@@ -130,6 +130,21 @@ defmodule BarkparkWeb.BulldocsSourceController do
     case get_in(paper.content || %{}, ["rev"]) do
       rev when is_integer(rev) -> rev
       _ -> paper.rev
+    end
+  end
+
+  # `/papers/:slug/source` takes `dataset` from the QUERY STRING (only the
+  # sibling `/d/:dataset/papers/:slug/source` route carries it as a path
+  # segment, where Phoenix's path params win the merge). `?dataset[]=x` decodes
+  # to a list and `?dataset[a]=b` to a map; either one reaches
+  # `x.dataset == ^dataset` on a :string column and raises Ecto.Query.CastError,
+  # which has no Plug.Exception impl → a raw 500 instead of a 404. The dataset
+  # is a scope selector with a documented default, so a malformed one fails soft
+  # to that default (same guard shape as MetaController.show/2).
+  defp requested_dataset(params) do
+    case Map.get(params, "dataset") do
+      ds when is_binary(ds) -> ds
+      _ -> Content.paper_default_dataset()
     end
   end
 

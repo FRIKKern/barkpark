@@ -72,6 +72,48 @@ defmodule BarkparkCloud.Accounts.TwoFactor do
   clock. Steps are scanned oldest-first so a code straddling two steps resolves
   to its earliest matching step (the conservative choice for replay).
   """
+  # ── CITED SAFE — class C done RIGHT, and the in-repo MODEL IDIOM
+  # (clock-semantics wave, 2026-08-19). Read this before re-sourcing the clock.
+  #
+  # Provenance: this is the same family as the defect closed by #12628
+  # (8598c4efe7), where a wall-clock-derived window was used as a BUCKET KEY, so
+  # a caller holding a stale window could delete a newer bucket and reset the
+  # budget (atomicity precedent: #12579, e45f1377bb). `div(time, 30)` below is a
+  # genuine wall-clock quantiser and the step index IS a bucket key — persisted,
+  # and a bound is enforced against it. Class C, correctly.
+  #
+  # (a) STRUCTURAL: the persisted key is guarded by a STRICT ORDERING PREDICATE
+  #     in the WHERE, not by equality and not by a read-then-write —
+  #     `(is_nil(u.two_factor_last_step) or u.two_factor_last_step < ^step)` at
+  #     cloud/lib/barkpark_cloud/accounts.ex:2186, in the same `update_all` that
+  #     sets it. An out-of-order (rewound, replayed, or straddling) step
+  #     therefore matches ZERO rows and is rejected. That is exactly #12628's
+  #     remedy — tolerate out-of-order buckets by acting only on strictly-newer
+  #     ones — applied here PROPHYLACTICALLY, before that defect was found
+  #     anywhere. When a future site needs the class-C shape, copy this one.
+  #
+  # (b) The `[-1, 0, 1]` scan below is EARLIEST-FIRST and returns on first
+  #     match, so a code straddling two steps resolves to its OLDEST matching
+  #     step and is then rejected by the strict guard. A latest-first scan would
+  #     have made the ±1 tolerance window replayable once per code — the
+  #     ordering of that list is load-bearing, not cosmetic.
+  #
+  # CLOCK STEP, both directions: BACKWARD yields a lower `step`, which the
+  # strict guard rejects — fail-CLOSED. FORWARD yields a higher `step`, which is
+  # accepted and consumed, so the only cost is that some future steps are burned
+  # early; a replay of an already-consumed code still fails. `now` is injectable
+  # for tests but production always passes the real clock, and no request value
+  # reaches it — an attacker cannot supply a time here.
+  #
+  # CENSUS NOTE worth one line, because it is how this quantiser hid: the
+  # canonical census grep `div(System\.` CANNOT SEE IT — the `div` is applied to
+  # the local variable `time`, not to a clock call. Any future sweep for
+  # bucket-key sites must grep `div(` and follow the binding.
+  #
+  # WHAT THIS VERDICT DOES NOT REST ON: the moduledoc claim above that the step
+  # "is monotonic in wall-clock time". Wall-clock time is NOT monotonic — that
+  # is the whole premise of this wave. The verdict rests on the SQL guard at
+  # accounts.ex:2186, which holds whether or not the clock behaves.
   @spec matching_step(binary(), String.t(), integer()) :: {:ok, integer()} | :error
   def matching_step(secret, otp, now \\ System.os_time(:second))
 

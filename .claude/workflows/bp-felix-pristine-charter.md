@@ -2958,7 +2958,94 @@ their non-merge rows via `seal_one.py` post-merge; close `felix-w27-s6-12041-gol
 5. **sync dead-letter classification** — `task-felix-w14-sync-deadletter-classification` (opus,
    medium). Gate: applier_test.exs green + classification-revert fail-before; no reaper.
 
+## Wave 31 Decisions (2026-08-18) — RECONCILIATION: THE LEDGER TELLS THE TRUTH
+
+Wave 31 is a reconcile-and-close wave, not an audit/build wave. Wave 30 proved the api/ core is
+swept clean; the real unmet work was the ledger. The finding is undramatic and that IS the honest
+outcome: the census refuted the wish's central premise three ways, and the one substantive ledger
+correction available today was a re-parent, not a batch of closes. Numbering starts at **D208** —
+D202-D207 are staged on the still-open wave-30 charter PR **#12147** (union-merge partner; resolve
+by union, keep D208 if #12147 lands first, else #12147 renumbers).
+
+- **D208 — THE 173-OPEN PREMISE IS FALSE.** Felix (`task-96a908af98698118`) child_count 173 was, at
+  wave start, 124 done / 31 open / 16 cancelled / 2 considering — not 173 open. The wave's product is
+  an honest partition + a convergence verdict, never a slice count.
+- **D209 — THE CLOSEABLE-BY-EVIDENCE STALE-OPEN BATCH IS EMPTY TODAY.** Every 0/N open row has zero
+  merged commits; the only two N-1/N rows (5/6) are `felix-w27-bl-media-dataset-swallow-mirror`
+  (gated on PR **#12132**, OPEN/BLOCKED, unmet crit is the merge-gated one) and
+  `felix-w30-s1-redaction-global-schema-fallback` (gated on PR **#12159**, OPEN/UNSTABLE, unmet crit
+  is the merge-gated one). Neither head is an ancestor of origin/main; both close automatically when
+  their PR lands. A naive progress-ratio close is REFUSED (the console-w76 batch-close-heuristic
+  lesson holds). No row was fabricated closed.
+- **D210 — THE TWO ROWS WAVE 30 CLOSED STAND; audit-back reconfirms from source. DO NOT REOPEN.**
+  `felix-w27-s6-12041-golden-contingency` (done 3/3): #12041 merge commit `71f06d6` is a proven
+  ancestor of origin/main; D198 authorizes; airtight. `felix-w29-bl-asset-schema-nil-redaction`
+  (done 2/2): refutation sound at source — `envelope.ex:145-162` shows a nil caller_context routes to
+  `%CallerContext{}` and FAILS CLOSED, so the correct reddening exemplar is the `:internal` sentinel
+  (returns `envelope` unredacted, not request-reachable), exactly as recorded — NOT `caller_context=nil`.
+  The `D204` citation on that close is a PROVENANCE GAP only (D202-D207 live on open #12147, absent
+  from origin/main); the underlying refutation is independently source-confirmed. Charter note, no reopen.
+- **D211 — 7 NON-FELIX RIDERS RE-PARENTED to `cloud-console-hardening-epic` (executes D194).** The
+  five `gr-*` guerrilla-backlog rows + `cch-w1-mirror-direct-write-unfenced` + `cch-w3-task-birth-attribution`
+  moved cleanly (each parent_id verified post-move); `felix-w28-bl-reparent-nonfelix-rows` CLOSED 2/2.
+  Felix open dropped 31→23. `gr-bl-task-move-noop-help-drift`'s live defect is the Go CLI help text
+  (a CLI wave under the new parent), not an api/ Felix concern.
+- **D212 — `felix-w27-bl-sobelow-baseline-lineshift` is GENUINE-UNBUILT, CI/human-gated — NOT
+  stale-open.** #11427 (`4ca033f502`) is a merged ancestor but re-anchored only 3 of 6 CSRF rows and
+  has ALREADY re-drifted on current main (skip anchors 622/539/563 vs live pipeline decls 553/577/646).
+  D194's "THE LINESHIFT ROW IS NOT SUBSUMED" holds; the row stays open, fenced by open PR **#6057** +
+  D167 (zero builders in the sobelow vein). Counts toward human-gated residue, not the closeable batch.
+- **D213 — CONVERGENCE: SEAL-AND-SPIN recommended (a recommendation for the human, never a wave action
+  that shreds backlog).** No open row is an unbuilt, buildable api/-core defect above the doctrine bar.
+  The ~23 residue is: 2 built-and-merge-gated (#12132/#12159), ~11 CI/sobelow/gate-tooling + human-gated
+  governance (`close-6057-superseded`, `stranded-sobelow-worktree`, `workflows-ownership-gap`,
+  `openapi-drift-chronic` — regen OOMs locally, CI-artifact only), ~7 api/-core watches/evals/seams/audits
+  deferred by design, 3 W13 watches. Recommendation: declare the api/ Phoenix-mastery audit complete;
+  keep the epic open ONLY as a thin holder for the two merge-gated PRs; spin the tooling/human rows to
+  owners. Do NOT keep it open pending the watches — they are a permanent standing backlog.
+
+## Wave 32 Decisions (2026-08-18) — THE DONE SET IS TRUE, EXCEPT ONE
+
+Wave 32 is a VERIFY-HEAVY FALSE-DONE AUDIT of the full Felix done set — the GR112-style independent re-audit the reconciliation waves (w30 api/ sweep, w31 ledger reconcile) never performed. Read-only ledger audit: bp reads + git reads, one reopen-stage write, this docs-only charter note. No code edits. Two mechanical sweeps at 100% coverage gave a hard trust floor + a true denominator; judgment depth was spent on the risk cohorts + a broad calibration sample. Wave Paper: `felix-pristine-wave-2026-08-18`.
+
+- **D214 — THE TRUE DENOMINATOR IS 127 DONE (live L1), not `child_count` 168** (which counts 23 open / 16 cancelled / 2 considering). Re-derived by five surveyors and re-confirmed at Decide. After the one reopen it is 126 done / 24 open.
+
+- **D215 — TWO MECHANICAL SWEEPS ARE CLEAN AT 100% COVERAGE.** SHA-ancestry: every decisive merge citation resolves to an ancestor of origin/main; the three absent PRs run to ground — #6551 (superseded, decisive #6616 `27352d8c13` ancestor), #12037 (superseded by #11853 `b10593ab94` ancestor), #12147 (the still-open wave-30 charter draft, cited only by the wave-30-log paperwork row). Engine-close provenance: exactly 10 rows bypassed the claim/close engine (4 no-claim A1, 6 worker-null holder-override A2), every one carrying a documented reconcile/override trail; ZERO bare hand-flips, and the 11-fake-done fabrication shape (null claim + boilerplate) does not appear. `closed_by` is engine-provenance, not authenticated identity — cohort A is "closed outside the engine", never "closed by the wrong person".
+
+- **D216 — THE ONE PROVEN FALSE-DONE, REOPENED: `felix-w24-bl-config-hash-line-consistency`.** The D164 PAID table mis-batched it into "the four binding sub-rows -> #7556", but #7556 (`2f9f25dd93`, "bind sobelow annotations to their defs") built the annotation-BINDING ratchet (`sobelow-inline-overlap-check.sh`, satisfying overlap-unbound + multiclause) — NOT the baseline-row FINGERPRINT-recompute-red-on-disagreement check crit0 demands. Capability ABSENT on origin/main (`3ddc00a0`), proven both directions: `sobelow-baseline-staleness-check.sh` EXPLICITLY prints `SKIP Config.CSRF` / `SKIP Config.HTTPS` (7 whole-file Config.* baseline rows structurally uncovered), and `sobelow-baseline-reconcile.sh` only uploads an artifact under a `continue-on-error: true` host job, so no fingerprint check can red. All 3 criteria `met=False`; crit0's user-visible claim is FALSE on main. Reopened via `bp task stage ... open` keeping the claim (the false-done recipe), correction note on `content.disposition_reason`. LOW severity (defense-in-depth over 7 narrow rows) — a real gap left unguarded, not a security hole. The row was re-read live before the reopen (`updated 2026-08-17T20:02Z`, no live engagement — no concurrent holder).
+
+- **D217 — EVERY OTHER JUDGMENT COHORT IS TRUE.** Cohort A 10/10 (`78bd9402` resolved as the squash predecessor of #3063's landed `3d0b1c28`; the ClaudeChat cap re-landed via #5975; the chatlive display-cap relocated live to `stream_tail.ex`). Decide-closed 0/N: 8/9 pass — dataset-slug, blobstore-migration, fenced-sixteen, bundle-member-guard, overlap-unbound, staleness-blocking-flip and multiclause all have their capability present on main. Paper-acceptance 12/12 reconcile against verdict tables; clean-cohort calibration 6/6; non-done set (41) clean.
+
+- **D218 — STAMPED-BUT-UNPROVEN IS REFUTED BY A LIVE MUTATE-CHECK.** Removing `materialized: true` from `queue.ex:179-180` makes `queue_test.exs:578` FAIL at `assert done_cte` (Expected truthy, got nil) — the CTE subplan node vanishes when PG inlines a single-reference CTE, so the test structurally proves the materialization capability and is not vacuous. `task-2c74954d53781113` stays done.
+
+- **D219 — CORRECTIONS TO INHERITED FRAMING (measured, not inherited).** The criteria-partial cohort is 21, not 23 (the extra 2 are None/None wave-log paperwork). D10's rubric-bug explanation is REFUTED for this cohort: the D10/D18 restamp targets are July 10-13 rows (none here), and the rubric-shape bug `task-6e819f39fe3aa9e6` is still OPEN under a different epic. The GR112 precedent was a 76/76 SWEEP, not "0/29" (29 was its deep sample) — audit ALL 127, never present a sample as a sweep.
+
+- **D220 — TRUST VERDICT: THE FELIX DONE SET IS HONEST.** 126/127 done rows independently re-derived TRUE; 1 low-severity false-done reopened. The three documented warts are cosmetic/paperwork with capability confirmed, NOT false-dones: `felix-w29-bl-asset-schema-nil-redaction` cites D204 (on open #12147) but its nil-fail-closed + schema-independent encrypted-drop capability is on main; `drafts.felix-pristine-wave-30-log` is done-against-open-#12147 but an engine-closed paperwork row with no criteria; squash-artifact secondary SHAs (e.g. w15's `ec097ceb0`) are non-ancestors whose primary merge IS an ancestor. The reconciliation program now rests on an independently-verified ledger.
+
+### Wave 32 roadmap (0 build slices — a read-only audit; 1 deferred remediation)
+
+1. **config-hash fingerprint-recompute check** — `felix-w24-bl-config-hash-line-consistency` (**opus**, round 2 — DEFERRED, the audit fence forbids code edits this wave; NOT dispatched). Reopened this wave; its 3 stored criteria are the build spec (recompute each baseline row's fingerprint, red on disagreement, cover the 7 whole-file Config.* rows the staleness ratchet SKIPS). Gate: `sobelow-baseline-*` scripts red on an injected Config.* fingerprint drift. A future felix wave / the lead dispatches it.
+
 ## Wave log
+
+### Wave 2026-08-18 — Wave 32 FALSE-DONE AUDIT. "126 true, one reopened — the ledger is honest."
+
+The GR112-style independent re-audit the reconciliation waves never ran. True denominator 127 done (live L1, not child_count 168). Two mechanical sweeps CLEAN at 100%: every decisive merge citation is an ancestor of origin/main (the 3 absent PRs run to ground), and exactly 10 engine-bypass rows all carry a documented reconcile/override trail — zero bare hand-flips, no 11-fake-done shape. The judgment cohorts where fabrication hides were re-derived from source: cohort A 10/10, paper-acceptance 12/12, calibration 6/6, non-done 41 clean, and the one strong stamped-but-unproven candidate REFUTED by a live mutate-check (removing `materialized:true` reds `queue_test:578` at `assert done_cte`). ONE genuine false-done: `felix-w24-bl-config-hash-line-consistency`, closed wave-26 as "PAID #7556 D164" but #7556 built annotation-BINDING, not the baseline fingerprint-recompute check crit0 demands — capability ABSENT on main (staleness ratchet SKIPs Config.CSRF/HTTPS; reconcile is continue-on-error advisory). Reopened via `bp task stage open` keeping the claim, correction note recorded; low severity, remediation deferred. Corrections to the inherited framing: criteria-partial cohort is 21 not 23; D10's rubric-bug story is REFUTED for this cohort; GR112 was 76/76 not 0/29. TRUST VERDICT: the Felix done set is HONEST — the reconciliation program rests on a now-independently-verified ledger. FENCE HELD: read-only audit + one reopen + this charter note; zero code edits. Wave Paper: `felix-pristine-wave-2026-08-18`.
+
+
+### Wave 2026-08-18 — Wave 31 RECONCILE. "173 was 31, the stale-open batch was empty, and the ledger now tells it."
+
+The census refuted the 173-open premise (124 done / 31 open / 16 cancelled / 2 considering) and found
+the closeable-by-evidence stale-open batch EMPTY: every 0/N row has zero merged commits, and the two
+5/6 rows are gated on still-open PRs #12132 (BLOCKED) and #12159 (UNSTABLE) — neither head an ancestor
+of origin/main, so both close only when their PR lands. The two rows the wish named to close were
+already closed by wave 30, and the audit-back reconfirmed BOTH from source (the `:internal` sentinel is
+the reddening exemplar, not `caller_context=nil`) — no reopen. The one substantive ledger write was the
+re-parent: 7 non-Felix riders moved to `cloud-console-hardening-epic`, dropping Felix open 31→23 with
+ZERO false closes. `felix-w27-bl-sobelow-baseline-lineshift` was verified genuine-unbuilt CI/human-gated
+(NOT stale-open) — #11427's 3-row fix already re-drifted. Verdict: SEAL-AND-SPIN — api/ core clean; keep
+the epic as a thin holder for #12132/#12159; the rest is standing backlog + human decisions. An honest
+ledger and a true residue number, not a slice count. No new api/ build (as expected). No build slices.
 
 ### Wave 2026-08-18 — Wave 30 BUILT + REVIEWED, grade A. "The Unswept Frontier Held; One Seam Hardened."
 

@@ -332,3 +332,136 @@ Test), #5706 (S2, waits CI Elixir Test), #5707 (S4, own gate) — all pairwise f
 Merge THIS charter PR (D25) and close `tlv-bl-true-blocking-primitive-decision` citing the merged
 D25 SHA + `claimable_statuses_test.exs`. (3) Then the crown `tlv-bl-writer-seam-transition-gate` and
 `tlv-bl-publish-door-lifecycle-guard` remain the top round-2 candidates, then tlv-s5/tlv-s8.
+
+### Wave 2026-08-18 — reconciliation (wave 6), Opus-only (Fable capped to Aug 21), grade A−
+
+A reconcile-and-close wave, not a fresh-build wave — the ledger's own subject applied to itself.
+The epic exists to make a task's state read TRUE on every surface; three weeks after the last
+touch, this wave re-derived the epic's own children to truth. **NO builders dispatched** — movement 4
+(finish an offline- AND mutation-provable backlog row) found nothing finishable this wave, so the
+code wave is empty by design, and for THIS epic that honest verdict IS the deliverable.
+
+**True split (re-derived from L1, four Opus verifiers PROVING by running):** 44 children =
+**24 done / 17 open / 1 considering / 2 cancelled**. child_count 44 is NOT the open count — the 17
+open rows are the whole job. origin/main was 41b16d78db at Decide (the digest's d7da14e8fc is an
+ancestor, no divergence); every ancestry proof re-run against 41b16d78db.
+
+**The one evidence-close (handed to the LEAD — its sole unmet criterion is merge-gated):**
+`ledger-merge-criterion-autostamp` (4/5). Built by **#5742 = `9e7132846f`**, which carries the exact
+`Task: ledger-merge-criterion-autostamp` trailer and `git merge-base --is-ancestor 9e7132846f
+origin/main` = YES. The sole unmet criterion is **0-based index 4** (`met=false, merge_gate=true`,
+"PR merged to main (LEAD closes this criterion on merge)."). **Pay `--criterion 4`, never 5** — the
+D87/search-template-w12 gotcha: `bp task close --criterion` is 0-based, briefs are 1-based. Claim is
+LAPSED (worker=null, epoch=8): re-claim first to mint a fresh epoch, read the CURRENT holder+epoch
+immediately before close, then close `done` stamping the merge SHA. Criterion text must be byte-exact
+including the trailing period or the close 409s `criteria_mismatch`.
+
+**The one clean re-parent (PERFORMED + verified this wave):**
+`pds-bl-merge-gated-criteria-carry-the-flag` → PDS epic `task-2ac1f95237c4a8e5` (open, top-level,
+accepting children). Its subject is the PDS merge-gated class; #9527's own body names it "parented to
+a different epic". Move confirmed by re-reading `parent_id` = `task-2ac1f95237c4a8e5`.
+
+**Mis-parent rows KEPT under this epic (verified, NOT moved):**
+- `cloud-console-data-query-id-prefix-bug` — its only plausible owner `cloud-console-hardening-epic`
+  is IN its terminal close TODAY (NO-SEAL ruling, forwarding ~427 orphans OUT, D93 "no re-homing this
+  wave"); the bug is **api-side** (`/v1/data/query`), not a console-GUI defect. Re-homing would strand
+  it. It is still genuinely UNBUILT on origin/main (query_controller reads no `id_prefix`, rejects no
+  unknown param) — do not close by evidence.
+- `task-eal-bl-lock-key-convergence`, `task-eal-bl-cmux-auto-pulse`, `spd-b44-slug-allocator-assigns-not-guesses`,
+  `graph-endpoint-latency`, `task-6e819f39fe3aa9e6`, `task-11390a3b900c8a09` — no foreign task-system
+  umbrella epic exists (bp search returned only this epic); this epic IS their umbrella.
+- `task-eal-bl-events-cold-index` (considering) — epic-NATIVE by content (ordered mutation-event
+  replay is the spine of lifecycle visibility). `considering` is correct — it dogfoods D1's new
+  first-class state. LEAVE.
+
+**The named seal-blockers — LEAVE (genuine offline-unbuildable-this-wave defects):** `tlv-s5`
+(Studio board, 0/6) and `tlv-s8` (epic-cycle walks its graph, 0/5) — both unbuilt, Fable-tier,
+live-surface; their deps (s1/s2/s6/s7) all DONE, so blocked SOLELY by the Fable cap (to Aug 21) +
+live surface. Zero commit hits on any ref.
+
+**Offline-buildable backlog — LEAVE (movement 4 found no clean finish):**
+- `tlv-bl-tui-close-drift-resync-guidance` (highest bar, 86) — reword+pin is offline-provable, but
+  crit[0]'s second clause needs model-layer surgery (the interactive board close wires plain
+  `DoClose`, not `DoCloseRev`; the only `DoCloseRev` caller is `cmux_hook.go:245`), and crit[2] is a
+  server-side CAS guarantee the `serve()` unit mock cannot enforce. A genuine Go slice, not a stamp.
+- `tlv-bl-task-board-columns-dead-code` — "dead" is only half true: no runtime importer, but
+  `component-golden-parity.test.ts:51` + `task-board-columns.test.ts:18` import it and the 31/0 suite
+  passes → a delete is a REHOME, not a free delete. crit[1] is merge-gated.
+- `tlv-bl-js-vocab-generator` — genuinely unbuilt (its only commit hit #5707 builds the DONE
+  drift-gate SIBLING and explicitly DEFERS the generator — a phantom-citation trap avoided); needs a
+  new build-time emitter + retiring the Part-5 gate; crit[2] merge-gated.
+
+**Live/prod-gated backlog — LEAVE (D13/D14 new-architecture residue):** `tlv-bl-web-task-cache-bust`,
+`tlv-bl-chat-live-transition-stream` (Studio subscribes for the Doing strip, but the transcript
+transition-stream is unbuilt — brief slightly overstates the gap), `tlv-bl-task-prime-chip-gap`.
+
+**Convergence verdict — recommend AGAINST seal-and-spin.** `tlv-s5` and `tlv-s8` are real above-bar
+defects blocking the epic's own D11/D12/D14 and D17 criteria and cannot be built this wave
+(Fable-capped, live-surface). The correct next move is a Fable wave after the Aug-21 cap lifts. Where
+the ledger already read true, the wave manufactured no findings — already-honest-with-evidence is the
+A-grade for a ledger-truth epic reconciling itself.
+
+**Next wave — dispatch order:** (1) LEAD closes `ledger-merge-criterion-autostamp` by evidence
+(re-claim → `--criterion 4` → merge SHA `9e7132846f`). (2) After Aug-21 Fable cap lifts: dispatch
+`tlv-s5` (fable, round 2, live Studio) then `tlv-s8` (fable, round 3, LAST merge — shared workflow
+file). (3) Offline-buildable backlog as dedicated slices when a build wave has room:
+`tlv-bl-tui-close-drift-resync-guidance` (Go, highest bar), `tlv-bl-js-vocab-generator` (build wave),
+`tlv-bl-task-board-columns-dead-code` (low-bar rehome). Wave paper:
+`task-lifecycle-visibility-wave-2026-08-18`.
+
+### Wave 2026-08-18 — done-set false-done audit (wave 7), Opus-only (Fable capped to Aug 21)
+
+A VERIFY-HEAVY AUDIT — not a build wave, not a reconcile wave. Wave 6 spent its judgment on the 17
+open rows and treated the ~24 done rows as settled background; this wave put the DONE set on trial.
+**VERDICT: 0 false-done across all 25 live-L1 done rows. Zero reopens; none manufactured. Stated even
+though it is zero.**
+
+**True denominator:** 25 done (44 children = 25 done / 16 open / 1 considering / 2 cancelled —
+re-derived twice from live L1; child_count is NOT the done count). Pinned snapshot
+origin/main = `e21bf409893d9de66542a31b06716e3c33d8f102` (== HEAD at audit time — verified live, not stale).
+
+**SWEEP A — SHA-ancestry at 100%.** All 15 merge-citing done rows resolve to a real `merge_commit_sha`
+on FRIKKern/barkpark, and every SHA is an ancestor of e21bf40 (`git merge-base --is-ancestor` RUN, never
+a PR-head shortcut). The four no-SHA "Historical completion reconciled from N/N" substrate rows
+(`tlv-s1..s4`) landed as the ADJACENT group **#4392–#4395** — NOT the survey brief's #5529–5533, which
+are later finishing-wave PRs — all ancestors with substance present on main (validation.ex 7-value vocab,
+emit.mjs LIFE_ORDER, status-vocab.test.ts). The three dup-PR pairs BOTH landed: the dup is a harmless
+empty re-merge sharing the primary's `headRefOid`, never a masked non-landing.
+
+**SWEEP B — engine-close provenance at 100%.** Recovered per-row from `doc.claim`, NOT from `bp task
+events` (which carries no worker/epoch/actor/closed_by on any event — a real ledger-observability gap,
+filed): 22 clean engine closes, 3 null-worker closes (`closed_by="None"`), 0 rows matching the
+fabrication shape (null-claim + boilerplate + 0/N + zero-evidence); all 25 carry `criteria_met == total`.
+The pre-#6420 close path stamped "None" six days BEFORE the sentinel guard (`448749cf18`, PDS-D290)
+landed 2026-07-28; the hole is closed on origin/main today.
+
+**Two-lane decision check (Paper/decision-existence, NOT ancestry).** D25 (this charter — advisory
+blocking FINAL), **D212** (`bp-studio-space-priority-charter.md:1751` — authorizes the spd-b24 verdict-close
+AND forwards the true-blocking successor), and D6 (axis-2 cancelled-strand deferral) were all git-shown REAL
+on origin/main and COVER their cited closes. The census's "phantom D212" flag was REFUTED — D212 exists and
+names spd-b24 explicitly.
+
+**Vacuous-green DISPROVEN by RUNNING the probes.** The one structural false-done candidate —
+`tlv-bl-js-vocab-drift-gate` — is a REAL guard: `status-manifest-check.sh` Part 5 reds on
+label/glyph/dropped-role/order drift across BOTH TS twins, with required roles derived DYNAMICALLY from the
+manifest (so a genuinely new state cannot be silently skipped). The Go empty-arg guard kills its mutant at
+`cli_test.go:298`; four Elixir guard suites red on mutation, including the claimable_statuses exemplar
+(`~w(open blocked)`→`~w(open)` reds 4 tests). The survey's "silently skips new states" concern belongs to
+`design/validate.mjs` `REQUIRED_LIFE` (a hardcoded 9-element literal) — a SEPARATE, still-vacuous gate,
+filed to backlog.
+
+**Trust verdict:** the done set of task-lifecycle-visibility-epic is TRUE, independently re-verified,
+false-done count **ZERO**. Where the ledger already read true, the audit manufactured no findings —
+already-honest-with-evidence is the A-grade for a ledger-truth epic auditing itself.
+
+**Build wave: EMPTY by design** (read-only fence, audit complete, zero false-done). Decide-phase products:
+this wave-log note + the trust-verdict Paper + the committed re-derivation ledger rows, all on ONE docs-only
+PR. **Backlog filed (published epic children, not this wave):** `tlv-bl-events-actor-attribution` (prio 2 —
+task events carry no close attribution; provenance recoverable only from `doc.claim`),
+`tlv-bl-validate-mjs-required-life-hardcoded` (prio 2 — make the design-token validator's hardcoded
+`REQUIRED_LIFE` manifest-driven), `tlv-bl-null-worker-close-path-audit` (prio 3 — regression-test the #6420
+sentinel guard + document the `worker=None`+epoch corner).
+
+**Next wave — dispatch order:** unchanged from wave 6 for the OPEN rows — after the Aug-21 Fable cap lifts,
+dispatch `tlv-s5` then `tlv-s8`; then the offline-buildable and the three new audit-filed backlog rows as a
+build wave has room. Wave paper: `task-lifecycle-visibility-donefalse-audit-2026-08-18`.

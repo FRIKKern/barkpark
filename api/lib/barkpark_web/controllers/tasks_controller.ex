@@ -929,13 +929,28 @@ defmodule BarkparkWeb.TasksController do
   # ─── GET /v1/tasks/:doc_id/edges ────────────────────────────────────────
 
   def edges(conn, %{"doc_id" => doc_id} = params) do
-    kind_opt =
-      case params["kind"] do
-        nil -> :blocks
-        "all" -> :all
-        other when is_binary(other) -> other
-      end
+    # `kind` is a FILTER, so a shape we cannot filter on is refused LOUDLY —
+    # `?kind[]=blocks` decodes to a list and used to fall off this case as a
+    # CaseClauseError-500 (before find_task_by_doc_id/2, so even a nonexistent
+    # doc_id 500'd instead of 404ing). Silently ignoring an unusable filter
+    # would return an unfiltered graph the caller believes is filtered — the
+    # same dishonesty query_controller's invalid_filter_op guard refuses.
+    # Contrast request_dataset/1, a SCOPE SELECTOR with a documented default,
+    # which fails SOFT.
+    with {:ok, kind_opt} <- parse_edge_kind(params["kind"]) do
+      edges_for_kind(conn, doc_id, kind_opt)
+    else
+      {:error, :invalid_kind} ->
+        bad_request(conn, "kind must be a string")
+    end
+  end
 
+  defp parse_edge_kind(nil), do: {:ok, :blocks}
+  defp parse_edge_kind("all"), do: {:ok, :all}
+  defp parse_edge_kind(other) when is_binary(other), do: {:ok, other}
+  defp parse_edge_kind(_), do: {:error, :invalid_kind}
+
+  defp edges_for_kind(conn, doc_id, kind_opt) do
     case find_task_by_doc_id(doc_id, conn) do
       {:ok, task} ->
         deps = Tasks.dependencies(task.id, kind: kind_opt)
@@ -1083,12 +1098,27 @@ defmodule BarkparkWeb.TasksController do
   # queueing on the DB pool: a shed request costs one ETS lookup, a queued one
   # costs a connection every other route also needs. Slots are ETS rows keyed by
   # a ref and carrying {owner_pid, deadline}; every acquire first sweeps rows
-  # whose owner died or whose deadline passed, so a slot cannot leak even if a
-  # request process is killed mid-derivation (`after` covers the ordinary exits).
+  # whose OWNER DIED, so a slot cannot leak even if a request process is killed
+  # mid-derivation (`after` covers every ordinary exit AND every raise).
   #
-  # Saturation races resolve toward REFUSAL, never toward over-admission: two
-  # racers can both see the table over cap and both back out. At saturation
-  # shedding is the intended behaviour, so a spurious 503 is the safe error.
+  # The ACQUIRE path's saturation races resolve toward REFUSAL, never toward
+  # over-admission: the row is inserted BEFORE `:ets.info(:size)` is read, so the
+  # latest admitter necessarily counts itself and every racer, sees cap+1 and
+  # backs out. Two racers can both back out; at saturation shedding is the
+  # intended behaviour, so a spurious 503 is the safe error.
+  #
+  # THAT CLAIM HELD FOR ACQUIRE AND DID NOT HOLD FOR THE TTL SWEEP. The sweep
+  # also reaped rows whose `deadline` had passed, and a deadline is a wall-time
+  # GUESS about whether a derivation has finished, not a fact about it. A
+  # derivation outliving @graph_corpus_slot_ttl_ms had its row deleted while its
+  # owner was still alive and still holding the pool connection this cap exists
+  # to protect — and because every acquire sweeps first, an ARRIVING request
+  # performed that reap on the live holders' behalf and was then admitted over
+  # the cap. It refilled without limit (effective concurrency ~
+  # ceil(duration / TTL) x cap) and it was self-amplifying: extra admissions
+  # lengthen every derivation, which crosses the TTL more often. Fail-open in
+  # the only regime where the cap matters. The deadline arm is now GONE; the
+  # deadline itself stays on the row as diagnostic data.
   @graph_corpus_slots :barkpark_graph_corpus_slots
   @graph_corpus_max_concurrency 4
   @graph_corpus_slot_ttl_ms 60_000
@@ -1297,7 +1327,11 @@ defmodule BarkparkWeb.TasksController do
   # ─── corpus admission cap (see the @graph_corpus_max_concurrency comment) ──
 
   defp acquire_graph_corpus_slot do
-    ensure_graph_corpus_slots()
+    # NO lazy `:ets.new` here. The table is created once from
+    # `Barkpark.Application.start/2`; a request-path create would hand ownership
+    # of the bound to a transient request process, and the bound would die (and
+    # silently RESET) with it. If the table is somehow absent the `rescue` below
+    # sheds rather than 500s.
     sweep_graph_corpus_slots()
 
     ref = make_ref()
@@ -1327,13 +1361,33 @@ defmodule BarkparkWeb.TasksController do
     ArgumentError -> :ok
   end
 
-  # Reap slots whose owner died (a killed request process never runs `after`) or
-  # whose deadline passed. Keeps the table bounded by the cap under all exits.
+  # Reap slots whose owner DIED, and only those. Liveness is a fact about the
+  # holder; the row's deadline is not, so it is diagnostic data here and nothing
+  # more (see the @graph_corpus_max_concurrency comment for the over-admission
+  # the deadline arm caused).
+  #
+  # WHY DEAD-ONLY LOSES NOTHING. `graph_corpus/2` wraps the derivation in a
+  # lexical `try/after`, and `after` runs on an ordinary return, on a raise, on
+  # a throw and on an in-process `exit/1` — so a 15s DBConnection timeout
+  # releases its own slot without any sweep. What `after` does NOT cover is an
+  # exit signal delivered from ANOTHER process to this untrapping one — `:kill`
+  # is the un-trappable case, but `Process.exit(pid, :shutdown)` skips `after`
+  # just the same. Every one of those leaves the owner DEAD, which is exactly
+  # what this arm reclaims: it is load-bearing and must survive.
+  #
+  # THE TRADE, stated rather than discovered under review: an alive-but-wedged
+  # holder now keeps its slot until it finishes, so a permanently stuck
+  # derivation costs one slot of capacity for its lifetime. That is fail-CLOSED
+  # capacity loss — the cap sheds a little more than strictly necessary — and it
+  # matches this cap's own doctrine that at saturation a spurious 503 is the
+  # safe error. Nothing in api/config bounds handler wall time, so the previous
+  # behaviour was not "reclaiming stuck work": it was cancelling the bound on
+  # HEALTHY long derivations. Killing a wedged owner is a different mechanism
+  # with real blast radius (a broken connection instead of a clean 503) and is
+  # deliberately NOT done here (filed: acpc-bl-graph-slot-wedged-live-holder).
   defp sweep_graph_corpus_slots do
-    now = System.monotonic_time(:millisecond)
-
-    for {ref, pid, deadline} <- :ets.tab2list(@graph_corpus_slots),
-        deadline <= now or not Process.alive?(pid) do
+    for {ref, pid, _deadline} <- :ets.tab2list(@graph_corpus_slots),
+        not Process.alive?(pid) do
       :ets.delete(@graph_corpus_slots, ref)
     end
 
@@ -1357,7 +1411,8 @@ defmodule BarkparkWeb.TasksController do
         try do
           :ets.new(@graph_corpus_slots, [:named_table, :public, :set, read_concurrency: true])
         rescue
-          # Lost the create race to a concurrent request — the table exists.
+          # Lost the create race to a concurrent boot (the test VM re-starts the
+          # supervision tree) — the table exists, which is all this needs.
           ArgumentError -> :ok
         end
 
@@ -1474,8 +1529,18 @@ defmodule BarkparkWeb.TasksController do
   # The dataset string a graph read scopes to. The graph endpoints have no
   # :doc_id segment to derive a dataset from, so we read the optional `dataset`
   # query param (defaulting to "production", the canonical content dataset).
+  # Fails SOFT on purpose: a non-binary `dataset` (e.g. `?dataset[]=production`,
+  # which Plug decodes to a list) used to flow straight into is_binary-guarded
+  # callees with no fallback clause — Tasks.Events.replay_since/3 and
+  # Tasks.Fleet.roster/2 among seven call sites — raising FunctionClauseError
+  # (500) before any Repo call. A scope selector with a documented default
+  # falls back to that default rather than 400ing six live routes; the `kind`
+  # FILTER in edges/2 is the deliberate opposite and returns 400.
   defp request_dataset(conn) do
-    conn.params["dataset"] || "production"
+    case conn.params["dataset"] do
+      dataset when is_binary(dataset) -> dataset
+      _ -> "production"
+    end
   end
 
   # ─── field-visibility seal (fail-closed) ────────────────────────────────

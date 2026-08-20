@@ -1694,7 +1694,136 @@ test("gr-p5-2fa: the on-state is read FREE from /v1/me — no GET /v1/account/tw
   // And the model actually reads it.
   assert.equal(hooks.accountModel({}, { user: { two_factor_enabled: true } }).twoFactorEnabled, true);
   assert.equal(hooks.accountModel({}, { user: { two_factor_enabled: false } }).twoFactorEnabled, false);
-  assert.equal(hooks.accountModel({}, {}).twoFactorEnabled, false, "an unloaded /v1/me must fail to OFF");
+  // cch-w39-s2 — REWRITTEN, not deleted. This assertion used to read
+  // `assert.equal(…, false, "an unloaded /v1/me must fail to OFF")`, which
+  // encoded the defect as a REQUIREMENT: "fail to OFF" is fail-closed grammar
+  // borrowed from a permission check, but OFF is not the safe answer here — it
+  // is a determinate claim about this account's security, made from an envelope
+  // that never arrived. The safe answer is that there ISN'T one.
+  assert.equal(hooks.accountModel({}, {}).twoFactorEnabled, null,
+    "an unloaded /v1/me must fail to UNKNOWN — never to the determinate OFF");
+});
+
+// ── cch-w39-s2 · THE FOUR SITES THAT PAINTED A FACT NOTHING READ ────────────
+// With /v1/me stalled the modal rendered a real `<span class="badge a2f-badge
+// a2f-badge--off">Off</span>` and the "Set up two-factor authentication" CTA
+// beside a placeholder identity row. Four sites folded the same coercion:
+// accountModel's `!!user.two_factor_enabled` under `me = me || {}`, the badge,
+// the panel's first paint, and openAccountModal's SECOND independent read.
+
+test("cch-w39-s2: an unread /v1/me paints NO determinate two-factor claim, at any of the four sites", () => {
+  // 1 — the model: three-valued, the root the other three inherit.
+  const unread = hooks.accountModel({}, {}).twoFactorEnabled;
+  assert.equal(unread, null, "the model must not coerce an absent envelope to false");
+  assert.notEqual(unread, false, "…and specifically not to the OFF claim");
+
+  // 2 — the phase mapper: one owner, three values.
+  assert.equal(hooks.accountTwoFactorPhase(true), "on");
+  assert.equal(hooks.accountTwoFactorPhase(false), "off");
+  assert.equal(hooks.accountTwoFactorPhase(null), "unknown", "null is not off");
+  assert.equal(hooks.accountTwoFactorPhase(undefined), "unknown", "neither is undefined");
+
+  // 3 — the badge: three-valued, not the old boolean.
+  assert.ok(hooks.accountTwoFactorBadgeHtml("on").includes(">On<"));
+  assert.ok(hooks.accountTwoFactorBadgeHtml("off").includes(">Off<"));
+  const unknownBadge = hooks.accountTwoFactorBadgeHtml("unknown");
+  assert.ok(!/>Off</.test(unknownBadge) && !/>On</.test(unknownBadge),
+    "the unknown badge may state neither state: " + unknownBadge);
+  assert.ok(unknownBadge.includes('id="a2f-badge"'), "the badge id is a node contract — it must survive");
+  // The CSSOM baseline is pinned, so the unknown pill rides the SHIPPED muted
+  // head. The honest difference is the word, not a new rule head.
+  assert.ok(unknownBadge.includes("a2f-badge--off"), "no new badge rule head may be authored");
+
+  // 4 — the whole modal, built exactly as openAccountModal builds it from an
+  // unread /v1/me: no Off pill, and no offer that implies one.
+  const html = hooks.accountModalHtml(hooks.accountModel({}, {}), "loading");
+  assert.ok(!html.includes('a2f-badge--off" id="a2f-badge">Off<'), "no Off pill may be painted");
+  assert.ok(!html.includes('id="a2f-start"'),
+    "the setup CTA IS the claim that nothing is set up — it may not render unread");
+});
+
+test("cch-w39-s2: accountTwoFactorPanelHtml's fallthrough is EXPLICIT — an unknown phase is not the off state", () => {
+  const unknown = hooks.accountTwoFactorPanelHtml({ phase: "unknown", meState: "loading" });
+  assert.ok(!unknown.includes("Set up two-factor authentication"),
+    "the not-enrolled offer must not be the silent default");
+  assert.ok(!unknown.includes('id="a2f-start"'), "…and neither may its button id");
+  assert.ok(unknown.includes('id="a2f-unknown-line"'), "the unknown arm must say so in its own words");
+
+  // A phase NO ONE has written yet — the shape a later wave adds — must land in
+  // the same arm rather than quietly acquiring the not-enrolled markup.
+  const future = hooks.accountTwoFactorPanelHtml({ phase: "some-phase-a-later-wave-adds" });
+  assert.ok(!future.includes('id="a2f-start"'), "an unrecognised phase may not render the setup offer");
+
+  // The four named phases are untouched.
+  assert.ok(hooks.accountTwoFactorPanelHtml({ phase: "off" }).includes('id="a2f-start"'),
+    "the real off state still offers setup");
+  assert.ok(hooks.accountTwoFactorPanelHtml({ phase: "on" }).includes('id="a2f-disable"'),
+    "the real on state still offers the disable link");
+});
+
+test("cch-w39-s2: a repaint cannot silently restore Off — a2fBadgeState is three-valued", () => {
+  // a2fPaint recomputes the badge FROM the phase. The shipped expression was
+  // `phase === "on" || phase === "codes"` — a boolean, so EVERY phase it did
+  // not name (including the new unknown one) fell into the false arm and
+  // repainted the determinate "Off" pill on top of an honest render.
+  assert.equal(hooks.a2fBadgeState("on"), "on");
+  assert.equal(hooks.a2fBadgeState("codes"), "on", "the one-shot sheet is still enrolled");
+  assert.equal(hooks.a2fBadgeState("off"), "off");
+  assert.equal(hooks.a2fBadgeState("enroll"), "off", "an unconfirmed enrolment is not on");
+  assert.equal(hooks.a2fBadgeState("unknown"), "unknown");
+  assert.equal(hooks.a2fBadgeState("some-phase-a-later-wave-adds"), "unknown",
+    "an unnamed phase must fall to unknown, never to the Off claim");
+  // Drive the repaint the way a2fPaint does and read the resulting pill.
+  const repainted = hooks.accountTwoFactorBadgeHtml(hooks.a2fBadgeState("unknown"));
+  assert.ok(!/>Off</.test(repainted), "the repaint must not restore Off: " + repainted);
+});
+
+test("cch-w39-s2: the unknown arm speaks only shipped copy — no invented cause, no invented next step", () => {
+  const loading = hooks.accountTwoFactorPanelHtml({ phase: "unknown", meState: "loading" });
+  const failed = hooks.accountTwoFactorPanelHtml({ phase: "unknown", meState: "failed" });
+  assert.ok(loading.includes("Checking your account"), "the in-flight arm reuses the shipped checking line");
+  assert.ok(!loading.includes('id="a2f-retry"'), "nothing to retry while the read is still in flight");
+  assert.ok(failed.includes('id="a2f-retry"'), "the failed arm must offer re-entry");
+  assert.ok(/>Retry</.test(failed), "the control is the one-word Retry label");
+  // D438's fence: no cause the read did not return, and no throttling grammar.
+  for (const html of [loading, failed]) {
+    assert.ok(!/\brate[ -]?limit|\b429\b|too many|expired|blocked|forbidden|not allowed/i.test(html),
+      "the unknown arm may not name a cause: " + html);
+  }
+  // And it does not mint a SECOND retry idiom — the modal re-enters through
+  // loadMe(), the same one loader #9922's operator arm re-enters.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const wire = src.slice(src.indexOf("function a2fWire()"), src.indexOf("function submitPasswordChange"));
+  assert.ok(/#a2f-retry[\s\S]*loadMe\(\)\.then/.test(wire),
+    "the retry must re-enter the shared loadMe() seam, not a private refetch");
+});
+
+test("cch-w39-s2: a server-CONFIRMED enrolment survives a /v1/me that never landed", () => {
+  // The write-back was `if (meCache && meCache.user) …` — guarded by the very
+  // read that failed. A user who enrolled successfully (server confirmed,
+  // recovery codes in hand) had it forgotten on the next open.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function a2fSetEnabled("), src.indexOf("function accountModalModel("));
+  assert.ok(/a2fConfirmed\s*=\s*\{/.test(fn),
+    "the confirmed fact must be retained OUTSIDE the meCache guard: " + fn);
+  const idx = fn.indexOf("a2fConfirmed =");
+  const guardIdx = fn.indexOf("if (meCache");
+  assert.ok(idx > 0 && guardIdx > idx,
+    "the retention must happen BEFORE (and outside) the meCache echo");
+  // It is never written INTO meCache: meState() reads "loaded" iff meCache is
+  // truthy, so synthesising one would tell the whole console an unread /v1/me
+  // had answered.
+  assert.ok(!/meCache\s*=\s*\{/.test(fn), "a2fSetEnabled must never fabricate a meCache");
+  // And it is scoped to the session token, so it cannot outlive its account.
+  const model = src.slice(src.indexOf("function accountModalModel("), src.indexOf("function a2fWire()"));
+  assert.ok(/a2fConfirmed\.token === sessionToken\(\)/.test(model),
+    "the confirmed fact must be bound to the session that confirmed it: " + model);
+  // REVIEW (cch-w39-s2-r): …and it fills an UNKNOWN rather than outranking a
+  // read that landed. Without the null guard a local echo from an unread
+  // session would beat a fresh /v1/me forever — the same "state a fact the
+  // newest read does not support" defect, pointed the other way.
+  assert.ok(/model\.twoFactorEnabled === null && a2fConfirmed/.test(model),
+    "the retained fact may only fill an unknown, never override a landed read: " + model);
 });
 
 // ── gr-p5-account-2fa · GR56 THE ONE-SHOT SHEET, AND THE × TRAP ─────────────
@@ -22008,4 +22137,40 @@ test("cch-w75-s1: repo_not_in_installation renders the permanent-until-regranted
   // The state is permanent until access is re-granted: a transience verb would be
   // the exact lie this cure deletes.
   assert.ok(!/try again|\bretry\b/i.test(copy), "no transience verb: " + copy);
+});
+
+// ── cch-w74: an expired session stops accusing the user of a wrong password ──
+// SOURCE-TEXT, per the cch-w37-s6 loadOperator precedent: submitPasswordChange
+// is impure (it reads #pw-current/#pw-new, calls api(), and paints #pw-error),
+// and this sandbox's getElementById returns null, so a node "drive" would be
+// vacuous. What is pinned is the SHAPE of the 401 arm: the accusation is gated
+// on the proven slug, and every OTHER 401 renders non-accusatory session copy.
+//
+// THE DEFECT this replaces: the arm was `r.status === 401 ? "Current password
+// is wrong." : friendly(...)`. Because api() is called with noBounce:true (so
+// its login bounce is suppressed for THIS 401) and Auth.require_user ships a
+// slug-less `unauthorized` when the session token has died, an expired-session
+// 401 painted "Current password is wrong." at a user whose password was fine —
+// reachable by any authenticated non-admin whose token dies between page-load
+// and submit (sharpest: this feature's own "signed out everywhere" success
+// path). The pre-fix red below is the bare status-only conflation.
+test("cch-w74: the password 401 accusation keys on the invalid_current_password slug, not the bare status", () => {
+  const body = APP_SRC.match(/function submitPasswordChange\(e\) \{[\s\S]*?\n  \}\n/)[0];
+  // THE RED on pre-fix bytes: the bare status-only conflation is GONE. A
+  // status-keyed accusation accuses an expired session of a wrong password.
+  assert.ok(!/r\.status === 401 \? "Current password is wrong\."/.test(body),
+    "the bare `r.status === 401 ? \"Current password is wrong.\"` conflation must be gone");
+  // A slug-carrying 401 renders the accusation: the accusing copy exists ONLY
+  // behind the proven slug guard.
+  assert.match(body,
+    /r\.status === 401 && r\.data && r\.data\.error === "invalid_current_password"\s*\n\s*\? "Current password is wrong\."/,
+    "the accusation must be gated on r.data.error === \"invalid_current_password\"");
+  // A slug-less 401 renders non-accusatory session copy — it states only what is
+  // proven (the session is gone), never the password accusation.
+  assert.match(body, /: r\.status === 401\s*\n\s*\? "Your session has expired — sign in again\."/,
+    "a slug-less 401 must render honest session copy, never the password accusation");
+  // The accusation string appears EXACTLY once — no un-gated second copy leaks
+  // back the conflation this slice deletes.
+  assert.equal((body.match(/Current password is wrong\./g) || []).length, 1,
+    "the accusation copy exists once, only behind the slug guard");
 });
