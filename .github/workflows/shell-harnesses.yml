@@ -161,6 +161,8 @@ on:
       # construction: it can only ever match files this lane already checks.
       - "scripts/workflow-portability-check.sh"
       - "scripts/workflow-portability-check.test.sh"
+      - "scripts/workflow-module-exec-smoke.sh"
+      - "scripts/workflow-module-exec-smoke.test.sh"
       - ".claude/workflows/*.workflow.js"
       # DEPLOY-RELIABILITY EXIT RUNNER (W35). Per file, never a directory glob —
       # D26. The first two are the runner and its harness; the last four are the
@@ -262,6 +264,8 @@ on:
       # A lane wired on PRs only goes dark the moment a merge lands.
       - "scripts/workflow-portability-check.sh"
       - "scripts/workflow-portability-check.test.sh"
+      - "scripts/workflow-module-exec-smoke.sh"
+      - "scripts/workflow-module-exec-smoke.test.sh"
       - ".claude/workflows/*.workflow.js"
       # DEPLOY-RELIABILITY EXIT RUNNER (W35) — mirrors the pull_request list
       # above, inputs included. A lane wired on PRs only goes dark the moment a
@@ -630,6 +634,24 @@ jobs:
         # No `continue-on-error` anywhere in this file: it launders a red into a
         # green JOB conclusion, which is the only thing the fleet reads.
         run: bash scripts/workflow-portability-check.test.sh
+      - name: workflow-module-exec-smoke.sh syntax check
+        run: bash -n scripts/workflow-module-exec-smoke.sh
+      - name: workflow-module-exec-smoke.test.sh syntax check
+        run: bash -n scripts/workflow-module-exec-smoke.test.sh
+      - name: the EXECUTION gate can still LOSE (TDZ + schema-tripwire mutants)
+        # The fail-before proof for the module-scope execution gate. Every gate
+        # this repo had for these engines only PARSES them, which is structurally
+        # blind to a temporal-dead-zone crash (a runtime ReferenceError) and
+        # leaves the engines' own module-scope tripwires as dead code. Cases 2
+        # and 3 each run BOTH gates on the same mutant and assert the split:
+        # parse-only GREEN, execution RED. Commit f8977af85c is the time this
+        # class actually took the epic-cycle engine out.
+        run: bash scripts/workflow-module-exec-smoke.test.sh
+      - name: the live corpus LOADS (module scope executes, fenced at first spend)
+        # Complements "is portable" rather than replacing it: portability parses,
+        # this one RUNS module scope with stub globals and stops at the first
+        # agent/parallel/pipeline call, so nothing is ever spawned or billed.
+        run: bash scripts/workflow-module-exec-smoke.sh
       - name: the live corpus is portable
         # The ratchet proper. ADVISORY by decision D4 — this workflow is not one
         # of main's required contexts (those are exactly: Elixir gate, PR
