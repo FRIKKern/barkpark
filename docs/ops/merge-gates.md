@@ -825,20 +825,52 @@ gate scripts themselves and to the workflow file.
 ### The doc-gates roster (it is not two scripts — it is twenty-one)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **21 steps labelled `(blocking)`** plus 6 `(tripwire)`
-self-tests that prove a scanner still reds on a planted defect. A PR touching
-one `.ex` file runs all of them. **`(blocking)` there means blocking inside the
-job, not on the merge**: this workflow carries a workflow-level `on: … paths:`
-filter, so on a PR touching none of those paths the check is simply ABSENT —
-which is why `.github/required-checks.json` files `Doc budgets + anchors` under
-**S4 PATHS-FILTERED** and why `doc-gates` is not a required context and **cannot
-block a merge** by itself. A red step reds the job on the PRs where it runs;
-that is the whole of its authority. (The count read 17 until 2026-08-07 —
-`Never-cancel-main concurrency ratchet` and `Nil-polarity fail-closed gate` were
-missing from the table below; the number is now derived by
-`grep -c '(blocking)' .github/workflows/doc-gates.yml` and §20 of
-`scripts/required-checks.test.sh` reds if the two drift apart.) In workflow
-order:
+undersells it: it runs **21 steps labelled `(fails this job)`** plus 6
+`(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
+PR touching one `.ex` file runs all of them.
+
+**THIS PARAGRAPH USED TO SAY `(blocking)`, AND THE SENTENCE AFTER IT TAUGHT THE
+WORD.** Until 2026-08-19 the count line above ended in the words "labelled
+`(blocking)`" and the next line read "**`(blocking)` there means blocking
+inside the job, not on the merge**" — the canonical page on merge authority,
+naming steps that have none with the vocabulary of steps that do, and then
+teaching that vocabulary as current. #12631 had already renamed all 21 step
+names in `.github/workflows/doc-gates.yml` to `(fails this job)`; only this page
+still spelled the old label. The old words are quoted here rather than deleted,
+so a reader who greps `(blocking)` lands on the correction instead of on
+nothing.
+
+The deciding structure, not the naming: `.github/workflows/doc-gates.yml`
+publishes exactly ONE check-run context — the job name `Doc budgets + anchors`
+— and `.github/required-checks.json` files that context as an **S4
+PATHS-FILTERED** exclusion row, one of 25, not one of the four required
+contexts (`Cloud gate`, `Console gate`, `Elixir gate`, `PR references an active
+task`). The workflow also carries a workflow-level `on: … paths:` filter, so on
+a PR touching none of those paths the check is simply ABSENT. Said negatively,
+which is the phrasing that cannot be read as a promise: a red step reds THIS
+JOB on the PRs where it runs, and that red is visible on the PR; **none of it
+stops a merge**, and `doc-gates` **cannot block a merge** by itself. That is the
+whole of its authority.
+
+(The count read 17 until 2026-08-07 — `Never-cancel-main concurrency ratchet`
+and `Nil-polarity fail-closed gate` were missing from the table below. The 21 is
+derived by running, not transcribed:
+
+```bash
+grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 21
+```
+
+That replaces the command this page cited until 2026-08-19, `grep -c
+'(blocking)' .github/workflows/doc-gates.yml`, which returns **1** on `main`
+today — the page was naming a derivation that refuted its own number. §20 CLAUSE
+11 of `scripts/required-checks.test.sh` reds if the prose count, the table rows
+below, and the workflow drift apart, and it counts the UNION of both labels so a
+revert to the old name is still counted rather than read as zero. RESIDUE, named
+rather than left to be tripped over: the unanchored `grep -c '(fails this job)'`
+returns **22**, because `.github/workflows/doc-gates.yml:15` quotes both labels
+inside its own corrective header — anchor on `- name:`, as above. §20 CLAUSE
+11's pass message also still spells the label `(blocking)`; it compares NUMBERS,
+so its verdict is unaffected.) In workflow order:
 
 | # | Step | Runs |
 |---|------|------|

@@ -157,8 +157,23 @@ jobs:
       # leg that goes RED when the resume flag is dropped, bake's npm-registry
       # check BEFORE any create, full teardown lifecycle (remove + snapshots
       # delete + both ls sweeps), and planted-key custody (the key rides ONLY
-      # the shim's single --env pair, never argv/logs). BLOCKING, one named
-      # step (this workflow hardcodes proof scripts by name).
+      # the shim's single --env pair, never argv/logs). One named step (this
+      # workflow hardcodes proof scripts by name).
+      #
+      # This comment said "BLOCKING" until 2026-08-19, and it was a claim of
+      # authority the committed spec denies. This job publishes the context
+      # `Cloud shim confinement + session-sandbox proofs (black-box, no real
+      # Vercel)`, and that string appears in NEITHER of the two places that
+      # decide anything in .github/required-checks.json: not among the four
+      # required contexts (`Cloud gate`, `Console gate`, `Elixir gate`, `PR
+      # references an active task`), and not among the 25 exclusion rows that
+      # classify the rest. Stated negatively: a red here reds THIS JOB, and the
+      # red is visible on the PR; it stops no merge, and branch protection has
+      # never heard of this context. RESIDUE: line 3's file header still opens
+      # "BLOCKING" — it is one of the three held at
+      # BLOCKING_HEADER_UNRESOLVED_BASELINE=3 in
+      # scripts/required-checks-verify.sh:645, and is filed as
+      # cgsiw-s1-followup-header-baseline-ratchet.
       - name: Live-turn driver self-test (W35, D270)
         run: |
           shellcheck -S error scripts/connectors/w35-live-turn-driver.sh
@@ -208,9 +223,19 @@ jobs:
       - name: Install
         run: npm ci
 
-      # BLOCKING, unlike js-tests.yml's and elixir.yml's advisory format jobs —
-      # and deliberately so. Those two are advisory for reasons connectors/ does
-      # not have: js-tests.yml checks a partial glob (a parity signal, not the
+      # THIS COMMENT OPENED "BLOCKING, unlike js-tests.yml's and elixir.yml's
+      # advisory format jobs" UNTIL 2026-08-19, AND THAT WAS THE INVERSE OF THE
+      # TRUTH. It contrasted this step against two workflows it called advisory
+      # in order to tell the reader that this one really blocks — about a
+      # context branch protection has never heard of. The deciding structure:
+      # this job's name, `Typecheck + tests (real Postgres, zero skips)`,
+      # appears in neither the four required contexts nor the 25 exclusion rows
+      # of .github/required-checks.json. Said negatively: a red here reds THIS
+      # JOB on the PRs whose paths render it; it stops no merge. What survives
+      # the correction is the STRICTNESS claim, which is real and is about this
+      # step's own arm: it is strict where js-tests.yml and elixir.yml are
+      # lenient, for reasons connectors/ does not share —
+      # js-tests.yml checks a partial glob (a parity signal, not the
       # whole tree) and elixir.yml's `mix format` tracks a pinned toolchain whose
       # formatter drifts between versions. connectors/ pins prettier ^3.3 in its
       # own package.json, `format:check` covers the WHOLE package, and the tree is
