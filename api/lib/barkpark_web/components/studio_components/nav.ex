@@ -274,14 +274,21 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   humans and smoke tests can read the running build at a glance.
   Version/commit come from `Barkpark.BuildInfo` (compile-time git data;
   "unknown" outside a git checkout — never raises).
+
+  The optional `:vitals` slot renders after the version span — the caller
+  passes either the live `BarkparkWeb.ServerVitalsLive` (live context) or a
+  static host-vitals snapshot (dead views). The `#bp-build-version` span is
+  left byte-identical so smoke tests still read the running build.
   """
+  slot :vitals
+
   def studio_footer(assigns) do
     ~H"""
     <div
       class="studio-footer"
       style="flex: none; padding: 4px 16px; font-size: 11px; color: var(--fg-dim); border-top: 1px solid var(--border);"
     >
-      <span id="bp-build-version">Barkpark v<%= Barkpark.BuildInfo.version() %> · <%= Barkpark.BuildInfo.commit() %></span>
+      <span id="bp-build-version">Barkpark v<%= Barkpark.BuildInfo.version() %> · <%= Barkpark.BuildInfo.commit() %></span><%= render_slot(@vitals) %>
     </div>
     """
   end

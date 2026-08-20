@@ -183,6 +183,10 @@ defmodule Barkpark.Application do
       # (cloud-console W5). Up before the Endpoint so early traffic is counted;
       # a pure ETS-backed window, no Repo dependency.
       BarkparkWeb.RequestStats,
+      # Always-on Linux-host vitals sampler for the Studio bottom bar. Core /
+      # plugin-independent (unlike Pulse.Metrics), no Repo dependency; reads
+      # :os_mon + /proc every few seconds and broadcasts on "server_vitals".
+      Barkpark.HostVitals.Sampler,
       # Boot-time collector for workspace-bundle temp files a SIGKILLed BEAM
       # could not clean up after itself (PDS-D210). The export engine's
       # try/after covers raises and disconnects, but not the OOM killer — and

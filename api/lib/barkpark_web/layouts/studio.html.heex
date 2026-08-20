@@ -117,6 +117,17 @@
   {@inner_content}
 
   <%!-- Build-version footer: last child of the shell flex column, so it
-        pins to the bottom on every Studio + admin surface. --%>
-  <BarkparkWeb.StudioComponents.Nav.studio_footer />
+        pins to the bottom on every Studio + admin surface. The vitals slot
+        carries live host stats (Barkpark.HostVitals.Sampler): an embedded
+        sticky LiveView in a live context, a static snapshot on dead views
+        (controller-rendered admin pages have no @socket). --%>
+  <BarkparkWeb.StudioComponents.Nav.studio_footer>
+    <:vitals>
+      <%= if assigns[:socket] do %>
+        <%= live_render(@socket, BarkparkWeb.ServerVitalsLive, id: "server-vitals", sticky: true) %>
+      <% else %>
+        <BarkparkWeb.ServerVitalsLive.line vitals={Barkpark.HostVitals.Sampler.snapshot()} />
+      <% end %>
+    </:vitals>
+  </BarkparkWeb.StudioComponents.Nav.studio_footer>
 </.studio_shell>

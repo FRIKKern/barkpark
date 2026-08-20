@@ -21,7 +21,9 @@ defmodule Barkpark.MixProject do
   def application do
     [
       mod: {Barkpark.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      # :os_mon powers the Studio bottom-bar host vitals (Barkpark.HostVitals.Sampler
+      # reads :cpu_sup / :memsup / :disksup). Starts OTP's OS monitors on boot.
+      extra_applications: [:logger, :runtime_tools, :os_mon]
     ]
   end
 
