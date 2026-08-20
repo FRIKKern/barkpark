@@ -1247,7 +1247,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:316
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.claim/2", "130674472", "21159066"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2435"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2505"},
     # barkpark_web/controllers/tasks_controller.ex:371
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.show/2", "107047617", "14030995"},
@@ -1267,7 +1267,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:652
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stage/2", "86501420", "84462998"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3147"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3217"},
     # barkpark_web/controllers/tasks_controller.ex:788
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stamp/2", "53080965", "119279425"},
@@ -1276,9 +1276,15 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.pulse/2", "62712851", "71420310"},
       verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:169"},
-    # barkpark_web/controllers/tasks_controller.ex:922
+    # barkpark_web/controllers/tasks_controller.ex:961
+    # RE-KEYED, NOT RE-JUDGED. edges/2 now parses `kind` and delegates the
+    # unchanged success body to edges_for_kind/3, so the emitting def moved and
+    # the head hash moved with it (29434876 -> 41908878). The receipt EXPRESSION
+    # is byte-identical — its fingerprint 113319186 is unchanged — so the
+    # verdict and basis carry over untouched. The 400 arm emits no `ok: true`
+    # and is therefore not a site this lens sees.
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
-            "BarkparkWeb.TasksController.edges/2", "29434876", "113319186"},
+            "BarkparkWeb.TasksController.edges_for_kind/3", "41908878", "113319186"},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:952
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
@@ -1311,7 +1317,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:1352
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.papers/2", "102968637", "84462998"},
-      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:1724"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:1794"},
     # barkpark_web/controllers/tasks_controller.ex:1379
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.sessions/2", "36243778", "84462998"},
