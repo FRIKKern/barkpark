@@ -339,8 +339,24 @@ jobs:
         with:
           node-version: "20"
 
+      # --selftest FIRST (distrust vacuous green). The 13-arm harness plants a
+      # real violation and re-invokes the shipping script for each one; it had
+      # NO CI caller, so it was rotting unexecuted — a harness nothing runs is
+      # indistinguishable from no harness, and worse, because its presence is
+      # what stops anyone writing one.
+      #
+      # Arms (j0)-(j2) are new and cover the half CI actually runs this script
+      # for. Every pre-existing arm exercises --span-only, which SKIPS the
+      # fixed-caps loop: measured 2026-08-20, blinding the CAPS heredoc dropped
+      # the gate from 35 size verdicts to 7 — CLAUDE.md, docs/api-v1.md and every
+      # contract doc unchecked — and it still printed PASS while the 11-arm
+      # selftest passed straight through. The gate now pins the row count against
+      # a committed literal and the harness proves that ratchet bites in both
+      # directions.
       - name: Doc byte budgets (fails this job)
-        run: bash scripts/check-doc-budgets.sh
+        run: |
+          bash scripts/check-doc-budgets.sh --selftest
+          bash scripts/check-doc-budgets.sh
 
       # --selftest FIRST (distrust vacuous green). The harness landed in #12561
       # with 18 cases — including §8's three: a duplicate capability slug, a
