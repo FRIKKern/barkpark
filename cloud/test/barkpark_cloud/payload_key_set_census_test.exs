@@ -1063,6 +1063,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # here — `team` and `scope` rode free in W19 S1, `sha`/`count`/`limit` in
   # W26 S3. Re-measure by the 999-technique after the other PR lands; never sum.
   @go_tag_sites %{
+    "artifact_url" => 2,
     "as_of" => 5,
     "at" => 2,
     "barkpark_id" => 4,
@@ -1082,7 +1083,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "delivered" => 2,
     "deployment" => 3,
     "deployments" => 2,
-    "detail" => 7,
+    "detail" => 8,
     "doc_type" => 2,
     "domains" => 3,
     "email" => 3,
@@ -1095,9 +1096,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "failure_reason" => 2,
     "framework" => 4,
     "from" => 2,
+    "git_ref" => 2,
     "headroom" => 2,
     "host" => 6,
     "id" => 13,
+    "image_tag" => 2,
     "in_flight" => 2,
     "inserted_at" => 8,
     "instance" => 3,
