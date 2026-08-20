@@ -550,3 +550,76 @@ already had a premise refuted once in this wave.
 9. **A guard belongs in the room, not at the door — but it ships with the room's
    furniture.** D19 is the shape: relocating a refusal downward without its error
    mapping and its UI arm converts a silence into a crash, which is worse.
+
+
+## Wave log
+
+### Wave 2026-08-20 — wave 1 (S1 + S2, the two priority-0 slices)
+
+Wave Paper: `gyldendal-field-report-wave-2026-08-20`. Grade **A-**.
+
+**Landed — six slices built, reviewed, gate-green, pushed with PRs open.** All six
+were rebased onto `origin/main` e60f0a57b9 by the reviewer; `main` moved eleven
+heads during the wave (standing rule 7 earned its place again).
+
+| Slice | task | final branch | PR |
+|---|---|---|---|
+| Studio principal-kind (#34, the only CRITICAL) | `gfr-w1-studio-principal-kind` | `loop-epic/studio-stops-teleporting-an-account-sess-0-r` | #12893 |
+| The two pipeline mounts #12826 missed (#15 + fleet token) | `gfr-w1-pipeline-tenancy-remnants` | `loop-epic/close-the-two-pipeline-mounts-12826-did--1-r` | #12894 |
+| Workspace creator binding + D13 Tier-A denial (M4) | `gfr-w1-workspace-creator-and-denial` | `loop-epic/the-human-who-creates-a-workspace-become-2-r` | #12895 |
+| The filter chokepoint + the Studio desk arm (D19) | `gfr-w1-filter-chokepoint-strict` | `loop-epic/an-unsupported-filter-op-is-refused-at-t-3-r` | #12896 |
+| Repeated `--filter` composes with AND (#16, D17a) | `gfr-w1-filter-and-composition` | `loop-epic/two-filter-flags-mean-and-end-to-end-and-4-r` | #12897 |
+| The write spine stops eating documents named `content` (#3, D18) | `gfr-w1-write-spine-collide-refusal` | `loop-epic/a-document-whose-own-field-is-named-cont-5-r` | #12898 |
+
+**Stalled: nothing.** 6/6 builders green, 0 interrupts. Slices 7 and 8 were
+deferred by the sequenced-rounds law, not by failure.
+
+**What the review changed, and what it says about reviewing waves.** Every slice
+was green in isolation and three carried real defects that only a MERGE could
+show. The wave's most valuable single act was trial-merging all six into one tree
+and running a wider gate than any slice's own:
+
+* `gfr-w1-write-spine-collide-refusal` keyed its orphan set on `@reserved_in`
+  (`from_envelope/1`'s FOLD list) while claiming "would be silently discarded",
+  which is a statement about `Document.changeset/2`'s cast whitelist — a
+  different list that also casts `workspace_id`/`project_id`/`dataset_id`/
+  `owner_id`. Those four LAND, so refusing them was a false positive that broke
+  `flat_write_scope_leak_test.exs`, a tenancy file outside the slice's four gate
+  files. Fixed and pinned.
+* `gfr-w1-filter-chokepoint-strict` pinned two of its three chokepoint tests with
+  `assert_error_sent/2` on a shape the DOOR happened not to inspect — a test of
+  the door's blindness, not of the builder's refusal. The sibling filter slice
+  fixes the door, so both went red on the combined tree while the client-visible
+  behaviour got BETTER. Re-pointed at the builder seam.
+* `gfr-w1-workspace-creator-and-denial` rebased onto `0172421e0d` **without a
+  conflict and did not compile**: main had extracted the transaction body into a
+  new arity and the slice's line travelled into a function that never received
+  its parameter. A clean rebase is not a correct rebase.
+
+**Next wave takes**, in this order:
+
+1. Merge round 1 (six PRs above). `errors.ex` is touched by three of them (all
+   additive `build/1` clauses, union-merge; keep the `put_hint/1` "an arm that set
+   its own hint wins" clause first) and `filter_ops_test.exs` by two (both append
+   a `describe` at the end — union-resolve, verified green).
+2. Then `gfr-w1-per-field-op-table` (needs `gfr-w1-filter-chokepoint-strict`
+   merged) — **the defect Gyldendal actually hit**: a legal op on a column-backed
+   field silently returns zero rows. #2b is NOT closed until this lands.
+3. Then `gfr-w1-stdin-guard-altitude` (needs `gfr-w1-filter-and-composition`
+   merged; both edit `internal/cli/run.go`).
+4. Then S3/S6/S7. Before any of it, close `gfr-bl-workspace-member-verb` — this
+   wave shipped a one-shot backfill precisely because there is no way to add a
+   member to a workspace through any Barkpark surface, and that hole will be hit
+   again.
+
+**Owed before merge:** slices 1, 2 and 3 are the charter's HIGH-FLIP-RISK trio. The
+single wave reviewer re-derived each key judgment independently (the
+`OptionalSessionToken` assign split, the `share_token_off_surface?` predicate's
+path dependence, the `cast/3` whitelist); a genuinely independent second reviewer
+is a manual lead step and is still owed.
+
+**Standing rule earned this wave:**
+
+10. **A slice's own gate cannot see a slice's blast radius.** Three of six slices
+    were green alone and wrong together. Trial-merge the wave before grading it,
+    and run a gate wider than the union of the slice gates.
