@@ -38,6 +38,7 @@ taskboard-render	Render
 teams-tenant-id	teamsTenantId
 template-manifest	Load
 tenancy-scope	scope_to_workspace_or_global
+tenant-blob-key	blob_key
 url-scoped-build	ScopedURL
 user-auth	register_user
 uuid-guarded-fetch	uuid_or_nil
