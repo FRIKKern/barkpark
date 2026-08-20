@@ -257,4 +257,140 @@ defmodule Barkpark.Content.QueryTest do
 
     assert refute_starts.("p%cent") == 4
   end
+
+  # ── The filter chokepoint (gfr-w1-filter-chokepoint-strict) ────────────────
+  #
+  # `apply_field_op/4`'s catch-all used to `do: query` and `hasStrong`'s parser
+  # had an `:error -> query` arm. Both DELETED a clause the builder could not
+  # spell, so the caller received the UNFILTERED set believing it had filtered.
+  # A guard at one HTTP door was the only thing standing between that and every
+  # consumer. The refusal lives at the builder now, so every door inherits it.
+  describe "unsupported filter clauses are REFUSED at the builder" do
+    test "validate_filter_map/1 accepts every documented op, and doc_id's prefix ops" do
+      assert Query.validate_filter_map(%{}) == :ok
+      assert Query.validate_filter_map(%{"title" => "Alpha"}) == :ok
+
+      for op <- Query.valid_filter_ops() -- ["is", "hasStrong", "in", "nin"] do
+        assert Query.validate_filter_map(%{"title" => %{op => "x"}}) == :ok,
+               "expected #{op} to be accepted"
+      end
+
+      assert Query.validate_filter_map(%{"title" => %{"in" => ["a", "b"]}}) == :ok
+      assert Query.validate_filter_map(%{"title" => %{"nin" => ["a"]}}) == :ok
+      assert Query.validate_filter_map(%{"status" => %{"is" => "null"}}) == :ok
+      assert Query.validate_filter_map(%{"status" => %{"is" => "notnull"}}) == :ok
+      assert Query.validate_filter_map(%{"tags" => %{"hasStrong" => "wired:50"}}) == :ok
+
+      # `starts_with` has a clause on the id column ONLY — accepted there,
+      # refused everywhere else. Accepting it field-wide would let a desk chip
+      # pass write-validation and then raise at render.
+      assert Query.validate_filter_map(%{"doc_id" => %{"starts_with" => "p"}}) == :ok
+      assert Query.validate_filter_map(%{"_id" => %{"not_starts_with" => "p"}}) == :ok
+
+      assert Query.validate_filter_map(%{"title" => %{"starts_with" => "p"}}) ==
+               {:error, {"title", "starts_with"}}
+    end
+
+    test "validate_filter_map/1 names the first clause with no SQL arm" do
+      assert Query.validate_filter_map(%{"status" => %{"bogus" => "x"}}) ==
+               {:error, {"status", "bogus"}}
+
+      # `is` is value-matched: only null/notnull have clauses, so `is=published`
+      # (a plausible equality typo) used to match EVERYTHING.
+      assert Query.validate_filter_map(%{"status" => %{"is" => "published"}}) ==
+               {:error, {"status", "is"}}
+
+      # hasStrong's `<tag>:<min>` grammar, same parser as the SQL arm.
+      assert Query.validate_filter_map(%{"tags" => %{"hasStrong" => "wired"}}) ==
+               {:error, {"tags", "hasStrong"}}
+
+      # A range op needs a scalar bound — a list cannot be bound into a compare.
+      assert Query.validate_filter_map(%{"price" => %{"gt" => ["1"]}}) ==
+               {:error, {"price", "gt"}}
+
+      # in/nin bind a LIST; a bare scalar has no clause.
+      assert Query.validate_filter_map(%{"title" => %{"in" => "a,b"}}) ==
+               {:error, {"title", "in"}}
+
+      # Fail CLOSED on a shape that is not a filter map at all.
+      assert Query.validate_filter_map("nonsense") == {:error, {nil, :not_a_map}}
+      assert Query.validate_filter_map(nil) == {:error, {nil, :not_a_map}}
+    end
+
+    test "list_documents/3 RAISES rather than returning the unfiltered set" do
+      doc!("chk1", "Alpha")
+      doc!("chk2", "Beta")
+
+      # Sanity: the same read with a VALID filter returns the filtered set, so
+      # the refusal below is about the op — not about an empty dataset.
+      assert length(
+               Query.list_documents(@type_name, @dataset,
+                 perspective: :raw,
+                 filter_map: %{"title" => %{"eq" => "Alpha"}}
+               )
+             ) == 1
+
+      e =
+        assert_raise Barkpark.Content.InvalidFilterError, fn ->
+          Query.list_documents(@type_name, @dataset,
+            perspective: :raw,
+            filter_map: %{"title" => %{"bogus" => "Alpha"}}
+          )
+        end
+
+      assert e.op == "bogus"
+      assert e.field == "title"
+      # The MESSAGE names the op and the vocabulary, and NEVER the field: a
+      # refusal raised inside the builder does not inherit QueryController's
+      # forbidden_query_field/4 ordering, and at internal doors that gate never
+      # ran at all. See Barkpark.Content.InvalidFilterError's moduledoc.
+      refute e.message =~ "title"
+      assert e.message =~ "bogus"
+      assert e.message =~ "startsWith"
+    end
+
+    test "count_documents/3 inherits the same refusal — a count cannot over-report" do
+      doc!("chk3", "Gamma")
+
+      assert_raise Barkpark.Content.InvalidFilterError, fn ->
+        Query.count_documents(@type_name, @dataset,
+          perspective: :raw,
+          filter_map: %{"status" => %{"is" => "published"}}
+        )
+      end
+    end
+
+    test "a malformed hasStrong value is a refusal, not a silent no-op" do
+      doc!("chk4", "Delta")
+
+      e =
+        assert_raise Barkpark.Content.InvalidFilterError, fn ->
+          Query.list_documents(@type_name, @dataset,
+            perspective: :raw,
+            filter_map: %{"tags" => %{"hasStrong" => "floorless"}}
+          )
+        end
+
+      assert e.op == "hasStrong"
+    end
+
+    test "the refusal is a 400 at any door that does not catch it (Plug.Exception)" do
+      assert Plug.Exception.status(Barkpark.Content.InvalidFilterError.new("title", "bogus")) ==
+               400
+    end
+
+    test "the envelope is invalid_filter/400 and does not echo the field" do
+      env =
+        Barkpark.Content.Errors.to_envelope(
+          {:error, Barkpark.Content.InvalidFilterError.new("secretField", "bogus")}
+        )
+
+      assert env.code == "invalid_filter"
+      assert env.status == 400
+      assert env.details == %{op: "bogus"}
+      refute env.message =~ "secretField"
+      # The code-keyed hint still rides along for the caller.
+      assert is_binary(env.hint) and env.hint != ""
+    end
+  end
 end

@@ -278,7 +278,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
         plugin_filter = if is_map(node.filter), do: node.filter, else: %{}
         list_opts = [perspective: :drafts, filter_map: plugin_filter] ++ scope(opts)
-        docs = Content.list_documents(type_name, dataset, list_opts)
+        {docs, filter_error} = list_documents_preflighted(type_name, dataset, list_opts)
 
         doc_pane = %{
           title: node.title || (schema && schema.title) || type_name,
@@ -288,6 +288,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           priority: :active,
           desk_groups: [],
           active_desk: nil,
+          filter_error: filter_error,
           items: doc_items(docs, schema),
           selected: Enum.at(rest, 0)
         }
@@ -332,7 +333,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
               ),
             else: list_opts
 
-        docs = Content.list_documents(type_name, dataset, list_opts)
+        {docs, filter_error} = list_documents_preflighted(type_name, dataset, list_opts)
 
         doc_pane = %{
           title: node.title || (schema && schema.title) || type_name,
@@ -342,6 +343,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           priority: :active,
           desk_groups: desk_groups,
           active_desk: active_group && Map.get(active_group, "name"),
+          filter_error: filter_error,
           items: doc_items(docs, schema),
           selected: Enum.at(rest, 0)
         }
@@ -711,6 +713,41 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # them as alternative chip-style filters on a single `:document_type_list`
   # pane. Schemas without `desk_groups` (or with `[]`) render the existing
   # single flat list — back-compat lock.
+
+  # Read a document list AFTER checking its filter map — never around a rescue.
+  #
+  # Three filter sources reach `Content.list_documents/3` from this module: a
+  # plugin node's verbatim `filter` map, a structure node's parsed `filter`
+  # string, and the active desk group's chip filter merged over either. All three
+  # are STORED data, authored elsewhere (a plugin, a structure definition, a
+  # customer's schema), and the query builder now REFUSES an unsupported op
+  # instead of silently returning every row — so a filter that was written before
+  # `SchemaDefinition`'s write-time validation existed would raise from inside
+  # the LiveView and take the whole desk down.
+  #
+  # The pre-flight asks `Query.validate_filter_map/1` the same question the
+  # builder would raise on, and turns a refusal into an HONEST pane: no items, and
+  # a `filter_error` the pane renders next to the chip row. Deliberately NOT a
+  # `rescue` — a rescue would also swallow genuine builder bugs, re-creating the
+  # silence this whole change removes, one layer up. Anything OTHER than a bad
+  # filter still crashes loudly.
+  defp list_documents_preflighted(type_name, dataset, list_opts) do
+    filter_map = Keyword.get(list_opts, :filter_map, %{})
+
+    case Content.Query.validate_filter_map(filter_map) do
+      :ok ->
+        {Content.list_documents(type_name, dataset, list_opts), nil}
+
+      {:error, {nil, :not_a_map}} ->
+        {[], "This list's saved filter is malformed and was not applied. No documents are shown."}
+
+      {:error, {field, op}} ->
+        {[],
+         "This list's saved filter uses an unsupported operator #{inspect(op)} on " <>
+           "#{inspect(to_string(field))}, so it could not be applied. No documents are shown — " <>
+           "fix the filter in this type's schema (desk groups)."}
+    end
+  end
 
   defp schema_desk_groups(nil), do: []
 

@@ -1177,8 +1177,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             </div>
           <% end %>
 
+          <%!-- A STORED filter this pane could not apply (an unsupported op in a
+                desk-group chip or a plugin/structure filter). The list is empty
+                because nothing was queried, NOT because the type has no
+                documents — saying "No documents yet" here would be a lie, so the
+                empty state below is suppressed and this states the real reason. --%>
+          <%= if pane[:filter_error] do %>
+            <div class="bp-pane-notice bp-pane-notice-error" role="status" data-test-id="pane-filter-error">
+              <.icon name="alert-triangle" size={14} />
+              <span><%= pane[:filter_error] %></span>
+            </div>
+          <% end %>
+
           <div class="pane-body">
-            <%= if pane.items == [] and pane[:type_name] != nil do %>
+            <%= if pane.items == [] and pane[:type_name] != nil and pane[:filter_error] == nil do %>
               <.pane_empty message="No documents yet">
                 <:icon><.icon name={pane[:icon] || "file"} size={32} /></:icon>
                 <button
