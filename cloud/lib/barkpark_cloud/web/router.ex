@@ -5898,7 +5898,7 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/billing/checkout {plan} → 200 {checkout_url} — open a hosted
   # Checkout Session for the AUTHED user's team on `plan` (the customer opens the
   # url in a browser to pay). team_id is the authed team, NEVER client-supplied.
-    # checkout). 403 {error: "forbidden", reason: "no_team", scope: "team"}
+  # checkout). 403 {error: "forbidden", reason: "no_team", scope: "team"}
   # when the user has no team to bill.
   # OWNER-gated: billing is owner-only (`@action_min billing: [owner]`) — spending
   # money / changing the plan is the team owner's call, not any member or admin.
