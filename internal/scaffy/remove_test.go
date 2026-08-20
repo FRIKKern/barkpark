@@ -17,6 +17,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -32,6 +34,137 @@ func snapshotSansReceipts(t *testing.T, root string) map[string]string {
 		}
 	}
 	return snap
+}
+
+// churnGitMaintenanceLock models git's DETACHED background
+// auto-maintenance: `git commit` spawns `git maintenance run --auto`,
+// which creates and unlinks .git/objects/maintenance.lock while the
+// test's own snapshot walk is in flight. Churning the exact path in a
+// tight loop turns that rare CI race into a reliable one, so the guard
+// below is provable rather than merely quiet.
+func churnGitMaintenanceLock(t *testing.T, root string) func() {
+	t.Helper()
+	objs := filepath.Join(root, ".git", "objects")
+	if err := os.MkdirAll(objs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lock := filepath.Join(objs, "maintenance.lock")
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for !stop.Load() {
+			_ = os.WriteFile(lock, []byte("pid\n"), 0o644)
+			_ = os.Remove(lock)
+		}
+	}()
+	return func() {
+		stop.Store(true)
+		wg.Wait()
+		_ = os.Remove(lock)
+	}
+}
+
+// TestSnapshotSkipsGitStore — the guard behind TestRemoveFullCycleByteClean.
+//
+// That test git-inits its fixture root, so before this guard the
+// byte-equality snapshot walked .git/ too and raced git's background
+// maintenance lock, producing two failure shapes on CI from one cause:
+// `lstat …/.git/objects/maintenance.lock: no such file or directory`
+// (run 32355132650, main) and `after remove: file
+// .git/objects/maintenance.lock vanished` (run 32314845330, main).
+//
+// Both halves of the narrowing are pinned here, because a guard that
+// fixed the flake by swallowing missing files would also blind the
+// remove suite to the removal defects it exists to catch:
+//
+//	(1) under lock churn the walk neither errors nor captures .git/;
+//	(2) the skip is .git/ ALONE — ordinary files are still captured,
+//	    lookalike names are not exempt, and a file that disappears
+//	    outside .git/ is still visible to assertTreesEqual.
+func TestSnapshotSkipsGitStore(t *testing.T) {
+	seed := func(t *testing.T) string {
+		t.Helper()
+		root := t.TempDir()
+		for _, rel := range []string{"go.mod", "a/b.txt", "a/c.txt", "d/e.txt", ".gitignore", ".git-not-the-store/keep.txt"} {
+			writeTreeFile(t, root, rel, "x\n")
+		}
+		for _, rel := range []string{".git/HEAD", ".git/objects/aa/1", ".git/objects/bb/2"} {
+			writeTreeFile(t, root, rel, "o\n")
+		}
+		return root
+	}
+
+	t.Run("survives maintenance-lock churn", func(t *testing.T) {
+		root := seed(t)
+		stop := churnGitMaintenanceLock(t, root)
+		defer stop()
+
+		// 200 walks: against the unguarded walk this reproduces at
+		// roughly one failure every other iteration, so a clean batch
+		// is evidence rather than luck.
+		const walks = 200
+		for i := 0; i < walks; i++ {
+			snap, err := walkSnapshot(root)
+			if err != nil {
+				t.Fatalf("walk %d raced git maintenance: %v", i, err)
+			}
+			for rel := range snap {
+				if strings.HasPrefix(filepath.ToSlash(rel), ".git/") {
+					t.Fatalf("walk %d captured a git-internal path: %s", i, rel)
+				}
+			}
+		}
+	})
+
+	t.Run("skips the git store alone", func(t *testing.T) {
+		root := seed(t)
+		snap, err := walkSnapshot(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Everything outside the store is captured, .gitignore and a
+		// .git-prefixed LOOKALIKE directory included.
+		for _, rel := range []string{"go.mod", "a/b.txt", "a/c.txt", "d/e.txt", ".gitignore", ".git-not-the-store/keep.txt"} {
+			if _, ok := snap[filepath.FromSlash(rel)]; !ok {
+				t.Errorf("snapshot dropped %s — the skip must be the git store alone", rel)
+			}
+		}
+		// The store itself is absent, though it is right there on disk.
+		if _, err := os.Stat(filepath.Join(root, ".git", "HEAD")); err != nil {
+			t.Fatalf("test setup: the git store must exist on disk: %v", err)
+		}
+		for rel := range snap {
+			if filepath.ToSlash(rel) == ".git" || strings.HasPrefix(filepath.ToSlash(rel), ".git/") {
+				t.Errorf("snapshot captured git internals: %s", rel)
+			}
+		}
+	})
+
+	t.Run("a removal outside the store is still caught", func(t *testing.T) {
+		// The non-swallow arm: no fs.ErrNotExist tolerance was added,
+		// so a real disappearance is still a visible difference — which
+		// is exactly what assertTreesEqual reports as "vanished".
+		root := seed(t)
+		before, err := walkSnapshot(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(root, "a", "b.txt")); err != nil {
+			t.Fatal(err)
+		}
+		after, err := walkSnapshot(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := before[filepath.FromSlash("a/b.txt")]; !ok {
+			t.Fatal("test setup: a/b.txt must be in the before snapshot")
+		}
+		if _, ok := after[filepath.FromSlash("a/b.txt")]; ok {
+			t.Fatal("a deleted file must vanish from the snapshot — the guard must not swallow it")
+		}
+	})
 }
 
 func assertTreesEqual(t *testing.T, phase string, want, got map[string]string) {
@@ -70,7 +203,13 @@ func TestRemoveFullCycleByteClean(t *testing.T) {
 
 	git := func(args ...string) string {
 		t.Helper()
-		full := append([]string{"-C", root, "-c", "user.email=scaffy@test", "-c", "user.name=scaffy", "-c", "commit.gpgsign=false"}, args...)
+		// gc.auto/maintenance.auto off: `git commit` otherwise spawns a
+		// DETACHED `git maintenance run --auto` that keeps writing into
+		// this t.TempDir after the test returns. walkSnapshot already
+		// skips .git/ so the byte-equality arm no longer races it, but a
+		// background process outliving the fixture can still lose the
+		// TempDir cleanup a race; leave it unstarted.
+		full := append([]string{"-C", root, "-c", "user.email=scaffy@test", "-c", "user.name=scaffy", "-c", "commit.gpgsign=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)
 		out, err := exec.Command("git", full...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
