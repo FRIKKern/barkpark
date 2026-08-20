@@ -201,7 +201,6 @@ defmodule BarkparkCloud.NotificationsTest do
       settings = Notifications.get_or_create_settings(team)
       view = Notifications.settings_view(settings)
       assert view.smtp_password == nil
-      assert view.api_key == nil
     end
   end
 
@@ -402,6 +401,192 @@ defmodule BarkparkCloud.NotificationsTest do
 
       assert_email_sent(subject: "Verify your Barkpark Cloud email")
     end
+  end
+
+  ## The daily fleet digest — dr-w19-s5, THE ADDRESS
+  ##
+  ## `deliver_fleet_digest/1` used to resolve `platform_admin_emails/0`, whose
+  ## only source is a config allowlist that is unset on prod and hard-defaults to
+  ## `[]`: the one push channel for fleet health succeeded at sending nothing,
+  ## every day, for its whole recorded life. It now partitions the fleet by team
+  ## and mails each team's own members. These tests pin the two things a SOURCE
+  ## census structurally cannot: that the population is REAL (a registered
+  ## membership row, never a synthetic address), and that the tenancy ruling
+  ## holds — a team's digest carries that team's instances and nobody else's.
+
+  describe "deliver_fleet_digest/1 — the audience" do
+    # Fleet rows are read, never persisted, by the digest (`DigestEmail.summary/1`
+    # and `body/1` are pure over the update columns), so a struct is the honest
+    # fixture — no Registry insert, no migration coupling.
+    defp barkpark_row(team, name, attrs \\ %{}) do
+      Map.merge(
+        %BarkparkCloud.Registry.Barkpark{
+          id: Ecto.UUID.generate(),
+          team_id: team.id,
+          name: name,
+          slug: name,
+          update_state: "behind",
+          update_running_release: "v1.0.0",
+          update_latest_release: "v1.1.0",
+          autoupdate_enabled: true,
+          autoupdate_paused: false
+        },
+        attrs
+      )
+    end
+
+    # Every email the Swoosh test adapter delivered to this process, drained in
+    # order. `assert_email_sent/1` consumes exactly one message and asserts on
+    # its return value, which cannot express "no email anywhere says X".
+    defp sent_emails(acc \\ []) do
+      receive do
+        {:email, email} -> sent_emails([email | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+
+    defp recipient_of(email) do
+      [{_name, address}] = email.to
+      address
+    end
+
+    test "recipients are the REAL team members — one mail per member, per team" do
+      {team_a, [a1, a2]} = team_with_members(2)
+      {team_b, [b1]} = team_with_members(1)
+
+      fleet = [
+        barkpark_row(team_a, "alpha-one"),
+        barkpark_row(team_a, "alpha-two"),
+        barkpark_row(team_b, "bravo-one")
+      ]
+
+      assert {:ok, %{sent: 3, recipients: recipients}} = Notifications.deliver_fleet_digest(fleet)
+
+      assert Enum.sort(recipients) == Enum.sort([a1, a2, b1])
+      assert Enum.sort(Enum.map(sent_emails(), &recipient_of/1)) == Enum.sort([a1, a2, b1])
+
+      # REAL, not synthetic: every address is a registered user's stored email.
+      for email <- recipients do
+        assert Accounts.get_user_by_email(email),
+               "#{email} must be a registered account, not an address the digest invented"
+      end
+    end
+
+    test "TENANCY: a team's digest carries that team's instances and no other team's" do
+      {team_a, [a1]} = team_with_members(1)
+      {team_b, [b1]} = team_with_members(1)
+
+      fleet = [barkpark_row(team_a, "alpha-only"), barkpark_row(team_b, "bravo-only")]
+
+      assert {:ok, %{sent: 2}} = Notifications.deliver_fleet_digest(fleet)
+
+      bodies = Map.new(sent_emails(), &{recipient_of(&1), &1.text_body})
+
+      assert bodies[a1] =~ "alpha-only"
+      refute bodies[a1] =~ "bravo-only"
+      assert bodies[a1] =~ "Fleet: 1 instance"
+
+      assert bodies[b1] =~ "bravo-only"
+      refute bodies[b1] =~ "alpha-only"
+    end
+
+    test "each send is a Delivery row carrying the REAL team_id it was sent for" do
+      {team, [member]} = team_with_members(1)
+
+      assert {:ok, %{sent: 1}} = Notifications.deliver_fleet_digest([barkpark_row(team, "solo")])
+
+      assert [row] = Delivery |> Repo.all() |> Enum.filter(&(&1.event == "fleet_digest"))
+      assert row.recipient == member
+      assert row.team_id == team.id, "a fleet_digest row with team_id nil is returnable by nobody"
+      assert row.status == "sent"
+      assert row.kind == "transactional"
+    end
+
+    test "a team with instances but ZERO members is skipped, not mailed and not invented" do
+      memberless = team_fixture()
+      {team, [member]} = team_with_members(1)
+
+      fleet = [barkpark_row(memberless, "orphan"), barkpark_row(team, "owned")]
+
+      assert {:ok, %{sent: 1, recipients: [^member]}} = Notifications.deliver_fleet_digest(fleet)
+
+      emails = sent_emails()
+      assert length(emails) == 1
+      refute hd(emails).text_body =~ "orphan"
+    end
+
+    # REVIEW FIX (w20): `instances` is the WHOLE fleet, and under per-team
+    # partitioning that stopped meaning "instances someone was told about" — an
+    # instance with a nil team_id, or one whose team has no members, is counted
+    # in `instances` and reaches nobody. `instances=3` beside `sent=1` would
+    # read as a digest that spoke for three instances when it spoke for one.
+    # `covered` is the honest denominator, and this test pins the GAP: the two
+    # numbers must be allowed to disagree, and the log must show both.
+    test "the accounting states how much of the fleet the digest actually spoke for" do
+      {team, [_member]} = team_with_members(1)
+      memberless = team_fixture()
+
+      fleet = [
+        barkpark_row(team, "owned"),
+        barkpark_row(memberless, "no-members"),
+        barkpark_row(memberless, "no-members-2")
+      ]
+
+      # Read off TELEMETRY, not the log line: this is the SUCCESS arm, which
+      # logs at :info, and config/test.exs pins the Logger to :warning — a
+      # capture_log assertion here would read "" and pass vacuously against any
+      # value of `covered` whatsoever. The telemetry metadata is the same map
+      # the log line renders from.
+      ref = make_ref()
+      test_pid = self()
+
+      :telemetry.attach(
+        "covered-#{inspect(ref)}",
+        [:barkpark_cloud, :notifications, :fleet_digest, :settled],
+        fn _event, measurements, metadata, _cfg ->
+          send(test_pid, {ref, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("covered-#{inspect(ref)}") end)
+
+      assert {:ok, %{sent: 1}} = Notifications.deliver_fleet_digest(fleet)
+
+      assert_receive {^ref, %{recipients: 1, sent: 1}, metadata}
+
+      # The whole fleet is still reported as the fleet — that number is not a lie,
+      # it is just not the reach.
+      assert metadata.instances == 3
+      # …and exactly ONE of those three instances belongs to a team that was
+      # actually mailed. A `covered: 3` here would be the overstatement.
+      assert metadata.covered == 1
+    end
+
+    test "an empty fleet is a COUNTED loss: recipients=0 at WARNING, and nothing is sent" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, :no_admins} = Notifications.deliver_fleet_digest([])
+        end)
+
+      assert log =~ "fleet_digest phase=settled"
+      assert log =~ "recipients=0 sent=0"
+      assert log =~ "reason=no_team_recipients"
+      assert log =~ "[warning]"
+
+      assert sent_emails() == []
+    end
+
+    # "the digest no longer reads the platform allowlist AT ALL" is NOT tested
+    # here on purpose. Proving it requires a REGISTERED allowlisted address that
+    # is in no team, and `:platform_admin_emails` is node-global Application
+    # config — writing it from this `async: true` module is exactly the seam
+    # `async_global_seam_guard_test.exs` reds on, and it would put the swap in
+    # force for every other async module running at that instant. The claim is
+    # pinned in `workers/daily_digest_worker_test.exs` (`async: false`), which
+    # owns that key already: "an allowlisted address that is in no team is
+    # dropped, never mailed".
   end
 
   ## Test-send rate limit

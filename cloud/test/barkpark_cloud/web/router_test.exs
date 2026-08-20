@@ -20,6 +20,18 @@ defmodule BarkparkCloud.Web.RouterTest do
 
   @opts Router.init([])
 
+  # The register handler spends the node-global "register:" ETS bucket on EVERY
+  # call (arpss w3 — the check precedes validation by design), and Plug.Test
+  # conns all arrive as 127.0.0.1, so this module's register calls accumulate
+  # against ONE 30/60s budget across the whole run. Today's call count keeps the
+  # margin, but a mystery 429 in an unrelated register test is the worst kind of
+  # flake — start every test with a clean limiter. async: false (above), so no
+  # concurrent spender races the reset.
+  setup do
+    BarkparkCloud.DeviceAuth.RateLimiter.reset()
+    :ok
+  end
+
   @password "correct-horse-battery"
   @worker_token "worker-token-test-fixed"
 

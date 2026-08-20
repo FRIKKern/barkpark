@@ -246,7 +246,9 @@ defmodule Barkpark.Plugins.BootstrapDefaultSlotProbeTest do
   # ── S5 — put_scope_attrs RE-STAMPS, never NILs ─────────────────────────
 
   test "S5 put_scope_attrs re-stamps the scope keys rather than nilling them", ctx do
-    attrs =
+    # put_scope_attrs is {:ok, attrs} | {:error, reason} since the felix-w26
+    # fail-closed contract — a valid dataset string always lands the ok arm.
+    {:ok, attrs} =
       %{
         "name" => SlotStub.schema_name(),
         "title" => "x",

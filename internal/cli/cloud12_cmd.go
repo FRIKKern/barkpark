@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -498,11 +499,25 @@ func runSignupCloud(out *writer, args []string) int {
 	client := &cloudclient.Client{BaseURL: base}
 	resp, rerr := client.Register(cloudCtx(), email, password, team)
 	if rerr != nil {
-		// 409 email_taken → point the user at login; everything else (422 validation,
-		// connectivity) surfaces verbatim. We match on the message cloudError carried.
+		// 409 email_taken → point the user at login; everything else (422 validation)
+		// surfaces verbatim. We match on the message cloudError carried.
 		msg := rerr.Error()
 		if strings.Contains(msg, "email_taken") {
 			return useError(out, "failed", "email already registered — run `bp login` instead", exitGeneric)
+		}
+		// POST-COMMIT NETWORK DROP (onb-w4): a NON-refusal error means the control
+		// plane never returned an HTTP status at all — the connection dropped. That
+		// drop can land AFTER the server already committed the account (register is
+		// not idempotent — a blind retry 409s email_taken and forces a command
+		// switch). We cannot know from here whether the write happened, so we fail
+		// closed and tell the honest truth: the account MAY already exist, and the
+		// recovery is `bp login` with the SAME credentials — never a bare
+		// "signup failed: <transport>" that strands a possibly-created account.
+		// A server refusal is a *cloudclient.CloudRefusal (it carries an HTTP
+		// status); a transport error is not, which is exactly the seam we key on.
+		var refusal *cloudclient.CloudRefusal
+		if !errors.As(rerr, &refusal) {
+			return useError(out, "failed", signupTransportRecoveryMessage(email, base, msg), exitGeneric)
 		}
 		return useError(out, "failed", "signup failed: "+msg, exitGeneric)
 	}
@@ -528,6 +543,37 @@ func runSignupCloud(out *writer, args []string) int {
 	}
 	out.outf("  run 'bp go-live --name <name>' to provision your first Barkpark")
 	return exitOK
+}
+
+// signupTransportRecoveryMessage builds the honest receipt for a `bp signup`
+// whose POST /v1/auth/register dropped in transport (onb-w4). Because the drop
+// can happen AFTER the server committed the account, the copy never claims the
+// signup failed cleanly: it names the ambiguous state (the account MAY already
+// exist) and advises `bp login` with the SAME credentials as the recovery — a
+// blind `bp signup` retry would 409 email_taken and force a command switch. When
+// the email is known it is threaded into the login hint so the user can act
+// without retyping it; the underlying transport error stays appended so the
+// cause is never hidden.
+//
+// The base URL is threaded in too, and appended as --url whenever it is NOT the
+// baked default: this path never persists CloudURL, so on a FIRST signup against
+// a non-default control plane a bare `bp login --email X` would resolve back to
+// the default host and fail — and the copy's next clause ("if that reports
+// invalid credentials, the account was not created") would then draw exactly the
+// false conclusion this receipt exists to prevent.
+func signupTransportRecoveryMessage(email, base, transportErr string) string {
+	loginHint := "bp login"
+	if e := strings.TrimSpace(email); e != "" {
+		loginHint = "bp login --email " + e
+	}
+	if b := strings.TrimSpace(base); b != "" && b != cloudclient.DefaultBaseURL {
+		loginHint += " --url " + b
+	}
+	return "signup could not be confirmed — the connection dropped before the " +
+		"control plane replied, so your account may already have been created. " +
+		"Run `" + loginHint + "` with the same password to sign in; if that reports " +
+		"invalid credentials, the account was not created and you can run `bp signup` " +
+		"again. (" + transportErr + ")"
 }
 
 // runLogout is the `bp logout` built-in — the sign-out sibling of `bp login`.
@@ -650,6 +696,7 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 		"mode":          b.Mode,
 		"health_status": b.HealthStatus,
 		"agent_status":  b.AgentStatus,
+		"last_seen_at":  b.LastSeenAt,
 		"version":       b.Version,
 		"git_commit":    b.GitCommit,
 		"team_id":       b.TeamID,
@@ -667,7 +714,9 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 // on every row: PROVIDER (identity → GenProviderMark) + STATUS (the folded
 // GenInstanceLifecycle state → its role hue), alongside NAME · URL · MODE ·
 // HEALTH · AGENT (Decision 34 activates the merged-but-dormant #1739 chrome on the
-// registry leg). renderHzTable measures widths on bare strings and only tints when
+// registry leg) — plus LAST-SEEN, the age of the control plane's last observation
+// rendered through relativeAge(b.LastSeenAt) (a never-seen row → hzCell's em-dash).
+// renderHzTable measures widths on bare strings and only tints when
 // out.color is on, so color-off output stays byte-stable. URL falls back to the
 // host when the server has no URL yet (still provisioning). Every cell rides
 // through hzCell like every other renderHzTable call site: control chars from a
@@ -676,7 +725,7 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 // house em-dash rather than a bare gap — the tinters key on exact vocabulary
 // values, so a dashed cell stays honestly unpainted.
 func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark, showTeam bool) {
-	headers := []string{"NAME", "PROVIDER", "URL", "STATUS", "MODE", "HEALTH", "AGENT"}
+	headers := []string{"NAME", "PROVIDER", "URL", "STATUS", "MODE", "HEALTH", "AGENT", "LAST-SEEN"}
 	if showTeam {
 		headers = append([]string{"TEAM"}, headers...)
 	}
@@ -689,6 +738,7 @@ func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark, showTea
 		row := []string{
 			hzCell(b.Name), hzCell(b.Provider), hzCell(u), hzCell(registryLifecycleToken(b)),
 			hzCell(b.Mode), hzCell(b.HealthStatus), hzCell(b.AgentStatus),
+			hzCell(relativeAge(b.LastSeenAt)),
 		}
 		if showTeam {
 			team := ""

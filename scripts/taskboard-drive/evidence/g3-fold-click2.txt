@@ -1,0 +1,9 @@
+ ▎ The task TUI is glanceable, live, a… ··· 15/23│ │ The task TUI is glanceable, live, and never flickers                     │
+                                                 │ │ ✓ done · C3/7 · task · relevance-loop                                    │
+   Scaffy epic — commands as content: a… ··· 1/14│ │                                                                          │
+ ├─ ⠋ The story stops contradicting the engine: …│ │ criteria 4/4                                                             │
+ │    C5/7 · P2 · 4/5                            │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
+ ├─ ⠋ pull --check answers for the server that p…│ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
+ │    C5/7 · P1 · 4/5                            │ │     constant motion.                                                     │
+ ├─ ⠋ bp scaffy describe: a command's contract i…│ │   ✓ Mouse and keyboard operate the focused column consistently.          │
+ │    C5/7 · P1 · 4/5                            │ │   ✓ The current taskboard regression suite is green.                     │

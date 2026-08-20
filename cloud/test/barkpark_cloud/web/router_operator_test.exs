@@ -8,9 +8,16 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
   `platform_operator` boolean.
 
   Proves the fail-closed 401/403/200 matrix across all six endpoints, that the
-  deliveries surface exposes ONLY nil-team `fleet_digest` rows (never a
-  team-scoped row and never a nil-team identity email), the fleet shape, and the
-  warm-pool shape.
+  deliveries surface returns the receipts a REAL `deliver_fleet_digest/1` run
+  writes and nothing else (never a team-scoped alert row, never an identity
+  email), the fleet shape, and the warm-pool shape.
+
+  RETRACTED (cch-w56-s3): this moduledoc used to say the deliveries surface
+  "exposes ONLY nil-team `fleet_digest` rows". It pinned a shape the writer can
+  never produce — `deliver_fleet_digest/1` builds targets under an
+  `is_binary(team_id)` guard, so every receipt carries a REAL `team_id` — which
+  is why the old fixtures were 8/8 green under BOTH the broken reader and the
+  fixed one. The deliveries tests now DRIVE the writer and read the route.
 
   `async: false` — the operator allowlist is process-global Application config
   (`:platform_admin_emails`), so these tests must not run concurrently against a
@@ -20,7 +27,7 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
   import Plug.Test
   import Plug.Conn
 
-  alias BarkparkCloud.{Accounts, Registry, Repo}
+  alias BarkparkCloud.{Accounts, Notifications, Registry, Repo}
   alias BarkparkCloud.Notifications.Delivery
   alias BarkparkCloud.Web.Router
 
@@ -211,50 +218,109 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     assert length(body["barkparks"]) >= 2
   end
 
-  ## 4. Deliveries — ONLY nil-team fleet_digest rows; no leak
+  ## 4. Deliveries — the receipts a REAL digest run writes; no leak
+  ##
+  ## These tests DRIVE `Notifications.deliver_fleet_digest/1` — real team, real
+  ## membership rows, real Mailer (Swoosh test adapter), real Repo insert — and
+  ## then dispatch the real route. A hand-inserted `%Delivery{}` cannot stand in:
+  ## the only shape a fixture is free to invent is one `record_delivery/5` can
+  ## never write, and that is exactly how the previous version of this file
+  ## stayed green under a reader that returned nothing on prod.
 
-  test "GET /v1/operator/deliveries returns nil-team fleet_digest rows and never leaks team or identity rows" do
+  # One real digest run for `team`, returning the Delivery rows it wrote.
+  defp drive_digest(team) do
+    before = Repo.all(Delivery) |> MapSet.new(& &1.id)
+    barkpark = barkpark_fixture(team)
+    assert {:ok, %{sent: sent}} = Notifications.deliver_fleet_digest([barkpark])
+    assert sent > 0, "the digest must actually send for this drive to prove anything"
+    Repo.all(Delivery) |> Enum.reject(&MapSet.member?(before, &1.id))
+  end
+
+  test "GET /v1/operator/deliveries returns the receipts a REAL digest run wrote" do
     {operator, _op_team} = operator_fixture()
     token = session_token(operator)
 
-    {_owner, team} = user_with_team()
+    {_member, team} = user_with_team("member")
+    [receipt] = drive_digest(team)
 
-    fleet = delivery_fixture(%{team_id: nil, event: "fleet_digest", recipient: "ops@example.com"})
-    team_row = delivery_fixture(%{team_id: team.id, event: "past_due"})
-    # a nil-team NON-fleet row (identity email) — is_nil(team_id) alone would
-    # leak it, so the event filter must exclude it
-    identity_row = delivery_fixture(%{team_id: nil, event: "reset"})
+    # the writer's own shape, restated here so the reader is tested against
+    # reality and not against a fixture's imagination
+    assert receipt.event == "fleet_digest"
+    assert receipt.team_id == team.id
+    refute is_nil(receipt.team_id)
 
     conn = call(:get, "/v1/operator/deliveries", token)
     assert conn.status == 200
     rows = json_body(conn)["deliveries"]
+
+    assert receipt.id in Enum.map(rows, & &1["id"]),
+           "the operator log must return the row a real deliver_fleet_digest/1 run just wrote"
+
+    row = Enum.find(rows, &(&1["id"] == receipt.id))
+    assert row["event"] == "fleet_digest"
+    assert row["recipient"] == receipt.recipient
+    assert row["status"] == "sent"
+  end
+
+  test "GET /v1/operator/deliveries is CROSS-TEAM — every team's digest receipts, one page" do
+    {operator, _op_team} = operator_fixture()
+    token = session_token(operator)
+
+    {_a, team_a} = user_with_team("member")
+    {_b, team_b} = user_with_team("member")
+    [a_receipt] = drive_digest(team_a)
+    [b_receipt] = drive_digest(team_b)
+
+    ids =
+      json_body(call(:get, "/v1/operator/deliveries", token))["deliveries"]
+      |> Enum.map(& &1["id"])
+
+    assert a_receipt.id in ids
+    assert b_receipt.id in ids
+  end
+
+  test "GET /v1/operator/deliveries never leaks a team alert row or an identity email" do
+    {operator, _op_team} = operator_fixture()
+    token = session_token(operator)
+
+    {_owner, team} = user_with_team()
+    [receipt] = drive_digest(team)
+
+    # The EVENT filter is now the only filter, so these two are what it holds
+    # back: a team-scoped alert row and a user-scoped identity email.
+    team_row = delivery_fixture(%{team_id: team.id, event: "past_due"})
+    identity_row = delivery_fixture(%{team_id: nil, event: "reset"})
+
+    rows = json_body(call(:get, "/v1/operator/deliveries", token))["deliveries"]
     ids = Enum.map(rows, & &1["id"])
 
-    assert fleet.id in ids
+    assert receipt.id in ids
     refute team_row.id in ids
     refute identity_row.id in ids
-
-    # every returned row is a fleet_digest send
-    assert Enum.map(rows, & &1["event"]) |> Enum.uniq() == ["fleet_digest"]
+    assert rows |> Enum.map(& &1["event"]) |> Enum.uniq() == ["fleet_digest"]
   end
 
   test "GET /v1/operator/deliveries is newest-first and ?limit caps the page" do
     {operator, _t} = operator_fixture()
     token = session_token(operator)
 
+    {_u1, team_a} = user_with_team("member")
+    {_u2, team_b} = user_with_team("member")
+
+    # Real receipts; only the CLOCK is controlled (inserted_at is a managed
+    # timestamp, so the ordering assertion needs it stamped after insert).
+    [older] = drive_digest(team_a)
+    [newer] = drive_digest(team_b)
+
     older =
-      delivery_fixture(%{
-        team_id: nil,
-        event: "fleet_digest",
-        inserted_at: ~U[2026-07-01 00:00:00.000000Z]
-      })
+      older
+      |> Ecto.Changeset.change(inserted_at: ~U[2026-07-01 00:00:00.000000Z])
+      |> Repo.update!()
 
     newer =
-      delivery_fixture(%{
-        team_id: nil,
-        event: "fleet_digest",
-        inserted_at: ~U[2026-07-02 00:00:00.000000Z]
-      })
+      newer
+      |> Ecto.Changeset.change(inserted_at: ~U[2026-07-02 00:00:00.000000Z])
+      |> Repo.update!()
 
     rows = json_body(call(:get, "/v1/operator/deliveries", token))["deliveries"]
     ids = Enum.map(rows, & &1["id"])

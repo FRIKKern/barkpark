@@ -296,4 +296,61 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
     # the in-flight marker rides along — the console "Updating" badge reads it
     assert row["autoupdate_triggered_at"] == "2026-07-10T12:05:00.000000Z"
   end
+
+  # ── dr-w24-s2: the commit-distance measurement leaves the database ─────────
+  #
+  # The control plane has measured commit distance hourly since W21 and NOTHING
+  # read it: no serializer, no route, no CLI, no console. Prod carries rows that
+  # read commit_distance 2493 / commit_ancestry "behind" / update_state
+  # "current" — the honest column and the reassuring one on the SAME ROW, with
+  # only the reassuring one reaching a human. This asserts the three keys are on
+  # the wire, and that a NULL distance travels as null (never 0).
+  test "GET /v1/barkparks emits commit_distance, commit_ancestry, commit_distance_checked_at" do
+    {user, team} = user_with_team()
+
+    _measured =
+      barkpark_fixture(team)
+      |> Ecto.Changeset.change(
+        name: "measured",
+        update_state: "current",
+        commit_distance: 2493,
+        commit_ancestry: "behind",
+        commit_distance_checked_at: ~U[2026-08-08 12:17:01.000000Z]
+      )
+      |> Repo.update!()
+
+    _unmeasured =
+      barkpark_fixture(team)
+      |> Ecto.Changeset.change(
+        name: "unmeasured",
+        update_state: "current",
+        commit_distance: nil,
+        commit_ancestry: "unknown",
+        commit_distance_checked_at: ~U[2026-08-08 12:17:08.000000Z]
+      )
+      |> Repo.update!()
+
+    {:ok, token} = Accounts.create_user_session_token(user)
+    conn = call(:get, "/v1/barkparks", nil, token)
+    assert conn.status == 200
+
+    rows = json_body(conn)["barkparks"]
+    measured = Enum.find(rows, &(&1["name"] == "measured"))
+    unmeasured = Enum.find(rows, &(&1["name"] == "unmeasured"))
+
+    # All three keys, present on the row that carries a measurement.
+    assert measured["commit_distance"] == 2493
+    assert measured["commit_ancestry"] == "behind"
+    assert measured["commit_distance_checked_at"] == "2026-08-08T12:17:01.000000Z"
+    # …beside the release-tag grade they contradict. Both travel; the reader
+    # decides. (update_state is pinned at `current` because no release tag has
+    # been cut since 2026-07-08, not because it cannot say `behind`.)
+    assert measured["update_state"] == "current"
+
+    # UNMEASURED travels as null, never 0 — the whole honesty rung of the field.
+    assert Map.has_key?(unmeasured, "commit_distance")
+    assert unmeasured["commit_distance"] == nil
+    assert unmeasured["commit_ancestry"] == "unknown"
+    assert unmeasured["commit_distance_checked_at"] == "2026-08-08T12:17:08.000000Z"
+  end
 end

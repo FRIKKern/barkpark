@@ -17,13 +17,14 @@ import (
 
 // render_test.go — the projection proofs. The load-bearing one is D10: each
 // settled assistant message renders as its OWN document (one RenderDoc call), so
-// "Figure N." numbering RESETS per message. The golden-parity harness diffs
-// exactly this assistant-body projection; cards/tail/user echoes are out of
+// nothing leaks across replies — and since pdrender now numbers NOTHING (it only
+// emphasises an author-typed "Figure N." lead, like the web reader), a caption
+// says exactly what the author typed in every message. The golden-parity harness
+// diffs exactly this assistant-body projection; cards/tail/user echoes are out of
 // scope and only proven not to crash or scope-creep.
 
-// figureDoc is a one-figure document (an ascii diagram, which carries a
-// "Figure N." caption). Two of these rendered as separate messages must BOTH
-// caption "Figure 1." — the per-message reset.
+// figureBlocks is a one-figure document. Two of these rendered as separate
+// messages must each carry their OWN caption text and no invented number.
 func figureBlocks(caption string) json.RawMessage {
 	doc := map[string]any{
 		"blocks": []any{
@@ -38,10 +39,11 @@ func figureBlocks(caption string) json.RawMessage {
 	return raw
 }
 
-// TestFigureNumberingResetsPerMessage is the D10 proof: two assistant messages
-// each rendered via their own RenderDoc call both start at "Figure 1.", instead
-// of the second continuing to "Figure 2." as it would in one shared document.
-func TestFigureNumberingResetsPerMessage(t *testing.T) {
+// TestFigureCaptionsCarryNoInventedNumber is the D10 proof in its honest form:
+// two assistant messages each rendered via their own RenderDoc call carry their
+// own author caption and NO renderer-generated "Figure N." — nothing accumulates
+// across replies because there is no counter to accumulate.
+func TestFigureCaptionsCarryNoInventedNumber(t *testing.T) {
 	reg := pdrender.DefaultRegistry(pdrender.DarkTheme())
 	m1 := Message{Role: "assistant", Blocks: figureBlocks("first")}
 	m2 := Message{Role: "assistant", Blocks: figureBlocks("second")}
@@ -49,14 +51,13 @@ func TestFigureNumberingResetsPerMessage(t *testing.T) {
 	out1 := strings.Join(renderAssistantDoc(reg, 80, m1), "\n")
 	out2 := strings.Join(renderAssistantDoc(reg, 80, m2), "\n")
 
-	if !strings.Contains(out1, "Figure 1.") {
-		t.Fatalf("first message should caption Figure 1., got:\n%s", out1)
+	if !strings.Contains(out1, "first") || !strings.Contains(out2, "second") {
+		t.Fatalf("each message must carry its own caption, got:\n%s\n---\n%s", out1, out2)
 	}
-	if !strings.Contains(out2, "Figure 1.") {
-		t.Fatalf("second message must RESET to Figure 1. (per-message document, D10), got:\n%s", out2)
-	}
-	if strings.Contains(out2, "Figure 2.") {
-		t.Fatal("figure numbering must NOT continue across messages (D10 per-message reset)")
+	for i, out := range []string{out1, out2} {
+		if strings.Contains(out, "Figure") {
+			t.Fatalf("message %d gained a figure number no author typed:\n%s", i+1, out)
+		}
 	}
 }
 

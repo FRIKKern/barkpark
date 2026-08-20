@@ -25,7 +25,7 @@
 //             height-bearing @media, so the derived refusal refuses nothing
 //             today and legA's own output says so. The declared HEIGHTS set
 //             carries a written reason per value.
-//   SCENARIO  104 scenarios, 25 rendered, 79 in a COMMITTED residue literal.
+//   SCENARIO  111 scenarios, 26 rendered, 85 in a COMMITTED residue literal.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  WHY THIS EXISTS (cch wave 14, slice S1)
@@ -179,8 +179,14 @@
 //  COST, HONESTLY
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
-//  costs roughly a second per cell. The full render leg is 26 cells x 2 themes
-//  x 15 widths = 780 cells: budget MINUTES. The theme axis DOUBLED that, for an
+//  costs roughly a second per cell. The full render leg is 27 cells x 2 themes
+//  x 18 boundary widths = 972 renders: budget MINUTES. The width numeral here is
+//  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "18
+//  boundary widths"), not the 15 that this file's residue prose still repeats —
+//  that stale numeral has no arm and is owned by
+//  cch-w63-bl-the-derived-width-axis-has-no-arm-and-its-prose-propagated.
+//  Measured, not assumed: `--render --cell inst-update-refused` reports 36
+//  renders for ONE cell (18 x 2). The theme axis DOUBLED that, for an
 //  axis stated above to be coverage rather than yield — slice it with
 //  `--theme light` when you are chasing a width, not a mode. Two traps proven the hard way: Page.navigate to
 //  a URL differing only in its hash is a SAME-DOCUMENT navigation, so injected
@@ -221,6 +227,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { IDS, SCENARIOS } from "./scenarios.mjs";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(process.env.BREAKPOINT_SWEEP_ROOT || path.resolve(HERE, ".."));
@@ -279,6 +286,7 @@ export const WIDTHS = boundaryWalk(BREAKPOINTS);
 
 const INST = IDS.liveInstance;
 const SITE = IDS.siteWeb;
+const REFUSED = IDS.refusedInstance;
 
 // The screen axis: SCENARIO x ROUTE. `view` is the section.view that MUST be
 // live, `ready` is what the driver polls for, and `sentinel` is clause 3 of the
@@ -311,6 +319,7 @@ export const CELLS = [
   { name: "inst-timeline", scen: "timeline", hash: `#instance/${INST}/timeline`, view: "view-instance", sentinel: "#instance-tabpanel .tlv-row" },
   { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", sentinel: "#instance-tabpanel .metrics-grid" },
   { name: "inst-webhooks", scen: "webhooks-panel", hash: `#instance/${INST}/webhooks`, view: "view-instance", sentinel: "#instance-tabpanel .wh-card" },
+  { name: "inst-update-refused", scen: "instance-update-credential-refused", hash: `#instance/${REFUSED}`, view: "view-instance", sentinel: '#instance-tabpanel .update-badge[data-update-state="unknown"]' },
   { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
   { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
 ];
@@ -362,38 +371,38 @@ export function familyOf(scen) {
 }
 
 // The 13 families the residue falls into, each with the reason Leg B does not
-// render it. These are REASONS, not an allowlist: the allowlist is the 79
-// name-keyed entries below, which is what makes a 105th scenario refusable.
+// render it. These are REASONS, not an allowlist: the allowlist is the 85
+// name-keyed entries below, which is what makes a 112th scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 21 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
-  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 9 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity — over a grid already walked at all 15 widths.",
-  "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 9 vary binding/verify content inside the same .detail-grid. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg.",
-  "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 7 are member-role and empty-state variants of those same panels.",
+  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 22 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
+  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 11 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, and cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
+  "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 10 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg.",
+  "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 9 are member-role, ACTOR-IDENTITY and empty-state variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
   "path:/new": "The launch/theater page is likewise its own document outside the shell.",
-  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 3 vary member-role, cancelling copy and the portal return inside those same panels.",
+  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 4 vary member-role, cancelling copy, the portal return and cch-w39-s1's `billing-me-unreadable` inside those same panels — the last swaps the Manage section's one-line copy for a single .empty-state block, a geometry the two cells already walk at all 15 widths.",
   "hash:#operator": "The operator console is swept by two cells (console, halted). These 4 vary zero-staging / denied / route-unreadable / me-unreadable states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 15 widths.",
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
   "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
 };
 
-// THE RESIDUE — 79 scenarios that exist and are NOT rendered by any cell,
+// THE RESIDUE — 85 scenarios that exist and are NOT rendered by any cell,
 // COMMITTED AS A LITERAL, name-keyed to the family that explains them.
 //
 // WHY A COMMITTED LITERAL AND NOT A COMPUTED ONE (charter D180). An allowlist
 // derived from the current residue is green under EVERY mutation, because it
 // grows with the artifact and can never refuse anything: it looks itemised, it
-// is even "artifact-derived", and it is 100% vacuous. Typed out, a 103rd
+// is even "artifact-derived", and it is 100% vacuous. Typed out, a 112th
 // scenario has nowhere to hide.
 // WHY NAME-KEYED AND NOT FAMILY-KEYED. A 13-entry family list fails 3 of 4
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
-// the 21-member `hash:#instance` family, and goes green while its entry rots
+// the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 104 scenarios · 26 cells over 25 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 79 · 13 families.
+// THE CENSUS THIS RECONCILES AGAINST: 111 scenarios · 27 cells over 26 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 85 · 13 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -402,6 +411,10 @@ export const RESIDUE_FAMILY_REASONS = {
 // failed` is the 102nd scenario and the 77th residue entry, and this sweep
 // exited 2 with `UNLISTED scenario "site-deploy-rail-failed" (family
 // hash:#site)` until the entry below was written.
+// cch-w38-s1 moved it a fifth time: `panel-overview-member` is the 104th
+// scenario and the 79th residue entry — residue for the same reason its owner
+// twin `panel-overview` is a CELL: it varies the CONTENT of a panel the four
+// instance cells already walk at all 15 widths, not its geometry.
 // cch-w34-s6 REVIEW moved it a fourth time: `overview-never-reported` is the
 // 103rd scenario and the 78th residue entry — residue, not a cell, the same
 // home its sibling `overview-attention` has, so it is rendered and asserted by
@@ -412,21 +425,60 @@ export const RESIDUE_FAMILY_REASONS = {
 // the 79th residue entry, in the family its three siblings already occupy. The
 // sweep exited 2 with `UNLISTED scenario "operator-me-unreadable" (family
 // hash:#operator)` until the entry above was written.
-// `familyOf` over all 104 gives 15; the two with ZERO residue are `hash:#sites`
-// and `hash:#activity`. 79 is the RESIDUE, not the census.
-// EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED (cch-w18-s4, D213):
-// `scenarioReport({ scenarios: SCENARIOS })` prints
-// {total:104, cells:26, distinctCovered:25, residue:79, families:13, ok:true},
-// `Object.keys(SCENARIO_RESIDUE).length` is 79 and `familyOf` over all 104
-// gives 15. The prose said 99/74 while the literal below already held 75 —
-// #8849's `sites-on-instance` moved the census and only the TEST literals
-// (breakpoint-sweep.test.mjs:516-522) were updated. A census that two files
-// spell differently is the staleness this file exists to make fatal.
+// cch-w45-s1 moved it a seventh time, by TWO: `members-admin-actor` and
+// `members-peer-owner` — the first fixtures in which the acting principal is
+// not the roster's row 0, so the first able to ask a rank-relative predicate
+// about a row the actor does NOT outrank — are the 107th and 108th scenarios
+// and the 82nd and 83rd residue entries. The sweep exited 2 with `UNLISTED
+// scenario "members-admin-actor" (family hash:#settings)` (and the twin) until
+// the entries below were written; the four numbers here were then RE-READ from
+// `scenarioReport`, never carried from the brief.
+// cch-w48-s6 moved it an EIGHTH time, by TWO, and deliberately in ONE commit:
+// `overview-member-empty-fleet` (the first fixture combining a member actor with
+// a zero-instance fleet — the exact frame launchFlow's pre-hoc refusal exists
+// for) and `site-member` (the first member to enter the site layer at all) are
+// the 109th and 110th scenarios and the 84th and 85th residue entries. ONE
+// owner, ONE merge window, on purpose: main is strict:false, so two green PRs
+// each bumping this literal by one merge without conflict and red main on the
+// second (the 104->105 precedent). The sweep exited 2 with `UNLISTED scenario
+// "overview-member-empty-fleet" (family hash:#overview)` and the twin until the
+// entries below were written, and all five numerals were then RE-READ from
+// `scenarioReport`, never carried from the brief.
+// `familyOf` over all 111 gives 15; the two with ZERO residue are `hash:#sites`
+// and `hash:#activity`. 85 is the RESIDUE, not the census.
+//
+// WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527). The old header here read
+// "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed numerals
+// spanning SEVEN lines, and three of the numbers under it were owned by
+// nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
+// that reads these bytes. Every numeral in this block is now named by the arm
+// that reds when it drifts, all in breakpoint-sweep.test.mjs:
+//   * 111 / 27 / 26 / 85 / 13 — "the census reconciles: …", whose TITLE is now
+//     built from `scenarioReport` by template literal rather than typed, so the
+//     printed line has no second copy left to rot.
+//   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
+//     "the two ZERO-residue families are named, and 15 families over all
+//     scenarios is not 13".
+//   * each `// <family> — N` group header below, their SUM against the literal,
+//     and the header COUNT against the family count (the reformat tripwire) —
+//     "every `// <family> — N` header inside SCENARIO_RESIDUE is recounted from
+//     the literal itself".
+//   * each `These N` in RESIDUE_FAMILY_REASONS above — "every `These N` clause
+//     in RESIDUE_FAMILY_REASONS is recounted from the literal". Five reasons
+//     spell no count and are honestly SKIPPED by that arm; their membership is
+//     covered by the header arm, which spans all 13.
+// THE PRECEDENT THIS EXISTS FOR: the prose here once said 99/74 while the
+// literal below already held 75 — #8849's `sites-on-instance` moved the census
+// and only the TEST literals were updated. A census that two files spell
+// differently is the staleness this file exists to make fatal, and until
+// cch-w47-s4 this file was carrying two of them: `hash:#billing — 3` over four
+// entries, and a `These 9` over ten.
 // STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
 // longer exists, or one that has since gained a cell, exits 2.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 21
+  // hash:#instance — 22
   "sites-on-instance": "hash:#instance",
+  "panel-overview-member": "hash:#instance",
   "provisioning": "hash:#instance",
   "usage-quota": "hash:#instance",
   "failed": "hash:#instance",
@@ -447,7 +499,7 @@ export const SCENARIO_RESIDUE = {
   "offload-working": "hash:#instance",
   "offload-done": "hash:#instance",
   "offload-blocked": "hash:#instance",
-  // hash:#overview — 10
+  // hash:#overview — 11
   "loggedout": "hash:#overview",
   "empty": "hash:#overview",
   "fleet-usage": "hash:#overview",
@@ -458,7 +510,8 @@ export const SCENARIO_RESIDUE = {
   "overview-trial-runway": "hash:#overview",
   "overview-attention": "hash:#overview",
   "overview-never-reported": "hash:#overview",
-  // hash:#site — 9
+  "overview-member-empty-fleet": "hash:#overview",
+  // hash:#site — 10
   "promote-failure": "hash:#site",
   "promote-in-flight": "hash:#site",
   "promote-retry": "hash:#site",
@@ -468,7 +521,10 @@ export const SCENARIO_RESIDUE = {
   "site-binding-bound": "hash:#site",
   "site-binding-unknown": "hash:#site",
   "site-binding-mismatch": "hash:#site",
-  // hash:#settings — 7
+  "site-member": "hash:#site",
+  // hash:#settings — 9
+  "members-admin-actor": "hash:#settings",
+  "members-peer-owner": "hash:#settings",
   "env-write-once-409": "hash:#settings",
   "env-member": "hash:#settings",
   "tokens-empty": "hash:#settings",
@@ -500,9 +556,10 @@ export const SCENARIO_RESIDUE = {
   "theater-midflight": "path:/new",
   "theater-failed": "path:/new",
   "theater-ready": "path:/new",
-  // hash:#billing — 3
+  // hash:#billing — 4
   "billing-portal-return": "hash:#billing",
   "billing-member": "hash:#billing",
+  "billing-me-unreadable": "hash:#billing",
   "billing-cancelling": "hash:#billing",
   // hash:#operator — 4
   "operator-zero-staging": "hash:#operator",
@@ -716,6 +773,37 @@ export function parseViewIds(html) {
   const re = /<section\b[^>]*\bclass="view"[^>]*\bid="([^"]+)"/g;
   let m;
   while ((m = re.exec(html)) !== null) ids.push(m[1]);
+  return ids;
+}
+
+// cch-w46-s7 — THE STATIC SHELL'S OWN CONTROLS, for an instrument that cannot
+// otherwise see them.
+//
+// WHY THIS LIVES HERE AND NOT IN THE SWEEP: it is a pure regex over the SAME
+// artifact parseViewIds above already reads, in the same shape, and this file
+// is the one place in the harness that owns "what index.html statically
+// declares". The member-authority sweep imports it.
+//
+// WHY IT IS NEEDED AT ALL: smoke.mjs NEVER reads index.html — its only
+// readFileSync targets ../app.js and makeDom() synthesizes an EMPTY document.
+// So every control the shell authors statically (#overview-launch,
+// #fleet-launch) is invisible to a registry-bytes sweep: it has no mount whose
+// innerHTML carries it. This reader is the only door to them.
+//
+// SCOPE, deliberately narrow and stated: id-bearing control tags only. A
+// control the shell authors WITHOUT an id is not returned — it has no stable
+// identity to account for, and inventing an ordinal one over a hand-authored
+// file would red on any reflow. That omission is named in the sweep's header
+// as a blind spot rather than hidden here.
+const STATIC_CONTROL_TAGS = "button|a|input|select|textarea|summary";
+export function parseStaticControlIds(html) {
+  const ids = [];
+  const re = new RegExp("<(" + STATIC_CONTROL_TAGS + ")\\b([^>]*)>", "gi");
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const id = /\bid="([^"]+)"/.exec(m[2] || "");
+    if (id) ids.push(id[1]);
+  }
   return ids;
 }
 
@@ -1275,24 +1363,60 @@ async function withBrowser(fn) {
   }
   out(`>> serve      :${PORT} — served bytes == disk bytes (${rel(ROOT)})\n`);
 
-  profile = fs.mkdtempSync(path.join(os.tmpdir(), "breakpoint-sweep-"));
-  chrome = spawn(chromeBin, [
-    "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
-    "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-    "--disable-background-networking", "--hide-scrollbars",
-    `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank",
-  ], { stdio: "ignore" });
+  // D101 BRING-UP RETRY (deploy-reliability wave 8). Bounded, a FRESH profile
+  // dir per attempt (it used to be mkdtemp'd once, so a retry would re-race the
+  // same DevToolsActivePort path), and every failed attempt's Chrome stderr is
+  // printed — `stdio: "ignore"` discarded exactly the line that says why.
+  //
+  // THE LINE THIS RETRY MUST NOT CROSS. cch-w19-bl-gr115's "do not paper over
+  // the race" ruling governs exit-1 MEASURED intermittency — the browser came
+  // up, the sweep measured, and it disagreed with itself between runs. This
+  // retries only the exit-2 case where Chrome never came up: no width was
+  // rendered, so there is no claim for a retry to hide. Everything after
+  // `devPort` is a measurement and is never retried.
+  let attemptSpawnError = null;
+  const brought = await bringUpChrome({
+    label: "breakpoint-sweep",
+    attempts: BRINGUP_ATTEMPTS,
+    newProfile: () => fs.mkdtempSync(path.join(os.tmpdir(), "breakpoint-sweep-")),
+    launch: (dir) => {
+      attemptSpawnError = null;
+      const child = spawn(chromeBin, [
+        "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
+        "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+        "--disable-background-networking", "--hide-scrollbars",
+        `--user-data-dir=${dir}`, "--remote-debugging-port=0", "about:blank",
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+      child.on("error", (e) => { attemptSpawnError = e; });
+      return { child, readStderr: captureStderr(child) };
+    },
+    awaitDevToolsPort: async ({ profile: dir }) => {
+      const portFile = path.join(dir, "DevToolsActivePort");
+      for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+        if (attemptSpawnError) break;
+        try {
+          const raw = fs.readFileSync(portFile, "utf8").split("\n");
+          if (raw[0] && Number(raw[0])) return Number(raw[0]);
+        } catch { /* not written yet */ }
+        await sleep(100);
+      }
+      if (attemptSpawnError) {
+        throw new Error(`Chrome could not be executed (${attemptSpawnError.code || attemptSpawnError.message}): ${chromeBin}`);
+      }
+      return null;
+    },
+    abandon: async ({ profile: dir, child }) => {
+      await reap(child);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    },
+    log: (s) => process.stderr.write(s),
+  }).catch((err) => (err && err.refused ? { refusal: err } : Promise.reject(err)));
 
-  const portFile = path.join(profile, "DevToolsActivePort");
-  let devPort = null;
-  for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
-    try {
-      const raw = fs.readFileSync(portFile, "utf8").split("\n");
-      if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
-    } catch { /* not written yet */ }
-    await sleep(100);
-  }
-  if (!devPort) return die("Chrome never wrote DevToolsActivePort — it did not start");
+  // exit 2, `die`'s default: the browser never started on any bounded attempt.
+  if (brought.refusal) return die(brought.refusal.message);
+  chrome = brought.child;
+  profile = brought.profile;
+  const devPort = brought.devPort;
 
   let version;
   try {

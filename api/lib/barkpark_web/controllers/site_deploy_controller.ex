@@ -126,9 +126,29 @@ defmodule BarkparkWeb.SiteDeployController do
         })
 
       {:error, :disabled} ->
-        # The apply flag flipped off (or the Runner died) between the guard and
-        # the call — still fail-closed.
+        # The apply flag flipped off between the guard and the call — still
+        # fail-closed, and still the operator's flag to set. This arm is ONLY
+        # the Runner's own considered `:disabled` reply now; a Runner that
+        # could not answer lands below.
         feature_not_configured(conn)
+
+      {:error, :runner_unavailable} ->
+        # The Runner did not answer inside the call budget, or was not alive to
+        # answer. This used to arrive here as `{:error, :disabled}` and render
+        # `feature_not_configured` — telling an operator to set
+        # BARKPARK_SITE_DEPLOY_APPLY=1 on a box that had carried it for 75
+        # minutes, at 5039ms, WHILE the build the door had just accepted ran to
+        # completion behind the answer. 207 rows in 24h, 24.5% of the fleet's
+        # failure numerator, wrong about the cause AND about the outcome.
+        #
+        # Its own typed code now, and the message never names the flag. Same
+        # 503 as before ON PURPOSE (charter D115): the control plane keys its
+        # refusal class on the STATUS, so moving this would refile the rows into
+        # the very class this wave is emptying. The CODE is what changed, and
+        # `transient_refusal?/1` in the control plane graces it in the SAME PR —
+        # so this now BUYS a start retry and 45 poll-grace beats where it used
+        # to spend a build.
+        runner_unavailable(conn)
 
       {:error, {:artifact_rejected, code, message}} ->
         # The box REFUSED the caller's prebuilt bytes. 400 with the extractor's
@@ -244,6 +264,32 @@ defmodule BarkparkWeb.SiteDeployController do
         message:
           "site deploys are not enabled on this instance " <>
             "(set BARKPARK_SITE_DEPLOY_APPLY=1)"
+      }
+    })
+  end
+
+  # The door is CONFIGURED and the Runner is supervised — it just did not answer
+  # in time. Deliberately says nothing about the apply flag: this refusal is not
+  # about configuration, and the operator who "fixes" it by setting a flag that
+  # is already set has been sent to the wrong place.
+  #
+  # It is also honest about the outcome it does not know: a trigger that outran
+  # the call budget may ALREADY be running on the box, in which case the retry
+  # this refusal invites meets a 409 `already_running` (which the control plane
+  # turns into a counted deferral, never a second build).
+  @runner_unavailable_retry_after_s 15
+
+  defp runner_unavailable(conn) do
+    conn
+    |> put_status(:service_unavailable)
+    |> put_resp_header("retry-after", Integer.to_string(@runner_unavailable_retry_after_s))
+    |> json(%{
+      error: %{
+        code: "deploy_runner_unavailable",
+        message:
+          "the deploy runner did not answer in time — the box is busy or wedged, " <>
+            "not unconfigured; retry in #{@runner_unavailable_retry_after_s}s " <>
+            "(if the trigger did land, the retry answers already_running)"
       }
     })
   end

@@ -994,4 +994,169 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert html =~ "You need to be an owner or admin"
     end
   end
+
+  # ── Installation-admin re-gate on credential handlers (W35, D274 — E2) ──
+  #
+  # Plugin credentials live in the installation-GLOBAL `plugin_settings` store
+  # (PK plugin_name, no tenant column): one shared account per deployment. The
+  # W26 `:scoped_admin` mount gate only proves the actor administers the URL
+  # workspace, so pre-W35 an admin of workspace B and ONLY B could mount
+  # /w/B/…/studio/settings and reveal / overwrite / delete EVERY tenant's
+  # credentials. These tests model exactly that principal — an admin membership
+  # of B with NO installation authority (token arm: no flat global "admin"
+  # perm; user arm: no Default-workspace admin role) — and prove each
+  # credential handler refuses with the plugin_settings row byte-UNCHANGED.
+  #
+  # ORACLE LAW (D268): the load-bearing assertion is STATE — the SettingsRecord
+  # row read back and compared whole (any write, re-encrypt, or delete flips
+  # it), plus the audit table for reveal. Flash copy is secondary.
+  describe "installation-admin re-gate on credential handlers (W35, D274 — E2)" do
+    alias Barkpark.Plugins.SettingsRecord
+
+    @w35_secret "installation-secret-xyz"
+
+    setup %{conn: conn} do
+      # Token principal: admin OF WORKSPACE B via membership role — clears the
+      # role-only W26 mount gate — but WITHOUT the flat global "admin"
+      # permission, so it holds no installation-level authority.
+      {:ok, b_admin_tok} =
+        Auth.create_token("w35-b-admin-raw", "w35 b-only admin", "production", ["read", "write"])
+
+      {:ok, ws_b} = Barkpark.Tenancy.create_workspace(%{slug: "w35-wb", name: "W35 Cred WS B"})
+      {:ok, proj_b} = Barkpark.Tenancy.create_project_with_dataset(ws_b, %{name: "W35PB"})
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_b.id, b_admin_tok.id, "admin")
+
+      # The installation-global victim row every tenant shares.
+      {:ok, _} = Settings.put("w35-victim", %{"api_key" => @w35_secret})
+
+      conn = init_test_session(conn, %{"api_token" => "w35-b-admin-raw"})
+      {:ok, conn: conn, ws_b: ws_b, proj_b: proj_b}
+    end
+
+    defp w35_settings_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/studio/settings"
+
+    defp victim_row, do: Repo.get_by(SettingsRecord, plugin_name: "w35-victim")
+
+    defp audit_count(plugin, action) do
+      Repo.aggregate(
+        from(a in SettingsAudit, where: a.plugin_name == ^plugin and a.action == ^action),
+        :count
+      )
+    end
+
+    test "reveal is REFUSED for a workspace-B-only admin — no secret in the DOM, no reveal audit, row unchanged",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+      before = victim_row()
+
+      html = render_click(view, "reveal", %{"plugin_name" => "w35-victim"})
+
+      # STATE ORACLES (load-bearing): row byte-unchanged, zero reveal audit.
+      assert victim_row() == before
+      refute audited?("w35-victim", "reveal")
+      # The secret never reaches the DOM; the refusal-unique flash does.
+      refute html =~ @w35_secret
+      assert html =~ "installation-admin authority"
+    end
+
+    test "save is REFUSED for a workspace-B-only admin — the shared credential row is byte-unchanged",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+      before = victim_row()
+      # The setup seed itself audits one "write" — the refused save must not
+      # add another, so the ORACLE is the count staying put, not emptiness.
+      write_audits_before = audit_count("w35-victim", "write")
+
+      html =
+        render_submit(view, "save", %{
+          "plugin_name" => "w35-victim",
+          "settings_json" => ~s({"api_key": "attacker-overwrite"})
+        })
+
+      # STATE ORACLE (load-bearing): the overwrite never landed.
+      assert victim_row() == before
+      assert audit_count("w35-victim", "write") == write_audits_before
+      refute html =~ "Saved w35-victim"
+      assert html =~ "installation-admin authority"
+    end
+
+    test "delete is REFUSED for a workspace-B-only admin — the shared credential row survives byte-identical",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+      before = victim_row()
+      assert before, "victim row must exist before the delete attempt"
+
+      html = render_click(view, "delete", %{"plugin_name" => "w35-victim"})
+
+      # STATE ORACLE (load-bearing): the row still exists, byte-identical.
+      assert victim_row() == before
+      refute audited?("w35-victim", "delete")
+      refute html =~ "Deleted w35-victim"
+      assert html =~ "installation-admin authority"
+    end
+
+    test "reveal_field is REFUSED for a workspace-B-only admin — typed secret stays masked, no reveal audit",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      # The typed path: seed bokbasen (spec-backed), load it (loading renders
+      # MASKED values and is not credential-revealing), then attempt the
+      # per-field reveal. Same env hygiene as the typed-renderer suite: a host
+      # carrying BOKBASEN_* env config must not perturb the spec resolution.
+      prev = Application.get_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+      Application.delete_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, prev),
+          else: Application.delete_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+      end)
+
+      Settings.put("bokbasen", %{
+        "api_base" => "https://api.bokbasen.io",
+        "oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+        "client_id" => "w35-client-id-long",
+        "client_secret" => "w35-client-secret-long",
+        "client_role" => "publisher"
+      })
+
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+
+      view
+      |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
+      |> render_submit()
+
+      before = Repo.get_by(SettingsRecord, plugin_name: "bokbasen")
+
+      html = render_click(view, "reveal_field", %{"field" => "client_secret"})
+
+      # STATE ORACLES (load-bearing): no reveal audit, row byte-unchanged.
+      refute audited?("bokbasen", "reveal")
+      assert Repo.get_by(SettingsRecord, plugin_name: "bokbasen") == before
+      # The unmasked secret never reaches the DOM.
+      refute html =~ "w35-client-secret-long"
+      assert html =~ "installation-admin authority"
+    end
+
+    test "user arm: an account that is admin of workspace B ONLY is refused the same way — row unchanged",
+         %{ws_b: ws_b, proj_b: proj_b} do
+      email = "w35-b-admin-#{System.unique_integer([:positive])}@example.com"
+
+      {:ok, user} =
+        Barkpark.Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+
+      {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_b.id, user.id, "admin", "user")
+
+      conn = Plug.Test.init_test_session(build_conn(), %{"user_session" => raw})
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+      before = victim_row()
+
+      html = render_click(view, "reveal", %{"plugin_name" => "w35-victim"})
+
+      # STATE ORACLES (load-bearing): row byte-unchanged, zero reveal audit.
+      assert victim_row() == before
+      refute audited?("w35-victim", "reveal")
+      refute html =~ @w35_secret
+      assert html =~ "installation-admin authority"
+    end
+  end
 end

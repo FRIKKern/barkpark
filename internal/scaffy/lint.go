@@ -249,9 +249,9 @@ func (l *linter) tokens() {
 		used[v.Name] = true
 		if !isJoinerOutput(site.spelling, match.words) {
 			l.add(site.line, RuleMalformedToken,
-				fmt.Sprintf("token {{.%s}} matches VARIABLE %q but is not one of its four spellings", site.spelling, v.Name),
-				fmt.Sprintf("legal spellings: {{.%s}} {{.%s}} {{.%s}} {{.%s}} (A1)",
-					joinPascal(match.words), joinKebab(match.words), joinCamel(match.words), joinSnake(match.words)),
+				fmt.Sprintf("token {{.%s}} matches VARIABLE %q but is not one of its five spellings", site.spelling, v.Name),
+				fmt.Sprintf("legal spellings: {{.%s}} {{.%s}} {{.%s}} {{.%s}} {{.%s}} (A1)",
+					joinPascal(match.words), joinKebab(match.words), joinCamel(match.words), joinSnake(match.words), joinScreaming(match.words)),
 			)
 			continue
 		}

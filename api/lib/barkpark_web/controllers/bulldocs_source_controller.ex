@@ -10,12 +10,34 @@ defmodule BarkparkWeb.BulldocsSourceController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
+  alias Barkpark.PortableDoc.Bpml
+  alias Barkpark.PortableDoc.Bpml.UnprintableError
 
   def show(conn, %{"slug" => slug} = params) do
-    dataset = Map.get(params, "dataset") || Content.paper_default_dataset()
+    dataset = requested_dataset(params)
     scope = paper_scope(conn, params)
     perspective = BarkparkWeb.AnonPerspective.resolve(conn, params)
+    format = Map.get(params, "format", "json")
 
+    cond do
+      format not in ["json", "bpml"] ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{
+          "error" => %{
+            "code" => "unknown_format",
+            "message" => "unknown format #{inspect(format)}",
+            "hint" =>
+              "formats: json (default, the block truth) and bpml (the readable isomorphic view); derived formats (html) have their own endpoints"
+          }
+        })
+
+      true ->
+        show_paper(conn, slug, dataset, scope, perspective, format)
+    end
+  end
+
+  defp show_paper(conn, slug, dataset, scope, perspective, format) do
     case fetch_paper(slug, dataset, scope, perspective) do
       nil ->
         send_resp(conn, 404, "not found")
@@ -36,13 +58,30 @@ defmodule BarkparkWeb.BulldocsSourceController do
               {:error, reason}
           end
 
-        case source do
-          {:error, reason} ->
+        case {source, format} do
+          {{:error, reason}, _} ->
             conn
             |> put_status(:unprocessable_entity)
             |> json(%{"error" => %{"code" => to_string(reason)}})
 
-          source ->
+          # BPML is a VIEW of blocks only — an html-source paper has no block
+          # truth to print, so the isomorphic format honestly refuses.
+          {%{"kind" => "blocks", "blocks" => blocks}, "bpml"} ->
+            send_bpml(conn, paper, blocks)
+
+          {%{"kind" => "html"}, "bpml"} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              "error" => %{
+                "code" => "bpml_unavailable",
+                "message" =>
+                  "this paper was ingested as opaque body_html — it has no block source",
+                "hint" => "re-ingest with blocks (or BPML) to make the isomorphic view available"
+              }
+            })
+
+          {source, _json} ->
             json(conn, %{
               "id" => paper.doc_id,
               "title" => paper.title,
@@ -50,6 +89,62 @@ defmodule BarkparkWeb.BulldocsSourceController do
               "source" => source
             })
         end
+    end
+  end
+
+  # The readable isomorphic view: a complete, self-describing <paper> document
+  # as text, with the rev in a header so a working-copy pull can anchor on it.
+  # The header carries the PAPER-LEVEL integer rev (content["rev"]) — the value
+  # the ops path's if_rev guard compares against — NOT the row's _rev hash
+  # (which the JSON envelope already exposes as "_rev").
+  defp send_bpml(conn, paper, blocks) do
+    bpml = Bpml.print_paper(%{"slug" => paper.doc_id, "title" => paper.title, "blocks" => blocks})
+
+    conn
+    |> put_resp_content_type("text/bpml")
+    |> put_resp_header("x-paper-rev", to_string(paper_op_rev(paper)))
+    |> send_resp(200, bpml)
+  rescue
+    # The printer's ONE typed refusal, for ALL FOUR unprintable positions
+    # (block, inline node, mark, table head cell). It used to rescue only
+    # ArgumentError, so the three FunctionClauseError shapes escaped as raw HTTP
+    # 500s with an HTML error page — 141 of 776 published papers on the
+    # 2026-08-17 census. The message carries kind+type, so the census keeps
+    # bucketing what still needs kernel coverage.
+    e in UnprintableError ->
+      conn
+      |> put_status(:unprocessable_entity)
+      |> json(%{
+        "error" => %{
+          "code" => "bpml_unprintable",
+          "message" => Exception.message(e),
+          "hint" =>
+            "this paper uses a #{e.kind} shape outside the BPML kernel vocabulary; fetch format=json"
+        }
+      })
+  end
+
+  # The op-anchor rev: the integer content["rev"] the if_rev guard reads,
+  # falling back to the row hash for legacy papers that never carried one.
+  defp paper_op_rev(paper) do
+    case get_in(paper.content || %{}, ["rev"]) do
+      rev when is_integer(rev) -> rev
+      _ -> paper.rev
+    end
+  end
+
+  # `/papers/:slug/source` takes `dataset` from the QUERY STRING (only the
+  # sibling `/d/:dataset/papers/:slug/source` route carries it as a path
+  # segment, where Phoenix's path params win the merge). `?dataset[]=x` decodes
+  # to a list and `?dataset[a]=b` to a map; either one reaches
+  # `x.dataset == ^dataset` on a :string column and raises Ecto.Query.CastError,
+  # which has no Plug.Exception impl → a raw 500 instead of a 404. The dataset
+  # is a scope selector with a documented default, so a malformed one fails soft
+  # to that default (same guard shape as MetaController.show/2).
+  defp requested_dataset(params) do
+    case Map.get(params, "dataset") do
+      ds when is_binary(ds) -> ds
+      _ -> Content.paper_default_dataset()
     end
   end
 

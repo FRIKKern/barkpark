@@ -141,6 +141,16 @@ type onbInstance struct {
 	URL     string   `json:"url"`
 	Aliases []string `json:"aliases"`
 	Source  string   `json:"source"`
+	// AliasShadow is the compare-only fleet-reconcile advisory (D39). It is set
+	// ONLY on the doctor receipt's local-first path (onboardingInstance), and ONLY
+	// when the fleet row matching this box's stamped InstanceID carries a canonical
+	// target the local alias set does not know — a rename the additive-only alias
+	// store (mergeAliases, config.go) can never self-heal. It names the remedy
+	// (`bp connect <newURL>`). Empty on every other path: fail-open (no token /
+	// fleet error / no matching row), and always empty on whoami's network-free
+	// localInstance — so `omitempty` keeps those receipts byte-identical. This
+	// field is advisory ONLY; nothing here mutates config.
+	AliasShadow string `json:"alias_shadow,omitempty"`
 }
 
 type onbAuthCheck struct {
@@ -275,6 +285,7 @@ func buildOnboardingReceipt(g globals, ctx manifest.Context) onboardingReceipt {
 func onboardingWhoamiSpine(g globals, ctx manifest.Context, cfg *Config, m *manifest.Manifest) map[string]any {
 	return map[string]any{
 		"instance": localInstance(cfg, ctx),
+		"cli":      whoamiCLIFreshness(),
 		"mcp": map[string]any{
 			"version": cliVersion,
 			"count":   len(mcpTaskToolNames),
@@ -283,6 +294,47 @@ func onboardingWhoamiSpine(g globals, ctx manifest.Context, cfg *Config, m *mani
 		"tool_call":          onboardingToolCallProof(g, ctx, m),
 		"reload_instruction": onboardingReloadInstruction,
 	}
+}
+
+// whoamiCLIFreshness is the whoami half of the CLI-freshness leg (charter D28):
+// the SAME tri-state verdict the doctor receipt renders (onboardingCLIFreshness),
+// but resolved ONLY from the on-disk release cache — it NEVER makes an HTTP call,
+// so whoami keeps its local-first, always-exit-0 contract on the always-run hot
+// path. The split of labour is deliberate: the doctor (already network-bearing)
+// pays for the resolve and refreshes the cache; whoami reads it for free.
+//
+// The tri-state stays honest end to end:
+//   - a dev build short-circuits to UNREPORTED — it cannot be compared against
+//     the cli-v* channel at all, exactly as the doctor leg and `bp upgrade` hold;
+//   - a cold or stale cache (never refreshed, or older than the TTL) is honest
+//     UNREPORTED that names the ONE command which refreshes it: `bp doctor`;
+//   - only a FRESH cache yields a reading — up-to-date or behind — and even then
+//     it is transparently marked as cache-sourced.
+//
+// It never launders an absence into a green (up-to-date) or a false alarm
+// (behind): an unknown is reported as unknown.
+func whoamiCLIFreshness() onbCLICheck {
+	c := onbCLICheck{Installed: cliVersion, Status: onbCLIUnreported}
+	if cliVersion == "dev" {
+		c.Detail = "running a dev build (go build) — there is no release to compare it against, so freshness is UNREPORTED; refresh it with `" + onbCLIDevRemedy + "`"
+		return c
+	}
+	cache, fresh := readReleaseCache()
+	if !fresh {
+		c.Detail = "freshness UNREPORTED — no fresh release reading cached; run `bp doctor --onboarding` to refresh it"
+		return c
+	}
+	c.Latest = cache.Latest
+	if compareVersions(cliVersion, cache.Latest) < 0 {
+		c.Status = onbCLIBehind
+		c.UpToDate = onbBool(false)
+		c.Detail = "a newer CLI is available (cached — run `bp doctor --onboarding` to re-check) — run `bp upgrade`"
+		return c
+	}
+	c.Status = onbCLIUpToDate
+	c.UpToDate = onbBool(true)
+	c.Detail = "up to date (cached — run `bp doctor --onboarding` to re-check)"
+	return c
 }
 
 // localInstance is whoami's NETWORK-FREE instance identity: the active saved
@@ -344,6 +396,13 @@ func onboardingCLIFreshness() onbCLICheck {
 		c.Detail = "freshness UNREPORTED — could not resolve the latest release: " + err.Error()
 		return c
 	}
+	// Refresh the on-disk cache whoami reads. This is `bp doctor --onboarding`,
+	// one of several network-bearing surfaces that keep the cache warm — bp
+	// upgrade (runUpgrade) and the update-notice background resolve write it too;
+	// only plain `bp doctor` (doctor_cmd.go) stays offline and refreshes nothing.
+	// Best-effort: a cache-write failure never sinks the receipt's own live
+	// reading below.
+	_ = writeReleaseCache(latest)
 	c.Latest = latest
 	if compareVersions(cliVersion, latest) < 0 {
 		c.Status = onbCLIBehind
@@ -387,8 +446,13 @@ func onboardingInstance(cfg *Config, ctx manifest.Context) *onbInstance {
 
 	// Local-first: a stamped InstanceID means we already know this box's identity
 	// from the saved config — no fleet fetch, no network. This is the offline win.
+	// The identity ALWAYS resolves locally here; the only thing that can leave the
+	// process is the compare-only alias-shadow advisory below, and only under a
+	// Cloud token. Fail-open throughout: no token / fleet error / no matching row
+	// leave the receipt byte-identical.
 	local := localInstance(cfg, ctx)
 	if local != nil && local.ID != "" {
+		local.AliasShadow = onboardingAliasShadowAdvisory(cfg, local)
 		return local
 	}
 
@@ -408,6 +472,48 @@ func onboardingInstance(cfg *Config, ctx manifest.Context) *onbInstance {
 	// (url + saved name). localInstance covers every active!=\"\" case, so this is
 	// the last honest report before nil (which only happens when active is empty).
 	return local
+}
+
+// onboardingAliasShadowAdvisory is the D39 compare-only fleet reconcile: it
+// answers "has the fleet renamed this box's canonical target out from under a
+// stale local alias set?" WITHOUT ever mutating config. The alias store is
+// additive-only by construction (mergeAliases, config.go — the sole persist
+// writer, no prune path), so a canonical rename can never self-heal locally: the
+// dead hostname prints as truth forever. This advisory makes that recoverable by
+// naming the remedy (`bp connect <newURL>`, the existing ADDITIVE fold-in).
+//
+// It runs ONLY on the local-first path (a stamped InstanceID is present) and is
+// TOKEN-GATED (same gate as the fleet fallback). It matches the fleet row by
+// Barkpark.ID EQUALITY against the stamped InstanceID — NEVER by URL, because a
+// URL match cannot detect the very rename this exists to catch. FAIL-OPEN: no
+// token, a fleet error, or no matching row all return "" (silent, receipt
+// unchanged); the identity itself always came from local config regardless.
+func onboardingAliasShadowAdvisory(cfg *Config, local *onbInstance) string {
+	if cfg == nil || local == nil || local.ID == "" || !cfg.HasCloudToken() || onboardingListFleet == nil {
+		return ""
+	}
+	fleet, err := onboardingListFleet(cfg)
+	if err != nil {
+		return "" // fail-open: a fleet error never sinks the receipt
+	}
+	for _, b := range fleet {
+		if strings.TrimSpace(b.ID) != local.ID {
+			continue // ID EQUALITY — never a URL match
+		}
+		target := fleetTarget(b.URL, b.Host)
+		if target == "" {
+			return ""
+		}
+		// Does any local URL/alias already address this canonical target? Reuse the
+		// fleetMatchesActive normalization (scheme-normalized URL + host forms).
+		for _, known := range append([]string{local.URL}, local.Aliases...) {
+			if fleetMatchesActive(b, strings.TrimRight(strings.TrimSpace(known), "/")) {
+				return "" // the canonical target is already a known alias — no shadow
+			}
+		}
+		return "fleet canonical target is now " + target + ", absent from local aliases — run `bp connect " + target + "` to fold it in"
+	}
+	return "" // no fleet row carries this InstanceID — fail-open, silent
 }
 
 // fleetMatchesActive reports whether a fleet row addresses the same box as the
@@ -615,6 +721,9 @@ func renderOnboardingReceipt(out *writer, r onboardingReceipt) {
 	out.outf("  %s CLI                 %s", markTri(r.CLI.Status), cliDetail(r.CLI))
 	out.outf("  %s Cloud session       %s", mark(r.CloudSession.Present), cloudDetail(r.CloudSession))
 	out.outf("  %s Instance            %s", mark(r.Instance != nil), instanceDetail(r.Instance))
+	if r.Instance != nil && r.Instance.AliasShadow != "" {
+		out.outf("  ⚠ alias shadow        %s", r.Instance.AliasShadow)
+	}
 	out.outf("  %s Auth                %s", mark(r.Auth.Reachable), authDetail(r.Auth))
 	out.outf("  %s MCP catalog         %d tools: %s", mark(r.MCP.Count == len(mcpTaskToolNames)), r.MCP.Count, strings.Join(r.MCP.Tools, ", "))
 	out.outf("  %s Tool-call proof     %s", mark(r.ToolCall.OK), r.ToolCall.Summary)

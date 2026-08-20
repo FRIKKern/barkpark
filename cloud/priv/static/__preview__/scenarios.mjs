@@ -42,6 +42,8 @@ export const IDS = {
   provisioningInstance: "5b2c1e00-0000-4000-8000-0000000000a3",
   failedInstance: "5b2c1e00-0000-4000-8000-0000000000a4",
   suspendedInstance: "5b2c1e00-0000-4000-8000-0000000000a5",
+  // cch-w61-s2: the box that answered our stored admin credential with a 401.
+  refusedInstance: "5b2c1e00-0000-4000-8000-0000000000a6",
   // The single-instance provisioning / failed scenarios reuse their own ids.
   soloProvisioning: "5b2c1e00-0000-4000-8000-0000000000b1",
   soloFailed: "5b2c1e00-0000-4000-8000-0000000000b2",
@@ -89,6 +91,28 @@ function bpBase(over) {
       update_running_release: null,
       update_latest_release: null,
       update_checked_at: null,
+      // cch-w61-s2: `barkpark_json` serializes the update probe's typed refusal
+      // reason on EVERY row (Registry.persist_update_unknown/2 writes it; the
+      // whitelist is Barkpark.update_unavailable_reasons/0). It is null on a box
+      // that answered. A fixture that OMITS the key is a fixture in which the
+      // refused state cannot exist at all — the whole corpus rendered the Updates
+      // panel in exactly ONE state before this row was added.
+      update_unavailable_reason: null,
+      // cch-w47-s2 (D529/D515): `barkpark_json` serializes the autoupdate policy
+      // block on EVERY row, so a fixture that OMITS these keys makes
+      // `hasAutoupdatePolicy` false for the whole corpus — the policy chip and
+      // the four policy buttons then render in NO scenario at all, and any
+      // guard on them is one that structurally cannot fail. The values are the
+      // MIGRATIONS' OWN COLUMN DEFAULTS (20260710160000_add_channel_and_fleet_settings):
+      // enabled true, paused false, channel "prod" — never nulls, which are a
+      // third state no control plane has ever serialized and which paint a bare
+      // "Auto" chip that withholds the channel that IS the policy. Only
+      // pinned_release and autoupdate_triggered_at are genuinely nullable.
+      autoupdate_enabled: true,
+      autoupdate_paused: false,
+      channel: "prod",
+      pinned_release: null,
+      autoupdate_triggered_at: null,
       inserted_at: tMinus(86400),
       provision_status: null,
       provision_error: null,
@@ -229,7 +253,43 @@ const suspendedInstance = bpBase({
   version: "0.9.2",
   last_seen_at: tMinus(3600),
   suspended: true,
-  suspended_reason: "Payment failed — subscription past due",
+  // cch-w55-s3 — a PLANE-LEGAL reason slug. This fixture used to carry the human
+  // sentence "Payment failed — subscription past due", which no producer in
+  // cloud/lib can ever write: the only three values written are `billing_lapsed`
+  // (Billing.cancel_subscription/1), `billing_past_due` (maybe_enforce/1) and
+  // `quota_exceeded` (Billing.reconcile_plan_limit/1), and router.ex:9383 ships
+  // the raw column. A fixture vouching for copy the plane cannot emit certifies
+  // nothing.
+  suspended_reason: "billing_past_due",
+  provision_status: "succeeded",
+});
+
+// cch-w61-s2 — THE BOX THAT REFUSED OUR CREDENTIAL. A HOSTED row (the Updates
+// panel only renders when a box has a host, which is why the corpus's two
+// hostless deep-links rendered no panel at all), carrying the state the hourly
+// update probe writes when the box answers our stored admin credential with a
+// 401: update_state "unknown" + update_unavailable_reason "identity_refused",
+// stamped 45 minutes ago.
+//
+// KEYED ON id AND host, NEVER ON NAME OR SLUG. The live subject shares its name
+// with two other rows on the fleet; a reader that picks by name picks an
+// arbitrary one of the three, and the assertion silently becomes a statement
+// about the wrong box. `167.233.194.23` is a bare-IP host on purpose — that is
+// what the subject actually serves on, and it also proves publicUrl() renders a
+// schemeless host without inventing a domain.
+const credentialRefusedInstance = bpBase({
+  id: IDS.refusedInstance,
+  name: "Gyldendal",
+  slug: "gyldendal",
+  url: "https://167.233.194.23",
+  host: "167.233.194.23",
+  health_status: "unknown",
+  agent_status: "offline",
+  version: "0.9.1",
+  last_seen_at: tMinus(45 * 60),
+  update_state: "unknown",
+  update_unavailable_reason: "identity_refused",
+  update_checked_at: tMinus(45 * 60),
   provision_status: "succeeded",
 });
 
@@ -455,6 +515,21 @@ const sitesListRows = [
     // A cancel does not tear down what is already serving, so the pointer holds.
     current_deployment_id: depOf(7),
     last_deployment: lastDeploy("cancelled", "manual", 1800),
+  }),
+  // cch-w64-s6: the SEVENTH server status, and the one the corpus could not
+  // render at all — `lastDeploy()` had covered live/building/failed/cancelled/
+  // never, so the state a live head-of-stream census found on 3 of 12 production
+  // sites (oldest 93s old, all three carrying the box's 409 sentence) had never
+  // reached a pixel here. `deferred` means the BOX refused this build and the
+  // plane re-queued the rebuild; the previous build is still being served, so
+  // the production pointer holds and this row keeps its door — the same rule
+  // the failed and rebuilding rows above follow.
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000ca",
+    name: "acme-media", slug: "acme-media", domains: ["media.acme.com"],
+    framework: "astro", github_webhook_configured: true,
+    current_deployment_id: depOf(8),
+    last_deployment: lastDeploy("deferred", "content-auto", 240),
   }),
   // cch-w15-bl-preview-only-site-fixture-missing, closed HERE: the corpus held
   // ZERO preview-only sites, so the population the Visit-link defect was widest
@@ -725,13 +800,20 @@ export const RAIL_FAIL_KIND_DETAIL = railEmitDetail(
 // onto the stage line at :1062) is this one, verbatim. It reaches the rail as
 // `BPSTAGE name=BUILD status=failed detail="…"`.
 //
-// It classifies: `unauthorized` → "The hosting provider rejected our
-// credentials. We're on it — try again shortly." — which is what the settled
-// row has always shown, and what the rail showed NOTHING of before this slice.
+// It classifies: `unauthorized` → "A credential was rejected. This capture
+// doesn't say whose credential it was — the raw error line names it." — which
+// is what the settled row shows, and what the rail showed NOTHING of before
+// this slice.
+//
+// The copy is deliberately vague about WHOSE credential (wave 40 S6): the
+// credential this very line reports is the USER'S OWN site read token, and the
+// sentence that used to sit here ("The hosting provider rejected our
+// credentials. We're on it — try again shortly.") named a party, an owner and
+// a remedy that `humanize/1` — arity 1, a substring test — cannot see.
 //
 // RE-DERIVE THE WHOLE STRING:
 //   grep -n 'FATAL: 401 Unauthorized' deploy/site-deploy.sh
-//   grep -n "String.contains?(down, \"unauthorized\")" cloud/lib/barkpark_cloud/failure_copy.ex
+//   grep -n '@credential_rejected' cloud/lib/barkpark_cloud/failure_copy.ex
 // `sites_deploy_stage_caption_test.exs` reads BOTH ends and reds when either
 // moves — that test, not this comment, is what keeps the fixture honest.
 //
@@ -869,10 +951,8 @@ const ev = (id, type, payload, at) => ({ id, type, payload, inserted_at: at });
 const liveInstanceEvents = [
   ev(9, "verify", verifyPass, tMinus(120)),
   ev(8, "health", { health: "up", disk_used_pct: 41, pg_size_mb: 212, uptime_s: 86000 }, tMinus(300)),
-  ev(7, "backup", { status: "ok", size_mb: 88, took_s: 12 }, tMinus(4100)),
   ev(6, "health", { health: "up", disk_used_pct: 41, pg_size_mb: 211 }, tMinus(7300)),
   ev(5, "status", { transition: "online", reason: "agent_report" }, tMinus(80000)),
-  ev(4, "tls", { domain: "production-5b2c1e.barkpark.cloud", status: "issued" }, tMinus(86000)),
 ];
 const liveInstanceEventsOneFail = [ev(10, "verify", verifyOneFail, tMinus(60))].concat(liveInstanceEvents.slice(1));
 const liveInstanceEventsNoVerify = liveInstanceEvents.slice(1);
@@ -949,7 +1029,19 @@ const accountSessionsRevoke = [
 // Add e.g. `membersDenied`/`envDenied` fixtures + the matching flag branch in the
 // endpoint switch, then set the flag on the member scenario. Keep the DEFAULT
 // path (owner, no flag) so no existing scenario changes behaviour.
-function me(teamName, onb, role) {
+// cch-w45-s1: `actorId` is the fourth parameter because rank is NOT identity.
+// Until this wave `me()` threaded `role` into FOUR authority fields and ZERO
+// identity fields, so a role-only "admin" scenario rendered BYTE-IDENTICALLY to
+// the owner one (4220 vs 4220): every rank-relative predicate in the members
+// panel compares the actor to the ROSTER ROW, and the roster row it was
+// compared against was always the actor's own (teamMembers[0] IS usr_ada).
+// Every guard over that comparison was green by construction. Passing an
+// `actorId` moves `user.id` — and, inseparably, `user.email`, because an actor
+// whose two halves name different people is a fixture that could never exist on
+// the wire. Omit it and the corpus's default actor (usr_ada, the owner) is
+// unmoved: moving that default globally is forbidden (it reds the members
+// remove-click leg and the 2FA/invite copy, which read me().user.email).
+function me(teamName, onb, role, actorId) {
   onb = onb || {};
   const steps = [
     // Every scenario that is logged-in carries a subscription fixture, so the
@@ -958,10 +1050,42 @@ function me(teamName, onb, role) {
     { key: "instance", done: !!onb.instance },
     { key: "published_doc", done: !!onb.published_doc },
   ];
+  // cch-w43-s1: the envelope is the one the SERVER mints, key for key. The
+  // shape is DERIVED from /v1/me's own response map (router.ex, the
+  // `get "/v1/me"` clause): user{id,email,confirmed,two_factor_enabled,
+  // platform_operator} · team{id,name,slug} · teams[]{id,name,slug,role} ·
+  // role · team_authority{team_id,role,admin,owner} · onboarding.
+  // __me_envelope_census.mjs re-derives that map at test time and diffs it
+  // against what route(name,"GET","/v1/me") actually serves, so this comment
+  // is not the guard — the census is, and it reds by key path when the two
+  // drift. Until wave 43 the corpus emitted FOUR of those six keys, which is
+  // why every rendered scenario ran on app.js's compatibility floors and the
+  // `grant` band had never been painted by any instrument.
+  //
+  // `platform_operator` is deliberately NOT set here: it is the operator axis,
+  // and operatorMe() (below) is the ONE producer that raises it, exactly as
+  // GR39 requires. The census unions over the whole corpus, so those scenarios
+  // are what prove the key is served at all.
+  const actorRole = role || "owner";
+  const actorUserId = actorId || "usr_ada";
   return {
-    user: { id: "usr_ada", email: "ada@acme.com", confirmed: true, two_factor_enabled: false },
+    user: { id: actorUserId, email: corpusActorEmail(actorUserId), confirmed: true, two_factor_enabled: false },
     team: { id: IDS.team, name: teamName, slug: "acme" },
-    role: role || "owner",
+    // EVERY membership, the server's words. The corpus's actor belongs to the
+    // one team it is scoped to — a SECOND team here would be a scenario-level
+    // claim (a switcher with somewhere to switch to) that no fixture asks for.
+    teams: [{ id: IDS.team, name: teamName, slug: "acme", role: actorRole }],
+    role: actorRole,
+    // The authority the GATE enforces, stated on the wire. Scoped to the SAME
+    // team as `team:` and `role:` above — one resolved team, never a role from
+    // one team beside an id from another. admin/owner mirror Authz: owner is
+    // both, admin is admin-not-owner, everyone else is neither.
+    team_authority: {
+      team_id: IDS.team,
+      role: actorRole,
+      admin: actorRole === "owner" || actorRole === "admin",
+      owner: actorRole === "owner",
+    },
     onboarding: {
       completed: !!onb.completed,
       completed_at: onb.completed ? tMinus(80000) : null,
@@ -1018,6 +1142,26 @@ const teamMembers = [
   { user_id: "usr_lin", email: "lin@acme.com", role: "admin", joined_at: tMinus(120 * 86400) },
   { user_id: "usr_rex", email: "rex@acme.com", role: "member", joined_at: tMinus(20 * 86400) },
 ];
+// cch-w45-s1: a SECOND owner, appended by CONCAT so `teamMembers` — and every
+// count assertion, every residue line and every wire leg standing on its three
+// rows — is byte-for-byte unmoved. This is the one roster cell where the two
+// server verbs DISAGREE: `Accounts.remove_member_as/3` carries an owner escape
+// hatch (`actor_role == "owner" or outranks?/2`, accounts.ex:1722) while
+// `update_member_role_as/4` does not (strict `outranks?`, accounts.ex:1801) —
+// so an owner MAY remove a peer owner and may NOT re-role one. No cell of the
+// corpus could paint that disagreement before, because there was no peer owner.
+const teamMembersPeerOwner = teamMembers.concat([
+  { user_id: "usr_ozz", email: "ozz@acme.com", role: "owner", joined_at: tMinus(200 * 86400) },
+]);
+// The corpus's actors, id → email, read STRAIGHT off the roster fixtures so the
+// two halves of an identity can never be edited apart. Unknown id is FATAL, not
+// a silent fallback to ada: a typo'd actor that quietly renders as the owner is
+// exactly the vacuous green this fixture exists to end.
+function corpusActorEmail(userId) {
+  const row = teamMembersPeerOwner.find((m) => m.user_id === userId);
+  if (!row) throw new Error("preview corpus has no actor " + userId + " — id and email move together");
+  return row.email;
+}
 const teamInvites = [
   { id: "inv_sky", email: "sky@partner.io", role: "member", expires_at: tPlus(6 * 86400), inserted_at: tMinus(86400) },
   { id: "inv_max", email: "max@acme.com", role: "admin", expires_at: tPlus(3 * 86400), inserted_at: tMinus(3 * 86400) },
@@ -1172,7 +1316,7 @@ const lifecycleCapabilities = {
     hetzner: {
       tier: "prod",
       capabilities: { archive: true, resurrect: true, adopt: true, audit: true, pause: false },
-      gaps: { pause: "Hetzner has no pause primitive — a stopped server still bills, so archive it instead." },
+      gaps: { pause: "A Hetzner server bills for as long as it exists, powered on or off — we can't pause it. Deleting the instance is the only thing that stops the charge." },
     },
   },
   default_gap: "Not supported by this provider.",
@@ -1194,7 +1338,7 @@ const settingsProviderCapabilities = {
         core: true, catalog: false, labels: true, pause: false,
         archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
       },
-      gaps: { pause: "Hetzner has no pause primitive — a stopped server still bills, so archive it instead." },
+      gaps: { pause: "A Hetzner server bills for as long as it exists, powered on or off — we can't pause it. Deleting the instance is the only thing that stops the charge." },
     },
     azure: {
       tier: "prod",
@@ -2106,6 +2250,18 @@ export const SCENARIOS = {
     deepLink: "#overview",
     data: { me: me("Ada's Lab"), barkparks: [], subscription: trialSub, sites: [], audit: [] },
   },
+  "overview-member-empty-fleet": {
+    label: "A plain member on a ZERO-instance team — the welcome runway refuses UP-FRONT instead of selling a launch the server 403s",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Ada's Lab", {}, "member", "usr_rex"),
+      barkparks: [],
+      subscription: trialSub,
+      sites: [],
+      audit: [],
+    },
+  },
   "mixed-fleet": {
     label: "A real estate — live, provisioning, failed, suspended + sites & activity",
     authed: true,
@@ -2167,6 +2323,28 @@ export const SCENARIOS = {
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      capabilities: lifecycleCapabilities,
+      domainStatus: dnsPendingDomain,
+    },
+  },
+  // ── Instance Overview as a plain MEMBER (cch-w38-s1) ──────────────────────
+  // Byte-identical to `panel-overview` except the /v1/me envelope carries
+  // role:"member" — the first plain-member scenario OUTSIDE GR33's settings
+  // scope, and the fixture that makes the instance band's authority answer
+  // observable at all. On origin/main this screen offered a member a live
+  // Decommission (browser-measured: {"port":"4187","meRole":"member",
+  // "decommission":{"disabled":false,"visible":true},"totalDisabled":0}); the
+  // expectation in smoke.mjs pins the disable-and-explain remedy (D428).
+  "panel-overview-member": {
+    label: "Instance Overview as a plain member — the lifecycle rail refuses up-front, with the server's own sentence",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [],
@@ -2247,6 +2425,25 @@ export const SCENARIOS = {
     deepLink: "#site/" + IDS.siteWeb,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteDeploys, blogSite],
+      audit: [],
+      deployments: rollbackDeployments,
+    },
+  },
+  // cch-w48-s6: THE SAME SITE SCREEN, entered by a plain MEMBER. Measured before
+  // this key existed: all twelve `#site/` scenarios carried the default owner
+  // actor, so no instrument had ever rendered the site layer for a member —
+  // every member-fence claim about this screen was a claim about a screen the
+  // corpus could not paint. Same fixtures as `rollback` (no new data), one
+  // moved axis: role.
+  "site-member": {
+    label: "Site detail as a plain member — the deploy history and its member-legal controls, on the one screen no member fixture had ever entered",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member", "usr_rex"),
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [webSiteDeploys, blogSite],
@@ -2386,6 +2583,52 @@ export const SCENARIOS = {
       members: teamMembers,
       // A member never fetches invitations (the client skips the admin-gated
       // call), so no fixture — the panel renders the roster alone.
+    },
+  },
+  // cch-w45-s1: THE FRAME NO EXISTING CELL PRODUCED — an actor who is not row 0.
+  // lin is the acting ADMIN, by IDENTITY (usr_lin) and not merely by rank, over
+  // the SAME 3-row roster the owner scenario uses. Three different answers in
+  // one panel, each a different arm of the two server predicates:
+  //   ada  (owner, outranks the actor) → NEITHER Change role NOR Remove,
+  //   lin  (SELF)                      → Change role (the rank arm is bypassed
+  //                                      on your own row — self-demotion is a
+  //                                      409 STATE refusal the server owns, not
+  //                                      an authority one) and NOT Remove,
+  //   rex  (member, outranked)         → BOTH.
+  // Before this scenario, every rank-relative predicate was only ever asked
+  // about rows the actor outranked, so an over-offer on a superior's row could
+  // not be seen by any instrument.
+  "members-admin-actor": {
+    label: "Members (admin actor, not the owner) — the owner's row offers NOTHING, the self row only Change role",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "admin", "usr_lin"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembers,
+      invitations: teamInvites,
+    },
+  },
+  // cch-w45-s1: the acting OWNER against a roster that holds a SECOND owner —
+  // the one cell where the server's two member verbs disagree. Remove is
+  // offered on ozz's row (remove_member_as/3's owner escape hatch) and Change
+  // role is NOT (update_member_role_as/4 has no such hatch), so a panel that
+  // paints both is over-offering a control the server 403s `outranked`.
+  "members-peer-owner": {
+    label: "Members (owner) — a PEER OWNER row: Remove is offered, Change role is not (the two verbs disagree)",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembersPeerOwner,
+      invitations: teamInvites,
     },
   },
   // Env-vars (admin): the row grammar end-to-end — team + instance scopes, a
@@ -3218,7 +3461,8 @@ export const SCENARIOS = {
           url: "https://marketing-2b9c4.barkpark.cloud", host: "marketing-2b9c4.barkpark.cloud",
           health_status: "up", agent_status: "online", version: "0.2.25",
           region: "hel1", server_type: "cx22", channel: "prod", autoupdate_enabled: false,
-          provider: "azure", suspended: true, suspended_reason: "Payment failed — subscription past due",
+          // cch-w55-s3 — plane-legal slug (see the `suspended_reason` note above).
+          provider: "azure", suspended: true, suspended_reason: "billing_past_due",
           provision_status: "succeeded",
         }),
         bpBase({
@@ -3310,7 +3554,6 @@ export const SCENARIOS = {
           ...Array.from({ length: 10 }, (_, i) =>
             ev(40 - i, "health", { health: "down", disk_used_pct: 91, pg_size_mb: 212 }, tMinus(60 + i * 60))),
           ev(20, "status", { transition: "offline", reason: "agent_silent" }, tMinus(700)),
-          ev(19, "tls", { domain: "production-5b2c1e.barkpark.cloud", status: "issued" }, tMinus(86000)),
         ],
       },
     },
@@ -3486,6 +3729,37 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // cch-w39-s1 — THE HEADLINE DEFECT, DRIVEN. A genuine OWNER of a paid team
+  // whose /v1/me 500s: on origin/main billingIsOwner() answered false (a
+  // two-valued read of a three-valued fact) and #billing-manage told the OWNER
+  // "Only the team owner can manage billing." with nothing on the page to
+  // press. It consumes the meFault override cch-w37-s6 already merged (route()
+  // in this file) rather than minting a second one, and deep-links to #billing
+  // — a residue family that already exists, so no 14th family is created.
+  "billing-me-unreadable": {
+    label: "Billing — an OWNER whose /v1/me 500s: the page reports the failed check with a retry instead of accusing them of not being the owner",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 18 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(40 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
+
   // The owner AFTER an in-app cancel: the subscription is now cancel_at_period_end
   // (grace) — the plan card reads "Access until {date}" + the Ending badge, the
   // Cancel section is GONE (a second cancel is a no-op), but Manage billing stays
@@ -3606,6 +3880,22 @@ export const SCENARIOS = {
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
       providers: connectedProviders,
       capabilities: settingsProviderCapabilities,
+      // cch-w48-s6 — A CONSOLE-SIDE FIXTURE, and it is NOT "the state the
+      // server sends". This is the knowing EXCEPTION to cch-w43-s1's rule that
+      // the corpus mints the envelope the server mints, and it is cited here
+      // rather than left implicit: the live control plane CANNOT mint
+      // connected:true. `record_installation/2` has one caller and that caller
+      // 503s without GitHub App credentials, and the running control plane
+      // carries ZERO ^GITHUB env — so on the deployed system this endpoint
+      // answers the not-configured arm, always. The shape below is read off
+      // app.js's own reader (`renderGithub`: connected / account_login /
+      // configured / install_url — no secret), which is the contract this
+      // fixture is FOR: arm 1 of renderGithub had never been painted by ANY
+      // instrument, so every claim about what a member sees on the GitHub card
+      // was a claim about markup nothing rendered. It rides the EXISTING
+      // providers-member scenario, not a new key, so it moves zero typed
+      // integers — nothing in the census counts fixture keys.
+      github: { connected: true, account_login: "acme-engineering", configured: true },
     },
   },
   // ── G-04 notifications: the crown, states-complete ─────────────────────────
@@ -4007,6 +4297,24 @@ export const SCENARIOS = {
       orderTask: offloadOrderTask("blocked", { worker: "muscle-2", epoch: 1, ts_iso: "2026-07-24T12:00:00Z" }),
     },
   },
+  // ── cch-w61-s2: the credential-refused box, and a rollback that CAN refuse ──
+  "instance-update-credential-refused": {
+    label: "Updates panel — a box that answered our stored credential with a 401 (Unknown, 45m), and a Roll back that refuses terminally",
+    authed: true,
+    deepLink: "#instance/" + IDS.refusedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [credentialRefusedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      // The 409 the control plane emits for a box it will not relay to. Before
+      // this route existed the POST fell through to a blanket 200 and the modal
+      // reported success — the fixture could not refuse, so the split could not
+      // be exercised at all.
+      instanceRollback: { status: 409, body: { ok: false, error: { code: "identity_refused" } } },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -4298,6 +4606,18 @@ export function route(name, method, path, state) {
   const bpOne = p.match(/^\/v1\/barkparks\/([^/]+)$/);
   if (bpOne && method === "DELETE") {
     return destroyFrom(listOf(d, state, "barkparks"), state, (b) => b.id === bpOne[1]);
+  }
+  // cch-w61-s2: POST /v1/barkparks/:id/rollback — the instance slot flip. It was
+  // UNMODELLED: it fell through to the terminal `/v1/` 200 {} at the bottom of
+  // route(), so every preview click on "Roll back…" "succeeded" against a
+  // fixture that could never refuse, and the console's whole terminal-vs-retry
+  // split was unreachable from this harness. A scenario overrides via
+  // d.instanceRollback to drive one named refusal; the default stays the 202 the
+  // control plane answers on the happy path.
+  const bpRollback = p.match(/^\/v1\/barkparks\/([^/]+)\/rollback$/);
+  if (bpRollback && method === "POST") {
+    return d.instanceRollback ||
+      { status: 202, body: { status: "rolling_back", target_sha: "9f2c1a7", pinned_release: "v0.9.0" } };
   }
   if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
   // gr-p4-billing (G-01): the owner-gated billing WRITES, unmodeled before this
@@ -4669,6 +4989,21 @@ export function route(name, method, path, state) {
       return d.operatorDeliveries ? { status: 200, body: { deliveries: d.operatorDeliveries } } : forbidden;
     }
     return forbidden;
+  }
+
+  // cch-w48-s6 GITHUB — placed ABOVE the catch-all below on purpose: the
+  // catch-all answers `{}`, which renderGithub reads as the not-configured arm,
+  // and that is why arm 1 (connected) had never been painted. GATED ON THE
+  // FIXTURE so no scenario without a `github` fixture changes behaviour by one
+  // byte — the catch-all keeps serving them exactly what it served before.
+  // CONSOLE-SIDE, NOT SERVER TRUTH: see the fixture's own comment on
+  // `providers-member` — the deployed control plane has no GitHub App
+  // credentials and cannot answer connected:true. The DELETE arm exists so the
+  // Disconnect affordance has a wire to reach, not because a member may use it
+  // (cch-w48-s3 owns that fence).
+  if (p === "/v1/github/installation" && d.github) {
+    if (method === "DELETE") return { status: 200, body: { connected: false } };
+    if (method === "GET") return { status: 200, body: d.github };
   }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never

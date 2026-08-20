@@ -456,7 +456,11 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
       assert cell_header["rows"] == [[[%{"type" => "text", "value" => "Body"}]]]
       refute Map.has_key?(scalar_header, "columns")
       assert scalar_header["head"] == [text.("Corner"), text.("Proof")]
-      assert scalar_header["rows"] == [["writer", "does not crash"]]
+
+      # Bare-string body cells now get the per-cell rescue (pe-w1: the gate
+      # refused them as "has no renderable inline content" even though the
+      # text is fully derivable) — canonical inline arrays, render-identical.
+      assert scalar_header["rows"] == [[text.("writer"), text.("does not crash")]]
     end
 
     test "promotes a boolean table header marker without rendering it as a cell" do

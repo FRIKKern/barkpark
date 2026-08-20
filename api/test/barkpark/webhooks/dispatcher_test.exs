@@ -2,6 +2,7 @@ defmodule Barkpark.Webhooks.DispatcherTest do
   use Barkpark.DataCase, async: false
   use Oban.Testing, repo: Barkpark.Repo
   import Ecto.Query
+  import ExUnit.CaptureLog
 
   alias Barkpark.Content
   alias Barkpark.Webhooks
@@ -551,6 +552,25 @@ defmodule Barkpark.Webhooks.DispatcherTest do
              )
     end
 
+    # clk-w4 (TESTABILITY, not a defect — dispatcher.ex's `abs(now - t)` is
+    # CORRECT today). The stale arm above drives only the PAST side, so striking
+    # `abs(` from the freshness check left every webhook test in this repo green
+    # while the window silently lost its future half. This arm drives the other
+    # side: a signature dated 301s AHEAD of `now` must fail exactly like a stale
+    # one. Deterministic — `now` is the public 5th argument, no clock involved.
+    test "future-dated timestamp is rejected too — the freshness window is two-sided" do
+      header = "t=#{@parity_ts},v1=#{@parity_hex}"
+      early_now = @parity_ts - 301
+
+      refute Dispatcher.verify_signature(
+               @parity_body,
+               @parity_ts,
+               header,
+               [@parity_secret],
+               early_now
+             )
+    end
+
     test "tampered body is rejected (HMAC no longer matches the signed material)" do
       header = "t=#{@parity_ts},v1=#{@parity_hex}"
 
@@ -862,6 +882,192 @@ defmodule Barkpark.Webhooks.DispatcherTest do
       w = reload_wh(wh)
       assert w.consecutive_failures == 0
       assert w.active == true
+    end
+  end
+
+  # A publish that fires ZERO webhooks used to be indistinguishable from a
+  # publish nobody subscribed to: the fan-out's outcome was discarded, so the
+  # only evidence of a delivery was the row itself and the failure WAS the
+  # absence of a row. These cover the accounting that makes the class countable.
+  describe "fan-out accounting" do
+    def handle_fanout(_event, measurements, metadata, %{pid: pid, doc_id: doc_id}) do
+      if metadata.doc_id == doc_id,
+        do: send(pid, {:fanout, metadata.phase, measurements, metadata})
+
+      :ok
+    end
+
+    # Listen only to the fan-out of THIS test's doc — the module's other
+    # broadcasts (every `new_event_id/0` creates a document) fan out too.
+    defp attach_fanout_probe(doc_id) do
+      id = "fanout-probe-#{System.unique_integer([:positive])}"
+
+      :ok =
+        :telemetry.attach_many(
+          id,
+          [
+            [:barkpark, :webhooks, :fan_out, :selected],
+            [:barkpark, :webhooks, :fan_out, :settled]
+          ],
+          &__MODULE__.handle_fanout/4,
+          %{pid: self(), doc_id: doc_id}
+        )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    # A second endpoint, so every fan-out below selects TWO (the setup's `ep`
+    # plus this one) and a count of 0 can never be mistaken for "none matched".
+    defp extra_endpoint(name) do
+      {:ok, w} =
+        Webhooks.create_webhook(%{
+          "name" => name,
+          "url" => "http://example.test/#{name}",
+          "dataset" => "test",
+          "secret" => "s",
+          "events" => ["publish"]
+        })
+
+      w
+    end
+
+    defp delivery_count(event_id) do
+      Barkpark.Repo.aggregate(
+        from(d in Barkpark.Webhooks.Delivery, where: d.event_id == ^event_id),
+        :count
+      )
+    end
+
+    test "a fan-out that selects endpoints and mints ZERO rows is counted, not silent" do
+      extra_endpoint("acct-zero")
+      attach_fanout_probe("zero-mint")
+
+      # Abort the fan-out BEFORE any endpoint is claimed. The CAUSE is not the
+      # point and this slice asserts none — the production zero-delivery
+      # publishes have no established root cause. What is under test is that a
+      # fan-out which selects endpoints and mints nothing leaves a durable
+      # record instead of an absence.
+      prev_conc = Application.get_env(:barkpark, :webhook_delivery_concurrency)
+      Application.put_env(:barkpark, :webhook_delivery_concurrency, 0)
+      on_exit(fn -> set_or_delete(:webhook_delivery_concurrency, prev_conc) end)
+
+      :ok = FakeHTTP.start([])
+      eid = new_event_id()
+      selected = length(active_ids())
+      assert selected == 2
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _pid} =
+                   Dispatcher.dispatch_async(
+                     "test",
+                     "publish",
+                     "widget",
+                     "zero-mint",
+                     %{"_id" => "zero-mint"},
+                     eid
+                   )
+
+          # Recorded in the CALLER, before the task exists — so it survives a
+          # fan-out task that never runs at all.
+          assert_receive {:fanout, :selected, %{selected: ^selected}, _meta}, 2_000
+
+          assert_receive {:fanout, :settled, m, meta}, 2_000
+          assert m.selected == selected
+          assert m.minted == 0
+          assert meta.dedup == true
+          assert meta.abort_reason != nil
+          assert meta.event_id == eid
+        end)
+
+      # journald-greppable, at WARNING so it needs no metrics pipeline.
+      assert log =~ "webhook_fanout phase=settled"
+      assert log =~ "minted=0"
+      assert log =~ "selected=2"
+
+      # The absence the counter stands in for: not one row was minted.
+      assert delivery_count(eid) == 0
+      assert FakeHTTP.calls() == []
+    end
+
+    test "a healthy fan-out counts every minted row (the zero is not by construction)" do
+      extra_endpoint("acct-all")
+      attach_fanout_probe("all-mint")
+
+      :ok = FakeHTTP.start([{:ok, 200}, {:ok, 200}])
+      eid = new_event_id()
+      assert length(active_ids()) == 2
+
+      assert {:ok, _pid} =
+               Dispatcher.dispatch_async(
+                 "test",
+                 "publish",
+                 "widget",
+                 "all-mint",
+                 %{"_id" => "all-mint"},
+                 eid
+               )
+
+      assert_receive {:fanout, :settled, m, _meta}, 2_000
+      assert m.selected == 2
+      assert m.settled == 2
+      assert m.minted == 2
+      assert m.crashed == 0
+      assert delivery_count(eid) == 2
+    end
+
+    test "the back-compat dispatch_async/5 arm still delivers, accounted dedup=false" do
+      extra_endpoint("acct-legacy")
+      attach_fanout_probe("legacy")
+
+      :ok = FakeHTTP.start([{:ok, 200}, {:ok, 200}])
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _pid} =
+                   Dispatcher.dispatch_async("test", "publish", "widget", "legacy", %{
+                     "_id" => "legacy"
+                   })
+
+          assert_receive {:fanout, :settled, m, meta}, 2_000
+          assert meta.dedup == false
+          assert meta.source == :content_legacy
+          assert m.selected == 2
+          assert m.settled == 2
+          # Row-less by design — a 0 here is construction, never loss…
+          assert m.minted == 0
+        end)
+
+      # …so it must NOT be reported as loss.
+      refute log =~ "[warning] webhook_fanout"
+      assert eventually(fn -> length(FakeHTTP.calls()) == 2 end)
+    end
+
+    test "a recording sink that RAISES cannot fail the dispatch", %{webhook: wh} do
+      Application.put_env(:barkpark, :webhook_fanout_sink, fn _record ->
+        raise "recording blew up"
+      end)
+
+      on_exit(fn -> Application.delete_env(:barkpark, :webhook_fanout_sink) end)
+
+      :ok = FakeHTTP.start([{:ok, 200}])
+      eid = new_event_id()
+
+      # The `selected` record runs INLINE in this process — the publish's own
+      # process — so a raising recorder would take the publish down with it.
+      assert {:ok, _pid} =
+               Dispatcher.dispatch_async(
+                 "test",
+                 "publish",
+                 "widget",
+                 "sink-raises",
+                 %{"_id" => "sink-raises"},
+                 eid
+               )
+
+      assert Process.alive?(self())
+      # …and the delivery it was counting still lands.
+      assert eventually(fn -> match?(%{status: "ok"}, Webhooks.get_delivery(wh.id, eid)) end)
     end
   end
 end

@@ -1,7 +1,7 @@
-NAME      PROVIDER  URL                       STATUS          MODE     HEALTH   AGENT
-prod      hetzner   https://prod.example.com  live            managed  up       online
-spinning  azure     —                         provisioning    managed  unknown  offline
-broken    hetzner   —                         degraded        managed  unknown  offline
-paused    azure     paused.example.com        stopped         byo      up       online
-leaving   hetzner   leaving.example.com       decommissioned  managed  up       online
-legacy    —         legacy.example.com        live            byo      up       online
+NAME      PROVIDER  URL                       STATUS          MODE     HEALTH   AGENT    LAST-SEEN
+prod      hetzner   https://prod.example.com  live            managed  up       online   —
+spinning  azure     —                         provisioning    managed  unknown  offline  —
+broken    hetzner   —                         degraded        managed  unknown  offline  —
+paused    azure     paused.example.com        stopped         byo      up       online   —
+leaving   hetzner   leaving.example.com       decommissioned  managed  up       online   —
+legacy    —         legacy.example.com        live            byo      up       online   —

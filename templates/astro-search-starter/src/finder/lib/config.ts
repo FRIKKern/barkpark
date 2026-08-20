@@ -82,4 +82,4 @@ export const SITE_TITLE = process.env.NEXT_PUBLIC_SITE_TITLE || "Search everythi
 /** Hero sub-headline AND the document `<meta name="description">`. */
 export const SITE_TAGLINE =
   process.env.NEXT_PUBLIC_SITE_TAGLINE ||
-  "Instant, typo-tolerant search across every document — with a live graph of how it all connects.";
+  "Instant search across every document — misspellings widened server-side by Postgres trigram — with a live graph of how it all connects.";

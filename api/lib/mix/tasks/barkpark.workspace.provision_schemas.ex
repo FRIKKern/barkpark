@@ -111,8 +111,16 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemas do
           }
 
           case Content.upsert_schema(attrs, dataset, target_scope) do
-            {:ok, _} -> Mix.shell().info("  ✓ #{name} (#{verb})")
-            {:error, cs} -> Mix.shell().error("  ✗ #{name}: #{inspect(cs.errors)}")
+            {:ok, _} ->
+              Mix.shell().info("  ✓ #{name} (#{verb})")
+
+            {:error, %Ecto.Changeset{} = cs} ->
+              Mix.shell().error("  ✗ #{name}: #{inspect(cs.errors)}")
+
+            # Fail-closed scope stamp (felix-w26): dataset resolution can now
+            # refuse with a non-changeset reason ({:invalid_dataset, _} / :conflict).
+            {:error, reason} ->
+              Mix.shell().error("  ✗ #{name}: #{inspect(reason)}")
           end
         else
           Mix.shell().info("  • #{name} (would #{verb})")

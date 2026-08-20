@@ -815,6 +815,54 @@ defmodule BarkparkCloud.RegistryTest do
       assert Barkpark.subdomain_from_url(suff) == "gyldendal-71069eaa"
     end
 
+    # cch-w69-bl / D865 — subdomain_from_url/1 self-normalises (trim |> downcase)
+    # so the DNS label / Hetzner box name the worker mints never depends on
+    # upstream cleanliness. Each hostile spelling below (the D852 classes) must
+    # fold to the SAME clean label. RED ON PRE-FIX BYTES: without the fold, a
+    # leading space defeats the case-sensitive replace_prefix (yielding
+    # " https://gyldendal" or a whole dirty host), an uppercase scheme passes
+    # through unstripped ("HTTPS://gyldendal.barkpark.cloud"), and a mixed-case
+    # host escapes the lowercase suffix strip ("Gyldendal.BARKPARK.CLOUD").
+    test "subdomain_from_url self-normalises the D852 hostile spellings to the clean label" do
+      base = %Barkpark{slug: "x", team_id: Ecto.UUID.generate()}
+      clean = "gyldendal"
+
+      hostile = [
+        # leading / trailing whitespace
+        "  https://gyldendal.barkpark.cloud",
+        "https://gyldendal.barkpark.cloud  ",
+        "\thttps://gyldendal.barkpark.cloud\n",
+        # uppercase / mixed-case scheme
+        "HTTPS://gyldendal.barkpark.cloud",
+        "HtTpS://gyldendal.barkpark.cloud",
+        # mixed-case host + zone
+        "https://Gyldendal.barkpark.cloud",
+        "https://gyldendal.BARKPARK.CLOUD",
+        "https://GYLDENDAL.Barkpark.Cloud",
+        # the compound worst case: space + uppercase scheme + mixed host
+        "  HTTPS://Gyldendal.Barkpark.Cloud  "
+      ]
+
+      for url <- hostile do
+        assert Barkpark.subdomain_from_url(%{base | url: url}) == clean,
+               "expected #{inspect(url)} to fold to #{inspect(clean)}"
+      end
+
+      # The suffixed (team-disambiguated) shape survives the fold too — a
+      # mixed-case suffixed url still yields the correct suffixed label.
+      assert Barkpark.subdomain_from_url(%{
+               base
+               | url: "  HTTPS://Gyldendal-71069EAA.Barkpark.Cloud"
+             }) ==
+               "gyldendal-71069eaa"
+
+      # DIVERGENCE NOTE (fourth normaliser spelling): DomainStatus.platform_host/1
+      # (cloud/lib/barkpark_cloud/domain_status.ex) trims but does NOT downcase
+      # and additionally splits path/port — it is a private helper on a separate
+      # backlog row (cch-w71-bl-platform-host-fourth-normaliser-spelling). It is
+      # intentionally NOT converged here; convergence is tracked there.
+    end
+
     test "subdomain_from_url falls back to provisioning_subdomain when url is nil" do
       bp = %Barkpark{slug: "gyldendal", team_id: Ecto.UUID.generate(), url: nil}
       assert Barkpark.subdomain_from_url(bp) == Barkpark.provisioning_subdomain(bp)

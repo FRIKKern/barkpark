@@ -172,8 +172,11 @@ type JobSpec struct {
 	Template string `json:"template,omitempty"`
 	// AgentToken (charter Decision 33) is the per-instance monitoring token the
 	// control plane mints at CLAIM time (scope "report") and threads in plaintext
-	// here — the same sanctioned crossing as env/credentials, over the worker-token
-	// internal channel. The configure step writes it to /etc/barkpark/agent.token
+	// here — the same sanctioned crossing as Credentials above, over the worker-token
+	// internal channel. (It is NOT "the same crossing as env": JobSpec declares no
+	// env field at all, and every claim decode below is a bare json.Unmarshal, so an
+	// `env` key in the claim payload is silently DROPPED and never reaches the box.)
+	// The configure step writes it to /etc/barkpark/agent.token
 	// (0600) and enables barkpark-agent.service so the box reports its health +
 	// vitals home. Present for BOTH providers; only its hash is stored server-side.
 	// Empty when an OLD control plane omits the key → the worker skips the agent

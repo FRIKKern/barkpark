@@ -1,0 +1,39 @@
+
+ barkpark · tasks       ⇄ guerrilla  CONN · T ↔ ──────────────────────────────────────────────────────────────────────────
+   The task TUI is glanceable, live, a… ··· 15/23 ││ The drive harness goes hermetic — fixture-served, byte-deterministic     │
+ ├─▎◆ The drive harness goes hermetic — fixture-… ││ geometry proofs                                                          │
+ │    C5/7 · P1 · 2/5                             ││ ⠿ in_progress · P1 · C5/7 · task · epic-builder-the-drive-harness-goes-… │
+ ├─ ⠿ The wide panes overflow markers answer cli… ││                                                                          │
+ │    C5/7 · P3 · 4/5                             ││ criteria 2/5                                                             │
+ ├─ ⠿ The NOW band and the in-flight count tell … ││   ✓ A dependency-free fixture server under scripts/taskboard-drive/      │
+ │    C5/7 · P2 · 3/4                             ││     serves the three-endpoint LIVE-pinned surface (list, prime,          │
+ ├─ ⠿ Task-TUI wave 21 settlement paperwork: the… ││     streaming listen with a welcome frame) plus the D115 in_progress     │
+ │    C5/7 · P1 · ✓○ 1/2 · w21-decide-fable · T ││     filter route, and bp tasks pointed at it via BARKPARK_SERVER boots   │
+ ├─ ✓ hitmap.go height-2 reservation — audit whe… ││     and paints the fixture corpus — the run transcript is quoted in      │
+ └─ ✓ The drive harness anchors row identity on … ││     evidence                                                             │
+   +4 more · 13 done · 1 cancelled                ││   ✓ drive.sh gains a hermetic mode that starts the fixture, runs the     │
+                                                  ││     churn-independent assert subset (the D118 geometry/grammar/file-     │
+   Scaffy epic — commands as content: a… ··· 1/14 ││     state class) against it, DROPS the CONN mask there, and asserts the  │
+ ├─ ⠿ The story stops contradicting the engine: … ││     literal live glyph in the header                                     │
+ │    C5/7 · P2 · 4/5                             ││   ○ Two consecutive hermetic runs produce identical assert transcripts   │
+ ├─ ⠿ pull --check answers for the server that p… ││     (timestamps/pids normalized) — the empty diff is quoted in evidence; │
+ │    C5/7 · P1 · 4/5                             ││     live mode still passes its selection-identity asserts unchanged      │
+ ├─ ⠿ bp scaffy describe: a command's contract i… ││   ○ bash -n scripts/taskboard-drive/drive.sh clean, and the fixture      │
+ │    C5/7 · P1 · 4/5                             ││     builds/runs with CC=/usr/bin/clang CGO_ENABLED=1 go run (or          │
+ ├─ ⠿ The served-catalog drift check becomes an … ││     equivalent) — decisive command lines quoted in evidence              │
+ │    C5/7 · P1 · 5/6                             ││   ○ PR merged (lead closes this on merge)                                │
+ ├─ ⠿ Assert env stops clobbering a stranger's c… ││                                                                          │
+ │    C5/7 · P1 · 3/4                             ││ purpose · derived                                                        │
+ ├─ ⠿ Close the census trap at the trigger: go-t… ││   part of   task-tui-goal                                                │
+ │    C5/7 · P1 · 2/3                             ││   impact    blocks 0 · blocked by 0                                      │
+ ├─ ⠿ Scaffy W8 second-consumer drift-truth wave… ││   does      The drive harness goes hermetic — fixture-served, byte-      │
+ │    C4/7 · P2 · scaffy-w8-decider · T         ││             deterministic geometry proofs                                │
+ └─ ✓ Reconcile scaffy false-done ledger rows ag… ││   why       Why this task is necessary within task-tui-goal is not       │
+   +6 more                                        ││             recorded.                                                    │
+                                                  ││   endgame   Advance task-tui-goal by completing this task.               │
+   Paper Excellence epic — close the a… ··· 31/73 ││   important 90/100 — Derived from P1 queue priority.                     │
+ ├─ ⠿ Corpus census recheck runs the real printe… ││   relevant  90/100 — Derived from active in-progress status.             │
+   ↓ 40 more below                                ││   proof     Recorded task intent — The drive harness goes hermetic —     │
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ ││             fixture-served, byte-deterministic geometry proofs —         │
+ ⠿ 15 in flight · ○ 2+ ready · ✓ 3328 done ·… 51% ││             document.title                                               │
+ jk · enter open · esc back · c claim · x close … ││   ↓ more below                                                           │

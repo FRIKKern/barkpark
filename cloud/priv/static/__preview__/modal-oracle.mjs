@@ -98,6 +98,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SCENARIOS } from "./scenarios.mjs";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -425,7 +426,9 @@ async function main() {
   }
 
   const port = Number(process.env.PORT || (await freePort()));
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "modal-oracle-"));
+  // Allocated PER BRING-UP ATTEMPT below, never once here: a retry into the
+  // dead attempt's directory re-races the same DevToolsActivePort path.
+  let profile = null;
   const t0 = Date.now();
 
   let server = null;
@@ -464,7 +467,7 @@ async function main() {
     };
     await reap(chrome, "chrome");
     await reap(server, "serve.mjs");
-    try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ }
+    if (profile) { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ } }
     teardownMs = Date.now() - td0;
   };
 
@@ -483,35 +486,81 @@ async function main() {
 
     // ── boot Chrome, letting IT pick the debug port (written to
     //    <profile>/DevToolsActivePort) so parallel runs can never collide ─────
-    chrome = spawn(
-      chromeBin,
-      [
-        "--headless=new",
-        "--disable-gpu",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-extensions",
-        "--disable-background-networking",
-        `--user-data-dir=${profile}`,
-        `--window-size=${VIEW_W},${VIEW_H}`,
-        "--remote-debugging-port=0",
-        "about:blank",
-      ],
-      { stdio: "ignore" },
-    );
+    // D101 BRING-UP RETRY (deploy-reliability wave 8). Bounded, a FRESH profile
+    // dir per attempt, every failed attempt's Chrome stderr printed.
+    //
+    // THE LINE THIS RETRY MUST NOT CROSS. cch-w19-bl-gr115's "do not paper over
+    // the race" ruling governs exit-1 MEASURED intermittency — the browser came
+    // up, the oracle asserted, and it disagreed with itself between runs. This
+    // retries only the exit-2 case where Chrome never came up: not one modal
+    // state was asserted, so there is no claim for a retry to hide. Everything
+    // after `devPort` is a measurement and is never retried.
+    let attemptSpawnError = null;
+    const brought = await bringUpChrome({
+      label: "modal-oracle",
+      attempts: BRINGUP_ATTEMPTS,
+      newProfile: () => fs.mkdtempSync(path.join(os.tmpdir(), "modal-oracle-")),
+      launch: (dir) => {
+        attemptSpawnError = null;
+        const child = spawn(
+          chromeBin,
+          [
+            "--headless=new",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-extensions",
+            "--disable-background-networking",
+            `--user-data-dir=${dir}`,
+            `--window-size=${VIEW_W},${VIEW_H}`,
+            "--remote-debugging-port=0",
+            "about:blank",
+          ],
+          { stdio: ["ignore", "ignore", "pipe"] },
+        );
+        child.on("error", (e) => { attemptSpawnError = e; });
+        return { child, readStderr: captureStderr(child) };
+      },
+      awaitDevToolsPort: async ({ profile: dir }) => {
+        const portFile = path.join(dir, "DevToolsActivePort");
+        for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+          if (attemptSpawnError) break;
+          try {
+            const raw = fs.readFileSync(portFile, "utf8").split("\n");
+            if (raw[0] && Number(raw[0])) return Number(raw[0]);
+          } catch { /* not written yet */ }
+          await sleep(100);
+        }
+        if (attemptSpawnError) {
+          throw new Error(`Chrome could not be executed (${attemptSpawnError.code || attemptSpawnError.message}): ${chromeBin}`);
+        }
+        return null;
+      },
+      abandon: async ({ profile: dir, child }) => {
+        if (child && child.pid != null) { try { child.kill("SIGKILL"); } catch { /* already gone */ } }
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      },
+      log: (s) => process.stderr.write(s),
+    }).catch((err) => (err && err.refused ? { refusal: err } : Promise.reject(err)));
 
-    const portFile = path.join(profile, "DevToolsActivePort");
-    let devPort = null;
-    for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
-      try {
-        const raw = fs.readFileSync(portFile, "utf8").split("\n");
-        if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
-      } catch { /* not written yet */ }
-      await sleep(100);
+    // EXIT 2 BY HAND, NOT BY THROW — same reasoning as the font pin below. The
+    // enclosing catch maps every throw to process.exit(1), i.e. "a modal defect
+    // was measured". A browser that never started measured NOTHING, and
+    // laundering that into exit 1 is the exact accusation this wave exists to
+    // stop.
+    if (brought.refusal) {
+      await teardown();
+      process.stderr.write(`\n!! ORACLE (exit 2): REFUSED TO MEASURE — ${brought.refusal.message}\n`);
+      process.stderr.write(`   Headless Chrome never came up, so NOT ONE modal state was asserted.\n`);
+      process.stderr.write(`   Fix the browser in this environment (CHROME=${chromeBin}), then re-run.\n`);
+      process.stderr.write(`   teardown ${teardownMs}ms\n`);
+      process.exit(2);
     }
-    if (!devPort) throw new Error("Chrome never wrote DevToolsActivePort — it did not start");
+    chrome = brought.child;
+    profile = brought.profile;
+    const devPort = brought.devPort;
 
     const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
     process.stdout.write(`>> ${version.Browser} · node ${process.version}\n`);

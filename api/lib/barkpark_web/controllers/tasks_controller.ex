@@ -50,6 +50,7 @@ defmodule BarkparkWeb.TasksController do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Graph
   alias Barkpark.Tasks.Edge
+  alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.TasksController.Params
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -268,12 +269,22 @@ defmodule BarkparkWeb.TasksController do
     # touched first" ordering for the un-parent-filtered list.
     parent = params["parent"]
 
+    # dr-w34-s4: twin collapse (published-wins) — a `drafts.<id>` shadow whose
+    # published twin exists in the same scope is suppressed, so a twinned task
+    # is ONE row here exactly as it is one row in `child_tasks/2` and in the
+    # ready queue. An UNPAIRED `drafts.<id>` row (the whole mutate-created
+    # population) has no distinct twin and survives — see
+    # `Tasks.Query.collapse_twins/1` for why this is NOT a blanket `drafts.`
+    # exclusion. NOTE the pagination consequence: `limit`/`offset` live in this
+    # BASE, so removing shadow rows shifts which rows land on which page and
+    # moves `bp task ls --all` totals.
     base =
       from(d in Document,
         where: d.type == "task",
         limit: ^limit,
         offset: ^offset
       )
+      |> Tasks.Query.collapse_twins()
 
     query =
       base
@@ -401,6 +412,14 @@ defmodule BarkparkWeb.TasksController do
       where: d.type == "task",
       order_by: [asc: d.inserted_at]
     )
+    # dr-w34-s4: child_count = length(children), and this is its ONLY producer.
+    # `maybe_filter_parent_id/2` strips `drafts.` from BOTH sides, so a shadow
+    # child is GUARANTEED to match its published parent and used to contribute
+    # +2. Twin collapse counts it once — while an unpaired `drafts.<id>` child
+    # (no published twin) still counts, so the epic's live number cannot drop
+    # by deleting real tasks. SAME predicate the index applies, so
+    # `bp task get <epic>` and `bp task ls --parent <epic>` agree.
+    |> Tasks.Query.collapse_twins()
     |> Params.maybe_filter_workspace(workspace_id)
     |> Params.maybe_filter_project(project_id)
     |> Params.maybe_filter_parent_id(doc_id)
@@ -1064,12 +1083,27 @@ defmodule BarkparkWeb.TasksController do
   # queueing on the DB pool: a shed request costs one ETS lookup, a queued one
   # costs a connection every other route also needs. Slots are ETS rows keyed by
   # a ref and carrying {owner_pid, deadline}; every acquire first sweeps rows
-  # whose owner died or whose deadline passed, so a slot cannot leak even if a
-  # request process is killed mid-derivation (`after` covers the ordinary exits).
+  # whose OWNER DIED, so a slot cannot leak even if a request process is killed
+  # mid-derivation (`after` covers every ordinary exit AND every raise).
   #
-  # Saturation races resolve toward REFUSAL, never toward over-admission: two
-  # racers can both see the table over cap and both back out. At saturation
-  # shedding is the intended behaviour, so a spurious 503 is the safe error.
+  # The ACQUIRE path's saturation races resolve toward REFUSAL, never toward
+  # over-admission: the row is inserted BEFORE `:ets.info(:size)` is read, so the
+  # latest admitter necessarily counts itself and every racer, sees cap+1 and
+  # backs out. Two racers can both back out; at saturation shedding is the
+  # intended behaviour, so a spurious 503 is the safe error.
+  #
+  # THAT CLAIM HELD FOR ACQUIRE AND DID NOT HOLD FOR THE TTL SWEEP. The sweep
+  # also reaped rows whose `deadline` had passed, and a deadline is a wall-time
+  # GUESS about whether a derivation has finished, not a fact about it. A
+  # derivation outliving @graph_corpus_slot_ttl_ms had its row deleted while its
+  # owner was still alive and still holding the pool connection this cap exists
+  # to protect — and because every acquire sweeps first, an ARRIVING request
+  # performed that reap on the live holders' behalf and was then admitted over
+  # the cap. It refilled without limit (effective concurrency ~
+  # ceil(duration / TTL) x cap) and it was self-amplifying: extra admissions
+  # lengthen every derivation, which crosses the TTL more often. Fail-open in
+  # the only regime where the cap matters. The deadline arm is now GONE; the
+  # deadline itself stays on the row as diagnostic data.
   @graph_corpus_slots :barkpark_graph_corpus_slots
   @graph_corpus_max_concurrency 4
   @graph_corpus_slot_ttl_ms 60_000
@@ -1149,7 +1183,19 @@ defmodule BarkparkWeb.TasksController do
         # Fold over the documents the node phase ALREADY read (doc_lists is in
         # `types` order), instead of `corpus_edges/3` re-listing every type a
         # second time, and hand the fold its schema prefetch.
-        edge_opts = Keyword.put(opts, :schemas, schemas)
+        #
+        # `dangling: :skip` is the OPT-IN escape from `extract_edges/2`'s
+        # per-target existence query — ONE un-batched round-trip per reference
+        # value per document (~1,300 serial queries on the live corpus), held
+        # against a single checked-out pool connection long enough to hit the
+        # 15s DBConnection checkout ceiling and return a 500. This path NEVER
+        # reads the boolean: the `edges` mapping below keeps only
+        # from_id/to_id/kind/weight/plugin_source, and the phantom-node pass
+        # answers the same "does the target exist?" question in memory off
+        # `node_ids`. The flag is local to THIS call site — /v1/graph/dangling
+        # (Graph.dangling/1), EdgeProjector and corpus_edges/3 read through the
+        # unchanged `:resolve` default and keep resolving.
+        edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
 
         raw_edges =
           types
@@ -1266,7 +1312,11 @@ defmodule BarkparkWeb.TasksController do
   # ─── corpus admission cap (see the @graph_corpus_max_concurrency comment) ──
 
   defp acquire_graph_corpus_slot do
-    ensure_graph_corpus_slots()
+    # NO lazy `:ets.new` here. The table is created once from
+    # `Barkpark.Application.start/2`; a request-path create would hand ownership
+    # of the bound to a transient request process, and the bound would die (and
+    # silently RESET) with it. If the table is somehow absent the `rescue` below
+    # sheds rather than 500s.
     sweep_graph_corpus_slots()
 
     ref = make_ref()
@@ -1296,13 +1346,33 @@ defmodule BarkparkWeb.TasksController do
     ArgumentError -> :ok
   end
 
-  # Reap slots whose owner died (a killed request process never runs `after`) or
-  # whose deadline passed. Keeps the table bounded by the cap under all exits.
+  # Reap slots whose owner DIED, and only those. Liveness is a fact about the
+  # holder; the row's deadline is not, so it is diagnostic data here and nothing
+  # more (see the @graph_corpus_max_concurrency comment for the over-admission
+  # the deadline arm caused).
+  #
+  # WHY DEAD-ONLY LOSES NOTHING. `graph_corpus/2` wraps the derivation in a
+  # lexical `try/after`, and `after` runs on an ordinary return, on a raise, on
+  # a throw and on an in-process `exit/1` — so a 15s DBConnection timeout
+  # releases its own slot without any sweep. What `after` does NOT cover is an
+  # exit signal delivered from ANOTHER process to this untrapping one — `:kill`
+  # is the un-trappable case, but `Process.exit(pid, :shutdown)` skips `after`
+  # just the same. Every one of those leaves the owner DEAD, which is exactly
+  # what this arm reclaims: it is load-bearing and must survive.
+  #
+  # THE TRADE, stated rather than discovered under review: an alive-but-wedged
+  # holder now keeps its slot until it finishes, so a permanently stuck
+  # derivation costs one slot of capacity for its lifetime. That is fail-CLOSED
+  # capacity loss — the cap sheds a little more than strictly necessary — and it
+  # matches this cap's own doctrine that at saturation a spurious 503 is the
+  # safe error. Nothing in api/config bounds handler wall time, so the previous
+  # behaviour was not "reclaiming stuck work": it was cancelling the bound on
+  # HEALTHY long derivations. Killing a wedged owner is a different mechanism
+  # with real blast radius (a broken connection instead of a clean 503) and is
+  # deliberately NOT done here (filed: acpc-bl-graph-slot-wedged-live-holder).
   defp sweep_graph_corpus_slots do
-    now = System.monotonic_time(:millisecond)
-
-    for {ref, pid, deadline} <- :ets.tab2list(@graph_corpus_slots),
-        deadline <= now or not Process.alive?(pid) do
+    for {ref, pid, _deadline} <- :ets.tab2list(@graph_corpus_slots),
+        not Process.alive?(pid) do
       :ets.delete(@graph_corpus_slots, ref)
     end
 
@@ -1326,7 +1396,8 @@ defmodule BarkparkWeb.TasksController do
         try do
           :ets.new(@graph_corpus_slots, [:named_table, :public, :set, read_concurrency: true])
         rescue
-          # Lost the create race to a concurrent request — the table exists.
+          # Lost the create race to a concurrent boot (the test VM re-starts the
+          # supervision tree) — the table exists, which is all this needs.
           ArgumentError -> :ok
         end
 
@@ -1365,6 +1436,17 @@ defmodule BarkparkWeb.TasksController do
   # published-before-draft ordering, but WITHOUT the type filter. When a doc_id
   # collides across types in one scope, the published-preferred first row wins
   # (v1 graph roots on the published-preferred row — documented contract).
+  #
+  # PERSPECTIVE GATE (task-d223068f55efbf47, SECURITY): resolution honours the
+  # REQUESTED perspective. The old unconditional `pub OR draft` match meant a
+  # draft-only id (no published twin) fell back to its `drafts.<id>` row at the
+  # DEFAULT (published) perspective — any plain read token got a 200 confirming
+  # the draft's existence and echoing its real title through the traversal
+  # (live-proven). Now a default/published-perspective request resolves ONLY a
+  # published root (draft-only id -> not_found); the draft fallback survives
+  # solely for an explicit drafts/raw perspective from a non-anon-pinned tier.
+  # Both callers (graph_show, graph_tasks) route through here, so both are
+  # covered. Mutation proof: graph_draft_leak_test.exs.
   defp resolve_graph_root(id, conn) do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
@@ -1372,13 +1454,20 @@ defmodule BarkparkWeb.TasksController do
     dataset = conn.params["dataset"]
 
     pub_id = Content.published_id(id)
-    draft = Content.draft_id(pub_id)
 
     query =
-      from(d in Document,
-        where: d.doc_id == ^pub_id or d.doc_id == ^draft,
-        order_by: [asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id)]
-      )
+      case graph_perspective(conn, conn.params) do
+        :published ->
+          from(d in Document, where: d.doc_id == ^pub_id)
+
+        _drafts_or_raw ->
+          draft = Content.draft_id(pub_id)
+
+          from(d in Document,
+            where: d.doc_id == ^pub_id or d.doc_id == ^draft,
+            order_by: [asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id)]
+          )
+      end
       |> Params.maybe_filter_workspace(workspace_id)
       |> Params.maybe_filter_project(project_id)
       |> Params.maybe_filter_dataset(dataset)
@@ -1389,10 +1478,26 @@ defmodule BarkparkWeb.TasksController do
     end
   end
 
+  # The graph read perspective, clamped through the AnonPerspective chokepoint.
+  # Params.parse_perspective keeps this surface's `?drafts=true` alias, but an
+  # anon-pinned caller (tokenless, or the browser-shipped public-read
+  # credential — charter D60/D61) is pinned to :published regardless of the
+  # param. DEFENSE-IN-DEPTH ONLY on this route today: public-read is already
+  # 403 at /v1/graph/* (route-level), so this clamp's observable delta is ~zero
+  # — the LOAD-BEARING gate is resolve_graph_root honouring the perspective.
+  defp graph_perspective(conn, params) do
+    if AnonPerspective.anon_pinned?(conn) do
+      :published
+    else
+      Params.parse_perspective(params)
+    end
+  end
+
   # Build the keyword opts for Content.Graph.traverse/2 from query params + the
-  # resolved root (for dataset/scope). perspective=drafts (alias ?drafts=true)
-  # is token-gated — this whole controller is already behind :require_token, so
-  # honouring the param here IS the gate.
+  # resolved root (for dataset/scope). perspective rides graph_perspective/2 —
+  # the AnonPerspective-clamped resolver — NOT the conn-blind param parse alone
+  # (the old comment's ":require_token IS the gate" assumption was invalidated
+  # by the browser-shipped public-read token, #6270 / SR-2).
   defp graph_traverse_opts(%Document{} = root, params, conn) do
     scope_opts(conn)
     |> Keyword.put(:dataset, root.dataset)
@@ -1403,7 +1508,7 @@ defmodule BarkparkWeb.TasksController do
     |> Keyword.put(:direction, Params.parse_direction(params["direction"]))
     |> Keyword.put(:kinds, Params.csv_list(params["kinds"]))
     |> Keyword.put(:sources, Params.csv_list(params["sources"]))
-    |> Keyword.put(:perspective, Params.parse_perspective(params))
+    |> Keyword.put(:perspective, graph_perspective(conn, params))
   end
 
   # The dataset string a graph read scopes to. The graph endpoints have no

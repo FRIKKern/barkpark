@@ -283,6 +283,111 @@ func compareVersions(a, b string) int {
 	return 0
 }
 
+// releaseCacheFile is the on-disk cache of the newest resolved cli-v* release,
+// living beside config.json in the config dir. It is refreshed by the
+// network-bearing `bp doctor --onboarding` and read — NETWORK-FREE — by
+// `bp whoami`, which must never make an HTTP call on its always-run hot path.
+const releaseCacheFile = "cli-release-cache.json"
+
+// releaseCacheTTL bounds how long a cached release reading stays trustworthy. A
+// reading older than this is treated as ABSENT (a cold cache), so whoami reports
+// an honest "unreported" rather than comparing against a day-stale latest.
+const releaseCacheTTL = 24 * time.Hour
+
+// releaseCache is the tiny on-disk record whoami reads instead of the network.
+type releaseCache struct {
+	// Latest is the newest resolved cli-v* version (no leading v), e.g. "1.15.0".
+	Latest string `json:"latest"`
+	// CheckedAt is when the network resolve that produced Latest ran (RFC3339).
+	CheckedAt time.Time `json:"checked_at"`
+}
+
+// releaseCachePath is the absolute path to the release cache file.
+func releaseCachePath() (string, error) {
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, releaseCacheFile), nil
+}
+
+// writeReleaseCache atomically records the newest resolved release version, so a
+// later network-free whoami can render the freshness verdict. It mkdir -p's the
+// 0700 config dir and writes the file 0600 via a same-dir temp + rename, exactly
+// like SaveConfig — a crash or a concurrent reader never sees a half-written
+// cache. Best-effort: a write failure never sinks the caller (doctor still
+// renders its live reading), so callers may ignore the error.
+func writeReleaseCache(latest string) error {
+	latest = strings.TrimSpace(latest)
+	if latest == "" {
+		return fmt.Errorf("refusing to cache an empty release version")
+	}
+	dir, err := configDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("mkdir config dir %s: %w", dir, err)
+	}
+	raw, err := json.MarshalIndent(releaseCache{Latest: latest, CheckedAt: time.Now().UTC()}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal release cache: %w", err)
+	}
+	raw = append(raw, '\n')
+	tmp, err := os.CreateTemp(dir, "cli-release-*.json")
+	if err != nil {
+		return fmt.Errorf("create temp release cache in %s: %w", dir, err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return fmt.Errorf("write temp release cache %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return fmt.Errorf("chmod temp release cache %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("close temp release cache %s: %w", tmp.Name(), err)
+	}
+	path := filepath.Join(dir, releaseCacheFile)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("rename release cache %s: %w", path, err)
+	}
+	return nil
+}
+
+// readReleaseCache returns the cached release reading and whether it is FRESH:
+// present on disk, non-empty, and written within releaseCacheTTL. It NEVER
+// touches the network — a missing, unreadable, malformed, empty, or stale cache
+// all read as (zero, false), which whoami renders as an honest "unreported". A
+// future CheckedAt (clock skew) is also treated as stale, never as fresh.
+func readReleaseCache() (releaseCache, bool) {
+	path, err := releaseCachePath()
+	if err != nil {
+		return releaseCache{}, false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return releaseCache{}, false
+	}
+	var rc releaseCache
+	if err := json.Unmarshal(raw, &rc); err != nil {
+		return releaseCache{}, false
+	}
+	if strings.TrimSpace(rc.Latest) == "" || rc.CheckedAt.IsZero() {
+		return releaseCache{}, false
+	}
+	age := time.Since(rc.CheckedAt)
+	if age < 0 || age > releaseCacheTTL {
+		return releaseCache{}, false
+	}
+	return rc, true
+}
+
 // fetchToFile downloads url into dst (creating it 0600). Returns the HTTP
 // error for non-2xx.
 func fetchToFile(client *http.Client, rawURL, dst string) error {
@@ -455,6 +560,11 @@ func runUpgrade(out *writer, g globals, args []string) int {
 		out.errf("bp upgrade: %v", err)
 		return exitGeneric
 	}
+	// This resolve is network-bearing, so refresh the on-disk cache a later
+	// network-free whoami reads its freshness verdict from — covers both bare
+	// `bp upgrade` and `bp upgrade --check`. A failed resolve returns above and
+	// writes nothing. Best-effort: a cache-write failure never sinks the upgrade.
+	_ = writeReleaseCache(latest)
 	behind := compareVersions(cliVersion, latest) < 0
 
 	if check {

@@ -31,6 +31,14 @@ defmodule Barkpark.StudioChat.Message do
 
   @fields ~w(session_id seq role source_markdown metadata)a
 
+  # A grapheme-count backstop on the durable text. The REAL per-turn bound lives
+  # at the write seam (`Recorder.persist_runtime_text/1` byte-caps before this
+  # runs — charter D169); `validate_length` counts GRAPHEMES, not bytes, so it
+  # can only ever be a looser second fence. Kept in lockstep-loose with the
+  # 1 MiB byte cap: no realistic single message reaches a million graphemes, so
+  # this reds only a pathological row the byte cap somehow missed.
+  @max_source_markdown_graphemes 1_048_576
+
   @doc """
   Changeset for a completed message. `session_id`, `seq`, and `role` are
   required; `source_markdown` may be nil for a purely structural row (e.g. a
@@ -40,6 +48,7 @@ defmodule Barkpark.StudioChat.Message do
     message
     |> cast(attrs, @fields)
     |> validate_required([:session_id, :seq, :role])
+    |> validate_length(:source_markdown, max: @max_source_markdown_graphemes)
     |> unique_constraint([:session_id, :seq],
       name: :chat_messages_session_id_seq_index,
       message: "sequence already taken for this session"

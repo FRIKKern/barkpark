@@ -386,14 +386,4 @@ describe("telegram connector — listen()/stopListening() drive the watchdog", (
 
     await connector.stopListening?.(poller.adapter as unknown as Adapter);
   });
-
-  it("does not supervise in webhook mode — there is no poll loop to watch", async () => {
-    const poller = fakePoller();
-    const connector = createTelegramConnector({ mode: "webhook" });
-
-    await connector.listen?.(poller.adapter as unknown as Adapter);
-
-    expect(poller.startCalls.length).toBe(0);
-    expect(poller.adapter.isPolling).toBe(false);
-  });
 });

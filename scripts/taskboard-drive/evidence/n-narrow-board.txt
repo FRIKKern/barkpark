@@ -1,0 +1,23 @@
+
+ barkpark · tasks                         ⇄ guerrilla  CONN · T
+ ▎ The task TUI is glanceable, live, and never flickers ····· 15/23
+ ├─ ⠿ The drive harness goes hermetic — fixture-served, byte-deter…
+ │    C5/7 · P1 · 2/5
+ ├─ ⠿ The wide panes overflow markers answer clicks — the last mou…
+ │    C5/7 · P3 · 4/5
+ ├─ ⠿ The NOW band and the in-flight count tell one collapsed trut…
+ │    C5/7 · P2 · 3/4
+ ├─ ⠿ Task-TUI wave 21 settlement paperwork: the D114-D123 charter…
+ │    C5/7 · P1 · ✓○ 1/2 · w21-decide-fable · T
+ ├─ ✓ hitmap.go height-2 reservation — audit whe…  C5/7 ✓✓✓ 3/3 T
+ └─ ✓ The drive harness anchors row identity on …  C5/7 ✓✓✓✓ 4/4 T
+   +4 more · 13 done · 1 cancelled
+
+   Scaffy epic — commands as content: a hardened .scaffy … ··· 1/14
+ ├─ ⠿ The story stops contradicting the engine: five spellings, 22…
+ │    C5/7 · P2 · 4/5
+ ├─ ⠿ pull --check answers for the server that pulled it: provenan…
+   ↓ 56 more below
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+ ⠿ 15 in flight · ○ 2+ ready · ✓ 3328 done · 588 stale          51%
+ jk move · enter open · esc back · c claim · x close · o studio

@@ -268,6 +268,10 @@ defmodule Barkpark.Content do
   @doc """
   Extract the outbound reference-field edges of a document.
   See `Barkpark.Content.Edges.extract_edges/2`.
+
+  `dangling` is `nil` — NOT COMPUTED, never "not dangling" — when the caller
+  opted out of the per-target existence query with `dangling: :skip`. The
+  default is `:resolve` and always returns a boolean.
   """
   @spec extract_edges(map() | Document.t(), keyword()) :: [
           %{
@@ -276,7 +280,7 @@ defmodule Barkpark.Content do
             kind: String.t(),
             field: String.t(),
             refType: String.t() | nil,
-            dangling: boolean()
+            dangling: boolean() | nil
           }
         ]
   def extract_edges(doc, opts \\ []), do: Edges.extract_edges(doc, opts)

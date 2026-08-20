@@ -400,4 +400,42 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
     assert [%Deployment{id: id}] = Registry.list_orphaned_static_deployments()
     assert id == d.id
   end
+
+  ## 10. (deploy-reliability W17 S5) `resumed:` IS the recovery metric — the
+  ##     reaper puts it straight into the Oban job meta. It used to be
+  ##     `length(orphans)`, the count of rows FOUND, over a fire-and-forget
+  ##     `Deploy.start/1` spec'd `:: :ok`. So a sweep in which every single
+  ##     rescue was REFUSED still reported `resumed: N`: the recovery mechanism
+  ##     failing was indistinguishable from it working.
+
+  defmodule RefusingStarter do
+    @moduledoc false
+    @behaviour BarkparkCloud.Sites.Deploy.Starter
+
+    @impl true
+    def start(_deployment_id), do: {:error, :max_children}
+  end
+
+  test "a rescue the supervisor REFUSES is not counted resumed — the metric can lose" do
+    bp = team_fixture() |> barkpark_fixture()
+
+    # Two SITES — the `(site_id, environment)` active-deploy unique allows only
+    # one live row per site, and two orphans is what makes "found" and
+    # "restarted" tell different stories.
+    for tag <- ["r1", "r2"] do
+      site = static_site_fixture(bp)
+      {:ok, d} = Registry.create_deployment(site, %{build_id: tag, content_rev: tag})
+      Repo.update_all(from(x in Deployment, where: x.id == ^d.id), set: [claim_epoch: 1])
+    end
+
+    assert length(Registry.list_orphaned_static_deployments()) == 2
+
+    # Nothing can be spawned. Two rows are found; ZERO are re-driven.
+    Process.put(:site_deploy_starter, RefusingStarter)
+
+    assert {:ok, %{resumed: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    # They are still orphans, so the next sweep tries again — the honest state.
+    assert length(Registry.list_orphaned_static_deployments()) == 2
+  end
 end

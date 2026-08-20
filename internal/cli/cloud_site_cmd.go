@@ -36,10 +36,14 @@ package cli
 // `bp cloud rollback` / `bp cloud verify`.
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -227,7 +231,13 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 
 	site, cerr := cfg.CloudClient().CreateSpawnSite(cloudCtx(), req)
 	if cerr != nil {
-		return cloudFail(out, "create site", cerr)
+		// The create refusal rides the SAME #11784 ladder as delete/rollback — one
+		// dialect, never a second. POST /v1/sites emits no top-level 403 and no 409,
+		// so the exit families that land here are: 401 → cloudFail fallthrough (the
+		// shared `bp login` sentence, byte-identical "create site" label), no_team →
+		// 1 with the `bp team use` fix, barkpark_not_found 404 → 4, every 422 → 1,
+		// node_ports_exhausted 503 / read_token_mint_failed 502 → 8 relaying detail.
+		return siteRefusalFail(out, siteRefusedCreate, name, cerr)
 	}
 
 	// --deploy (D19) turns create into the one-motion: on a successful create the CLI
@@ -689,8 +699,9 @@ func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.
 // renderSiteDeployVerdict is the human verdict on a deployment the stream stopped
 // on — the extracted, network-free render the success-claim registry probes. Its
 // ONLY input is the deployment record the control plane returned, and the exit
-// code it returns is siteDeployExit's contract (a deploy that never went live
-// never exits 0).
+// code it returns is siteDeployExit's contract (a deploy that was DROPPED never
+// exits 0; a deferred one — re-queued, nothing lost — deliberately does, see the
+// D543 note on siteDeployExit).
 //
 // THE LIMIT IT SPEAKS. "live" is the control plane's record of its own SWITCH,
 // and the CLI never fetches the URL — so the receipt names the deployment it read
@@ -713,6 +724,30 @@ func renderSiteDeployVerdict(out *writer, ref string, d cloudclient.SiteDeployme
 			out.userErr("site deploy cancelled at %s — %s (nothing was switched, visitors still see the previous build)", sanitizeCell(stage), sanitizeCell(reason))
 		}
 		return exitGeneric
+	case siteDeployDeferred(d.Status):
+		// The MAJORITY outcome (73.7% of settled attempts, charter D209) and, until
+		// wave 32, the one this verdict lied about: it fell through to the default
+		// arm and printed "deploy in progress" over a row the control plane had
+		// already settled. Nothing is in progress; the box refused this round and
+		// re-queued a rebuild carrying the same content. Say all three things —
+		// what happened, how deep the refusal chain is (siteDeferralLine, which
+		// spells out that the depth counts consecutive same-cause refusals rather
+		// than counting down to a drop), and that the operator must NOT re-publish
+		// by hand to make it happen.
+		//
+		// THE STAGE IS QUOTED, NEVER GUESSED. An earlier cut defaulted an empty
+		// stage to "PLAN", which is the stage a deferral plausibly stops at — and
+		// a plausible guess printed as a reading is exactly the lie this epic
+		// exists to remove. A control plane that sends no stage gets a sentence
+		// that says so.
+		if st := strings.TrimSpace(d.Stage); st != "" {
+			out.outf("↺ site deploy deferred at %s — the box refused this round; nothing was built and nothing was switched, so visitors still see the previous build", sanitizeCell(st))
+		} else {
+			out.outf("↺ site deploy deferred before it named a stage — the box refused this round; nothing was built and nothing was switched, so visitors still see the previous build")
+		}
+		out.outf("  %s", siteDeferralLine(d))
+		out.outf("  a rebuild carrying this same content is already queued — do NOT re-publish to force it; watch it land with `bp cloud site status %s`", ref)
+		return siteDeployExit(d)
 	case strings.EqualFold(d.Status, "live"):
 		prov := siteTriggerNarration(d.Trigger)
 		if u := strings.TrimSpace(d.URL); u != "" {
@@ -730,8 +765,21 @@ func renderSiteDeployVerdict(out *writer, ref string, d cloudclient.SiteDeployme
 }
 
 // siteDeployExit is the exit code for a terminal deployment in machine-output
-// mode: failed or cancelled → generic, otherwise 0. A deploy that never went live
+// mode: failed or cancelled → generic, otherwise 0. A deploy that was DROPPED
 // must never exit 0 — a script that greps for success would ship a lie.
+//
+// DEFERRED KEEPS EXIT 0, DELIBERATELY (deploy-reliability charter D543 — decided,
+// not an oversight, and pinned by TestRunCloudSiteDeployDeferredKeepsExitZero).
+// A deferral is not a drop: wave 32 measured content coverage at 100.00% on
+// settled deferrals, because the control plane re-queues a rebuild carrying the
+// same content and it lands. Deferral is also 73.7% of settled attempts, so
+// flipping it non-zero would break every `deploy && notify` chain and every
+// `set -e` script for an outcome that loses nothing — cry-wolf on the operator
+// surface, which is the exact failure this epic exists to prevent. What was
+// dishonest here was the SENTENCE and the ten minutes of polling, both fixed in
+// the deferred arm of renderSiteDeployVerdict; the code was always right.
+// An opt-in `--wait-for-live` for callers that genuinely need liveness is filed
+// separately (dr-w32-bl-deploy-wait-for-live-flag) and is NOT this function's job.
 func siteDeployExit(d cloudclient.SiteDeployment) int {
 	if strings.EqualFold(d.Status, "failed") || siteDeployCancelled(d.Status) {
 		return exitGeneric
@@ -810,6 +858,275 @@ func siteFailure(d cloudclient.SiteDeployment) (stage, reason string) {
 	return stage, reason
 }
 
+// siteDeployDeferred is the control plane's `deferred` status: a SETTLED row
+// that is not a failure. The box refused this round (its concurrent-build cap is
+// full, or a deploy for this site is already running) and a rebuild carrying the
+// same content was re-queued. It is terminal in the transition table, so a
+// deferred row never becomes anything else — but it is also not a drop, which is
+// exactly why it must not be rendered with the failure vocabulary.
+func siteDeployDeferred(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "deferred")
+}
+
+// siteDeferralChainRe reads the chain depth the control plane writes into a
+// deferred row (deploy-reliability charter D99, PR #9905): "refusal 3 of 12".
+// The producer literal is in cloud/lib/barkpark_cloud/sites/deploy.ex defer/3 —
+// this pattern and that sentence are ONE contract, and a pre-D99 control plane
+// simply has no match, which is why every caller has an honest no-match arm
+// instead of printing a zero.
+var siteDeferralChainRe = regexp.MustCompile(`refusal (\d+) of (\d+)`)
+
+// siteDeferralText is what a DEFERRED row says, in the same order of decreasing
+// truth siteFailure uses — minus its fallback, which names a health gate that a
+// deferred row never reached. Silence stays silence here.
+func siteDeferralText(d cloudclient.SiteDeployment) string {
+	if r := strings.TrimSpace(d.FailureReason); r != "" {
+		return r
+	}
+	for _, st := range d.Stages {
+		if det := strings.TrimSpace(st.Detail); det != "" {
+			return det
+		}
+	}
+	return ""
+}
+
+// siteDeferralChain is the chain's DEPTH and the bound its cause is measured
+// against: the control plane's own COLUMNS first, and only then the row's words.
+// ok is false against a control plane that reports neither.
+//
+// COLUMN-FIRST, PROSE-FALLBACK, AND THE FALLBACK IS NOT A COURTESY (charter
+// D221). deferral_depth/deferral_bound went on the wire in #10301 and are stamped
+// on 116 of 1,934 post-boundary deferred rows (6.0%), first written at
+// 2026-08-07T10:12:35Z. That boundary is a HARD STEP: a row is NULL exactly when
+// it predates that instant, so a column-only reader pointed at any pre-boundary
+// window reads 100% NULL for the WHOLE window — it does not degrade by a
+// fraction, it loses everything. The prose regex is what renders those rows
+// today, and it is retired only when no un-backfilled deferred row can still be
+// read, which no backfill has been proposed to reach.
+//
+// A PRESENT-BUT-UNUSABLE PAIR IS "NO CHAIN", NEVER A PROSE RE-READ. When the
+// columns are there and say depth < 1 or bound < 1, the control plane has
+// answered — with a value that describes no chain — and falling through to the
+// regex would let a stale sentence CONTRADICT the column the same row carries.
+// The two arms disagreeing is the one outcome this order exists to prevent.
+//
+// THE TWO ARMS ALSO COUNT DIFFERENT THINGS, which is why the depth is never
+// presented as a chain identity: the column's notion is consecutive deferrals of
+// the same CAUSE at the head of the site's stream, NOT the (site_id, content_rev)
+// grouping — a content-rev chain of length 4 carries a stamped depth of 5.
+func siteDeferralChain(d cloudclient.SiteDeployment) (depth, bound int, ok bool) {
+	if d.DeferralDepth != nil && d.DeferralBound != nil {
+		cd, cb := *d.DeferralDepth, *d.DeferralBound
+		if cd < 1 || cb < 1 {
+			return 0, 0, false
+		}
+		return cd, cb, true
+	}
+	m := siteDeferralChainRe.FindStringSubmatch(siteDeferralText(d))
+	if m == nil {
+		return 0, 0, false
+	}
+	depth, derr := strconv.Atoi(m[1])
+	bound, berr := strconv.Atoi(m[2])
+	if derr != nil || berr != nil || depth < 1 || bound < 1 {
+		return 0, 0, false
+	}
+	return depth, bound, true
+}
+
+// --- the ABANDONED chain: the same numbers, the OPPOSITE fact ------------------
+
+// siteDeployAbandoned is DeployLedger's abandonment cohort, read off the row's
+// NAMED class (ABANDONED_AT_CAPACITY / ABANDONED_BOX_STUCK /
+// ABANDONED_UNCLASSIFIED — deploy_ledger.ex abandoned_class/1).
+//
+// IT IS A CLASS PREDICATE, NEVER `deferral_depth >= 12` (deploy-reliability
+// charter D195). Thresholding the depth would be right for the wrong reason on
+// the capacity cause and simply WRONG on the busy/stuck one, whose bound is 6 —
+// and it would answer zero forever against the pre-column rows.
+//
+// The prefix, not an exact set, on purpose: the day the ledger names a fourth
+// abandonment cause, this reader keeps counting it instead of quietly dropping
+// the row out of the cohort — the same inversion dr-w28-s4 fixed inside
+// abandoned_class/1 itself.
+func siteDeployAbandoned(class string) bool {
+	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(class)), "ABANDONED_")
+}
+
+// siteAbandonmentChainRe reads the depth out of the terminal round's own
+// sentence. The producer literal is Sites.Deploy.abandonment_reason/3
+// (cloud/lib/barkpark_cloud/sites/deploy.ex:1424), and the control plane's own
+// classifier anchors on the SAME clause (deploy_ledger.ex @abandoned) — three
+// readers, one sentence, so a reword reds on the producer side first.
+//
+// It is NOT `refusal N of M`: that clause is written only on the DEFERRED branch
+// (deploy.ex:1302). An abandoned row has never carried it, and a reader keyed on
+// it matches nothing at all.
+var siteAbandonmentChainRe = regexp.MustCompile(`— and it has now refused (\d+) rebuilds in a row for this site,`)
+
+// siteAbandonmentText is the row's words in decreasing order of truth. The RAW
+// capture is consulted too, because FailureReason can be the humanizer's generic
+// arm — and the clause the depth lives in is in what the box actually said.
+func siteAbandonmentText(d cloudclient.SiteDeployment) string {
+	for _, s := range []string{d.FailureReason, d.FailureReasonRaw} {
+		if t := strings.TrimSpace(s); t != "" && siteAbandonmentChainRe.MatchString(t) {
+			return t
+		}
+	}
+	for _, st := range d.Stages {
+		if det := strings.TrimSpace(st.Detail); det != "" && siteAbandonmentChainRe.MatchString(det) {
+			return det
+		}
+	}
+	return ""
+}
+
+// siteAbandonmentDepth is how many rounds in a row the box refused before the
+// publish was GIVEN UP ON — column-first, prose-fallback, exactly the order
+// charter D221 already ruled for the deferral chain, and for the same reason:
+// the columns were first written at a hard instant, so a column-only reader is
+// blind to every row older than it rather than degraded by a fraction. Seven
+// live abandoned rows carry NULL columns today and the sentence is all they have.
+//
+// On `main` today the prose arm is the ONLY reachable one — nothing writes the
+// columns on an abandoned row until PR #11209 merges (see
+// `siteAbandonmentBound`). The column-first order is kept anyway because it is
+// the ruled one and because it needs no edit the day #11209 lands, whose
+// `deferral_depth: prior + 1` is by construction the number this regex reads
+// out of the same call's sentence.
+//
+// A PRESENT-BUT-UNUSABLE COLUMN IS "NO DEPTH", NEVER A PROSE RE-READ: the
+// control plane has answered, and falling through would let a stale sentence
+// contradict the column on the same row.
+func siteAbandonmentDepth(d cloudclient.SiteDeployment) (int, bool) {
+	if d.DeferralDepth != nil {
+		if *d.DeferralDepth < 1 {
+			return 0, false
+		}
+		return *d.DeferralDepth, true
+	}
+	m := siteAbandonmentChainRe.FindStringSubmatch(siteAbandonmentText(d))
+	if m == nil {
+		return 0, false
+	}
+	depth, err := strconv.Atoi(m[1])
+	if err != nil || depth < 1 {
+		return 0, false
+	}
+	return depth, true
+}
+
+// siteAbandonmentBound is the budget that depth was measured against, and it is
+// COLUMN-ONLY on purpose. The bound is not in the sentence, and re-deriving
+// "12 unless capacity, then 6" in Go would hardcode the control plane's
+// per-cause budget in a second place — the precise mistake charter D195 names.
+//
+// So on a row without the column, depth and cause render and the bound does
+// NOT. That asymmetry is the coverage signal, honestly rendered: a zero here
+// would read as "abandoned against a budget of nothing".
+//
+// ON `main` TODAY THAT IS EVERY ABANDONED ROW, verified in the producer rather
+// than taken on trust: the abandonment arm is `fail(ctx,
+// abandonment_reason(reason, prior + 1, cause))` and `fail/2` writes only
+// `status` / `failure_reason` / `detail` — the column triple is written on the
+// DEFERRED arm alone. PR #11209 (`dr-w28-s6-abandonment-stamps-its-own-columns`,
+// open, unmerged) is what starts writing them, with `deferral_depth: prior + 1`
+// — the SAME number `abandonment_reason/3` interpolates, pinned there by
+// `assert abandoned.failure_reason =~ "refused #{abandoned.deferral_depth}
+// rebuilds in a row"`. So the two arms below cannot disagree, and this key is
+// simply unreachable until #11209 lands: MERGE THAT FIRST, or ship this knowing
+// `abandonment_bound` is dead until it does.
+func siteAbandonmentBound(d cloudclient.SiteDeployment) (int, bool) {
+	if d.DeferralBound == nil || *d.DeferralBound < 1 {
+		return 0, false
+	}
+	return *d.DeferralBound, true
+}
+
+// siteDeferralLine is the operator's one-line read of a deferral chain.
+//
+// THE HONEST BOUND, and the reason this line spells out what is being counted
+// rather than printing a bare "3 of 12": the depth is the number of CONSECUTIVE
+// deferrals OF THE SAME CAUSE at the head of this site's deployment stream,
+// scanned only @deferral_scan_depth (14) rows deep by the control plane's
+// consecutive_deferrals/2. It is NOT a lifetime count — one successful deploy,
+// or one deferral of a different cause, resets it to zero — so a site that
+// deferred 75 times in 12h can legitimately read 3 here, and one did. A bare
+// "3 of 12" would read as a countdown to a drop a merely-slow box may never
+// reach, which is the opposite of the truth.
+func siteDeferralLine(d cloudclient.SiteDeployment) string {
+	depth, bound, ok := siteDeferralChain(d)
+	if !ok {
+		return "the box refused this deploy — this control plane does not report how deep the refusal chain is"
+	}
+	return fmt.Sprintf(
+		"refusal %d of %d consecutive — counts only back-to-back refusals of the SAME cause, so any successful deploy resets it to 0; it is a zero-progress guard, not a countdown",
+		depth, bound,
+	)
+}
+
+// siteDeferredRow picks which row a status header's deferral section describes:
+// the NEWEST one when it deferred (that is the round the operator is waiting
+// on), else the live pointer if it is itself a deferred row. nil when neither
+// deferred — the common case, where nothing is printed at all.
+func siteDeferredRow(dep, newest *cloudclient.SiteDeployment) *cloudclient.SiteDeployment {
+	if newest != nil && siteDeployDeferred(newest.Status) {
+		return newest
+	}
+	if dep != nil && siteDeployDeferred(dep.Status) {
+		return dep
+	}
+	return nil
+}
+
+// siteRequeueVisible answers the ONE question the deferral copy used to assume:
+// does the page this status read actually carry a re-queued attempt for the row
+// that was refused?
+//
+// It is deliberately narrow. A re-queue would arrive as a NEWER row on the same
+// site that has not settled — so the evidence is "a non-terminal row whose
+// inserted_at is strictly after the refused row's", and nothing else counts. A
+// newer FAILED or LIVE row is not the refused round being retried, and an
+// unparseable or absent stamp on either side proves nothing: both refuse rather
+// than guess, because guessing here is exactly how the unconditional promise got
+// written in the first place.
+//
+// In the shape the status header hits, this is nearly always false — the refused
+// row IS the newest row on a newest-first page, so by construction there is
+// nothing newer to see. That is the finding, not a defect in this function: from
+// this page a re-queue is usually UNOBSERVABLE, and the copy must say so instead
+// of asserting it.
+func siteRequeueVisible(dd cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) bool {
+	at, ok := siteParseStamp(dd.InsertedAt)
+	if !ok {
+		return false
+	}
+	for _, r := range ledger {
+		if strings.EqualFold(strings.TrimSpace(r.ID), strings.TrimSpace(dd.ID)) {
+			continue
+		}
+		if !siteDeployWaiting(r.Status) {
+			continue
+		}
+		rt, rok := siteParseStamp(r.InsertedAt)
+		if !rok || !rt.After(at) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// siteRequeueClause is the parenthetical the deferred-newest status line ends on
+// — a claim when the page proves one, and a named blind spot when it does not.
+func siteRequeueClause(dd cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) string {
+	if siteRequeueVisible(dd, ledger) {
+		return "(a newer attempt is already on this site's ledger)"
+	}
+	return "(nothing newer than it is on the page this status read, so whether a rebuild has been re-queued is not visible from here — it is not evidence your publish was dropped)"
+}
+
 // runCloudSiteRollback is `bp cloud site rollback <site>` — the sub-second
 // symlink flip to the previous good build.
 func runCloudSiteRollback(out *writer, g globals, args []string) int {
@@ -833,7 +1150,7 @@ func runCloudSiteRollback(out *writer, g globals, args []string) int {
 	}
 	res, rberr := cfg.CloudClient().RollbackSpawnSite(cloudCtx(), id)
 	if rberr != nil {
-		return cloudFail(out, "roll site back", rberr)
+		return siteRefusalFail(out, siteRefusedRollback, ref, rberr)
 	}
 
 	if out.output == "json" {
@@ -934,7 +1251,7 @@ func runCloudSiteDelete(out *writer, g globals, args []string) int {
 	}
 	res, derr := cfg.CloudClient().DeleteSpawnSite(cloudCtx(), id)
 	if derr != nil {
-		return cloudFail(out, "delete site", derr)
+		return siteRefusalFail(out, siteRefusedDelete, ref, derr)
 	}
 
 	if out.output == "json" {
@@ -977,6 +1294,291 @@ func renderSiteDeleted(out *writer, ref string, res cloudclient.SiteDeleteResult
 	}
 	out.outf("✓ site deregistered — %s is deleted from the control plane (status: %s).", sanitizeCell(slug), sanitizeCell(res.Status))
 	out.outf("  the box teardown ran first (the control plane refuses to deregister a site whose teardown errored), but this envelope carries no measured box state — nothing here read the route, the slots or the tree, so the teardown itself is UNVERIFIED by this receipt.")
+}
+
+// siteRefusalKind names WHICH site verb was refused. The three share the exit
+// ladder and the label, but not their sentences: a refused rollback flipped
+// nothing, a refused teardown leaves a site that is BOTH still registered and
+// still serving, and a refused create never wrote a row at all — copy that blurs
+// them tells the reader the wrong thing about what state their site is now in.
+type siteRefusalKind int
+
+const (
+	siteRefusedRollback siteRefusalKind = iota
+	siteRefusedDelete
+	// siteRefusedCreate is `bp cloud site create`'s refusal arm (cch-w70). It joins
+	// the ONE #11784 dialect rather than minting a second ladder: POST /v1/sites
+	// emits no top-level 403 and no 409, so its refusals resolve on the SAME
+	// status-family exit map (401 → cloudFail, no_team → 1, 404 → 4, 422 → 1,
+	// 5xx → 8) — only its sentences differ, because a refused create wrote nothing.
+	siteRefusedCreate
+)
+
+// what is the cloudFail fallthrough label — byte-unchanged from the strings these
+// verbs have always printed ("roll site back: …", "delete site: …", "create
+// site: …"), so the shared auth seam reads identically before and after this slice.
+func (k siteRefusalKind) what() string {
+	switch k {
+	case siteRefusedDelete:
+		return "delete site"
+	case siteRefusedCreate:
+		return "create site"
+	default:
+		return "roll site back"
+	}
+}
+
+// noun is how a sentence refers to the refused act.
+func (k siteRefusalKind) noun() string {
+	switch k {
+	case siteRefusedDelete:
+		return "the deletion of"
+	case siteRefusedCreate:
+		return "the creation of"
+	default:
+		return "the rollback of"
+	}
+}
+
+// verb is the bare action, for a sentence that already names the site ("not
+// allowed to delete site %q").
+func (k siteRefusalKind) verb() string {
+	switch k {
+	case siteRefusedDelete:
+		return "delete"
+	case siteRefusedCreate:
+		return "create"
+	default:
+		return "roll back"
+	}
+}
+
+// nothingClause is the honesty tail: what did NOT happen, stated positively so a
+// deny path never reads like a partial action.
+func (k siteRefusalKind) nothingClause() string {
+	switch k {
+	case siteRefusedDelete:
+		return "Nothing was torn down and the site is still registered."
+	case siteRefusedCreate:
+		return "No site was created."
+	default:
+		return "Nothing was flipped."
+	}
+}
+
+// siteRefusalFail maps a refused site rollback / delete onto the unified `bp:`
+// error seam — the rollbackFail idiom (cloud_rollback_cmd.go), retargeted at the
+// TYPED refusal both site verbs already carry.
+//
+// Both verbs used to hand the error to the bare `cloudFail`, which branches only
+// on the substring "unauthorized": a 409 the box refused, a 404 that is not our
+// site and a 500 the plane crashed on all printed the label "failed" and exited 1,
+// and `-o json` named none of them. The refusal has been typed since #11711 —
+// cloudError returns *cloudclient.CloudRefusal and both DeleteSpawnSite and
+// RollbackSpawnSite route non-2xx through it — so the evidence was already on the
+// wire and only the last inch discarded it.
+//
+// TWO fallthroughs are deliberate. A refusal that is not a *CloudRefusal at all (a
+// transport error, a gateway page) and a 401 both route through cloudFail, so the
+// "session expired? run `bp login` again" sentence stays the SAME one every other
+// cloud verb prints for the one refusal that is never about the site.
+func siteRefusalFail(out *writer, kind siteRefusalKind, ref string, err error) int {
+	var re *cloudclient.CloudRefusal
+	if errors.As(err, &re) && re.HTTPStatus != 401 {
+		return useErrorDetailed(out, siteRefusalLabel(re.Code), siteRefusalMessage(kind, ref, re),
+			siteRefusalExit(re.HTTPStatus, re.Reason, re.Code), siteRefusalDetails(re))
+	}
+	return cloudFail(out, kind.what(), err)
+}
+
+// siteRefusalDetails builds the machine-only `error.details` payload for a refused
+// site verb. Today its sole member is the readable-types menu a
+// `content_binding_empty` create refusal carries: the cleaned array (junk rows
+// with an empty `type` already dropped by cloudError) is nested under
+// `readable_types` so a script reading `bp cloud site create -o json` gets
+// `error.details.readable_types` — the SAME list the console renders. The bytes
+// are re-serialized from the decoded rows, NOT the server's raw bytes: row order
+// and `type`-before-`count` key order are fixed by the ReadableType struct tags
+// (never a Go map that would alphabetize), so the fingerprint is stable while
+// junk rows stay out of the machine channel. Returns nil when the refusal
+// carried no menu, so every other refusal emits a detail-less envelope
+// byte-identical to the pre-menu shape.
+func siteRefusalDetails(re *cloudclient.CloudRefusal) json.RawMessage {
+	if len(re.ReadableTypesRaw) == 0 {
+		return nil
+	}
+	return json.RawMessage(`{"readable_types":` + string(re.ReadableTypesRaw) + `}`)
+}
+
+// siteReadableTypesMenu renders the readable-types menu in the console's grammar
+// (cloud/priv/static/app.js siteReadableTypesMenu): `type (count)` when the row
+// carries a magnitude, the bare `type` when it does not, joined with ", ". A row
+// with an empty type is skipped (cloudError already drops those, so this is a
+// belt-and-braces guard). Empty when nothing usable survives — the caller's signal
+// to relay the server's own sentence rather than promise a menu it cannot fill.
+func siteReadableTypesMenu(types []cloudclient.ReadableType) string {
+	parts := make([]string, 0, len(types))
+	for _, t := range types {
+		name := strings.TrimSpace(t.Type)
+		if name == "" {
+			continue
+		}
+		if t.Count != nil {
+			parts = append(parts, fmt.Sprintf("%s (%d)", name, *t.Count))
+		} else {
+			parts = append(parts, name)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// siteRefusalLabel is the `bp:` error-code label — the control plane's own code
+// where present, so the machine-readable envelope names the exact refusal, with a
+// stable "failed" fallback for a codeless body.
+func siteRefusalLabel(code string) string {
+	if strings.TrimSpace(code) == "" {
+		return "failed"
+	}
+	return code
+}
+
+// siteRefusalExit maps the refusal's HTTP status onto the CLI's stable exit
+// ladder, by STATUS FAMILY (not by code) so a new refusal code the control plane
+// adds is exit-coded correctly without a CLI change.
+//
+// The ONE exception is a CAUSE the CLI RECOGNISES, and it is the same doctrine
+// `rollbackExit` carries: a teamless caller stays exitGeneric on both sides of the
+// 422 {"error":"no_team"} → 403 {"error":"forbidden","reason":"no_team"}
+// conversion. Exit 3 means "your credential is bad" — a script retries auth — and
+// that is false here: the login is fine, it simply has no active team, and the fix
+// is `bp team use <team>`. Only a recognised reason may override a status, so an
+// unknown cause can never move an exit code.
+func siteRefusalExit(status int, reason, code string) int {
+	if reason == "no_team" || code == "no_team" {
+		return exitGeneric // 1 — the cause, not the status family
+	}
+	switch {
+	case status == 404:
+		return exitNotFound // 4
+	case status == 409:
+		return exitConflict // 6 — the box refused (identity_refused)
+	case status == 401 || status == 403:
+		return exitAuth // 3
+	case status >= 500:
+		return exitServer // 8 — the plane or the box failed, not a measured refusal
+	default:
+		return exitGeneric // 1 — 422 teardown_failed / not_rollbackable
+	}
+}
+
+// siteRefusalMessage is the one human sentence per refusal, per verb. Each says
+// WHAT happened, what was NOT changed, and where the fix is. The control plane's
+// own `detail` is RELAYED, never re-worded: `identity_refused` in particular is
+// byte-frozen on the plane (deploy.ex `unreachable/2` deliberately echoes the
+// instance seam), and a CLI that paraphrased it would make the console, the CLI and
+// the plane tell three stories about one fact.
+func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudRefusal) string {
+	// The CAUSE the server named outranks the code, exactly as in the exit ladder:
+	// "forbidden" alone would send a teamless caller to re-authenticate a
+	// credential that is not the problem.
+	if re.Reason == "no_team" || re.Code == "no_team" {
+		return fmt.Sprintf("your Cloud login has no active team, so the control plane refused %s %q — run `bp team use <team>` and retry. %s",
+			kind.noun(), ref, kind.nothingClause())
+	}
+	detail := strings.TrimSpace(re.Detail)
+	switch re.Code {
+	case "content_binding_empty":
+		// The create door refused because the site's read token sees nothing at the
+		// bound dataset, and it shipped the STRUCTURED menu of types it CAN read.
+		// The console renders that menu from the array and STRIPS the CLI re-run
+		// line (it is CLI-voiced); the CLI is that line's home, so it keeps it.
+		// When the array survived, compose the receipt from the parts the CLI
+		// controls — the verdict, the menu rendered in the console grammar, and the
+		// re-run incantation the server built with the real dataset triple — so the
+		// menu the user reads is the machine-readable list, not a prose copy that a
+		// terser server might not send. With no usable array, the server's own
+		// sentence is the most specific true thing, so relay it whole.
+		if menu := siteReadableTypesMenu(re.ReadableTypes); menu != "" {
+			verdict := detail
+			if i := strings.Index(detail, ". "); i != -1 {
+				verdict = detail[:i+1]
+			}
+			reRun := ""
+			if i := strings.Index(detail, "Re-run naming a type"); i != -1 {
+				reRun = strings.TrimSpace(detail[i:])
+			}
+			msg := fmt.Sprintf("%s It can read: %s.", siteRefusalDetail(verdict, "this site would build from nothing."), menu)
+			if reRun != "" {
+				msg += " " + reRun
+			}
+			return msg + " " + kind.nothingClause()
+		}
+		if detail != "" {
+			return fmt.Sprintf("the control plane refused %s %q (%s): %s %s",
+				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail), kind.nothingClause())
+		}
+		return fmt.Sprintf("the control plane refused %s %q (%s) — nothing there is readable by this site's token. %s",
+			kind.noun(), ref, sanitizeCell(re.Code), kind.nothingClause())
+	case "identity_refused":
+		// The box answered our stored admin credential with a 401, so nothing went
+		// on the wire at all — a CONFLICT with the box's verdict about our
+		// credential, not a network fault.
+		return fmt.Sprintf("%s %q was refused before anything went on the wire: %s %s",
+			kind.noun(), ref, siteRefusalDetail(detail, "the instance rejected our access credential."), kind.nothingClause())
+	case "teardown_failed":
+		return fmt.Sprintf("the instance could not tear site %q down: %s The site is still registered and may still be serving — the control plane refuses to deregister a site whose teardown errored, so retry once the box is healthy.",
+			ref, siteRefusalDetail(detail, "the box reported no reason."))
+	case "not_found":
+		return fmt.Sprintf("no such site %q (or it is not in your team)", ref)
+	case "barkpark_not_found":
+		// create-only: the 404 is about the INSTANCE named to host the site, never
+		// the site (which does not exist yet). Point the reader at --instance, not
+		// at a site slug they never typed.
+		return fmt.Sprintf("the instance named to host site %q is not in your team (or no longer exists) — list your fleet with `bp cloud status` and re-run with a valid --instance. %s",
+			ref, kind.nothingClause())
+	case "forbidden":
+		return fmt.Sprintf("your Cloud login is not allowed to %s site %q — %s %s",
+			kind.verb(), ref, siteRefusalDetail(detail, "it needs the `write` ability on the team that owns the site."), kind.nothingClause())
+	case "server_error":
+		// The plane crashed partway. For a delete that is the one genuinely
+		// ambiguous state (the box teardown runs FIRST), and saying so is the
+		// difference between a retry and a look.
+		switch kind {
+		case siteRefusedDelete:
+			return fmt.Sprintf("the control plane errored while deleting %q: %s The box teardown runs BEFORE the row is deregistered, so the site may be torn down yet still registered — read `bp cloud site status %s` before retrying.",
+				ref, siteRefusalDetail(detail, "it gave no reason."), ref)
+		case siteRefusedCreate:
+			// create's real 5xx paths carry their own codes (node_ports_exhausted
+			// 503 / read_token_mint_failed 502, both handled by the default relay
+			// arm) — a bare server_error is an unexpected crash. The read token is
+			// minted BEFORE the row is inserted and no row is written unless the whole
+			// pipeline succeeds, so a crash leaves no site.
+			return fmt.Sprintf("the control plane errored while creating %q: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		default:
+			return fmt.Sprintf("the control plane errored while rolling %q back: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		}
+	default:
+		// Every other code — including the flat `teardown_failed`/`rollback_failed`
+		// twins' detail, `not_rollbackable`, and `registration_not_removed` when it
+		// lands — relays the plane's sentence rather than flattening it to a slug.
+		if detail != "" {
+			return fmt.Sprintf("the control plane refused %s %q (%s): %s",
+				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail))
+		}
+		return fmt.Sprintf("the control plane refused %s %q (%s)", kind.noun(), ref, sanitizeCell(siteRefusalLabel(re.Code)))
+	}
+}
+
+// siteRefusalDetail relays the plane's own sentence when it sent one, and falls
+// back to a short clause when it did not — so a detail-less body still reads as a
+// sentence instead of trailing off after a colon.
+func siteRefusalDetail(detail, fallback string) string {
+	if detail == "" {
+		return fallback
+	}
+	return sanitizeCell(detail)
 }
 
 // [--doc-type <t>]` — PATCH the between-deploys-safe fields. Infrastructural
@@ -1106,12 +1708,22 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 	// A control plane that cannot answer this list is NOT a reason to fail the
 	// whole verb — the live pointer is still true — but it IS a reason to say the
 	// staleness check did not run, rather than to imply it passed.
+	//
+	// W11: the SAME single call now asks for siteStatusLedgerPage rows instead of
+	// one. limit=1 sees only the NEWEST pending row — i.e. the SHORTEST wait among
+	// everything still queued — so a two-day-old stranded sibling behind a fresh
+	// re-queue was invisible and the "still waiting" bound printed the most
+	// flattering number available. Erring optimistic is the direction this epic
+	// exists to eliminate. Row [0] is still the newest, so every existing reader of
+	// `newest` is unchanged; the rest of the page feeds the censored bound only.
 	var newest *cloudclient.SiteDeployment
-	page, lerr := cfg.CloudClient().ListSpawnSiteDeployments(cloudCtx(), id, 1, "")
+	var ledger []cloudclient.SiteDeployment
+	page, lerr := cfg.CloudClient().ListSpawnSiteDeployments(cloudCtx(), id, siteStatusLedgerPage, "")
 	switch {
 	case lerr != nil:
 		out.errf("could not read this site's newest deployment (%v) — the header below describes the LIVE build only, and a newer failed deploy would not show here", lerr)
 	case len(page.Deployments) > 0:
+		ledger = page.Deployments
 		n := page.Deployments[0]
 		newest = &n
 	}
@@ -1127,13 +1739,22 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 		}
 		if newest != nil {
 			payload["latest_deployment"] = siteDeploymentMap(*newest)
-			payload["staleness"] = siteStalenessMap(dep, newest)
+			payload["staleness"] = siteStalenessMap(dep, newest, ledger)
+		}
+		// The window rides as its OWN node, present only when a page was actually
+		// read — an absent `window` means "this status could not read the ledger",
+		// which is the one thing a zeroed census would hide.
+		if w, ok := siteReadWindow(ledger); ok {
+			payload["window"] = siteWindowMap(w)
 		}
 		out.emitStructured(payload)
 		return exitOK
 	}
 
-	renderKV(out, spawnSiteStatusMap(site, dep, newest))
+	renderKV(out, spawnSiteStatusMap(site, dep, newest, ledger))
+	if w, ok := siteReadWindow(ledger); ok {
+		renderSiteWindow(out, w)
+	}
 	if dep == nil {
 		out.outf("")
 		if newest != nil && siteDeployFailed(newest.Status) {
@@ -1362,7 +1983,11 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 // build while the site's actual last word was a failure. `newest` is nil when the
 // list read failed or the site has no deployments at all; in neither case does
 // this function claim the two agree.
-func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDeployment) map[string]any {
+//
+// `ledger` is the rest of that same page (newest first, `newest` included) — it
+// feeds ONE thing: the right-censored "still waiting" bound in the time-to-web
+// line, which must be taken from the OLDEST waiting row, not the newest.
+func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) map[string]any {
 	m := map[string]any{
 		"site":      spawnSiteRef(s),
 		"kind":      hzCell(s.Kind),
@@ -1412,7 +2037,8 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 	// THE STALENESS ARM. The live pointer and the newest ledger row disagree, and
 	// the newest one failed — so "live" alone is a half-truth: it names a build the
 	// box is still serving BECAUSE the next one never got switched in. Say both.
-	if newest != nil && siteDeployFailed(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID)) {
+	newestFailedStale := newest != nil && siteDeployFailed(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID))
+	if newestFailedStale {
 		if dep != nil {
 			m["status"] = "live — but the NEWEST deploy FAILED (visitors still see this older build)"
 		} else {
@@ -1432,7 +2058,373 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDe
 	if fc := siteFailureClass(dep, newest); fc != "" {
 		m["failure class"] = hzCell(fc)
 	}
+	// DEFERRED IS NOT FAILED, and until D99 it rendered as NOTHING at all here:
+	// the reason arm above fires only on failed/cancelled, so a settled `deferred`
+	// row printed a bare status word and the operator could not tell a first blip
+	// from a chain eight rounds deep. The chain gets its own row rather than a
+	// sentence buried in prose, because "how deep am I" is the whole question a
+	// deferral raises.
+	//
+	// REVIEW FIX (dr-w7): gated on `!newestFailedStale`. The two arms both write
+	// `reason`, and this one runs SECOND — so when the newest row FAILED while the
+	// live pointer happened to be a deferred row, the header said "the NEWEST
+	// deploy FAILED" and then printed the older deferral's sentence underneath it,
+	// describing a different row than the status line names. The failure is the
+	// louder truth and it wins; the live pointer is only ever written on a `live`
+	// transition today, so this is a defensive ordering guard, not a live bug.
+	if dd := siteDeferredRow(dep, newest); dd != nil && !newestFailedStale {
+		if newest != nil && siteDeployDeferred(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID)) {
+			// Same shape as the staleness arm above, for the sibling half-truth:
+			// "live" alone names a build the box is still serving BECAUSE the next
+			// one was refused.
+			//
+			// THE RE-QUEUE IS NOW CONDITIONAL, and this is the sharpest correction
+			// on this surface (charter D213). Both lines used to end "(a rebuild is
+			// already re-queued)" UNCONDITIONALLY, and the comment that stood here
+			// said so out loud — "the difference being that this one is re-queued,
+			// not lost". The CLI cannot see that. On site `search`, 47 of 523
+			// content_rev chains are deferred-only with no live and no failed row,
+			// and every one of them printed that promise. So the clause is asserted
+			// only where the page actually carries a newer attempt, and otherwise
+			// the header says what it can and cannot see from here.
+			//
+			// IT IS NOT ESCALATED INTO A LOSS CLAIM (charter D212): of 227 settled
+			// abandoned chains, 227 have a later live row on the same site and ZERO
+			// do not — the abandonment is benign supersession. "We cannot see one
+			// from here" is the honest register; "your publish was lost" would be a
+			// second false claim pointing the other way.
+			requeue := siteRequeueClause(*newest, ledger)
+			if dep != nil {
+				m["status"] = "live — the NEWEST deploy was DEFERRED by the box " + requeue
+			} else {
+				m["status"] = "never went live — the newest deploy was DEFERRED by the box " + requeue
+			}
+			m["newest deployment"] = hzCell(newest.ID)
+			m["newest status"] = hzCell(newest.Status)
+		}
+		m["deferral"] = siteDeferralLine(*dd)
+		if txt := siteDeferralText(*dd); txt != "" {
+			m["reason"] = sanitizeCell(txt)
+		}
+	}
+	// THE CLOCK, slotted LAST and deliberately in a key of its own. Every other arm
+	// above competes over `status` and `reason`; this one writes only "time to web"
+	// and reads nothing either arm wrote, which is what keeps it structurally clear
+	// of the dr-w7 precedence bug (two arms writing `reason`, the second describing
+	// a different row than the status line named). Empty means the stamps could not
+	// support a sentence — never an imputed zero.
+	if line := siteTimeToWebLine(dep, ledger); line != "" {
+		m["time to web"] = line
+	}
 	return m
+}
+
+// siteStatusLedgerPage is how many ledger rows `status` asks for in its ONE list
+// call. See the comment at the call site: the newest row alone answers "did the
+// last thing that happened fail?", but it CANNOT answer "how long has anything
+// been waiting?" — that answer lives in the oldest still-pending row, which a
+// limit of 1 structurally hides. 20 is a bounded page, not a walk.
+const siteStatusLedgerPage = 20
+
+// siteClock is now, injectable so the duration tests are not a race.
+var siteClock = func() time.Time { return time.Now().UTC() }
+
+// siteShortDur renders a duration in TWO units — "4m25s", "2h39m", "3d04h".
+//
+// It exists because package cli's only duration renderer, deployCensusWidth,
+// floors at whole minutes ("%.0f minutes"), which is right for a census WINDOW
+// and wrong for a publish: a 265-second deploy prints "4 minutes" there, and
+// anything under 30 seconds prints "0 minutes" — a number that reads as "instant"
+// for a deploy that took half a minute. The two renderers are deliberately
+// different functions and a test pins that they disagree.
+func siteShortDur(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dd%02dh", int(d.Hours())/24, int(d.Hours())%24)
+	}
+}
+
+// siteParseStamp reads one control-plane timestamp, refusing everything it cannot
+// prove. The refusal is the whole point: SiteDeployment.BecameLiveAt is a BARE
+// string, so an absent stamp arrives as "" — and time.Parse("") does not error
+// into nothing, it is simply never allowed to reach the arithmetic, because the
+// zero instant minus a 2026 timestamp is a time-to-web of roughly two millennia
+// printed as fact.
+func siteParseStamp(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.999999", "2006-01-02T15:04:05"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+// siteTimeToWeb is how long this deployment took to reach visitors: the gap
+// between the control plane accepting it (inserted_at) and the switch that put it
+// in front of traffic (became_live_at).
+//
+// NAME THE CLOCK, because this one is easy to over-claim: t0 is inserted_at — the
+// moment the CONTROL PLANE picked the work up — not the moment a human hit
+// publish. Publish→insert is debounced (up to 60s) and measured to understate the
+// human-felt wait by ~4.8x over a 24h window, so every renderer of this number
+// must say whose clock it is. A later wave re-keys it to a true publish stamp.
+//
+// It refuses three ways and imputes nothing: an empty stamp (never went live), an
+// unparseable stamp (a control plane speaking a shape we do not model), and a
+// became_live_at that precedes inserted_at (clock skew or a repointed row — a
+// negative duration is not a fast deploy).
+func siteTimeToWeb(d cloudclient.SiteDeployment) (time.Duration, bool) {
+	live, lok := siteParseStamp(d.BecameLiveAt)
+	ins, iok := siteParseStamp(d.InsertedAt)
+	if !lok || !iok {
+		return 0, false
+	}
+	gap := live.Sub(ins)
+	if gap < 0 {
+		return 0, false
+	}
+	return gap, true
+}
+
+// siteDeployWaiting reports a row whose CONTENT has not reached the web and is
+// not going to stop trying: anything the transition table has not settled as live,
+// failed or cancelled.
+//
+// DEFERRED COUNTS, and this predicate used to say the opposite (`&& !siteDeployDeferred(s)`,
+// dr-w7). A deferred row is settled as a ROW and unsettled as a PUBLISH: the box
+// refused the round and the control plane re-queued a rebuild carrying the same
+// content, so nothing has reached visitors and nothing has been given up on. That
+// is the definition of a wait — and it is the ONE shape that is genuinely
+// unbounded, since a refusal can be followed by a refusal forever. Excluding it
+// meant siteWaitingSince structurally could not see the very case it exists to
+// bound, while deferrals grew to 53.6% of attempts.
+//
+// A deferred row is still not a FAILURE, and nothing here changes that vocabulary:
+// the failure arms in spawnSiteStatusMap key off siteDeployFailed and never off
+// this predicate.
+//
+// THE `|| siteDeployDeferred(s)` ARM IS LEVEL WITH THAT PARAGRAPH, NOT REDUNDANT
+// WITH IT. Wave 32 made `deferred` TERMINAL in cloudclient.SiteDeploymentTerminal
+// (it is settled server-side, so the deploy stream must stop polling it), which
+// would otherwise have silently reverted dr-w12 S7 by dropping deferred out of
+// this predicate — four tests named that revert, TestSiteWaitingSinceMeasures-
+// ADeferralChainFromItsStart loudest. The two questions are genuinely different
+// and now read differently: SiteDeploymentTerminal asks "can this ROW still
+// change?" (no), this asks "has the CONTENT reached the web?" (also no, and a
+// re-queued rebuild is still trying). Deleting this arm re-breaks the clock.
+func siteDeployWaiting(status string) bool {
+	s := strings.TrimSpace(status)
+	if s == "" {
+		return false
+	}
+	return !cloudclient.SiteDeploymentTerminal(s) || siteDeployDeferred(s)
+}
+
+// siteWaitingSince is the RIGHT-CENSORED bound for a revision that has not reached
+// the web yet: how long the OLDEST still-waiting row newer than the live pointer
+// has been waiting. Censored because the wait is not over — the true time-to-web
+// is at least this, and unknowable until the switch happens.
+//
+// OLDEST, not newest, on purpose. The page arrives newest-first, so reading row
+// [0] reports the SHORTEST wait among everything pending and hides a stranded
+// two-day-old sibling behind a fresh re-queue. This function takes the maximum,
+// so it is order-independent, and it refuses any row whose inserted_at will not
+// parse rather than guessing a start.
+//
+// THAT MAXIMUM IS ALSO WHAT MEASURES A DEFERRAL CHAIN FROM ITS START. A chain is
+// n separate rows — refusal 1, refusal 2, … — each with its own inserted_at, and
+// the newest one is the SHORTEST wait in the chain. Now that siteDeployWaiting
+// admits deferred rows, every round of the chain is a candidate and the maximum
+// lands on the FIRST refused attempt, which is when the operator actually started
+// waiting. Rows at or below the live pointer are still excluded, so a chain that a
+// successful deploy already broke does not leak back in — the same reset rule the
+// control plane's consecutive_deferrals/2 applies.
+//
+// It stays a LOWER bound in one more way with deferrals in scope: the page is
+// siteStatusLedgerPage rows, so a chain whose start has fallen off the page is
+// measured from the oldest round still visible. "At least" is the only claim this
+// function ever makes.
+func siteWaitingSince(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) (time.Duration, string, bool) {
+	waited, row, ok := siteWaitingWorst(dep, ledger)
+	if !ok {
+		return 0, "", false
+	}
+	return waited, strings.TrimSpace(row.ID), true
+}
+
+// siteWaitingWorst is siteWaitingSince's measurement, returning the ROW rather
+// than its id — the renderers need the row itself to say WHY it is waiting (a
+// refused round reads differently from a slow build), and re-finding it by id in
+// the caller would be a second scan that could disagree with this one.
+func siteWaitingWorst(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) (time.Duration, cloudclient.SiteDeployment, bool) {
+	now := siteClock()
+	var (
+		worst    time.Duration
+		worstRow cloudclient.SiteDeployment
+		found    bool
+	)
+	for _, r := range sitePendingRows(dep, ledger) {
+		ins, ok := siteParseStamp(r.InsertedAt)
+		if !ok {
+			continue
+		}
+		waited := now.Sub(ins)
+		if waited <= 0 {
+			continue
+		}
+		if !found || waited > worst {
+			worst, worstRow, found = waited, r, true
+		}
+	}
+	return worst, worstRow, found
+}
+
+// siteWaitingChainHead is the NEWEST refused round among the pending rows — the
+// one whose sentence carries the chain's CURRENT depth.
+//
+// The clock and the depth deliberately come off different rows, because they are
+// different facts: the wait started at the first refusal (the oldest row), while
+// "how deep am I now" is only true on the latest one. Reading the depth off the
+// row the clock was measured from would print "refusal 1 of 12" over a chain four
+// rounds deep — an understatement produced by the fix itself.
+func siteWaitingChainHead(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) (cloudclient.SiteDeployment, bool) {
+	// Newest-first, so the first deferred row in the pending set is the head.
+	for _, r := range sitePendingRows(dep, ledger) {
+		if siteDeployDeferred(r.Status) {
+			return r, true
+		}
+	}
+	return cloudclient.SiteDeployment{}, false
+}
+
+// sitePendingRows is the shared scoping rule behind every waiting question: the
+// rows on this page that have not reached the web and are NEWER than what is being
+// served, in the page's own newest-first order.
+//
+// It is one function rather than a rule copied per caller on purpose — the clock
+// and the chain-depth reader must agree on which rows are "pending", or the header
+// can measure one chain and quote another's depth.
+func sitePendingRows(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) []cloudclient.SiteDeployment {
+	out := make([]cloudclient.SiteDeployment, 0, len(ledger))
+	liveIdx := -1
+	if dep != nil {
+		for i, r := range ledger {
+			if strings.EqualFold(strings.TrimSpace(r.ID), strings.TrimSpace(dep.ID)) {
+				liveIdx = i
+				break
+			}
+		}
+	}
+	for i, r := range ledger {
+		if !siteDeployWaiting(r.Status) {
+			continue
+		}
+		if dep != nil {
+			if strings.EqualFold(strings.TrimSpace(r.ID), strings.TrimSpace(dep.ID)) {
+				continue
+			}
+			switch {
+			case liveIdx >= 0:
+				// Newest-first: anything at or below the live pointer's index is
+				// OLDER than what is serving and cannot be a pending newer revision.
+				if i > liveIdx {
+					continue
+				}
+			default:
+				// The live pointer is off this page. Fall back to stamps, and when
+				// they will not order the pair, KEEP the row: showing a waiter that
+				// might be old is the pessimistic direction, and this epic exists to
+				// stop erring the other way.
+				rt, rok := siteParseStamp(r.InsertedAt)
+				dt, dok := siteParseStamp(dep.InsertedAt)
+				if rok && dok && !rt.After(dt) {
+					continue
+				}
+			}
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// siteTimeToWebLine is the sentence this epic was founded on — how long it took
+// for what you are being served to actually reach the web, and whether anything
+// newer is still stuck behind it.
+//
+// POINTER-SCOPED WORDING, and this is load-bearing rather than style: a rollback
+// (cloud/lib/barkpark_cloud/sites/deploy.ex finish_rollback) repoints
+// current_deployment_id at an OLDER row WITHOUT restamping became_live_at, so
+// "your last publish" would name a build the user never published last. "The build
+// you are being served" is true under a rollback, a stale-live pointer and a
+// normal deploy alike.
+//
+// Returns "" when the stamps cannot support a sentence — the row simply gets no
+// clock, which is the honest shape of "we do not know".
+func siteTimeToWebLine(dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) string {
+	line := ""
+	if dep != nil {
+		if ttw, ok := siteTimeToWeb(*dep); ok {
+			line = fmt.Sprintf("the build you are being served went live %s after the control plane picked it up (publishes are debounced up to 60s)", siteShortDur(ttw))
+		}
+	}
+	if waited, row, ok := siteWaitingWorst(dep, ledger); ok {
+		clause := fmt.Sprintf(
+			"a newer revision is still waiting — at least %s so far, measured from the control plane's inserted_at on the OLDEST pending row (not from your publish, which it can understate by up to 60s of debounce)",
+			siteShortDur(waited),
+		)
+		if note := siteWaitingDeferralNote(row, dep, ledger); note != "" {
+			clause += " — " + note
+		}
+		if line == "" {
+			return clause
+		}
+		line += " (" + clause + ")"
+	}
+	return line
+}
+
+// siteWaitingDeferralNote is what the censored wait owes the reader when the row it
+// was measured from is a REFUSED round rather than a queued one: the wait is not
+// one attempt taking a long time, it is a chain of attempts being turned away.
+//
+// It leads with the CLOCK, never with the depth, and the ordering is the finding
+// rather than taste: the chain is bounded and small (24h p50 depth 3, max 11, wall
+// p50 121.6s) while the wait it produces is not, so a header that opened with "3"
+// would name the least alarming number on the row. Depth arrives afterwards, as a
+// detail, and only ever through siteDeferralLine — which prints it as depth-of-
+// fence with what is actually being counted, and which degrades honestly to "this
+// control plane does not report how deep the refusal chain is" against a pre-D99
+// box. That degraded arm is deliberately kept: a reader that cannot lose cannot be
+// believed when it says it has not lost.
+//
+// No rate is computed here and none may be (charter D174/D142): chains carry no
+// key, they are reconstructible only positionally, and the resulting closed-live
+// rate is era-unstable (48.4% over 7d vs 28.3% over 24h).
+func siteWaitingDeferralNote(measured cloudclient.SiteDeployment, dep *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) string {
+	// Only when the wait we just PRINTED is itself a refusal chain. A stranded
+	// queued row that happens to share the page with a deferral is a different
+	// wait, and describing it as refused would be a lie about the louder number.
+	if !siteDeployDeferred(measured.Status) {
+		return ""
+	}
+	head, ok := siteWaitingChainHead(dep, ledger)
+	if !ok {
+		head = measured
+	}
+	return "the box REFUSED that round and re-queued a rebuild, so this clock runs from the FIRST refused attempt, not the newest: " + siteDeferralLine(head)
 }
 
 // siteFailureClass is the named failure class to show in a status header: the
@@ -1450,11 +2442,166 @@ func siteFailureClass(dep, newest *cloudclient.SiteDeployment) string {
 	return ""
 }
 
+// siteWindow is the WINDOW this status actually read, and the outcomes inside it.
+//
+// WHY IT EXISTS. `bp cloud site status` is the one deploy surface a site owner
+// runs, and it could print six green stage ticks over a stream that was three
+// quarters refused: measured on search-capstone, the reachable 200-row window
+// (2026-08-07T01:32:34Z → 10:29:17Z) was 148 deferred / 47 live / 5 failed, and
+// the header named none of it and named no window over which anyone could
+// contest it. A surface that does not print the window it read is already
+// mis-reporting, because it invites the reader to generalise a bounded page into
+// a site's whole history.
+//
+// EVERY COUNT SHIPS WITH ITS DENOMINATOR (charter D3) and none of them is a rate:
+// the counts are over THIS page, not over the site, and dividing them would
+// manufacture a percentage that is era-unstable and unfalsifiable (D174/D142).
+// The span is the stamps the page ACTUALLY carried — never siteClock(), never an
+// imputed "last 24h" — and rows whose inserted_at will not parse are counted out
+// loud rather than silently dropped from the span.
+// THE BUCKETS SUM TO Rows, AND THAT IS A CONTRACT, NOT AN ACCIDENT (review, W14).
+// The first cut counted deferred/live/failed/waiting and nothing else — so a
+// `cancelled` row landed in NO bucket and a reader who subtracted the printed
+// counts from the denominator got an unexplained remainder with no name. That is
+// the same defect as the unnamed window one layer down: a census that does not
+// account for every row it read invites exactly the generalisation it exists to
+// stop. `cancelled` is a status this file already names (siteDeployCancelled), so
+// it gets its own count; Other is the catch-all for a status word the control
+// plane may add tomorrow, printed as "in another state" rather than silently
+// dropped. TestSiteWindowAccountsForEveryRowItRead pins the identity.
+type siteWindow struct {
+	Rows      int
+	Deferred  int
+	Failed    int
+	Live      int
+	Waiting   int
+	Cancelled int
+	Other     int
+	Stampless int
+	Oldest    string
+	Newest    string
+	PageFull  bool
+	PageLimit int
+}
+
+// siteReadWindow measures the page. It reports only what the rows say.
+func siteReadWindow(ledger []cloudclient.SiteDeployment) (siteWindow, bool) {
+	if len(ledger) == 0 {
+		return siteWindow{}, false
+	}
+	w := siteWindow{Rows: len(ledger), PageLimit: siteStatusLedgerPage, PageFull: len(ledger) >= siteStatusLedgerPage}
+	var oldest, newest time.Time
+	for _, r := range ledger {
+		switch {
+		case siteDeployDeferred(r.Status):
+			w.Deferred++
+		case siteDeployFailed(r.Status):
+			w.Failed++
+		case strings.EqualFold(strings.TrimSpace(r.Status), "live"):
+			w.Live++
+		case siteDeployCancelled(r.Status):
+			w.Cancelled++
+		case siteDeployWaiting(r.Status):
+			w.Waiting++
+		default:
+			w.Other++
+		}
+		t, ok := siteParseStamp(r.InsertedAt)
+		if !ok {
+			w.Stampless++
+			continue
+		}
+		if oldest.IsZero() || t.Before(oldest) {
+			oldest = t
+		}
+		if newest.IsZero() || t.After(newest) {
+			newest = t
+		}
+	}
+	if !oldest.IsZero() {
+		w.Oldest = oldest.Format(time.RFC3339)
+		w.Newest = newest.Format(time.RFC3339)
+	}
+	return w, true
+}
+
+// renderSiteWindow prints the census as its OWN block after the KV table.
+//
+// NOT KV ROWS, and that is mechanical rather than aesthetic: renderKV sorts its
+// keys ALPHABETICALLY and pads every key to the widest one, so census rows would
+// scatter between `dataset` and `framework` and widen the whole header away from
+// the facts it exists to show. `stages:` already established the block shape on
+// this surface.
+func renderSiteWindow(out *writer, w siteWindow) {
+	out.outf("")
+	out.outf("recent attempts (the window this status read — not this site's whole history):")
+	if w.Oldest != "" {
+		out.outf("  %d attempts read, from %s to %s", w.Rows, w.Oldest, w.Newest)
+	} else {
+		out.outf("  %d attempts read — none of them carried a readable inserted_at, so this window has no span", w.Rows)
+	}
+	parts := make([]string, 0, 6)
+	parts = append(parts, fmt.Sprintf("%d of %d deferred by the box", w.Deferred, w.Rows))
+	parts = append(parts, fmt.Sprintf("%d of %d live", w.Live, w.Rows))
+	parts = append(parts, fmt.Sprintf("%d of %d failed", w.Failed, w.Rows))
+	if w.Waiting > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d still running or queued", w.Waiting, w.Rows))
+	}
+	// Printed only when non-zero, but never omitted when non-zero: the three
+	// headline counts plus these two are exhaustive over the page, so the reader
+	// can subtract and land on nothing left over.
+	if w.Cancelled > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d cancelled", w.Cancelled, w.Rows))
+	}
+	if w.Other > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d in another state this CLI does not name", w.Other, w.Rows))
+	}
+	out.outf("  %s", strings.Join(parts, " · "))
+	if w.Stampless > 0 && w.Oldest != "" {
+		out.outf("  %d of %d rows carried no readable inserted_at and are outside that span", w.Stampless, w.Rows)
+	}
+	if w.PageFull {
+		out.outf("  the page came back full at %d rows, so older attempts exist that this status did not read", w.PageLimit)
+	}
+}
+
+// siteWindowMap is the census's `-o json` twin. It is its OWN sibling node, NOT a
+// `staleness` key: staleness answers "is what is serving also the last thing that
+// happened?" about TWO rows, while this answers "what did I read, and how did it
+// go?" about a page — folding them would let a reader threshold a page-scoped
+// count as if it were a property of the live pointer.
+func siteWindowMap(w siteWindow) map[string]any {
+	m := map[string]any{
+		"attempts_read":  w.Rows,
+		"page_limit":     w.PageLimit,
+		"page_full":      w.PageFull,
+		"deferred_count": w.Deferred,
+		"failed_count":   w.Failed,
+		"live_count":     w.Live,
+		"waiting_count":  w.Waiting,
+		// Always emitted, zero included: a machine reader checks the identity
+		// deferred+live+failed+waiting+cancelled+other == attempts_read, and an
+		// absent key would make that check unwritable.
+		"cancelled_count": w.Cancelled,
+		"other_count":     w.Other,
+	}
+	// Absent, never zero-valued: a span the page could not support must read as
+	// unknown, and "1970-01-01" is the most confident lie this node could tell.
+	if w.Oldest != "" {
+		m["oldest_inserted_at"] = w.Oldest
+		m["newest_inserted_at"] = w.Newest
+	}
+	if w.Stampless > 0 {
+		m["attempts_without_a_stamp"] = w.Stampless
+	}
+	return m
+}
+
 // siteStalenessMap is the `-o json` twin of the staleness arm above: the explicit
 // comparison, so a script does not have to re-derive "is what is serving also the
 // last thing that happened?" by diffing two ids. Emitted only when the newest read
 // actually succeeded — an absent node means unknown, never "in sync".
-func siteStalenessMap(dep, newest *cloudclient.SiteDeployment) map[string]any {
+func siteStalenessMap(dep, newest *cloudclient.SiteDeployment, ledger []cloudclient.SiteDeployment) map[string]any {
 	m := map[string]any{
 		"latest_deployment_id": newest.ID,
 		"latest_status":        newest.Status,
@@ -1468,6 +2615,42 @@ func siteStalenessMap(dep, newest *cloudclient.SiteDeployment) map[string]any {
 	m["latest_failed"] = siteDeployFailed(newest.Status)
 	if fc := strings.TrimSpace(newest.FailureClass); fc != "" {
 		m["failure_class"] = fc
+	}
+	// The censored wait, as a NUMBER a script can threshold on — and never as a
+	// bare duration. The pair is emitted together on purpose: a lone
+	// latest_waiting_seconds reads like a finished measurement, when it is a lower
+	// bound on a wait that has not ended. It is the OLDEST waiting row's, so
+	// alerting on it cannot be fooled by a fresh re-queue in front of a stranded
+	// sibling.
+	if waited, row, ok := siteWaitingWorst(dep, ledger); ok {
+		id := strings.TrimSpace(row.ID)
+		m["latest_waiting_seconds_at_least"] = int64(waited.Seconds())
+		m["latest_waiting_censored"] = true
+		// WHY it is waiting, for the half of the wait that is now a refusal chain
+		// rather than a slow build. The flag is written only on a deferred row —
+		// never a `false` on the others, which would read as a measurement the CLI
+		// did not make — and the depth pair rides the control plane's own sentence
+		// (absent against a pre-D99 box, exactly as in siteDeploymentMap). No rate,
+		// no percentage: chains have no key (charter D174/D142).
+		if siteDeployDeferred(row.Status) {
+			m["latest_waiting_deferred"] = true
+			head, hok := siteWaitingChainHead(dep, ledger)
+			if !hok {
+				head = row
+			}
+			if depth, bound, dok := siteDeferralChain(head); dok {
+				m["latest_waiting_deferral_depth"] = depth
+				m["latest_waiting_deferral_bound"] = bound
+			}
+		}
+		// AS-OF, because a censored bound without one is undated arithmetic: the
+		// same pinned window was measured returning 3 → 2 → 0 waiters in five
+		// minutes (charter D163), so a captured JSON blob carrying only a duration
+		// cannot say whether it describes now or an hour ago.
+		m["latest_waiting_as_of"] = siteClock().Format(time.RFC3339)
+		if id != "" {
+			m["latest_waiting_deployment_id"] = id
+		}
 	}
 	return m
 }
@@ -1523,11 +2706,71 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	if d.FailureReasonRaw != "" {
 		m["failure_reason_raw"] = d.FailureReasonRaw
 	}
+	// deploy-reliability W7 (charter D99, PR #9905): the deferral chain, as
+	// NUMBERS a script can threshold on rather than a sentence it must grep. Only
+	// on a deferred row, and only when the control plane actually said it — a
+	// pre-D99 box carries no pair and gets no keys, never a zero that would read
+	// as "no chain".
+	if siteDeployDeferred(d.Status) {
+		if depth, bound, ok := siteDeferralChain(d); ok {
+			m["deferral_depth"] = depth
+			m["deferral_bound"] = bound
+		}
+		// deploy-reliability W29: the chain's NAMED cause. It has been decoded
+		// since #10248 and emitted NOWHERE — "decode is not readership" on a
+		// column populated on 1,332 live rows, so a script could see how deep a
+		// chain ran and never WHY. Written only when the control plane sent it.
+		if d.DeferralCause != nil {
+			if c := strings.TrimSpace(*d.DeferralCause); c != "" {
+				m["deferral_cause"] = c
+			}
+		}
+	}
+	// deploy-reliability W29 (charter D504): an ABANDONED publish — a chain the
+	// control plane GAVE UP on — carries its own depth, bound and cause, under
+	// their own key names.
+	//
+	// NEW KEYS, NOT THE DEFERRAL ONES, and the gate is the class rather than a
+	// relaxed siteDeployDeferred. The two facts are semantically OPPOSITE: on a
+	// deferred row depth means "refused N times, RE-QUEUED"; here it means
+	// "refused N times, WE STOPPED". A dashboard summing one key across both
+	// would count a lost publish as a waiting one — the exact confusion
+	// TestSiteDeferralChainNotOnFailedRows exists to refuse, and it keeps
+	// refusing it.
+	//
+	// Each key is written only when it is KNOWN. The bound is column-only, so an
+	// old row renders depth and cause without it; that gap is the coverage
+	// signal, and a zero in its place would be a measurement nobody made.
+	if siteDeployAbandoned(d.FailureClass) {
+		if depth, ok := siteAbandonmentDepth(d); ok {
+			m["abandonment_depth"] = depth
+		}
+		if bound, ok := siteAbandonmentBound(d); ok {
+			m["abandonment_bound"] = bound
+		}
+		m["abandonment_cause"] = d.FailureClass
+	}
 	if d.Environment != "" {
 		m["environment"] = d.Environment
 	}
 	if d.Branch != "" {
 		m["branch"] = d.Branch
+	}
+	// deploy-reliability W11: the two clocks the wire has carried all along and
+	// this envelope threw away — it shipped 16 keys and not one timestamp, so a
+	// script reading `-o json` could see WHAT happened and never WHEN.
+	//
+	// time_to_web_seconds is ABSENT, never 0, whenever the stamps cannot prove it:
+	// a queued row has no became_live_at, and a zero there would read as "went live
+	// instantly" — the single most flattering lie this envelope could tell.
+	if ins := strings.TrimSpace(d.InsertedAt); ins != "" {
+		m["inserted_at"] = ins
+	}
+	if live := strings.TrimSpace(d.BecameLiveAt); live != "" {
+		m["became_live_at"] = live
+	}
+	if ttw, ok := siteTimeToWeb(d); ok {
+		m["time_to_web_seconds"] = int64(ttw.Seconds())
 	}
 	return m
 }
@@ -1595,6 +2838,9 @@ NOT TO BE CONFUSED WITH
 
 OUTPUT + EXIT
   a stage-aware human stream; -o json emits the deployment / site envelope.
-  0 ok · 1 build failed or cancelled · 2 usage · 3 not logged in · 4 no such site.`
+  0 ok · 1 build failed or cancelled · 2 usage · 3 not logged in · 4 no such site.
+  rollback and delete exit-code the control plane's typed refusal: 6 refused (the
+  box refused our credential) · 8 the plane or the box failed · 1 anything else,
+  each with the plane's own code in the -o json envelope.`
 	out.outf("%s", help)
 }

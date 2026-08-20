@@ -1,28 +1,42 @@
+# Build context is the REPO ROOT (not api/): the release needs `design/` and
+# `api/assets/` at COMPILE time, both of which live outside api/. Build with:
+#
+#   docker build -f api/Dockerfile -t barkpark-api .
+#
+# `api/Dockerfile.dockerignore` is the BuildKit per-Dockerfile ignore file and
+# takes precedence over the root `.dockerignore` (which excludes api/ wholesale
+# for the web image).
 FROM elixir:1.19-alpine AS build
 
 # build-base (gcc/make/musl-dev) is REQUIRED to compile native NIFs — argon2_elixir
 # (password hashing) builds a C NIF, so a `git`-only image fails `mix deps.compile`.
-RUN apk add --no-cache git build-base
+# cmake is required by expty's vendored libuv.
+RUN apk add --no-cache git build-base cmake
+
+# alpine 3.23 ships cmake 4.x, which refuses projects declaring
+# `cmake_minimum_required(VERSION 3.x)` below 3.5 — expty's vendored libuv does.
+# This floor keeps that build compatible.
+ENV CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 WORKDIR /app
 
 ENV MIX_ENV=prod
 
-# Optional: skip the libvips-backed image dep (vix). Default unset → built (prod
-# parity). Staging can pass `--build-arg BARKPARK_SKIP_IMAGE=1` to avoid the
-# musl/libvips precompiled-NIF mismatch on alpine; media renditions then fall
-# back to the ImageMagick CLI backend.
-ARG BARKPARK_SKIP_IMAGE
-ENV BARKPARK_SKIP_IMAGE=${BARKPARK_SKIP_IMAGE}
-
 RUN mix local.hex --force && mix local.rebar --force
 
-COPY mix.exs mix.lock ./
+COPY api/mix.exs api/mix.lock ./
 RUN mix deps.get --only prod && mix deps.compile
 
-COPY config/config.exs config/prod.exs config/runtime.exs config/
-COPY lib lib
-COPY priv priv
+COPY api/config/config.exs api/config/prod.exs api/config/runtime.exs config/
+
+# Compile-time reads that live OUTSIDE api/:
+#   design/status-manifest.json  ← Render.StatusVocab (resolves to /design at runtime path depth)
+#   api/assets/**                ← Render.Stylesheet (File.read! + @external_resource)
+COPY design /design
+COPY api/assets assets
+
+COPY api/lib lib
+COPY api/priv priv
 
 RUN mix compile
 RUN mix release
@@ -42,15 +56,16 @@ COPY --from=build /app/_build/prod/rel/barkpark ./
 
 RUN mkdir -p /app/uploads
 
+# NOTHING that prod's runtime.exs REQUIRES may be baked here: a placeholder
+# SECRET_KEY_BASE / DATABASE_URL / PHX_HOST shadows the boot-time raise, so the
+# container starts and then 500s at the first request instead of refusing with
+# a readable message. Only genuinely image-level facts stay.
 ENV PHX_SERVER=true
-ENV PHX_HOST=localhost
 ENV PORT=4000
-ENV DATABASE_URL=ecto://postgres:postgres@db/barkpark_prod
-ENV SECRET_KEY_BASE=placeholder_will_be_overridden
 
 EXPOSE 4000
 
-COPY entrypoint.sh /app/entrypoint.sh
+COPY api/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 CMD ["/app/entrypoint.sh"]

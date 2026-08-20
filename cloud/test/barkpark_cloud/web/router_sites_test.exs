@@ -60,6 +60,16 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     {user, team}
   end
 
+  # deploy-reliability W14 S4. Every other fixture in this file hands back an
+  # OWNER — `user_with_team/0` hardcodes the role — which is exactly why the
+  # role-blindness of the deploy-reporting reads was invisible to 101 tests.
+  # This one joins a SECOND user to an existing team at the lowest role there is.
+  defp member_of(team, role) do
+    user = user_fixture()
+    {:ok, _} = Accounts.add_member(team, user, role)
+    user
+  end
+
   defp barkpark_fixture(team) do
     n = System.unique_integer([:positive])
 
@@ -475,6 +485,152 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       full = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
       assert length(json_body(full)["deployments"]) == 3
     end
+
+    # deploy-reliability W13 S3. W12 shipped the deferral WRITER
+    # (`Sites.Deploy.defer/3` fills deferral_depth/bound/cause) and no reader:
+    # this payload did not mention the columns, so the only route to a wait's
+    # depth was a regex over the English in `failure_reason`. These keys are the
+    # reader.
+    #
+    # IT CAN LOSE: delete the three `deferral_*` lines from
+    # `deployment_json/1` and the presence assertions red; coerce a nil to 0 and
+    # the non-deferred assertions red.
+    test "the deferral chain reaches the wire, and a row with no chain says nil rather than 0" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+
+      {:ok, deferred} = Registry.create_deployment(site, %{git_ref: "a"})
+
+      {:ok, _} =
+        Registry.transition_deployment(deferred, %{
+          status: "deferred",
+          deferral_depth: 3,
+          deferral_bound: 12,
+          deferral_cause: "BOX_AT_CAPACITY_DEFERRED"
+        })
+
+      {:ok, clean} = Registry.create_deployment(site, %{git_ref: "b"})
+      token = login_token(user)
+
+      conn = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
+      assert conn.status == 200
+      rows = Map.new(json_body(conn)["deployments"], &{&1["id"], &1})
+
+      chain = rows[deferred.id]
+      assert chain["deferral_depth"] == 3
+      assert chain["deferral_bound"] == 12
+      # THE LEDGER CLASS, frozen at defer time — not a raw box code.
+      assert chain["deferral_cause"] == "BOX_AT_CAPACITY_DEFERRED"
+
+      # A row that never deferred carries NO chain, and the honest answer is
+      # nil: a 0 here would read as "deferred zero times", which is a different
+      # sentence from "nobody recorded a chain" — and it is the sentence 98.75%
+      # of prod's deferred rows (every one written before migration
+      # 20260807150000) would falsely tell.
+      none = rows[clean.id]
+      assert Map.has_key?(none, "deferral_depth")
+      assert none["deferral_depth"] == nil
+      assert none["deferral_bound"] == nil
+      assert none["deferral_cause"] == nil
+    end
+  end
+
+  ## deploy-reliability W14 S4 — WHO can read the owner's own deploy numbers.
+  ##
+  ## Two reads carry every owner-facing deployment number in this epic:
+  ##
+  ##     GET /v1/sites/:id/deployments   (the ledger list — `bp cloud site status`)
+  ##     GET /v1/sites/:id               (the site's current deployment)
+  ##
+  ## Both are gated by the 2-arity `with_team_site(conn, fun)`, which defaults to
+  ## `:session` (router.ex:11065) and runs `Auth.require_user/2` ONLY — the cond
+  ## in its body is `halted -> is_nil(current_team) -> Registry.get_team_site`,
+  ## with no Authz/role call anywhere; `resolve_team/2` asks for nothing beyond
+  ## membership. GET /v1/sites/:id inlines the same three steps.
+  ##
+  ## THE REACHABILITY WAS GUARDED BY NOTHING. Every other test in this file logs
+  ## in an OWNER (`user_with_team/0` hardcodes the role), so prepending
+  ## `Auth.require_team_admin(conn, [])` to the list route reds ONLY the probes
+  ## below while all 101 pre-existing tests here stay green. That is the shape of
+  ## a guard that cannot lose, and these three tests are the guard that can.
+  describe "deploy-reliability W14 S4: role reachability of the deploy-reporting reads" do
+    # IT CAN LOSE: put any role gate on the list route and this reds 403 vs 200.
+    test "a plain team MEMBER — not an owner — lists the site's deployments → 200 with rows" do
+      {_owner, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      {:ok, d1} = Registry.create_deployment(site, %{git_ref: "a"})
+      {:ok, _} = Registry.transition_deployment(d1, %{status: "failed"})
+      {:ok, d2} = Registry.create_deployment(site, %{git_ref: "b"})
+
+      member = member_of(team, "member")
+      assert Accounts.get_membership(team, member).role == "member"
+
+      conn = call(:get, "/v1/sites/#{site.id}/deployments", nil, login_token(member))
+
+      assert conn.status == 200
+      rows = json_body(conn)["deployments"]
+      # Rows, not an empty 200: a gate that quietly filtered the ledger to
+      # nothing would still answer 200, and that is the failure this asserts past.
+      assert Enum.map(rows, & &1["id"]) |> Enum.sort() == Enum.sort([d1.id, d2.id])
+    end
+
+    # The same role blindness on the sibling read the dashboard opens first.
+    test "a plain team MEMBER reads GET /v1/sites/:id → 200" do
+      {_owner, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+
+      member = member_of(team, "member")
+
+      conn = call(:get, "/v1/sites/#{site.id}", nil, login_token(member))
+
+      assert conn.status == 200
+      assert json_body(conn)["site"]["id"] == site.id
+    end
+
+    # PINS TODAY'S PAT CONTRACT, deliberately — see the PR body for the cost.
+    #
+    # The refusal on the two reads above is CREDENTIAL-CLASS, not role-class: no
+    # PAT of any tier reaches a `:session` route, so a read PAT is 401 (not 403 —
+    # `require_user` never saw a session token) on both, while the single-
+    # deployment poll, which is gated `{:ability, "read"}`, answers 200 on a REAL
+    # row with the SAME token. A member's read PAT is equally 401.
+    #
+    # The consequence, stated so the pin is deliberate: no automation credential
+    # can compute the owner's number, because `bp cloud site status` reads the
+    # ledger through the session-only list route. Re-tiering it to
+    # {:ability, "read"} sits inside cloud-console-hardening's auth fence and is
+    # FILED, not built here (deploy-reliability charter D219).
+    test "a read PAT is 401 on BOTH owner reads while the single-deployment poll is 200" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      {:ok, dep} = Registry.create_deployment(site, %{git_ref: "a"})
+
+      {:ok, read_pat, stored} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "read-key",
+          abilities: ["read"]
+        })
+
+      assert stored.abilities == ["read"]
+
+      list = call(:get, "/v1/sites/#{site.id}/deployments", nil, read_pat)
+      assert list.status == 401
+      assert json_body(list)["error"] == "unauthorized"
+
+      show = call(:get, "/v1/sites/#{site.id}", nil, read_pat)
+      assert show.status == 401
+
+      # The SAME token, on the SAME site, one path segment deeper — 200 on a real
+      # row. The refusal above is therefore about the credential CLASS the route
+      # accepts, not about what the token is allowed to read.
+      poll = call(:get, "/v1/sites/#{site.id}/deployments/#{dep.id}", nil, read_pat)
+      assert poll.status == 200
+      assert json_body(poll)["deployment"]["id"] == dep.id
+    end
   end
 
   ## POST /v1/sites/:id/env — encrypted env round-trip
@@ -852,7 +1008,7 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
         {"E_ABSOLUTE_PATH", ~s(entry "/timeout.html" is an absolute path — refused),
          "A network step timed out"},
         {"E_ABSOLUTE_PATH", ~s(entry "/unauthorized.html" is an absolute path — refused),
-         "The hosting provider rejected our credentials"},
+         "A credential was rejected."},
         {"E_PATH_TRAVERSAL", ~s(entry "../dns/failed.html" escapes the artifact root),
          "Securing the domain failed on the provider side."}
       ]
@@ -1057,6 +1213,115 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       body = json_body(conn)
       assert body["error"] == "read_token_mint_failed"
       assert body["detail"] =~ bp.slug
+      # A FLAT `{"error": "..."}` body carries its word straight through — the
+      # box's own refusal survives into the console-facing detail, unchanged.
+      assert body["detail"] =~ "forbidden"
+      # BYTE-IDENTITY PIN: the flat arm is untouched by the nested-envelope fix,
+      # so the whole detail string is exactly the pre-fix output — slug, the
+      # `(HTTP <status>)` framing, then `: <box word>`. A regression that widened
+      # the flat path (e.g. re-wrapping it) breaks this equality.
+      assert body["detail"] ==
+               "#{bp.slug} refused to mint the site's read token (HTTP 403): forbidden"
+
+      # A site that cannot read its content is not a site. Nothing was written.
+      assert Registry.list_sites_for_team(team) == []
+    end
+
+    # cch-w70-bl: the box's refusal may arrive wrapped in a TYPED ENVELOPE
+    # (`{"error": {"code": ..., "message": ...}}`), not flat — TokenController's
+    # 422 unprocessable. mint_failure_copy/2 used to read `body["error"]`, get a
+    # MAP, fail the is_binary guard, and discard the box's message — the third
+    # box-word-discarding chain, sibling of the rollback/teardown relay drop.
+    # Before the fix the detail was `bp-<n> refused to mint the site's read token
+    # (HTTP 422)` with the box's code and message ABSENT. It must now compose the
+    # machine `code` and the human `message` as `code — message`.
+    test "a nested 422 unprocessable mint refusal → 502 composing code — message, and NO ghost row" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok,
+           %{
+             status: 422,
+             body:
+               ~s({"error":{"code":"unprocessable","message":"permissions [\\"write\\"] not allowed"}})
+           }}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          token
+        )
+
+      assert conn.status == 502
+      body = json_body(conn)
+      assert body["error"] == "read_token_mint_failed"
+      # Names WHICH box, carries the `(HTTP 422)` framing…
+      assert body["detail"] =~ bp.slug
+      assert body["detail"] =~ "(HTTP 422)"
+      # …AND surfaces WHAT it said — the code AND the message inside the typed
+      # envelope, composed `code — message`, no longer discarded by the guard.
+      assert body["detail"] =~ "unprocessable"
+      assert body["detail"] =~ "permissions"
+      assert body["detail"] =~ "not allowed"
+      assert body["detail"] =~ "unprocessable — permissions"
+      # A site that cannot read its content is not a site. Nothing was written.
+      assert Registry.list_sites_for_team(team) == []
+    end
+
+    # cch-w70-bl: the 401/403 auth plugs on the scoped token route ALSO nest
+    # their refusal (`{"error": {"code": "forbidden", "message": ...}}`), not just
+    # TokenController's 422. The same nested-envelope unwrap must carry the plug's
+    # words through, composed `code — message` like the 422 arm (and the helper
+    # degrades to the bare human string when an envelope carries no code).
+    test "a nested 403 scoped-plug mint refusal → 502 carrying the plug's message, and NO ghost row" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok,
+           %{
+             status: 403,
+             body:
+               ~s({"error":{"code":"forbidden","message":"admin token cannot mint public-read here"}})
+           }}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          token
+        )
+
+      assert conn.status == 502
+      body = json_body(conn)
+      assert body["error"] == "read_token_mint_failed"
+      assert body["detail"] =~ bp.slug
+      assert body["detail"] =~ "(HTTP 403)"
+      assert body["detail"] =~ "forbidden — admin token cannot mint public-read here"
       # A site that cannot read its content is not a site. Nothing was written.
       assert Registry.list_sites_for_team(team) == []
     end
@@ -1701,6 +1966,39 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert Registry.get_site(site.id).current_deployment_id == prev.id
     end
 
+    test "the rollback LANDS in the audit trail — the console calls Activity append-only" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000002"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "live"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000002"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      FakeBoxRelay.program(
+        rollback: {:ok, 200, %{"status" => "rolled_back", "build_id" => "prevbuild0000002"}}
+      )
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 200
+
+      # The router writes this event with `_ = Accounts.record_audit(…)`: a
+      # changeset error is DISCARDED, so the 200 above says nothing about
+      # whether the row exists. Only the trail itself can answer.
+      events = Accounts.list_audit_events(team)
+      assert ev = Enum.find(events, &(&1.action == "site.rolled_back"))
+      assert ev.team_id == team.id
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "site"
+      assert ev.target_id == site.id
+      assert ev.metadata["deployment_id"] == prev.id
+      assert ev.metadata["previous_deployment_id"] == live.id
+    end
+
     test "a rollback that CANNOT happen answers non-2xx — the CLI gates success on the status alone" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
@@ -1715,6 +2013,44 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       body = json_body(conn)
       assert body["ok"] == false
       assert body["detail"] =~ "no previous build"
+    end
+
+    ## W70 (D847/D854) — THE FLAT-DETAIL LAW, mutation-proven at the route. The
+    ## box's REAL pre-poll refusal is NESTED (`%{error: %{code, message}}`,
+    ## relayed verbatim by BoxRelay.HTTP), and the CLI's site arms
+    ## (RollbackSpawnSite → cloudError) decode FLAT strings only: a map left
+    ## under "error" degrades the receipt to a 200-rune raw clamp. So the wire
+    ## keeps `error` = the route's own STRING code and the box's words land in
+    ## flat top-level `detail`, composed "code — message" server-side.
+    test "a NESTED box refusal keeps error a STRING code and lands the box's words in flat detail" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(
+        rollback:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "already_running",
+               "message" => "deploy already running for blog"
+             }
+           }}
+      )
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 409
+
+      body = json_body(conn)
+      assert body["ok"] == false
+      # The route code, a STRING — never the box's nested map.
+      assert body["error"] == "rollback_failed"
+      # The box's own words, FLAT where cloudError can read them — never left
+      # only inside a nested error.message.
+      assert is_binary(body["detail"])
+      assert body["detail"] =~ "already_running"
+      assert body["detail"] =~ "deploy already running for blog"
     end
 
     test "a container site is not rollbackable this way → 422 (the two verbs stay unblurred)" do
@@ -1953,6 +2289,111 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert Registry.list_deployments(site, 10) == []
     end
 
+    ## W67 S2 (charter D820) — THE TWO CASCADES NOTHING ASSERTED.
+    ##
+    ## Three FKs reference `sites`; until this wave only `deployments` had
+    ## behavioural cover. Each test below drives the REAL route, so a regression
+    ## fails the way production fails: `Repo.delete` raises `Ecto.ConstraintError`
+    ## under a non-cascade FK, the router's `{:ok, _} = Registry.delete_site(site)`
+    ## hard match turns that into `500 {"error":"server_error"}` with no `ok` and
+    ## no `detail` — AFTER the box teardown already disarmed the Caddy route. The
+    ## inverse orphan: a dead site that is still registered.
+    ##
+    ## Measured 2026-08-10: with `site_artifacts.site_id` flipped to ON DELETE
+    ## RESTRICT, this whole file was 104 tests / 0 failures and
+    ## `fk_census_test.exs` was 5/0. The structural half of the guard lives in
+    ## `site_cascade_census_test.exs`; these are the behavioural half.
+
+    test "an uploaded artifact BOUND TO A DEPLOYMENT cascades on delete" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+      {:ok, dep} = Registry.create_deployment(site, %{build_id: "artifactbuild001"})
+
+      Repo.insert!(%Registry.SiteArtifact{
+        site_id: site.id,
+        deployment_id: dep.id,
+        sha256: String.duplicate("a", 64),
+        byte_size: 3,
+        bytes: <<1, 2, 3>>
+      })
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      # A 500 here is the regression: the artifact FK refused, and it refused
+      # AFTER the teardown call above already succeeded.
+      assert conn.status == 200, "site delete answered #{conn.status}: #{conn.resp_body}"
+      assert json_body(conn)["ok"] == true
+      assert Registry.get_site(site.id) == nil
+
+      # Postgres checks RESTRICT IMMEDIATELY, not at end of statement, so the
+      # deployments cascade does NOT rescue an artifact bound to a deployment —
+      # this row's own FK has to be `on_delete: :delete_all` in its own right.
+      assert Repo.aggregate(
+               from(a in Registry.SiteArtifact, where: a.site_id == ^site.id),
+               :count
+             ) == 0
+    end
+
+    test "an uploaded artifact with NO deployment (deployment_id nil) cascades on delete" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      # The site-scoped upload route's shape: bytes at rest before any build
+      # claims them. Nothing else in the delete path touches this row.
+      Repo.insert!(%Registry.SiteArtifact{
+        site_id: site.id,
+        deployment_id: nil,
+        sha256: String.duplicate("b", 64),
+        byte_size: 2,
+        bytes: <<9, 9>>
+      })
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      assert conn.status == 200, "site delete answered #{conn.status}: #{conn.resp_body}"
+      assert Registry.get_site(site.id) == nil
+
+      assert Repo.aggregate(
+               from(a in Registry.SiteArtifact, where: a.site_id == ^site.id),
+               :count
+             ) == 0
+    end
+
+    test "content-publish rows cascade on delete (the table that landed unasserted)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, _publish} =
+        Registry.ContentPublish.record(site.id, DateTime.utc_now(), %{doc_type: "paper"})
+
+      assert Repo.aggregate(
+               from(p in Registry.ContentPublish, where: p.site_id == ^site.id),
+               :count
+             ) == 1
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      assert conn.status == 200, "site delete answered #{conn.status}: #{conn.resp_body}"
+      assert Registry.get_site(site.id) == nil
+
+      assert Repo.aggregate(
+               from(p in Registry.ContentPublish, where: p.site_id == ^site.id),
+               :count
+             ) == 0
+    end
+
     test "a box that could NOT tear down leaves the row in place (no orphaned registration)" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
@@ -1972,6 +2413,128 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       refute Registry.get_site(site.id) == nil
     end
 
+    ## W68 — THE 502 ARM, WHICH NO TEST HAD EVER REACHED, AND WHICH USED TO SAY
+    ## "DEPLOY" IN A DELETE RECEIPT (charter D814, Option A).
+    ##
+    ## `teardown/2`'s 502 fires only on `{:error, reason}` — a programmed
+    ## `{:ok, 502, …}` never reaches it, because every `{:ok, 400..599}` is
+    ## mapped to the 422 above. `FakeBoxRelay` returns the programmed term
+    ## verbatim, so each of the four REACHABLE reasons is driven here
+    ## (`:identity_refused` is intercepted one clause earlier into the typed
+    ## 409, covered below). The details are pinned EXACTLY: before this wave the
+    ## `:no_admin_token` and catch-all sentences were `unreachable/2`'s deploy
+    ## copy, so the deploy-vs-teardown wording is precisely what can lose.
+    test "an unreachable box is a 502 whose copy narrates the TEARDOWN, never a deploy (all four reachable reasons)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      expected = [
+        {:not_live, "instance #{bp.slug} has no URL yet — it is still provisioning"},
+        {:no_admin_token,
+         "instance #{bp.slug} has no stored admin token — the control plane cannot " <>
+           "drive a teardown on it"},
+        {:decrypt_failed, "instance #{bp.slug}'s admin token could not be decrypted"},
+        # Any other reason (a transport error term) is the catch-all — the arm
+        # production actually populates. Its "is unreachable" substring is what
+        # `DeployLedger.classify/2` keys on and is preserved on purpose.
+        {:econnrefused,
+         "instance #{bp.slug} is unreachable — the teardown could not be delivered; " <>
+           "check instance health"}
+      ]
+
+      for {reason, detail} <- expected do
+        FakeBoxRelay.program(teardown: {:error, reason})
+
+        conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+        assert conn.status == 502, "#{reason}: status #{conn.status}, expected 502"
+        body = json_body(conn)
+        assert body["ok"] == false
+        assert body["error"] == "teardown_failed"
+        assert body["detail"] == detail
+        refute body["detail"] =~ "deploy", "#{reason}: a DELETE receipt said \"deploy\""
+
+        # An unreachable box was never torn down — the row must survive it.
+        refute Registry.get_site(site.id) == nil
+      end
+    end
+
+    ## W68 — THE ROLLBACK-COPY LEAK. The teardown 422 used to launder the box's
+    ## refusal body through `rollback_refusal/2`, so `{"error":"not_supported"}`
+    ## answered a DELETE with "this site has no live release yet — there is
+    ## nothing to roll back". Now the box's own word travels verbatim, and the
+    ## one verb-neutral typed sentence (`lock_held`) keeps its plain words.
+    test "a box refusal body never renders ROLLBACK prose in a delete receipt" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      # The leak case measured in the W68 brief: before the fix this detail read
+      # "this site has no live release yet — there is nothing to roll back".
+      FakeBoxRelay.program(teardown: {:ok, 422, %{"error" => "not_supported"}})
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["error"] == "teardown_failed"
+      assert body["detail"] == "not_supported"
+      refute body["detail"] =~ "roll back"
+
+      # The verb-neutral typed exit stays human: lock_held is a deploy running
+      # on the box, and saying so is true for a teardown too.
+      FakeBoxRelay.program(teardown: {:ok, 409, %{"error" => "lock_held"}})
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 422
+
+      assert json_body(conn)["detail"] ==
+               "a deploy is running on the box — try again once it finishes"
+
+      # A body with no typed word at all still gets the honest fallback.
+      FakeBoxRelay.program(teardown: {:ok, 500, %{}})
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 422
+      assert json_body(conn)["detail"] == "the instance could not tear this site down (HTTP 500)"
+
+      refute Registry.get_site(site.id) == nil
+    end
+
+    ## W70 (D847/D854) — the teardown twin of the rollback flat-detail proof:
+    ## the nested pre-poll refusal keeps `error` = "teardown_failed" (STRING,
+    ## what DeleteSpawnSite → cloudError decodes) and the box's words land in
+    ## flat top-level `detail`, composed "code — message".
+    test "a NESTED box refusal keeps error=teardown_failed and the box's words in flat detail" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(
+        teardown:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "already_running",
+               "message" => "deploy already running for blog"
+             }
+           }}
+      )
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+      assert conn.status == 422
+
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"] == "teardown_failed"
+      assert is_binary(body["detail"])
+      assert body["detail"] =~ "already_running"
+      assert body["detail"] =~ "deploy already running for blog"
+
+      # A refused teardown never deregisters the site.
+      refute Registry.get_site(site.id) == nil
+    end
+
     test "another team's site is 404, never deleted (team-scoped)" do
       {_owner, team} = user_with_team()
       bp = live_barkpark(team)
@@ -1982,6 +2545,75 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
       assert conn.status == 404
       # Untouched.
+      refute Registry.get_site(site.id) == nil
+    end
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## cloud-console-hardening W63 (D741/D763) — THE TYPED REFUSAL, AT THE WIRE.
+  ##
+  ## Added by the WAVE REVIEW, not the slice. cch-w63-s3 fenced the site writes
+  ## at `BoxRelay` and taught both routes a 4-tuple clause that relays the code
+  ## `Sites.Deploy` measured — but every assertion it shipped stops at the
+  ## `Sites.Deploy` return value. Deleting either router clause therefore still
+  ## sent a 409 wearing the flat `rollback_failed` / `teardown_failed` slug and
+  ## NOTHING went red, which is a guard-shaped hole in a wave whose thesis is
+  ## that a guard must be able to lose. These two drive the real conn.
+  ##
+  ## The flat slug is what makes the console unable to classify a site failure
+  ## at all: router.ex stamped `rollback_failed` on EVERY error status, so a
+  ## reader keying on the code learns nothing. The status still comes from
+  ## `Sites.Deploy`; these tests assert the ROUTE relays both halves.
+  ## ---------------------------------------------------------------------------
+
+  describe "a box that refused our credential answers a TYPED code on the wire" do
+    defp refused_barkpark(team) do
+      team
+      |> live_barkpark()
+      |> Ecto.Changeset.change(update_unavailable_reason: "identity_refused")
+      |> BarkparkCloud.Repo.update!()
+    end
+
+    test "POST /v1/sites/:id/rollback → 409 identity_refused, NOT rollback_failed, and no box call" do
+      {user, team} = user_with_team()
+      bp = refused_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      # ARMED: `record/1` only appends under a key `program/1` created, so an
+      # unprogrammed recorder answers `[]` for any traffic at all.
+      FakeBoxRelay.program([])
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+
+      assert conn.status == 409
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"] == "identity_refused"
+      refute body["error"] == "rollback_failed"
+      assert body["detail"] =~ "the instance rejected our access credential"
+      # A 502 would be a claim about the network. Nothing went on the wire.
+      assert FakeBoxRelay.calls() == []
+    end
+
+    test "DELETE /v1/sites/:id → 409 identity_refused, the row survives, and no box call" do
+      {user, team} = user_with_team()
+      bp = refused_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program([])
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      assert conn.status == 409
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"] == "identity_refused"
+      refute body["error"] == "teardown_failed"
+      assert body["detail"] =~ "the instance rejected our access credential"
+      assert FakeBoxRelay.calls() == []
+      # Box-first: a refused teardown never deregisters a still-serving box.
       refute Registry.get_site(site.id) == nil
     end
   end
@@ -2511,6 +3143,110 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       conn = call(:patch, "/v1/sites/#{site.id}", %{theme: "ember"}, write_token)
 
       assert conn.status == 200
+    end
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## deploy-reliability W17 S5: a driver that never started is not a 201
+  ## ---------------------------------------------------------------------------
+
+  # The supervisor refuses the child. Both deploy arms used to run this through
+  # `:ok = Sites.Deploy.start(row)` — a wrapper spec'd `:: :ok`, so the match
+  # could not fail and the refusal became a `201 created` for a build that does
+  # not exist.
+  defmodule RefusingStarter do
+    @moduledoc false
+    @behaviour BarkparkCloud.Sites.Deploy.Starter
+
+    # Mirrors the PRODUCTION refusal shape: `TaskStarter` wraps the
+    # `Task.Supervisor.start_child` result, so a `max_children` refusal reaches
+    # `start_reported/1` as `{:error, {:error, :max_children}}`. The site unwraps
+    # once, so `transport_reason/1` sees `{:error, :max_children}` and answers the
+    # bounded busy-box message (transport-leak wave D93).
+    @impl true
+    def start(_deployment_id), do: {:error, {:error, :max_children}}
+  end
+
+  describe "deploy-reliability W17 S5: a refused driver spawn answers 503, not 201" do
+    test "POST /v1/sites/:id/deploy (box build) → 503 deploy_not_started, row left queued" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      Process.put(:site_deploy_starter, RefusingStarter)
+
+      conn = call(:post, "/v1/sites/#{site.id}/deploy", %{}, token)
+
+      # The 201 is DOWNSTREAM of the start call, so nothing had been sent and the
+      # route can still tell the truth.
+      assert conn.status == 503
+      body = json_body(conn)
+      assert body["error"] == "deploy_not_started"
+      assert body["detail"] =~ "nothing is building"
+      # Redacted (D93): the client sees the bounded busy-box message, never the
+      # raw refusal term. The full term is Logger.error'd server-side.
+      assert body["reason"] == "the deploy could not be started — the box is busy; retry shortly"
+      refute body["reason"] =~ "max_children"
+
+      # The row IS minted and audited — the attempt is on the record, reapable,
+      # and named in the body so the operator can go look at it.
+      assert dep_id = body["deployment"]["id"]
+      assert Registry.get_deployment(dep_id).status == "queued"
+    end
+
+    test "POST …/deployments/:dep_id/artifact → 503 telling the caller to MINT A NEW deployment" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+
+      # The mint itself starts no driver (mint-then-upload, charter D86), so it
+      # still answers 201 even with a refusing starter installed.
+      dep = mint_prebuilt(site, token)
+      Process.put(:site_deploy_starter, RefusingStarter)
+
+      payload = :crypto.strong_rand_bytes(1024)
+      sha = sha256_hex(payload)
+
+      conn =
+        call_binary(
+          :post,
+          "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact",
+          payload,
+          token
+        )
+
+      assert conn.status == 503
+      body = json_body(conn)
+      assert body["error"] == "deploy_not_started"
+      assert body["artifact_sha256"] == sha
+      # Redacted (D93): bounded busy-box message client-side, full term logged.
+      assert body["reason"] == "the deploy could not be started — the box is busy; retry shortly"
+      refute body["reason"] =~ "max_children"
+
+      # THE INSTRUCTION MUST NOT BE "RE-POST". The bytes are stored, so the
+      # retry the caller would reach for is answered `already_uploaded` WITHOUT
+      # starting a driver — proven below.
+      assert body["detail"] =~ "Mint a NEW prebuilt deployment"
+      refute body["detail"] =~ "retry the upload"
+
+      # The stored bytes are retained (that is why the re-POST is a dead end).
+      assert Sites.Deploy.artifact_for(dep["id"]).sha256 == sha
+
+      # Proof the copy is honest: the same bytes again → 200 already_uploaded,
+      # and the row is STILL queued. Nothing was started by the retry.
+      retry =
+        call_binary(
+          :post,
+          "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact",
+          payload,
+          token
+        )
+
+      assert retry.status == 200
+      assert json_body(retry)["status"] == "already_uploaded"
+      assert Registry.get_deployment(dep["id"]).status == "queued"
     end
   end
 end

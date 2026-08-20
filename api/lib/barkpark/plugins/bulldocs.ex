@@ -209,6 +209,16 @@ defmodule Barkpark.Plugins.Bulldocs do
       {:get, "/d/:dataset/papers/:slug/email", BarkparkWeb.BulldocsEmailController, :show,
        auth: :public_root},
       {:post, "/bulldocs/papers", BarkparkWeb.BulldocsIngestController, :ingest, auth: :ingest},
+      # Validate-all dry-run (BPML masterplan W0): same body shapes as ingest,
+      # every violation (BPML parse, wall gates, structure) in one reply,
+      # nothing persisted. Registered BEFORE the :slug routes conceptually but
+      # unambiguous either way — "validate" is a fixed segment, not a slug arg.
+      {:post, "/bulldocs/papers/validate", BarkparkWeb.BulldocsIngestController, :validate,
+       auth: :ingest},
+      # Working-copy push (BPML masterplan W3): edited BPML + baseRev in,
+      # server-derived op batch under if_rev, canonical BPML back.
+      {:post, "/bulldocs/papers/:slug/sync", BarkparkWeb.BulldocsIngestController, :sync,
+       auth: :ingest},
       {:post, "/bulldocs/papers/:slug/ops", BarkparkWeb.BulldocsIngestController, :apply_op,
        auth: :ingest},
       # Session-handoff (task-3): a `session` is a blocks-doc twin of a paper
@@ -313,7 +323,13 @@ defmodule Barkpark.Plugins.Bulldocs do
         noun: "bulldocs",
         verb: "publish",
         summary:
-          "Publish (upsert) a paper from a portable-doc or HTML payload. " <>
+          "Publish (upsert) a paper from a portable-doc block payload. blocks[] is the door: " <>
+            "56 renderer block types (chart, diagram, asciicast, diff, filetree, pipeline, …) " <>
+            "with value-keyed inline leaves — items and cells are objects carrying a value key, " <>
+            "never bare strings (a bare string publishes clean and renders blank). " <>
+            "Guide: /papers/paper-authoring-excellence. " <>
+            "body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables " <>
+            "in the terminal reader. " <>
             "Reader spacing law: empty paragraph blocks are editor scaffolds, not published " <>
             "layout — remove them from ingest payloads; shared reader tokens own section rhythm.",
         http: %{method: "POST", path_template: "/v1/plugins/bulldocs/papers"},
@@ -325,7 +341,9 @@ defmodule Barkpark.Plugins.Bulldocs do
           %{
             name: "file",
             type: "file",
-            summary: "Payload (blocks or body_html) from a file or - for stdin."
+            summary:
+              "Payload from a file or - for stdin: portable-doc blocks (preferred) " <>
+                "or legacy body_html."
           }
         ],
         writes: true,

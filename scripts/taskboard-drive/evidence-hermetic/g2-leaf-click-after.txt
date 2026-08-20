@@ -1,0 +1,39 @@
+
+ barkpark · tasks                                         ⇄ 127.0.0.1  ● live · T ↔ ────────────────────────────────────────
+   Harbor lights epic ························································· 1/4 ││ Dredge the north channel               │
+ ├─▎◆ Dredge the north channel                                                      ││ ⠿ in_progress · P1 · C4/7 · task · fi… │
+ │    C4/7 · P1 · 1/2 · fixture-worker · T · T                                    ││                                        │
+ ├─ ○ Paint the pier bollards                                       C4/7 P2 0/1 T ││ criteria 1/2                           │
+ ├─ ○ Replace the fog bell                                          C4/7 P3 0/1 T ││                                        │
+ └─ ✓ Retire the old winch                                              C4/7 1/1 T ││ purpose · derived                      │
+                                                                                    ││   part of   fx-harbor                  │
+   Orchard rows epic ·························································· 0/3 ││   impact    blocks 0 · blocked by 0    │
+ ├─ ⠿ Mulch the seedling beds                                                       ││   does      Dredge the north channel   │
+ │    C4/7 · P2 · 0/1 · fixture-worker-two · T · T                                ││   why       Why this task is necessary │
+ ├─ ! Net the cherry rows                                   C5/7 P2 0/1 T blocked ││             within fx-harbor is not    │
+ └─ ○ Graft the pear stock                                          C4/7 P1 0/2 T ││             recorded.                  │
+                                                                                    ││   endgame   Advance fx-harbor by       │
+   (no epic) ·································································· 1/2 ││             completing this task.      │
+                                                                                    ││   important 90/100 — Derived from P1   │
+                                                                                    ││             queue priority.            │
+                                                                                    ││   relevant  90/100 — Derived from      │
+                                                                                    ││             active in-progress status. │
+                                                                                    ││   proof     Recorded task intent —     │
+                                                                                    ││             Dredge the north channel — │
+                                                                                    ││             document.title             │
+                                                                                    ││   proof     Mission placement — fx-    │
+                                                                                    ││             harbor — content.parent_id │
+                                                                                    ││   derived from recorded task facts · … │
+                                                                                    ││                                        │
+                                                                                    ││ created T ago (Aug 01, 09:01)        │
+                                                                                    ││ updated T ago (Aug 10, 08:00)         │
+                                                                                    ││                                        │
+                                                                                    ││ ○ created (Aug 01) →                   │
+                                                                                    ││   ⠿ claimed by fixture-worker (Aug 10) │
+                                                                                    ││                                        │
+                                                                                    ││   Fixture leaf, claimed and in         │
+                                                                                    ││   progress.                            │
+                                                                                    ││                                        │
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ ││ claim  fixture-worker · epoch 3 · cla… │
+ ⠿ 2 in flight · ○ 4 ready · ✓ 2 done · 4/18 criteria · 9 stale                 18% ││                                        │
+ jk move · enter open · esc back · c claim · x close · o studio · M mouse           ││                                        │

@@ -1,0 +1,22 @@
+{
+ "_fixture": "A reland_fetch.py artifact for a corpus of page_size+1 documents: 4 docs at page_size 3 CANNOT fit in one page, so an honest offset walk reports pages >= 2. The pre-fix workflow pinned limit=1000 with no walk and would have reported page 1 only. Not hand-waved: reland_loudfail.test.sh section 3 runs a REAL reland_fetch.py walk against a localhost stub serving these same documents and asserts the walk reports the same pages/docs/total this file claims.",
+ "reland_fetch": {
+  "status": "ok",
+  "note": "",
+  "pages": 2,
+  "page_size": 3,
+  "docs": 4,
+  "total": 4,
+  "truncated": false,
+  "http": 200,
+  "auth": "token"
+ },
+ "result": {
+  "documents": [
+   {"doc_id": "fx-page1-a", "content": {"lifecycle_status": "done", "landed": {"files": ["a.ex"]}}},
+   {"doc_id": "fx-page1-b", "content": {"lifecycle_status": "done", "landed": {"files": ["b.ex"]}}},
+   {"doc_id": "fx-page1-c", "content": {"lifecycle_status": "done", "landed": {"files": ["c.ex"]}}},
+   {"doc_id": "fx-page2-a", "content": {"lifecycle_status": "done", "landed": {"files": ["shipped.ex"]}}}
+  ]
+ }
+}

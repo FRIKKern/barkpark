@@ -2,18 +2,21 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
   @moduledoc """
   isu-w5 — the daily fleet-update digest: honest fleet roll-up (current/behind/
   paused counts + per-instance running->latest, state, pin/pause flags, last
-  checked), platform-admin-ONLY recipients (a non-admin registered user is never
-  a recipient), and a zero-admin logged no-op that never crashes.
+  checked), TEAM-MEMBER recipients since dr-w19-s5 (a registered user outside the
+  owning team is never a recipient, and an allowlisted address that is in no team
+  is not one either), and a no-recipient run that is counted, warned, and never
+  crashes.
 
-  `async: false` — the recipient allowlist is process-global Application config
-  (`:platform_admin_emails`), so these tests must not run concurrently against a
-  shared key. Oban runs in `:manual` mode (config/test.exs), so `perform_job/2`
+  `async: false` — several tests still WRITE `:platform_admin_emails`, which is
+  process-global Application config, precisely to prove the digest no longer
+  reads it; they must not run concurrently against a shared key. Oban runs in `:manual` mode (config/test.exs), so `perform_job/2`
   runs the worker synchronously in this test's transaction; the Swoosh Test
   adapter captures every send for `assert_email_sent` / `refute_email_sent`.
   """
   use BarkparkCloud.DataCase, async: false
   use Oban.Testing, repo: BarkparkCloud.Repo
 
+  import ExUnit.CaptureLog
   import Swoosh.TestAssertions
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
@@ -70,6 +73,62 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     # Oban uniqueness config is stamped onto the built job (guards double-send).
     unique = Ecto.Changeset.get_field(DailyDigestWorker.new(%{}), :unique)
     assert unique.period == 86_400
+
+    # dr-w29-s4: the states are named EXPLICITLY and `:completed` is NOT among
+    # them. Oban's default set includes it, which made the period a rolling
+    # window off yesterday's finished row instead of a same-day double-send
+    # guard. The behavioural proof is the next test; this is the shape pin, and
+    # it matches every other worker in `lib/barkpark_cloud/workers/`.
+    assert unique.states == [:available, :scheduled, :executing, :retryable, :suspended]
+    refute :completed in unique.states
+  end
+
+  ## 1b. The rolling-window defect — a COMPLETED digest must not eat today's tick
+  ##
+  ##     The pin above is a shape; this is the behaviour. Under the bare
+  ##     `unique: [period: 86_400]` Oban inherited `states: [scheduled,
+  ##     available, executing, retryable, completed]` and `timestamp:
+  ##     :inserted_at`, so YESTERDAY'S completed row suppressed today's enqueue
+  ##     whenever the cron tick landed microseconds earlier in the second than
+  ##     the previous one — no job row, no log, no telemetry, no delivery. Prod
+  ##     lost 3 of 7 days to it. Revert `@unique` to the bare option and this
+  ##     test REDS: `second.conflict?` is true and only one row exists.
+
+  test "a COMPLETED digest from yesterday does NOT suppress today's enqueue" do
+    {:ok, first} = Oban.insert(DailyDigestWorker.new(%{}))
+    refute first.conflict?
+
+    # Drive it to the state a finished cron tick leaves behind — the whole point
+    # is that a job Oban has already run is not a reason to refuse the next one.
+    first
+    |> Ecto.Changeset.change(
+      state: "completed",
+      completed_at: DateTime.utc_now()
+    )
+    |> Repo.update!()
+
+    # Today's tick: identical args, well inside the 86,400s period.
+    {:ok, second} = Oban.insert(DailyDigestWorker.new(%{}))
+
+    refute second.conflict?
+    assert second.id != first.id
+
+    # Two DISTINCT rows, not one row handed back twice.
+    rows =
+      Repo.all(Oban.Job) |> Enum.filter(&(&1.worker == "BarkparkCloud.Workers.DailyDigestWorker"))
+
+    assert length(rows) == 2
+    assert Enum.map(rows, & &1.id) |> Enum.uniq() |> length() == 2
+  end
+
+  test "a digest still PENDING does suppress a second enqueue (the guard still guards)" do
+    {:ok, first} = Oban.insert(DailyDigestWorker.new(%{}))
+    {:ok, second} = Oban.insert(DailyDigestWorker.new(%{}))
+
+    # `:available` IS in the state list, so the double-enqueue this option was
+    # written for is still refused — the fix widens nothing it should not.
+    assert second.conflict?
+    assert second.id == first.id
   end
 
   ## 2. Body rendering — honest fleet truth from fixture rows
@@ -85,6 +144,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
         update_running_release: "v1.2.0",
         update_latest_release: "v1.10.0",
         update_checked_at: checked,
+        commit_ancestry: "behind",
+        commit_distance: 42,
+        commit_distance_checked_at: checked,
         autoupdate_enabled: true,
         autoupdate_paused: true,
         pinned_release: "v1.2.0"
@@ -96,6 +158,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
         update_running_release: "v1.10.0",
         update_latest_release: "v1.10.0",
         update_checked_at: checked,
+        commit_ancestry: "current",
+        commit_distance: 0,
+        commit_distance_checked_at: checked,
         autoupdate_enabled: true,
         autoupdate_paused: false,
         pinned_release: nil
@@ -107,6 +172,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
         update_running_release: "v1.9.0",
         update_latest_release: "v1.9.0",
         update_checked_at: nil,
+        commit_ancestry: "behind",
+        commit_distance: 7,
+        commit_distance_checked_at: checked,
         autoupdate_enabled: false,
         autoupdate_paused: false,
         pinned_release: nil
@@ -121,25 +189,27 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     assert summary.latest == "v1.10.0"
 
     # Subject reflects the counts exactly.
+    # dr-w25-s6: the rungs are the control plane's MEASURED `commit_ancestry`,
+    # not the box's release-tag self-grade, and `unmeasured` is always shown.
     assert DigestEmail.subject(summary) ==
-             "Barkpark fleet digest — 1 current / 2 behind / 1 paused"
+             "Barkpark fleet digest — 1 current / 2 behind / 0 unmeasured / 1 paused"
 
     body = DigestEmail.body(summary)
 
     # Header: totals + semver-aware latest (v1.10.0 beats v1.9.0 — a lexical max fails).
-    assert body =~ "Fleet: 3 instances — 1 current, 2 behind, 1 paused."
+    assert body =~ "Fleet: 3 instances — 1 current, 2 behind, 0 unmeasured, 1 paused."
     assert body =~ "Latest available release: v1.10.0"
 
     # Per-instance honest lines: running -> latest, state, flags, last checked.
     assert body =~
-             "- Acme (acme): v1.2.0 -> v1.10.0 | state: behind | pinned=v1.2.0, paused | checked 2026-07-10 05:17 UTC"
+             "- Acme (acme): v1.2.0 -> v1.10.0 | state: behind | 42 commits behind main (measured 2026-07-10 05:17 UTC) | pinned=v1.2.0, paused | checked 2026-07-10 05:17 UTC"
 
     assert body =~
-             "- Beta (beta): v1.10.0 -> v1.10.0 | state: current | checked 2026-07-10 05:17 UTC"
+             "- Beta (beta): v1.10.0 -> v1.10.0 | state: current | 0 commits behind main (measured 2026-07-10 05:17 UTC) | checked 2026-07-10 05:17 UTC"
 
     # autoupdate-off flag + a never-checked instance render honestly.
     assert body =~
-             "- Gamma (gamma): v1.9.0 -> v1.9.0 | state: behind | autoupdate off | checked never"
+             "- Gamma (gamma): v1.9.0 -> v1.9.0 | state: behind | 7 commits behind main (measured 2026-07-10 05:17 UTC) | autoupdate off | checked never"
   end
 
   test "an empty fleet renders a clear no-instances digest without crashing" do
@@ -147,7 +217,7 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     assert summary.total == 0
 
     assert DigestEmail.subject(summary) ==
-             "Barkpark fleet digest — 0 current / 0 behind / 0 paused"
+             "Barkpark fleet digest — 0 current / 0 behind / 0 unmeasured / 0 paused"
 
     body = DigestEmail.body(summary)
     assert body =~ "Fleet: 0 instances."
@@ -157,9 +227,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
 
   ## 3. Recipients — platform-admin ONLY; a non-admin registered user is excluded
 
-  test "the digest reaches configured platform admins and NEVER a non-admin user" do
+  test "the digest reaches the instance's TEAM MEMBERS and NEVER a user outside the team" do
     admin = user("admin-#{System.unique_integer([:positive])}@example.com")
-    non_admin = user("member-#{System.unique_integer([:positive])}@example.com")
+    outsider = user("member-#{System.unique_integer([:positive])}@example.com")
     t = team(admin)
 
     _bp =
@@ -169,15 +239,18 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
         update_latest_release: "v1.1.0"
       })
 
-    # Only the admin is on the allowlist — the non-admin user exists but is not.
-    set_admins([admin.email])
+    # dr-w19-s5: the allowlist is EMPTY here on purpose. Before the re-address it
+    # was the whole audience, so this test would have sent nothing; the digest is
+    # now addressed to the owning team's members and this run must still deliver.
+    set_admins([])
 
     assert {:ok, %{sent: 1, recipients: recipients}} = perform_job(DailyDigestWorker, %{})
     assert recipients == [admin.email]
 
-    # The non-admin registered user is proven excluded from the RESOLVED recipient
-    # set (the exfiltration boundary — this is where a non-admin would leak in).
-    refute non_admin.email in recipients
+    # The registered user who is in no team is proven excluded from the RESOLVED
+    # recipient set — the exfiltration boundary, and the tenancy boundary too: a
+    # fleet-wide fan-out would have handed this account another team's instances.
+    refute outsider.email in recipients
 
     # ...and a real digest actually went to the admin (not a silent empty send).
     assert_email_sent(fn email ->
@@ -187,35 +260,212 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     end)
   end
 
-  test "a configured email with no registered account is dropped, never mailed" do
+  test "an allowlisted address that is in no team is dropped, never mailed" do
+    n = System.unique_integer([:positive])
+    member = user("op-#{n}@example.com")
+    listed_outsider = user("listed-#{n}@example.com")
+    t = team(member)
+
+    _bp = instance(t, "Prod", "prod-#{n}", %{update_state: "current"})
+
+    # A REGISTERED platform admin, a ghost address, and neither in the team that
+    # owns the instance. Before dr-w19-s5 the first two would both have been
+    # resolved (the ghost dropped for being unregistered, the admin mailed); now
+    # the allowlist decides nothing at all and only the team's member is mailed.
+    set_admins([listed_outsider.email, "ghost@example.com"])
+
+    assert {:ok, %{sent: 1, recipients: recipients}} = perform_job(DailyDigestWorker, %{})
+    assert recipients == [member.email]
+    refute listed_outsider.email in recipients
+    refute "ghost@example.com" in recipients
+  end
+
+  ## 4. Zero admins — a COUNTED LOSS (dr-w18-s3), never a send, never a crash
+  ##
+  ##    This section used to be titled "a logged no-op", and it asserted exactly
+  ##    the no-op: `{:ok, :no_admins}`, no email. Both of those are still true and
+  ##    both are still asserted — but on prod `PLATFORM_ADMIN_EMAILS` is unset, so
+  ##    this is the arm that runs EVERY day, and the pin below said nothing about
+  ##    whether anyone could tell. Oban recorded 5 of 5 digest jobs `completed`
+  ##    and `notification_deliveries` held zero `fleet_digest` rows across 37
+  ##    unpruned days: a push channel succeeding at sending nothing.
+  ##
+  ##    So the pin is WIDENED, not loosened. `{:ok, :no_admins}` stays exact
+  ##    (loosening it to `{:ok, _}` is the vacuity this epic exists to kill) and
+  ##    the run must now also produce a countable record of the loss.
+
+  # Attach a telemetry collector for one test and hand back the ref it tags with.
+  defp attach_digest_probe do
+    ref = make_ref()
+    test = self()
+    handler = "digest-probe-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark_cloud, :notifications, :fleet_digest, :settled],
+      fn _event, measurements, metadata, _ ->
+        send(test, {:fleet_digest, ref, measurements, metadata})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+    ref
+  end
+
+  test "a fleet with no reachable recipient is a COUNTED loss: recipients=0 sent=0, warned, still :ok" do
+    # dr-w19-s5 re-addressed the digest: the empty population is no longer the
+    # platform allowlist (which nobody could join) but a team with no members —
+    # the honest zero. An instance owned by a memberless team is the fleet row
+    # that reaches nobody, and the allowlist is set to a REGISTERED admin here on
+    # purpose: the old address must not be able to rescue this run.
+    n = System.unique_integer([:positive])
+    orphan_owner = user("nobody-#{n}@example.com")
+    {:ok, memberless} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+
+    _bp = instance(memberless, "Prod", "prod-#{n}", %{update_state: "behind"})
+
+    set_admins([orphan_owner.email])
+    ref = attach_digest_probe()
+
+    log =
+      capture_log(fn ->
+        assert {:ok, :no_admins} = perform_job(DailyDigestWorker, %{})
+      end)
+
+    # (a) THE COUNT — the record a reporter or a test can attach to. No Delivery
+    # row and no synthetic recipient are involved: charter D362 names this digest
+    # as a consented recipient-less withhold, and the count needs no recipient.
+    assert_received {:fleet_digest, ^ref, measurements, metadata}
+    assert measurements == %{recipients: 0, sent: 0}
+    assert metadata.phase == :settled
+    assert metadata.reason == "no_team_recipients"
+    assert metadata.instances == 1
+
+    # (b) THE LINE — greppable in journald, at WARNING, because "nobody was
+    # mailed" must not read like the info-level chatter of a healthy run.
+    assert log =~ "fleet_digest phase=settled"
+    assert log =~ "recipients=0"
+    assert log =~ "sent=0"
+    assert log =~ "[warning]"
+
+    # The Swoosh Test adapter posts {:email, _} to this process on any send —
+    # none arrives, proving the zero-admin path never delivered.
+    refute_received {:email, _}
+  end
+
+  ## 5. The counted loss is not a constant — a healthy run counts what it sent
+  ##
+  ##    Without this, §4 would pass against an accounting seam hard-wired to
+  ##    zero, which is the same false green one layer up.
+
+  test "a real send accounts recipients=1 sent=1 at info, not at warning" do
     admin = user("op-#{System.unique_integer([:positive])}@example.com")
     t = team(admin)
 
     _bp =
       instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{update_state: "current"})
 
-    # Real admin + a ghost address that was never registered.
-    set_admins([admin.email, "ghost@example.com"])
+    set_admins([admin.email])
+    ref = attach_digest_probe()
 
-    assert {:ok, %{sent: 1, recipients: recipients}} = perform_job(DailyDigestWorker, %{})
-    assert recipients == [admin.email]
-    refute "ghost@example.com" in recipients
+    # `config/test.exs` pins the PRIMARY logger level at :warning, which drops an
+    # info line before any capture handler sees it — so the level is lowered for
+    # this one test (the file is `async: false`) and restored. That the healthy
+    # line is invisible at the default level is the point, not an accident: the
+    # loss is loud where it runs, the healthy run is not.
+    prior_level = Logger.level()
+    Logger.configure(level: :info)
+    on_exit(fn -> Logger.configure(level: prior_level) end)
+
+    log =
+      capture_log(fn ->
+        assert {:ok, %{sent: 1, recipients: [_]}} = perform_job(DailyDigestWorker, %{})
+      end)
+
+    assert_received {:fleet_digest, ^ref, %{recipients: 1, sent: 1}, metadata}
+    assert metadata.reason == nil
+    assert log =~ "fleet_digest phase=settled recipients=1 sent=1"
+    refute log =~ "[warning]"
+    assert_email_sent()
   end
 
-  ## 4. Zero admins — a logged no-op, never a send, never a crash
+  ## 6. A PARTIAL send is a LOSS — `sent` is counted, never assumed (w18 review)
+  ##
+  ##    `sent` used to be `length(recipients)`: a digest that failed for two of
+  ##    three admins reported `sent: 3`. dr-w18-s3 derived it from
+  ##    `record_delivery/5`'s own `{:ok, _}` classification instead, which is a
+  ##    real correctness fix — and shipped with NO test over the `sent <
+  ##    recipients` branch, so the only witness of the counter was a run where
+  ##    every send succeeded. That is indistinguishable from `sent =
+  ##    length(recipients)` and leaves the fix unproven.
+  ##
+  ##    This drives a mailer that fails for ONE of two real recipients, so the
+  ##    counter has to disagree with the recipient count to pass.
 
-  test "zero configured admins is a no-op: no email sent, worker still :ok" do
-    admin = user("nobody-#{System.unique_integer([:positive])}@example.com")
-    t = team(admin)
+  test "a partial send counts what actually left: sent=1 of recipients=2, warned as partial_send" do
+    n = System.unique_integer([:positive])
+    good = user("op-good-#{n}@example.com")
+    bad = user("fail-op-#{n}@example.com")
+    t = team(good)
+    {:ok, _} = Accounts.add_member(t, bad, "admin")
 
-    _bp =
-      instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{update_state: "behind"})
+    _bp = instance(t, "Prod", "prod-#{n}", %{update_state: "behind"})
 
-    set_admins([])
+    set_admins([good.email, bad.email])
+    swap_mailer_adapter(BarkparkCloud.Workers.DailyDigestWorkerTest.HalfDeadAdapter)
+    ref = attach_digest_probe()
 
-    assert {:ok, :no_admins} = perform_job(DailyDigestWorker, %{})
-    # The Swoosh Test adapter posts {:email, _} to this process on any send —
-    # none arrives, proving the zero-admin path never delivered.
-    refute_received {:email, _}
+    log =
+      capture_log(fn ->
+        assert {:ok, %{sent: 1, recipients: recipients}} = perform_job(DailyDigestWorker, %{})
+        assert length(recipients) == 2
+      end)
+
+    # THE COUNTER DISAGREES WITH THE RECIPIENT COUNT. This is the assertion the
+    # old `sent = length(recipients)` could not satisfy at any value.
+    assert_received {:fleet_digest, ^ref, %{recipients: 2, sent: 1}, metadata}
+    assert metadata.reason == "partial_send"
+    assert log =~ "fleet_digest phase=settled recipients=2 sent=1"
+    assert log =~ "reason=partial_send"
+    assert log =~ "[warning]"
+
+    # And the Delivery rows agree with the count, because both read the same
+    # `{:ok, _}` classification: one sent, one failed.
+    rows = Repo.all(BarkparkCloud.Notifications.Delivery)
+    digest_rows = Enum.filter(rows, &(&1.event == "fleet_digest"))
+    assert Enum.count(digest_rows, &(&1.status == "sent")) == 1
+    assert Enum.count(digest_rows, &(&1.status == "failed")) == 1
+  end
+
+  # Swap the platform mailer adapter for one test and restore it after. The
+  # Swoosh Test adapter cannot fail, so a partial send is unreachable without
+  # this seam.
+  defp swap_mailer_adapter(adapter) do
+    prior = Application.get_env(:barkpark_cloud, BarkparkCloud.Mailer, [])
+
+    Application.put_env(
+      :barkpark_cloud,
+      BarkparkCloud.Mailer,
+      Keyword.put(prior, :adapter, adapter)
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark_cloud, BarkparkCloud.Mailer, prior) end)
+  end
+
+  # A mailer that refuses any recipient whose local part starts with "fail" and
+  # hands everything else to the ordinary Test adapter, so `assert_email_sent`
+  # still works for the half that got through.
+  defmodule HalfDeadAdapter do
+    use Swoosh.Adapter
+
+    @impl true
+    def deliver(%Swoosh.Email{to: [{_name, address} | _]} = email, config) do
+      if String.starts_with?(address, "fail") do
+        {:error, {:temporary_failure, "450 4.2.1 mailbox busy"}}
+      else
+        Swoosh.Adapters.Test.deliver(email, config)
+      end
+    end
   end
 end

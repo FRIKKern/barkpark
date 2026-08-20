@@ -228,7 +228,7 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		stack:         []Frame{{Kind: FrameBoard, Title: "tasks"}},
 		papers:        map[string]PaperState{},
 		cacheDir:      cfg.CacheDir,
-		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project),
+		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset),
 		fetch:         FetchSnapshotFull,
 		build:         BuildBoard,
 		doClaim:       DoClaim,
@@ -547,6 +547,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc", "backspace":
 		(&m).popFrame()
+		// Wide mode: esc back to the depth-0 board hands j/k to the board cursor
+		// again. enterTask (and any mouse preview-pane press) sets wideFocus=reader,
+		// but popFrame never touched it — so before this, Enter→Esc stranded j/k in
+		// the preview scroll with only a mouse board-pane click to recover. esc
+		// always returning you to list navigation is the invariant lazygit and k9s
+		// share; no new pane key, no new mode (charter D117).
+		if m.wide && len(m.stack) == 1 {
+			m.wideFocus = wideFocusBoard
+		}
 		return m, nil
 	case "M":
 		return m.toggleMouse()
@@ -916,14 +925,34 @@ func (m Model) clickFooterVerb(verb rune) (tea.Model, tea.Cmd) {
 }
 
 // footerVerbAt maps an absolute terminal click (x,y) to the board footer verb
-// whose span contains it, or (0,false). NARROW board mode only — the portrait
-// primary surface: wide two-pane and the reading frames expose no footer verb
-// targets (the reading footer omits c/x/o by charter). The geometry mirrors
-// Compose byte-for-byte: the footer is the last painted row (Y == height-1 after
-// Compose's clamps and its one blank top row), inset by the left gutter gl, and
-// the spans are computed at the same inner width renderFooter paints at.
+// whose span contains it, or (0,false). Both board frames now expose the verbs
+// (charter D111): the reading frames still omit c/x/o, so a pushed frame bails.
+// The geometry mirrors Compose byte-for-byte — the footer is the last painted
+// row, inset by the left gutter gl, and the spans are computed at the exact
+// inner width renderFooter paints at:
+//
+//   - NARROW: the footer spans the whole portrait inner width (width-gl-gr), so
+//     the ladder sheds against that.
+//   - WIDE (D111): the footer is the LEFT board pane, so it sheds against the
+//     live dragged/persisted boardPaneCols — one grammar, two widths. The pad is
+//     the same gl; the footer row is the pane's last row (Y == wideGeom's inner).
 func (m Model) footerVerbAt(x, y int) (rune, bool) {
-	if m.wide || m.topFrame().Kind != FrameBoard {
+	if m.topFrame().Kind != FrameBoard {
+		return 0, false
+	}
+	if m.wide {
+		gl, innerW, inner := m.wideGeom()
+		if y != inner {
+			return 0, false
+		}
+		boardW := m.boardPaneCols(innerW)
+		col := x - gl
+		_, spans := buildBoardFooter(boardW, m.ui.MouseReleased)
+		for _, s := range spans {
+			if col >= s.start && col < s.end {
+				return s.verb, true
+			}
+		}
 		return 0, false
 	}
 	width, height := m.width, m.height
@@ -1664,9 +1693,11 @@ func (m *Model) freeScroll(delta int) {
 	top.Scroll = nt
 }
 
-// readingWidth is the width a pushed frame renders at: full width in narrow
-// push mode, the right-pane width in wide two-pane mode (charter D24: the
-// renderers cap the reading measure at 72 internally, so extra width is margin).
+// readingWidth is the width a pushed frame renders at: the pane width capped by
+// docLayout at the paper-standard 100-col document column (charter D24: the
+// renderers additionally cap the prose measure at 72 internally). It MUST
+// mirror the width composeAt paints at, or scroll clamps and paint disagree
+// about how lines wrap.
 func (m Model) readingWidth() int {
 	w := m.width
 	if w < 20 {
@@ -1680,12 +1711,19 @@ func (m Model) readingWidth() int {
 	} else {
 		w -= 4
 	}
+	// composeAt re-floors the post-gutter width at 20 (compose.go:234-237) BEFORE
+	// docLayout; mirror that floor or the scroll clamp under-counts the true paint
+	// at tiny widths (narrow, m.width 19..22: the measure lagged paint by 3/3/2/1).
+	if w < 20 {
+		w = 20
+	}
 	if m.wide {
 		w = w - m.boardPaneCols(w) - paneGutter2
 		if w < minReadingWidth {
 			w = minReadingWidth
 		}
 	}
+	w, _ = docLayout(w)
 	return w
 }
 
@@ -1708,9 +1746,9 @@ func (m Model) readingViewportHeight() int {
 		h = 8 // composeAt re-floors, so short panes never over-report
 	}
 	if m.wide {
-		return h - 1
+		return h - 1 // the sheet's ─ top edge (renderDocPane)
 	}
-	return h - 2
+	return h - 2 // the reading footer + the sheet's ─ top edge
 }
 
 // readingSubjectTask resolves the task the act verbs (c/x/o) target in a pushed

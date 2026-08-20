@@ -887,7 +887,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
         diff_section_rows_html(head)
       end
 
-    ~s|<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
+    ~s|<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
       counts <> body <> ~s|</div>|
   end
 
@@ -917,7 +917,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
         else:
           ~s|<div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">#{escape_html(legend)}</div>|
 
-    ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
+    ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
       rows <> legend_html <> ~s|</div>|
   end
 
