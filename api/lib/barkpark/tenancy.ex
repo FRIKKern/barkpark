@@ -928,6 +928,67 @@ defmodule Barkpark.Tenancy do
        when is_binary(principal_id) and is_binary(principal_type) do
     ws_attrs = put_derived_slug(attrs)
 
+    if slug_value(ws_attrs) == @default_slug do
+      {:error, singleton_slug_error(ws_attrs)}
+    else
+      do_create_owned_workspace(ws_attrs, principal_id, principal_type)
+    end
+  end
+
+  # ── Instance-singleton seat guard (task-94a6ed8ced1fc547) ───────────────────
+  #
+  # `get_default_workspace/0` identifies a security-relevant SINGLETON by a
+  # mutable string — `Repo.get_by(Workspace, slug: @default_slug)`. Whoever holds
+  # that slug IS the instance default: `AssignDefaultScope` binds every flat
+  # route to it, and `Content.WriteScope.resolve_write_scope/1` stamps an
+  # UNSCOPED WRITE with it. So while the seat is vacant, taking the slug takes
+  # the seat, and an unscoped write lands in the claimant's workspace.
+  #
+  # The seat goes vacant in NORMAL operation, not only via a destructive admin
+  # action: `SupportResetDefaultWorkspaceStep` deletes it and the following
+  # `SupportAdminTokenStep` re-mints it — the seat is vacant BETWEEN the two, and
+  # the bracket tolerates an absent workspace so re-runs converge.
+  #
+  # GUARDED HERE — after `put_derived_slug/1`, on the ONE chokepoint every
+  # ownership-claiming path funnels through — because the slug is DERIVED as
+  # often as it is typed. `slugify("Default") == "default"`, so three of the four
+  # claim paths never send a `slug` field at all:
+  #
+  #   * POST /api/workspaces {"slug":"default"}              explicit
+  #   * POST /api/workspaces {"name":"Default"}              derived
+  #   * Studio create-workspace (live/studio/.../scope.ex)   derived
+  #   * studio_chrome.ex                                     derived
+  #
+  # A controller-level check on `params["slug"]` sees only the first.
+  #
+  # `create_workspace/1` is deliberately NOT guarded: it is the INTERNAL creator
+  # that legitimately mints the singleton (`Seeds.Shared.ensure_default_scope/0`,
+  # `mix frt.seed`), and it is how the support bracket recovers. The line this
+  # guard draws is exactly "a PRINCIPAL is claiming ownership of a new
+  # workspace" — which must never yield the singleton — versus "the SYSTEM is
+  # establishing its own default".
+  #
+  # The refusal is a CHANGESET error, so it surfaces as the same 422 a duplicate
+  # slug already produces: the Studio handlers' existing `{:error, changeset}`
+  # branches and the support box's `case "$code" in 2*|409|422)` tolerance both
+  # keep working untouched.
+  #
+  # RESIDUE, stated rather than implied: renaming a workspace INTO the slug
+  # bypasses this, since `Workspace.changeset/2` casts `:slug`. There is no
+  # `update_workspace/2` and no HTTP update route today, so it is unreachable —
+  # but the end state is to stop identifying the singleton by a claimable string
+  # at all, which is a data-model change this guard does not attempt.
+  defp singleton_slug_error(attrs) do
+    %Workspace{}
+    |> Workspace.changeset(attrs)
+    |> Ecto.Changeset.add_error(
+      :slug,
+      "is reserved for the instance default workspace and cannot be claimed"
+    )
+    |> Map.put(:action, :insert)
+  end
+
+  defp do_create_owned_workspace(ws_attrs, principal_id, principal_type) do
     Repo.transaction(fn ->
       with {:ok, workspace} <- create_workspace(ws_attrs),
            {:ok, _membership} <-
