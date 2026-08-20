@@ -29,6 +29,13 @@ defmodule BarkparkWeb.GithubWebhookController do
         it acts only on `action == "opened"`, drops `[bot]`-sender deliveries
         (D4 cut #1), and births a deterministic `gh-<num>` task through the
         `Tasks.Dedup` seam.
+    * `"pull_request"` → `Barkpark.Plugins.Github.MergeEvents.handle/2`
+      (ledger-merge-criterion-autostamp). A merged close (`action == "closed"` +
+      `pull_request.merged == true`) resolves the PR's `Task: <doc_id>` trailer and
+      auto-stamps the task's explicit `merge_gate:true` criterion via
+      `Tasks.reconcile_merge_gate/3` (STAMP-ONLY — never a lifecycle flip, so the
+      lead keeps close's claim/epoch judgment and other unmet criteria stay
+      visibly partial). Named idempotent outcomes; a non-merge close is a no-op.
     * `"ping"` → `200 {ok: true}`. GitHub's install handshake; nothing to do.
     * anything else → `202` no-op (accepted, ignored).
 
@@ -75,6 +82,7 @@ defmodule BarkparkWeb.GithubWebhookController do
   def receive(conn, params) do
     case github_event(conn) do
       "issues" -> handle_issues(conn, params)
+      "pull_request" -> handle_pull_request(conn, params)
       "ping" -> json(conn, %{ok: true})
       _other -> conn |> put_status(:accepted) |> json(%{ok: true, ignored: "event"})
     end
@@ -168,6 +176,53 @@ defmodule BarkparkWeb.GithubWebhookController do
     end
   end
 
+  # `pull_request` event → the merge-event bridge (ledger-merge-criterion-autostamp).
+  # A merged close auto-stamps the task's explicit `merge_gate:true` criterion via
+  # `Tasks.reconcile_merge_gate/3` (STAMP-ONLY — never a lifecycle flip). Every
+  # outcome tag gets an explicit 2xx clause so a new tag never CaseClauseErrors →
+  # 500 → GitHub retry-storm. Only a genuine ledger-write failure ({:error, _}) is
+  # 5xx (retryable, replay-safe via `:already_stamped`).
+  defp handle_pull_request(conn, params) do
+    case merge_events_fun().(params, ingest_opts()) do
+      {:ok, :stamped, doc_id, indices} ->
+        # The merge-gate criterion (or several) flipped met on the resolved task.
+        json(conn, %{ok: true, stamped: true, task: doc_id, criteria: indices})
+
+      {:ok, tag, doc_id} when tag in [:already_stamped, :no_marker, :no_guardable_marker] ->
+        # Named idempotent / no-write outcomes: replayed event, unmarked legacy
+        # gate, or an unguardable gate. All handled — 2xx, never a retry.
+        json(conn, %{ok: true, reconciled: to_string(tag), task: doc_id})
+
+      {:ambiguous_trailer, ids} ->
+        # The PR body references more than one distinct task — refused, not guessed.
+        conn
+        |> put_status(:accepted)
+        |> json(%{ok: true, ignored: "ambiguous_trailer", tasks: ids})
+
+      {:unknown_task, doc_id} ->
+        # The trailer names a doc that does not resolve. Accepted no-op (a retry
+        # cannot make the task exist; a re-projection/adopt will, on a later merge).
+        conn |> put_status(:accepted) |> json(%{ok: true, ignored: "unknown_task", task: doc_id})
+
+      tag when tag in [:no_trailer, :ignored] ->
+        # No `Task:` trailer, or not a merged close. Verified + deliberately no-op.
+        conn |> put_status(:accepted) |> json(%{ok: true, ignored: to_string(tag)})
+
+      {:error, reason} ->
+        # A genuine ledger-write failure (e.g. a rev-CAS race). 5xx invites GitHub
+        # to redeliver; the reconcile is replay-safe (redelivery → :already_stamped).
+        Logger.error(
+          "github webhook: merge reconcile failed for PR ##{pr_number(params)}: #{inspect(reason)}"
+        )
+
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{
+          error: %{code: "merge_reconcile_failed", message: "could not process delivery"}
+        })
+    end
+  end
+
   # First non-blank X-GitHub-Event header value, downcased, or "" when absent.
   # GitHub sends exactly one; a missing/blank header falls through to the 202
   # no-op branch (never crashes).
@@ -185,6 +240,15 @@ defmodule BarkparkWeb.GithubWebhookController do
   # Kept to the small integer GitHub assigns; never the free-text fields.
   defp issue_number(params) do
     case get_in(params, ["issue", "number"]) do
+      n when is_integer(n) -> n
+      _ -> "?"
+    end
+  end
+
+  # The PR number if present, else "?" — for the failure log line only (never the
+  # attacker-controlled title/body).
+  defp pr_number(params) do
+    case get_in(params, ["pull_request", "number"]) do
       n when is_integer(n) -> n
       _ -> "?"
     end
@@ -226,6 +290,17 @@ defmodule BarkparkWeb.GithubWebhookController do
 
   defp default_inbound(payload, opts) do
     mod = Module.concat(Barkpark.Plugins.Github, InboundEvents)
+    mod.handle(payload, opts)
+  end
+
+  # MergeEvents seam, mirroring `inbound_fun/0`: overridable in test via app env
+  # (`:github_webhook_merge_events_fun`), else the real module resolved dynamically.
+  defp merge_events_fun do
+    Application.get_env(:barkpark, :github_webhook_merge_events_fun) || (&default_merge_events/2)
+  end
+
+  defp default_merge_events(payload, opts) do
+    mod = Module.concat(Barkpark.Plugins.Github, MergeEvents)
     mod.handle(payload, opts)
   end
 end

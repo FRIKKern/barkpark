@@ -1,0 +1,82 @@
+COMMAND "Ensure an Elixir import" DESCRIPTION "Idempotently make sure a module `import` line exists in an Elixir file — insert it once after a caller-named anchor line, skip forever after. The ensure family: the guard keys on the hand-reproducible import line itself, so a human who typed the same line first wins and scaffy stays out of the way." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "scaffy", "scaffold" CONCEPT "ensure-import" VARIANT "elixir" DIRECTION "add" VARIABLES
+  VARIABLE 1 "Module" OPAQUE TITLE "Module to import" DESCRIPTION "The module name imported — the exact text after `import `, e.g. `Logger` or `Ecto.Query`. OPAQUE: substituted verbatim, never re-cased; a module name carries dots and mixed case, so there is one spelling per file ({{.Module}})." EXAMPLES "Logger", "Ecto.Query", "Bitwise"
+  VARIABLE 2 "TargetFile" OPAQUE TITLE "File to edit" DESCRIPTION "Repo-relative path of the Elixir source that should carry the import. OPAQUE — a path is never re-cased." EXAMPLES "api/lib/barkpark/content.ex", "api/lib/barkpark/plugins/tickets.ex"
+  VARIABLE 3 "AnchorLine" OPAQUE TITLE "Existing line to insert after" DESCRIPTION "The verbatim existing line the import is placed directly after — typically the module's `use` line or its first existing `import`/`alias`. The full line, exactly as it appears (leading indentation included). OPAQUE: matched verbatim, never re-cased." EXAMPLES "  use Ecto.Schema", "  use Barkpark, :context", "  require Logger"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE ENSURE LAW (charter D57) — why this is not a MARK-guarded command
+# ─────────────────────────────────────────────────────────────────────────────
+# An ensure command guarantees a line a developer could just as well have typed
+# by hand. So idempotency keys on that HAND-REPRODUCIBLE line — the full import
+# text `import {{.Module}}` — and NEVER on a `MARK:` comment. This is the whole
+# distinction from add-oban-worker / add-cli-verb, whose guards key on the mark:
+# there, scaffy OWNS the block it plants. Here it does not — a human import and a
+# scaffy import are the same line, and the guard must treat them identically.
+#
+# Two consequences fall out of that law, both binding on every ensure-* command:
+#
+#   1. A NO-OP RUN WRITES NO RECEIPT. If the guard already sees `import {{.Module}}`
+#      (however it got there — scaffy earlier, or a hand edit), the op is skipped
+#      and NOTHING is written: no file change, and crucially no receipt in
+#      `.scaffy/receipts/`. Scaffy records only what it actually did.
+#
+#   2. `bp scaffy remove` AFTER A SKIP EXITS 4 — AND THAT IS CORRECT. remove is
+#      receipt replay (D36). A skipped ensure wrote no receipt, so remove finds
+#      none and exits 4 (ReceiptMissingError), leaving the file untouched. Scaffy
+#      never owned that import line, so it must not remove it. Exit 4 here is the
+#      SUCCESS signal of the ensure contract, not a failure — do not "fix" it.
+#
+# SUBSTRING FALSE-SKIP CAVEAT (read before using on submodule imports). The guard
+# is a plain substring test: `import {{.Module}}`. So `import Logger` is a
+# substring of an ALREADY-PRESENT `import Logger.Handlers` — the run would skip
+# and never add the bare `import Logger` you asked for. The guard cannot tell a
+# prefix apart from a whole import. Mitigation: pass the EXACT module you mean; if
+# you need `import Logger` and the file already imports `import Logger.Handlers`,
+# the two are genuinely different imports and this substring guard will not add
+# the second — insert it by hand, or narrow the design (a trailing-newline guard
+# is not expressible in a single-line ASLONG). This is a known, documented edge;
+# for the overwhelmingly common flat-module case it is a non-issue.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP — insert `import {{.Module}}` once, directly after the anchor line
+# ─────────────────────────────────────────────────────────────────────────────
+# INSERT AFTER FIRST {{.AnchorLine}}: the payload lands immediately below the
+# first occurrence of the caller's anchor. The payload plants a provenance
+# comment carrying the mark (so remove has a handle and a reader sees where the
+# line came from) plus the import itself. The mark name is the FIXED kebab
+# `ensure-import`: a plain MARK requires its `MARK:` text verbatim in the payload
+# (it is here), and it need not be per-module unique because remove is receipt
+# replay keyed on command+vars (D35/D36) — two ensured imports in one file get
+# two receipts and retract independently, even sharing the mark comment.
+#
+# The ASLONG guard is the ENSURE LAW in one line: DONT CONTAIN the import text
+# itself. It is a verbatim substring of the payload (E-006, add polarity → guard
+# derives from what the op writes), ASCII, and brace-safe (`}}` is followed by a
+# space, never a literal `}`).
+IN "{{.TargetFile}}"
+### Ensure `import {{.Module}}` exists after the anchor line
+INSERT AFTER FIRST
+::: anchor line :::
+{{.AnchorLine}}
+::: anchor line :::
+WITH
+::: {{.Module}} import :::
+  # scaffy:ensure-import {{.Module}} MARK:ensure-import
+  import {{.Module}}
+::: {{.Module}} import :::
+MARK "ensure-import"
+ASLONG FILE DONT CONTAIN "import {{.Module}}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# The import is present (verbatim substring of the payload the op writes). This
+# ASSERT FILE holds whether scaffy inserted the line this run or a prior run / a
+# hand edit already had it — the ensure contract guarantees the END STATE.
+ASSERT FILE "{{.TargetFile}}" CONTAINS "import {{.Module}}"
+
+# Compile gate — an import of a module that does not exist fails compilation.
+# Every Elixir gate is TIER ci (A2): never run in the apply worktree, only on CI
+# where the BEAM toolchain is provisioned. A skipped (no-op) run still asserts —
+# the end state is what is checked.
+ASSERT CMD "cd api && mix compile" TIER ci

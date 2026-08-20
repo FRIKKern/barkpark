@@ -1,0 +1,40 @@
+{
+  "asserts": null,
+  "command": "Add an API Error Shape",
+  "direction": "add",
+  "duration_ms": 1,
+  "ok": true,
+  "ops": [
+    {
+      "index": 2,
+      "kind": "insert-after-first",
+      "line": 0,
+      "mark": "error-test-duel_probe",
+      "path": "api/test/barkpark/content/errors_test.exs",
+      "status": "removed"
+    },
+    {
+      "index": 1,
+      "kind": "insert-after-first",
+      "line": 0,
+      "mark": "error-shape-duel_probe",
+      "path": "api/lib/barkpark/content/errors.ex",
+      "status": "removed"
+    },
+    {
+      "index": 0,
+      "kind": "replace",
+      "line": 0,
+      "mark": "error-hint-duel_probe",
+      "path": "api/lib/barkpark/content/errors.ex",
+      "status": "restored"
+    }
+  ],
+  "receipt": "/private/tmp/scaffy-duel-add-error-shape--A--3/.scaffy/receipts/error-shape--duel-probe--e811af0c9837.json",
+  "vars": {
+    "Hint": "Retry the duel probe once the transient condition clears.",
+    "Message": "duel probe error",
+    "Status": "418",
+    "error_code": "duel_probe"
+  }
+}

@@ -18,19 +18,26 @@ defmodule Barkpark.Search.Crystallizer do
   # duplicate rows, bounded cost.
   @backfill_days 3
 
-  @doc "Crystallize all surface/scope pairs for a trailing day window plus week/month boundaries when due."
+  @doc "Crystallize all surface/scope/workspace tuples for a trailing day window plus week/month boundaries when due."
   @spec crystallize_due(Date.t()) :: map()
   def crystallize_due(%Date{} = today \\ Date.utc_today()) do
     day_targets = for n <- 1..@backfill_days, do: Date.add(today, -n)
 
-    pairs =
-      from(e in Event, select: {e.surface, e.scope}, distinct: true)
+    # Enumerate distinct (surface, scope, workspace_id) TRIPLES, not just
+    # (surface, scope) pairs. Two workspaces that share a scope STRING (e.g. both
+    # own the universally-seeded `"production"` slug) resolve to the SAME
+    # `dataset_id`, so a scope-only enumeration folded their events into one
+    # crystal (workspace_id=nil) and summed two tenants' analytics. The
+    # workspace_id leaf keeps each tenant's roll-up on its own row.
+    triples =
+      from(e in Event, select: {e.surface, e.scope, e.workspace_id}, distinct: true)
       |> Repo.all()
 
     day_stats =
-      Enum.flat_map(pairs, fn {surface, scope} ->
+      Enum.flat_map(triples, fn {surface, scope, workspace_id} ->
         Enum.map(day_targets, fn day ->
-          {{surface, scope, day}, crystallize_period(surface, scope, :day, day)}
+          {{surface, scope, workspace_id, day},
+           crystallize_period(surface, scope, :day, day, workspace_id)}
         end)
       end)
 
@@ -49,8 +56,9 @@ defmodule Barkpark.Search.Crystallizer do
         this_monday = Date.add(today, -(Date.day_of_week(today) - 1))
         week_start = Date.add(this_monday, -7)
 
-        Enum.map(pairs, fn {surface, scope} ->
-          {{surface, scope}, crystallize_period(surface, scope, :week, week_start)}
+        Enum.map(triples, fn {surface, scope, workspace_id} ->
+          {{surface, scope, workspace_id},
+           crystallize_period(surface, scope, :week, week_start, workspace_id)}
         end)
       else
         []
@@ -62,8 +70,9 @@ defmodule Barkpark.Search.Crystallizer do
         # 2nd and 3rd all target the same month and dedup via upsert.
         month_start = Date.add(Date.beginning_of_month(today), -1) |> Date.beginning_of_month()
 
-        Enum.map(pairs, fn {surface, scope} ->
-          {{surface, scope}, crystallize_period(surface, scope, :month, month_start)}
+        Enum.map(triples, fn {surface, scope, workspace_id} ->
+          {{surface, scope, workspace_id},
+           crystallize_period(surface, scope, :month, month_start, workspace_id)}
         end)
       else
         []
@@ -76,9 +85,23 @@ defmodule Barkpark.Search.Crystallizer do
     }
   end
 
-  @doc "Crystallize one surface/scope/period bucket (idempotent upsert)."
-  @spec crystallize_period(String.t(), String.t(), :day | :week | :month, Date.t()) :: map()
-  def crystallize_period(surface, scope, period, period_start)
+  @doc """
+  Crystallize one surface/scope/workspace/period bucket (idempotent upsert).
+
+  `workspace_id` scopes both the events read AND the roll-up rows written, so a
+  scope STRING shared across tenants no longer merges their analytics. `nil` is
+  the legacy/unscoped bucket (events whose `workspace_id IS NULL`) — the default
+  keeps the pre-tenancy `crystallize_period/4` call sites behaviour-identical.
+  """
+  @spec crystallize_period(
+          String.t(),
+          String.t(),
+          :day | :week | :month,
+          Date.t(),
+          binary() | nil
+        ) ::
+          map()
+  def crystallize_period(surface, scope, period, period_start, workspace_id \\ nil)
       when is_binary(surface) and is_binary(scope) and period in [:day, :week, :month] do
     {start_dt, end_dt} = period_bounds(period, period_start)
 
@@ -88,13 +111,17 @@ defmodule Barkpark.Search.Crystallizer do
           e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^start_dt and
             e.inserted_at < ^end_dt
       )
+      |> scope_workspace(workspace_id)
       |> Repo.all()
 
     query_rows = aggregate_queries(events)
     merge_rows = detect_merge_patterns(events)
 
-    crystal_count = upsert_crystals(surface, scope, period, period_start, query_rows, events)
-    pattern_count = upsert_merge_patterns(surface, scope, period, period_start, merge_rows)
+    crystal_count =
+      upsert_crystals(surface, scope, period, period_start, query_rows, events, workspace_id)
+
+    pattern_count =
+      upsert_merge_patterns(surface, scope, period, period_start, merge_rows, workspace_id)
 
     %{
       events: length(events),
@@ -143,6 +170,15 @@ defmodule Barkpark.Search.Crystallizer do
         "filter_merge"
     end
   end
+
+  # Tenant leaf for the events read + upsert get_by. A `nil` workspace_id means
+  # the legacy/unscoped bucket, so match `IS NULL` (never `= NULL`, which is
+  # never true) — Postgres treats NULL as distinct, so this keeps the null arm
+  # from folding into a real tenant's roll-up.
+  defp scope_workspace(query, nil), do: from(e in query, where: is_nil(e.workspace_id))
+
+  defp scope_workspace(query, workspace_id),
+    do: from(e in query, where: e.workspace_id == ^workspace_id)
 
   defp period_bounds(:day, day) do
     start_dt = DateTime.new!(day, ~T[00:00:00], "Etc/UTC")
@@ -233,7 +269,15 @@ defmodule Barkpark.Search.Crystallizer do
     {rows, rejected_count}
   end
 
-  defp upsert_crystals(surface, scope, period, period_start, {rows, rejected_count}, _events) do
+  defp upsert_crystals(
+         surface,
+         scope,
+         period,
+         period_start,
+         {rows, rejected_count},
+         _events,
+         workspace_id
+       ) do
     period_str = Atom.to_string(period)
 
     quality_row = %{
@@ -259,7 +303,8 @@ defmodule Barkpark.Search.Crystallizer do
           surface: surface,
           scope: scope,
           period: period_str,
-          period_start: period_start
+          period_start: period_start,
+          workspace_id: workspace_id
         })
         |> put_dataset_id(scope)
       )
@@ -271,14 +316,20 @@ defmodule Barkpark.Search.Crystallizer do
   defp upsert_crystal(changeset) do
     attrs = Ecto.Changeset.apply_changes(changeset)
 
-    case Repo.get_by(Crystal,
-           surface: attrs.surface,
-           scope: attrs.scope,
-           period: attrs.period,
-           period_start: attrs.period_start,
-           query_normalized: attrs.query_normalized,
-           filter_fingerprint: attrs.filter_fingerprint
-         ) do
+    # Query (not get_by): a `nil` workspace_id must match `IS NULL`, and Ecto
+    # forbids `= nil` in a keyword get_by. scope_workspace/2 picks the arm.
+    existing =
+      from(c in Crystal,
+        where:
+          c.surface == ^attrs.surface and c.scope == ^attrs.scope and
+            c.period == ^attrs.period and c.period_start == ^attrs.period_start and
+            c.query_normalized == ^attrs.query_normalized and
+            c.filter_fingerprint == ^attrs.filter_fingerprint
+      )
+      |> scope_workspace(attrs.workspace_id)
+      |> Repo.one()
+
+    case existing do
       nil ->
         Repo.insert!(changeset)
 
@@ -369,7 +420,7 @@ defmodule Barkpark.Search.Crystallizer do
     }
   end
 
-  defp upsert_merge_patterns(surface, scope, period, period_start, rows) do
+  defp upsert_merge_patterns(surface, scope, period, period_start, rows, workspace_id) do
     period_str = Atom.to_string(period)
 
     Enum.map(rows, fn row ->
@@ -379,7 +430,8 @@ defmodule Barkpark.Search.Crystallizer do
           surface: surface,
           scope: scope,
           period: period_str,
-          period_start: period_start
+          period_start: period_start,
+          workspace_id: workspace_id
         })
         |> put_dataset_id(scope)
       )
@@ -391,15 +443,19 @@ defmodule Barkpark.Search.Crystallizer do
   defp upsert_merge_pattern(changeset) do
     attrs = Ecto.Changeset.apply_changes(changeset)
 
-    case Repo.get_by(MergePattern,
-           surface: attrs.surface,
-           scope: attrs.scope,
-           period: attrs.period,
-           period_start: attrs.period_start,
-           from_fingerprint: attrs.from_fingerprint,
-           to_fingerprint: attrs.to_fingerprint,
-           pattern_type: attrs.pattern_type
-         ) do
+    existing =
+      from(m in MergePattern,
+        where:
+          m.surface == ^attrs.surface and m.scope == ^attrs.scope and
+            m.period == ^attrs.period and m.period_start == ^attrs.period_start and
+            m.from_fingerprint == ^attrs.from_fingerprint and
+            m.to_fingerprint == ^attrs.to_fingerprint and
+            m.pattern_type == ^attrs.pattern_type
+      )
+      |> scope_workspace(attrs.workspace_id)
+      |> Repo.one()
+
+    case existing do
       nil ->
         Repo.insert!(changeset)
 

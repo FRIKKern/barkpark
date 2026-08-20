@@ -1,0 +1,53 @@
+{
+  "grip_id": "v-ws-join-proof-2026-07-26",
+  "verifier": "v-ws-join-proof",
+  "wave": "search-template-wave-9-2026-07-26",
+  "assignment": "Does the WS fix actually land end-to-end on guerrilla? Read SearchChannel join authorization completely; prove the transport with the REAL deployed search-ember slot token; confirm public-read clamp is browser-safe; settle whether astro-search's live bundle has WS armed; compute new URL('https://guerrilla.barkpark.cloud/w/default/p/default').origin.",
+  "verdict": "THE WS FIX LANDS — proven end-to-end today with search-ember's own deployed token: phx_join on search:default:default:production replies {\"status\":\"ok\"} and a query frame returns count=670. Token is {public-read}, unrevoked, no expiry, and live-refuses write (403) and admin (403) — browser-safe per the README contract. Origin derivation is correct: .origin yields the bare https://guerrilla.barkpark.cloud (astro inlines exactly that + \"/socket\"). Astro's live bundle IS armed (token + socket URL + dataset all build-time inlined); Next's live bundle is NOT (process.env reads survive verbatim, enable-flag D=!!(L&&P) is false). NEW BLOCKING FINDING the digest missed: the Next module also reads BARKPARK_DATASET (non-NEXT_PUBLIC, never client-inlinable) with fallback \"docs\" — and topic search:default:default:docs JOINS GREEN and returns count=0, so a WS fix that sets only WS_URL/WS_TOKEN yields a silently-empty live finder. The dataset must be inlined too. CORRECTION to the digest: the default:default workspace/project fallback is CORRECT for this site (slot env WORKSPACE=default PROJECT=default); the dataset is the one that is wrong.",
+  "recipes": [
+    {
+      "claim": "search-ember slot env: BARKPARK_API_URL is ALREADY workspace/project-scoped (https://guerrilla.barkpark.cloud/w/default/p/default), WORKSPACE=default, PROJECT=default, DATASET=production, and BARKPARK_TOKEN is present",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 'grep -E \"^BARKPARK_(TOKEN|API_URL|WORKSPACE|PROJECT|DATASET)=\" /opt/barkpark/.slots/search-ember__a.env'"
+    },
+    {
+      "claim": "new URL(scoped BARKPARK_API_URL).origin yields the BARE origin https://guerrilla.barkpark.cloud — the origin-normalized WS derivation (D38/D43) is correct and strips the /w/../p/.. scope path",
+      "rerun": "node -e 'console.log(new URL(\"https://guerrilla.barkpark.cloud/w/default/p/default\").origin)'"
+    },
+    {
+      "claim": "The REAL deployed search-ember token joins SearchChannel on search:default:default:production ({\"status\":\"ok\"}) and a query frame returns count=670 over the socket, engine=indx — indx works over WS even though the site's /api/find loopback 404s",
+      "rerun": "node /private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/de30ce5f-300d-4a94-a11d-64d330d25a90/scratchpad/wsprobe.mjs 'UXOvtfPOUiJF7Bw4kAz3jVW3IDyHGoLBz6Ygj7NcpnE' 'search:default:default:production'"
+    },
+    {
+      "claim": "The socket accepts a browser-realistic Origin (101 Switching Protocols) but rejects a foreign Origin (403) and a bad token (403) — check_origin is live and the endpoint-level allowlist already admits guerrilla; NOTE HTTP/2 mangles the upgrade, --http1.1 is required",
+      "rerun": "K=$(openssl rand -base64 16); curl -sS -i --http1.1 --max-time 10 -N -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H \"Sec-WebSocket-Key: $K\" -H 'Origin: https://guerrilla.barkpark.cloud' 'https://guerrilla.barkpark.cloud/socket/websocket?vsn=2.0.0&token=UXOvtfPOUiJF7Bw4kAz3jVW3IDyHGoLBz6Ygj7NcpnE' | head -3"
+    },
+    {
+      "claim": "The search-ember slot token carries permissions {public-read} with revoked_at NULL and expires_at NULL",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 \"sudo -u postgres psql -d barkpark_prod -c \\\"select name, permissions, revoked_at, expires_at from api_tokens where token_hash = encode(sha256('UXOvtfPOUiJF7Bw4kAz3jVW3IDyHGoLBz6Ygj7NcpnE'::bytea),'hex');\\\"\""
+    },
+    {
+      "claim": "The clamp is REAL, not just a label: the same token is refused for write (403 forbidden 'token lacks required permission') and for admin schema create (403) — safe to inline in a browser bundle",
+      "rerun": "curl -sS -w '\\nHTTP %{http_code}\\n' -X POST -H 'Authorization: Bearer UXOvtfPOUiJF7Bw4kAz3jVW3IDyHGoLBz6Ygj7NcpnE' -H 'Content-Type: application/json' -d '{\"mutations\":[{\"create\":{\"_type\":\"post\",\"title\":\"probe-should-fail\"}}]}' https://guerrilla.barkpark.cloud/w/default/p/default/v1/data/mutate/production"
+    },
+    {
+      "claim": "SearchChannel join fails CLOSED on a bogus workspace and bogus project ({\"reason\":\"unauthorized\"}) and on a malformed 3-segment topic ({\"reason\":\"bad_topic\"}); ?fields= is honored over WS (returns only the requested scalars plus _-prefixed system fields)",
+      "rerun": "node /private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/de30ce5f-300d-4a94-a11d-64d330d25a90/scratchpad/wsmulti.mjs"
+    },
+    {
+      "claim": "BLOCKING: topic search:default:default:docs (the Next module's BARKPARK_DATASET fallback) JOINS GREEN and returns count=0 — dataset is NOT validated at join, so a WS fix that omits dataset inlining fails silently. Also: a perspective=drafts / perspective=raw override pushed over WS is IGNORED (0 drafts in page) because search_channel.ex hard-codes perspective: :published",
+      "rerun": "node /private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/de30ce5f-300d-4a94-a11d-64d330d25a90/scratchpad/ws3.mjs"
+    },
+    {
+      "claim": "astro-search's LIVE bundle has WS fully armed with build-time-inlined literals: socket URL is the bare origin + /socket, the public-read token is inlined, dataset/workspace/project are literals, and the enable flag Te=!!we is true",
+      "rerun": "curl -sS https://guerrilla.barkpark.cloud/sites/astro-search/_astro/FinderIsland.CZlFmh3q.js | grep -oE 'var Y=`[a-z]+`,be=`[a-z]+`,xe=`[a-z]+`;.{0,220}'"
+    },
+    {
+      "claim": "search-ember's LIVE Next bundle has WS DEAD: NEXT_PUBLIC_BARKPARK_WS_URL/WS_TOKEN survive as runtime process.env reads (never statically replaced), the enable flag is D=!!(L&&P) -> false, and BARKPARK_DATASET falls back to \"docs\"",
+      "rerun": "cd /tmp && rm -rf nx && mkdir nx && cd nx && curl -sSL https://guerrilla.barkpark.cloud/sites/search-ember/ -o i.html && for c in $(grep -oE 'src=\"/sites/search-ember/_next/static/chunks/[^\"]*\\.js\"' i.html | sed 's/src=\"//;s/\"//' | sort -u); do curl -sS \"https://guerrilla.barkpark.cloud$c\" -O; done; grep -ohE '.{160}NEXT_PUBLIC_BARKPARK_WS_URL.{120}' *.js"
+    },
+    {
+      "claim": "Prior art: #4189 (task-9a8109ca71b7cb77) patched the fields allowlist into BOTH vendored live-search clients byte-identically, dropping WS frames from 9-15MB to ~20KB; stw7-backlog-drafts-clamp-gap closed the public-read drafts leak on the SCOPED HTTP route (the WS channel was never exposed to it)",
+      "rerun": "bp search query \"SearchChannel websocket public-read token join\" && bp task get task-9a8109ca71b7cb77"
+    }
+  ]
+}

@@ -20,6 +20,14 @@ import type {
  * no importers in the monorepo (the lockfile marks it `extraneous`). Use
  * `@barkpark/core`'s `createClient` instead. Do not add features here.
  *
+ * DEAD PACKAGE (verified 2026-07-16): confirmed zero importers repo-wide
+ * (`grep -r '@barkpark/client' web js apps connectors cloud` — none) and not a
+ * pnpm workspace member. Do not fix, feature, or re-diff this package in future
+ * quality sweeps — that includes the bare-string-envelope bug in `errors.ts`,
+ * which is unreachable dead code and intentionally left as-is. Deletion or
+ * npm-deprecation is a lead decision, not a sweep task (README pins external
+ * users to v0.0.1).
+ *
  * Framework-agnostic client for the Barkpark v1 HTTP API.
  *
  * See docs/api-v1.md for the full HTTP contract. This client is a thin,

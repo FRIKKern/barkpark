@@ -1,8 +1,8 @@
 defmodule Barkpark.SecretsTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Secrets
-  alias Barkpark.Secrets.SecretAudit
+  alias Barkpark.Secrets.{SecretAudit, SecretRecord}
 
   @name "test_secret"
 
@@ -45,6 +45,26 @@ defmodule Barkpark.SecretsTest do
         end
 
       refute String.contains?(raw_str, marker)
+    end
+  end
+
+  describe "legacy on-disk format (D201 option C — global tier stays Cloak-compatible)" do
+    test "a row storing RAW Cloak bytes (pre-refactor format) still round-trips through get/reveal" do
+      marker = "legacy-cloak-round-trip-value"
+
+      # Simulate a row written before the per-tier codec landed: the value column
+      # holds a bare `Barkpark.Vault` ciphertext (exactly what the old
+      # `Barkpark.EncryptedBinary` Ecto type dumped). No context call — hand the
+      # raw bytes straight to the column. The global decode path must read it.
+      Repo.insert!(%SecretRecord{
+        name: @name,
+        value: Barkpark.Vault.encrypt!(marker),
+        updated_at: DateTime.utc_now(),
+        workspace_id: nil
+      })
+
+      assert marker == Secrets.get(@name)
+      assert {:ok, ^marker} = Secrets.reveal(@name)
     end
   end
 

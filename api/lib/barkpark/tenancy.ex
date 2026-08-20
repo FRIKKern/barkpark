@@ -8,6 +8,8 @@ defmodule Barkpark.Tenancy do
   """
   import Ecto.Query, warn: false
 
+  require Logger
+
   alias Barkpark.Repo
   alias Barkpark.Accounts.User
   alias Barkpark.Audit.ExportSink
@@ -18,6 +20,8 @@ defmodule Barkpark.Tenancy do
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership, Organization}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Tenancy.WorkspaceBundle
+  alias Barkpark.Tenancy.WorkspaceBundle.Catalog
 
   @default_slug "default"
   @default_org_slug "default"
@@ -461,6 +465,277 @@ defmodule Barkpark.Tenancy do
 
   defp do_set_workspace_plugin_settings(_workspace_or_id, _plugins), do: {:error, :not_found}
 
+  # ── Workspace chat settings (connectors D205 — per-workspace execution profile) ──
+  #
+  # The per-workspace CHAT preferences live in the same `settings` jsonb bag as
+  # `theme` and `plugins`, under the `"chat"` key. These two accessors mirror
+  # `workspace_plugin_settings/1` / `set_workspace_plugin_settings/2` exactly:
+  # read guards a nil/legacy row to the empty map; write merges into `settings`
+  # so the theme, plugin overrides, and any other preference are preserved.
+  # Interpreting `"execution_profile"` (`"cloud" | "self_hosted"`; anything else
+  # counts as unset → the global config → :self_hosted, fail-safe) is
+  # `BarkparkWeb.Studio.ClaudeChat`'s job — this module only persists and reads
+  # back the raw map.
+
+  @doc """
+  Read a workspace's raw chat-settings map from its `settings` bag.
+
+  Returns `settings["chat"]` when it is a map, else `%{}`. Guards a `nil`
+  workspace and a workspace whose `settings` is nil/not-a-map (a legacy row) →
+  `%{}`. The map shape is `%{"execution_profile" => "cloud" | "self_hosted"}`;
+  interpreting it against the global execution-profile config is
+  `BarkparkWeb.Studio.ClaudeChat`'s job.
+  """
+  @spec workspace_chat_settings(Workspace.t() | nil) :: map()
+  def workspace_chat_settings(%Workspace{settings: settings}) when is_map(settings) do
+    case settings["chat"] do
+      chat when is_map(chat) -> chat
+      _ -> %{}
+    end
+  end
+
+  def workspace_chat_settings(_), do: %{}
+
+  @doc """
+  Persist a workspace's chat-settings map into its `settings` bag.
+
+  Accepts a `%Workspace{}` struct or a workspace id binary. Merges into the
+  existing `settings` map under the `"chat"` key so the theme and unrelated
+  preferences are preserved. A non-map `chat` value returns
+  `{:error, :invalid_chat_settings}` without touching the DB; a missing
+  workspace returns `{:error, :not_found}`.
+  """
+  @spec set_workspace_chat_settings(Workspace.t() | binary(), map()) ::
+          {:ok, Workspace.t()}
+          | {:error, :invalid_chat_settings | :not_found | Ecto.Changeset.t()}
+  def set_workspace_chat_settings(workspace_or_id, chat) when is_map(chat) do
+    do_set_workspace_chat_settings(workspace_or_id, chat)
+  end
+
+  def set_workspace_chat_settings(_workspace_or_id, _chat), do: {:error, :invalid_chat_settings}
+
+  defp do_set_workspace_chat_settings(%Workspace{} = workspace, chat) do
+    settings = Map.put(workspace.settings || %{}, "chat", chat)
+
+    workspace
+    |> Workspace.changeset(%{
+      slug: workspace.slug,
+      name: workspace.name,
+      settings: settings
+    })
+    |> Repo.update()
+  end
+
+  defp do_set_workspace_chat_settings(id, chat) when is_binary(id) do
+    case get_workspace_by_id(id) do
+      nil -> {:error, :not_found}
+      %Workspace{} = workspace -> do_set_workspace_chat_settings(workspace, chat)
+    end
+  end
+
+  defp do_set_workspace_chat_settings(_workspace_or_id, _chat), do: {:error, :not_found}
+
+  # ── Pull provenance (PDS-D15/D16 — where pulled data came from) ────────────
+  #
+  # A dataset pulled from another server (`bp dev pull`) records WHERE it came
+  # from, in the same `settings` jsonb bag as `theme` / `plugins` / `chat`,
+  # under the `"pull_provenance"` key. Zero migration.
+  #
+  # Unlike those three this bag is TWO levels deep — keyed by DATASET SLUG —
+  # because one workspace holds sibling datasets that are pulled independently
+  # and must never clobber each other's stamp:
+  #
+  #     settings["pull_provenance"]["production"] =>
+  #       %{"source_server" => …, "source_workspace" => …, "source_dataset" => …,
+  #         "exported_at" => …, "profile" => …, "pulled_at" => …}
+  #
+  # The stamp is also the KEY the boot-time plugin bootstrap guard reads
+  # (`Barkpark.Plugins.Bootstrap`): a schema row living in a stamped
+  # (workspace, dataset) slot is pulled data, so bootstrap logs drift instead of
+  # overwriting it.
+
+  @doc """
+  Read the pull-provenance stamp for one dataset slug of a workspace.
+
+  Returns the stored map when this workspace carries a stamp for `dataset_slug`,
+  else `%{}`. Guards a `nil` workspace, a workspace whose `settings` is
+  nil/not-a-map (a legacy row read before the column backfilled), a
+  non-map `"pull_provenance"` bag and a non-binary slug — every one degrades to
+  `%{}` rather than raising, because this read sits on the boot path.
+  """
+  @spec pull_provenance(Workspace.t() | nil, binary() | nil) :: map()
+  def pull_provenance(%Workspace{settings: settings}, dataset_slug)
+      when is_map(settings) and is_binary(dataset_slug) do
+    with bag when is_map(bag) <- settings["pull_provenance"],
+         stamp when is_map(stamp) <- bag[dataset_slug] do
+      stamp
+    else
+      _ -> %{}
+    end
+  end
+
+  def pull_provenance(_workspace, _dataset_slug), do: %{}
+
+  @doc """
+  Read the whole pull-provenance bag of a workspace (`%{slug => stamp}`).
+
+  Same guards as `pull_provenance/2` → `%{}` on anything unexpected.
+  """
+  @spec pull_provenance(Workspace.t() | nil) :: map()
+  def pull_provenance(%Workspace{settings: settings}) when is_map(settings) do
+    case settings["pull_provenance"] do
+      bag when is_map(bag) -> bag
+      _ -> %{}
+    end
+  end
+
+  def pull_provenance(_workspace), do: %{}
+
+  # ─── The pull-provenance guard predicate (PDS-D21/D22, PDS-D125/D126) ──────
+  #
+  # ONE home, TWO boot-time writers. `Plugins.Bootstrap.upsert_one/3` walks the
+  # plugin registry; `Content.TagRegistry.register_attrs!/2` writes the core
+  # `tag` schema straight through, outside that walk and outside
+  # `SchemaBootstrap`'s rescue. Both land on `Content.upsert_schema/2`, which
+  # reads first and UPDATES in place, so both can clobber a pulled row — and
+  # they clobber DIFFERENT column sets, because `Ecto.Changeset.cast/3` only
+  # touches keys PRESENT in the attrs map (Bootstrap builds attrs from
+  # `Map.from_struct` and reverts eight; TagRegistry declares five keys and
+  # reverts four). The write-shape differs; the question "is the row this
+  # upsert would match pulled data?" does not. It is answered exactly once,
+  # here, and a second copy of it would be the fork the canonical-impl doctrine
+  # exists to prevent.
+  #
+  # WHAT THE READ ACTUALLY MATCHES. `Content.get_schema/3` on empty opts narrows
+  # to the DEFAULT project's dataset_id (`resolve_read_dataset_id` →
+  # `read_default_project_id([])`), so this is DEFAULT-DATASET-SLOT matching:
+  # a properly-backfilled FOREIGN row is never matched, a row sitting in the
+  # Default slot is. Post-PDS-D9 the Default slot IS the pulled workspace.
+  #
+  # WHAT CALLERS DO WITH IT IS THEIR OWN CONTRACT. This predicate answers a
+  # question; it does not decide the skip. Bootstrap skips the whole upsert
+  # (insert included — its rows are plugin-declared and a missing one is
+  # log-and-continue). TagRegistry skips the UPDATE only and still inserts when
+  # absent, because PDS-D12 puts it outside the boot rescue precisely so a
+  # missing core `tag` schema fails the boot closed rather than booting a system
+  # whose publish wall can resolve nothing (PDS-D126).
+
+  @doc """
+  The schema row a boot-time upsert of `name`/`dataset` would MATCH, when that
+  row is pull-provenance-stamped data — else `nil`.
+
+  Returns the `%Barkpark.Content.SchemaDefinition{}` itself (not a boolean) so a
+  caller that wants to return the surviving row can do so without a second read;
+  `pulled_schema_row?/2` is the boolean face of the same answer.
+
+  A row counts as pulled when it exists, carries a `workspace_id`, and that
+  workspace carries a non-empty `pull_provenance` stamp for the row's own
+  dataset SLUG (a stamp on a sibling dataset does NOT cover this one).
+
+  Fail-OPEN by design: any raise from the read degrades to `nil` (= "not
+  pulled", proceed unguarded). This sits on the boot path, so the guard's own
+  read must never be what breaks a boot — losing the guard is recoverable, a
+  boot loop is not.
+  """
+  @spec pulled_schema_row(term(), term()) :: Content.SchemaDefinition.t() | nil
+  # @canonical capability:pull-provenance-schema-guard aka:pulled_row,provenance_covered,clobber guard,schema bootstrap guard
+  def pulled_schema_row(name, dataset) when is_binary(name) and is_binary(dataset) do
+    case Content.get_schema(name, dataset) do
+      {:ok, %Content.SchemaDefinition{} = existing} ->
+        if provenance_covered?(existing, dataset), do: existing, else: nil
+
+      _ ->
+        nil
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "Tenancy.pulled_schema_row: pull-provenance guard read failed for " <>
+          "#{inspect(name)}/#{inspect(dataset)} — proceeding unguarded: #{Exception.message(e)}"
+      )
+
+      nil
+  end
+
+  def pulled_schema_row(_name, _dataset), do: nil
+
+  @doc """
+  Boolean face of `pulled_schema_row/2`: does a boot-time upsert of
+  `name`/`dataset` match a pull-provenance-stamped row?
+  """
+  @spec pulled_schema_row?(term(), term()) :: boolean()
+  def pulled_schema_row?(name, dataset), do: not is_nil(pulled_schema_row(name, dataset))
+
+  defp provenance_covered?(%Content.SchemaDefinition{workspace_id: nil}, _dataset), do: false
+
+  defp provenance_covered?(%Content.SchemaDefinition{} = existing, dataset) do
+    # The row's own `dataset` STRING is the dataset SLUG the stamp is keyed by.
+    slug = existing.dataset || dataset
+
+    existing.workspace_id
+    |> get_workspace_by_id()
+    |> pull_provenance(slug)
+    |> map_size()
+    |> Kernel.>(0)
+  end
+
+  @doc """
+  Persist the pull-provenance stamp for ONE dataset slug of a workspace.
+
+  Accepts a `%Workspace{}` struct or a workspace id binary. Merges into the
+  existing `settings` map under `"pull_provenance"` and, INSIDE that, under
+  `dataset_slug` — so the theme, plugin overrides, chat prefs AND every sibling
+  dataset's stamp survive. A non-map `provenance` or a non-binary slug returns
+  `{:error, :invalid_provenance}` without touching the DB; a missing workspace
+  returns `{:error, :not_found}`.
+
+  CLEARING a stamp is writing an EMPTY map: `set_pull_provenance(ws, slug, %{})`.
+  That is the supported escape hatch out of the `Plugins.Bootstrap` guard — a
+  stamped slot never takes a plugin schema update again, so the operator needs a
+  way back. It is pinned by `bootstrap_guard_test.exs` ("CLEARING the stamp is a
+  real escape hatch"). There is no CLI/HTTP surface for it yet
+  (`pds-bl-clear-pull-provenance`); a remote console is the only front door.
+  """
+  @spec set_pull_provenance(Workspace.t() | binary(), binary(), map()) ::
+          {:ok, Workspace.t()}
+          | {:error, :invalid_provenance | :not_found | Ecto.Changeset.t()}
+  def set_pull_provenance(workspace_or_id, dataset_slug, provenance)
+      when is_binary(dataset_slug) and is_map(provenance) do
+    do_set_pull_provenance(workspace_or_id, dataset_slug, provenance)
+  end
+
+  def set_pull_provenance(_workspace_or_id, _dataset_slug, _provenance),
+    do: {:error, :invalid_provenance}
+
+  defp do_set_pull_provenance(%Workspace{} = workspace, dataset_slug, provenance) do
+    bag = pull_provenance(workspace)
+
+    settings =
+      Map.put(
+        workspace.settings || %{},
+        "pull_provenance",
+        Map.put(bag, dataset_slug, provenance)
+      )
+
+    workspace
+    |> Workspace.changeset(%{
+      slug: workspace.slug,
+      name: workspace.name,
+      settings: settings
+    })
+    |> Repo.update()
+  end
+
+  defp do_set_pull_provenance(id, dataset_slug, provenance) when is_binary(id) do
+    case get_workspace_by_id(id) do
+      nil -> {:error, :not_found}
+      %Workspace{} = workspace -> do_set_pull_provenance(workspace, dataset_slug, provenance)
+    end
+  end
+
+  defp do_set_pull_provenance(_workspace_or_id, _dataset_slug, _provenance),
+    do: {:error, :not_found}
+
   @doc "Fetch a Project by its id, or nil. `nil` or malformed id returns nil."
   @spec get_project_by_id(binary() | nil) :: Project.t() | nil
   def get_project_by_id(nil), do: nil
@@ -763,12 +1038,22 @@ defmodule Barkpark.Tenancy do
     Repo.get_by(Dataset, project_id: project_id, slug: slug)
   end
 
-  @doc "List all Datasets under a Project (accepts a struct or a project id), ordered by slug."
+  @doc "List all Datasets under a Project (accepts a struct or a project id), the canonical `production` dataset first, then the rest alphabetically."
   @spec list_datasets(Project.t() | binary()) :: [Dataset.t()]
   def list_datasets(%Project{id: project_id}), do: list_datasets(project_id)
 
   def list_datasets(project_id) when is_binary(project_id) do
-    Repo.all(from d in Dataset, where: d.project_id == ^project_id, order_by: d.slug)
+    # Order the canonical `production`-slug dataset FIRST, then the rest
+    # alphabetically — the same idiom as `list_projects/1`'s `default` ordering.
+    # Every consumer that takes the first dataset (the mobile cascade's
+    # single-option auto-select, the switcher) resolves the same canonical
+    # default. The boolean `slug = 'production'` sorts DESC (true before false),
+    # then `slug` ASC.
+    Repo.all(
+      from d in Dataset,
+        where: d.project_id == ^project_id,
+        order_by: [desc: fragment("? = ?", d.slug, ^@production_dataset_slug), asc: d.slug]
+    )
   end
 
   @doc """
@@ -888,6 +1173,21 @@ defmodule Barkpark.Tenancy do
 
   Ordered cleanup in a single `Repo.transaction`:
 
+    0. Sweep the 4 E3/allowlist string-keyed tables the keystone exporter
+       copies (charter D4/D5) — the FK-less `(doc_id, dataset)`-keyed tables
+       (`authoring_exemptions`, `github_sync_conflicts`) and bare-dataset-keyed
+       tables (`preview_token_jti`, `shares`) the SQL cascade never reaches. The
+       `scope`-column allowlist is EMPTY: both `data_keys` /
+       `search_surface_config` AND the five `sync_*` tables are E1 after their
+       per-workspace attribution (charter D45/D49, D51-D54, D55) — the step-3 FK
+       cascade sweeps them, touching ONLY this workspace's own rows (its DEKs,
+       cursors, dead-letters and push-ledger). Runs FIRST because its
+       `(doc_id, dataset)`
+       semi-join needs the workspace's own `documents` still present and its
+       slug derivation needs its projects/datasets still present. A
+       `(doc_id, dataset)` row ALSO owned by a sibling workspace is guarded and
+       SURVIVES. Reuses the keystone enumeration + slug derivation, so export
+       and teardown share ONE source of truth for a workspace's tables.
     1. For every media_file scoped to the workspace, call
        `Barkpark.Media.delete_file/2` so the disk blob is removed
        (`File.rm`), CDN edge cache is invalidated (`Cdn.invalidate`),
@@ -929,10 +1229,16 @@ defmodule Barkpark.Tenancy do
   The whole sequence runs inside a single `Repo.transaction`. If ANY step
   fails — a hook returns an error, a Repo write blows up, the workspace
   delete races — the transaction rolls back and nothing partial-deletes.
-  Side-effects that already ran outside the transaction (a `File.rm` on
-  disk, an HTTP CDN purge) cannot be un-done; those run on rows that the
-  rollback will leave alive, so the next retry re-fires them. This is the
-  same trade-off `Media.delete_file/2` makes on its own.
+
+  Media-delete side effects are ATOMIC with the transaction: while inside it,
+  `Media.delete_file/2` DEFERS its four irreversible non-DB effects (on-disk
+  `File.rm`, CDN purge, the `media.deleted` webhook, rendition removal) into a
+  process-dict queue instead of firing them eagerly. This function FLUSHES that
+  queue only on `{:ok, _}` (commit) and DROPS it on rollback/rescue — so an
+  aborted teardown leaves each surviving `media_file` row's blob, CDN entry, and
+  renditions intact (no phantom media). The single in-transaction DB write those
+  deletes still make — the `:after_media_delete` plugin hook — rolls back with
+  the rest (its contract is DB-writes-only; see `Media.delete_file/2`).
 
   Accepts a `%Workspace{}` struct or a workspace id binary. Returns
   `{:ok, workspace}` on success or `{:error, term}` on rollback.
@@ -942,12 +1248,33 @@ defmodule Barkpark.Tenancy do
   @spec delete_workspace(Workspace.t() | binary()) ::
           {:ok, Workspace.t()} | {:error, :not_found | term()}
   def delete_workspace(%Workspace{} = workspace) do
-    Repo.transaction(fn ->
-      case do_delete_workspace(workspace) do
-        {:ok, ws} -> ws
-        {:error, reason} -> Repo.rollback(reason)
-      end
-    end)
+    # Media-delete effects (File.rm / CDN purge / media.deleted webhook /
+    # rendition removal) fired by `Media.delete_file/2` inside the transaction
+    # below are DEFERRED (it detects `Repo.in_transaction?/0`) so a mid-delete
+    # rollback — e.g. a halted document delete — cannot strand a surviving
+    # media_file row's blob. Clear any stale queue, then FLUSH on commit /
+    # DROP on rollback. Mirrors Content.Mutations.apply_mutations' broadcast
+    # triad.
+    Media.clear_deferred_media_effects()
+
+    result =
+      Repo.transaction(fn ->
+        case do_delete_workspace(workspace) do
+          {:ok, ws} -> ws
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, _} -> Media.flush_deferred_media_effects()
+      _ -> Media.clear_deferred_media_effects()
+    end
+
+    result
+  rescue
+    e ->
+      Media.clear_deferred_media_effects()
+      reraise(e, __STACKTRACE__)
   end
 
   def delete_workspace(id) when is_binary(id) do
@@ -960,7 +1287,9 @@ defmodule Barkpark.Tenancy do
   # Ordered cleanup inside the transaction. Each step short-circuits on
   # error so the transaction rolls back via Repo.rollback in the wrapper.
   defp do_delete_workspace(%Workspace{id: ws_id} = workspace) do
-    with :ok <- delete_workspace_media(ws_id),
+    with :ok <- delete_workspace_string_keyed(ws_id),
+         :ok <- delete_workspace_media(ws_id),
+         :ok <- prepare_workspace_cycle_teardown(ws_id),
          :ok <- delete_workspace_documents(ws_id),
          :ok <- delete_workspace_audit_sinks(ws_id),
          {:ok, _} <- Repo.delete(workspace) do
@@ -969,6 +1298,118 @@ defmodule Barkpark.Tenancy do
       {:error, _} = err -> err
     end
   end
+
+  defp prepare_workspace_cycle_teardown(ws_id) do
+    Repo.query!("SELECT barkpark_prepare_workspace_cycle_teardown($1)", [Ecto.UUID.dump!(ws_id)])
+    :ok
+  end
+
+  # Sweep the 4 E3 string-keyed tables the keystone exporter copies
+  # (charter D4/D5): the 2 E3 doc-keyed (Catalog.e3_doc_keyed/0) and the 2 E3
+  # dataset-keyed (Catalog.e3_dataset_keyed/0). The scope-column allowlist
+  # (Catalog.allowlist/0) is now EMPTY, so its sweep loop below is a no-op over
+  # zero tables. NONE of the swept tables carries `workspace_id` — their tenant
+  # key is a `(doc_id, dataset)` leaf or a `scope` string — so the SQL CASCADE on
+  # `Repo.delete(workspace)` NEVER reaches them; without this explicit step a
+  # torn-down workspace silently orphans (e.g.) its authoring_exemptions ledger.
+  # Both former allowlist members left this sweep once they gained a
+  # `workspace_id` FK and moved to E1, cascade-deleting with the workspace in
+  # step 3 (which touches ONLY this workspace's own rows):
+  #   * `search_surface_config` — Wave 5 Slice A (charter D45/D49).
+  #   * `data_keys` — the per-dataset DEK store; a sibling's shared-slug DEK now
+  #     survives via the FK cascade instead of a bare-scope delete
+  #     (bpb-datakeys-write-path-workspace-attribution, charter D51-D54).
+  #
+  # The five `sync_*` tables are NOT here: per-workspace attribution (charter
+  # D55) gave them a `workspace_id` FK, so they are E1 now and the SQL CASCADE on
+  # `Repo.delete(workspace)` sweeps them like any other E1 table.
+  #
+  # POSITION IS LOAD-BEARING — this runs FIRST, before media/documents/audit and
+  # before the final cascade: the E3 doc-keyed semi-join needs the workspace's
+  # OWN `documents` rows still present, and the dataset-slug derivation
+  # (`WorkspaceBundle.dataset_slugs_for/1`) needs its projects+datasets still
+  # present — both leave only at `Repo.delete(workspace)`.
+  #
+  # The predicate shapes are the EXACT keystone extraction shapes
+  # (`WorkspaceBundle.copy_where/4`), so export and teardown agree on membership:
+  #   * E3 doc-keyed — a `(doc_id, dataset)` semi-join (EXISTS, never a JOIN,
+  #     which would fan out on the 2-document case — charter D6), PLUS a
+  #     sibling-guard `NOT EXISTS` so a `(doc_id, dataset)` row ALSO owned by a
+  #     DIFFERENT workspace (charter D7 — the key is not workspace-unique)
+  #     SURVIVES this workspace's teardown.
+  #   * E3 dataset-keyed — `t.dataset = ANY(slugs)`, where `slugs` is the
+  #     PROJECT-QUALIFIED (workspace-EXCLUSIVE) set from
+  #     `WorkspaceBundle.dataset_slugs_for/1`: a slug shared with another
+  #     workspace is dropped, so this bare-slug sweep can never cross-tenant
+  #     delete a co-tenant's rows under the same slug (charter D21).
+  #   * allowlist — `t.scope = ANY(prefix <> slug)` with the per-table prefix.
+  #     The allowlist is EMPTY as of Wave 5 (both `search_surface_config` and
+  #     `data_keys` gained a `workspace_id` FK and moved to E1), so this loop
+  #     currently matches no table; the shape is retained for any future
+  #     bare-`scope` tenant table.
+  defp delete_workspace_string_keyed(ws_id) do
+    ws_lit = Catalog.uuid_literal!(ws_id)
+    slugs = WorkspaceBundle.dataset_slugs_for(ws_id)
+
+    Enum.each(Catalog.e3_doc_keyed(), &delete_e3_doc_keyed(&1, ws_lit))
+    Enum.each(Catalog.e3_dataset_keyed(), &delete_e3_dataset_keyed(&1, slugs))
+
+    for {table, prefix} <- Catalog.allowlist() do
+      delete_allowlist_scoped(table, prefix, slugs)
+    end
+
+    :ok
+  end
+
+  # E3 doc-keyed sweep: mirrors `WorkspaceBundle.copy_where(_, :e3_doc, …)`
+  # verbatim (the `(doc_id, dataset)` EXISTS semi-join) + the sibling-guard.
+  # Reachability: both interpolands are closed — `table` comes from
+  # `Catalog.e3_doc_keyed/0` (a pinned literal map) via `qi/1`, `ws_lit` from
+  # `Catalog.uuid_literal!/1`, which raises on anything that is not a UUID.
+  # sobelow_skip ["SQL.Query"]
+  defp delete_e3_doc_keyed(table, ws_lit) do
+    Repo.query!(
+      "DELETE FROM #{qi(table)} t " <>
+        "WHERE EXISTS (SELECT 1 FROM documents d " <>
+        "WHERE d.workspace_id = #{ws_lit} AND d.doc_id = t.doc_id AND d.dataset = t.dataset) " <>
+        "AND NOT EXISTS (SELECT 1 FROM documents d2 " <>
+        "WHERE d2.doc_id = t.doc_id AND d2.dataset = t.dataset AND d2.workspace_id <> #{ws_lit})",
+      []
+    )
+  end
+
+  # E3 dataset-keyed sweep: mirrors `WorkspaceBundle.copy_where(_, :e3_dataset, …)`.
+  # An empty slug set yields `ANY(ARRAY[]::text[])`, which matches nothing.
+  # Reachability: `table` is a pinned `Catalog.e3_dataset_keyed/0` literal via
+  # `qi/1`; `slugs` is rendered by `Catalog.text_array_literal/1`, which
+  # single-quotes and doubles every embedded quote.
+  # sobelow_skip ["SQL.Query"]
+  defp delete_e3_dataset_keyed(table, slugs) do
+    Repo.query!(
+      "DELETE FROM #{qi(table)} t WHERE t.dataset = ANY(#{Catalog.text_array_literal(slugs)})",
+      []
+    )
+  end
+
+  # allowlist sweep: mirrors `WorkspaceBundle.copy_where(_, :allowlist, …)` —
+  # the `scope`-column tables prefixed per `Catalog.allowlist/0`.
+  # Reachability: DEAD as of Wave 5 — `Catalog.allowlist/0` is `%{}`, so the
+  # only call site's `for` comprehension never iterates; if it is ever revived,
+  # the interpolands are a pinned table name and a `text_array_literal/1` array.
+  # sobelow_skip ["SQL.Query"]
+  defp delete_allowlist_scoped(table, prefix, slugs) do
+    scopes = Enum.map(slugs, &(prefix <> &1))
+
+    Repo.query!(
+      "DELETE FROM #{qi(table)} t WHERE t.scope = ANY(#{Catalog.text_array_literal(scopes)})",
+      []
+    )
+  end
+
+  # Double-quote a catalog-derived table name (every value originates from
+  # `Catalog`'s pinned constants, never user input; the quote-doubling is
+  # belt-and-suspenders, matching `WorkspaceBundle.qi/1`).
+  defp qi(ident), do: ~s("#{String.replace(ident, "\"", "\"\"")}")
 
   # Sweep the workspace's audit_export_sinks. This table carries workspace_id as
   # a plain binary_id with NO foreign key (migration 20260705140000), so the SQL

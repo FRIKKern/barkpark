@@ -281,14 +281,26 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
       else
         # Without xmllint the XSD render is skipped; we still prove the scoped
         # lookup FINDS the book under A (a 500 xsd_invalid means the doc was
-        # found and scope passed — NOT a 404).
+        # found and scope passed — NOT a 404). Tighten to the specific
+        # xsd_invalid envelope so an unrelated crash-500 can't pass here too.
         resp =
           conn
           |> put_req_header("authorization", "Bearer " <> raw)
           |> get(scoped_path(ws_a, proj_a, dataset, book_id))
 
-        assert resp.status in [200, 500],
-               "expected the in-scope lookup to FIND A's book (200 or xsd 500), got #{resp.status}"
+        case resp.status do
+          200 ->
+            :ok
+
+          500 ->
+            payload = Jason.decode!(resp.resp_body)
+
+            assert get_in(payload, ["error", "type"]) == "xsd_invalid",
+                   "expected the in-scope lookup's 500 to be the xsd_invalid envelope, got #{inspect(payload)}"
+
+          other ->
+            flunk("expected the in-scope lookup to FIND A's book (200 or xsd 500), got #{other}")
+        end
       end
     end
 

@@ -1,0 +1,307 @@
+@import "tailwindcss";
+
+/* Chrome background/foreground BRIDGE to the theme tokens (the SNAPSHOT block
+   below): --color-bg / --color-text carry the light values and
+   flip under [data-theme="dark"]. --font-sans is self-hosted Inter (next/font);
+   Geist Mono stays for code spans (no mono token exists yet). */
+@theme inline {
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-text);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* ── theme tokens: a HAND-MAINTAINED snapshot, not a generated file ─────────
+   This block used to be marked "BEGIN GENERATED: tokens (design/tokens.json —
+   regenerate: node design/emit.mjs --write; do not hand-edit)". That header was
+   false in both directions, and a stranger who believed it would either refuse
+   to touch the file or run a regenerate that does nothing:
+
+   • design/emit.mjs's ARTIFACTS list (emit.mjs:1979) has 19 entries and NOT ONE
+     is under templates/. `node design/emit.mjs --write` has never written this
+     file and cannot. design/check.mjs contains zero occurrences of "templates".
+   • The values have since diverged on their own: 77 of the 151 (selector, var)
+     pairs below differ from web/app/globals.css, which IS an emitted artifact.
+
+   So: these values ORIGINATED in design/tokens.json and are now a hand-kept
+   copy. Editing them here is legitimate — nothing regenerates over you.
+   RE-SYNCING them to design/tokens.json is a deliberate, reviewed change, not a
+   refresh: it would move --color-primary from hsl(163 46% 22%) to
+   hsl(151.96 71.81% 29.22%), a different green on the flagship's primary
+   button. That re-sync is deliberately NOT part of stw11-a11y-invariants.
+
+   The BEGIN/END markers are kept because scripts/templates-literal-check.sh
+   reads them to exempt this block from the raw-palette-literal ban.
+   ───────────────────────────────────────────────────────────────────────── */
+/* BEGIN SNAPSHOT: tokens (hand-maintained; originated in design/tokens.json — see the note above) */
+@theme {
+  --color-primary: hsl(163 46% 22%);
+  --color-primary-hover: hsl(163 46% 16%);
+  --color-primary-fg: hsl(0 0% 100%);
+  --color-bg: hsl(0 0% 100%);
+  --color-surface: hsl(0 0% 100%);
+  --color-muted-surface: hsl(240 4.8% 95.9%);
+  --color-text: hsl(240 10% 3.9%);
+  --color-muted-text: hsl(240 3.8% 45%);
+  --color-border: hsl(240 5.9% 90%);
+  --color-ring: hsl(163 42% 30%);
+  --color-accent: hsl(30 92% 42%);
+  --color-ok: hsl(142 72% 26%);
+  --color-warn: hsl(35 92% 38%);
+  --color-danger: hsl(0 68% 42%);
+  --color-info: hsl(217.2 91.2% 59.8%);
+  --color-graph-canvas: #16161a;
+}
+[data-theme="dark"] {
+  --color-primary: hsl(160 42% 62%);
+  --color-primary-hover: hsl(160 42% 70%);
+  --color-primary-fg: hsl(163 45% 8%);
+  --color-bg: hsl(240 10% 3.9%);
+  --color-surface: hsl(240 10% 5.5%);
+  --color-muted-surface: hsl(240 3.7% 12%);
+  --color-text: hsl(0 0% 95%);
+  --color-muted-text: hsl(240 5% 64.9%);
+  --color-border: hsl(240 3.7% 15.9%);
+  --color-ring: hsl(160 42% 62%);
+  --color-accent: hsl(33 92% 60%);
+  --color-ok: hsl(142 52% 52%);
+  --color-warn: hsl(38 94% 56%);
+  --color-danger: hsl(0 82% 66%);
+  --color-info: hsl(217.2 91.2% 59.8%);
+}
+/* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
+[data-bp-theme="evergreen"] {
+  --color-primary: hsl(163 46% 22%);
+  --color-primary-hover: hsl(163 46% 16%);
+  --color-primary-fg: hsl(0 0% 100%);
+  --color-bg: hsl(0 0% 100%);
+  --color-surface: hsl(0 0% 100%);
+  --color-muted-surface: hsl(240 4.8% 95.9%);
+  --color-text: hsl(240 10% 3.9%);
+  --color-muted-text: hsl(240 3.8% 45%);
+  --color-border: hsl(240 5.9% 90%);
+  --color-ring: hsl(163 42% 30%);
+  --color-accent: hsl(30 92% 42%);
+  --color-ok: hsl(142 72% 26%);
+  --color-warn: hsl(35 92% 38%);
+  --color-danger: hsl(0 68% 42%);
+  --color-info: hsl(217.2 91.2% 59.8%);
+}
+[data-bp-theme="evergreen"][data-theme="dark"] {
+  --color-primary: hsl(160 42% 62%);
+  --color-primary-hover: hsl(160 42% 70%);
+  --color-primary-fg: hsl(163 45% 8%);
+  --color-bg: hsl(240 10% 3.9%);
+  --color-surface: hsl(240 10% 5.5%);
+  --color-muted-surface: hsl(240 3.7% 12%);
+  --color-text: hsl(0 0% 95%);
+  --color-muted-text: hsl(240 5% 64.9%);
+  --color-border: hsl(240 3.7% 15.9%);
+  --color-ring: hsl(160 42% 62%);
+  --color-accent: hsl(33 92% 60%);
+  --color-ok: hsl(142 52% 52%);
+  --color-warn: hsl(38 94% 56%);
+  --color-danger: hsl(0 82% 66%);
+  --color-info: hsl(217.2 91.2% 59.8%);
+}
+[data-bp-theme="charple"] {
+  --color-primary: hsl(241 57% 45%);
+  --color-primary-hover: hsl(241 57% 39%);
+  --color-primary-fg: hsl(0 0% 100%);
+  --color-bg: hsl(250 42% 98%);
+  --color-surface: hsl(250 42% 98%);
+  --color-muted-surface: hsl(227.36 22.94% 96.02%);
+  --color-text: hsl(249 10% 14%);
+  --color-muted-text: hsl(227.51 3.7% 41.92%);
+  --color-border: hsl(227.38 10.84% 88.43%);
+  --color-ring: hsl(241 57% 53%);
+  --color-accent: hsl(241 57% 45%);
+  --color-ok: hsl(145.27 88.36% 28.41%);
+  --color-warn: hsl(40.11 100% 29.89%);
+  --color-danger: hsl(2.15 59.33% 48.33%);
+  --color-info: hsl(221.63 58.56% 52.81%);
+}
+[data-bp-theme="charple"][data-theme="dark"] {
+  --color-primary: hsl(249 100% 66%);
+  --color-primary-hover: hsl(249 100% 74%);
+  --color-primary-fg: hsl(0 0% 100%);
+  --color-bg: hsl(249 10% 14%);
+  --color-surface: hsl(249 12% 6%);
+  --color-muted-surface: hsl(235.81 10.46% 5.77%);
+  --color-text: hsl(249 15% 93%);
+  --color-muted-text: hsl(235.41 4.56% 61.6%);
+  --color-border: hsl(235.69 7.63% 8.27%);
+  --color-ring: hsl(249 100% 66%);
+  --color-accent: hsl(249 100% 66%);
+  --color-ok: hsl(136.37 45.27% 53.58%);
+  --color-warn: hsl(40.62 100% 42.95%);
+  --color-danger: hsl(4.54 100% 70.09%);
+  --color-info: hsl(220.77 100% 73.06%);
+}
+[data-bp-theme="ember"] {
+  --color-primary: hsl(20 82% 42%);
+  --color-primary-hover: hsl(20 82% 36%);
+  --color-primary-fg: hsl(0 0% 100%);
+  --color-bg: hsl(30 40% 99%);
+  --color-surface: hsl(30 40% 99%);
+  --color-muted-surface: hsl(16.48 26.29% 95.68%);
+  --color-text: hsl(22 24% 11%);
+  --color-muted-text: hsl(16.54 4.67% 41.31%);
+  --color-border: hsl(16.5 12.96% 87.95%);
+  --color-ring: hsl(20 82% 50%);
+  --color-accent: hsl(20 82% 42%);
+  --color-ok: hsl(138.34 50.65% 34.78%);
+  --color-warn: hsl(40.11 100% 29.89%);
+  --color-danger: hsl(3.67 50.42% 48.54%);
+  --color-info: hsl(221.2 49.02% 51.79%);
+}
+[data-bp-theme="ember"][data-theme="dark"] {
+  --color-primary: hsl(30 92% 60%);
+  --color-primary-hover: hsl(30 92% 68%);
+  --color-primary-fg: hsl(30 45% 8%);
+  --color-bg: hsl(24 22% 8%);
+  --color-surface: hsl(24 26% 6%);
+  --color-muted-surface: hsl(26.83 17% 5.24%);
+  --color-text: hsl(32 24% 92%);
+  --color-muted-text: hsl(26.68 6.42% 60.11%);
+  --color-border: hsl(26.78 12.03% 7.72%);
+  --color-ring: hsl(30 92% 60%);
+  --color-accent: hsl(30 92% 60%);
+  --color-ok: hsl(134.02 37.1% 56.89%);
+  --color-warn: hsl(37.47 67.56% 50.7%);
+  --color-danger: hsl(5.31 83.22% 69.77%);
+  --color-info: hsl(220.6 86.84% 72.26%);
+}
+[data-bp-theme="fjord"] {
+  --color-primary: hsl(222 58% 44%);
+  --color-primary-hover: hsl(222 58% 38%);
+  --color-primary-fg: hsl(0 0% 100%);
+  --color-bg: hsl(210 36% 99%);
+  --color-surface: hsl(210 36% 99%);
+  --color-muted-surface: hsl(219.67 25.15% 95.91%);
+  --color-text: hsl(220 30% 11%);
+  --color-muted-text: hsl(219.7 4.2% 41.73%);
+  --color-border: hsl(219.67 12.06% 88.27%);
+  --color-ring: hsl(222 58% 52%);
+  --color-accent: hsl(222 58% 44%);
+  --color-ok: hsl(137.23 45.13% 35.85%);
+  --color-warn: hsl(40.11 100% 29.89%);
+  --color-danger: hsl(4.05 47.78% 48.54%);
+  --color-info: hsl(221.08 46.09% 51.46%);
+}
+[data-bp-theme="fjord"][data-theme="dark"] {
+  --color-primary: hsl(213 74% 66%);
+  --color-primary-hover: hsl(213 74% 74%);
+  --color-primary-fg: hsl(213 45% 8%);
+  --color-bg: hsl(220 28% 8%);
+  --color-surface: hsl(216 30% 6%);
+  --color-muted-surface: hsl(213.45 15.36% 5.53%);
+  --color-text: hsl(212 26% 92%);
+  --color-muted-text: hsl(213.51 6.24% 60.93%);
+  --color-border: hsl(213.47 11.04% 8.02%);
+  --color-ring: hsl(213 74% 66%);
+  --color-accent: hsl(213 74% 66%);
+  --color-ok: hsl(132.78 31.44% 58.66%);
+  --color-warn: hsl(35.93 57.77% 55.07%);
+  --color-danger: hsl(5.83 69.33% 69.33%);
+  --color-info: hsl(220.37 70.04% 71.14%);
+}
+/* END SNAPSHOT: tokens */
+
+/* --background / --foreground are thin aliases onto the emitted tokens so the
+   body + ::selection consumers keep their names but track design/tokens.json
+   (and flip with the explicit data-theme toggle via --color-bg/--color-text —
+   no hand-authored light/dark hex here anymore). Scrollbar tints are not tokens
+   yet (rgba, no role); they stay OS-scheme-driven. */
+:root {
+  --background: var(--color-bg);
+  --foreground: var(--color-text);
+  --scrollbar-thumb: rgba(24, 24, 27, 0.22);
+  --scrollbar-thumb-hover: rgba(24, 24, 27, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --scrollbar-thumb: rgba(250, 250, 250, 0.18);
+    --scrollbar-thumb-hover: rgba(250, 250, 250, 0.32);
+  }
+}
+
+/* Thin, theme-matched scrollbars — replaces the chunky default OS bars that
+   look jarring on the dark split panes + code blocks. Firefox/standard via
+   scrollbar-width/color; WebKit (Chrome/Safari/Edge) via the pseudo-elements.
+   The transparent border + content-box clip make the thumb read as a floating
+   ~5px pill, and the transparent track lets the pane/code background show. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--foreground) 16%, transparent);
+}
+
+/* Search highlight — the per-word match colour is computed in JS as a
+   continuous red→green gradient and handed in via the --hl (light) / --hl-d
+   (dark) custom properties on each <mark>. We swap them by scheme here, matching
+   the same prefers-color-scheme strategy the rest of the theme uses. The
+   foreground stays inherited; the translucent background never touches it. */
+mark.bp-hl {
+  background-color: var(--hl);
+}
+
+@media (prefers-color-scheme: dark) {
+  mark.bp-hl {
+    background-color: var(--hl-d);
+  }
+}
+
+/* Inferred letters inside a CORRECTED word — the letters we filled in or changed
+   to understand a misspelling ("wrapp·e·r"). Italic is the shape cue (works
+   without colour/contrast); opacity stays high enough to clear WCAG text
+   contrast (0.45 was too faint for the very glyphs a low-vision reader needs). */
+.bp-hl-inferred {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/* Disclosure chevron — rotate when the parent <details> is open. Plain CSS on
+   the `rotate` property (Tailwind's transition-transform doesn't animate it),
+   so it works regardless of the group-open variant and animates smoothly. */
+.disclosure-chevron {
+  transition: rotate 0.15s ease;
+}
+
+details[open] .disclosure-chevron {
+  rotate: 180deg;
+}

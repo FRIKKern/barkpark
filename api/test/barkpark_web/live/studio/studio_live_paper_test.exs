@@ -112,6 +112,28 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
     assert html =~ ~s(data-slug="#{@slug}")
   end
 
+  test "the scoped Studio reader renders a paper whose blocks exist only under content.body",
+       %{conn: conn} do
+    paper = Content.get_paper(@slug, @dataset)
+    blocks = get_in(paper.content, ["body", "blocks"])
+
+    nested_only =
+      paper.content
+      |> Map.delete("blocks")
+      |> Map.delete("body_html")
+      |> Map.put("body", %{"blocks" => blocks})
+
+    paper
+    |> Ecto.Changeset.change(content: nested_only)
+    |> Barkpark.Repo.update!()
+
+    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+
+    assert html =~ ~s(data-test-id="studio-paper-editor")
+    assert html =~ ~s(data-block-id="b-intro")
+    assert html =~ "First block streamed."
+  end
+
   test "a {:paper_block} broadcast streams a new block into the pane with no remount (same pid)",
        %{conn: conn} do
     {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))

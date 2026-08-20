@@ -1,0 +1,140 @@
+{
+ "epccintr": {
+  "status": "interrupted",
+  "seq": 1,
+  "row": {
+   "task_type": "local_workflow",
+   "description": "bp-epic-cycle \u2014 7-phase epic cycle"
+  },
+  "origin": "background",
+  "usage": {
+   "total_tokens": 68272
+  },
+  "workflow": [
+   {
+    "type": "workflow_phase",
+    "index": 1,
+    "title": "Strategize"
+   },
+   {
+    "type": "workflow_phase",
+    "index": 2,
+    "title": "Explore"
+   },
+   {
+    "type": "workflow_phase",
+    "index": 3,
+    "title": "Decide"
+   },
+   {
+    "type": "workflow_phase",
+    "index": 4,
+    "title": "Build"
+   },
+   {
+    "type": "workflow_phase",
+    "index": 5,
+    "title": "Review"
+   },
+   {
+    "type": "workflow_phase",
+    "index": 6,
+    "title": "Judge"
+   },
+   {
+    "type": "workflow_phase",
+    "index": 7,
+    "title": "Perfect"
+   },
+   {
+    "type": "workflow_agent",
+    "index": 1,
+    "label": "strategist",
+    "phaseIndex": 1,
+    "phaseTitle": "Strategize",
+    "agentId": "a4fd07fbbc56195dd",
+    "model": "claude-fable-5",
+    "state": "done",
+    "startedAt": 1783633546962,
+    "queuedAt": 1783633546955,
+    "attempt": 1,
+    "lastToolName": "StructuredOutput",
+    "lastToolSummary": "WAVE 11 \u2014 \"alive at a glance, honest to the second.\" Wave 1\u2026",
+    "promptPreview": "You are the STRATEGIST of a Barkpark epic wave \u2014 one Fable mind setting bold direction. Risk is welcome here; rigor comes later.\n\nTHE USER'S WISH (this is the focus \u2014 everything serves it, judged holistically, not as a checklist):\n\"\"\"\nstudio-claude-chat WAVE 11 \u2014 return to user-visible quality. Wave 10 merged (#1980: wire truth \u2014 real fixtures, rail fold fixes, dead-spawn stderr honesty, bypass re\u2026",
+    "lastProgressAt": 1783633723134,
+    "tokens": 68272,
+    "toolCalls": 17,
+    "durationMs": 176172,
+    "resultPreview": "{\"direction\":\"WAVE 11 \u2014 \\\"alive at a glance, honest to the second.\\\" Wave 10 closed the wire-archaeology vein; every rail/probe/spawn assumption now has a real-binary verdict. What remains between this surface and the Kinsta/Vercel bar is PERCEIVED liveness and picker honesty: the data is all true now, but the chrome doesn't wear it. The finished experience: you glance at the browser tab and know \u2026"
+   },
+   {
+    "type": "workflow_agent",
+    "index": 2,
+    "label": "explore:liveness-anatomy",
+    "phaseIndex": 2,
+    "phaseTitle": "Explore",
+    "agentId": "af9d671e2d0073f5d",
+    "model": "claude-opus-4-8[1m]",
+    "state": "progress",
+    "startedAt": 1783633723186,
+    "queuedAt": 1783633723160,
+    "attempt": 1,
+    "lastToolName": "Bash",
+    "lastToolSummary": "find api -name \"chat_live.ex\" 2>/dev/null && echo \"---fixtu\u2026",
+    "promptPreview": "You are an EXPLORER grounding a Barkpark epic wave in reality. READ-ONLY: no edits, no commits, no bp mutations. Your job is truth the strategist can plan on \u2014 verified by reading actual code, never assumed.\n\nTHE USER'S WISH (this is the focus \u2014 everything serves it, judged holistically, not as a checklist):\n\"\"\"\nstudio-claude-chat WAVE 11 \u2014 return to user-visible quality. Wave 10 merged (#1980: wi\u2026",
+    "lastProgressAt": 1783633734941
+   },
+   {
+    "type": "workflow_agent",
+    "index": 3,
+    "label": "explore:picker-truth",
+    "phaseIndex": 2,
+    "phaseTitle": "Explore",
+    "agentId": "a36a2bda7a64a8c05",
+    "model": "claude-opus-4-8[1m]",
+    "state": "progress",
+    "startedAt": 1783633723188,
+    "queuedAt": 1783633723160,
+    "attempt": 1,
+    "lastToolName": "Bash",
+    "lastToolSummary": "git ls-tree -r --name-only origin/main | grep -iE 'chat|stu\u2026",
+    "promptPreview": "You are an EXPLORER grounding a Barkpark epic wave in reality. READ-ONLY: no edits, no commits, no bp mutations. Your job is truth the strategist can plan on \u2014 verified by reading actual code, never assumed.\n\nTHE USER'S WISH (this is the focus \u2014 everything serves it, judged holistically, not as a checklist):\n\"\"\"\nstudio-claude-chat WAVE 11 \u2014 return to user-visible quality. Wave 10 merged (#1980: wi\u2026",
+    "lastProgressAt": 1783633734899
+   },
+   {
+    "type": "workflow_agent",
+    "index": 4,
+    "label": "explore:browser-drive-feasibility",
+    "phaseIndex": 2,
+    "phaseTitle": "Explore",
+    "agentId": "a1801e5cfe92a0e4e",
+    "model": "claude-opus-4-8[1m]",
+    "state": "progress",
+    "startedAt": 1783633723189,
+    "queuedAt": 1783633723160,
+    "attempt": 1,
+    "lastToolName": "Bash",
+    "lastToolSummary": "ls .claude/workflows/ | grep -i studio-chat; echo \"---\"; wc\u2026",
+    "promptPreview": "You are an EXPLORER grounding a Barkpark epic wave in reality. READ-ONLY: no edits, no commits, no bp mutations. Your job is truth the strategist can plan on \u2014 verified by reading actual code, never assumed.\n\nTHE USER'S WISH (this is the focus \u2014 everything serves it, judged holistically, not as a checklist):\n\"\"\"\nstudio-claude-chat WAVE 11 \u2014 return to user-visible quality. Wave 10 merged (#1980: wi\u2026",
+    "lastProgressAt": 1783633731730
+   },
+   {
+    "type": "workflow_agent",
+    "index": 5,
+    "label": "explore:flake-and-leftovers",
+    "phaseIndex": 2,
+    "phaseTitle": "Explore",
+    "agentId": "abb3d3b03feba6dcf",
+    "model": "claude-opus-4-8[1m]",
+    "state": "progress",
+    "startedAt": 1783633723190,
+    "queuedAt": 1783633723160,
+    "attempt": 1,
+    "lastToolName": "Bash",
+    "lastToolSummary": "ls api/test/barkpark_web/live/ 2>/dev/null | grep -i -E \"ch\u2026",
+    "promptPreview": "You are an EXPLORER grounding a Barkpark epic wave in reality. READ-ONLY: no edits, no commits, no bp mutations. Your job is truth the strategist can plan on \u2014 verified by reading actual code, never assumed.\n\nTHE USER'S WISH (this is the focus \u2014 everything serves it, judged holistically, not as a checklist):\n\"\"\"\nstudio-claude-chat WAVE 11 \u2014 return to user-visible quality. Wave 10 merged (#1980: wi\u2026",
+    "lastProgressAt": 1783633736549
+   }
+  ]
+ }
+}

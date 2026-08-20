@@ -46,6 +46,18 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
                    "already_running",
                    "feature_not_configured",
                    "runner_start_failed",
+                   # Site deploy — the site's SOURCE could not be materialized,
+                   # so the build never started (POST /v1/admin/site-deploy,
+                   # same admin-ops family as the three codes above). Split out
+                   # of runner_start_failed by deploy-reliability D26 so a
+                   # provision failure names itself instead of vanishing into a
+                   # Logger line.
+                   "site_provision_failed",
+                   # Site deploy — the box's ONE fleet build slot is already
+                   # taken by another site's build, so the deploy is refused at
+                   # the door instead of queueing inside its unit for 900s
+                   # (same admin-ops endpoint, deploy-reliability wave 4).
+                   "box_at_capacity",
                    # Self-update W6 rollback preflight — same admin-ops
                    # endpoint family as the three codes above (fail-closed
                    # 500 when preflight can't clear the rollback).
@@ -58,6 +70,10 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
                    # (server-to-server), not a client-facing API.
                    "inbound_failed",
                    "intake_failed",
+                   # pull_request merge event → merge-gate autostamp reconcile
+                   # (same github-webhook receiver family; fail-closed 500 when
+                   # the reconcile raises).
+                   "merge_reconcile_failed",
                    # github-adopt operational bridge — `bp github adopt`.
                    "adopt_failed",
                    "not_intake"

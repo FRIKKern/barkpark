@@ -15,7 +15,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 )
+
+// safeName constrains a manifest-supplied noun name and command verb to a
+// shell-safe identifier: an opening lowercase letter or digit, then any run of
+// lowercase letters, digits, underscores, or hyphens. No shell metacharacter,
+// quote, whitespace, or `$(...)` can match.
+//
+// This is a CLIENT-SIDE TRUST BOUNDARY, not cosmetics. `bp completion <shell>`
+// emits a script the user is told to eval — `eval "$(bp completion bash)"`,
+// `bp completion fish | source` — and the bash/zsh/fish emitters bake manifest
+// NOUN and VERB names into that script RAW (internal/cli/builtins.go). The same
+// unvalidated names also flow into argv/path construction elsewhere. A hostile
+// or compromised server the bp is pointed at could otherwise plant a noun named
+// `x";touch /tmp/pwn;#` (or a `$(...)` / single-quote variant) that materializes
+// verbatim in the emitted shell and executes the moment it is eval'd — a
+// remote-to-eval RCE. Rejecting any name outside this charset at Parse, before a
+// single name can reach an emitter, closes that chain at its true locus.
+// Emitter-side quoting is tracked separately as defense-in-depth
+// (bp-secgo-completion-emitter-quoting).
+var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // Manifest is the root capabilities document. Field names mirror
 // manifest.schema.json exactly; optional/additive fields use omitempty.
@@ -35,6 +55,29 @@ type Manifest struct {
 	ETag        string            `json:"etag"`
 	Nouns       []Noun            `json:"nouns"`
 	Commands    []Command         `json:"commands"`
+	// Chat is the root chat capability-discovery block (charter D27): the
+	// per-provider picker vocabulary. The server emits it only to callers that
+	// opt in with ?chat=1 (fetch.go sends the param in the SAME commit that
+	// models this field — intra-Go atomicity: no bp ever sends chat=1 without
+	// being able to strict-decode the answer). Absent on older servers and on
+	// tier "none" — nil means "discover nothing, degrade".
+	Chat *ManifestChat `json:"chat,omitempty"`
+}
+
+// ManifestChat is the root "chat" discovery block: a flat map keyed by provider
+// id ("claude", "codex", …). Every nested key is modelled — Parse's
+// DisallowUnknownFields recurses, so an unmodelled server addition fails fast.
+type ManifestChat struct {
+	Providers map[string]ChatProviderCaps `json:"providers"`
+}
+
+// ChatProviderCaps is one provider's picker vocabulary. Empty slices are the
+// honest degrade signal (codex ships all-empty today): offer no picker rather
+// than inventing values.
+type ChatProviderCaps struct {
+	Modes   []string `json:"modes"`
+	Models  []string `json:"models"`
+	Efforts []string `json:"efforts"`
 }
 
 // Server identifies the responding Barkpark instance. APIVersion and MinCLI are
@@ -88,6 +131,26 @@ type Command struct {
 	// SetKey, when set, nests the `--set` fields under that key in the body
 	// instead of merging them flat — `doc patch` needs `{patch:{id,type,set:{…}}}`.
 	SetKey string `json:"set_key,omitempty"`
+	// Views, when set, declares the response projections this command's route
+	// supports (AXI brief views, axi-agent-ergonomics-review R1). The server
+	// emits it only when the client opts in with ?views=1 on GET
+	// /v1/capabilities, so older servers — and servers predating the views
+	// feature — simply omit it and the field stays nil (dormant). A command
+	// without a views declaration is full-only forever; the CLI/MCP consumers
+	// must never send a ?view= param for it.
+	Views *Views `json:"views,omitempty"`
+}
+
+// Views is a command's declared response-projection contract (frozen shape,
+// charter bp-axi-brief-views decision 2): the supported view names, the
+// server-side default when no ?view= is sent, and the view an agent-facing
+// consumer (piped CLI, MCP) should request by default. Strict decode: every key
+// the server emits is modelled here — an unknown key inside views fails Parse
+// exactly like any other structural typo.
+type Views struct {
+	Supported        []string `json:"supported"`
+	Default          string   `json:"default"`
+	DefaultForAgents string   `json:"default_for_agents"`
 }
 
 // Arg is a positional argument (thin per the M0 freeze: name/required/type/summary).
@@ -135,6 +198,28 @@ func Parse(body []byte) (*Manifest, error) {
 	// than be silently dropped.
 	if err := dec.Decode(new(struct{})); err != io.EOF {
 		return nil, fmt.Errorf("parse manifest: trailing data after document")
+	}
+	// Value validation at the trust boundary: reject the WHOLE manifest if any
+	// noun name or command verb carries a character outside the shell-safe
+	// identifier charset, so a hostile name can never reach the eval'd completion
+	// emitters (or argv/path construction). See safeName's doc comment.
+	for _, n := range m.Nouns {
+		if !safeName.MatchString(n.Name) {
+			return nil, fmt.Errorf("parse manifest: unsafe noun name %q (must match %s)", n.Name, safeName)
+		}
+	}
+	for _, c := range m.Commands {
+		// Command.Noun is validated alongside Verb: Tree() synthesizes a noun
+		// node from cmd.Noun for any command whose noun was not declared in
+		// m.Nouns (tree.go), and that synthesized node name flows into the same
+		// eval'd completion emitters — so a hostile Command.Noun would bypass a
+		// Noun.Name-only check.
+		if !safeName.MatchString(c.Noun) {
+			return nil, fmt.Errorf("parse manifest: unsafe command noun %q (must match %s)", c.Noun, safeName)
+		}
+		if !safeName.MatchString(c.Verb) {
+			return nil, fmt.Errorf("parse manifest: unsafe command verb %q (must match %s)", c.Verb, safeName)
+		}
 	}
 	return &m, nil
 }

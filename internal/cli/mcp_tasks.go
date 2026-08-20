@@ -52,6 +52,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -113,7 +114,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_ready",
 		Title:       "List ready tasks",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
-		Description: "List the READY tasks — unblocked work available to claim, in priority order (priority 0 is highest). This is the queue head: start here to find work. Read-only; it does NOT claim anything. To take a task, call task_next (atomic claim) rather than task_show on a specific id, so you never race another worker.",
+		Description: "List the READY tasks — executable, unblocked work available to claim. Priority order (priority 0 is highest) is the compatibility default; pass order=closure_nearest for fewest unmet criteria, then oldest, then logical task id. This is the queue head: start here to find work. Read-only; it does NOT claim anything. To take a task, call task_next (atomic claim) rather than task_show on a specific id, so you never race another worker.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -123,12 +124,18 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
       "minimum": 1,
       "maximum": 200,
       "description": "Max tasks to return (default server page size)."
+    },
+    "order": {
+      "type": "string",
+      "enum": ["closure_nearest"],
+      "description": "Optional campaign order: fewest unmet criteria, then oldest, then logical task id."
     }
   }
 }`),
 	}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var in struct {
-			Limit *int `json:"limit"`
+			Limit *int   `json:"limit"`
+			Order string `json:"order"`
 		}
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpArgError(err), nil
@@ -137,11 +144,19 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		// like `bp task ready --limit N` — applyQuery turns g.limitSet into the
 		// query param regardless of whether the manifest declares a limit flag.
 		gq := g
+		// An MCP consumer is an agent by definition: request the brief view
+		// (AXI R1 — compact cards, no content echo). Old servers ignore the
+		// param (proven inert); task_show remains the full-detail escape hatch.
+		gq.view = "brief"
 		if in.Limit != nil {
 			gq.limit = *in.Limit
 			gq.limitSet = true
 		}
-		return mcpRun(execManifestCommand(gq, ctx, m, readyCmd, nil)), nil
+		tail := []string{}
+		if in.Order != "" {
+			tail = append(tail, "--order", in.Order)
+		}
+		return mcpRun(execManifestCommand(gq, ctx, m, readyCmd, tail)), nil
 	})
 
 	// task_next — atomically claim the NEXT ready task. Claim-first: the claim IS
@@ -152,7 +167,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_next",
 		Title:       "Claim the next ready task",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
-		Description: "Atomically CLAIM the next ready task (priority order) for worker_id, and return its brief. Claim FIRST — the claim is what hands you the task's full description + acceptance_criteria AND the epoch you need to close it. Pick one worker_id and keep it (e.g. \"cursor-<your-name-or-branch>\") so claim/close stay symmetric. An empty queue returns 200 with {\"ok\":false,\"reason\":\"no_ready\"} — that means 'no work available', NOT an error; do not retry in a tight loop. On success the response carries the claimed doc and its claim.epoch — remember that epoch to close.",
+		Description: "Atomically CLAIM the next executable task for worker_id, and return its brief. Priority order is the compatibility default; pass order=closure_nearest for fewest unmet criteria, then oldest, then logical task id. Claim FIRST — the claim is what hands you the task's full description + acceptance_criteria AND the epoch you need to close it. Pick one worker_id and keep it (e.g. \"cursor-<your-name-or-branch>\") so claim/close stay symmetric. An empty queue returns 200 with {\"ok\":false,\"reason\":\"no_ready\"} — that means 'no work available', NOT an error; do not retry in a tight loop. On success the response carries the claimed doc and its claim.epoch — remember that epoch to close.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -162,16 +177,36 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
       "type": "string",
       "description": "Stable worker identity, e.g. \"cursor-alice\". Reuse the same id for the matching close."
     },
-    "phase_id": {
-      "type": "string",
-      "description": "Optional: restrict the claim to tasks under this phase/goal slug."
-    }
-  }
-}`),
+	    "phase_id": {
+	      "type": "string",
+	      "description": "Optional: restrict the claim to tasks under this phase/goal slug."
+	    },
+	    "order": {
+	      "type": "string",
+	      "enum": ["closure_nearest"],
+	      "description": "Optional campaign order: fewest unmet criteria, then oldest, then logical task id."
+	    },
+	    "execution_policy_override": {
+	      "type": "object",
+	      "additionalProperties": false,
+	      "required": ["version"],
+	      "properties": {
+	        "version": { "type": "integer", "const": 1 },
+	        "agent_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+	        "model": { "type": "string", "minLength": 1, "maxLength": 128 },
+	        "reasoning_effort": { "type": "string", "enum": ["minimal", "low", "medium", "high", "xhigh"] },
+	        "resource_class": { "type": "string", "enum": ["light", "standard", "heavy"] }
+	      },
+	      "description": "Highest-precedence advisory override, frozen into the claim snapshot."
+	    }
+	  }
+	}`),
 	}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var in struct {
-			WorkerID string `json:"worker_id"`
-			PhaseID  string `json:"phase_id"`
+			WorkerID                string          `json:"worker_id"`
+			PhaseID                 string          `json:"phase_id"`
+			Order                   string          `json:"order"`
+			ExecutionPolicyOverride json.RawMessage `json:"execution_policy_override"`
 		}
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpArgError(err), nil
@@ -185,7 +220,18 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		if in.PhaseID != "" {
 			tail = append(tail, in.PhaseID)
 		}
-		return mcpRun(execManifestCommand(g, ctx, m, nextCmd, tail)), nil
+		if in.Order != "" {
+			tail = append(tail, "--order", in.Order)
+		}
+		var policy map[string]any
+		if len(in.ExecutionPolicyOverride) > 0 && string(in.ExecutionPolicyOverride) != "null" {
+			var err error
+			policy, err = parseTaskExecutionPolicyJSON(in.ExecutionPolicyOverride)
+			if err != nil {
+				return mcpArgError(fmt.Errorf("execution_policy_override: %w", err)), nil
+			}
+		}
+		return mcpRun(execTaskNextWithPolicy(g, ctx, m, nextCmd, tail, policy)), nil
 	})
 
 	// task_show — full detail for one task id (children + child_count).
@@ -194,7 +240,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_show",
 		Title:       "Show a task",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
-		Description: "Fetch one task by its doc_id — full detail including description, acceptance_criteria, lifecycle_status, any claim, and children + child_count. Read-only. Use it to re-read a brief (e.g. after a close 409'd with doc_changed_since_claim, read the task again before closing) or to inspect a task you already hold. To START work, prefer task_next (which claims atomically) over showing an id and hoping it's still free.",
+		Description: "Fetch one task by its doc_id — full detail including description, acceptance_criteria, lifecycle_status, any claim, and children + child_count. Read-only. Use it to re-read a brief (e.g. after a close 409'd with doc_changed_since_claim, read the task again, reconcile, then close passing observed_rev=current_rev — a bare re-read then close repeats the 409 because your claim's work digest is preserved) or to inspect a task you already hold. To START work, prefer task_next (which claims atomically) over showing an id and hoping it's still free.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -226,7 +272,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_close",
 		Title:       "Close a claimed task",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
-		Description: "Close a task you hold, under epoch-CAS. Pass the SAME worker_id you claimed with and the observed_epoch from that claim (doc.claim.epoch). lifecycle_status is the done-signal — \"done\" for completed work, \"cancelled\" to drop it, \"blocked\" if it can't proceed; it is what marks the task finished, NOT the claim record. Mark acceptance criteria in the same write via `criteria` — an array of {index, met, evidence} — so the ledger records WHAT you proved and HOW. If the close returns 409 doc_changed_since_claim, the brief changed under your claim: task_show it again, reconcile, then close again. If your claim lapsed (epoch moved on), re-claim the task with task_next / a fresh claim to get a new epoch, then close with that.",
+		Description: "Close a task you hold, under epoch-CAS. Pass the SAME worker_id you claimed with and the observed_epoch from that claim (doc.claim.epoch). lifecycle_status is the done-signal — \"done\" for completed work, \"cancelled\" to drop it, \"blocked\" if it can't proceed; it is what marks the task finished, NOT the claim record. Mark acceptance criteria in the same write via `criteria` — an array of {index, met, evidence, criterion} — so the ledger records WHAT you proved and HOW. `criterion` (the criterion's EXACT stored wording, copied verbatim from acceptance_criteria[index].criterion) is REQUIRED on every entry with met:true: the 0-based index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping a NEIGHBOURING criterion, and a text that does not match the row at index is REJECTED (409 criteria_mismatch) with nothing written. An entry with met:false needs no text. If the close returns 409 doc_changed_since_claim, the brief changed under your claim and the 409 names current_rev + changed_fields: task_show it, reconcile the changes, then close again passing observed_rev set to that current_rev (strict full-rev CAS, bypasses the digest fence). A plain task_show then close REPEATS the 409 — a same-worker re-read preserves the claim-time work digest, so observed_rev is the only escape. If your claim lapsed (epoch moved on), re-claim the task with task_next / a fresh claim to get a new epoch, then close with that.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -244,6 +290,10 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
       "type": "integer",
       "description": "The epoch from your claim (doc.claim.epoch). Close is a compare-and-swap on this — a stale epoch 409s."
     },
+    "observed_rev": {
+      "type": "string",
+      "description": "Recovery from a 409 doc_changed_since_claim: the current_rev the 409 named (the rev you just re-read and reconciled). Passing it switches the close to strict full-rev CAS and BYPASSES the claim-time work-digest fence, so the close succeeds against exactly the revision you reviewed. A stale rev still 409s. Omit for a normal close."
+    },
     "lifecycle_status": {
       "type": "string",
       "enum": ["done", "cancelled", "blocked"],
@@ -256,15 +306,16 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "criteria": {
       "type": "array",
-      "description": "Acceptance criteria to flip in the same atomic write.",
+      "description": "Acceptance criteria to flip in the same atomic write. Every entry with met:true MUST also carry criterion (its exact stored wording) — an unguarded met-flip is REJECTED (409 criterion_text_required).",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["index", "met"],
         "properties": {
-          "index": { "type": "integer", "description": "0-based position in the task's acceptance_criteria." },
+          "index": { "type": "integer", "description": "0-based position in the task's acceptance_criteria. The FIRST criterion is 0." },
           "met": { "type": "boolean" },
-          "evidence": { "type": "string", "description": "Concrete proof: test names, gate output, branch, commit." }
+          "evidence": { "type": "string", "description": "Concrete proof: test names, gate output, branch, commit." },
+          "criterion": { "type": "string", "description": "REQUIRED when met is true: the criterion's exact stored wording, copied verbatim from acceptance_criteria[index].criterion. It is the off-by-one guard — without it the close is REJECTED (409 criterion_text_required); with a text that does not match the row at index it is REJECTED (409 criteria_mismatch) and nothing is written. An entry with met:false needs no text." }
         }
       }
     }
@@ -275,6 +326,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			DocID           string            `json:"doc_id"`
 			WorkerID        string            `json:"worker_id"`
 			ObservedEpoch   *int              `json:"observed_epoch"`
+			ObservedRev     string            `json:"observed_rev"`
 			LifecycleStatus string            `json:"lifecycle_status"`
 			Reason          string            `json:"reason"`
 			Criteria        []json.RawMessage `json:"criteria"`
@@ -307,6 +359,12 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			}
 			tail = append(tail, "--set", "criteria:="+string(arr))
 		}
+		// observed_rev recovers a 409 doc_changed_since_claim: it rides the same
+		// repeatable --set flag as criteria so the server switches to strict
+		// full-rev CAS and bypasses the work-digest fence (Tasks.close/3 :observed_rev).
+		if rev := strings.TrimSpace(in.ObservedRev); rev != "" {
+			tail = append(tail, "--set", "observed_rev="+rev)
+		}
 		return mcpRun(execManifestCommand(g, ctx, m, cc, tail)), nil
 	})
 
@@ -329,7 +387,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     "description": { "type": "string" },
     "parent_id": { "type": "string", "description": "Parent task/goal slug for a nested tree." },
     "priority": { "type": "integer", "minimum": 0, "maximum": 4, "description": "0 = highest .. 4 = lowest." },
-    "acceptance_criteria": {
+	    "acceptance_criteria": {
       "type": "array",
       "description": "Proof obligations.",
       "items": {
@@ -341,9 +399,22 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
           "met": { "type": "boolean" },
           "evidence": { "type": "string" }
         }
-      }
-    },
-    "tags": {
+	      }
+	    },
+	    "execution_policy": {
+	      "type": "object",
+	      "additionalProperties": false,
+	      "required": ["version"],
+	      "properties": {
+	        "version": { "type": "integer", "const": 1 },
+	        "agent_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+	        "model": { "type": "string", "minLength": 1, "maxLength": 128 },
+	        "reasoning_effort": { "type": "string", "enum": ["minimal", "low", "medium", "high", "xhigh"] },
+	        "resource_class": { "type": "string", "enum": ["light", "standard", "heavy"] }
+	      },
+	      "description": "Optional strict advisory routing policy stored on the Task."
+	    },
+	    "tags": {
       "type": "array",
       "description": "Weighted labels. Hard bounds 1-12 (advisory norm 2-4); strengths must be distinct with a single unique maximum (the main tag).",
       "minItems": 1,
@@ -369,6 +440,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			ParentID           string            `json:"parent_id"`
 			Priority           *int              `json:"priority"`
 			AcceptanceCriteria []json.RawMessage `json:"acceptance_criteria"`
+			ExecutionPolicy    json.RawMessage   `json:"execution_policy"`
 			Tags               []json.RawMessage `json:"tags"`
 			Publish            *bool             `json:"publish"`
 		}
@@ -403,6 +475,13 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			}
 			body["acceptance_criteria"] = crit
 		}
+		if len(in.ExecutionPolicy) > 0 && string(in.ExecutionPolicy) != "null" {
+			policy, err := parseTaskExecutionPolicyJSON(in.ExecutionPolicy)
+			if err != nil {
+				return mcpArgError(fmt.Errorf("execution_policy: %w", err)), nil
+			}
+			body["execution_policy"] = policy
+		}
 		if len(in.Tags) > 0 {
 			tags := make([]any, 0, len(in.Tags))
 			for _, raw := range in.Tags {
@@ -431,7 +510,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_prime",
 		Title:       "Rehydrate task context",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
-		Description: "One-call REHYDRATION for a resuming agent — read this first when you pick up work. It returns, in a single response: your in_progress claims (each carries content.claim.epoch, so you can task_close WITHOUT re-fetching the task), the ready-head (top of the queue), recent_events (what changed lately), lifecycle counts, and rails (rail_rev per epic you hold). Pass worker_id = the SAME id you claim and close with, so in_progress is scoped to YOUR claims; OMITTING worker_id returns ALL open claims across every worker — the orchestrator dump, not your working set. IMPORTANT: prime is read-only and NEVER (re-)establishes a claim. If a task you expected is MISSING from in_progress, your claim LAPSED — re-claim it with task_next before you touch it; do not assume the old epoch is still valid.",
+		Description: "One-call REHYDRATION for a resuming agent — read this first when you pick up work. It returns, in a single response: your in_progress claims (each carries claim.epoch, so you can task_close WITHOUT re-fetching the task), the ready-head (top of the queue), recent_events (what changed lately), lifecycle counts, and rails (rail_rev per epic you hold). Pass worker_id = the SAME id you claim and close with, so in_progress is scoped to YOUR claims; OMITTING worker_id returns ALL open claims across every worker — the orchestrator dump, not your working set. IMPORTANT: prime is read-only and NEVER (re-)establishes a claim. If a task you expected is MISSING from in_progress, your claim LAPSED — re-claim it with task_next before you touch it; do not assume the old epoch is still valid.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -445,6 +524,11 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
       "minimum": 1,
       "maximum": 100,
       "description": "Ready-head and event-window size (default 10)."
+    },
+    "order": {
+      "type": "string",
+      "enum": ["closure_nearest"],
+      "description": "Optional campaign order for the ready head."
     }
   }
 }`),
@@ -452,6 +536,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		var in struct {
 			WorkerID string `json:"worker_id"`
 			Limit    *int   `json:"limit"`
+			Order    string `json:"order"`
 		}
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpArgError(err), nil
@@ -466,7 +551,15 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		if in.Limit != nil {
 			tail = append(tail, "--limit", strconv.Itoa(*in.Limit))
 		}
-		return mcpRun(execManifestCommand(g, ctx, m, primeCmd, tail)), nil
+		if in.Order != "" {
+			tail = append(tail, "--order", in.Order)
+		}
+		// Agent surface → brief view (AXI R1): the rehydration read keeps its
+		// claim epochs and counts but drops the content echoes. Inert on old
+		// servers; task_show stays full for any doc that needs the whole body.
+		gp := g
+		gp.view = "brief"
+		return mcpRun(execManifestCommand(gp, ctx, m, primeCmd, tail)), nil
 	})
 
 	// task_stamp — record evidence on ONE acceptance criterion mid-claim. A
@@ -480,7 +573,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_stamp",
 		Title:       "Stamp a criterion mid-claim",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(false)},
-		Description: "Record evidence on ONE acceptance criterion the MOMENT it is proven — do NOT batch to the close. Stamp is progress; close is the seal. Pass the SAME worker_id you claimed with and the observed_epoch from your claim (doc.claim.epoch) — stamp is holder-only under the SAME epoch fence as close (a lapsed claim can't stamp: re-claim to renew the epoch, then re-stamp). criterion is the 0-based index into the task's acceptance_criteria. Then pass EXACTLY ONE outcome: `met:true` WITH a non-empty `evidence` (concrete proof — test names, gate output, branch, commit) FLIPS the criterion's lock (a met with empty evidence is rejected); OR `miss:true` WITH a non-empty `note` records an honest failed attempt on the criterion's attempts trail (5 most recent kept) WITHOUT flipping met. Stamp does NOT bump the epoch, so the same observed_epoch is still valid for your next stamp or the close. On success the response carries the fresh doc. A wrong holder / stale epoch / bad index returns 409.",
+		Description: "Record evidence on ONE acceptance criterion the MOMENT it is proven — do NOT batch to the close. Stamp is progress; close is the seal. Pass the SAME worker_id you claimed with and the observed_epoch from your claim (doc.claim.epoch) — stamp is holder-only under the SAME epoch fence as close (a lapsed claim can't stamp: re-claim to renew the epoch, then re-stamp). criterion is the ZERO-BASED index into acceptance_criteria: the FIRST criterion is 0, the second is 1 — do NOT pass a 1-based number. criterion_text (the criterion's EXACT stored wording, copied verbatim from acceptance_criteria[criterion].criterion) is REQUIRED whenever you pass met:true — it is the off-by-one guard: WITHOUT it the stamp is REJECTED (409 criterion_text_required, nothing written), and WITH a text that does not match the row at criterion it is REJECTED (409 criteria_mismatch) instead of silently flipping a NEIGHBOURING criterion. A miss needs no text (it flips nothing). Then pass EXACTLY ONE outcome: `met:true` WITH a non-empty `evidence` (concrete proof — test names, gate output, branch, commit) FLIPS the criterion's lock (a met with empty evidence is rejected); OR `miss:true` WITH a non-empty `note` records an honest failed attempt on the criterion's attempts trail (5 most recent kept) WITHOUT flipping met. Stamp does NOT bump the epoch, so the same observed_epoch is still valid for your next stamp or the close. On success the response carries the fresh doc. A wrong holder / stale epoch / bad index returns 409.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -501,11 +594,15 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     "criterion": {
       "type": "integer",
       "minimum": 0,
-      "description": "0-based index into the task's acceptance_criteria — the one criterion to stamp."
+      "description": "ZERO-BASED index into the task's acceptance_criteria — the first criterion is 0, the second is 1. Do NOT pass a 1-based number."
+    },
+    "criterion_text": {
+      "type": "string",
+      "description": "REQUIRED with met (optional with miss): the criterion's exact stored wording, copied verbatim from acceptance_criteria[criterion].criterion. It is the off-by-one guard — a met stamp with NO criterion_text is REJECTED (409 criterion_text_required), and one whose text does not match the row at criterion is REJECTED (409 criteria_mismatch), instead of silently flipping a neighbour. Nothing is written on either rejection."
     },
     "met": {
       "type": "boolean",
-      "description": "Flip the criterion to met. REQUIRES a non-empty evidence. Pass EITHER met (with evidence) OR miss (with note), never both."
+      "description": "Flip the criterion to met. REQUIRES a non-empty evidence AND criterion_text. Pass EITHER met (with evidence + criterion_text) OR miss (with note), never both."
     },
     "evidence": {
       "type": "string",
@@ -527,6 +624,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			WorkerID      string `json:"worker_id"`
 			ObservedEpoch *int   `json:"observed_epoch"`
 			Criterion     *int   `json:"criterion"`
+			CriterionText string `json:"criterion_text"`
 			Met           bool   `json:"met"`
 			Evidence      string `json:"evidence"`
 			Miss          bool   `json:"miss"`
@@ -561,6 +659,9 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		// criterion + the met/evidence | miss/note outcome ride as manifest flags
 		// (query params) exactly as the CLI types them after the positionals.
 		tail := []string{in.DocID, in.WorkerID, strconv.Itoa(*in.ObservedEpoch), "--criterion", strconv.Itoa(*in.Criterion)}
+		if strings.TrimSpace(in.CriterionText) != "" {
+			tail = append(tail, "--criterion-text", in.CriterionText)
+		}
 		if in.Met {
 			tail = append(tail, "--met", "--evidence", in.Evidence)
 		} else {
@@ -633,6 +734,33 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 	return nil
 }
 
+// execTaskNextWithPolicy extends the live task.next manifest request only at
+// the MCP boundary. The server manifest intentionally remains backwards
+// compatible; this curated tool adds the typed override to the JSON body after
+// the shared dispatcher has resolved auth, scope, and the standard arguments.
+func execTaskNextWithPolicy(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string, policy map[string]any) (int, []byte, error) {
+	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, false)
+	if derr != nil {
+		return 0, nil, derr
+	}
+	if policy != nil {
+		body := map[string]any{}
+		if len(req.body) > 0 {
+			if err := json.Unmarshal(req.body, &body); err != nil {
+				return 0, nil, fmt.Errorf("decode task.next body: %w", err)
+			}
+		}
+		body["execution_policy_override"] = policy
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return 0, nil, fmt.Errorf("encode task.next policy: %w", err)
+		}
+		req.body = encoded
+		req.headers["Content-Type"] = "application/json"
+	}
+	return sendManifestRequest(req)
+}
+
 // mcpBoolPtr returns a pointer to b — for the SDK's *bool annotation fields
 // (DestructiveHint) where nil means "SDK default" and a non-nil pointer sets the
 // hint explicitly.
@@ -642,8 +770,8 @@ func mcpBoolPtr(b bool) *bool { return &b }
 // manifest verb), riding sendTaskMutations — the same raw send half `bp task
 // create` uses (tasks_create_cmd.go) — but returning an MCP result instead of
 // writing a receipt to stdout. It creates the draft, optionally publishes it, and
-// returns a compact JSON receipt {id, draft, status} as tool content — plus a
-// `warnings` key when the create/publish success envelope carries the authoring
+// returns a compact JSON receipt {id, draft, status, lifecycle_status} as tool
+// content — plus a `warnings` key when the create/publish success envelope carries the authoring
 // wall's advisories (publish response preferred, else create), so an agent sees the
 // same {code,severity,message} advice the CLI surfaces. Any failure sets IsError
 // with a message that still names the created id (so a created-but-publish-failed
@@ -679,7 +807,14 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 		docStatus = "published"
 		warnBody = pBody
 	}
-	receipt := map[string]any{"id": bareID, "draft": draftID, "status": docStatus}
+	// tlv-s6 (TLV charter D14): echo the born lifecycle_status — the body value
+	// the server accepted — so a birth-as-considering is visible in the receipt.
+	receipt := map[string]any{
+		"id":               bareID,
+		"draft":            draftID,
+		"status":           docStatus,
+		"lifecycle_status": body["lifecycle_status"],
+	}
 	if warnings := warningsFrom(warnBody); len(warnings) > 0 {
 		receipt["warnings"] = warnings
 	}
@@ -716,11 +851,22 @@ func decodeMCPArgs(req *mcp.CallToolRequest, dst any) error {
 	return nil
 }
 
+// mcpToolResultMaxBytes is the last-resort byte guard on every MCP tool result
+// that rides mcpRun — 7/8 curated tools plus ALL bridge tools in one place
+// (AXI R4, charter decision 10). Brief server views are the real diet; this cap
+// only stops a pathological payload (a 350KB task_ready against a pre-views
+// server) from flooding an agent's context. 48KB keeps a full brief page with
+// headroom while bounding the worst case.
+const mcpToolResultMaxBytes = 48 << 10
+
 // mcpRun wraps an mcpInvoke result into an MCP tool result: the raw response body
 // as text content, with IsError set when the HTTP status is >= 400. A transport
 // error (never reached the server) is itself an IsError text result. NOTE: a 200
 // carrying {"ok":false,"reason":"no_ready"} (the empty-queue claim) is NOT an
 // error — it is a valid outcome the model should read, so IsError stays false.
+// An oversized body is clamped to mcpToolResultMaxBytes with an inline
+// truncation notice naming the byte total and the escape command (truncation
+// honesty — anything omitted says so, with the exact way to get the rest).
 func mcpRun(status int, body []byte, err error) *mcp.CallToolResult {
 	if err != nil {
 		return mcpTextError("request failed: " + err.Error())
@@ -729,10 +875,38 @@ func mcpRun(status int, body []byte, err error) *mcp.CallToolResult {
 	if text == "" {
 		text = fmt.Sprintf("(empty response, HTTP %d)", status)
 	}
+	text = clampMCPToolResult(text)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		IsError: status >= 400,
 	}
+}
+
+// clampMCPToolResult bounds a tool-result body at mcpToolResultMaxBytes,
+// cutting on a rune boundary (walk back with utf8.RuneStart so a multi-byte
+// rune is never split) and appending the AXI-format truncation notice: the
+// byte total plus the exact escape commands that retrieve the rest. Small
+// payloads pass through untouched.
+func clampMCPToolResult(text string) string {
+	return clampMCPToolResultWithHint(text,
+		"narrow the call (a smaller limit, or a single-task read via task_show <doc_id>)")
+}
+
+// clampMCPToolResultWithHint is clampMCPToolResult with a caller-supplied
+// escape-hatch hint, so a surface with a different paging mechanism (the chat
+// tools page by `since`, not limit/task_show) can keep the truncation notice
+// honest about how to fetch the rest.
+func clampMCPToolResultWithHint(text, hint string) string {
+	if len(text) <= mcpToolResultMaxBytes {
+		return text
+	}
+	cut := mcpToolResultMaxBytes
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut] + fmt.Sprintf(
+		"\n[truncated: %d bytes total, first %d shown — %s to fetch the rest]",
+		len(text), cut, hint)
 }
 
 // mcpArgError is an IsError result for a bad tool argument (before any request).

@@ -16,10 +16,20 @@ defmodule Barkpark.Plugins.Github.Cursor do
   `mutation_events.id`) is exactly what the mirror needs; the pull cursor's remote
   id-space is never mixed in.
 
-  Structural copy of `Barkpark.Sync.PushCursor` — `put/3` is a MONOTONIC upsert
-  (never rewinds, even under out-of-order calls) and `bootstrap_if_absent/2` seeds
+  Structural copy of `Barkpark.Sync.PushCursor` — `put/4` is a MONOTONIC upsert
+  (never rewinds, even under out-of-order calls) and `bootstrap_if_absent/3` seeds
   the cursor to the dataset head (`MAX(mutation_events.id)`) ONLY when no row
   exists, so first enable NEVER mass-mirrors the pre-enable backlog to GitHub.
+
+  ## Workspace attribution (charter D55)
+
+  `sync_push_cursors` gained a per-workspace `workspace_id` attribution column,
+  but the outbound GitHub mirror is deliberately PER-DATASET, not per-workspace:
+  one cursor tracks a dataset's `mutation_events` head across every workspace that
+  shares the slug. So this cursor stamps `NULL` — its rows are workspace-agnostic
+  mirror infrastructure and are NOT part of any single workspace's bundle or
+  teardown (the FK cascade only removes rows whose `workspace_id` matches the
+  deleted workspace). The `{source, dataset}` key is unchanged.
   """
 
   alias Barkpark.Sync.PushCursor
@@ -44,7 +54,8 @@ defmodule Barkpark.Plugins.Github.Cursor do
   @spec put(String.t(), non_neg_integer()) :: :ok
   def put(dataset, event_id)
       when is_binary(dataset) and is_integer(event_id) and event_id >= 0 do
-    PushCursor.put(@source, dataset, event_id)
+    # NULL workspace_id — the outbound mirror cursor is per-dataset, not per-workspace.
+    PushCursor.put(nil, @source, dataset, event_id)
   end
 
   @doc """
@@ -63,6 +74,7 @@ defmodule Barkpark.Plugins.Github.Cursor do
   """
   @spec bootstrap_if_absent(String.t()) :: :ok
   def bootstrap_if_absent(dataset) when is_binary(dataset) do
-    PushCursor.bootstrap_if_absent(@source, dataset)
+    # NULL workspace_id — the outbound mirror cursor is per-dataset, not per-workspace.
+    PushCursor.bootstrap_if_absent(nil, @source, dataset)
   end
 end

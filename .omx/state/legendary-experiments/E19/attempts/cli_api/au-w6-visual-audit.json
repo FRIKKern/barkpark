@@ -1,0 +1,22 @@
+{
+  "accepted_capture": false,
+  "attempt_sha256": "5e1ae409fcf18d21f595ced03f612830ffe0a561fa6aae6cb089846be501c6bb",
+  "attempt_status": "BLOCKED",
+  "candidate_capsule_sha256": "8587ac82df39d049b573f7d732124b31fe324bac3f8c5d002f5677a98be81193",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_source_sha256": "de4ec576e88cdbff89e39fdfe0661ecc99a0f6f56e0336df15ac836225cc4d8e",
+  "capture_sha256": null,
+  "capture_timestamp": null,
+  "deployment_id": null,
+  "evidence_boundary": "RECONCILED_REAL_CELL_ATTEMPT_RECORD_NOT_A_CAPTURE",
+  "explicit_error": "NO_ISOLATED_DEPLOYED_RECORD_WITH_E16_PROVENANCE; LOCAL_CAPSULE_OR_PRODUCTION_API_IS_NOT_ACCEPTED",
+  "fixture_id": "au-w6-visual-audit",
+  "fixture_kind": "task",
+  "invocation_session": "PREDEPLOYMENT_STOP_NO_REAL_SESSION",
+  "production_contacted": false,
+  "proxy_derived": false,
+  "schema_version": "legendary-e19-attempt/v1",
+  "silent_blank": false,
+  "surface": "cli_api"
+}

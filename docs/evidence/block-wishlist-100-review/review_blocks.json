@@ -1,0 +1,8651 @@
+[
+ {
+  "id": "rv-eyebrow",
+  "type": "eyebrow",
+  "text": "PD BLOCK WISHLIST \u00b7 THE USEFULNESS REVIEW \u00b7 WAVE 1 \u00b7 2026-07-18"
+ },
+ {
+  "id": "rv-title",
+  "type": "heading",
+  "level": 1,
+  "text": "Block Wishlist 100 \u2014 the Usefulness Review, ranked in tiers S/A/B/C"
+ },
+ {
+  "id": "rv-ingress",
+  "type": "ingress",
+  "text": "All 100 wishlist candidates (B001-B100) from block-wishlist-100, scored on the charter D5 rubric and ranked S/A/B/C with usefulness as the primary criterion. The scoring is demand-grounded and feasibility-honest: every prerequisite flag is visible, every dedup ruling applied, and build cost never enters the score - only the tiebreak. The S tier is the ready-to-build backlog for wave 2, filed as pbw-stier-* tasks under pd-block-wishlist-epic."
+ },
+ {
+  "id": "rv-method-callout",
+  "type": "callout",
+  "tone": "info",
+  "title": "The rubric (charter D5)",
+  "content": [
+   {
+    "type": "text",
+    "value": "Each candidate scores 1-5 on four axes: demand evidence (weight 35%), frequency-of-use plausibility (25%), unlock-power (25%), cross-surface reach (15%, honest per D2-D4). Usefulness = the weighted sum. Build cost is a TIEBREAK only, read via the D6/D7 cost tier. Tier rule: S requires score >= 4.0 AND no unmet prerequisite flag; a prerequisite-flagged candidate caps at A regardless of score; charter D22 dedup rulings cap at C. Bands: A >= 3.4, B >= 2.7, C below."
+   }
+  ]
+ },
+ {
+  "id": "rv-h-verdict",
+  "type": "heading",
+  "level": 2,
+  "text": "The verdict at a glance"
+ },
+ {
+  "id": "rv-statgrid",
+  "type": "stat-grid",
+  "items": [
+   {
+    "label": "S - build now",
+    "value": "12",
+    "denom": "100"
+   },
+   {
+    "label": "A - next in line",
+    "value": "32",
+    "denom": "100"
+   },
+   {
+    "label": "B - worthy, not yet",
+    "value": "43",
+    "denom": "100"
+   },
+   {
+    "label": "C - low / capped",
+    "value": "13",
+    "denom": "100"
+   },
+   {
+    "label": "resolver-blocked (capped A)",
+    "value": "13"
+   },
+   {
+    "label": "plugin-seam-blocked",
+    "value": "5"
+   },
+   {
+    "label": "D22 parity entries",
+    "value": "7"
+   },
+   {
+    "label": "top score",
+    "value": "4.75"
+   }
+  ]
+ },
+ {
+  "id": "rv-tier-chart",
+  "type": "chart",
+  "kind": "bars",
+  "caption": "Candidates per tier - COUNT of the 100 reviewed (one series, D21-safe).",
+  "axes": {
+   "min": 0,
+   "xLabels": [
+    "S",
+    "A",
+    "B",
+    "C"
+   ]
+  },
+  "series": [
+   {
+    "label": "candidates",
+    "points": [
+     12,
+     32,
+     43,
+     13
+    ]
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-heat",
+  "type": "heatmap",
+  "values": true,
+  "rowLabels": [
+   "data-viz & charts",
+   "diagrams & technical",
+   "live-data & task-ops",
+   "editorial & structure",
+   "interactive & disclosure",
+   "media",
+   "geo & map",
+   "dev & code",
+   "fields & schema",
+   "navigation & meta"
+  ],
+  "colLabels": [
+   "S",
+   "A",
+   "B",
+   "C"
+  ],
+  "cells": [
+   [
+    1,
+    4,
+    11,
+    1
+   ],
+   [
+    1,
+    0,
+    2,
+    8
+   ],
+   [
+    1,
+    3,
+    6,
+    1
+   ],
+   [
+    2,
+    6,
+    3,
+    1
+   ],
+   [
+    2,
+    5,
+    3,
+    0
+   ],
+   [
+    1,
+    2,
+    5,
+    0
+   ],
+   [
+    0,
+    1,
+    2,
+    2
+   ],
+   [
+    2,
+    5,
+    3,
+    0
+   ],
+   [
+    1,
+    2,
+    5,
+    0
+   ],
+   [
+    1,
+    4,
+    3,
+    0
+   ]
+  ]
+ },
+ {
+  "id": "rv-verdict-note",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "The D8 family-by-tier matrix above is exhaustive: the ten families times four tiers account for all 100 candidates. Editorial & structure, dev & code, and interactive & disclosure carry the densest S/A mass - they are cheap (mostly STATIC/I0 compose.ex emitters with REAL email renders) and sit on the most-cited demand. Data-viz is wide but mid-band: the vocabulary reuses one emitter family, so its strongest members (bar-chart) carry the rest. Diagrams & technical is barbell-shaped: equation is a top-4 candidate while seven D22 parity entries anchor the C tier."
+   }
+  ]
+ },
+ {
+  "id": "rv-div-1",
+  "type": "divider"
+ },
+ {
+  "id": "rv-h-evidence",
+  "type": "heading",
+  "level": 2,
+  "text": "Demand evidence - what the scores cite"
+ },
+ {
+  "id": "rv-ev-1",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "Ledger evidence (the strongest signal class): the 294-paper census behind the wishlist counts 23 stat uses, 207 hand-typed tables, and ZERO video blocks - absence-by-missing-block, not absence of appetite. The broken-block drift is cited per charter D14 in its only citable form: the storage-path COALESCE census - coalesce(content->'blocks', content->'body'->'blocks') over published papers -> 77 placeholders (bulleted-list 27, bullet_list 22, bulleted_list 15, quote 8, numbered_list 3, bulletList 2), triple-confirmed; a naive single-path query undercounts to 51 and is not citable. The drift proves authors reach for block names that do not exist - the wishlist's core demand thesis."
+   }
+  ]
+ },
+ {
+  "id": "rv-ev-2",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "Code duplication evidence: the SAME dep-free Canvas2D map is maintained twice (web/components/listings-map.tsx and apps/hundesteder/components/places-map.tsx) - B070's demand score is 5 because a block retires two live forks. Repo prior art: internal/pdrender/dashboard.go already renders {label, blocks} tab sets (B052), and the OG preview manifest (no-oEmbed law) already does link-preview's fetch-at-save work (B098). Competitor pull: confirmed gaps in Notion (toc, equation, breadcrumb), Typst (equation, scientific-plot, vector/tree diagrams, citations), GitBook (steps, tabs, expandable, openapi-console), Craft (toggle-list, card links), Observable (chart-cell, data-grid, reactive-input), Coda (action-button), Slite (freshness-badge)."
+   }
+  ]
+ },
+ {
+  "id": "rv-h-dedup",
+  "type": "heading",
+  "level": 2,
+  "text": "Dedup guard (charter D22, binding)"
+ },
+ {
+  "id": "rv-dedup-1",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "Checked all 100 candidates against the binding rulings. (1) chat-approval, chat-question and chat-plan are EXISTING shipped block types (tiers.ex, #3514/#3742) - NO wishlist entry re-proposes them; the pool is clean of that dedup failure. (2) Per-kind TUI mermaid renderers are parity work under the ONE existing diagram block, never new-block candidates: B018-B024 are therefore capped at tier C with an explicit D22 flag - the terminal parity work itself stays legitimate but routes through the terminal-mermaid wave backlog, not a block build. (3) horizontal-bars is legitimate only as a distinct labeled ranking/leaderboard form: B003 bar-chart PASSES this test - it is the labeled categorical-bars block (gauge-list TUI vocabulary as prior art), not 'chart but sideways', and chart itself draws line series only."
+   }
+  ]
+ },
+ {
+  "id": "rv-div-2",
+  "type": "divider"
+ },
+ {
+  "id": "rv-h-stier",
+  "type": "heading",
+  "level": 2,
+  "text": "S tier - the ready-to-build backlog (12)"
+ },
+ {
+  "id": "rv-stier-table",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "#"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "family"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "bp task"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B093"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "toc"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "navigation & meta"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-toc"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B043"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "steps"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "editorial & structure"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-steps"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B003"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "bar-chart"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "data-viz & charts"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-bar-chart"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B025"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "equation"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "diagrams & technical"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-equation"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B075"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "api-endpoint"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "dev & code"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.50"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-api-endpoint"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "6"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B077"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "code-tabs"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "dev & code"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.45"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-code-tabs"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "7"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B052"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "tabs"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "interactive & disclosure"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.35"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-tabs"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "8"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B062"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "video"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "media"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.20"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-video"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "9"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B085"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "field-number"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "fields & schema"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.20"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC+SE"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-field-number"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "10"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B053"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "expandable"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "interactive & disclosure"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I0"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-expandable"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "11"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B040"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "footnote"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "editorial & structure"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-footnote"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "12"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B034"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "criteria-progress"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "live-data & task-ops"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pbw-stier-criteria-progress"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-stier-note",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "Ordering within equal scores is the D5 cost tiebreak: toc and steps tie at 4.75 (both STATIC); bar-chart and equation tie at 4.60 (both STATIC); video (STATIC) edges field-number (STATIC + STUDIO-EDIT surcharge) at 4.20; expandable (I0, reusing callout's shipped native-details pattern) edges footnote (STATIC with two-way wiring) at 4.15. criteria-progress is the one live-data entry that is genuinely unblocked: resolver rows already carry acceptance criteria, so it rides the existing task resolver with no new plumbing. Eight of twelve are STATIC - scaffy add-block-type is the suggested build path for those (charter D18: read the LIVE count pins - React/parity toHaveLength and EXPECTED_COUNT at their current values - never the stale scaffy corpus EXAMPLES). code-tabs and tabs are I1 (dual hydration + real-browser test, asciicast cost precedent 30-40 files)."
+   }
+  ]
+ },
+ {
+  "id": "rv-stier-tasks",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "Every S-tier candidate above is filed as a PUBLISHED bp task (id in the last column), parented under pd-block-wishlist-epic with wave_paper=block-wishlist-wave-2026-07-18, priority 2, each carrying the pitch, data shape, per-surface notes, cost tier, prerequisites and a merge-gated 'PR merged' criterion."
+   }
+  ]
+ },
+ {
+  "id": "rv-div-3",
+  "type": "divider"
+ },
+ {
+  "id": "rv-h-full",
+  "type": "heading",
+  "level": 2,
+  "text": "The full ranking - all 100, by family"
+ },
+ {
+  "id": "rv-full-key",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "One row per candidate - this is each candidate's single scored appearance. Columns D/F/U/R are the four D5 axes (demand, frequency, unlock, reach, each 1-5); usefulness is the weighted sum; flags mark unmet prerequisites (which cap the tier at A) and D22 rulings (which cap at C)."
+   }
+  ]
+ },
+ {
+  "id": "rv-h-fam-dv",
+  "type": "heading",
+  "level": 3,
+  "text": "data-viz & charts (17)"
+ },
+ {
+  "id": "rv-fam-blurb-dv",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "One shared Render.DataViz emitter vocabulary carries the whole family; bar-chart is the S-tier spearhead and the rest ladder behind it. chart-cell and data-grid score A on Observable-grade unlock but wait on the resolver seam."
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-table-dv",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "code tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "D"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "F"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "U"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "R"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "flags"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "B003"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "bar-chart"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B017"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "data-grid"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.85"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B002"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "sparkline"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B004"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pie-chart"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B016"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "chart-cell"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.50"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B001"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "radial-dial"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B005"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "scatter-plot"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B006"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "area-chart"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B007"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "histogram"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B014"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "calendar-heatmap"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B015"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "scientific-plot"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B009"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "waterfall-chart"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B010"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "funnel-chart"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B011"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "radar-chart"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B012"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "treemap"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B013"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "sankey"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.80"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B008"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "box-plot"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.55"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-h-fam-dg",
+  "type": "heading",
+  "level": 3,
+  "text": "diagrams & technical (11)"
+ },
+ {
+  "id": "rv-fam-blurb-dg",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "equation is the family's S-tier headline - a confirmed gap in both Notion and Typst with a zero-JS MathML path. B018-B024 are D22-capped parity entries; chemfig is the honest tail."
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-table-dg",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "code tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "D"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "F"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "U"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "R"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "flags"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "B025"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "equation"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B026"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "vector-diagram"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B027"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "tree-diagram"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B018"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "diagram-gantt-tui"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "D22 parity"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B019"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "diagram-er-tui"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "D22 parity"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B020"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "diagram-class-tui"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "D22 parity"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B021"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "diagram-pie-tui"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "D22 parity"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B022"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "diagram-gitgraph-tui"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "D22 parity"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B023"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "diagram-state-tui"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "D22 parity"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B024"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "diagram-journey-tui"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "D22 parity"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B028"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "chemfig"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "1.55"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-h-fam-ld",
+  "type": "heading",
+  "level": 3,
+  "text": "live-data & task-ops (11)"
+ },
+ {
+  "id": "rv-fam-blurb-ld",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "The liveliest demand (everything-is-a-task doctrine) but the most prerequisite-bound family: five of eleven wait on resolver plumbing (tr-agg-resolver-wave), two on the plugin seam. criteria-progress is the unblocked S-tier pick; burndown-chart is the next-cheapest live read."
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-table-ld",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "code tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "D"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "F"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "U"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "R"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "flags"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "B034"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "criteria-progress"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B029"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "timeline-gantt"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B032"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "activity-feed"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B035"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "epic-heartbeat"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B030"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "burndown-chart"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.25"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B033"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "claim-monitor"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.25"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B038"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "sheet-chart"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.25"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "plugin seam (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B031"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "task-calendar"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B037"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "deploy-status"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "plugin seam (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B039"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "paper-stats"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B036"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "countdown"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.40"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-h-fam-ed",
+  "type": "heading",
+  "level": 3,
+  "text": "editorial & structure (12)"
+ },
+ {
+  "id": "rv-fam-blurb-ed",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "The highest tier-mass family: cheap compose.ex emitters, REAL email renders, and docs-platform-staple demand. steps and footnote make S; faq, definition-list, changelog, glossary-term, pros-cons and hero all sit high in A."
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-table-ed",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "code tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "D"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "F"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "U"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "R"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "flags"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "B043"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "steps"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B040"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "footnote"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B044"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "faq"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I0"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B045"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "definition-list"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B047"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "changelog"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B050"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "hero"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B042"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "glossary-term"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I0"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.55"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B049"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pros-cons"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.55"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B041"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "sidenote"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.30"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B046"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "chronology"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.30"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B048"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "citation-list"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.05"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B051"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "page-break"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-h-fam-ix",
+  "type": "heading",
+  "level": 3,
+  "text": "interactive & disclosure (10)"
+ },
+ {
+  "id": "rv-fam-blurb-ix",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "tabs (repo prior art in dashboard.go) and expandable (shipped details pattern, repriced by D9) make S cheaply. The I2 write-path members (action-button, checklist, reactive-input) score high on unlock but carry the security surface as their honest cost."
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-table-ix",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "code tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "D"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "F"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "U"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "R"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "flags"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "B052"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "tabs"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "section"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.35"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B053"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "expandable"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I0"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B054"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "toggle-list"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I0"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B056"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "action-button"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.85"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B060"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "checklist"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.85"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B061"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "quiz-embed"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "plugin seam (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B058"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "reactive-input"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.50"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B055"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "carousel"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "section"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B059"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "poll"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B057"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "template-button"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.85"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-h-fam-me",
+  "type": "heading",
+  "level": 3,
+  "text": "media (8)"
+ },
+ {
+  "id": "rv-fam-blurb-me",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "video is the family S pick on census-proven absence. file-attachment and gallery lead A; svg-inline carries an explicit sanitizer security cost."
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-table-me",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "code tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "D"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "F"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "U"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "R"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "flags"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "B062"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "video"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.20"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B067"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "file-attachment"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B064"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "gallery"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I0/I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B069"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "icon"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B065"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "image-compare"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B066"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pdf-embed"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B068"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "svg-inline"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B063"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "audio"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-h-fam-geo",
+  "type": "heading",
+  "level": 3,
+  "text": "geo & map (5)"
+ },
+ {
+  "id": "rv-fam-blurb-geo",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "map is the top A candidate in the whole review (3.95) on fork-retiring demand; the rest of the family composes on its Canvas2D core once it exists."
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-table-geo",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "code tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "D"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "F"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "U"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "R"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "flags"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "B070"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "map"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.95"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B073"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "location-card"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B071"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "map-route"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B072"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "choropleth"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.40"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B074"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "geojson-map"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.40"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "C"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-h-fam-dev",
+  "type": "heading",
+  "level": 3,
+  "text": "dev & code (10)"
+ },
+ {
+  "id": "rv-fam-blurb-dev",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "api-endpoint and code-tabs make S on docs-staple demand cited from this very repo. json-viewer, csv-table, kbd and package-install stack the A band; the github-plugin cards wait on the seam."
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-table-dev",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "code tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "D"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "F"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "U"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "R"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "flags"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "B075"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "api-endpoint"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.50"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B077"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "code-tabs"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.45"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B078"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "json-viewer"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I0"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B079"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "csv-table"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B081"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "pr-status"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "plugin seam (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B082"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "kbd"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.65"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B084"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "package-install"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I1"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B080"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "commit-card"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "plugin seam (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B076"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "openapi-console"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.10"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B083"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "badge-row"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.05"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-h-fam-fs",
+  "type": "heading",
+  "level": 3,
+  "text": "fields & schema (8)"
+ },
+ {
+  "id": "rv-fam-blurb-fs",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "field-number is the S-tier pick - the missing atom every schema hits first. field-tags (Barkpark's own contract with no control) leads the rest; schema-card waits on a schema-source resolver."
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-table-fs",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "code tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "D"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "F"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "U"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "R"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "flags"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "B085"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "field-number"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC+SE"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.20"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B092"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "schema-card"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B091"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "field-tags"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC+SE"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.60"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B086"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "field-url"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC+SE"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B087"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "field-file"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC+SE"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B089"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "field-json"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC+SE"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B090"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "field-rating"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC+SE"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B088"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "field-geopoint"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "element"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC+SE"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "2.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-h-fam-nav",
+  "type": "heading",
+  "level": 3,
+  "text": "navigation & meta (8)"
+ },
+ {
+  "id": "rv-fam-blurb-nav",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "toc is the review's top score (4.75). link-preview rides shipped OG machinery into A; paper-list scores 4.00 but caps at A on the content-query resolver; backlinks surfaces an existing server capability once block plumbing lands."
+   }
+  ]
+ },
+ {
+  "id": "rv-fam-table-nav",
+  "type": "table",
+  "head": [
+   [
+    {
+     "type": "text",
+     "value": "ID"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "block"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "code tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "cost"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "D"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "F"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "U"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "R"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "usefulness"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "tier"
+    }
+   ],
+   [
+    {
+     "type": "text",
+     "value": "flags"
+    }
+   ]
+  ],
+  "rows": [
+   [
+    [
+     {
+      "type": "text",
+      "value": "B093"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "toc"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "S"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B099"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "paper-list"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4.00"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B098"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "link-preview"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.90"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B095"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "backlinks"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.75"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B100"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "freshness-badge"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "5"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.55"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "A"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B097"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "synced-block"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "I2"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.25"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "-"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B094"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "breadcrumb"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ],
+   [
+    [
+     {
+      "type": "text",
+      "value": "B096"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "related-papers"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "widget"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "STATIC"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "4"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "3.15"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "B"
+     }
+    ],
+    [
+     {
+      "type": "text",
+      "value": "resolver (D10)"
+     }
+    ]
+   ]
+  ]
+ },
+ {
+  "id": "rv-div-4",
+  "type": "divider"
+ },
+ {
+  "id": "rv-h-atier",
+  "type": "heading",
+  "level": 2,
+  "text": "A tier (32) - next in line"
+ },
+ {
+  "id": "rv-atier",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "Unblocked A leaders, in score order: map 3.95 (the fork-retiring Canvas2D consolidation - first promotion candidate once an S slot frees), then a dense 3.90 band of cheap REAL-email blocks: faq, definition-list, changelog, toggle-list, file-attachment, json-viewer, csv-table, link-preview. checklist and action-button (3.85) lead the I2 write-path wave that should ship together behind one security review. Capped-at-A by prerequisite: paper-list (4.00 - the one candidate whose raw score is S-grade), data-grid 3.85, backlinks 3.75, schema-card 3.75, epic-heartbeat / activity-feed / timeline-gantt 3.60, chart-cell 3.50 - all resolver-gated (tr-agg-resolver-wave is the unlock); pr-status 3.75 and quiz-embed 3.60 wait on the plugin block-registration seam."
+   }
+  ]
+ },
+ {
+  "id": "rv-h-btier",
+  "type": "heading",
+  "level": 2,
+  "text": "B tier (43) - worthy, not yet"
+ },
+ {
+  "id": "rv-btier",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "The B band is real but outranked: the data-viz long tail (radial-dial, histogram, area-chart, scatter-plot, calendar-heatmap and scientific-plot lead it at 3.15; radar, funnel, waterfall, treemap and sankey sit behind), the live-data middle (burndown-chart and claim-monitor at 3.25, then sheet-chart, task-calendar, deploy-status, paper-stats - all but burndown prerequisite-flagged), the field-atom siblings (url, file, json, rating, geopoint), the remaining media embeds (audio, pdf-embed, svg-inline, image-compare, icon), geo composition members (map-route, location-card), editorial support (sidenote, chronology, citation-list), and the heavier interactive pieces (carousel, poll, template-button, openapi-console, synced-block). Wave 2+ should re-score B after the S wave ships - the data-viz tail gets cheaper once bar-chart births the DataViz emitter family."
+   }
+  ]
+ },
+ {
+  "id": "rv-h-ctier",
+  "type": "heading",
+  "level": 2,
+  "text": "C tier (13) - low or capped"
+ },
+ {
+  "id": "rv-ctier",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "Seven D22-capped parity entries (B018-B024) - legitimate terminal-mermaid work, wrong ledger for it. Six genuinely low scores: box-plot 2.55, choropleth 2.40, geojson-map 2.40, countdown 2.40, page-break 2.00 and chemfig 1.55 - the wishlist itself predicted chemfig's rank; honesty kept it there."
+   }
+  ]
+ },
+ {
+  "id": "rv-next-callout",
+  "type": "callout",
+  "tone": "success",
+  "title": "What happens next",
+  "content": [
+   {
+    "type": "text",
+    "value": "Wave 2 builds the S tier: eight STATIC candidates ride scaffy add-block-type (live count pins per D18), tabs/code-tabs ride the I1 hydration pattern, field-number lands with its Studio control, and criteria-progress rides the existing task resolver. tr-agg-resolver-wave unblocks the eight resolver-capped A candidates; the plugin block-registration seam (pbw-backlog-plugin-block-seam) unblocks the five seam-flagged candidates (two of them A-tier). Each pbw-stier-* task carries its full brief."
+   }
+  ]
+ },
+ {
+  "id": "rv-div-end",
+  "type": "divider"
+ },
+ {
+  "id": "rv-colophon",
+  "type": "paragraph",
+  "content": [
+   {
+    "type": "text",
+    "value": "Written in the product it reviews. Input: Paper block-wishlist-100 (100 candidates, live-verified). Rubric: charter D5; cost tiers D6/D7; families D8; dedup rulings D9/D22; dataviz constraints D21. Review slice: pbw-w1-usefulness-review-paper, wave Paper block-wishlist-wave-2026-07-18."
+   }
+  ]
+ }
+]

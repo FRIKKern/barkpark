@@ -1,0 +1,40 @@
+{
+  "id": "v3-runner-proofs-egress-verdict",
+  "created": "2026-07-21T19:30:00Z",
+  "wave": "connectors-wave-30-2026-07-21",
+  "assignment": "RUN fake-vercel proofs (Slice A regression floor) + judge egress-reuse narrowing-leak verdict",
+  "verdict": "LEDGER-ONLY — D242 stands; do NOT fold egress-reuse-rederive into Slice A",
+  "recipes": [
+    {
+      "claim": "w12 shim-confinement proof is GREEN today (Slice A env/HOME/cwd/principal-gate floor)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && bash scripts/connectors/w12-shim-confinement-proof.sh; echo exit=$?",
+      "expect": "exit=0; PASS lines for (a) exactly [ANTHROPIC_API_KEY=sk-test], (b) planted secrets absent, (c) HOME/cwd confined, (d) principal gate exit 2 zero vercel calls"
+    },
+    {
+      "claim": "w29 egress-allowlist proof is GREEN today (Slice A create-path egress floor)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && bash scripts/connectors/w29-egress-allowlist-proof.sh; echo exit=$?",
+      "expect": "exit=0; LEG A/B/C PASS set-equality on --allowed-domain create argv; markers present"
+    },
+    {
+      "claim": "w29 NEVER drives a --sandbox-id REUSE turn — its only sandbox-id mention is the header comment; drive() passes only --egress-host",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'sandbox-id' scripts/connectors/w29-egress-allowlist-proof.sh",
+      "expect": "single hit at header line ~15 (a prose comment), never inside drive()"
+    },
+    {
+      "claim": "reuse branch discards egressHosts on origin/main — allowlist is create-only, reuse skips createSandbox",
+      "rerun": "git show origin/main:scripts/connectors/cloud-sandbox-runner.mjs | grep -n 'egressHosts\\|createSandbox('",
+      "expect": "line 871 `id = await createSandbox(workspace, egressHosts)` (create branch ONLY); reuse branch 861-869 sets id=reuseSandboxId, never touches egressHosts; union only at line 741 inside createSandbox"
+    },
+    {
+      "claim": "product DOES reuse a live sandbox across turns via --sandbox-id (keep mode) on origin/main",
+      "rerun": "git show origin/main:api/lib/barkpark_web/studio/claude_chat.ex | sed -n '320,325p'",
+      "expect": "cloud_sandbox_args: cloud_sandbox_id non-empty binary -> [\"--sandbox-id\", id, \"--keep-sandbox\"]"
+    },
+    {
+      "claim": "SELF-HEAL MITIGANT: both cloud_mcp_servers/2 and cloud_egress_hosts/2 key on the CURRENT installed set per-turn; credential+MCP re-derived per-turn on BOTH create and reuse paths (D214 ordering law)",
+      "rerun": "git show origin/main:api/lib/barkpark/connectors/cloud_policy.ex | grep -n 'def cloud_mcp_servers\\|def cloud_egress_hosts\\|MapSet.member?(installed'",
+      "expect": "cloud_mcp_servers/2 187, cloud_egress_hosts/2 246, both gated by MapSet.member?(installed, provider) 214; runner.mjs 831-836 comment: fresh per-turn credential on BOTH branches"
+    }
+  ],
+  "reasoning": "The reuse path skips createSandbox, so there is NO --allowed-domain emission to re-derive on reuse and no CLI mechanism to narrow a live sandbox's allowlist without a fresh create (which destroys the /tmp+transcript persistence reuse exists to preserve). A 'fix' would MANUFACTURE a new mechanism, not move existing code — speculative, exactly what D242 froze. Enforcement is live-only (D241, rides connectors-hg-live-isolated-cloud-turn) so no offline test can prove the leak causes real egress. Reachability is further gutted: the credential and MCP-config are re-derived from the installed set every turn on BOTH paths, so an uninstall strips the credential+MCP entry on the very next turn — the stale-wider allowlist grants only CREDENTIAL-LESS reachability to a public API host the same workspace allowlisted seconds earlier, self-healing on session-sandbox reap. That is D242's fail-closed backlog posture, not an IDOR-class leak. Backlog task connectors-egress-reuse-rederive (p4, open) is the correct home; name it in the SEAL LEDGER as live-key-cloud / frozen-by-design, not a Slice A build."
+}

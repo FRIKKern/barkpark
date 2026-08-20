@@ -5,7 +5,7 @@ defmodule Barkpark.Sync.OutboxTest do
   pulled mutation is never pushed back. No network. Events are inserted directly
   into `mutation_events` so the test controls `source` precisely.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo
@@ -13,15 +13,15 @@ defmodule Barkpark.Sync.OutboxTest do
 
   @dataset "test"
 
-  defp insert_event!(doc_id, source) do
+  defp insert_event!(doc_id, source, type \\ "post") do
     %MutationEvent{}
     |> Ecto.Changeset.change(%{
       dataset: @dataset,
-      type: "post",
+      type: type,
       doc_id: doc_id,
       mutation: "create",
       rev: "r-#{doc_id}",
-      document: %{"_id" => doc_id, "_type" => "post"},
+      document: %{"_id" => doc_id, "_type" => type},
       source: source,
       inserted_at: DateTime.utc_now()
     })
@@ -38,6 +38,22 @@ defmodule Barkpark.Sync.OutboxTest do
     assert api_ev.id in ids
     refute sync_ev.id in ids
     assert Enum.all?(rows, &(&1.source != "sync"))
+  end
+
+  test "EXCLUDES type:\"listener\" rows while returning same-range task and doc siblings (presence never syncs)" do
+    # Same dataset + id range; only the listener event must be filtered.
+    listener_ev = insert_event!("listener-mac-1", "cli", "listener")
+    task_ev = insert_event!("some-task", "api", "task")
+    doc_ev = insert_event!("some-post", "studio", "post")
+
+    rows = Outbox.fetch(@dataset, 0, 50)
+    ids = Enum.map(rows, & &1.id)
+
+    # Siblings pushable; listener presence absent — reverting the guard fails this.
+    assert task_ev.id in ids
+    assert doc_ev.id in ids
+    refute listener_ev.id in ids
+    assert Enum.all?(rows, &(&1.type != "listener"))
   end
 
   test "returns rows id ASC and respects after_id + limit" do

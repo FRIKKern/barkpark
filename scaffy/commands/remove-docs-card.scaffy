@@ -1,0 +1,96 @@
+# remove-docs-card.scaffy — the exact MARK-anchored inverse of add-docs-card.
+#
+# ==========================================================================
+# THE SECOND HALF OF THE SCRATCH PAIR
+# ==========================================================================
+# The 7-card cap is FULL (scripts/check-doc-budgets.sh:70-84 — exactly 7,
+# all slots taken), so add-docs-card cannot land for real on today's tree.
+# The pair is demonstrated as scratch create -> verify -> remove: run
+# add-docs-card, gate it, then run THIS command with the SAME --var values.
+# The fenced targets below re-derive, byte for byte, exactly what
+# add-docs-card wrote — after add -> remove,
+# 'git status --porcelain -- CLAUDE.md docs/' is EMPTY (byte-clean).
+#
+# Ops run in REVERSE order of add (INDEX un-sweep -> routing row -> card
+# file) so no intermediate state leaves a routing-table target pointing at
+# a deleted file. Every op is guarded with POSITIVE polarity — act only
+# while the planted text is present — so a second run is a no-op
+# (idempotent remove), and on a remove-direction op MARK names the handle
+# being CONSUMED, not planted. Post-conditions assume the pair ran with a
+# fresh, non-colliding card name (add-docs-card VARIABLE 1).
+
+COMMAND "Remove Docs Card" DESCRIPTION "Retract everything add-docs-card planted: un-sweep the Cards: brace list in docs/INDEX.md, remove the CLAUDE.md routing row plus its MARK comment, delete the card file — byte-clean, idempotent (a second run is a guarded no-op)." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "docs", "card", "remove" CONCEPT "docs-card" VARIANT "remove" DIRECTION "remove" VARIABLES
+  VARIABLE 1 "CardName" TITLE "Card to remove" DESCRIPTION "SAME value as the add-docs-card run — the kebab spelling {{.card-name}} re-derives the filename, routing target, INDEX entry and mark names." EXAMPLES "Wavecheck", "RenderPath", "AgentOnramps"
+  VARIABLE 2 "Group" OPAQUE TITLE "Routing group" DESCRIPTION "SAME value as the add-docs-card run — needed to re-derive the routing row byte-identically. OPAQUE: never re-cased, one spelling per file." EXAMPLES "Ops", "API/SDK", "CLI/TUI", "Studio"
+  VARIABLE 3 "TaskPattern" OPAQUE TITLE "Task pattern" DESCRIPTION "SAME value as the add-docs-card run — needed to re-derive the routing row byte-identically. OPAQUE: never re-cased, one spelling per file." EXAMPLES "render path / paper surface", "wavecheck scratch demo"
+
+# --------------------------------------------------------------------------
+# 1. Un-sweep the INDEX Cards: line.
+# The byte-exact inverse of add's REPLACE: swept tail back to the original
+# tail, guarded on the same payload literal (present -> act; absent ->
+# no-op). The mark was never plantable in a brace expansion (no comment
+# syntax survives inside one), so this is MARK VIRTUAL (D24), exactly as in
+# add-docs-card: a nominal handle with zero in-file bytes — the required
+# ASLONG guard on the literal ',{{.card-name}},tui' carries the whole
+# idempotency contract. On this remove-direction op the virtual mark names
+# the handle being CONSUMED.
+# --------------------------------------------------------------------------
+IN "docs/INDEX.md"
+### Un-sweep the Cards: brace list
+REPLACE
+::: cards list tail swept :::
+search-media,{{.card-name}},tui}.md
+::: cards list tail swept :::
+WITH
+::: cards list tail :::
+search-media,tui}.md
+::: cards list tail :::
+MARK VIRTUAL "index-cards-{{.card-name}}"
+ASLONG FILE CONTAIN ",{{.card-name}},tui"
+
+# --------------------------------------------------------------------------
+# 2. Retract the routing row + its MARK comment.
+# REMOVE deletes the fenced block byte-exactly (both lines, including their
+# newlines), anchored at the mark add-docs-card planted at the end of the
+# routing table (below the Meta row, CLAUDE.md:44 on the clean tree).
+# --------------------------------------------------------------------------
+IN "CLAUDE.md"
+### Retract the {{.card-name}} routing row and its MARK comment
+REMOVE
+::: {{.card-name}} route row :::
+| {{.Group}} | {{.TaskPattern}} | `docs/cards/{{.card-name}}.md` |
+<!-- scaffy:add-docs-card {{.CardName}} MARK:claude-route-{{.card-name}} -->
+::: {{.card-name}} route row :::
+MARK "claude-route-{{.card-name}}"
+ASLONG FILE CONTAIN "MARK:claude-route-{{.card-name}}"
+
+# --------------------------------------------------------------------------
+# 3. Delete the card file.
+# Guarded on the canonical-for line add-docs-card wrote into line 1, so a
+# hand-authored card that merely shares the filename is never deleted.
+# --------------------------------------------------------------------------
+DELETE FILE IF PRESENT "docs/cards/{{.card-name}}.md"
+ASLONG FILE CONTAIN "canonical-for: {{.card-name}}-overview"
+
+# ==========================================================================
+# HONESTY BLOCK — the INDEX Cards: line is UN-GATED
+# ==========================================================================
+# The Cards: brace line this command un-sweeps is provably covered by NO CI
+# gate: the INDEX gate extracts entries with
+#   grep -oE '[A-Za-z0-9._/-]+\.md'    (scripts/docs-anchors-check.sh:69)
+# and that charset excludes '{', '}' and ',' — a brace-expansion line never
+# yields a resolvable entry, so no gate anywhere parses, resolves, or diffs
+# it (a stale or half-swept Cards: line would sail through CI green). The
+# first DONT CONTAIN assert below is therefore honestly LOCAL — it is the
+# ONLY check of the un-sweep that exists. Do not read CI green as covering
+# it.
+# ==========================================================================
+
+# Post-conditions — after add-docs-card then remove-docs-card, the working
+# tree is byte-clean: git diff is EMPTY and the card file is gone.
+ASSERT FILE "docs/INDEX.md" DONT CONTAIN ",{{.card-name}},tui"
+ASSERT FILE "CLAUDE.md" DONT CONTAIN "MARK:claude-route-{{.card-name}}"
+ASSERT FILE "CLAUDE.md" DONT CONTAIN "docs/cards/{{.card-name}}.md"
+ASSERT FILE "docs/cards/{{.card-name}}.md" ABSENT
+ASSERT CMD "bash scripts/check-doc-budgets.sh"
+ASSERT CMD "bash scripts/docs-anchors-check.sh # LOCAL with the clean-checkout caveat: 24s green in a fresh worktree; HANGS (>115s) in a litter-saturated primary checkout — run from a clean checkout only"

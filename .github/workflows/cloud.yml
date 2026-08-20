@@ -5,31 +5,182 @@ name: cloud
 # cloud-8 (identity) brought the FIRST tests, so the `test` job below adds a Postgres
 # service + `mix test`, mirroring api/'s elixir.yml Test job. The `compile` job keeps
 # the fast compile+format signal (no DB needed).
+#
+# Jobs:
+#   0. changes      — the DISPATCHER. Always runs. Computes the changed-path set and
+#                     emits the one boolean the expensive jobs are gated on.
+#   1. compile      — compile + format. Gated on the cloud path set.
+#   2. test         — Postgres + `mix test`. Gated on the cloud path set.
+#   3. path-escape  — the path ratchet + its harness. Unfiltered, blocking.
+#   4. cloud-gate   — the AGGREGATOR. The one name that should be REQUIRED.
+#
+# ── WHY THERE IS NO `on: … paths:` FILTER HERE ANY MORE ──────────────────────
+# This workflow carried one until wave 9. A WORKFLOW-LEVEL paths filter emits NO
+# check run at all on a non-matching PR, so a required context pointing at this
+# workflow would report "expected" forever and DEADLOCK every docs-only, api-only
+# and js-only PR (honest-gates D18, re-measured as this epic's D89). The filter
+# therefore moves DOWN: an always-running dispatcher computes the path verdict and
+# the expensive jobs carry job-level `if:`. Every job still publishes a check run
+# on every PR; the cheap ones are `skipped`, and the aggregator below decides
+# whether a skip was legitimate. That is what makes `Cloud gate` registrable.
+#
+# The path set itself is declared ONCE, in scripts/cloud-path-escape-check.sh —
+# the ratchet that proves it covers everything the suite reads. Nothing here may
+# hand-write a path list; that is how the two drift apart.
 on:
   pull_request:
-    paths:
-      - "cloud/**"
-      - ".github/workflows/cloud.yml"
-      # Vendored-template drift tripwire: cloud/priv/templates/** is a COPY of the
-      # create-barkpark-app templates (`make cloud-templates-sync`), guarded by
-      # AppFilesDriftTest in the `test` job below. Editing the SOURCE must run that
-      # guard on THIS PR — else the sync is skipped and drift lands (the #963→#969
-      # class). Mirrors vendored-assets.yml (fires on BOTH source and copy).
-      - "js/packages/create-barkpark-app/templates/**"
   push:
     branches: [main]
-    paths:
-      - "cloud/**"
-      - ".github/workflows/cloud.yml"
-      - "js/packages/create-barkpark-app/templates/**"
 
 concurrency:
   group: cloud-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs, but NEVER cancel main: fast push cadence
+  # otherwise starves the suite (2026-06-10: 19 consecutive main runs
+  # cancelled, zero completions all day). Queued main runs collapse to one.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    # THE DISPATCHER. No `if:`, no matrix, no path filter — it runs on every
+    # event, always, so the jobs behind it always have a defined answer.
+    #
+    # It never emits `false` when it cannot tell. On an unresolvable base, a
+    # base with no common ancestor, or an uninterpretable verdict it FAILS; on
+    # an empty diff — rare but legal — it dispatches TRUE. That polarity is the
+    # whole point: a dispatcher that "couldn't tell" and emitted all-false would
+    # skip the entire Cloud suite and publish a green required context.
+    # Never a silent false: fail, or run everything.
+    name: Dispatch (cloud paths)
+    runs-on: ubuntu-latest
+    outputs:
+      cloud: ${{ steps.sets.outputs.cloud }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
+          # `refs/pull/N/merge` — a commit that already contains main's advance
+          # — while `pull_request.base.sha` LAGS the base branch tip. The
+          # three-dot diff below then sweeps in every commit main gained since
+          # that stale base, and a one-file PR dispatches as if it touched ten
+          # (honest-gates D34). Pinning the head sha makes the diff describe
+          # THIS PR.
+          #
+          # This job ONLY. Every other job here deliberately keeps the merge
+          # ref: they must test the merged result, not the head in isolation.
+          # `github.sha` is the fallback for `push` events, which have no PR.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history: the PR base sha must be resolvable locally for the
+          # three-dot diff below. A shallow checkout makes `git cat-file -e`
+          # miss it, which this step treats as a hard failure.
+          fetch-depth: 0
+
+      - id: sets
+        name: Compute the changed-path set
+        run: |
+          set -euo pipefail
+
+          event="${{ github.event_name }}"
+          if [ "$event" != "pull_request" ]; then
+            # push-to-main (and anything else): NEVER skip. Main is the branch
+            # every other run is compared against; a partial main is worse than
+            # a slow one, and there is no reviewer left to notice.
+            echo "event '$event' is not a pull_request — the path set is true."
+            echo "cloud=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then
+            echo "::error::dispatcher: the PR carries no base sha. Refusing to guess — a guessed base skips the suite and reports green."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            # The base commit can be absent from this checkout during burst
+            # merges. Try to fetch it once, then give up loudly.
+            git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::error::dispatcher: PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base."
+            exit 1
+          fi
+
+          # A base with NO common ancestor makes the three-dot diff below exit
+          # 128 with a raw `fatal: … no merge base` and ZERO annotation: under
+          # `set -euo pipefail` the assignment dies and the author sees a red
+          # dispatcher with no guidance. Name the condition instead. There is
+          # deliberately NO two-dot fallback — measured, `base HEAD` sweeps in
+          # the base's ENTIRE content and dispatches true for the wrong reason,
+          # which is exactly the "verdict from an unknown base" this job refuses.
+          if ! git merge-base "$base" HEAD >/dev/null 2>&1; then
+            echo "::error::dispatcher: PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Refusing to emit a path verdict — and refusing a two-dot fallback, which would sweep in the base's entire content. Rebase the branch onto its base branch."
+            exit 1
+          fi
+
+          echo "diff base: ${base} (three-dot against HEAD)"
+          # `-z` + `--no-renames` are BOTH load-bearing; either alone certifies
+          # a hole (measured, wave 10):
+          #   * plain `--name-only` QUOTES and octal-escapes any path holding a
+          #     non-ASCII byte, and keeps quoting `"`, `\` and newline even under
+          #     core.quotepath=false — `cloud/lib/we"ird.ex` prints as
+          #     `"cloud/lib/we\"ird.ex"`, the anchored ERE below misses it, and
+          #     this job reports a GREEN required context over a suite that never
+          #     ran. `-z` emits the raw bytes, which cannot be quoted; `tr`
+          #     restores the line format the matcher reads.
+          #   * rename detection (default-on since git 2.9) prints only the
+          #     DESTINATION, so `git mv cloud/lib/a.ex docs/a.ex` yields
+          #     cloud=false while cloud/** just lost a file. `--no-renames`
+          #     prints both sides.
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          echo "changed files:"
+          printf '%s\n' "$changed"
+
+          if [ -z "$changed" ]; then
+            # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
+            # PR, nets to nothing against the base. The old polarity failed here
+            # — a permanently red required context on a legal PR, with no
+            # self-service fix for the author. Run everything instead: expensive,
+            # never wrong. Never `false`, which is the only truly unsafe answer.
+            echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching cloud=true and running the WHOLE suite rather than skipping it — a skip here would green a required context nothing measured. Cost: the full Cloud compile + test suite."
+            echo "cloud=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The path set is declared ONCE, in the ratchet that proves it.
+          cloud="$(printf '%s\n' "$changed" | bash scripts/cloud-path-escape-check.sh --match cloud)"
+
+          case "${cloud}" in
+            true | false) ;;
+            *)
+              echo "::error::dispatcher: refusing to emit the uninterpretable verdict cloud=${cloud}."
+              exit 1
+              ;;
+          esac
+
+          echo "verdict: cloud=${cloud}"
+          echo "cloud=${cloud}" >> "$GITHUB_OUTPUT"
+
+  path-escape:
+    # DELIBERATELY UNFILTERED — no `if:`, no dependency on the dispatcher. This
+    # job proves the dispatcher's path set still covers everything the suite
+    # reads, so gating it on that same set would let it go dark exactly when it
+    # is needed (honest-gates D26: a harness nobody runs is not a ratchet). It
+    # costs a few seconds of bash.
+    name: Cloud path-escape ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Harness (the ratchet must be able to fail)
+        run: bash scripts/cloud-path-escape-check.sh --selftest
+
+      - name: Every repo-root read is dispatched on
+        run: bash scripts/cloud-path-escape-check.sh
+
   compile:
     name: Cloud control-plane (compile + format)
+    needs: changes
+    if: needs.changes.outputs.cloud == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -61,6 +212,17 @@ jobs:
 
   test:
     name: Cloud control-plane (test)
+    needs: changes
+    # Gated on the SAME set as compile. Note what rides in that set beyond
+    # cloud/**: js/packages/create-barkpark-app/templates/** is here because
+    # cloud/priv/templates/** is a COPY of those templates
+    # (`make cloud-templates-sync`), guarded by AppFilesDriftTest in THIS job.
+    # Editing the SOURCE must run that guard on THIS PR — else the sync is
+    # skipped and drift lands (the #963→#969 class). That trigger used to live
+    # in the workflow-level `on: paths:` filter deleted above; it now lives in
+    # scripts/cloud-path-escape-check.sh's CLOUD_PATHS, which is what this
+    # `if:` resolves through. Losing it would silently drop the drift guard.
+    if: needs.changes.outputs.cloud == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -93,6 +255,18 @@ jobs:
         with:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
+      # cch-w49-s3: the cross-layer mirror guard
+      # (cloud/test/barkpark_cloud/billing_client_mirror_test.exs) reads the
+      # CONSOLE's own plan catalog by RUNNING it — System.cmd("node", …) over
+      # priv/static/__preview__/__plan_catalog_dump.mjs — and it ASSERTS on a
+      # missing node rather than skipping. So node is a hard dependency of this
+      # job, pinned here rather than inherited from whatever the runner image
+      # happens to ship (the same discipline every other node-running workflow
+      # in this repo already follows). ~5s.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - name: Cache deps
         uses: actions/cache@v4
         with:
@@ -110,3 +284,217 @@ jobs:
           mix ecto.migrate
       - name: Test
         run: mix test
+
+  cloud-gate:
+    # ── THE AGGREGATOR — the one name that should carry branch protection ──
+    #
+    # Deliberate shape, every part of it load-bearing, and ported verbatim from
+    # elixir.yml's `elixir-gate` because the hazards are identical:
+    #
+    #   * NO `strategy.matrix`. The published check-run name is then exactly the
+    #     `name:` string below. `compile` and `test` ARE matrixed, so their
+    #     published names either gain the matrix tuple (`… (27.0, 1.18.1)`) or,
+    #     if they never STARTED, publish the literal uninterpolated
+    #     `${{ matrix.x }}` — both unusable as a required context (D20). That is
+    #     why this is a NEW job and never a rename of a leaf. This name is a
+    #     constant.
+    #
+    #   * `if: always()`. Without it this job would itself be `skipped` whenever
+    #     an upstream failed — publishing a PASSING required context out of a
+    #     failed run.
+    #
+    #   * It ASSERTS on every upstream result instead of echoing them.
+    #     `if: always()` buys the right to decide; it does not decide. A probe
+    #     aggregator that merely printed `needs.will-fail.result` reported
+    #     `success`, and a PR merged through it (honest-gates D19).
+    #
+    #   * EVERY job in this workflow is in `needs`. No job here carries
+    #     `continue-on-error` (re-verified at wave 9), so none of them can
+    #     launder a failure into `needs.<job>.result == success`. If one ever
+    #     gains it, it must come OUT of this needs set in the same commit.
+    #
+    # Allow-set, exhaustively: `success` always; `skipped` ONLY when the
+    # dispatcher output that gated that job was literally 'false'. Everything
+    # else — `failure`, `cancelled`, an unrecognised value, an empty string —
+    # is a FAILURE, including a failure of the dispatcher itself.
+    name: Cloud gate
+    if: always()
+    needs: [changes, compile, test, path-escape]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide (fail-closed over every upstream result)
+        env:
+          R_CHANGES: ${{ needs.changes.result }}
+          R_COMPILE: ${{ needs.compile.result }}
+          R_TEST: ${{ needs.test.result }}
+          R_ESCAPE: ${{ needs.path-escape.result }}
+          O_CLOUD: ${{ needs.changes.outputs.cloud }}
+        run: |
+          set -euo pipefail
+
+          echo "dispatcher outputs: cloud='${O_CLOUD}'"
+          echo
+
+          bad=0
+
+          # ── D770/D771 — `bad` SAYS THAT something is wrong, never WHICH ───
+          # Measured by executing this very step body with one upstream =
+          # failure: the step LOG names the offending job one line above, but
+          # the `::error::` — the ONLY line the check-run API carries, and so
+          # the only line a human at the merge button or the merge queue ever
+          # reads — named NOTHING. `bad` is a bit; this is the set behind it.
+          # It is appended at EVERY `bad=1` site, so it can never disagree with
+          # the verdict: a job reaches this list through the same line that
+          # reds the gate. DERIVED from `${job}` — never a hardcoded name, and
+          # never a re-print of the step log.
+          # Comma-joined, not space-joined: job names contain spaces
+          # ("changes (dispatcher)", "path-escape ratchet"), so a space-joined
+          # list cannot be read back as a set.
+          reds=""
+
+          # ── D377 tally: did anything SUBSTANTIVE actually run? ────────────
+          # `bad` answers "is anything wrong"; it cannot answer "was anything
+          # tested", and until wave 33 nothing did. These two answer it.
+          # Only PATH-GATED jobs count: the dispatcher and the ratchet carry the
+          # gate value NEVER and run on every head, so they are present in a
+          # "nothing ran" run exactly as in a full one and can distinguish
+          # nothing.
+          dispatched=0
+          not_dispatched=""
+
+          # decide <job-name> <result> <gate-value>
+          #   gate-value is the dispatcher output that gated the job, or the
+          #   literal string NEVER for jobs that must always run. A skip is
+          #   accepted only against a gate-value of exactly 'false'.
+          decide() {
+            local job="$1" result="$2" gate="$3"
+            case "$result" in
+              success)
+                echo "  ok      ${job}: success"
+                ;;
+              skipped)
+                if [ "$gate" = "false" ]; then
+                  echo "  ok      ${job}: skipped — dispatcher said this path set was not touched (gate='false')"
+                else
+                  echo "  FAIL    ${job}: skipped, but its gate is '${gate}', not 'false'."
+                  echo "          A skip here does NOT mean 'not needed'. It means the job never ran —"
+                  echo "          most often because an upstream FAILED. Refusing to green a required"
+                  echo "          context on it."
+                  bad=1
+                  reds="${reds:+${reds}, }${job}"
+                fi
+                ;;
+              failure | cancelled)
+                echo "  FAIL    ${job}: ${result}"
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              '')
+                echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
+                echo "          or the run object is malformed. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              *)
+                echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+            esac
+            # Tally, for the D377 notice at the bottom of this step. NEVER-gated
+            # jobs are excluded on purpose (see the declaration above).
+            if [ "$gate" != "NEVER" ]; then
+              case "$result" in
+                success) dispatched=$((dispatched + 1)) ;;
+                skipped) not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
+          }
+
+          # The dispatcher itself may never skip: without it there are no gate
+          # values, so nothing downstream can be judged.
+          decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
+          decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
+          decide "compile"                 "${R_COMPILE}" "${O_CLOUD}"
+          decide "test"                    "${R_TEST}"    "${O_CLOUD}"
+
+          echo
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::Cloud gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose. NOT IN THE ALLOW-SET: ${reds}"
+            exit 1
+          fi
+
+          # ── D377/D378 — SAY IT WHERE A PERSON AND AN API CAN READ IT ──────
+          # Measured on api-only PR #9529 (head 48d960092): this context read
+          # `Cloud gate | success | ann=0 | summary=null` with BOTH substantive
+          # jobs skipped — byte-identical to a run where `mix test` passed.
+          # $GITHUB_STEP_SUMMARY does not reach the check-run API (0 of 32
+          # check-runs returned a non-null summary), and renaming this frozen
+          # required context would deadlock main; a bare ::notice:: does reach
+          # it (probe/elixir-gate-annotation, run 31055317124).
+          # ONE notice, never one per job — GitHub caps annotations at 10 per
+          # level per step and truncates the rest silently.
+          if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=Cloud gate: green — nothing ran::NOTHING CLOUD RAN on this head.%0ACloud gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Cloud job executed', never as 'the Cloud suite passed'."
+          fi
+          echo "Cloud gate: every upstream job either succeeded or was legitimately not dispatched."
+
+  report-main-failure:
+    # ── THE RED THAT REACHES A HUMAN ─────────────────────────────────────────
+    #
+    # Same defect, same fix, same reasoning as console-harness.yml's job of this
+    # name: a post-merge red X on `main` is only visible to whoever thinks to
+    # open the Actions tab, so main-push gate failures have been concluding into
+    # the void — nine measured `Console gate` reds in the sampled window against
+    # exactly TWO "CI failure" issues in the repository's entire history. This
+    # job is the record for the Cloud control plane's half of that net.
+    #
+    #   * `needs: [cloud-gate]` — it reports the AGGREGATOR'S verdict, the name
+    #     branch protection actually reads, never a single leaf.
+    #
+    #   * `failure()` is true only for a real FAILURE and is FALSE for
+    #     `cancelled`. Deliberate: a cancelled main-push run (queue-depth-1
+    #     displacement — charter D115's CADENCE class) ran zero substantive jobs
+    #     and has nothing to report. Filing for those is the noise that trains
+    #     people to ignore the real ones.
+    #
+    #   * `github.ref == 'refs/heads/main'` — a failing PR already has a human
+    #     attached. Only main's post-merge red is ownerless.
+    #
+    #   * `permissions:` is JOB-LEVEL and must stay that way. The repository's
+    #     `default_workflow_permissions` is "read", so the issue POST 403s
+    #     without `issues: write` — but a WORKFLOW-level block would silently
+    #     re-scope every other job's token in this file. The grant lives on the
+    #     one job that needs it.
+    #
+    # scripts/file-ci-failure-issue.sh exits 1 when the alert was NOT delivered,
+    # so this job cannot warn-and-pass. Its red never touches `Cloud gate`, which
+    # has already published its verdict by the time this runs.
+    name: Report main-push failure to a human
+    needs: [cloud-gate]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: cloud-main
+          CI_FAILURE_DETAIL: |
+            The `Cloud gate` required context is RED on a push to `main`.
+            This is POST-MERGE: the breakage is already on the default branch,
+            and every PR branched from this tip inherits it.
+
+            Read the aggregator's "Decide (fail-closed over every upstream
+            result)" step first — it names which upstream job is outside the
+            allow-set (`changes` dispatcher, `path-escape` ratchet, `compile`,
+            `test`) and on which OTP/Elixir matrix leg.
+
+            This issue is idempotent per key: an ongoing failure appends a
+            comment rather than opening a new issue. CLOSE IT once main is green
+            again — the next main-push failure opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh

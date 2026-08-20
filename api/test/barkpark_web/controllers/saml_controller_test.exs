@@ -2,6 +2,10 @@ defmodule BarkparkWeb.SamlControllerTest do
   @moduledoc "SAML SP HTTP surface — start redirect + ACS session mint + JIT."
   use BarkparkWeb.ConnCase, async: false
 
+  # TOTP codes come from the window-stable helper ONLY — a code minted inline
+  # can expire in the gap before the server validates it (honest-gates S1).
+  import Barkpark.TotpTestHelper
+
   alias Barkpark.{Accounts, Repo, Sso.Saml, Tenancy}
   alias Barkpark.Tenancy.Membership
   import Ecto.Query
@@ -21,8 +25,11 @@ defmodule BarkparkWeb.SamlControllerTest do
 
     authn =
       case Keyword.get(opts, :session_index) do
-        nil -> ""
-        idx -> ~s(<saml:AuthnStatement AuthnInstant="#{DateTime.to_iso8601(now)}" SessionIndex="#{idx}"/>)
+        nil ->
+          ""
+
+        idx ->
+          ~s(<saml:AuthnStatement AuthnInstant="#{DateTime.to_iso8601(now)}" SessionIndex="#{idx}"/>)
       end
 
     xml = """
@@ -186,7 +193,7 @@ defmodule BarkparkWeb.SamlControllerTest do
       secret = NimbleTOTP.secret()
 
       {:ok, _user, _codes} =
-        Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+        Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
       body =
         conn
@@ -246,6 +253,50 @@ defmodule BarkparkWeb.SamlControllerTest do
     assert conn |> get("/v1/auth/saml/no-such-org/start") |> json_response(404)
   end
 
+  # acpc-w1-sso-list-param-guard: the :sso_browser pipeline carries NO auth
+  # plug, so both of these are reachable by an unauthenticated caller who only
+  # knows an org slug with a configured SamlConnection. Before the
+  # `when is_binary(encoded)` head guards, a list-valued param slipped past the
+  # action head and raised FunctionClauseError inside Base.decode64/2 — below
+  # the action frame, so Phoenix's ActionClauseError→400 conversion never
+  # applied and the caller got a 500.
+  test "POST ACS with a LIST-valued SAMLResponse is 400, not a 500", %{conn: conn} do
+    i = idp()
+    setup_conn(i.cert_pem)
+
+    assert conn
+           |> post("/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => ["abc"]})
+           |> json_response(400)
+  end
+
+  test "POST SLO with a LIST-valued SAMLRequest is 400, not a 500", %{conn: conn} do
+    i = idp()
+    setup_conn(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
+
+    assert conn
+           |> post("/v1/auth/saml/#{@slug}/slo", %{"SAMLRequest" => ["abc"]})
+           |> json_response(400)
+  end
+
+  # The missing-param fallback clauses (saml_controller.ex acs/2 and slo/2
+  # second heads) are what the guarded heads fall through to — pin them so the
+  # guard can never be "fixed" by deleting the fallback.
+  test "POST ACS with no SAMLResponse at all is still 400", %{conn: conn} do
+    i = idp()
+    setup_conn(i.cert_pem)
+
+    body = conn |> post("/v1/auth/saml/#{@slug}/acs", %{}) |> json_response(400)
+    assert body["error"] == "SAMLResponse is required"
+  end
+
+  test "POST SLO with no SAMLRequest at all is still 400", %{conn: conn} do
+    i = idp()
+    setup_conn(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
+
+    body = conn |> post("/v1/auth/saml/#{@slug}/slo", %{}) |> json_response(400)
+    assert body["error"] == "SAMLRequest is required"
+  end
+
   describe "Single Logout" do
     test "IdP LogoutRequest revokes the named session, replies with a LogoutResponse form, and audits",
          %{conn: conn} do
@@ -256,7 +307,8 @@ defmodule BarkparkWeb.SamlControllerTest do
       token =
         conn
         |> post("/v1/auth/saml/#{@slug}/acs", %{
-          "SAMLResponse" => signed_response("slo@samlctrl.com", i.key, i.cert_der, session_index: "idx-1")
+          "SAMLResponse" =>
+            signed_response("slo@samlctrl.com", i.key, i.cert_der, session_index: "idx-1")
         })
         |> json_response(201)
         |> Map.fetch!("token")
@@ -275,6 +327,19 @@ defmodule BarkparkWeb.SamlControllerTest do
       # The auto-submit LogoutResponse form pointing back at the IdP.
       assert html =~ "SAMLResponse"
       assert html =~ "https://idp.example.com/slo"
+
+      # CSP survival (task-0fc9d55c): the :sso_browser pipeline bypasses
+      # root.html.heex, so slo/2 sets a strict script-src 'nonce-…' by hand and
+      # esaml stamps the SAME nonce onto its auto-submit <script>. Prove the
+      # policy is present, has no 'unsafe-inline' (a real backstop, not vacuous
+      # green), the script carries the exact header nonce, and the form still
+      # auto-submits — so the logout completes under the tightened policy.
+      [policy] = get_resp_header(resp, "content-security-policy")
+      assert [_, nonce] = Regex.run(~r/script-src 'self' 'nonce-([^']+)'/, policy)
+      refute policy =~ "'unsafe-inline'"
+      assert html =~ ~s|<script nonce="#{nonce}">|
+      assert html =~ "saml-req-form"
+      assert html =~ ".submit()"
 
       # Sobelow Config.Headers fix (task-f76e9b7b): the SLO auto-submit HTML form
       # rides the :sso_browser pipeline, which now sets secure browser headers.
@@ -296,7 +361,8 @@ defmodule BarkparkWeb.SamlControllerTest do
       token =
         conn
         |> post("/v1/auth/saml/#{@slug}/acs", %{
-          "SAMLResponse" => signed_response("victim@samlctrl.com", i.key, i.cert_der, session_index: "idx-2")
+          "SAMLResponse" =>
+            signed_response("victim@samlctrl.com", i.key, i.cert_der, session_index: "idx-2")
         })
         |> json_response(201)
         |> Map.fetch!("token")
@@ -323,7 +389,8 @@ defmodule BarkparkWeb.SamlControllerTest do
       token =
         conn
         |> post("/v1/auth/saml/#{@slug}/acs", %{
-          "SAMLResponse" => signed_response("bye@samlctrl.com", i.key, i.cert_der, session_index: "idx-3")
+          "SAMLResponse" =>
+            signed_response("bye@samlctrl.com", i.key, i.cert_der, session_index: "idx-3")
         })
         |> json_response(201)
         |> Map.fetch!("token")
@@ -340,7 +407,9 @@ defmodule BarkparkWeb.SamlControllerTest do
       refute Accounts.verify_user_session_token(token)
     end
 
-    test "logout of a SAML session on an SLO-less connection stays local (no slo_url)", %{conn: conn} do
+    test "logout of a SAML session on an SLO-less connection stays local (no slo_url)", %{
+      conn: conn
+    } do
       i = idp()
       setup_conn(i.cert_pem)
 

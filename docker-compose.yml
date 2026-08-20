@@ -15,34 +15,193 @@ services:
       retries: 5
 
   api:
-    build: ./api
+    # Repo-ROOT build context on purpose: the release reads design/ and
+    # api/assets/ at compile time, both outside api/. api/Dockerfile.dockerignore
+    # (BuildKit per-Dockerfile ignore) supplies the right exclusions.
+    build:
+      context: .
+      dockerfile: api/Dockerfile
     ports:
       - "${PORT:-4000}:4000"
     environment:
-      - DATABASE_URL=ecto://postgres:postgres@db/barkpark_prod
-      - SECRET_KEY_BASE=${SECRET_KEY_BASE:-$(openssl rand -base64 48)}
-      - PHX_HOST=${PHX_HOST:-localhost}
+      # Postgres inside this compose file. Override to point at a managed
+      # database; the default matches the `db` service above.
+      - DATABASE_URL=${DATABASE_URL:-ecto://postgres:postgres@db/barkpark_prod}
+      # HARD REQUIRE — never a default. A generated-looking placeholder here
+      # boots the container and then 500s every signed request; the refusal
+      # below is the honest failure. Phoenix needs at least 64 BYTES.
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE:?set SECRET_KEY_BASE in .env — at least 64 bytes; generate with `openssl rand -base64 64`}
+      # The public hostname the API is reached on. Wrong value = LiveView
+      # websockets fail check_origin and Studio goes click-dead, so this is a
+      # require, not a guess.
+      - PHX_HOST=${PHX_HOST:?set PHX_HOST in .env — your public hostname (e.g. cms.example.com), or localhost for local use}
       - PORT=4000
       # Secrets the prod runtime.exs REQUIRES (raises on boot without them). The
       # cloak key encrypts plugin-settings + TOTP secrets; the KEK wraps the
-      # envelope DEKs for field-level encryption (core-auth); preview JWT signs
-      # draft-preview links. Supplied via the repo-root .env for local staging.
+      # envelope DEKs for field-level encryption (core-auth) and must decode to
+      # EXACTLY 32 bytes; preview JWT signs draft-preview links. Supplied via
+      # the repo-root .env for local staging.
       - BARKPARK_CLOAK_KEY=${BARKPARK_CLOAK_KEY:?set BARKPARK_CLOAK_KEY in .env}
       - BARKPARK_KEK=${BARKPARK_KEK:?set BARKPARK_KEK in .env}
       - PREVIEW_JWT_SECRET=${PREVIEW_JWT_SECRET:?set PREVIEW_JWT_SECRET in .env}
+      - BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=${BARKPARK_RELEASE_CAPTURE_HMAC_SECRET:?set BARKPARK_RELEASE_CAPTURE_HMAC_SECRET in .env}
       # Boot-time seed profile: `clean` skips the heavy demo dataset (avoids the
       # codelist-seed memory pressure); `demo` for a populated stage.
       - BARKPARK_SEED_PROFILE=${BARKPARK_SEED_PROFILE:-clean}
-      # Bare passthrough on purpose: only set in the container when set in the
-      # invoking shell. NEVER ${BARKPARK_PLUGINS:-} — that expands an unset var
-      # to the empty string, which is the plugin KILL SWITCH server-side.
+      # ── Passthrough allowlist ────────────────────────────────────────────
+      # Everything below is a BARE line on purpose: the variable reaches the
+      # container ONLY when set in the invoking shell / .env, and stays UNSET
+      # otherwise, so the app's own default wins. NEVER write `${FOO:-}` here —
+      # that expands an unset var to the EMPTY STRING, which for several of
+      # these (BARKPARK_PLUGINS above all) is a kill switch, not a no-op.
+      # This list is the full runtime env census; scripts/env-census.py is the
+      # gate that keeps it complete. A key that already carries an assignment
+      # above gets NO bare line here — a duplicate key silently last-wins.
+      #
+      # NEVER ${BARKPARK_PLUGINS:-} — the empty string is the plugin KILL
+      # SWITCH server-side, so an unset var must stay unset.
       - BARKPARK_PLUGINS
+      # Core web / endpoint
+      - BARKPARK_ADMIN_TOKEN
+      - BARKPARK_DEPLOYMENT_DIGEST
+      - BARKPARK_EXTRA_ORIGINS
+      - BARKPARK_GIT_SHA
+      - BARKPARK_AUTH_RATE_REGISTER
+      - BARKPARK_HOST_EUR_MONTH
+      - BARKPARK_PUBLIC_DEMO_STUDIO
+      - BARKPARK_RATE_LIMIT_READ
+      - BARKPARK_RATE_LIMIT_WRITE
+      - BARKPARK_SEED_ADMIN_TOKEN
+      - BARKPARK_TRUSTED_PROXIES
+      - DATABASE_SOCKET_DIR
+      - DEFAULT_CORS_ORIGINS
+      - DNS_CLUSTER_QUERY
+      - ECTO_IPV6
+      - PHX_PORT
+      - PHX_SCHEME
+      - POOL_SIZE
+      - PUBLIC_READ_TOKEN_FILE
+      # Crypto / preview
+      - BARKPARK_KEK_PREVIOUS
+      - BARKPARK_KEK_VERSION
+      - PREVIEW_JWT_TTL_SECONDS
+      # Media + storage
+      - BARKPARK_MEDIA_DIR
+      - BARKPARK_MEDIA_STORAGE
+      - BARKPARK_S3_ACCESS_KEY_ID
+      - BARKPARK_S3_BUCKET
+      - BARKPARK_S3_ENDPOINT
+      - BARKPARK_S3_KEY_PREFIX
+      - BARKPARK_S3_PRESIGN_TTL
+      - BARKPARK_S3_PUBLIC_BASE_URL
+      - BARKPARK_S3_REGION
+      - BARKPARK_S3_SECRET_ACCESS_KEY
+      - MEDIA_CDN_BASE_URL
+      - MEDIA_CDN_INVALIDATION_SECRET
+      - MEDIA_CDN_INVALIDATION_URL
+      - MEDIA_PROCESSING_CALLBACK_TOKEN
+      - MEDIA_SIGNING_SECRET
+      - MEDIA_WEBHOOK_EVENTS
+      - MEDIA_WEBHOOK_SECRET
+      - MEDIA_WEBHOOK_URL
+      # Mail
+      - SMTP_HOST
+      - SMTP_PASSWORD
+      - SMTP_PORT
+      - SMTP_USERNAME
+      - SMTP_VERIFY_PEER
+      # Search / Indx
+      - BARKPARK_ASTRO_SEARCH_TEMPLATE_DIR
+      - BARKPARK_SEARCH_TEMPLATE_DIR
+      - EDGE_PROJECTOR_INCREMENTAL
+      - INDX_API_BASE
+      - INDX_API_TOKEN
+      - INDX_HTTP_TIMEOUT_MS
+      - INDX_INCREMENTAL_UPSERT
+      - INDX_TEAM
+      - INDX_USER_EMAIL
+      - INDX_USER_PASSWORD
+      # ONIX / Bokbasen
+      - BARKPARK_ONIX_CODELIST_PATH
+      - BOKBASEN_API_BASE
+      - BOKBASEN_CLIENT_ID
+      - BOKBASEN_CLIENT_ROLE
+      - BOKBASEN_CLIENT_SECRET
+      - BOKBASEN_HTTP_TIMEOUT_MS
+      - BOKBASEN_OAUTH_TOKEN_URL
+      - BOKBASEN_RATE_LIMIT_MS
+      # Connectors
+      - CONNECTORS_BRIDGE_URL
+      - CONNECTORS_CONNECT_SECRET
+      - CONNECTORS_LINEAR_CLIENT_ID
+      - CONNECTORS_LINEAR_REDIRECT_URI
+      - CONNECTORS_SLACK_CLIENT_ID
+      - CONNECTORS_SLACK_REDIRECT_URI
+      # Papers / ingest / canvas
+      - BARKPARK_ALLOW_BUNDLE_IMPORT
+      - BARKPARK_BUNDLE_SPILL_DIR
+      - BARKPARK_INGEST_TOKEN
+      - BARKPARK_PAPER_CANVAS
+      - PAPERFLOW_INGEST_TOKEN
+      # Tasks / tickets / pulse
+      - BARKPARK_GITHUB_INTAKE_WORKSPACE_ID
+      - BARKPARK_PULSE_CHANNELS
+      - BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS
+      - BARKPARK_TASK_LEASE_TTL_SECONDS
+      - BARKPARK_TICKET_RATE_ATTACHMENT
+      - BARKPARK_TICKET_RATE_CREATE
+      - BARKPARK_TICKET_RATE_MESSAGE
+      # Sync (cloud mirror)
+      - BARKPARK_CLOUD_URL
+      - BARKPARK_SYNC_DATASET
+      - BARKPARK_SYNC_ENABLED
+      - BARKPARK_SYNC_PROJECT
+      - BARKPARK_SYNC_PUSH_BATCH_SIZE
+      - BARKPARK_SYNC_PUSH_ENABLED
+      - BARKPARK_SYNC_PUSH_INTERVAL_MS
+      - BARKPARK_SYNC_TOKEN
+      - BARKPARK_SYNC_URL
+      - BARKPARK_SYNC_WORKSPACE
+      # Sites / templates / sharing
+      - BARKPARK_NODE_TEMPLATE_DIR
+      - BARKPARK_SHARES
+      - BARKPARK_SHARE_HOST
+      - BARKPARK_SHARE_LAN
+      - BARKPARK_SITES_DIR
+      - BARKPARK_SITE_DEPLOY_APPLY
+      - BARKPARK_SITE_DEPLOY_CD
+      - BARKPARK_SITE_TEMPLATE_DIR
+      - VERCEL_DEPLOY_HOOK
+      # Self-update / upstream
+      - BARKPARK_SELF_UPDATE_APPLY
+      - BARKPARK_SELF_UPDATE_CD
+      - BARKPARK_SELF_UPDATE_CHECK
+      - BARKPARK_UPSTREAM_BRANCH
+      - BARKPARK_UPSTREAM_CHANNEL
+      - BARKPARK_UPSTREAM_REPO
+      # Release capture
+      - BARKPARK_RELEASE_CAPTURE_BP_PATH
+      - BARKPARK_RELEASE_CAPTURE_TOKEN
+      # Claude chat / console
+      - ANTHROPIC_API_KEY
+      - BARKPARK_CLAUDE_CHAT
+      - BARKPARK_TMUX_CONSOLE
     volumes:
       - uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
+    # Reports liveness, gates NOTHING: first boot runs migrations + seeds and
+    # can legitimately take minutes, hence start_period 300s. Deliberately no
+    # `condition: service_healthy` consumer anywhere — a slow-but-fine first
+    # boot must never be turned into a failed `docker compose up`.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4000/api/schemas || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
 
 volumes:
   pgdata:

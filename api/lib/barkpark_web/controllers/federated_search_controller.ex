@@ -6,8 +6,8 @@ defmodule BarkparkWeb.FederatedSearchController do
 
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
-  alias Barkpark.Content.Envelope
   alias Barkpark.Media
+  alias Barkpark.Search.HitEnvelope
   alias Barkpark.Search.Intelligence
   alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.SearchIntel
@@ -71,7 +71,7 @@ defmodule BarkparkWeb.FederatedSearchController do
       surfaces: surfaces,
       results:
         Map.new(results, fn r ->
-          {r.surface, surface_payload(r, CallerContext.from_conn(conn))}
+          {r.surface, surface_payload(r, CallerContext.from_conn(conn), params["view"])}
         end),
       searchEventId: search_event_id,
       ms: ms
@@ -87,18 +87,21 @@ defmodule BarkparkWeb.FederatedSearchController do
            dataset: dataset,
            scope: scope
          },
-         caller_context
+         caller_context,
+         view
        ) do
-    # Multi-type federated hits => resolve each doc's schema by type so a
-    # non-encrypted private/owner_only/readable_by field is dropped for a
-    # non-authorized caller (the schema-free guard alone only catches ciphertext).
-    %{
-      hits: Envelope.render_many_by_type(hits, schema_resolver(dataset, scope), caller_context),
-      total: total,
-      parsedQuery: meta[:parsed],
-      highlights: meta[:highlights] || %{},
-      recovery: meta[:recovery]
-    }
+    # The documents surface rides the SAME shared hit-envelope builder as
+    # REST/loopback/WS search (AXI R3), re-keyed to this surface's historical
+    # shape (hits/total; no correctedTo/facets/truncation). Multi-type schema
+    # resolution drops a non-encrypted private/owner_only/readable_by field for
+    # a non-authorized caller; `?view=brief` returns brief hit cards.
+    hits
+    |> HitEnvelope.build(total, nil, meta,
+      caller_context: caller_context,
+      schema_resolver: schema_resolver(dataset, scope),
+      view: view
+    )
+    |> HitEnvelope.rekey_federated()
   end
 
   defp surface_payload(
@@ -110,7 +113,10 @@ defmodule BarkparkWeb.FederatedSearchController do
            dataset: dataset,
            scope: scope
          },
-         _caller_context
+         _caller_context,
+         # Media hits are AssetResponse renders, not documents — the brief
+         # document-card view does not apply (out of scope for AXI R3).
+         _view
        ) do
     docs = Media.asset_docs_for_files(files, dataset, scope)
     render_opts = [include_urls: true]
@@ -131,7 +137,8 @@ defmodule BarkparkWeb.FederatedSearchController do
 
   defp surface_payload(
          %{surface: _surface, hits: hits, total: total, meta: meta},
-         _caller_context
+         _caller_context,
+         _view
        ) do
     %{
       hits: hits,

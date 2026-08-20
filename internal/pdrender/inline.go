@@ -32,7 +32,7 @@ func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool) string {
 	switch v := n.(type) {
 	case string:
 		// Bare string → a text node with no marks.
-		return sanitizeText(v)
+		return sanitizeDisplayText(v)
 	case float64, int, int64, bool:
 		return toStr(v)
 	case fmt.Stringer:
@@ -48,8 +48,11 @@ func (ir InlineRenderer) node(n any, ctx RenderCtx, insideLink bool) string {
 func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool) string {
 	switch attrStr(n, "type") {
 	case "text":
-		value := sanitizeText(attrStr(n, "value"))
 		marks := attrSlice(n, "marks")
+		value := sanitizeDisplayText(attrStr(n, "value"))
+		if hasCodeMark(marks) {
+			value = sanitizeText(attrStr(n, "value"))
+		}
 		if len(marks) == 0 {
 			return value
 		}
@@ -220,21 +223,21 @@ func (ir InlineRenderer) renderTaskChip(chip *TaskChip, n map[string]any, ctx Re
 	return ir.theme.Dim.Render(chipText) + " " + ir.theme.Link.Render(title)
 }
 
-// taskStatusGlyph maps a task lifecycle status to its chip glyph — kept in
-// LOCKSTEP with the Elixir walker's task_glyph/1 (the HTML chip). Unknown or
-// missing status gets the neutral pointer.
+// taskStatusGlyph maps a task lifecycle status to its chip glyph. For the known
+// lifecycle statuses it DELEGATES to the status-manifest-gated vocabulary in
+// gridblocks.go (glyphForRole ∘ roleForStatus — the UNSTYLED accessor, because
+// the chip is already Dim-wrapped at renderTaskChip; glyphForStatus pre-applies
+// color and would double-style). This kills the last hardcoded glyph fork so the
+// in-body chip and the adjacent task board speak ONE status language (D100).
+//
+// The known-status guard is MANDATORY: roleForStatus maps any UNRECOGNIZED
+// status onto role "open" (glyph ○) in its default clause, so an unconditional
+// delegate would silently collapse the unknown-status sentinel. Everything
+// outside the known set keeps the neutral ▸ pointer.
 func taskStatusGlyph(status string) string {
 	switch status {
-	case "open":
-		return "○"
-	case "in_progress":
-		return "◐"
-	case "blocked":
-		return "⊘"
-	case "done":
-		return "●"
-	case "cancelled":
-		return "✕"
+	case "open", "ready", "in_progress", "blocked", "done", "closed", "cancelled", "considering", "researching":
+		return glyphForRole(roleForStatus(status))
 	default:
 		return "▸"
 	}
@@ -311,6 +314,26 @@ func (ir InlineRenderer) renderLink(href, text string, ctx RenderCtx) string {
 		return "\x1b]8;;" + href + "\x1b\\" + styled + "\x1b]8;;\x1b\\"
 	}
 	return styled + ir.theme.Dim.Render(" ("+href+")")
+}
+
+// displayHTMLEntities is intentionally finite and single-pass. Ordering ampersand
+// first means "&amp;amp;" becomes the literal "&amp;", never "&" in the same call.
+var displayHTMLEntities = strings.NewReplacer(
+	"&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`,
+	"&#39;", "'", "&apos;", "'", "&nbsp;", " ", "&mdash;", "—", "&ndash;", "–",
+)
+
+func sanitizeDisplayText(s string) string {
+	return sanitizeText(displayHTMLEntities.Replace(s))
+}
+
+func hasCodeMark(marks []any) bool {
+	for _, mark := range marks {
+		if markType(mark) == "code" {
+			return true
+		}
+	}
+	return false
 }
 
 // allowedURLScheme is the set of URI schemes safe to hand a terminal's OSC 8

@@ -158,12 +158,14 @@ defmodule BarkparkWeb.Studio.StudioLiveAirdropTest do
       [_, token] = Regex.run(~r{/grant/([A-Za-z0-9_-]+)}, html)
       assert length(String.split(html, token)) == 2
 
-      # AC5: the grantee got the claim email with the link.
-      assert_email_sent(fn email ->
-        assert {_, to_addr} = hd(email.to)
-        assert to_addr == grantee.email
-        assert email.text_body =~ "/grant/"
-      end)
+      # AC5: the grantee got the claim email with the link. Grant delivery is now
+      # offloaded to Barkpark.TaskSupervisor (GrantNotifier no longer blocks the
+      # mint LiveView on SMTP), so wait for the background delivery with a timeout
+      # rather than assert_email_sent's zero-timeout assert_received.
+      assert_receive {:email, email}, 1_000
+      assert {_, to_addr} = hd(email.to)
+      assert to_addr == grantee.email
+      assert email.text_body =~ "/grant/"
     end
 
     test "custom duration accepts a datetime", %{conn: conn, ws: ws} do

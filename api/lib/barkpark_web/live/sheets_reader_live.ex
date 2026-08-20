@@ -12,9 +12,11 @@ defmodule BarkparkWeb.SheetsReaderLive do
   barkpark-w9dg). A draft-only or unknown slug raises `NotFound`
   (`plug_status: 404`), like the papers contract demands publicly.
 
-  The grid itself is `BarkparkWeb.Studio.SheetGrid` in `read_only` mode —
-  every editing affordance stripped (markup AND the component's
-  server-side `send_ops` guard), tab switching kept.
+  The grid itself is `BarkparkWeb.Studio.SheetGrid` under
+  `{write_capable: false, live_session: false, chrome: :reader}` — the one
+  host that says no on all three axes. Every editing affordance stripped
+  (markup AND the component's server-side `send_ops` guard), no draft byte
+  reachable, no Studio chrome; tab switching kept.
 
   PUBLISHED-PERSPECTIVE, NOT LIVE-DRAFT: this reader does NOT subscribe to
   the sheet session's delta topic. Session deltas (`{:sheets_op, …}`) carry
@@ -30,6 +32,7 @@ defmodule BarkparkWeb.SheetsReaderLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Content
+  alias Barkpark.Content.{CallerContext, Envelope}
 
   # The public reader's tenant dataset — same constant the papers reader
   # resolves against (`Content.get_public_paper/2`'s default).
@@ -47,6 +50,11 @@ defmodule BarkparkWeb.SheetsReaderLive do
         raise NotFound, message: "no published sheet #{inspect(slug)}"
 
       doc ->
+        # Field-visibility seal (fail-closed): redact the published sheet's
+        # content under the ANONYMOUS caller before ANY consumer (the preview
+        # manifest AND SheetGrid) reads it.
+        doc = seal(doc)
+
         if connected?(socket) do
           # The PUBLISHED-doc topic — a publish (or any published-row write)
           # broadcasts `{:doc_updated, …}` here. Deliberately NOT the session
@@ -96,6 +104,10 @@ defmodule BarkparkWeb.SheetsReaderLive do
         {:noreply, socket}
 
       doc ->
+        # Same fail-closed seal as mount — the refresh must never forward a
+        # newly-declared private field to the anonymous grid.
+        doc = seal(doc)
+
         send_update(BarkparkWeb.Studio.SheetGrid,
           id: "sheet-reader-#{socket.assigns.slug}",
           published_content: doc.content || %{}
@@ -106,6 +118,29 @@ defmodule BarkparkWeb.SheetsReaderLive do
   end
 
   def handle_info(_other, socket), do: {:noreply, socket}
+
+  # Redact a published sheet's `content` through the canonical Envelope
+  # field-visibility chokepoint under the ANONYMOUS caller — the public reader
+  # is an anonymous principal, so it may see only public fields; a `private` /
+  # `owner_only` / `readable_by` (or encrypted) field is DROPPED before it can
+  # reach SheetGrid or the social-share preview manifest. Mirrors the public
+  # paper reader's seal (`Barkpark.Content.Papers.reader_source/3` →
+  # `Envelope.render(paper, schema, CallerContext.anonymous())`).
+  #
+  # LATENT hardening: with no sheet field declaring visibility today the content
+  # is unchanged and every render is byte-identical; it fails closed the instant
+  # a sheet schema declares field visibility. `owner_id` is nil (anonymous),
+  # so an `owner_only` field conservatively drops. Schema is scoped to the
+  # published doc's own workspace (the seeded Default public tenant).
+  defp seal(%{content: content} = doc) do
+    schema =
+      case Content.get_schema("sheet", @dataset, workspace_id: doc.workspace_id) do
+        {:ok, s} -> s
+        _ -> nil
+      end
+
+    %{doc | content: Envelope.redact(content || %{}, schema, CallerContext.anonymous(), nil)}
+  end
 
   @impl true
   def render(assigns) do
@@ -122,7 +157,9 @@ defmodule BarkparkWeb.SheetsReaderLive do
         doc={@doc}
         dataset={@dataset}
         is_draft={false}
-        read_only={true}
+        write_capable={false}
+        live_session={false}
+        chrome={:reader}
       />
     </main>
     """

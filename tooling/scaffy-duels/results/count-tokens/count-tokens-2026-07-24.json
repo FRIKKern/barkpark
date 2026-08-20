@@ -1,0 +1,81 @@
+{
+  "generated_by": "count_tokens_calibrate.py",
+  "fixtures": {
+    "full": "caps-full-2026-07-24.json",
+    "brief": "caps-brief-2026-07-24.json"
+  },
+  "meter_standard": "POST /v1/messages/count_tokens (METER.md; tiktoken/chars-4 banned)",
+  "pinned_models": [
+    "claude-opus-4-8",
+    "claude-sonnet-5"
+  ],
+  "key_present": false,
+  "byte_label": "BYTES-NOT-TOKENS-PENDING-CONVERSION",
+  "shipped_encoding": "brief-tuples",
+  "flip_threshold": 0.1,
+  "payloads": {
+    "full": {
+      "kind": "baseline",
+      "family": "json",
+      "encoding": "full-nested-json",
+      "shipped": false,
+      "bytes": 95915,
+      "byte_ratio_vs_full": 1.0,
+      "tokens": null
+    },
+    "brief-tuples": {
+      "kind": "brief",
+      "family": "json",
+      "encoding": "array-of-tuples+legend",
+      "shipped": true,
+      "bytes": 26502,
+      "byte_ratio_vs_full": 3.6192,
+      "tokens": null
+    },
+    "brief-nested-json": {
+      "kind": "brief",
+      "family": "json",
+      "encoding": "nested-json",
+      "shipped": false,
+      "bytes": 42042,
+      "byte_ratio_vs_full": 2.2814,
+      "tokens": null
+    },
+    "brief-tsv": {
+      "kind": "brief",
+      "family": "text",
+      "encoding": "tsv",
+      "shipped": false,
+      "bytes": 21214,
+      "byte_ratio_vs_full": 4.5213,
+      "tokens": null
+    },
+    "brief-cmd": {
+      "kind": "brief",
+      "family": "text",
+      "encoding": "cmd-usage-lines",
+      "shipped": false,
+      "bytes": 25796,
+      "byte_ratio_vs_full": 3.7182,
+      "tokens": null
+    },
+    "brief-packed": {
+      "kind": "brief",
+      "family": "text",
+      "encoding": "packed",
+      "shipped": false,
+      "bytes": 20966,
+      "byte_ratio_vs_full": 4.5748,
+      "tokens": null
+    }
+  },
+  "verdict": "VERDICT (PENDING token conversion): FLIP — 'brief-packed' beats brief-tuples by 20.9% > 10% (file an amendment task naming 'brief-packed')",
+  "winner": "brief-packed",
+  "brief_advantage_vs_tuples": {
+    "brief-tuples": 0.0,
+    "brief-nested-json": -0.5864,
+    "brief-tsv": 0.1995,
+    "brief-cmd": 0.0266,
+    "brief-packed": 0.2089
+  }
+}

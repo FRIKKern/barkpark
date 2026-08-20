@@ -12,20 +12,23 @@
 package pdrender
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Block is the decoded wire block: a type discriminator plus raw fields.
 // pdrender owns this type so the package has no apiclient dependency. The
 // caller decodes the JSON map into Attrs; the renderers read type-specific
-// fields out of it. Only `section` populates Children; only `figure`
-// populates Child — mirroring Render.Compose.compose_block/2's recursion shape
-// (compose.ex).
+// fields out of it. Recursive section/expandable containers populate Children;
+// figure populates Child — mirroring Render.Compose.compose_block/2's recursion
+// shape (compose.ex).
 type Block struct {
 	ID       string
 	Type     string
 	Attrs    map[string]any
-	Children []Block // section.blocks
+	Children []Block // container children, falling back to legacy blocks
 	Child    *Block  // figure.child
 }
 
@@ -82,11 +85,6 @@ type RenderCtx struct {
 	Theme   Theme   // palette + pre-built lipgloss styles
 	Depth   int     // nesting depth (section recursion); drives indent/rule weight
 	Profile Profile // color/capability profile
-
-	// figureN is a shared mutable counter for "Figure N." captions across a
-	// whole document render. A pointer so the increment is visible to sibling
-	// figures rendered later in the same RenderDoc pass.
-	figureN *int
 
 	// RefResolver is the caller-supplied seam for field-reference: given a
 	// referenced doc id and its refType, it returns the doc's TITLE for display.
@@ -149,17 +147,6 @@ func (c RenderCtx) WithWidth(w int) RenderCtx { c.Width = w; return c }
 // Deeper returns a copy of the ctx one nesting level deeper.
 func (c RenderCtx) Deeper() RenderCtx { c.Depth++; return c }
 
-// nextFigure returns the next figure number, allocating the shared counter
-// lazily so a ctx built by hand (e.g. in a test) still works.
-func (c *RenderCtx) nextFigure() int {
-	if c.figureN == nil {
-		n := 0
-		c.figureN = &n
-	}
-	*c.figureN++
-	return *c.figureN
-}
-
 // Renderer is the per-block-type unit. It returns lines laid out to fit
 // ctx.Width columns, ANSI-styled, ready for lipgloss.JoinVertical. Height is
 // implicit in the slice length. Returning []string (not one joined string)
@@ -196,23 +183,55 @@ func (r *Registry) Render(b Block, ctx RenderCtx) []string {
 	if !ok {
 		rend = r.fallback
 	}
-	return rend.Render(b, ctx)
+	return boundDisplayLines(rend.Render(b, ctx), ctx.Width)
+}
+
+// boundDisplayLines is the shared final display boundary for both direct Render
+// callers and RenderDoc. Individual renderers still own their semantic layout;
+// this backstop only touches lines that actually overflow, so already-bounded
+// code/literal output remains byte-identical. ansi.Wrap preserves ANSI/OSC8
+// sequences while measuring visible terminal cells.
+func boundDisplayLines(lines []string, width int) []string {
+	width = clampWidth(width)
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if ansi.StringWidth(line) <= width {
+			out = append(out, line)
+			continue
+		}
+		out = append(out, strings.Split(ansi.Wrap(line, width, " "), "\n")...)
+	}
+	return out
+}
+
+func hardBoundDisplayLines(lines []string, width int) []string {
+	width = clampWidth(width)
+	out := make([]string, 0, len(lines))
+	for _, line := range boundDisplayLines(lines, width) {
+		if ansi.StringWidth(line) > width {
+			// ansi.Wrap v0.8 can leave punctuation-heavy prose one or two cells
+			// over its limit. At the final document boundary there is no parent
+			// layout left to degrade, so a grapheme-aware hard wrap is safe and
+			// preserves every authored byte plus ANSI/OSC sequence.
+			out = append(out, strings.Split(ansi.Hardwrap(line, width, false), "\n")...)
+		} else {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // RenderDoc stacks every top-level block with one blank line between them,
-// joined into a single string via lipgloss.JoinVertical. A shared figure
-// counter is seeded here so "Figure N." numbering is document-global.
+// joined into a single string via lipgloss.JoinVertical. It numbers nothing:
+// figure captions carry exactly what the author typed (see figureCaption).
 func (r *Registry) RenderDoc(blocks []Block, ctx RenderCtx) string {
-	figN := 0
-	ctx.figureN = &figN
 	if ctx.Theme.isZero() {
 		ctx.Theme = r.theme
 	}
 	parts := make([]string, 0, len(blocks)*2)
+	emitted := 0
 	for i := 0; i < len(blocks); {
-		if i > 0 {
-			parts = append(parts, "") // rhythm: a blank line between blocks
-		}
+		var lines []string
 		// Consecutive field blocks render as ONE aligned definition list — a dim
 		// label column + value column — instead of a stack of two-line pairs.
 		if isFieldGroupType(blocks[i].Type) {
@@ -220,14 +239,23 @@ func (r *Registry) RenderDoc(blocks []Block, ctx RenderCtx) string {
 			for j < len(blocks) && isFieldGroupType(blocks[j].Type) {
 				j++
 			}
-			parts = append(parts, renderFieldGroup(r, blocks[i:j], ctx)...)
+			lines = renderFieldGroup(r, blocks[i:j], ctx)
 			i = j
+		} else {
+			lines = r.Render(blocks[i], ctx)
+			i++
+		}
+		if len(lines) == 0 {
 			continue
 		}
-		parts = append(parts, r.Render(blocks[i], ctx)...)
-		i++
+		if emitted > 0 {
+			parts = append(parts, "") // rhythm: one blank line between visible blocks
+		}
+		parts = append(parts, lines...)
+		emitted++
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return strings.Join(hardBoundDisplayLines(strings.Split(joined, "\n"), ctx.Width), "\n")
 }
 
 // Inline is a thin pass-through so callers (and the demo) can render a run of
@@ -247,8 +275,63 @@ func DefaultRegistry(theme Theme) *Registry {
 	}
 	ir := r.inline
 	r.blocks["heading"] = headingRenderer{ir: ir}
+	// scaffy:add-block-type Tabs MARK:go-registry-tabs
+	r.blocks["tabs"] = tabsRenderer{reg: r}
+	// scaffy:add-block-type CodeTabs MARK:go-registry-code-tabs
+	r.blocks["code-tabs"] = codeTabsRenderer{reg: r}
+	// scaffy:add-block-type ApiEndpoint MARK:go-registry-api-endpoint
+	r.blocks["api-endpoint"] = apiEndpointRenderer{}
+	// scaffy:add-block-type Video MARK:go-registry-video
+	r.blocks["video"] = videoRenderer{}
+	// scaffy:add-block-type CriteriaProgress MARK:go-registry-criteria-progress
+	r.blocks["criteria-progress"] = criteriaProgressRenderer{}
+	// scaffy:add-block-type Equation MARK:go-registry-equation
+	r.blocks["equation"] = equationRenderer{}
+	// scaffy:add-block-type BarChart MARK:go-registry-bar-chart
+	r.blocks["bar-chart"] = barChartRenderer{}
+	// scaffy:add-block-type Expandable MARK:go-registry-expandable
+	r.blocks["expandable"] = expandableRenderer{reg: r}
+	// scaffy:add-block-type Footnote MARK:go-registry-footnote
+	r.blocks["footnote"] = footnoteRenderer{}
+	// scaffy:add-block-type Steps MARK:go-registry-steps
+	r.blocks["steps"] = stepsRenderer{reg: r}
+	// scaffy:add-block-type Toc MARK:go-registry-toc
+	r.blocks["toc"] = tocRenderer{}
+	// scaffy:add-block-type Blockquote MARK:go-registry-blockquote
+	r.blocks["blockquote"] = blockquoteRenderer{ir: ir}
+	// scaffy:add-block-type Filetree MARK:go-registry-filetree
+	r.blocks["filetree"] = filetreeRenderer{}
+	// scaffy:add-block-type Diff MARK:go-registry-diff
+	r.blocks["diff"] = diffRenderer{}
 	r.blocks["paragraph"] = paragraphRenderer{ir: ir}
-	r.blocks["list"] = listRenderer{ir: ir}
+	lr := listRenderer{ir: ir}
+	r.blocks["list"] = lr
+	// Authoring-drift aliases → list (mirrors compose.ex's alias choke point):
+	// agents hand-typed TipTap-internal / snake / kebab spellings via raw mutate,
+	// leaving 77 live prod blocks unrenderable. The unordered spellings reuse the
+	// list renderer as-is; `numbered_list` forces ordered:true; `quote` maps to
+	// blockquote. No stored-data migration — the alias fixes prod content on read.
+	r.blocks["bulletList"] = lr
+	r.blocks["bullet_list"] = lr
+	r.blocks["bulleted-list"] = lr
+	r.blocks["bulleted_list"] = lr
+	r.blocks["numbered_list"] = orderedListRenderer{lr: lr}
+	// `ordered-list` is the same renderer under a second spelling (charter D57) —
+	// 2 live blocks. Their items are map-shaped (`{content:[…]}`), which itemNodes
+	// does NOT normalize, so the numbers land but the item text stays blank: the
+	// pre-existing defect the canonical `list` reproduces identically (charter
+	// D38, task-993d136b0fbf2fd1), not an alias defect.
+	r.blocks["ordered-list"] = orderedListRenderer{lr: lr}
+	// h-tag spellings → heading at the level the TYPE names (charter D57): 18 live
+	// prod blocks unknown-boxed on every surface, SIX of them carrying no `level`
+	// key. See headingAtLevel in blocks.go. Registered HERE with the other
+	// authoring-drift aliases rather than beside `heading`, because
+	// scaffy/commands/add-block-type.scaffy anchors on the heading registration
+	// line verbatim — that line is load-bearing template bytes, not free text.
+	r.blocks["h1"] = headingAtLevel{hr: headingRenderer{ir: ir}, level: 1}
+	r.blocks["h2"] = headingAtLevel{hr: headingRenderer{ir: ir}, level: 2}
+	r.blocks["h3"] = headingAtLevel{hr: headingRenderer{ir: ir}, level: 3}
+	r.blocks["quote"] = blockquoteRenderer{ir: ir}
 	r.blocks["callout"] = calloutRenderer{ir: ir}
 	r.blocks["divider"] = dividerRenderer{}
 	// section recurses through the registry, so it holds a back-reference.
@@ -277,6 +360,7 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["field-color"] = fieldColorRenderer{}
 	r.blocks["field-reference"] = fieldReferenceRenderer{}
 	r.blocks["field-image"] = fieldImageRenderer{}
+	r.blocks["field-number"] = fieldNumberRenderer{}
 
 	// ── M2 hard blocks (honest, labeled, never-panic) ─────────────────────────
 	// No terminal draws mermaid, plays a cast, or paints inline graphics in a
@@ -365,6 +449,19 @@ func DefaultRegistry(theme Theme) *Registry {
 	// only under a TrueColor profile; ANSI-plain braille otherwise, byte-stable).
 	// W3 of the slate — the capstone (see chart.go).
 	r.blocks["chart"] = chartRenderer{}
+	// route: a sport track (encoded polyline in `polyline`) rasterised through
+	// the same braille dot-canvas as chart — the terminal twin of the web SVG
+	// track shape (data_viz.ex §route). Meta row + caption below the plot.
+	r.blocks["route"] = routeRenderer{}
+	// ── jarl figure family (duel / lineage) ───────────────────────────────────
+	// duel: a two-arm comparison — legend header + `label  valueA vs valueB`
+	// rows with the authored dim delta under each label (duel.go). lineage:
+	// dated nodes in authored order — dim overline / bold title / value+unit /
+	// wrapped body (lineage.go). Both carry the kilde provenance law (kilde.go):
+	// datum-bearing entries stamp a dim "Kilde:" line; an invalid ref renders
+	// nothing. Terminal twins of dataviz.ts's duel/lineage emitters.
+	r.blocks["duel"] = duelRenderer{}
+	r.blocks["lineage"] = lineageRenderer{}
 	// dashboard: a tabbed CONTAINER that composes the slate leaf blocks (chart /
 	// heatmap / stat-grid / gauge-list) into a Claude-Code-/usage-style cockpit —
 	// authored tabs + a heavy ━ active rail, the active tab's children laid out as
@@ -373,5 +470,19 @@ func DefaultRegistry(theme Theme) *Registry {
 	// The composition capstone of the slate (see dashboard.go); $span in a child
 	// query rides INERT (a future Elixir resolver wave reads it, never pdrender).
 	r.blocks["dashboard"] = dashboardRenderer{reg: r}
+
+	// ── chat structural blocks (dual-surface tool/todo/thinking rows) ──────────
+	// Terminal twins of Studio's bespoke chat tool-row HEEx (chat_tool_renderer.ex),
+	// promoted to PortableDoc block types so the same row renders on BOTH surfaces
+	// (Law 1). Server carries the precomputed diff lines / todo list / token count
+	// on the block; pdrender never re-derives (see chat_blocks.go).
+	r.blocks["chat-tool-diff"] = chatToolDiffRenderer{}
+	r.blocks["chat-todo"] = chatTodoRenderer{}
+	r.blocks["chat-thinking"] = chatThinkingRenderer{}
+	// The three INTERACTIVE cards (charter D35): the block is the read-time VISUAL;
+	// answerability rides the message envelope (internal/chat cardView), not here.
+	r.blocks["chat-approval"] = chatApprovalRenderer{}
+	r.blocks["chat-question"] = chatQuestionRenderer{}
+	r.blocks["chat-plan"] = chatPlanRenderer{}
 	return r
 }

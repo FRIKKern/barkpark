@@ -1,0 +1,46 @@
+name: astro-finder-drift
+
+# Byte-identity tripwire for the Astro flagship's vendored finder closure
+# (search-template epic D44). templates/astro-search-starter COPIES the finder
+# out of templates/search-starter rather than sharing it; a copy without a gate
+# rots (a fix lands in search-starter, the Astro copy silently drifts — the
+# proven #3779/#3780/#3842 pattern). This job reds when ANY vendored Astro file
+# differs byte-for-byte from its templates/search-starter source.
+#
+# NOTE: this workflow only *gates* a PR once it is registered as a required
+# check in the repo's branch-protection settings (a human GitHub step). Until
+# then it still runs and reds the PR page on failure.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "templates/search-starter/**"
+      - "templates/astro-search-starter/src/finder/**"
+      - "templates/astro-search-starter/src/styles/globals.css"
+      - "scripts/check-astro-finder-drift.sh"
+      - ".github/workflows/astro-finder-drift.yml"
+  pull_request:
+    paths:
+      - "templates/search-starter/**"
+      - "templates/astro-search-starter/src/finder/**"
+      - "templates/astro-search-starter/src/styles/globals.css"
+      - "scripts/check-astro-finder-drift.sh"
+      - ".github/workflows/astro-finder-drift.yml"
+
+concurrency:
+  group: astro-finder-drift-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  drift:
+    name: Astro finder byte-identity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the tripwire
+        run: bash scripts/check-astro-finder-drift.sh --selftest
+
+      - name: Check byte-identity
+        run: bash scripts/check-astro-finder-drift.sh

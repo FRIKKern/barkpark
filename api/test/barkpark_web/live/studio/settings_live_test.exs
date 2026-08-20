@@ -673,11 +673,20 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
 
     test "an enabled plugin whose owned types are UNREGISTERED shows the 'no content types' truth",
          %{conn: conn} do
-      # Remove the (globally-registered) `paper` schema for this test's scope, so
-      # bulldocs — enabled by declaration default, owner of the `paper` type —
-      # owns a type registered NOWHERE in this workspace. Enabling it surfaced
-      # nothing, and the row says so honestly (the common Default-stamp case).
-      unregister_type!("paper")
+      # Remove EVERY globally-registered bulldocs schema for this test's scope,
+      # so bulldocs — enabled by declaration default — owns a type registered
+      # NOWHERE in this workspace. Enabling it surfaced nothing, and the row
+      # says so honestly (the common Default-stamp case). One unregister per
+      # owned type: leaving ANY of them registered flips the hint to the softer
+      # "types registered" truth (exactly what this assertion exists to
+      # distinguish).
+      #
+      # The list is DERIVED from `Bulldocs.register_schemas/1` — the same source
+      # the LV's `Structure.owned_schema_types_map/0` reads — rather than
+      # hardcoded. A hardcoded pair went stale the moment bulldocs grew a third
+      # schema (`session`, session-handoff task 3) and this test failed with the
+      # softer hint; deriving it means the next schema added can never do that.
+      unregister_bulldocs_owned_types!()
 
       {:ok, view, _html} = live(conn, scoped_settings_path())
 
@@ -733,6 +742,14 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     Repo.delete_all(from(s in Barkpark.Content.SchemaDefinition, where: s.name == ^name))
   end
 
+  # Every type bulldocs OWNS, straight off the plugin's own schema declaration
+  # (`register_schemas/1` returns one `%SchemaDefinition{}` per shipped
+  # schema JSON). Adding a schema to the plugin automatically widens this.
+  defp unregister_bulldocs_owned_types! do
+    Barkpark.Plugins.Bulldocs.register_schemas([])
+    |> Enum.each(&unregister_type!(&1.name))
+  end
+
   defp insert_type_doc!(type) do
     Repo.insert!(%Barkpark.Content.Document{
       doc_id: "#{type}-1",
@@ -745,17 +762,401 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     })
   end
 
-  defp pick_plugin do
-    Barkpark.Plugins.Registry.all()
-    |> Enum.map(& &1.name)
-    |> Enum.sort()
-    |> List.first()
+  # ── Chat execution profile toggle (connectors W23-2, D207/D211 → W26) ────
+  #
+  # The write surface for the per-workspace chat execution profile. W23-2
+  # added the PER-WRITE `workspace_admin?/2` re-gate because the mount gate was
+  # a GLOBAL-permission admin check (D207). W26 fixed the mount gate itself
+  # (`LiveAuth.:scoped_admin` authorizes against the TARGET workspace), so the
+  # flat-global-admin read-member is now rejected AT MOUNT — the per-write
+  # re-gate stays in the LV as belt-and-suspenders behind it.
+  describe "chat execution profile toggle (W23-2)" do
+    setup do
+      # Two tokens, BOTH holding the flat global admin permission so BOTH clear
+      # the coarse mount gate. The per-write re-gate is the ONLY thing that
+      # separates them at the target workspace.
+      {:ok, admin_tok} =
+        Auth.create_token("ep-admin-raw", "ep admin", "production", ["read", "write", "admin"])
+
+      {:ok, outsider_tok} =
+        Auth.create_token(
+          "ep-outsider-raw",
+          "ep outsider",
+          "production",
+          ["read", "write", "admin"]
+        )
+
+      {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "ep-ws", name: "Exec Profile WS"})
+      {:ok, proj} = Barkpark.Tenancy.create_project_with_dataset(ws, %{name: "EPP"})
+
+      # admin_tok is an ADMIN of the target ws; outsider_tok is only a MEMBER —
+      # read access lets it mount (LiveScope), but it is NOT a workspace admin.
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, admin_tok.id, "admin")
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, outsider_tok.id)
+
+      {:ok, ws: ws, proj: proj}
+    end
+
+    defp ep_settings_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/studio/settings"
+
+    test "renders the execution-profile control, defaulting to self-hosted when unset", %{
+      conn: conn,
+      ws: ws,
+      proj: proj
+    } do
+      conn = init_test_session(conn, %{"api_token" => "ep-admin-raw"})
+      {:ok, _view, html} = live(conn, ep_settings_url(ws, proj))
+
+      assert html =~ "Chat execution profile"
+      assert html =~ ~s(data-test-id="execution-profile-control")
+      # Unset persisted value → the switch reads self-hosted (the resolver's
+      # fail-safe default), never cloud.
+      assert html =~ ~s(data-execution-profile="self_hosted")
+    end
+
+    test "REJECTED AT MOUNT (W26): a flat-global-admin read-member of the target workspace never reaches the panel — nothing is written",
+         %{conn: conn, ws: ws, proj: proj} do
+      # The outsider holds the flat global admin perm — the shape that mounted
+      # this panel pre-W26 and was only stopped by the per-write re-gate. The
+      # `:scoped_admin` mount gate now refuses it outright: no view exists to
+      # fire the toggle at, and nothing is ever written.
+      conn = init_test_session(conn, %{"api_token" => "ep-outsider-raw"})
+
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, ep_settings_url(ws, proj))
+
+      assert Barkpark.Tenancy.workspace_chat_settings(Barkpark.Tenancy.get_workspace_by_id(ws.id)) ==
+               %{},
+             "a non-admin mount must not persist any chat settings"
+    end
+
+    test "happy path: an owner/admin of the workspace flips to cloud, it persists, and theme + plugin keys survive the merge",
+         %{conn: conn, ws: ws, proj: proj} do
+      # Seed unrelated settings keys FIRST so the merge-in-place chat write is
+      # proven non-clobbering.
+      {:ok, _} = Barkpark.Tenancy.set_workspace_theme(ws.id, "evergreen")
+
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{
+          "onixedit" => %{"enabled" => false}
+        })
+
+      conn = init_test_session(conn, %{"api_token" => "ep-admin-raw"})
+      {:ok, view, _html} = live(conn, ep_settings_url(ws, proj))
+
+      html = render_click(view, "toggle_execution_profile", %{"ws" => ws.id})
+      assert html =~ "cloud sandbox"
+
+      ws_after = Barkpark.Tenancy.get_workspace_by_id(ws.id)
+      assert Barkpark.Tenancy.workspace_chat_settings(ws_after)["execution_profile"] == "cloud"
+      # Merge-in-place preserved the sibling settings namespaces.
+      assert Barkpark.Tenancy.workspace_theme(ws_after) == "evergreen"
+      assert Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(ws_after), "onixedit")
+
+      # The toggle is a server-derived flip: a second click round-trips back to
+      # self-hosted, never trusting a client-supplied value.
+      {:ok, view2, _html} = live(conn, ep_settings_url(ws, proj))
+      render_click(view2, "toggle_execution_profile", %{"ws" => ws.id})
+
+      assert Barkpark.Tenancy.workspace_chat_settings(Barkpark.Tenancy.get_workspace_by_id(ws.id))[
+               "execution_profile"
+             ] == "self_hosted"
+    end
+
+    test "a garbage persisted profile never propagates — a flip yields a known-good value", %{
+      conn: conn,
+      ws: ws,
+      proj: proj
+    } do
+      # Corrupt the stored value directly, then toggle. The handler derives the
+      # next value from `current == "cloud"` (false for garbage) → "cloud", a
+      # known-good value guarded against `~w(cloud self_hosted)` before the write.
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_chat_settings(ws.id, %{"execution_profile" => "banana"})
+
+      conn = init_test_session(conn, %{"api_token" => "ep-admin-raw"})
+      {:ok, view, _html} = live(conn, ep_settings_url(ws, proj))
+      render_click(view, "toggle_execution_profile", %{"ws" => ws.id})
+
+      profile =
+        Barkpark.Tenancy.workspace_chat_settings(Barkpark.Tenancy.get_workspace_by_id(ws.id))[
+          "execution_profile"
+        ]
+
+      assert profile in ~w(cloud self_hosted)
+      assert profile == "cloud"
+    end
   end
 
-  defp audited?(plugin, action) do
-    Repo.exists?(
-      from a in SettingsAudit,
-        where: a.plugin_name == ^plugin and a.action == ^action
-    )
+  # ── Per-write workspace_admin? re-gate on theme/plugin writes (W34, D268) ──
+  #
+  # Belt parity with toggle_execution_profile (W23-2/D211). The W26
+  # `:scoped_admin` mount gate rejects an outsider AT MOUNT, so the LIVE threat
+  # these tests model is NOT an outsider mounting — it is a role DOWNGRADE that
+  # lands AFTER a legitimate admin has already mounted (defense-in-depth: a
+  # LiveView outlives the mount check). Each test mounts as a real workspace
+  # admin, downgrades that membership admin → member mid-socket via a direct
+  # Repo write (there is no public revoke API), then fires the handler on the
+  # STILL-MOUNTED view. `workspace_admin?/2` does a fresh `Repo.one` per call
+  # (auth.ex membership/2 — zero socket cache), so the downgrade is seen at the
+  # very next click and the write must fail closed.
+  #
+  # ORACLE LAW (D268): the load-bearing assertion is the targeted STATE being
+  # UNCHANGED (theme read-back / plugin-override map). The bare substring
+  # `html =~ "owner or admin of this workspace"` is FORBIDDEN — it also matches
+  # the static help text at settings_live.ex and passes with the belt deleted.
+  # The flash oracle here is the refusal-UNIQUE prefix "You need to be an owner
+  # or admin" (do_toggle_execution_profile's wording), never the static phrase.
+  describe "per-write workspace_admin? re-gate — theme/plugin writes (W34, D268)" do
+    setup %{conn: conn} do
+      {:ok, admin_tok} =
+        Auth.create_token("w34-admin-raw", "w34 admin", "production", ["read", "write", "admin"])
+
+      {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "w34-ws", name: "W34 Belt WS"})
+      {:ok, proj} = Barkpark.Tenancy.create_project_with_dataset(ws, %{name: "W34P"})
+
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, admin_tok.id, "admin")
+
+      conn = init_test_session(conn, %{"api_token" => "w34-admin-raw"})
+      {:ok, conn: conn, ws: ws, proj: proj, admin_tok: admin_tok}
+    end
+
+    defp w34_settings_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/studio/settings"
+
+    # Mid-socket role downgrade with NO public revoke API: mutate the membership
+    # row directly admin → member. Targeted by principal_id so the write is
+    # unambiguous even if the workspace later grows other memberships.
+    defp downgrade_to_member!(ws, principal_id) do
+      Barkpark.Tenancy.Membership
+      |> Repo.get_by!(workspace_id: ws.id, principal_id: principal_id)
+      |> Ecto.Changeset.change(role: "member")
+      |> Repo.update!()
+    end
+
+    defp reread(ws), do: Barkpark.Tenancy.get_workspace_by_id(ws.id)
+
+    test "set_workspace_theme is REFUSED after a mid-socket admin→member downgrade — theme unchanged",
+         %{conn: conn, ws: ws, proj: proj, admin_tok: admin_tok} do
+      {:ok, view, _html} = live(conn, w34_settings_url(ws, proj))
+
+      # Baseline: this fresh workspace has NO persisted "theme" settings key.
+      # (The RESOLVED theme defaults to "evergreen" — the only theme shipping —
+      # so we must assert on the raw persisted key, not the resolved value, or a
+      # refused write is indistinguishable from a landed one.)
+      refute Map.has_key?(reread(ws).settings || %{}, "theme")
+
+      downgrade_to_member!(ws, admin_tok.id)
+
+      html =
+        render_change(view, "set_workspace_theme", %{"theme" => "evergreen", "ws" => ws.id})
+
+      # STATE ORACLE (load-bearing): the write never persisted settings["theme"].
+      refute Map.has_key?(reread(ws).settings || %{}, "theme")
+      # Flash oracle: refusal-unique prefix present, success phrase absent.
+      assert html =~ "You need to be an owner or admin"
+      refute html =~ "Workspace theme set to"
+    end
+
+    test "toggle_plugin is REFUSED after a mid-socket admin→member downgrade — no override persisted",
+         %{conn: conn, ws: ws, proj: proj, admin_tok: admin_tok} do
+      {:ok, view, _html} = live(conn, w34_settings_url(ws, proj))
+      name = pick_plugin()
+
+      # Baseline: no plugin override exists for this workspace.
+      refute Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(reread(ws)), name)
+
+      downgrade_to_member!(ws, admin_tok.id)
+
+      html = render_click(view, "toggle_plugin", %{"plugin" => name, "ws" => ws.id})
+
+      # STATE ORACLE (load-bearing): no plugin override was written.
+      refute Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(reread(ws)), name)
+      assert html =~ "You need to be an owner or admin"
+    end
+
+    test "set_plugin_placement is REFUSED after a mid-socket admin→member downgrade — no placement override persisted",
+         %{conn: conn, ws: ws, proj: proj, admin_tok: admin_tok} do
+      {:ok, view, _html} = live(conn, w34_settings_url(ws, proj))
+      name = pick_plugin()
+
+      refute Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(reread(ws)), name)
+
+      downgrade_to_member!(ws, admin_tok.id)
+
+      html =
+        render_change(view, "set_plugin_placement", %{
+          "plugin" => name,
+          "placement" => "main",
+          "ws" => ws.id
+        })
+
+      # STATE ORACLE (load-bearing): no placement override was written.
+      refute Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(reread(ws)), name)
+      assert html =~ "You need to be an owner or admin"
+    end
+  end
+
+  # ── Installation-admin re-gate on credential handlers (W35, D274 — E2) ──
+  #
+  # Plugin credentials live in the installation-GLOBAL `plugin_settings` store
+  # (PK plugin_name, no tenant column): one shared account per deployment. The
+  # W26 `:scoped_admin` mount gate only proves the actor administers the URL
+  # workspace, so pre-W35 an admin of workspace B and ONLY B could mount
+  # /w/B/…/studio/settings and reveal / overwrite / delete EVERY tenant's
+  # credentials. These tests model exactly that principal — an admin membership
+  # of B with NO installation authority (token arm: no flat global "admin"
+  # perm; user arm: no Default-workspace admin role) — and prove each
+  # credential handler refuses with the plugin_settings row byte-UNCHANGED.
+  #
+  # ORACLE LAW (D268): the load-bearing assertion is STATE — the SettingsRecord
+  # row read back and compared whole (any write, re-encrypt, or delete flips
+  # it), plus the audit table for reveal. Flash copy is secondary.
+  describe "installation-admin re-gate on credential handlers (W35, D274 — E2)" do
+    alias Barkpark.Plugins.SettingsRecord
+
+    @w35_secret "installation-secret-xyz"
+
+    setup %{conn: conn} do
+      # Token principal: admin OF WORKSPACE B via membership role — clears the
+      # role-only W26 mount gate — but WITHOUT the flat global "admin"
+      # permission, so it holds no installation-level authority.
+      {:ok, b_admin_tok} =
+        Auth.create_token("w35-b-admin-raw", "w35 b-only admin", "production", ["read", "write"])
+
+      {:ok, ws_b} = Barkpark.Tenancy.create_workspace(%{slug: "w35-wb", name: "W35 Cred WS B"})
+      {:ok, proj_b} = Barkpark.Tenancy.create_project_with_dataset(ws_b, %{name: "W35PB"})
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_b.id, b_admin_tok.id, "admin")
+
+      # The installation-global victim row every tenant shares.
+      {:ok, _} = Settings.put("w35-victim", %{"api_key" => @w35_secret})
+
+      conn = init_test_session(conn, %{"api_token" => "w35-b-admin-raw"})
+      {:ok, conn: conn, ws_b: ws_b, proj_b: proj_b}
+    end
+
+    defp w35_settings_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/studio/settings"
+
+    defp victim_row, do: Repo.get_by(SettingsRecord, plugin_name: "w35-victim")
+
+    defp audit_count(plugin, action) do
+      Repo.aggregate(
+        from(a in SettingsAudit, where: a.plugin_name == ^plugin and a.action == ^action),
+        :count
+      )
+    end
+
+    test "reveal is REFUSED for a workspace-B-only admin — no secret in the DOM, no reveal audit, row unchanged",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+      before = victim_row()
+
+      html = render_click(view, "reveal", %{"plugin_name" => "w35-victim"})
+
+      # STATE ORACLES (load-bearing): row byte-unchanged, zero reveal audit.
+      assert victim_row() == before
+      refute audited?("w35-victim", "reveal")
+      # The secret never reaches the DOM; the refusal-unique flash does.
+      refute html =~ @w35_secret
+      assert html =~ "installation-admin authority"
+    end
+
+    test "save is REFUSED for a workspace-B-only admin — the shared credential row is byte-unchanged",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+      before = victim_row()
+      # The setup seed itself audits one "write" — the refused save must not
+      # add another, so the ORACLE is the count staying put, not emptiness.
+      write_audits_before = audit_count("w35-victim", "write")
+
+      html =
+        render_submit(view, "save", %{
+          "plugin_name" => "w35-victim",
+          "settings_json" => ~s({"api_key": "attacker-overwrite"})
+        })
+
+      # STATE ORACLE (load-bearing): the overwrite never landed.
+      assert victim_row() == before
+      assert audit_count("w35-victim", "write") == write_audits_before
+      refute html =~ "Saved w35-victim"
+      assert html =~ "installation-admin authority"
+    end
+
+    test "delete is REFUSED for a workspace-B-only admin — the shared credential row survives byte-identical",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+      before = victim_row()
+      assert before, "victim row must exist before the delete attempt"
+
+      html = render_click(view, "delete", %{"plugin_name" => "w35-victim"})
+
+      # STATE ORACLE (load-bearing): the row still exists, byte-identical.
+      assert victim_row() == before
+      refute audited?("w35-victim", "delete")
+      refute html =~ "Deleted w35-victim"
+      assert html =~ "installation-admin authority"
+    end
+
+    test "reveal_field is REFUSED for a workspace-B-only admin — typed secret stays masked, no reveal audit",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      # The typed path: seed bokbasen (spec-backed), load it (loading renders
+      # MASKED values and is not credential-revealing), then attempt the
+      # per-field reveal. Same env hygiene as the typed-renderer suite: a host
+      # carrying BOKBASEN_* env config must not perturb the spec resolution.
+      prev = Application.get_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+      Application.delete_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, prev),
+          else: Application.delete_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+      end)
+
+      Settings.put("bokbasen", %{
+        "api_base" => "https://api.bokbasen.io",
+        "oauth_token_url" => "https://login.bokbasen.io/oauth2/token",
+        "client_id" => "w35-client-id-long",
+        "client_secret" => "w35-client-secret-long",
+        "client_role" => "publisher"
+      })
+
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+
+      view
+      |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
+      |> render_submit()
+
+      before = Repo.get_by(SettingsRecord, plugin_name: "bokbasen")
+
+      html = render_click(view, "reveal_field", %{"field" => "client_secret"})
+
+      # STATE ORACLES (load-bearing): no reveal audit, row byte-unchanged.
+      refute audited?("bokbasen", "reveal")
+      assert Repo.get_by(SettingsRecord, plugin_name: "bokbasen") == before
+      # The unmasked secret never reaches the DOM.
+      refute html =~ "w35-client-secret-long"
+      assert html =~ "installation-admin authority"
+    end
+
+    test "user arm: an account that is admin of workspace B ONLY is refused the same way — row unchanged",
+         %{ws_b: ws_b, proj_b: proj_b} do
+      email = "w35-b-admin-#{System.unique_integer([:positive])}@example.com"
+
+      {:ok, user} =
+        Barkpark.Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+
+      {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_b.id, user.id, "admin", "user")
+
+      conn = Plug.Test.init_test_session(build_conn(), %{"user_session" => raw})
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+      before = victim_row()
+
+      html = render_click(view, "reveal", %{"plugin_name" => "w35-victim"})
+
+      # STATE ORACLES (load-bearing): row byte-unchanged, zero reveal audit.
+      assert victim_row() == before
+      refute audited?("w35-victim", "reveal")
+      refute html =~ @w35_secret
+      assert html =~ "installation-admin authority"
+    end
   end
 end

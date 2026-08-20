@@ -1,0 +1,57 @@
+{
+  "cell": "add-oban-worker--A--2",
+  "chore": "add-oban-worker",
+  "arm": "A",
+  "rep": "2",
+  "cap_usd": 1.5,
+  "worktree": "/private/tmp/scaffy-duel-add-oban-worker--A--2",
+  "duration_ms": 67000,
+  "warm_ms": 83000,
+  "meter": {
+    "total_cost_usd": 0.4836879,
+    "usage": {
+      "input_tokens": 20,
+      "cache_creation_input_tokens": 45261,
+      "cache_read_input_tokens": 597723,
+      "output_tokens": 2183,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 45261,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 322,
+          "cache_read_input_tokens": 68526,
+          "cache_creation_input_tokens": 498,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 498
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    },
+    "source": "claude-cli-json"
+  },
+  "score": {
+    "gates_green": true,
+    "asserts": [],
+    "tier_ci_forced": [
+      {
+        "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/workers",
+        "rc": 0
+      }
+    ],
+    "agent_gate": [],
+    "diff_sha256": "f614a3d4b67b283d9ad0303dfac7c1de9149be9a5311095fb823e59b08f4fc4f",
+    "reversible": true
+  }
+}

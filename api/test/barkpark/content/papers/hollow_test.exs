@@ -16,7 +16,7 @@ defmodule Barkpark.Content.Papers.HollowTest do
       freely editable (fresh papers are hollow by construction).
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
@@ -58,12 +58,24 @@ defmodule Barkpark.Content.Papers.HollowTest do
       assert Hollow.hollow?([locked_title(), para("   \n\t ")])
     end
 
+    test "punctuation-only prose is hollow while language, numbers, and symbols count" do
+      assert Hollow.hollow?([locked_title(), para(" / — ")])
+      refute Hollow.hollow?([locked_title(), para("I")])
+      refute Hollow.hollow?([locked_title(), para("2")])
+      refute Hollow.hollow?([locked_title(), para("∑")])
+    end
+
     test "an image-only paper is NOT hollow (real payload, no text needed)" do
       refute Hollow.hollow?([%{"id" => "i1", "type" => "image", "src" => "/hero.jpg"}])
     end
 
     test "an image ghost with a blank src is NOT content" do
       assert Hollow.hollow?([locked_title(), %{"id" => "i1", "type" => "image", "src" => ""}])
+
+      assert Hollow.hollow?([
+               locked_title(),
+               %{"id" => "i2", "type" => "image", "width" => 640, "height" => 480}
+             ])
     end
 
     test "docs without a blocks list (body_html-only, pre-doctrine) are exempt" do

@@ -100,8 +100,10 @@ defmodule Barkpark.Media.Storage.MediaFileTest do
     end
 
     test "html / xml / javascript client types are all neutralized" do
-      for mime <- ~w(text/html application/xhtml+xml text/xml application/xml application/javascript text/javascript) do
+      for mime <-
+            ~w(text/html application/xhtml+xml text/xml application/xml application/javascript text/javascript) do
         cs = MediaFile.changeset(%MediaFile{}, valid_attrs(%{mime_type: mime}))
+
         assert Ecto.Changeset.get_change(cs, :mime_type) == "application/octet-stream",
                "expected #{mime} to be neutralized"
       end
@@ -117,6 +119,7 @@ defmodule Barkpark.Media.Storage.MediaFileTest do
     test "legit image/pdf/video types pass through untouched" do
       for mime <- ~w(image/png image/jpeg image/gif image/webp application/pdf video/mp4) do
         cs = MediaFile.changeset(%MediaFile{}, valid_attrs(%{mime_type: mime}))
+
         assert Ecto.Changeset.get_change(cs, :mime_type) == mime,
                "expected #{mime} to survive unchanged"
       end

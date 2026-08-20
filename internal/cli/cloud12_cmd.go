@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -123,9 +124,13 @@ func runLoginCloud(out *writer, args []string) int {
 		}
 	}
 
-	email, password, url, device, perr := parseLoginArgs(args)
+	email, password, url, device, deviceStart, devicePollCode, perr := parseLoginArgs(args)
 	if perr != nil {
 		return useError(out, "usage", perr.Error(), exitUsage)
+	}
+	devicePollCode = strings.TrimSpace(devicePollCode)
+	if deviceStart && devicePollCode != "" {
+		return useError(out, "usage", "pass EITHER --device-start OR --device-poll <code>, not both", exitUsage)
 	}
 
 	cfg, err := LoadConfig()
@@ -141,6 +146,19 @@ func runLoginCloud(out *writer, args []string) int {
 	}
 	if base == "" {
 		base = cloudclient.DefaultBaseURL
+	}
+
+	// Non-interactive device-login steps (BP-ONB-13): split the blocking browser
+	// login into two script-drivable one-shots BEFORE the interactive branch, so a
+	// headless / agent wrapper owns the poll cadence itself. --device-start mints
+	// the code pair and exits; --device-poll <code> does exactly ONE poll and
+	// exits (no 15-min loop). Both emit a single JSON envelope; neither blocks and
+	// neither auto-registers a fleet (that is the human-TTY tail below).
+	if deviceStart {
+		return runDeviceStartStep(out, base)
+	}
+	if devicePollCode != "" {
+		return runDevicePollStep(out, cfg, base, devicePollCode)
 	}
 
 	// Copy-a-link browser login (charter decision 10): the friendly default when
@@ -320,7 +338,7 @@ func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient
 
 	out.outf("")
 	out.outf("Connected to %s — %s", only.Name, connectTarget)
-	if !connectToBarkpark(out, connectTarget, creds.AdminToken, only.Name) {
+	if !connectToBarkpark(out, connectTarget, creds.AdminToken, only.Name, only.ID, fleetTeamLabel(only)) {
 		return exitOK
 	}
 	// TAKE ME FURTHER (decision 23): a successful AUTO-connect ends with the
@@ -355,7 +373,7 @@ func finishMultiBarkpark(out *writer, client cloudFleetClient, list []cloudclien
 		}
 		out.outf("")
 		out.outf("Connected to %s — %s", res.Name, res.Server)
-		if connectToBarkpark(out, res.Server, res.Token, res.Name) {
+		if connectToBarkpark(out, res.Server, res.Token, res.Name, res.InstanceID, res.Team) {
 			out.outf("")
 			out.outf("  run 'bp' to open your desk")
 		}
@@ -372,18 +390,25 @@ func finishMultiBarkpark(out *writer, client cloudFleetClient, list []cloudclien
 	return exitOK
 }
 
-// connectToBarkpark delegates to the UNCHANGED setup connect path (TargetConnect
-// over configStoreAdapter) so the server is probed, the admin token is persisted,
-// bp is defaulted here, and the same premium connect summary prints — exactly like
-// the wizard's cloud target. We never hand-roll RememberServer. A connect failure
-// after a good login is a warning, not a failure (the user stays logged in) —
-// reported as ok=false so the caller skips the next-step tail (hint or desk offer).
-func connectToBarkpark(out *writer, server, token, name string) bool {
+// connectToBarkpark delegates to the setup connect path (TargetConnect over
+// configStoreAdapter) so the server is probed, the admin token is persisted, bp is
+// defaulted here, and the same premium connect summary prints — exactly like the
+// wizard's cloud target. We never hand-roll RememberServer. instanceID + team are
+// the control-plane identity from the fleet row already in scope (Barkpark.ID /
+// Team.Name); they thread through SetupPlan → SavedConfig → ServerEntry so a
+// second hostname of one instance collapses onto the existing entry (aliases)
+// instead of minting a phantom "-2" (D4/D9) — the activation that made the
+// wave-1 InstanceID plumbing live. A connect failure after a good login is a
+// warning, not a failure (the user stays logged in) — reported as ok=false so the
+// caller skips the next-step tail (hint or desk offer).
+func connectToBarkpark(out *writer, server, token, name, instanceID, team string) bool {
 	plan := setup.SetupPlan{
-		Target: setup.TargetConnect,
-		Server: server,
-		Token:  token,
-		Name:   strings.TrimSpace(name),
+		Target:     setup.TargetConnect,
+		Server:     server,
+		Token:      token,
+		Name:       strings.TrimSpace(name),
+		InstanceID: strings.TrimSpace(instanceID),
+		Team:       strings.TrimSpace(team),
 	}
 	opts := setup.Options{
 		Out:          out.stdout,
@@ -474,11 +499,25 @@ func runSignupCloud(out *writer, args []string) int {
 	client := &cloudclient.Client{BaseURL: base}
 	resp, rerr := client.Register(cloudCtx(), email, password, team)
 	if rerr != nil {
-		// 409 email_taken → point the user at login; everything else (422 validation,
-		// connectivity) surfaces verbatim. We match on the message cloudError carried.
+		// 409 email_taken → point the user at login; everything else (422 validation)
+		// surfaces verbatim. We match on the message cloudError carried.
 		msg := rerr.Error()
 		if strings.Contains(msg, "email_taken") {
 			return useError(out, "failed", "email already registered — run `bp login` instead", exitGeneric)
+		}
+		// POST-COMMIT NETWORK DROP (onb-w4): a NON-refusal error means the control
+		// plane never returned an HTTP status at all — the connection dropped. That
+		// drop can land AFTER the server already committed the account (register is
+		// not idempotent — a blind retry 409s email_taken and forces a command
+		// switch). We cannot know from here whether the write happened, so we fail
+		// closed and tell the honest truth: the account MAY already exist, and the
+		// recovery is `bp login` with the SAME credentials — never a bare
+		// "signup failed: <transport>" that strands a possibly-created account.
+		// A server refusal is a *cloudclient.CloudRefusal (it carries an HTTP
+		// status); a transport error is not, which is exactly the seam we key on.
+		var refusal *cloudclient.CloudRefusal
+		if !errors.As(rerr, &refusal) {
+			return useError(out, "failed", signupTransportRecoveryMessage(email, base, msg), exitGeneric)
 		}
 		return useError(out, "failed", "signup failed: "+msg, exitGeneric)
 	}
@@ -504,6 +543,37 @@ func runSignupCloud(out *writer, args []string) int {
 	}
 	out.outf("  run 'bp go-live --name <name>' to provision your first Barkpark")
 	return exitOK
+}
+
+// signupTransportRecoveryMessage builds the honest receipt for a `bp signup`
+// whose POST /v1/auth/register dropped in transport (onb-w4). Because the drop
+// can happen AFTER the server committed the account, the copy never claims the
+// signup failed cleanly: it names the ambiguous state (the account MAY already
+// exist) and advises `bp login` with the SAME credentials as the recovery — a
+// blind `bp signup` retry would 409 email_taken and force a command switch. When
+// the email is known it is threaded into the login hint so the user can act
+// without retyping it; the underlying transport error stays appended so the
+// cause is never hidden.
+//
+// The base URL is threaded in too, and appended as --url whenever it is NOT the
+// baked default: this path never persists CloudURL, so on a FIRST signup against
+// a non-default control plane a bare `bp login --email X` would resolve back to
+// the default host and fail — and the copy's next clause ("if that reports
+// invalid credentials, the account was not created") would then draw exactly the
+// false conclusion this receipt exists to prevent.
+func signupTransportRecoveryMessage(email, base, transportErr string) string {
+	loginHint := "bp login"
+	if e := strings.TrimSpace(email); e != "" {
+		loginHint = "bp login --email " + e
+	}
+	if b := strings.TrimSpace(base); b != "" && b != cloudclient.DefaultBaseURL {
+		loginHint += " --url " + b
+	}
+	return "signup could not be confirmed — the connection dropped before the " +
+		"control plane replied, so your account may already have been created. " +
+		"Run `" + loginHint + "` with the same password to sign in; if that reports " +
+		"invalid credentials, the account was not created and you can run `bp signup` " +
+		"again. (" + transportErr + ")"
 }
 
 // runLogout is the `bp logout` built-in — the sign-out sibling of `bp login`.
@@ -626,6 +696,7 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 		"mode":          b.Mode,
 		"health_status": b.HealthStatus,
 		"agent_status":  b.AgentStatus,
+		"last_seen_at":  b.LastSeenAt,
 		"version":       b.Version,
 		"git_commit":    b.GitCommit,
 		"team_id":       b.TeamID,
@@ -643,7 +714,9 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 // on every row: PROVIDER (identity → GenProviderMark) + STATUS (the folded
 // GenInstanceLifecycle state → its role hue), alongside NAME · URL · MODE ·
 // HEALTH · AGENT (Decision 34 activates the merged-but-dormant #1739 chrome on the
-// registry leg). renderHzTable measures widths on bare strings and only tints when
+// registry leg) — plus LAST-SEEN, the age of the control plane's last observation
+// rendered through relativeAge(b.LastSeenAt) (a never-seen row → hzCell's em-dash).
+// renderHzTable measures widths on bare strings and only tints when
 // out.color is on, so color-off output stays byte-stable. URL falls back to the
 // host when the server has no URL yet (still provisioning). Every cell rides
 // through hzCell like every other renderHzTable call site: control chars from a
@@ -652,7 +725,7 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 // house em-dash rather than a bare gap — the tinters key on exact vocabulary
 // values, so a dashed cell stays honestly unpainted.
 func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark, showTeam bool) {
-	headers := []string{"NAME", "PROVIDER", "URL", "STATUS", "MODE", "HEALTH", "AGENT"}
+	headers := []string{"NAME", "PROVIDER", "URL", "STATUS", "MODE", "HEALTH", "AGENT", "LAST-SEEN"}
 	if showTeam {
 		headers = append([]string{"TEAM"}, headers...)
 	}
@@ -665,6 +738,7 @@ func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark, showTea
 		row := []string{
 			hzCell(b.Name), hzCell(b.Provider), hzCell(u), hzCell(registryLifecycleToken(b)),
 			hzCell(b.Mode), hzCell(b.HealthStatus), hzCell(b.AgentStatus),
+			hzCell(relativeAge(b.LastSeenAt)),
 		}
 		if showTeam {
 			team := ""
@@ -678,12 +752,15 @@ func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark, showTea
 	renderHzTable(out, headers, rows)
 }
 
-// runProvider is the `bp provider <verb>` built-in. Today the only verb is `add`:
+// runProvider is the `bp provider <verb>` built-in. Verbs:
 //
-//	bp provider add hetzner --token <t> [--label <l>]
+//	bp provider add hetzner --token <t> [--label <l>]   connect a cloud account
+//	bp provider remove <kind>                           disconnect it (→ standalone)
 //
-// It connects a cloud account to the control plane (POST /v1/providers) so a
-// later `bp launch` can provision into it. Requires a Cloud token.
+// `add` connects a cloud account to the control plane (POST /v1/providers) so a
+// later `bp launch` can provision into it; `remove` drops it (DELETE
+// /v1/providers/:kind) — the plugin law: disconnecting degrades to standalone.
+// Requires a Cloud token.
 func runProvider(out *writer, args []string) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
 		printProviderHelp(out)
@@ -694,13 +771,23 @@ func runProvider(out *writer, args []string) int {
 	}
 
 	verb := args[0]
-	if verb != "add" {
+	switch verb {
+	case "add":
+		return runProviderAdd(out, args[1:])
+	case "remove":
+		return runProviderRemove(out, args[1:])
+	default:
 		out.userErr("unknown provider command %q", verb)
-		out.errf("usage: bp provider add hetzner --token <token> [--label <label>]")
+		out.errf("usage: bp provider <add|remove> <kind> …")
 		return exitUsage
 	}
+}
 
-	kind, token, label, perr := parseProviderAddArgs(args[1:])
+// runProviderAdd connects a cloud account: bp provider add <kind> --token <t>
+// [--label <l>] (POST /v1/providers). The token is verified server-side before
+// it is encrypted at rest, and never echoed back.
+func runProviderAdd(out *writer, args []string) int {
+	kind, token, label, perr := parseProviderAddArgs(args)
 	if perr != nil {
 		return useError(out, "usage", perr.Error(), exitUsage)
 	}
@@ -739,6 +826,47 @@ func runProvider(out *writer, args []string) int {
 	}
 	out.outf("✓ connected %s provider %q (id %s)", prov.Kind, label, prov.ID)
 	out.outf("  launch into it with 'bp launch %s --name <name>'", prov.Kind)
+	return exitOK
+}
+
+// runProviderRemove disconnects a cloud account: bp provider remove <kind>
+// (DELETE /v1/providers/:kind). Drops the team's connection of that kind — the
+// plugin law: with the provider gone, the box degrades gracefully to standalone.
+// A 404 (nothing connected of that kind — no existence leak) surfaces verbatim.
+func runProviderRemove(out *writer, args []string) int {
+	var kind string
+	for _, a := range args {
+		switch {
+		case a == "-h" || a == "--help":
+			printProviderHelp(out)
+			return exitOK
+		case strings.HasPrefix(a, "-"):
+			return useError(out, "usage", fmt.Sprintf("unknown flag %q (usage: bp provider remove <kind>)", a), exitUsage)
+		default:
+			if kind != "" {
+				return useError(out, "usage", fmt.Sprintf("unexpected extra argument %q", a), exitUsage)
+			}
+			kind = a
+		}
+	}
+	if kind == "" {
+		return useError(out, "usage", "missing provider kind — e.g. bp provider remove cloudflare", exitUsage)
+	}
+
+	cfg, ok := requireCloud(out)
+	if !ok {
+		return exitAuth
+	}
+
+	if err := cfg.CloudClient().DisconnectProvider(cloudCtx(), kind); err != nil {
+		return cloudFail(out, "disconnect provider", err)
+	}
+
+	if out.emitStructured(map[string]any{"ok": true, "kind": kind}) {
+		return exitOK
+	}
+
+	out.outf("✓ disconnected %s provider", kind)
 	return exitOK
 }
 
@@ -1016,45 +1144,74 @@ const (
 	flagPassEq  = flagPass + "="
 	flagURLEq   = flagURL + "="
 	flagTeamEq  = flagTeam + "="
+
+	// Non-interactive device-login steps (BP-ONB-13): --device-start (bare bool)
+	// mints the code pair and exits; --device-poll <code> performs one poll and
+	// exits. They split the blocking browser login so a headless/agent wrapper
+	// owns the poll cadence.
+	flagDeviceStart  = "--device-start"
+	flagDevicePoll   = "--device-poll"
+	flagDevicePollEq = flagDevicePoll + "="
 )
 
+// loginKnownFlags / signupKnownFlags list every bare flag token each parser
+// recognizes. nextFlagValue's guard checks a would-be value against this list
+// so `bp login --password --device-start` errors instead of silently binding
+// the password to the literal "--device-start" and leaving --device-start's
+// own bool false with no error.
+var loginKnownFlags = []string{flagEmail, flagUser, flagPasswd, flagPass, flagURL, flagDevice, flagDeviceStart, flagDevicePoll}
+var signupKnownFlags = []string{flagEmail, flagUser, flagPasswd, flagPass, flagTeam, flagURL}
+
 // parseLoginArgs splits `bp login` flags: --email/--user, --password/--pass,
-// --url, and the bare boolean --device (force the browser device-link flow).
-// Each value-flag accepts both `--flag value` and `--flag=value`. Any positional
-// or unknown flag is a usage error.
-func parseLoginArgs(args []string) (email, password, url string, device bool, err error) {
+// --url, the bare boolean --device (force the browser device-link flow), and the
+// two non-interactive device-login steps --device-start (bare bool) and
+// --device-poll <device_code> (BP-ONB-13). Each value-flag accepts both
+// `--flag value` and `--flag=value`. Any positional or unknown flag is a usage error.
+func parseLoginArgs(args []string) (email, password, url string, device, deviceStart bool, devicePoll string, err error) {
+	fail := func(e error) (string, string, string, bool, bool, string, error) {
+		return "", "", "", false, false, "", e
+	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
 		case a == flagEmail || a == flagUser:
-			email, i, err = nextFlagValue(args, i)
+			email, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagEmailEq):
 			email = a[len(flagEmailEq):]
 		case strings.HasPrefix(a, flagUserEq):
 			email = a[len(flagUserEq):]
 		case a == flagPasswd || a == flagPass:
-			password, i, err = nextFlagValue(args, i)
+			password, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagPwEq):
 			password = a[len(flagPwEq):]
 		case strings.HasPrefix(a, flagPassEq):
 			password = a[len(flagPassEq):]
 		case a == flagURL:
-			url, i, err = nextFlagValue(args, i)
+			url, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagURLEq):
 			url = a[len(flagURLEq):]
+		case a == flagDeviceStart:
+			// Bare boolean — the non-interactive first leg: mint a code pair and
+			// exit without polling.
+			deviceStart = true
+		case a == flagDevicePoll:
+			devicePoll, i, err = nextFlagValue(args, i, loginKnownFlags...)
+		case strings.HasPrefix(a, flagDevicePollEq):
+			devicePoll = a[len(flagDevicePollEq):]
 		case a == flagDevice:
 			// Bare boolean — no value consumed. Forces the browser device-link
 			// flow even when a credential or non-tty would otherwise route to the
-			// password path.
+			// password path. Matched AFTER the --device-* flags so it never shadows
+			// them (exact-equality cases, so order is belt-and-braces).
 			device = true
 		default:
-			return "", "", "", false, fmt.Errorf("unexpected argument %q (usage: bp login [--email <addr>] [--password <pw>] [--device] [--url <url>])", a)
+			return fail(fmt.Errorf("unexpected argument %q (usage: bp login [--email <addr>] [--password <pw>] [--device] [--device-start] [--device-poll <code>] [--url <url>])", a))
 		}
 		if err != nil {
-			return "", "", "", false, err
+			return fail(err)
 		}
 	}
-	return email, password, url, device, nil
+	return email, password, url, device, deviceStart, devicePoll, nil
 }
 
 // parseSignupArgs splits `bp signup` flags: --email/--user, --password/--pass,
@@ -1066,23 +1223,23 @@ func parseSignupArgs(args []string) (email, password, team, url string, err erro
 		a := args[i]
 		switch {
 		case a == flagEmail || a == flagUser:
-			email, i, err = nextFlagValue(args, i)
+			email, i, err = nextFlagValue(args, i, signupKnownFlags...)
 		case strings.HasPrefix(a, flagEmailEq):
 			email = a[len(flagEmailEq):]
 		case strings.HasPrefix(a, flagUserEq):
 			email = a[len(flagUserEq):]
 		case a == flagPasswd || a == flagPass:
-			password, i, err = nextFlagValue(args, i)
+			password, i, err = nextFlagValue(args, i, signupKnownFlags...)
 		case strings.HasPrefix(a, flagPwEq):
 			password = a[len(flagPwEq):]
 		case strings.HasPrefix(a, flagPassEq):
 			password = a[len(flagPassEq):]
 		case a == flagTeam:
-			team, i, err = nextFlagValue(args, i)
+			team, i, err = nextFlagValue(args, i, signupKnownFlags...)
 		case strings.HasPrefix(a, flagTeamEq):
 			team = a[len(flagTeamEq):]
 		case a == flagURL:
-			url, i, err = nextFlagValue(args, i)
+			url, i, err = nextFlagValue(args, i, signupKnownFlags...)
 		case strings.HasPrefix(a, flagURLEq):
 			url = a[len(flagURLEq):]
 		default:
@@ -1203,11 +1360,28 @@ func parseSubscribeArgs(args []string) (plan string, err error) {
 // the value and the advanced index. A missing value (flag is the last token) is
 // an error naming the flag. (cloud_cmd.go-style hand parsing; named distinctly
 // from migrate_cmd.go's inline-aware flagValue, which has a different signature.)
-func nextFlagValue(args []string, i int) (string, int, error) {
+//
+// known lists the flag tokens the caller's parser recognizes (e.g.
+// loginKnownFlags). If the next token starts with "-" AND is one of those known
+// flags, it is refused as a value with the same "needs a value" error — this
+// stops a bare value-flag from silently swallowing the following flag (e.g.
+// `--password --device-start` binding the password to the literal
+// "--device-start"). Callers that pass no known flags (or values that merely
+// start with "-" but aren't in the list, e.g. a password of "-secret") are
+// unaffected — the value still passes through unchanged.
+func nextFlagValue(args []string, i int, known ...string) (string, int, error) {
 	if i+1 >= len(args) {
 		return "", i, fmt.Errorf("%s needs a value", args[i])
 	}
-	return args[i+1], i + 1, nil
+	next := args[i+1]
+	if strings.HasPrefix(next, "-") {
+		for _, k := range known {
+			if next == k {
+				return "", i, fmt.Errorf("%s needs a value", args[i])
+			}
+		}
+	}
+	return next, i + 1, nil
 }
 
 // --- help text ---------------------------------------------------------------
@@ -1217,6 +1391,8 @@ func printLoginHelp(out *writer) {
 
 USAGE
   bp login [--email <addr>] [--password <pw>] [--device] [--url <url>]
+  bp login --device-start -o json           # mint a code pair, exit (no polling)
+  bp login --device-poll <device_code> -o json   # ONE poll, exit (script owns cadence)
 
 WHAT IT DOES
   On a terminal with no credentials given, opens a copy-a-link BROWSER login: it
@@ -1227,12 +1403,23 @@ WHAT IT DOES
   echoed) — the path headless/CI use. Either way the session token is stored
   (0600) so 'bp barkparks', 'bp launch', and 'bp go-live' work.
 
+  For headless / agent wrappers, --device-start and --device-poll split the
+  browser flow into two non-interactive steps: --device-start emits the code pair
+  as JSON and exits; --device-poll <code> does exactly ONE poll and exits, so a
+  script drives the cadence itself — e.g.
+      resp=$(bp login --device-start -o json); code=$(jq -r .device_code <<<"$resp")
+      until bp login --device-poll "$code" -o json; do sleep 5; done
+  --device-poll exits 0 ONLY on approval; a non-zero exit (with a {status:…}
+  envelope) means keep polling.
+
 FLAGS
-  --device          force the browser device-link flow (even with a credential)
-  --email <addr>    your account email (prompted when omitted) — password path
-  --password <pw>   your password (prompted, not echoed; or BARKPARK_PASSWORD)
-  --url <url>       control-plane URL (default https://api.barkpark.cloud)
-  -o json           emit one machine-readable JSON object on stdout`
+  --device            force the browser device-link flow (even with a credential)
+  --device-start      mint a device code pair as JSON and exit (no polling)
+  --device-poll <c>   perform ONE device poll for code <c> and exit
+  --email <addr>      your account email (prompted when omitted) — password path
+  --password <pw>     your password (prompted, not echoed; or BARKPARK_PASSWORD)
+  --url <url>         control-plane URL (default https://api.barkpark.cloud)
+  -o json             emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
 }
 
@@ -1281,16 +1468,19 @@ func printProviderHelp(out *writer) {
 	const help = `bp provider — connect a cloud account to provision Barkparks into.
 
 USAGE
-  bp provider add hetzner --token <token> [--label <label>]
+  bp provider add <kind> --token <token> [--label <label>]
+  bp provider remove <kind>
 
 WHAT IT DOES
-  links a cloud provider (today: hetzner) to your team on the control plane so
-  'bp launch <kind>' can provision a Barkpark into it. The token is encrypted at
-  rest by the control plane and never echoed back. Requires 'bp login' first.
+  links a cloud provider (hetzner / azure to provision into; cloudflare for free
+  edge DNS/TLS/CDN) to your team on the control plane. The token is verified, then
+  encrypted at rest by the control plane and never echoed back. 'remove'
+  disconnects it — the box degrades gracefully back to standalone. Requires
+  'bp login' first.
 
 FLAGS
-  --token <token>   the provider API token
-  --label <label>   a human label for the connection (optional)
+  --token <token>   the provider API token (add only)
+  --label <label>   a human label for the connection (optional, add only)
   -o json           emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
 }
@@ -1366,16 +1556,32 @@ func runInstance(out *writer, args []string) int {
 // <id> is the instance id shown by `bp barkparks` (-o json carries `id`). Treats
 // the response as a secret: it prints once and is never written to config.
 func runInstanceCredentials(out *writer, args []string) int {
-	var id string
-	for _, a := range args {
-		if a == "" || strings.HasPrefix(a, "-") {
+	var id, teamArg string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--team":
+			// `--team <slug|id>` — read credentials in an explicit team context
+			// rather than the active team (cfg.CloudTeam). Needs a value.
+			if i+1 >= len(args) {
+				return useError(out, "usage", "--team needs a value (a team slug or id — see 'bp teams')", exitUsage)
+			}
+			teamArg = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--team="):
+			teamArg = strings.TrimPrefix(a, "--team=")
+		case a == "":
 			continue
+		case strings.HasPrefix(a, "-"):
+			continue
+		default:
+			if id == "" {
+				id = a
+			}
 		}
-		id = a
-		break
 	}
 	if id == "" {
-		return useError(out, "usage", "bp instance credentials <id> — the instance id (see 'bp barkparks')", exitUsage)
+		return useError(out, "usage", "bp instance credentials <id> [--team <slug|id>] — the instance id (see 'bp barkparks')", exitUsage)
 	}
 
 	cfg, ok := requireCloud(out)
@@ -1383,7 +1589,36 @@ func runInstanceCredentials(out *writer, args []string) int {
 		return exitAuth
 	}
 
-	creds, err := cfg.CloudClient().GetCredentials(cloudCtx(), id)
+	// Team context resolution: an explicit --team (slug or UUID) wins, else the
+	// active team persisted by `bp team use` (cfg.CloudTeam). A slug is resolved
+	// to its UUID against the caller's membership list (GET /v1/me) because the
+	// control plane's get_team/1 is UUID-only — a slug can't be resolved
+	// server-side. An empty context is the plain, primary-team behaviour.
+	//
+	// CAVEAT (auth model): the X-Barkpark-Team header this sends is honoured only
+	// for SESSION-token auth — the `bp login` device flow mints a session token,
+	// so this switch works there. A personal access token (PAT) is hard-bound to
+	// its own pat.team_id server-side (auth.ex require_user_or_pat) and IGNORES
+	// the header, so `--team` has no effect under a PAT: use `bp login` for
+	// cross-team credential reads.
+	teamID := strings.TrimSpace(cfg.CloudTeam)
+	if t := strings.TrimSpace(teamArg); t != "" {
+		me, merr := cfg.CloudClient().Me(cloudCtx())
+		if merr != nil {
+			return cloudFail(out, "resolve team", merr)
+		}
+		match, found := resolveTeam(me.Teams, t)
+		if !found {
+			msg := fmt.Sprintf("not a member of team %q", t)
+			if names := teamHandles(me.Teams); names != "" {
+				msg += " — you can use: " + names
+			}
+			return useError(out, "failed", msg, exitGeneric)
+		}
+		teamID = match.ID
+	}
+
+	creds, err := cfg.CloudClient().GetCredentialsForTeam(cloudCtx(), id, teamID)
 	if err != nil {
 		// no_admin_token (404) is an expected, actionable state — surface it plainly.
 		if strings.Contains(err.Error(), "no_admin_token") {
@@ -1423,7 +1658,7 @@ func printInstanceHelp(out *writer) {
 	const help = `bp instance — manage one of your managed Barkpark instances.
 
 USAGE
-  bp instance credentials <id>
+  bp instance credentials <id> [--team <slug|id>]
 
 WHAT IT DOES
   credentials  retrieve the per-instance ADMIN TOKEN the platform minted on the
@@ -1433,6 +1668,10 @@ WHAT IT DOES
                instance id from 'bp barkparks' (-o json shows 'id').
 
 FLAGS
+  --team <t>   read credentials in an explicit team context (a team slug or id
+               from 'bp teams'); defaults to your active team ('bp team use').
+               An instance owned by a non-active team 404s without this. Honoured
+               for session-token auth ('bp login'); a PAT ignores it.
   -o json      emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
 }

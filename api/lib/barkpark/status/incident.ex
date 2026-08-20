@@ -26,8 +26,6 @@ defmodule Barkpark.Status.Incident do
 
   @type t :: %__MODULE__{}
 
-  @doc "The allowed impact severities, worst-last."
-  def impacts, do: @impacts
   @doc "The allowed lifecycle statuses."
   def statuses, do: @statuses
 

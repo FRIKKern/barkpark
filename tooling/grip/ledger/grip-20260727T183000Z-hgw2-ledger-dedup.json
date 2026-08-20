@@ -1,0 +1,159 @@
+{
+  "run_id": "grip-20260727T183000Z",
+  "subject_note": "Honest Gates wave 2 — verifier [ledger-dedup-and-fence]. Re-derivation recipes for every load-bearing fact in the dedup/fence report.",
+  "recipes": [
+    {
+      "subject": "bp:stw10-backlog-branch-protection",
+      "quantity": "task:parent_id",
+      "rerun": "bp task get stw10-backlog-branch-protection",
+      "derived_level": "L1",
+      "deps": ["guerrilla.barkpark.cloud/v1/tasks"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "parent_id=hg-bl-branch-protection-required-checks (was search-template-epic-goal); lifecycle open; priority 2"
+    },
+    {
+      "subject": "bp:hg-bl-branch-protection-required-checks",
+      "quantity": "task:duplicate-detection",
+      "rerun": "bp task get hg-bl-branch-protection-required-checks",
+      "derived_level": "L1",
+      "deps": ["guerrilla.barkpark.cloud/v1/tasks"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "already an epic child of auth-totp-tests-are-time-boundary-flaky at priority 1 with 4 acceptance criteria — stw10 is the DUPLICATE, so it was nested under this owner rather than made a sibling"
+    },
+    {
+      "subject": "github:PR 6057",
+      "quantity": "gh:pr-view",
+      "rerun": "gh pr view 6057 --json state,files,title,mergeStateStatus,updatedAt",
+      "derived_level": "L1",
+      "deps": ["github.com/FRIKKern/barkpark"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "state OPEN, mergeStateStatus DIRTY, updatedAt 2026-07-24T08:36:48Z, single file api/.sobelow-skips +76/-54"
+    },
+    {
+      "subject": "api/scripts/sobelow-baseline-reconcile.sh",
+      "quantity": "grep:-n",
+      "rerun": "git show origin/main:api/scripts/sobelow-baseline-reconcile.sh | grep -n 'mark-skip-all\\|--skip\\|sobelow'",
+      "derived_level": "L2",
+      "deps": ["origin/main"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "line 38 'mix sobelow --clear-skip', line 46 'mix sobelow --mark-skip-all', line 72 'sequence=clear-skip,mark-skip-all'. No --skip anywhere."
+    },
+    {
+      "subject": "api/deps/sobelow/lib/sobelow.ex",
+      "quantity": "grep:-n",
+      "rerun": "grep -n 'get_env(:skip)' api/deps/sobelow/lib/sobelow.ex",
+      "derived_level": "L2",
+      "deps": ["api/deps/sobelow"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "line 421 'if get_env(:skip), do: combine_skips(head, tail), else: funs' — @sobelow_skip module attributes are honoured ONLY under --skip, so --mark-skip-all without --skip re-fingerprints them"
+    },
+    {
+      "subject": "api/lib",
+      "quantity": "grep:-c",
+      "rerun": "git grep -h sobelow_skip origin/main -- api/lib | wc -l",
+      "derived_level": "L2",
+      "deps": ["origin/main"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "57 inline annotations across 20+ modules; api/.sobelow-skips is 135 lines"
+    },
+    {
+      "subject": ".format-drift-ceiling",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:.format-drift-ceiling",
+      "derived_level": "L2",
+      "deps": ["origin/main"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "fatal: path '.format-drift-ceiling' does not exist in 'origin/main' — S4 never landed"
+    },
+    {
+      "subject": "scripts/go-format-drift-ceiling.sh",
+      "quantity": "git:show head",
+      "rerun": "git show origin/main:scripts/go-format-drift-ceiling.sh | head -3",
+      "derived_level": "L2",
+      "deps": ["origin/main"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "header reads '(honest-gates, Go side of scripts/format-drift-ceiling.sh's Elixir ratchet)' — a live in-code pointer to a file that does not exist on main"
+    },
+    {
+      "subject": "github:elixir run 30291553601 (main)",
+      "quantity": "gh:run-view jobs",
+      "rerun": "gh run view 30291553601 --json conclusion,jobs",
+      "derived_level": "L1",
+      "deps": ["github.com/FRIKKern/barkpark"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "RUN conclusion success; JOB 'Format (mix format --check-formatted, advisory) (27.0, 1.18.1)' conclusion FAILURE. Newest main elixir run at time of writing."
+    },
+    {
+      "subject": "github:scaffy-catalog-drift run 30269281675 (main)",
+      "quantity": "gh:run-view jobs",
+      "rerun": "gh run view 30269281675 --json conclusion,jobs",
+      "derived_level": "L1",
+      "deps": ["github.com/FRIKKern/barkpark"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "RUN conclusion success; JOB 'served-catalog drift audit (advisory)' conclusion FAILURE — third measured instance of the run-level lie, outside elixir.yml"
+    },
+    {
+      "subject": "scaffy served catalog",
+      "quantity": "cli:seed --check",
+      "rerun": "go run ./scaffy/seed --check",
+      "derived_level": "L1",
+      "deps": ["guerrilla.barkpark.cloud"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "21/22 MATCH, 1 DRIFT — barkpark--block-type--starter local 0090d05d vs served 1c72d9ad; exit status 1"
+    },
+    {
+      "subject": "github:paper-readers (main, schedule)",
+      "quantity": "gh:run-list",
+      "rerun": "gh run list --workflow paper-readers --branch main --limit 3 --json conclusion,createdAt,databaseId",
+      "derived_level": "L1",
+      "deps": ["github.com/FRIKKern/barkpark"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "failure 2026-07-27T08:47 (30251239337), failure 2026-07-26T07:45, failure 2026-07-25T07:28 — three consecutive nightly reds"
+    },
+    {
+      "subject": "github:issue 5658",
+      "quantity": "gh:issue-list label ci-failure",
+      "rerun": "gh issue list --state all --limit 50 --label ci-failure --json number,title,state,createdAt",
+      "derived_level": "L1",
+      "deps": ["github.com/FRIKKern/barkpark"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "exactly two ci-failure issues ever: #4966 zz-alert-proof CLOSED, #5658 paper-readers OPEN since 2026-07-22T08:04:39Z. The alert fired once and deduped; it never aged and never reached the bp ledger."
+    },
+    {
+      "subject": "github:sheet-grid-js (main)",
+      "quantity": "gh:run-list",
+      "rerun": "gh run list --workflow sheet-grid-js --branch main --limit 3 --json conclusion,createdAt,databaseId",
+      "derived_level": "L1",
+      "deps": ["github.com/FRIKKern/barkpark"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "failure 2026-07-08T20:38 (28974049647) is the LAST main run — 19 days stale red, frozen behind the workflow's own paths filter"
+    },
+    {
+      "subject": "bp:auth-totp-tests-are-time-boundary-flaky children",
+      "quantity": "task:claim census",
+      "rerun": "for t in $(bp task get auth-totp-tests-are-time-boundary-flaky | python3 -c \"import json,sys;[print(c['doc_id']) for c in json.load(sys.stdin)['children']]\"); do bp task get $t | python3 -c \"import json,sys;d=json.load(sys.stdin)['doc'];print(d['doc_id'],d['lifecycle_status'],json.dumps(d.get('claim')))\"; done",
+      "derived_level": "L1",
+      "deps": ["guerrilla.barkpark.cloud/v1/tasks"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "ZERO live foreign claims. 5 done children carry closed claims; hg-w1-format-drift-ceiling carries an EXPIRED claim (expired_at 2026-07-20T19:05:00Z, worker null); every other open child has claim=null."
+    },
+    {
+      "subject": "bp:tgw6-bl-grip-suite-has-no-ci",
+      "quantity": "task:claim",
+      "rerun": "bp task get tgw6-bl-grip-suite-has-no-ci",
+      "derived_level": "L1",
+      "deps": ["guerrilla.barkpark.cloud/v1/tasks"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "lifecycle open, parent truth-grip-epic, priority 1, claim NULL, assignee null — unclaimed and inside the Truth-Grip fence"
+    },
+    {
+      "subject": "bp:task priority schema",
+      "quantity": "mutation:validation bound",
+      "rerun": "bp doc patch task <any-task> --yes --set priority:=5",
+      "derived_level": "L1",
+      "deps": ["guerrilla.barkpark.cloud/v1/data/mutate"],
+      "observed_at": "2026-07-27T18:30:00Z",
+      "observed_value": "priority:=5 and :=6 both rejected with 'task content failed validation'; :=4 accepted. Priority range is 0-4, so 4 is the deepest a task can be buried."
+    }
+  ]
+}

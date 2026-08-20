@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>html,body{margin:0;padding:0;background:#14181f;}a{color:#2560bd;}a:hover{color:#1c4c99;}</style>
+</helmet>
+<div style="display:flex;min-height:100vh;background:#14181f;color:#e9edf3;font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;">
+  <aside style="width:250px;flex-shrink:0;border-right:1px solid rgba(255,255,255,0.07);padding:26px 14px;display:flex;flex-direction:column;gap:3px;overflow-y:auto;">
+    <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.14em;color:#626c7c;padding:0 12px 10px 12px;">EMAIL FLEET · P1-4</span>
+    <sc-for list="{{ nav }}" as="n" hint-placeholder-count="14">
+      <sc-if value="{{ n.header }}" hint-placeholder-val="{{ false }}">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#626c7c;padding:14px 12px 6px 12px;">{{ n.label }}</span>
+      </sc-if>
+      <sc-if value="{{ n.item }}" hint-placeholder-val="{{ true }}">
+      <div onClick="{{ n.onClick }}" style-hover="background:rgba(255,255,255,0.05)" style="padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;color:{{ n.fg }};background:{{ n.bg }};">{{ n.label }}</div>
+      </sc-if>
+    </sc-for>
+    <div style="flex:1;"></div>
+    <span style="font-size:11.5px;color:#626c7c;line-height:1.6;padding:0 12px;">Shared shell, 600px, system-safe stack in production (Inter is preview-only). Every mail states why it was sent. Plain-text part mirrors copy 1:1.</span>
+  </aside>
+  <main style="flex:1;min-width:0;background:#e9ebef;display:flex;flex-direction:column;align-items:center;padding:40px 24px 80px 24px;overflow-y:auto;">
+    <div style="width:600px;max-width:100%;display:flex;flex-direction:column;gap:14px;">
+      <div style="background:#fff;border:1px solid #dde1e7;border-radius:10px;padding:12px 18px;display:flex;gap:10px;align-items:baseline;">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.1em;color:#8b95a5;">SUBJECT</span>
+        <span style="font-size:13.5px;font-weight:600;color:#1a2330;">{{ cur.subject }}</span>
+      </div>
+      <div style="background:#ffffff;border:1px solid #dde1e7;border-radius:14px;overflow:hidden;color:#1a2330;">
+        <div style="padding:26px 36px 0 36px;display:flex;align-items:center;gap:9px;">
+          <svg width="15" height="15" viewBox="0 0 14 14"><polygon points="7,1 12,11 2,11" style="fill:#15804e"></polygon></svg>
+          <span style="font-size:14px;font-weight:700;">Barkpark <span style="color:#5f6a7b;font-weight:500;">Cloud</span></span>
+        </div>
+        <div style="padding:26px 36px 32px 36px;display:flex;flex-direction:column;gap:16px;">
+          <span style="align-self:flex-start;padding:3px 11px;border-radius:99px;font-size:11.5px;font-weight:600;background:{{ cur.tagBg }};color:{{ cur.tagFg }};">{{ cur.tag }}</span>
+          <h1 style="margin:0;font-size:21px;font-weight:700;letter-spacing:-0.01em;line-height:1.3;">{{ cur.title }}</h1>
+          <sc-for list="{{ cur.paras }}" as="p" hint-placeholder-count="2">
+          <p style="margin:0;font-size:14px;line-height:1.65;color:#3d4859;">{{ p.t }}</p>
+          </sc-for>
+          <sc-if value="{{ cur.code }}" hint-placeholder-val="{{ false }}">
+          <div style="text-align:center;padding:16px;border:1px solid #dde1e7;border-radius:10px;background:#f7f8fa;font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;letter-spacing:0.16em;">{{ cur.code }}</div>
+          </sc-if>
+          <sc-if value="{{ cur.hasRows }}" hint-placeholder-val="{{ true }}">
+          <div style="border:1px solid #e4e7ec;border-radius:10px;padding:4px 16px;">
+            <sc-for list="{{ cur.rows }}" as="r" hint-placeholder-count="3">
+            <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #eef0f3;">
+              <span style="font-size:12.5px;color:#5f6a7b;width:110px;flex-shrink:0;">{{ r.k }}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#1a2330;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ r.v }}</span>
+            </div>
+            </sc-for>
+          </div>
+          </sc-if>
+          <sc-if value="{{ cur.cta }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;align-items:center;gap:14px;padding-top:4px;">
+            <span style="display:inline-block;background:#15804e;color:#ffffff;font-size:13.5px;font-weight:600;padding:11px 20px;border-radius:999px;cursor:pointer;">{{ cur.cta }}</span>
+            <sc-if value="{{ cur.secondary }}" hint-placeholder-val="{{ false }}">
+            <span style="font-size:13px;color:#2560bd;cursor:pointer;">{{ cur.secondary }}</span>
+            </sc-if>
+          </div>
+          </sc-if>
+          <sc-if value="{{ cur.fine }}" hint-placeholder-val="{{ false }}">
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#76818f;">{{ cur.fine }}</p>
+          </sc-if>
+        </div>
+        <div style="border-top:1px solid #e4e7ec;padding:16px 36px 20px 36px;display:flex;flex-direction:column;gap:5px;">
+          <span style="font-size:11.5px;color:#76818f;line-height:1.6;">{{ cur.why }} <span style="color:#2560bd;cursor:pointer;">Tune this in Notifications</span>.</span>
+          <span style="font-size:11.5px;color:#98a1ad;">Barkpark Cloud · Guerrilla workspace · sent to fjord@jarl.no</span>
+        </div>
+      </div>
+      <span style="font-size:12px;color:#5f6a7b;text-align:center;">{{ cur.note }}</span>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;: {&quot;width&quot;: 1200, &quot;height&quot;: 880}}">
+class Component extends DCLogic {
+  state = { v: 'deploy_failed' };
+  tags = {
+    fail: ['rgba(187,64,64,0.1)', '#bb4040'], warn: ['rgba(150,102,15,0.12)', '#96660f'],
+    ok: ['rgba(21,128,78,0.1)', '#15804e'], info: ['rgba(37,96,189,0.1)', '#2560bd']
+  };
+  emails = [
+    ['ALERTS', null],
+    ['deploy_failed', { label: 'Deploy failed', tag: 'DEPLOY FAILED', kind: 'fail',
+      subject: 'Deploy #40 failed on gyldendal.no — production untouched',
+      title: 'The build stopped — production kept serving deploy #39 the whole time.',
+      paras: [{ t: 'The build stopped because PUBLIC_API_URL isn\u2019t set. Nothing was switched — visitors never saw a broken site.' }],
+      rows: [{ k: 'Site', v: 'gyldendal.no' }, { k: 'Deploy', v: '#40 · manual · frikk' }, { k: 'Failed stage', v: 'BUILD · 17s' }, { k: 'Instance', v: 'Gyldendal (fsn1)' }],
+      cta: 'Open the deploy', secondary: 'Edit environment',
+      why: 'You\u2019re getting this because deploy alerts are on for gyldendal.no.',
+      note: 'Failure copy is the console\u2019s sentence verbatim — one source of truth.' }],
+    ['provision_failed', { label: 'Provision failed', tag: 'LAUNCH FAILED', kind: 'fail',
+      subject: 'Hugin didn\u2019t come up — nothing was charged',
+      title: 'Provisioning stopped at step 4 of 7 — and stopped billing with it.',
+      paras: [{ t: 'Configuring Barkpark failed on the fresh box (postgres init error). The server was destroyed and nothing appears on your invoice. Your slot is free again.' }],
+      rows: [{ k: 'Instance', v: 'hugin' }, { k: 'Provider', v: 'Hetzner · Falkenstein' }, { k: 'Failed step', v: 'Configuring Barkpark' }],
+      cta: 'Retry launch', secondary: 'View the console log',
+      why: 'You\u2019re getting this because you launched this instance.',
+      note: 'Price-transparency rule: a failed launch email must say what was (not) charged.' }],
+    ['agent_unreachable', { label: 'Agent unreachable', tag: 'UNREACHABLE', kind: 'warn',
+      subject: 'Can\u2019t reach Gyldendal — 30 minutes of silence',
+      title: 'The box stopped answering. Unreachable is not refused.',
+      paras: [{ t: 'Last heartbeat was 09:02. The server may be fine and the network not — we keep retrying every 60 seconds, and queued actions run the moment the agent answers. Nothing has been rejected.' }],
+      rows: [{ k: 'Instance', v: 'Gyldendal' }, { k: 'Last heartbeat', v: '09:02 · 30m ago' }, { k: 'Host', v: '5.75.169.183' }],
+      cta: 'View instance', secondary: null,
+      why: 'You\u2019re getting this because unreachable alerts are on (default for failures).',
+      note: 'The unreachable ≠ refused doctrine, carried into mail.' }],
+    ['health_degraded', { label: 'Health degraded', tag: 'DEGRADED', kind: 'warn',
+      subject: 'Gyldendal is degraded — the API isn\u2019t answering',
+      title: 'Heartbeats arrive, but the golden path is failing.',
+      paras: [{ t: 'The agent reports in, but the API check on :443 has failed for 10 minutes. Login and Studio still respond — users may not notice yet.' }],
+      rows: [{ k: 'Instance', v: 'Gyldendal' }, { k: 'Failing', v: 'API answers' }, { k: 'Passing', v: 'login · Studio' }],
+      cta: 'View instance', secondary: 'Open Studio',
+      why: 'You\u2019re getting this because health alerts are on for Gyldendal.',
+      note: 'States the passing checks too — honesty includes what still works.' }],
+    ['TRANSACTIONAL', null],
+    ['invite', { label: 'Invitation', tag: 'INVITATION', kind: 'info',
+      subject: 'Fjord invited you to the Guerrilla workspace',
+      title: 'Fjord invited you to Guerrilla as a member.',
+      paras: [{ t: 'Accept with the account for frikk@guerrilla.no — the invitation is bound to that address and expires in 7 days.' }],
+      rows: [{ k: 'Workspace', v: 'Guerrilla' }, { k: 'Role', v: 'member' }, { k: 'Expires', v: 'in 7 days' }],
+      cta: 'Accept invitation', secondary: null,
+      why: 'You\u2019re getting this because fjord@jarl.no entered your address.',
+      note: 'One-time link; accepting with a different account fails with a plain sentence.' }],
+    ['password_reset', { label: 'Password reset', tag: 'SECURITY', kind: 'info',
+      subject: 'Reset your Barkpark Cloud password',
+      title: 'Someone asked to reset your password. If it was you, go ahead.',
+      paras: [{ t: 'This link works once and expires in 30 minutes. If you didn\u2019t ask, do nothing — your password is unchanged and your sessions are untouched.' }],
+      rows: [{ k: 'Requested from', v: '84.212.31.7 · Oslo' }, { k: 'Expires', v: 'in 30 minutes' }],
+      cta: 'Choose a new password', secondary: null,
+      why: 'You\u2019re getting this because a reset was requested for this address.',
+      note: 'On success, every other session signs out — the email says so before you click.',
+      fine: 'Completing the reset signs out all other sessions and revokes device-linked CLIs.' }],
+    ['email_change', { label: 'Email-change code', tag: 'SECURITY', kind: 'info',
+      subject: 'Your confirmation code: 481 922',
+      title: 'Confirm your new address with this code.',
+      paras: [{ t: 'Enter it within 10 minutes. Five wrong attempts in a minute locks the change for an hour — that\u2019s the rate limit working, not an error.' }],
+      code: '481 922', rows: null, cta: null, secondary: null,
+      why: 'You\u2019re getting this because an email change was started from your account.',
+      note: 'The rate-limit refusal is explained in advance — no mystery lockouts.' }],
+    ['LIFECYCLE & BILLING', null],
+    ['trial_t3', { label: 'Trial · T-3', tag: 'TRIAL · 3 DAYS LEFT', kind: 'warn',
+      subject: 'Gyldendal is torn down in 3 days — pick a plan to keep it',
+      title: 'Your trial ends Thursday. Here\u2019s exactly what happens.',
+      paras: [{ t: 'When the trial ends, the instance is torn down — server, sites and content. Pick a plan before then and nothing changes; you\u2019ll see the price before anything is charged. We\u2019ll write once more, one day before.' }],
+      rows: [{ k: 'Instance', v: 'Gyldendal · 28 documents' }, { k: 'Trial ends', v: 'Thursday 09:00 CET' }, { k: 'Cheapest keep', v: 'Supporter · €12/month' }],
+      cta: 'Pick a plan', secondary: 'Archive instead (free)',
+      why: 'You\u2019re getting this because your trial is ending — it can\u2019t be turned off.',
+      note: 'T-3 and T-1 are the only trial emails. The archive escape hatch is always offered.' }],
+    ['dunning', { label: 'Payment failed', tag: 'PAYMENT FAILED', kind: 'fail',
+      subject: 'Your payment failed — instances run until 19 July',
+      title: 'The card was declined. Nothing stops for 3 days.',
+      paras: [{ t: 'We\u2019ll retry twice more. If payment hasn\u2019t succeeded by 19 July, instances are suspended — stopped, not deleted — and come back exactly as they were the moment it succeeds.' }],
+      rows: [{ k: 'Failed on', v: '16 July · card ···· 4242' }, { k: 'Grace until', v: '19 July' }, { k: 'Then', v: 'suspended — not deleted' }],
+      cta: 'Update payment method', secondary: null,
+      why: 'You\u2019re getting this because billing notices can\u2019t be turned off.',
+      note: 'Matches the 3-day backend grace; \u201csuspended — not deleted\u201d verbatim from the console.' }],
+    ['digest', { label: 'Operator digest', tag: 'DAILY DIGEST', kind: 'ok',
+      subject: 'Fleet digest — 1 needs attention, 1 fine, €25.80 projected',
+      title: 'Friday: one thing needs a look.',
+      paras: [{ t: 'Gyldendal has been degraded for 2 hours (API not answering — login and Studio fine). Guerrilla is healthy. The canary wave for v0.2.26 is holding at SETTLE. Projected invoice unchanged at €25.80.' }],
+      rows: [{ k: 'Degraded', v: 'Gyldendal · API check · 2h' }, { k: 'Healthy', v: 'Guerrilla' }, { k: 'Rollout', v: 'v0.2.26 · SETTLE 12m/30m' }, { k: 'Invoice', v: '€25.80 · 12 Aug' }],
+      cta: 'Open Overview', secondary: null,
+      why: 'You\u2019re getting this because the daily digest is on for operators (06:00 UTC).',
+      note: 'The triage-headline grammar, compressed to a subject line.' }]
+  ];
+  renderVals() {
+    const s = this.state;
+    const nav = this.emails.map(([id, e]) => e === null
+      ? { header: true, item: false, label: id }
+      : { header: false, item: true, label: e.label, fg: s.v === id ? '#e9edf3' : '#8d96a5',
+          bg: s.v === id ? 'rgba(255,255,255,0.07)' : 'transparent', onClick: () => this.setState({ v: id }) });
+    const e = (this.emails.find(([id, x]) => x && id === s.v) || this.emails[1])[1];
+    const [tagBg, tagFg] = this.tags[e.kind];
+    return { nav, cur: { ...e, tagBg, tagFg, hasRows: !!(e.rows && e.rows.length), rows: e.rows || [], paras: e.paras, code: e.code || null, fine: e.fine || null } };
+  }
+}
+</script>
+</body>
+</html>

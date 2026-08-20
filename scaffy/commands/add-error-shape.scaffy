@@ -1,0 +1,222 @@
+COMMAND "Add an API Error Shape" DESCRIPTION "Land a new v1 JSON error code end-to-end: a fix-suggesting @hints entry, a build/1 clause that maps its {:error, :code} tuple to a {code, message, status} envelope, and a unit test — idempotently, accreting behind marks. known_codes/0, the OpenAPI Error.code enum, and the coverage test all self-derive." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "scaffy", "testing", "scaffold" CONCEPT "error-shape" VARIANT "build-clause" DIRECTION "add" VARIABLES
+  VARIABLE 1 "error_code" OPAQUE TITLE "The stable error code" DESCRIPTION "The snake_case `code` string the envelope carries and callers key on. Also the atom in the {:error, :code} tuple build/1 matches. OPAQUE: never re-cased, one spelling per file (this file uses the kebab joiner-output {{.error-code}} so it is legal inside mark names), exempt from path-casing lints." EXAMPLES "playground_expired", "billing_required", "region_unavailable"
+  VARIABLE 2 "Hint" OPAQUE TITLE "Fix-suggesting hint" DESCRIPTION "One imperative line telling the caller what to fix. Registered in @hints and stamped onto the envelope additively (code/message/status stay stable). OPAQUE: verbatim, never re-cased." EXAMPLES "Start a fresh playground session — this one's TTL elapsed and its data was reaped."
+  VARIABLE 3 "Message" OPAQUE TITLE "Envelope message" DESCRIPTION "The human-readable `message` field of the error envelope build/1 returns. OPAQUE: verbatim, never re-cased." EXAMPLES "playground session expired", "billing setup required"
+  VARIABLE 4 "Status" OPAQUE TITLE "HTTP status code" DESCRIPTION "The integer HTTP status the envelope carries (unquoted number in the map literal). OPAQUE: verbatim, one spelling per file." EXAMPLES "403", "402", "422"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# What this command does (and, deliberately, does NOT touch)
+# ─────────────────────────────────────────────────────────────────────────────
+# A new public v1 error code is a SMALL, CLOSED edit surface — the query/legacy
+# "duplicated error emitters" scar is healed: 13 controllers action_fallback into
+# FallbackController → Content.Errors, so both controllers emit only shared
+# tuples (charter D54a). There is NO FOREACH-over-emitters to do. The mechanizable
+# surface is exactly THREE sites, all in two files:
+#
+#   ● errors.ex @hints  — the fix-suggesting hint, keyed off the stable `code`.
+#                         Registering it here is what enters the code into
+#                         known_codes/0 (errors.ex:132-134 = Map.keys(@hints) ∪
+#                         @public_inline_codes), and THAT is the single source
+#                         for the served OpenAPI `Error.code` enum. (Op A)
+#   ● errors.ex build/1 — the clause that maps {:error, :code} to the
+#                         {code, message, status} envelope, inserted BEFORE the
+#                         true catch-all (which matches everything). (Op B)
+#   ● errors_test.exs   — a unit test pinning the envelope shape AND the
+#                         known_codes/0 membership (the DELIBERATE tripwire —
+#                         known_codes derives from @hints, so the OpenAPI
+#                         drift-guard is a tautology; only a membership test
+#                         catches a dropped @hints entry). (Op C)
+#
+# TWO ACCRETION IDIOMS, chosen by the SEPARATOR of the collection each op grows:
+#   • Op A grows the @hints MAP, whose entries are COMMA-separated. Its last
+#     entry (quota_exceeded) carries no trailing comma before the closing `}`, so
+#     a bare INSERT would abut two map pairs with no separator (a syntax error).
+#     The fix is the A3 comma-list idiom: a self-consuming REPLACE that re-emits
+#     the last entry WITH a comma + the new entry, guarded by a payload-derived
+#     ASLONG and REANCHOR (E-005). REANCHOR's splice inserts a COMMA between
+#     siblings — exactly right for a map. The map's `}` is OUTSIDE the anchor.
+#   • Ops B and C grow collections of `defp` clauses / `test` blocks, which are
+#     separated by BLANK LINES, not commas. REANCHOR would wrongly splice a comma
+#     between them (a syntax error), so they use INSERT AFTER FIRST instead: the
+#     new block is inserted after a fixed, stable anchor and the anchor is left
+#     intact (never self-consuming, so E-005 does not apply). Idempotency is the
+#     engine's implicit planted-MARK guard — a second run with the same code sees
+#     its own `MARK:error-…-<code>` already present and skips. Sibling accretion
+#     is LIFO (each new code lands right after the same anchor), which is fine:
+#     order among these blocks is irrelevant (disjoint clause patterns; a flat
+#     test list).
+#
+# SELF-DERIVING — ZERO ops, do NOT touch:
+#   • known_codes/0 (errors.ex:132-134) recomputes from @hints on every call.
+#   • The OpenAPI `Error.code` enum (Barkpark.Api.OpenApi) reads known_codes/0.
+#   • test/barkpark_web/contract/error_code_coverage_test.exs globs the controller
+#     dirs for emitted codes and asserts emitted ⊆ known_codes — a build/1-only
+#     code (never written INLINE by a controller) simply never appears in
+#     `emitted`, so growing known_codes can never red it.
+#
+# NOT MECHANIZED — one required MANUAL step (see the §9 note at the bottom):
+#   • docs/api-v1.md §9 is a HAND-CURATED human prose list, and it IS gate-locked
+#     by errors_doc_coverage_test.exs (every known code must appear verbatim in
+#     backticks in §9). A generic command cannot mechanize the append: (1) §9 is
+#     editorial prose grouped by category (core / additive / endpoint-specific) —
+#     which bucket a new code belongs to is a human judgment; (2) api-v1.md sits
+#     at its CI-enforced byte budget (13991/14000 B — 9 bytes of headroom), so a
+#     mechanical append overflows check-doc-budgets.sh, and the doc contract
+#     FORBIDS raising the cap. Adding the §9 line (with a compensating prose
+#     trim) is the author's one hand-edit; this command is loud about it rather
+#     than papering over it or falsely claiming self-derivation.
+
+# Token spellings-as-transforms (D3d / A1). error_code is OPAQUE (its VALUE is
+# substituted verbatim, never re-cased). Under D22 an OPAQUE reference uses ONE
+# spelling per file — any legal joiner-output of the declared name. This file uses
+# the kebab spelling {{.error-code}} throughout, because a MARK name must be kebab
+# (E-019) and the snake `error_code` would red it. The value is unaffected:
+#   {{.error-code}}  → playground_expired  (the --var value, verbatim)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP A — register the fix-suggesting hint (this is what enters known_codes/0)
+# ─────────────────────────────────────────────────────────────────────────────
+# The @hints map's LAST entry is `"quota_exceeded" => "…"` (errors.ex:72-73) and
+# the map's closing `}` (:74) follows with NO trailing comma before it — a bare
+# INSERT of a second entry abuts two map pairs with no separator (Elixir syntax
+# error). Under A3 the append is a FENCED REPLACE of that last ENTRY (the `}` stays
+# OUTSIDE the anchor, exactly like add-oban-worker keeps the `]` outside): re-emit
+# the quota_exceeded entry WITH a trailing comma, then the mark comment, then the
+# new `"{{.error-code}}" => "{{.Hint}}"` entry.
+#
+# A4/A5 + E-005: the quota_exceeded entry survives as a substring of the
+# replacement (self-consuming), so idempotency rests on the payload-derived
+# ASLONG guard (the per-code mark substring — ASCII, brace-safe, and it ALSO
+# refuses a code already hand-registered under the same mark). REANCHOR makes the
+# sibling-accretion path first-class: the first code anchors on the quota_exceeded
+# structural target and plants MARK:error-hint-<code>; a later code anchors at the
+# LAST planted mark block of that family (the mark comment + its entry line, whose
+# tail ends in `"`) and WITH re-emits that block + comma + the new entry — the map
+# grows at the family's tail, the structural target is never re-matched once
+# consumed, and same-code re-runs are a no-op.
+IN "api/lib/barkpark/content/errors.ex"
+### Append {{.error-code}} hint to the @hints map after the quota_exceeded entry
+REPLACE
+::: quota_exceeded hint entry :::
+    "quota_exceeded" =>
+      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota."
+::: quota_exceeded hint entry :::
+WITH
+::: quota_exceeded plus {{.error-code}} hint :::
+    "quota_exceeded" =>
+      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota.",
+    # scaffy:add-error-shape {{.error-code}} MARK:error-hint-{{.error-code}}
+    "{{.error-code}}" => "{{.Hint}}"
+::: quota_exceeded plus {{.error-code}} hint :::
+MARK "error-hint-{{.error-code}}"
+REANCHOR "error-hint-"
+ASLONG FILE DONT CONTAIN "MARK:error-hint-{{.error-code}}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP B — the build/1 clause, inserted BEFORE the true catch-all
+# ─────────────────────────────────────────────────────────────────────────────
+# The catch-all `defp build(_)` (errors.ex:498-499) maps ANY unrecognized reason
+# to a 500, so a new clause MUST precede it. `defp` clauses are separated by BLANK
+# LINES, not commas, so this is an INSERT AFTER FIRST (not the A3 comma idiom): the
+# anchor is the last real clause before the catch-all — the is_binary/internal_error
+# clause (:495-496, unique) — and the new clause is inserted right after it, still
+# ABOVE the catch-all. The anchor is left intact (not self-consuming; E-005 N/A).
+# Order relative to the is_binary clause is irrelevant: `:{{.error-code}}` is an
+# atom, is_binary only matches binaries — disjoint patterns.
+#
+# Idempotency is the engine's implicit planted-MARK guard: a re-run with the same
+# code finds MARK:error-shape-<code> already present and skips. No ASLONG is
+# needed, and REANCHOR is deliberately ABSENT — its comma-splice is only correct
+# for comma-separated collections (Op A), never for blank-line-separated clauses.
+IN "api/lib/barkpark/content/errors.ex"
+### Insert build/1 clause for :{{.error-code}} above the catch-all
+INSERT AFTER FIRST
+::: is_binary internal_error clause :::
+  defp build({:error, reason}) when is_binary(reason),
+    do: %{code: "internal_error", message: reason, status: 500}
+::: is_binary internal_error clause :::
+WITH
+::: {{.error-code}} build clause :::
+
+  # scaffy:add-error-shape {{.error-code}} MARK:error-shape-{{.error-code}}
+  defp build({:error, :{{.error-code}}}),
+    do: %{code: "{{.error-code}}", message: "{{.Message}}", status: {{.Status}}}
+::: {{.error-code}} build clause :::
+MARK "error-shape-{{.error-code}}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP C — the unit test (envelope shape + known_codes/0 membership tripwire)
+# ─────────────────────────────────────────────────────────────────────────────
+# errors_test.exs is a flat test list (no describe blocks) closed by the module
+# `end` at :290. Tests are separated by BLANK LINES, so — like Op B — this is an
+# INSERT AFTER FIRST, anchored on the last test (the label_spine membership
+# tripwire, :287-289, unique). The new test is inserted after it, before the
+# module `end`. Idempotency is the implicit planted-MARK guard; no ASLONG, no
+# REANCHOR (blank-line-separated, not comma-separated).
+#
+# The new test asserts BOTH the envelope (code/message/status) AND
+# MapSet.member? on known_codes/0 — the deliberate tripwire, because the OpenAPI
+# drift-guard is a tautology (known_codes derives from @hints): drop the @hints
+# entry Op A planted and this membership assertion is what fails.
+IN "api/test/barkpark/content/errors_test.exs"
+### Insert a {{.error-code}} test after the label_spine test
+INSERT AFTER FIRST
+::: label_spine test block :::
+  test "label_spine is a registered code (OpenAPI enum + hint table truthful)" do
+    assert MapSet.member?(Errors.known_codes(), "label_spine")
+  end
+::: label_spine test block :::
+WITH
+::: {{.error-code}} test :::
+
+  # scaffy:add-error-shape {{.error-code}} MARK:error-test-{{.error-code}}
+  test "maps :{{.error-code}} to its envelope and registers {{.error-code}} in known_codes" do
+    Logger.metadata(request_id: nil)
+
+    env = Errors.to_envelope({:error, :{{.error-code}}})
+    assert env.code == "{{.error-code}}"
+    assert env.status == {{.Status}}
+    assert env.message == "{{.Message}}"
+    # additive fix-suggesting hint, like every other registered code
+    assert is_binary(env.hint) and env.hint != ""
+    # the deliberate tripwire: known_codes derives from @hints, so this membership
+    # assertion is what catches a dropped @hints entry (the OpenAPI guard can't).
+    assert MapSet.member?(Errors.known_codes(), "{{.error-code}}")
+  end
+::: {{.error-code}} test :::
+MARK "error-test-{{.error-code}}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# ASSERT FILE: each op's mark is present (verbatim substrings the ops write).
+ASSERT FILE "api/lib/barkpark/content/errors.ex" CONTAINS "MARK:error-hint-{{.error-code}}"
+ASSERT FILE "api/lib/barkpark/content/errors.ex" CONTAINS "MARK:error-shape-{{.error-code}}"
+ASSERT FILE "api/test/barkpark/content/errors_test.exs" CONTAINS "MARK:error-test-{{.error-code}}"
+
+# ASSERT CMD: the errors unit test (envelope shape + membership tripwire) AND the
+# served-vocabulary coverage guard. Scoped single-file `mix test` is LOCAL-safe
+# with a warm api/_build (charter A2, RESOLVED 2026-07-16: this exact pair runs
+# 27 tests green in ~0.7s warm) — no DB (both are `use ExUnit.Case`), no phx.server.
+# NOTE: errors_doc_coverage_test.exs (the §9 ratchet) is deliberately NOT asserted
+# here — see the §9 manual-step note below; a build/1-only code cannot satisfy it
+# until §9 is hand-edited.
+ASSERT CMD "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §9 — the ONE required MANUAL step (why it is not an op)
+# ─────────────────────────────────────────────────────────────────────────────
+# docs/api-v1.md §9 lists the public error vocabulary in human prose, and
+# api/test/barkpark/content/errors_doc_coverage_test.exs is the anti-drift RATCHET:
+# it asserts every known_codes/0 code appears verbatim in backticks in §9. So
+# after this command runs, add a line for {{.error-code}} to §9 by hand:
+#
+#     `{{.error-code}}` {{.Status}} — {{.Message}}
+#
+# placed in the category that fits (additive vs. endpoint-specific), TRIMMING
+# adjacent prose to stay within the 14000-byte budget (check-doc-budgets.sh, an
+# enforced merge gate — api-v1.md currently has ~9 bytes of headroom, and the doc
+# contract forbids raising the cap). This editorial judgment — bucket + budget
+# offset — is why no MARK/REPLACE can own it. Everything the MACHINE consumes
+# (known_codes/0, the OpenAPI Error.code enum, error_code_coverage_test.exs)
+# already self-derives from Op A's @hints entry; §9 is the human contract only.

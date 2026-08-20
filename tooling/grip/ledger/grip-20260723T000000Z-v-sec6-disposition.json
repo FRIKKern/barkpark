@@ -1,0 +1,61 @@
+{
+  "run_id": "grip-20260723T000000Z-v-sec6-disposition",
+  "recipes": [
+    {
+      "subject": "design/check.mjs Part B (§6) exists + passes",
+      "quantity": "gate:pass",
+      "rerun": "node design/check.mjs",
+      "derived_level": "L1",
+      "deps": ["design/check.mjs", "design/tokens.json"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "taskboard semrole-parity + glyph-budget tests pass",
+      "quantity": "test:pass",
+      "rerun": "go test -run 'TestRoleForParityWithSemrole|TestGoldenGlyphBudget' ./internal/taskboard -v",
+      "derived_level": "L1",
+      "deps": ["internal/taskboard"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "charter 'spec §6 aspirational / no design/check hex gate' claim — THREE spots",
+      "quantity": "grep:-n",
+      "rerun": "grep -n 'spec §6 is aspirational\\|design/check.*hex gate\\|NO in-repo .design/check' .claude/workflows/bp-task-tui-epic-charter.md",
+      "derived_level": "L3",
+      "deps": [".claude/workflows/bp-task-tui-epic-charter.md"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "Part B reads 4 emitted lifecycle artifacts — board tokens_gen.go, paper-surface.css, root.html.heex, studio/tokens_gen.ex",
+      "quantity": "grep:-n",
+      "rerun": "grep -n 'ARTIFACTS.find' design/check.mjs | head",
+      "derived_level": "L2",
+      "deps": ["design/check.mjs"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "pdrender in-body taskchip glyphs are HARDCODED, outside emit chain — Part B does not read them",
+      "quantity": "grep:-n",
+      "rerun": "grep -n 'func taskStatusGlyph' internal/pdrender/inline.go; grep -c 'lifecycle' internal/pdrender/tokens_gen.go",
+      "derived_level": "L2",
+      "deps": ["internal/pdrender/inline.go", "internal/pdrender/tokens_gen.go"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "taskStatusGlyph referenced by no gate/test outside inline.go",
+      "quantity": "grep:-rl",
+      "rerun": "grep -rln 'taskStatusGlyph' internal/ design/",
+      "derived_level": "L2",
+      "deps": ["internal/pdrender/inline.go"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "Part B covers 9 lifecycle states incl. considering/researching (#4393 ◌/◎)",
+      "quantity": "node:eval",
+      "rerun": "node -e \"const t=require('./design/tokens.json'); console.log(Object.keys(t.lifecycle).filter(k=>!k.startsWith('_')))\"",
+      "derived_level": "L2",
+      "deps": ["design/tokens.json"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    }
+  ]
+}

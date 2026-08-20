@@ -24,8 +24,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -123,16 +125,21 @@ func (s GoLiveSpec) healthTarget() string {
 //     encryption key opens another's.
 //   - PreviewJWTSecret is PREVIEW_JWT_SECRET, the draft-preview JWT signing key. A
 //     shared value lets one tenant mint valid preview tokens for another.
+//   - ReleaseCaptureHMAC is BARKPARK_RELEASE_CAPTURE_HMAC_SECRET, the
+//     release-capture HMAC signing secret. runtime.exs REQUIRES at least 32 bytes
+//     of it in prod (migrate dies without it) — and a shared value lets one
+//     tenant forge another's release-capture signatures.
 //
 // AdminToken is the clean-profile admin bearer (reused from
 // setup.GenerateAdminToken). They are NEVER logged or returned to the caller in
 // the clear beyond the LiveServer hand-off.
 type Secrets struct {
-	SecretKeyBase    string
-	Kek              string
-	CloakKey         string
-	PreviewJWTSecret string
-	AdminToken       string
+	SecretKeyBase      string
+	Kek                string
+	CloakKey           string
+	PreviewJWTSecret   string
+	ReleaseCaptureHMAC string
+	AdminToken         string
 }
 
 // LiveServer is the verified, registered outcome of a go-live: the popped host,
@@ -289,15 +296,6 @@ type Pool struct {
 	created int
 }
 
-// NewPool seeds a warm pool with the given ready hosts against provider. The
-// hosts are assumed already created (e.g. via provider.Create at seed time);
-// callers seed with SeedPool to also register them in a FakeProvider.
-func NewPool(provider CloudProvider, ready ...Server) *Pool {
-	rs := make([]Server, len(ready))
-	copy(rs, ready)
-	return &Pool{provider: provider, ready: rs}
-}
-
 // SeedPool creates n warm hosts via provider (names warm-1..warm-n) and returns
 // a Pool holding them ready. This is the test/seed-time helper: against a
 // FakeProvider it costs nothing and pre-registers the hosts so pop's replacement
@@ -395,6 +393,20 @@ type WarmPool struct {
 	// so Barkpark.Mailer stays on the Local adapter (no delivery) exactly as
 	// before this field existed. Populated from the worker's SMTP_RELAY_* env.
 	Mail MailRelay
+
+	// TrustedProxies is the control plane's EGRESS address (or a comma-separated
+	// list, e.g. an IPv4 + an IPv6 egress), written into the instance's
+	// BARKPARK_TRUSTED_PROXIES so the box BELIEVES the caller address the control
+	// plane relays on a proxied request. Barkpark.RateLimiter.client_ip walks
+	// x-forwarded-for right-to-left and skips only LISTED hops, so on a
+	// cloud-managed instance the rightmost hop is the control plane's egress: unset
+	// here, every proxied revoke keys on ONE bucket (the whole team shares
+	// 10/minute) instead of one per phone. Not a forgery and not a 5xx — a SILENT
+	// loss of the per-caller bucketing. Zero value → the step is skipped and the
+	// instance keeps loopback-only trust, exactly as before this field existed.
+	// Populated from the worker's BARKPARK_CLOUD_EGRESS_IPS env (the SAME address
+	// as the CP_HOST deploy secret — see deploy/README.md).
+	TrustedProxies string
 
 	// MigrateArgv is the `mix ecto.migrate` argv the migrate step carries. It is
 	// NOT executed in tests (the fake runner records it); the real runner shells
@@ -658,7 +670,7 @@ func validateSecretKeyBase(secret string) error {
 	return nil
 }
 
-// validateSecrets guards ALL four per-instance secret VALUES the install step
+// validateSecrets guards ALL five per-instance secret VALUES the install step
 // single-quotes into its shell. It runs before secretsInstallStep so a malformed
 // draw fails the chain closed rather than shelling out a broken command.
 func validateSecrets(s Secrets) error {
@@ -667,10 +679,17 @@ func validateSecrets(s Secrets) error {
 		{"BARKPARK_KEK", s.Kek},
 		{"BARKPARK_CLOAK_KEY", s.CloakKey},
 		{"PREVIEW_JWT_SECRET", s.PreviewJWTSecret},
+		{"BARKPARK_RELEASE_CAPTURE_HMAC_SECRET", s.ReleaseCaptureHMAC},
 	} {
 		if err := validateSecretValue(kv.name, kv.val); err != nil {
 			return err
 		}
+	}
+	// runtime.exs raises in prod below 32 bytes (byte_size on the STRING) — a
+	// short draw must fail the provision chain closed HERE, not at migrate on
+	// the shipped box.
+	if len(s.ReleaseCaptureHMAC) < 32 {
+		return fmt.Errorf("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET is %d bytes; runtime.exs requires at least 32", len(s.ReleaseCaptureHMAC))
 	}
 	return nil
 }
@@ -749,11 +768,12 @@ func (m MailRelay) Validate() error {
 // signing/encryption key (cross-tenant session/token forgery + content
 // decryption) or dies at `mix ecto.migrate` when runtime.exs raises "BARKPARK_KEK
 // is not set". This step MUST run BEFORE migrate: migrate sources .env, and
-// runtime.exs REQUIRES the KEK (+ cloak key + preview secret + signing secret) in
-// prod. Each value rides in via its own BP_* env so it never lands in the step
-// Title/Cmd (which may be narrated/logged) — only in the Argv the SSH runner
-// base64-encodes and sends, mirroring adminTokenStep. The .env edit is idempotent:
-// one grep -v strips any existing line for ALL four keys, each minted value is
+// runtime.exs REQUIRES the KEK (+ cloak key + preview secret + release-capture
+// HMAC + signing secret) in prod. Each value rides in via its own BP_* env so it
+// never lands in the step Title/Cmd (which may be narrated/logged) — only in the
+// Argv the SSH runner base64-encodes and sends, mirroring adminTokenStep. The
+// .env edit is idempotent:
+// one grep -v strips any existing line for ALL five keys, each minted value is
 // appended from its $BP_* via printf "%s" (never interpolated into the script
 // TEXT), and the file is swapped in with mv — so re-running the chain never
 // duplicates a line. The single restart makes Phoenix re-read every key at boot (it
@@ -763,19 +783,28 @@ func secretsInstallStep(s Secrets, mail MailRelay) CaddyStep {
 	script := `export BP_SKB='` + s.SecretKeyBase + `'; ` +
 		`export BP_KEK='` + s.Kek + `'; ` +
 		`export BP_CLOAK='` + s.CloakKey + `'; ` +
-		`export BP_PREVIEW='` + s.PreviewJWTSecret + `'; `
+		`export BP_PREVIEW='` + s.PreviewJWTSecret + `'; ` +
+		`export BP_RCH='` + s.ReleaseCaptureHMAC + `'; `
 
 	// grep -v strip list (idempotency) + the append block, both grown when the
 	// shared mail relay is injected. The strip removes any prior line for a key
 	// so a re-run never duplicates.
-	strip := `-e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET='`
+	strip := `-e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET=' -e '^BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=' -e '^BARKPARK_SELF_UPDATE_APPLY='`
 	appends := `printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB" >> ` + envFile + `.bpnew; ` +
 		`printf 'BARKPARK_KEK=%s\n' "$BP_KEK" >> ` + envFile + `.bpnew; ` +
 		`printf 'BARKPARK_CLOAK_KEY=%s\n' "$BP_CLOAK" >> ` + envFile + `.bpnew; ` +
-		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW" >> ` + envFile + `.bpnew; `
+		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW" >> ` + envFile + `.bpnew; ` +
+		`printf 'BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=%s\n' "$BP_RCH" >> ` + envFile + `.bpnew; ` +
+		// Arm one-click apply (fleet-health, 2026-08-14): the control plane's
+		// autoupdate rollout relays POST /v1/admin/self-update, and without this
+		// flag the box answers feature_not_configured (503) and the rollout
+		// worker CONTAINS it — proven on the v0.2.26 wave, where every managed
+		// box shipped unarmed and zero installs landed. Non-secret; managed
+		// boxes are the exact population the autonomous rollout exists for.
+		`printf 'BARKPARK_SELF_UPDATE_APPLY=%s\n' '1' >> ` + envFile + `.bpnew; `
 
-	redact := []string{s.SecretKeyBase, s.Kek, s.CloakKey, s.PreviewJWTSecret}
-	cmd := "install per-instance SECRET_KEY_BASE + BARKPARK_KEK + BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET (values redacted)"
+	redact := []string{s.SecretKeyBase, s.Kek, s.CloakKey, s.PreviewJWTSecret, s.ReleaseCaptureHMAC}
+	cmd := "install per-instance SECRET_KEY_BASE + BARKPARK_KEK + BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET + BARKPARK_RELEASE_CAPTURE_HMAC_SECRET (values redacted)"
 
 	// Point the instance at the shared transactional-mail relay so magic-link /
 	// password-reset / verify-email actually deliver (else Barkpark.Mailer stays
@@ -814,6 +843,74 @@ func secretsInstallStep(s Secrets, mail MailRelay) CaddyStep {
 	}
 }
 
+// NormalizeTrustedProxies validates + canonicalizes a comma-separated egress list
+// into the exact shape api/config/runtime.exs accepts for
+// BARKPARK_TRUSTED_PROXIES: individual IP literals, comma-joined, no ranges.
+//
+// It is deliberately STRICTER than "write whatever the operator typed": runtime.
+// exs RAISES on a malformed entry, so a fat-fingered value would not degrade the
+// bucket key — it would refuse to boot the instance at the next restart (and this
+// step's own restart is that restart). A CIDR range is rejected with its own
+// message because it is the tempting wrong answer: trusting a whole range lets
+// any host in it forge every client's bucket key via x-forwarded-for, which is
+// why the Elixir side refuses ranges outright.
+//
+// Empty/whitespace input is NOT an error — it is the "not configured" state, and
+// returns ("", nil) so the caller skips the step and the instance keeps
+// loopback-only trust.
+func NormalizeTrustedProxies(raw string) (string, error) {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
+		}
+		// ParseCIDR, not a bare "/" check: the range case earns its OWN message (it is
+		// the tempting wrong answer), while anything else that merely contains a slash
+		// — a URL, say — falls through to the plain not-an-IP message instead of being
+		// mislabeled a range.
+		if _, _, err := net.ParseCIDR(entry); err == nil {
+			return "", fmt.Errorf("%q is a CIDR range; BARKPARK_TRUSTED_PROXIES takes individual addresses only (a trusted range lets any host in it forge every client's rate-limit bucket key)", entry)
+		}
+		ip := net.ParseIP(entry)
+		if ip == nil {
+			return "", fmt.Errorf("%q is not a valid IP address", entry)
+		}
+		out = append(out, ip.String())
+	}
+	return strings.Join(out, ","), nil
+}
+
+// trustedProxiesStep writes BARKPARK_TRUSTED_PROXIES=<control plane egress> into
+// the instance's /opt/barkpark/.env, idempotently (strip any prior line, append
+// the current value, mv) — the same grep -v/printf/mv idiom secretsInstallStep
+// uses, so re-running the go-live chain never duplicates the line.
+//
+// It carries NO restart of its own: the caller runs it immediately BEFORE
+// secretsInstallStep, whose single `systemctl restart barkpark` picks up this
+// value together with the minted secrets (Phoenix reads the trust list once at
+// boot, exactly like PHX_HOST). Ordering the other way round would leave the box
+// running WITHOUT the trust list until some later restart.
+//
+// The value is non-secret (a public server address), so it appears in the Title/
+// Cmd — an operator reading the narrated step should be able to SEE which
+// address the instance was told to believe.
+func trustedProxiesStep(egress string) CaddyStep {
+	const envFile = "/opt/barkpark/.env"
+	script := `touch ` + envFile + `; ` +
+		`grep -v -e '^BARKPARK_TRUSTED_PROXIES=' ` + envFile + ` > ` + envFile + `.bpnew || true; ` +
+		`printf 'BARKPARK_TRUSTED_PROXIES=%s\n' '` + egress + `' >> ` + envFile + `.bpnew; ` +
+		`mv ` + envFile + `.bpnew ` + envFile
+	return CaddyStep{
+		Title: "trust the control plane's relayed caller address (BARKPARK_TRUSTED_PROXIES=" + egress + ")",
+		Cmd:   "set BARKPARK_TRUSTED_PROXIES=" + egress + " in " + envFile,
+		Argv:  []string{"bash", "-lc", script},
+		// The step rewrites .env; a failure could echo neighbouring secret-shaped
+		// lines (DATABASE_URL, SECRET_KEY_BASE) from grep/printf into captured output.
+		RedactEnvSecrets: true,
+	}
+}
+
 // generateBase64Key mints a fresh standard-base64 (padded) string of 32 random
 // bytes — the shape BARKPARK_KEK REQUIRES (runtime.exs Base.decode64's it to
 // EXACTLY 32 bytes) and a clean, independent 32-byte draw for the cloak key and
@@ -834,8 +931,11 @@ func generateBase64Key() (string, error) {
 //     (Studio/login) on fresh instances while the stateless API stayed green.
 //     64 raw bytes ≈ 86 chars, matching deploy.sh's `mix phx.gen.secret`.
 //   - admin token: setup.GenerateAdminToken (base64url of 24 bytes + prefix).
-//   - BARKPARK_KEK / BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET: base64 of 32 random
-//     bytes each (generateBase64Key) — the KEK MUST Base.decode64 to 32 bytes.
+//   - BARKPARK_KEK / BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET /
+//     BARKPARK_RELEASE_CAPTURE_HMAC_SECRET: base64 of 32 random bytes each
+//     (generateBase64Key) — the KEK MUST Base.decode64 to 32 bytes, and the
+//     release-capture HMAC's 44-char encoding clears runtime.exs's 32-byte
+//     floor on the STRING.
 func defaultSecretGen() (Secrets, error) {
 	kb := make([]byte, 64)
 	if _, err := rand.Read(kb); err != nil {
@@ -854,16 +954,21 @@ func defaultSecretGen() (Secrets, error) {
 	if err != nil {
 		return Secrets{}, fmt.Errorf("generate PREVIEW_JWT_SECRET: %w", err)
 	}
+	releaseCapture, err := generateBase64Key()
+	if err != nil {
+		return Secrets{}, fmt.Errorf("generate BARKPARK_RELEASE_CAPTURE_HMAC_SECRET: %w", err)
+	}
 	tok, err := setup.GenerateAdminToken()
 	if err != nil {
 		return Secrets{}, fmt.Errorf("generate admin token: %w", err)
 	}
 	return Secrets{
-		SecretKeyBase:    skb,
-		Kek:              kek,
-		CloakKey:         cloak,
-		PreviewJWTSecret: preview,
-		AdminToken:       tok,
+		SecretKeyBase:      skb,
+		Kek:                kek,
+		CloakKey:           cloak,
+		PreviewJWTSecret:   preview,
+		ReleaseCaptureHMAC: releaseCapture,
+		AdminToken:         tok,
 	}, nil
 }
 
@@ -894,6 +999,32 @@ func (defaultCaddySteps) Steps(name, zone string, appPort int) []CaddyStep {
 		out[i] = CaddyStep{Title: s.Title, Cmd: s.Cmd, Argv: s.Argv}
 	}
 	return out
+}
+
+// DefaultCaddyStepper / DefaultHealthGate expose the go-live chain's production
+// secure-leg defaults to callers OUTSIDE the WarmPool (the provisioner's
+// support chain runs the same DNS → Caddy/TLS → public-health sequence without
+// a WarmPool now that supports carry a full public identity). They are exactly
+// what withDefaults fills — one truth, no duplicated step list or gate options.
+func DefaultCaddyStepper() CaddyStepper { return defaultCaddySteps{} }
+
+var DefaultHealthGate HealthChecker = defaultHealthChecker
+
+// PinnedHealthGate is DefaultHealthGate with the gate's dialing pinned to a
+// KNOWN box IP (setup.HealthGate.PinnedIP): every probe against base's
+// hostname connects straight to ip:<port> instead of resolving the name,
+// while Host header, TLS SNI, and cert verification keep using the public
+// hostname. The support chain's configure-step gate uses it because it runs
+// on the CP box, whose resolver negative-caches a failed chain's deleted A
+// record for up to the barkpark.cloud SOA minimum (3600s) — a retry reusing
+// the slug then fails the WHOLE gate deadline against a perfectly healthy
+// box (live-reproduced twice, 2026-07-26) — and serves a repointed name's
+// old IP for the positive TTL. The mains/warm-pool go-live keeps
+// DefaultHealthGate's resolver-based dialing for now.
+func PinnedHealthGate(ip string) HealthChecker {
+	return func(_ context.Context, base, token string) (setup.HealthReport, error) {
+		return setup.RunHealthGate(base, token, setup.HealthGate{StubsOptional: true, PinnedIP: ip})
+	}
 }
 
 // withDefaults fills any nil injected seam with its default. The Pool, DNS, and
@@ -946,10 +1077,11 @@ func (realStepRunner) Run(ctx context.Context, s CaddyStep) error {
 //
 //  1. assign      — pop a ready host from the warm pool (triggers a refill).
 //  2. secrets     — mint per-instance SECRET_KEY_BASE, BARKPARK_KEK,
-//     BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET + admin token.
+//     BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET,
+//     BARKPARK_RELEASE_CAPTURE_HMAC_SECRET + admin token.
 //  3. dns         — UpsertRecord an A record <name>.<zone> → the host IP.
 //  4. caddy       — run the Caddy/TLS steps (sets PHX_HOST/PHX_SCHEME).
-//  5. secrets-install — write the four per-instance secrets into .env + restart
+//  5. secrets-install — write the five per-instance secrets into .env + restart
 //     (BEFORE migrate — runtime.exs requires BARKPARK_KEK in prod).
 //  6. migrate     — run the mix ecto.migrate step.
 //  7. admin-token — install the minted admin token (after migrate).
@@ -1204,6 +1336,24 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		wp.progress("configure", "failed", "secrets")
 		return LiveServer{}, fmt.Errorf("secrets: %w", err)
 	}
+
+	// 5a. trusted proxies — tell the box to BELIEVE the caller address the control
+	// plane relays (BARKPARK_TRUSTED_PROXIES = the CP's egress). Runs BEFORE
+	// secrets-install so that step's single restart loads it (Phoenix reads the
+	// trust list once at boot). Unset → skipped, and the instance keeps
+	// loopback-only trust: proxied revokes then all key on ONE bucket per team
+	// instead of one per phone. A MALFORMED value fails the chain CLOSED rather
+	// than shipping a .env that raises at the very restart two lines below.
+	if egress, err := NormalizeTrustedProxies(wp.TrustedProxies); err != nil {
+		wp.progress("configure", "failed", "trusted-proxies")
+		return LiveServer{}, fmt.Errorf("trusted-proxies: BARKPARK_CLOUD_EGRESS_IPS is malformed: %w", err)
+	} else if egress != "" {
+		if err := runner.Run(ctx, trustedProxiesStep(egress)); err != nil {
+			wp.progress("configure", "failed", "trusted-proxies")
+			return LiveServer{}, fmt.Errorf("trusted-proxies: %w", err)
+		}
+	}
+
 	if err := runner.Run(ctx, secretsInstallStep(secrets, wp.Mail)); err != nil {
 		wp.progress("configure", "failed", "secrets")
 		return LiveServer{}, fmt.Errorf("secrets: %w", err)
@@ -1551,10 +1701,13 @@ func (wp *WarmPool) SweepOrphans(ctx context.Context) (swept int, err error) {
 // FQDN is the box's globally-unique per-instance identity (<slug>-<teamid>.<zone>),
 // so requiring it as well guarantees we only ever delete THIS job's box.
 //
-// The server is deleted FIRST (stop billing), then the DNS A record. FULLY
-// IDEMPOTENT: no IP+FQDN match → no server delete (box already gone, or the IP
-// was reused by another instance — left untouched); DeleteRecord swallows
-// not-found. Runs on a fresh bounded context.
+// The server is deleted FIRST (stop billing), then the DNS — swept BY VALUE, so
+// an attached custom-domain record the claim payload never mentions dies with
+// the box instead of outliving it at a recycled address (see deprovisionDNS for
+// the mechanism and the wider-delete tradeoff). FULLY IDEMPOTENT: no IP+FQDN
+// match → no server delete (box already gone, or the IP was reused by another
+// instance — left untouched); the sweep of an already-clean zone deletes nothing
+// and DeleteRecord swallows not-found. Runs on a fresh bounded context.
 func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone string) error {
 	if wp.Provider == nil {
 		return fmt.Errorf("deprovision: a CloudProvider must be set")
@@ -1584,20 +1737,34 @@ func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone s
 	}
 	name := ""
 	ipOccupiedByOther := false
+	// REVIEW (cch-w54 wave review) — this loop used to `break` the moment it
+	// found OUR box, so a co-tenant sharing the address was noticed ONLY when the
+	// provider happened to list it first. That asymmetry was harmless while the
+	// DNS step was a single by-name delete; the by-value sweep below makes it
+	// dangerous, because a sweep at a shared address takes the co-tenant's record
+	// down with ours while its box keeps running. So the scan now runs to
+	// completion and `ipOccupiedByOther` is reliable in BOTH list orders.
+	//
+	// It does NOT become a refusal when our own box also matched: that case is
+	// deliberate, merged behaviour (TestDeprovisionByIP_IPReuseMatchesByFQDNLabel
+	// — delete the box whose identity matches, leave the stranger's alone). What
+	// it does is DOWNGRADE the DNS step to the by-name delete, so the widened
+	// blast radius never reaches an address we do not exclusively hold.
 	for _, s := range managed {
-		if s.IP == ip {
-			if s.Labels[FQDNLabelKey] == wantFqdn {
-				name = s.Name
-				break
-			}
-			// A managed box occupies this IP but its identity label does NOT match
-			// this job's box. Two cases, both unsafe to proceed past: (a) a legacy box
-			// created before the barkpark-fqdn label existed, or (b) a recycled IP now
-			// held by a DIFFERENT tenant's box. We must neither delete it nor let the
-			// control plane delete the registry row (which would strand a billed box),
-			// so we FAIL LOUDLY instead of silently no-op'ing the delete.
-			ipOccupiedByOther = true
+		if s.IP != ip {
+			continue
 		}
+		if s.Labels[FQDNLabelKey] == wantFqdn {
+			name = s.Name
+			continue
+		}
+		// A managed box occupies this IP but its identity label does NOT match
+		// this job's box. Two cases, both unsafe to proceed past: (a) a legacy box
+		// created before the barkpark-fqdn label existed, or (b) a recycled IP now
+		// held by a DIFFERENT tenant's box. We must neither delete it nor let the
+		// control plane delete the registry row (which would strand a billed box),
+		// so we FAIL LOUDLY instead of silently no-op'ing the delete.
+		ipOccupiedByOther = true
 	}
 	if name == "" && ipOccupiedByOther {
 		return fmt.Errorf(
@@ -1613,9 +1780,70 @@ func (wp *WarmPool) DeprovisionByIP(ctx context.Context, ip, dnsLabel, dnsZone s
 		}
 	}
 
-	if wp.DNS != nil && dnsLabel != "" && dnsZone != "" {
-		if derr := wp.DNS.DeleteRecord(dctx, dnsZone, dnsLabel, "A"); derr != nil {
-			return fmt.Errorf("deprovision %s: delete DNS %s.%s: %w", ip, dnsLabel, dnsZone, derr)
+	if wp.DNS != nil && dnsZone != "" {
+		if derr := deprovisionDNS(dctx, wp.DNS, dnsZone, dnsLabel, ip, !ipOccupiedByOther); derr != nil {
+			return fmt.Errorf("deprovision %s: %w", ip, derr)
+		}
+	}
+	return nil
+}
+
+// deprovisionDNS tears the released box's DNS down BY VALUE, not by name.
+//
+// Why not by name: the attach-domain flow upserts a SECOND A record — the
+// customer's custom host — into the SAME zone at the SAME IP, and the
+// deprovision claim payload only ever carries the PLATFORM dns_label. Deleting
+// that one label releases the box while the custom host keeps resolving to an
+// address that is about to belong to somebody else, and the registry row that
+// remembered the custom host is deleted right after, so the leftover record is
+// attributable to nothing. The support-instance teardown was fixed out of this
+// exact by-name trap (cloud_support_cmd.go stepDNS, "by VALUE, not name — a
+// by-name delete leaves the go-live sibling standing"); the customer path now
+// rides the same sweep.
+//
+// THE TRADEOFF, ACCEPTED DELIBERATELY (the support path accepted it first): a
+// by-value sweep removes EVERY A record in the zone that points at this IP —
+// not only the two names we know about. That is the point (an unknown extra
+// name at a released address is exactly the orphan we are here to kill), but it
+// is a wider delete than a name delete, so it is a decision, not an accident.
+// On the pathological IP-reuse shape (two managed boxes sharing one address) it
+// would also take the other box's record; the identity fence above is what
+// keeps that shape from reaching here in the dangerous direction.
+//
+// A DNSProvider that cannot list records degrades to the old by-name delete
+// rather than failing the teardown: the server delete has already succeeded by
+// this point, and erroring here would strand the job with the box gone.
+//
+// `exclusiveIP` is the caller's answer to "do we hold this address alone?".
+// DeprovisionByIP passes false when ANOTHER managed box was found sitting on the
+// same IP under a different identity label — the recycled-IP shape. In that
+// shape a by-value sweep would delete the co-tenant's live A record, so the step
+// degrades to the by-name delete: narrower than we would like (a custom-domain
+// record can still be orphaned), but never wider than the box we actually own.
+// The orphan is the lesser failure, and it is loud in the zone rather than
+// silent on someone else's running site.
+func deprovisionDNS(ctx context.Context, dns DNSProvider, zone, label, ip string, exclusiveIP bool) error {
+	if _, ok := dns.(RecordLister); !ok || !exclusiveIP {
+		if label == "" {
+			return nil
+		}
+		if derr := dns.DeleteRecord(ctx, zone, label, "A"); derr != nil {
+			return fmt.Errorf("delete DNS %s.%s: %w", label, zone, derr)
+		}
+		return nil
+	}
+
+	deleted, err := SweepARecordsByValue(ctx, dns, zone, ip)
+	if err != nil {
+		return fmt.Errorf("sweep DNS in %s for %s (deleted %v before the failure): %w", zone, ip, deleted, err)
+	}
+	// The platform label is swept too whenever its value still points at the box.
+	// If it does NOT (a drifted record, or one that was never written), the sweep
+	// cannot see it — so the by-name delete still runs, idempotently, rather than
+	// letting the label outlive the box it names.
+	if label != "" && !slices.Contains(deleted, label) {
+		if derr := dns.DeleteRecord(ctx, zone, label, "A"); derr != nil {
+			return fmt.Errorf("delete DNS %s.%s: %w", label, zone, derr)
 		}
 	}
 	return nil

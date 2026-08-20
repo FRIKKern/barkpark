@@ -25,18 +25,19 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   def studio_flash(assigns) do
     ~H"""
     <%= if Phoenix.Flash.get(@flash, :info) do %>
-      <div class="flash flash-info" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
+      <div class="flash flash-info" role="status" aria-live="polite" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
     <% end %>
     <%= if Phoenix.Flash.get(@flash, :error) do %>
-      <div class="flash flash-error" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
+      <div class="flash flash-error" role="alert" aria-live="assertive" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
     <% end %>
     """
   end
 
   @doc """
   Self-update bar for the Studio chrome — a slim strip pinned above the
-  topbar. Renders ONLY when the caller is an admin (`@admin?`, threaded
-  from the `shares_admin?` chrome flag) AND the running instance is behind
+  topbar. Renders ONLY when the caller is an INSTANCE admin (`@admin?`,
+  threaded from the HOST-level `instance_admin?` chrome flag, NOT the
+  workspace-scoped `shares_admin?`) AND the running instance is behind
   the latest published release (`Barkpark.SelfUpdate.status/0` reports
   `state: :behind`). Any other state — `:disabled` (Checker not running,
   e.g. test env), `:unknown`, `:current` — emits no update markup, so
@@ -526,8 +527,32 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     ] ++
       tmux_console_entry(admin?, return_path) ++
       claude_chat_entry(admin?, return_path) ++
-      styleguide_entry(admin?, return_path) ++ settings_entry(base, scope_prefix, admin?)
+      styleguide_entry(admin?, return_path) ++
+      connectors_entry(scope_prefix, admin?) ++ settings_entry(base, scope_prefix, admin?)
   end
+
+  # The Connectors tab (connectors D49). Admin-only. Scope-prefixed EXACTLY like
+  # Settings, and for the same reason: the catalog is scoped-in-substance (an
+  # install belongs to ONE workspace), so its canonical home is
+  # `/w/:ws/p/:proj/studio/connectors`. On a flat surface (`scope_prefix ""`) the
+  # tab points at the flat `/studio/connectors` spelling, which 302s to the scoped
+  # canonical via `AdminStudioRedirectController` — never a direct flat mount,
+  # which would have no `current_workspace` and pin every install to the seeded
+  # Default. The tab must exist on EVERY surface: the nav-parity contract
+  # (nav_parity_sweep_test) requires an identical tab-label set on every
+  # studio-layout route, and a tab that appears and vanishes as you navigate is
+  # exactly the bug that suite exists to prevent.
+  defp connectors_entry(scope_prefix, true) do
+    path =
+      case scope_prefix || "" do
+        "" -> "/studio/connectors"
+        prefix -> "#{prefix}/studio/connectors"
+      end
+
+    [%{label: "Connectors", path: path, icon: "zap", order: 55, active_when: path}]
+  end
+
+  defp connectors_entry(_scope_prefix, _admin?), do: []
 
   # The living token style guide tab (unified-aesthetic W2, /studio/styleguide).
   # Admin-only — mirrors the tmux-console gating precedent (the route itself is
@@ -564,8 +589,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # one chat surface per host, like the tmux console.
   # The Workspace Settings tab (ssp-w3, charter D15). Admin-only — mirrors the
   # Style/tmux/chat gating (the route itself is admin-gated). Scope-prefixed:
-  # on a scoped surface it addresses the SAME workspace/project/dataset the page
-  # is on (the canonical `/w/:ws/p/:proj/d/:dataset/studio/settings` route); on a
+  # on a scoped surface it addresses the SAME workspace/project the page
+  # is on (the canonical dataset-less `/w/:ws/p/:proj/studio/settings` route); on a
   # flat surface (scope_prefix "") it points at the flat `/studio/settings`
   # compat entry, which resolves the Default scope and redirects to the scoped URL.
   defp settings_entry(_base, scope_prefix, true) do

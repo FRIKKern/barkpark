@@ -64,6 +64,8 @@
     @media (prefers-color-scheme: dark) { html[data-bp-theme="ember"] { --info: #3b82f6; } }
     html[data-bp-theme="fjord"] { --info: #2563eb; --ring: var(--info); }
     @media (prefers-color-scheme: dark) { html[data-bp-theme="fjord"] { --info: #3b82f6; } }
+    html[data-bp-theme="iris"] { --info: #2563eb; --ring: var(--info); }
+    @media (prefers-color-scheme: dark) { html[data-bp-theme="iris"] { --info: #3b82f6; } }
     /* END GENERATED: tokens */
     body {
       margin: 0; background: var(--paper-bg-deep); color: var(--paper-ink);
@@ -315,7 +317,7 @@
         golden rule), same discipline as the bulldocs reader layout. --%>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
-  <script>
+  <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: { _csrf_token: csrfToken }

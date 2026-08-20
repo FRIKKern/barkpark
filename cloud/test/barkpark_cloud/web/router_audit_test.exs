@@ -13,6 +13,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
   use BarkparkCloud.DataCase, async: false
   import Plug.Test
   import Plug.Conn
+  import ExUnit.CaptureLog, only: [with_log: 1]
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Billing
@@ -205,6 +206,111 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       conn2 = call(:get, "/v1/audit?limit=2&before=" <> URI.encode_www_form(cursor), nil, token)
       assert %{"events" => second_page} = json_body(conn2)
       assert length(second_page) == 1
+    end
+
+    test "?actor_user_id narrows the trail to one member's events" do
+      {owner, team, token} = logged_in()
+      {other, _other_token} = member_of(team, "admin")
+
+      {:ok, _} =
+        Accounts.record_audit(%{
+          team_id: team.id,
+          actor_user_id: owner.id,
+          action: "site.created"
+        })
+
+      {:ok, _} =
+        Accounts.record_audit(%{
+          team_id: team.id,
+          actor_user_id: other.id,
+          action: "site.deleted"
+        })
+
+      # A system/webhook event carries a NIL actor and must never be swept in.
+      {:ok, _} = Accounts.record_audit(%{team_id: team.id, action: "barkpark.deleted"})
+
+      conn = call(:get, "/v1/audit?actor_user_id=" <> owner.id, nil, token)
+      assert conn.status == 200
+      assert %{"events" => [ev]} = json_body(conn)
+      assert ev["action"] == "site.created"
+      assert ev["actor"]["email"] == owner.email
+    end
+
+    test "a non-uuid ?actor_user_id is a no-op filter, never a 500" do
+      {_u, team, token} = logged_in()
+      {:ok, _} = Accounts.record_audit(%{team_id: team.id, action: "site.created"})
+
+      # A raw binary in a :binary_id comparison would raise Ecto.Query.CastError;
+      # the cast guard turns it into "no filter" instead.
+      conn = call(:get, "/v1/audit?actor_user_id=not-a-uuid", nil, token)
+      assert conn.status == 200
+      assert %{"events" => [_]} = json_body(conn)
+    end
+
+    test "?action_prefix narrows to one noun of the action vocabulary" do
+      {_u, team, token} = logged_in()
+
+      for action <- ~w(webhook.created webhook.rotated site.created) do
+        {:ok, _} = Accounts.record_audit(%{team_id: team.id, action: action})
+      end
+
+      conn = call(:get, "/v1/audit?action_prefix=webhook", nil, token)
+      assert conn.status == 200
+      assert %{"events" => events} = json_body(conn)
+      assert length(events) == 2
+      assert Enum.all?(events, &String.starts_with?(&1["action"], "webhook."))
+    end
+
+    test "?action_prefix treats LIKE metacharacters as literals (no wildcard widening)" do
+      {_u, team, token} = logged_in()
+
+      for action <- ~w(webhook.created site.created) do
+        {:ok, _} = Accounts.record_audit(%{team_id: team.id, action: action})
+      end
+
+      # Unescaped, `%` would match everything and `_` would match any single
+      # character (`webhoo_` would sweep in `webhook.*`). Escaped, both are
+      # literals that match nothing in the closed vocabulary.
+      for probe <- ["%", "webhoo_"] do
+        conn = call(:get, "/v1/audit?action_prefix=" <> URI.encode_www_form(probe), nil, token)
+        assert conn.status == 200
+        assert json_body(conn) == %{"events" => []}, "prefix #{probe} widened its own match"
+      end
+
+      # `_` is a LEGITIMATE literal in the vocabulary and must still match.
+      {:ok, _} =
+        Accounts.record_audit(%{team_id: team.id, action: "notifications.channels_changed"})
+
+      conn = call(:get, "/v1/audit?action_prefix=notifications.channels_ch", nil, token)
+      assert %{"events" => [ev]} = json_body(conn)
+      assert ev["action"] == "notifications.channels_changed"
+    end
+
+    test "the filters compose, and empty filter values are ignored" do
+      {owner, team, token} = logged_in()
+
+      for action <- ~w(webhook.created webhook.rotated) do
+        {:ok, _} =
+          Accounts.record_audit(%{team_id: team.id, actor_user_id: owner.id, action: action})
+      end
+
+      {:ok, _} = Accounts.record_audit(%{team_id: team.id, action: "webhook.deleted"})
+
+      conn =
+        call(
+          :get,
+          "/v1/audit?actor_user_id=#{owner.id}&action_prefix=webhook.rot",
+          nil,
+          token
+        )
+
+      assert %{"events" => [ev]} = json_body(conn)
+      assert ev["action"] == "webhook.rotated"
+
+      # Empty values must not degenerate into "match nothing".
+      conn2 = call(:get, "/v1/audit?actor_user_id=&action_prefix=", nil, token)
+      assert %{"events" => all} = json_body(conn2)
+      assert length(all) == 3
     end
 
     test "an admin in team A never sees team B's events" do
@@ -920,6 +1026,34 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       refute Enum.any?(Map.values(ev.metadata), &(&1 == "secret-hz-token"))
       refute Map.has_key?(ev.metadata, "token")
       refute Map.has_key?(ev.metadata, "credential")
+      # A first connect is NOT a rotation, and says so.
+      assert ev.metadata["rotated"] == false
+    end
+
+    test "a re-connect stamps rotated: true — METADATA, never a second action string" do
+      {_user, team, token} = logged_in()
+
+      assert call(:post, "/v1/providers", %{kind: "hetzner", token: "hz-first"}, token).status ==
+               201
+
+      assert call(
+               :post,
+               "/v1/providers",
+               %{kind: "hetzner", token: "hz-rotated", label: "main"},
+               token
+             ).status == 201
+
+      # Two events, ONE action: the closed noun.verb vocabulary that
+      # list_audit_events' :action_prefix filter reads is not widened, so the
+      # rotation is legible without a `provider.rotated` action existing.
+      assert [newer, older] = events(team, "provider.connected")
+      assert older.metadata["rotated"] == false
+      assert newer.metadata["rotated"] == true
+      assert newer.metadata["kind"] == "hetzner"
+      assert newer.metadata["label"] == "main"
+      # …and the rotation reuses the ONE row, so both events point at it.
+      assert newer.target_id == older.target_id
+      refute Enum.any?(Map.values(newer.metadata), &(&1 == "hz-rotated"))
     end
   end
 
@@ -1130,8 +1264,15 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       assert ev.metadata["has_artifact"] == true
     end
 
-    test "POST /v1/sites/:id/artifact writes site.artifact_uploaded (filename + bytes)" do
-      {user, team, token} = logged_in()
+    # site-spawner W10: the site-scoped upload route is RETIRED, so
+    # `site.artifact_uploaded` is a dead action — and that it was ALWAYS dead in
+    # practice is the evidence that retiring it costs nothing. Prod's audit table
+    # holds 244 rows across four weeks and ZERO with `target_type: "site"`, while
+    # the deployment-scoped sibling's rows prove auditing fires; no human ever
+    # called this route. Its only caller was `bp deploy`'s no-flag branch, whose
+    # every insert was an orphan by construction.
+    test "POST /v1/sites/:id/artifact is unrouted → 404 and NO audit is written" do
+      {_user, team, token} = logged_in()
       site = site_fixture(team)
 
       conn =
@@ -1140,12 +1281,8 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
         |> put_req_header("authorization", "Bearer #{token}")
         |> Router.call(@opts)
 
-      assert conn.status == 201
-
-      assert [ev] = events(team, "site.artifact_uploaded")
-      assert ev.actor_user_id == user.id
-      assert ev.metadata["bytes"] > 0
-      assert is_binary(ev.metadata["filename"])
+      assert conn.status == 404
+      assert events(team, "site.artifact_uploaded") == []
     end
 
     test "POST /v1/sites/:id/env writes site.env_changed — key names only, NEVER the values" do
@@ -1225,6 +1362,154 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
 
       assert [ev] = events(team, "site.github_disconnected")
       assert ev.metadata["repo"] == "octo/app"
+    end
+  end
+
+  ## Account security — the 2FA pair (cch-w53-s3)
+  ##
+  ## Turning 2FA on/off is the most security-relevant act a PLAIN MEMBER can
+  ## perform, and it is the only audited seam here that is NOT admin-gated on
+  ## the write side. Both producers are post-commit best-effort by design: the
+  ## account state has already changed, so nothing below may 500.
+
+  # Enroll `user` and return the raw TOTP secret so a test can compute a code.
+  defp enroll_two_factor(user) do
+    {:ok, %{secret_base32: b32}} = Accounts.start_two_factor_enrollment(user)
+    {:ok, secret} = Base.decode32(b32, padding: false)
+    secret
+  end
+
+  describe "the two-factor pair writes to the team trail" do
+    test "POST /v1/account/two-factor/confirm writes twofa.enabled" do
+      {user, team, token} = logged_in()
+      secret = enroll_two_factor(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/account/two-factor/confirm",
+          %{code: NimbleTOTP.verification_code(secret)},
+          token
+        )
+
+      assert conn.status == 200
+
+      assert [ev] = events(team, "twofa.enabled")
+      assert ev.team_id == team.id
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "user"
+      assert ev.target_id == user.id
+      # Nothing about the secret or the recovery codes reaches the row.
+      assert ev.metadata in [nil, %{}]
+    end
+
+    test "a WRONG code 422s and writes NO twofa.enabled row" do
+      {user, team, token} = logged_in()
+      _secret = enroll_two_factor(user)
+
+      conn = call(:post, "/v1/account/two-factor/confirm", %{code: "000000"}, token)
+      assert conn.status == 422
+      assert events(team, "twofa.enabled") == []
+    end
+
+    test "a PLAIN MEMBER (not admin) can write the row — the write side is not RBAC-gated" do
+      {_owner, team, _owner_token} = logged_in()
+      {member, member_token} = member_of(team, "member")
+      secret = enroll_two_factor(member)
+
+      conn =
+        call(
+          :post,
+          "/v1/account/two-factor/confirm",
+          %{code: NimbleTOTP.verification_code(secret)},
+          member_token
+        )
+
+      assert conn.status == 200
+      assert [ev] = events(team, "twofa.enabled")
+      assert ev.actor_user_id == member.id
+    end
+
+    test "DELETE /v1/account/two-factor writes twofa.disabled" do
+      {user, team, token} = logged_in()
+      secret = enroll_two_factor(user)
+
+      {:ok, _codes} =
+        Accounts.confirm_two_factor(
+          Accounts.get_user(user.id),
+          NimbleTOTP.verification_code(secret)
+        )
+
+      conn = call(:delete, "/v1/account/two-factor", nil, token)
+      assert conn.status == 200
+
+      assert [ev] = events(team, "twofa.disabled")
+      assert ev.team_id == team.id
+      assert ev.actor_user_id == user.id
+      assert ev.target_id == user.id
+    end
+
+    test "DELETE when 2FA was never ON writes NO row — the route is idempotent, the trail is not" do
+      {_user, team, token} = logged_in()
+
+      conn = call(:delete, "/v1/account/two-factor", nil, token)
+      assert conn.status == 200
+      assert events(team, "twofa.disabled") == []
+    end
+  end
+
+  # THE FAIL-CLOSED ARM. `Auth.require_user/2` assigns :current_team through
+  # `Accounts.primary_team/1`, which is `List.first/1` and returns nil for a
+  # user who belongs to no team — while `audit_events.team_id` is `null: false`.
+  # An unguarded producer would raise there and make ENABLING 2FA return 500:
+  # a security regression far worse than the missing row it was added to fix.
+  describe "a team-less user still gets 2FA (the audit write is skipped, LOGGED, never fatal)" do
+    setup do
+      user = user_fixture()
+      {:ok, token} = Accounts.create_user_session_token(user)
+      assert Accounts.primary_team(user) == nil
+      %{user: user, token: token}
+    end
+
+    test "confirm answers 200 and logs the skip", %{user: user, token: token} do
+      secret = enroll_two_factor(user)
+
+      {conn, log} =
+        with_log(fn ->
+          call(
+            :post,
+            "/v1/account/two-factor/confirm",
+            %{code: NimbleTOTP.verification_code(secret)},
+            token
+          )
+        end)
+
+      assert conn.status == 200
+      assert %{"recovery_codes" => codes} = json_body(conn)
+      assert length(codes) > 0
+      # 2FA is genuinely ON — the missing audit row cost the user nothing.
+      assert Accounts.two_factor_enabled?(Accounts.get_user(user.id))
+
+      # Skipped AND LOGGED, never silently discarded.
+      assert log =~ "audit twofa.enabled SKIPPED"
+      assert log =~ user.id
+    end
+
+    test "disable answers 200 and logs the skip", %{user: user, token: token} do
+      secret = enroll_two_factor(user)
+
+      {:ok, _} =
+        Accounts.confirm_two_factor(
+          Accounts.get_user(user.id),
+          NimbleTOTP.verification_code(secret)
+        )
+
+      {conn, log} = with_log(fn -> call(:delete, "/v1/account/two-factor", nil, token) end)
+
+      assert conn.status == 200
+      assert json_body(conn) == %{"ok" => true}
+      refute Accounts.two_factor_enabled?(Accounts.get_user(user.id))
+      assert log =~ "audit twofa.disabled SKIPPED"
     end
   end
 end

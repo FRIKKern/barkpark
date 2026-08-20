@@ -235,7 +235,11 @@ defmodule Barkpark.Plugins.Tickets.InboxPresenterTest do
       t =
         ticket(
           status: "answered",
-          messages: [msg("submitter", ago(30)), msg("operator", ago(20)), msg("submitter", ago(10))]
+          messages: [
+            msg("submitter", ago(30)),
+            msg("operator", ago(20)),
+            msg("submitter", ago(10))
+          ]
         )
 
       [row] = InboxPresenter.build([t], @now).waiting_on_them
@@ -377,7 +381,15 @@ defmodule Barkpark.Plugins.Tickets.InboxPresenterTest do
         key_name: "Atom Key",
         submitter_seen_at: ago(30),
         waiting_since: ago(3600),
-        messages: [%{author_kind: :operator, author_name: "Op", body: "hi", attachments: ["z"], at: ago(120)}]
+        messages: [
+          %{
+            author_kind: :operator,
+            author_name: "Op",
+            body: "hi",
+            attachments: ["z"],
+            at: ago(120)
+          }
+        ]
       }
 
       [row] = InboxPresenter.build([atom_ticket], @now).waiting_on_them

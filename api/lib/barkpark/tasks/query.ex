@@ -99,6 +99,60 @@ defmodule Barkpark.Tasks.Query do
   def maybe_filter_dataset(query, ""), do: query
   def maybe_filter_dataset(query, dataset), do: from(d in query, where: d.dataset == ^dataset)
 
+  @doc """
+  Twin collapse (published-wins) — the ONE owner of the "count a twinned task
+  once" law for every task READ path.
+
+  A task can exist twice: `t1` (the canonical/published row) and `drafts.t1`
+  (its shadow — every `/v1/data/mutate` write lands there). `maybe_filter_parent_id/2`
+  strips a leading `drafts.` from BOTH sides, so a shadow whose `parent_id` is
+  `drafts.<epic>` is GUARANTEED to match the published epic: without this
+  predicate a twinned child contributes TWO rows and `+2` to `child_count`.
+
+  The suppressed row is the one whose `drafts.`-stripped doc_id names a
+  DISTINCT same-scope task. Only a `drafts.<id>` shadow can match: a
+  non-prefixed row's stripped id equals its own doc_id, and the `<>` guard
+  excludes itself, so a published row never suppresses itself. Mirrors
+  `Barkpark.Tasks.Queue`'s ready-queue predicate (queue.ex ~146-173) and
+  `Barkpark.Tasks.Board.load_task_docs`'s `hd(twins)` default.
+
+  NOT a blanket `not like(doc_id, "drafts.%")` (the form `StudioChat` uses,
+  correctly, for CLAIM lookups — the claim lives on the published row). A
+  blanket exclusion would delete the whole population of mutate-created tasks
+  that legitimately live at `drafts.<id>` with NO published twin — the very
+  rows `Barkpark.Tasks.Claim` resolves by `drafts.`-fallback. Under twin
+  collapse an UNPAIRED shadow has no distinct twin, so the `NOT EXISTS` is
+  vacuously true and the row SURVIVES: an over-count is fixed without trading
+  it for an under-count.
+
+  Written as a raw correlated subquery rather than lifting queue.ex's
+  `parent_as(:doc)` form verbatim — the bases here do not bind `as: :doc`, and
+  a named-binding reference would not compile.
+  """
+  def collapse_twins(query) do
+    from(d in query,
+      where:
+        fragment(
+          """
+          NOT EXISTS (
+            SELECT 1 FROM documents AS twin
+            WHERE twin.type = 'task'
+              AND twin.doc_id = regexp_replace(?, '^drafts\\.', '')
+              AND twin.doc_id <> ?
+              AND twin.dataset = ?
+              AND twin.workspace_id IS NOT DISTINCT FROM ?
+              AND twin.project_id IS NOT DISTINCT FROM ?
+          )
+          """,
+          d.doc_id,
+          d.doc_id,
+          d.dataset,
+          d.workspace_id,
+          d.project_id
+        )
+    )
+  end
+
   def maybe_filter_claim_worker(query, nil), do: query
 
   def maybe_filter_claim_worker(query, worker) when is_binary(worker),
@@ -106,10 +160,15 @@ defmodule Barkpark.Tasks.Query do
 
   def maybe_filter_claim_worker(query, _), do: query
 
+  # `id` tiebreaks make the order TOTAL (queue.ex tiebreak precedent): without
+  # them, rows sharing a timestamp may swap across pages, so offset pagination
+  # could repeat/skip rows. Only true timestamp ties reorder — non-paging
+  # consumers see the same sequence as before.
   def apply_index_order(query, parent) when is_binary(parent),
-    do: from(d in query, order_by: [asc: d.inserted_at])
+    do: from(d in query, order_by: [asc: d.inserted_at, asc: d.id])
 
-  def apply_index_order(query, _), do: from(d in query, order_by: [desc: d.updated_at])
+  def apply_index_order(query, _),
+    do: from(d in query, order_by: [desc: d.updated_at, desc: d.id])
 
   # ── the live-plan fetcher ───────────────────────────────────────────────────
 
@@ -127,15 +186,52 @@ defmodule Barkpark.Tasks.Query do
   so `open` with an unmet blocker reads as backlog and `open` with none reads
   as ready — the white-ladder distinction, straight from the substrate.
   """
-  def rows_for_query(query, scope \\ []) when is_map(query) do
+  def rows_for_query(query, scope \\ [], opts \\ []) when is_map(query) do
     docs = docs_for_query(query, scope)
     counts = unmet_blocker_counts(docs)
 
+    # Field-visibility seal (charter W-one decision 10) — resolve the `task`
+    # schema ONCE per call and gate the private-capable content fields, so a
+    # schema-declared private/owner_only/readable_by field never leaks through a
+    # paper task-embed row or a Studio preview row. The dataset cascade is
+    # EXPLICIT: an `opts[:dataset]` threaded by the caller wins (the Studio
+    # preview path NEVER stamps `dataset` into the block query, so deriving it
+    # from the query map alone would seal against the WRONG schema there), then
+    # the query-map `dataset`, then "production" — the same cascade
+    # `load_task_schema/3` and the agg path use.
+    dataset = Keyword.get(opts, :dataset) || Map.get(query, "dataset") || "production"
+    readable? = row_field_visibility_gate(dataset)
+
     Enum.map(docs, fn doc ->
       doc
-      |> to_render_map(Map.get(counts, doc.id, 0))
+      |> to_render_map(Map.get(counts, doc.id, 0), readable?)
       |> TaskResolver.row_from_task()
     end)
+  end
+
+  # Inline fail-closed field-visibility twin of `Board.field_visibility_gate/1`
+  # (board.ex:190-202). Resolve the `task` schema ONCE per `rows_for_query` call
+  # (never per doc — no N+1) and return an ANONYMOUS-caller readability predicate
+  # `(field :: String.t()) -> boolean()`. A schema miss degrades to allow-all (a
+  # nil schema leaves every field undeclared ⇒ `field_readable?` true ⇒ public,
+  # legacy parity), never raises: `CallerContext.anonymous/0` is a non-admin
+  # struct that hits the checking clause and `raw_fields(nil) -> []`. Mirrors the
+  # measure-visibility cross-check (`measure_field_readable?/2`) — one indexed
+  # `Content.get_schema/3` bounds the cost.
+  defp row_field_visibility_gate(dataset) do
+    schema =
+      case Barkpark.Content.get_schema("task", dataset, []) do
+        {:ok, schema} -> schema
+        _ -> nil
+      end
+
+    fn field ->
+      Barkpark.Content.Envelope.field_readable?(
+        schema,
+        field,
+        Barkpark.Content.CallerContext.anonymous()
+      )
+    end
   end
 
   @doc "The filtered, scoped, ordered task Documents for a block `query` map."
@@ -146,6 +242,7 @@ defmodule Barkpark.Tasks.Query do
     parent = Map.get(query, "parent_id")
 
     from(d in Document, where: d.type == "task", limit: ^limit)
+    |> collapse_twins()
     |> Scope.scope_to_workspace(ws_id, project_id)
     |> maybe_filter_dataset(Map.get(query, "dataset"))
     |> maybe_filter_kind(Map.get(query, "kind"))
@@ -376,6 +473,7 @@ defmodule Barkpark.Tasks.Query do
     project_id = Keyword.get(scope, :project_id)
 
     from(d in Document, where: d.type == "task", limit: @agg_scan_cap)
+    |> collapse_twins()
     |> Scope.scope_to_workspace(ws_id, project_id)
     |> maybe_filter_dataset(Map.get(filter, "dataset"))
     |> maybe_filter_kind(Map.get(filter, "kind"))
@@ -733,16 +831,27 @@ defmodule Barkpark.Tasks.Query do
   end
 
   # Build the `render_doc`-shaped map `TaskResolver.row_from_task/1` reads.
-  defp to_render_map(%Document{} = doc, unmet) do
+  #
+  # `readable?` is the snapshot-wide fail-closed field-visibility predicate
+  # (`row_field_visibility_gate/1`) — the single seal point for the projected
+  # rows. The private-capable fields are gated PER-FIELD INDEPENDENTLY (each key
+  # maps 1:1 to its schema field, a conscious charter choice over board.ex's
+  # assignee+claim worker-union): a redacted field drops to nil (`row_from_task`
+  # prunes nils, so the row simply omits it) — `labels` keeps its `else: []`
+  # empty-list shape. LEFT UNGATED (board.ex count-vs-text law): `title`
+  # (promoted, `@system_filterable`), `lifecycle_status` (system-filterable),
+  # and the two derived COUNTS — `dependency_count` and `criteria_progress` —
+  # which carry no field text, only cardinality.
+  defp to_render_map(%Document{} = doc, unmet, readable?) do
     content = doc.content || %{}
 
     %{
       "title" => doc.title,
       "lifecycle_status" => Map.get(content, "lifecycle_status"),
-      "priority" => Map.get(content, "priority"),
-      "assignee" => Map.get(content, "assignee"),
-      "claim" => Map.get(content, "claim"),
-      "labels" => Map.get(content, "labels") || [],
+      "priority" => if(readable?.("priority"), do: Map.get(content, "priority")),
+      "assignee" => if(readable?.("assignee"), do: Map.get(content, "assignee")),
+      "claim" => if(readable?.("claim"), do: Map.get(content, "claim")),
+      "labels" => if(readable?.("labels"), do: Map.get(content, "labels") || [], else: []),
       "dependency_count" => unmet,
       "criteria_progress" => Barkpark.Tasks.Criteria.progress(content)
     }

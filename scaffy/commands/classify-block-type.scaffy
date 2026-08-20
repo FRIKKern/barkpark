@@ -1,0 +1,121 @@
+COMMAND "Classify a PortableDoc Block Type" DESCRIPTION "Add a block type to its composition-doctrine tier entry list in api/lib/barkpark/portable_doc/tiers.ex — the step add-block-type could only describe as manual prose (its conditional step 1, the D11 gap). One INSERT AFTER FIRST at the chosen tier's list opener line: a scaffy provenance comment plus the quoted entry, spliced directly after the never-consumed `@<tier> [` anchor. Since the 2026-07-17 restructure the @element/@widget lists are plain string lists (one entry per line, house trailing commas), so ANY number of same-tier classifies land as independent clean inserts — the D80 same-tier refusal is gone. Tier is the first ONEOF enum variable in the corpus (D56): the engine refuses any --var Tier outside element|widget|section at substitution time, before anything is written." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "portabledoc", "block" CONCEPT "block-type" VARIANT "tier-classify" DIRECTION "add" VARIABLES
+  VARIABLE 1 "BlockName" TITLE "The block type to classify" DESCRIPTION "The PortableDoc `type` string of the block being classified, referenced in its kebab spelling {{.block-name}} throughout — it is the literal string planted into the tier list, the same string compose_block/2 dispatches on. Classify the SAME spelling add-block-type scaffolded; tiers_test.exs cross-checks the two surfaces byte-for-byte." EXAMPLES "timeline", "fact-box", "milestone"
+  VARIABLE 2 "Tier" ONEOF "element", "widget", "section" TITLE "The composition-doctrine tier" DESCRIPTION "Which entry list the block joins (tiers.ex, composition-doctrine ladder): element = a single-purpose leaf, widget = composes elements into ONE purposeful unit, section = owns its children's LAYOUT. ONEOF is the runtime wall (D56): any other value is a usage error at substitution — exit 2, nothing written. Referenced in its lowercase spelling {{.tier}} so the value lands verbatim in the `@element` / `@widget` opener anchor. NOTE the section caveat in the prose below: @section is deliberately still a one-line ~w sigil, so a :section classification fails loud at the anchor instead of applying." EXAMPLES "element", "widget", "section"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHAT THIS COMMAND HONESTLY DOES (closes the D11 'conditional/manual' gap)
+#
+#   ○ api/lib/barkpark/portable_doc/tiers.ex   injected — provenance comment +
+#     "{{.block-name}}", planted as the FIRST entry of the @{{.tier}} list
+#
+# add-block-type's prose step 1 told you to hand-edit tiers.ex; this command IS
+# that edit. Entry order inside a tier list is non-semantic (the module folds
+# the lists into set maps, tiers.ex:147-148), so first-entry placement is safe
+# and gives the op a stable anchor: the list's opener line, which no run ever
+# consumes.
+#
+# PAIRING LAW — ALWAYS run this AFTER add-block-type (D79). Classification is
+# MANDATORY, never conditional: the moment a type gets a compose_block/2 clause
+# it is renderable, and tiers_test.exs pins completeness in BOTH directions
+# (test/barkpark/portable_doc/tiers_test.exs "completeness vs. the render
+# surface"): every renderable type must have a tier AND Tiers must not claim a
+# type the reader cannot produce. Runtime degrades an unclassified type to
+# :element (slots.ex:98) — but CI does NOT: an unclassified renderable type reds
+# that FIRST direction, so "a leaf needs no tier" is false for the suite. Run
+# `bp scaffy run classify-block-type --var BlockName=<type> --var Tier=element`
+# for leaf blocks too — explicitly, never nothing. Conversely, an entry planted
+# here without its compose clause reds the SECOND direction — which is why the
+# mix gate below is TIER ci: it goes green exactly when the pair landed together.
+#
+# ANCHOR REALITY (grep-proven at authoring time, post-restructure):
+#   @element [   tiers.ex:65  — plain string list, opener line matches once
+#   @widget [    tiers.ex:106 — plain string list, opener line matches once
+#   @section     tiers.ex:145 — ONE-LINE ~w sigil: `  @section ~w(section columns)`
+# The fenced anchor is the bare opener LINE `  @{{.tier}} [`, so Tier=section
+# clean-MISSES today's one-line shape: the engine refuses loud (anchor not
+# found, run aborts, NOTHING written). That is honest fail-closed behaviour,
+# kept deliberately: new :section types are rare (the tier holds exactly
+# section + columns), and the list is short enough that mix format would
+# collapse a broken-open shape back to one line. If you genuinely add a third
+# :section type, hand-edit tiers.ex:145.
+#
+# WHY A BARE INSERT AFTER FIRST (v3, the append-friendly-restructure ruling —
+# supersedes the v2 self-consuming REPLACE): the old `~w(` sigils admitted no
+# comment (every token in the parens is a word), so the mark line had to sit
+# ABOVE the opener and the only anchor for that was the opener line itself — a
+# self-consuming REPLACE whose E-005-mandated REANCHOR made the SECOND classify
+# into the same tier refuse loud (D33 tail-desync; the D80 verdict: no chain or
+# meta-command fixes a REANCHOR limit). The 2026-07-17 restructure changed the
+# DATA SHAPE instead (the usage.go precedent): @element/@widget are now plain
+# string lists with house trailing commas, where a comment IS legal — so the
+# op is a bare INSERT AFTER FIRST against a never-consumed anchor (the
+# add-sdk-method idiom: trailing commas make every splice separator-free), the
+# payload plants a real MARK, and no REANCHOR family exists to desync.
+#
+# MARK NAME SHAPE — tier-{{.block-name}}--{{.tier}}, block name FIRST, tier
+# LAST, joined by a DOUBLE dash. Deliberate: the engine's implicit re-run guard
+# is a substring probe on `MARK:<name>`, and the tier vocabulary is dense with
+# prefix pairs (stat/stats/stat-grid, card/cards, note/notes). With the old
+# tier-first spelling, `MARK:tier-widget-stat` is a substring of the planted
+# `MARK:tier-widget-stats` — classifying stat after stats would false-skip.
+# Kebab names never contain `--`, so `tier-<name>--<tier>` can never be a
+# substring of a sibling mark. The explicit ASLONG below is prefix-safe the
+# same way: the quote-comma terminator makes `"stat",` miss `"stats",`.
+#
+# RE-RUN MATRIX (no families, no REANCHOR — every case is independent):
+#   * same block, same tier  → mark already planted (implicit guard) → op
+#     skips (idempotent, D23).
+#   * new block, SAME tier   → independent clean insert after the same opener
+#     anchor — the case v2 structurally refused (D80), now first-class.
+#   * new block, other tier  → clean insert at that tier's own opener.
+#   * hand-added entry (the retired D79 recipe, or any human edit) → the
+#     ASLONG sees the `"<name>",` entry and skips clean — the D57 ensure law:
+#     the human won, scaffy writes nothing and owns nothing.
+#   * Tier=section           → anchor not found, loud refusal, nothing written.
+# The D79 hand-edit recipe (command for the first block, one-word hand-edit
+# for the second) is RETIRED — run the command once per block, always.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The one op. Anchor = the chosen tier's opener line, byte-exact with its
+# 2-space indent (tiers.ex:65/:106) — never consumed, so every run splices
+# directly after it. Payload = provenance comment planting the real mark
+# (D24 — MARK:<name> verbatim in the payload) + the quoted entry with its
+# house trailing comma (the entries that follow are untouched). The ASLONG
+# guards on the entry itself (E-011 add polarity, D57: a hand-authored
+# entry wins and the run is a no-op).
+IN "api/lib/barkpark/portable_doc/tiers.ex"
+### Plant {{.block-name}} into the @{{.tier}} entry list
+INSERT AFTER FIRST
+::: {{.tier}} list opener :::
+  @{{.tier}} [
+::: {{.tier}} list opener :::
+WITH
+::: {{.block-name}} entry :::
+    # scaffy:classify-block-type {{.block-name}} MARK:tier-{{.block-name}}--{{.tier}}
+    "{{.block-name}}",
+::: {{.block-name}} entry :::
+MARK "tier-{{.block-name}}--{{.tier}}"
+ASLONG FILE DONT CONTAIN "\"{{.block-name}}\","
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The quoted entry is in the file — a verbatim substring the op writes (A4/A5:
+# ASCII, no }} beside a literal brace). Deliberately NOT the mark: the ensure
+# law's postcondition shape (D57, the ensure-import precedent) — the assert
+# holds whether scaffy planted the entry this run, a prior run did, or a human
+# hand-added it (the guard-skip path). The mark's presence on the scaffy path
+# is proven by the re-run skip + the receipt, never asserted.
+ASSERT FILE "api/lib/barkpark/portable_doc/tiers.ex" CONTAINS "\"{{.block-name}}\","
+
+# LOCAL: the cheap litter-immune placement proof — the entry sits INSIDE the
+# chosen tier's bracket list (opener line through closing bracket), not merely
+# somewhere in the file.
+ASSERT CMD "sed -n '/@{{.tier}} \[/,/^  \]/p' api/lib/barkpark/portable_doc/tiers.ex | grep -q '\"{{.block-name}}\",'"
+
+# TIER ci: the completeness invariant itself — EVERY renderable type has a
+# tier AND Tiers claims nothing unrenderable. Green exactly when this run is
+# paired with the block's compose clause (see PAIRING LAW above). Deferred to
+# CI: this worktree-agnostic Elixir suite is not on the proven local-safe list.
+ASSERT CMD "cd api && mix test test/barkpark/portable_doc/tiers_test.exs" TIER ci

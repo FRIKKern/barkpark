@@ -1,0 +1,621 @@
+{
+  "slug": "scaffy-command-footprints",
+  "style": "article",
+  "blocks": [
+    {
+      "id": "scf-001",
+      "text": "Scaffy \u00b7 The 21-Command Atlas",
+      "type": "eyebrow"
+    },
+    {
+      "id": "scf-002",
+      "level": 1,
+      "text": "Every Command, Every Footprint",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "All 21 served commands with the exact file footprint each one leaves \u2014 \u25cf created, \u25cb injected (mark-planted, guarded, reversible), \u2715 deleted. Every tree below is DERIVED from the command's own ops by a parser, not hand-drawn: what you see is what bp scaffy run does, and what bp scaffy remove takes back byte-clean. Sources, transcripts and full prose: /papers/scaffy-command-showcase."
+        }
+      ],
+      "id": "scf-003",
+      "type": "ingress"
+    },
+    {
+      "id": "scf-004",
+      "items": [
+        {
+          "label": "commands",
+          "value": "21"
+        },
+        {
+          "label": "files created (\u25cf)",
+          "value": "17"
+        },
+        {
+          "label": "injection sites (\u25cb)",
+          "value": "45"
+        },
+        {
+          "label": "corpus lines",
+          "value": "3576"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "id": "scf-005",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "the legend every tree below shares \u2014 reversibility included by construction",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-006",
+      "type": "divider"
+    },
+    {
+      "id": "scf-007",
+      "level": 2,
+      "text": "Plugin lifecycle",
+      "type": "heading"
+    },
+    {
+      "id": "scf-008",
+      "level": 3,
+      "text": "Add a Barkpark Plugin  \u00b7  bp scaffy run add-plugin.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffold a minimal, auto-discovered Barkpark plugin \u2014 manifest, entry module (use Barkpark.Plugin), README, schemas dir, and a manifest test \u2014 with zero registry wiring. (2 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-009",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-010",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u251c\u2500\u2500 api/priv/plugins/{{.plugin_name}}/\n\u2502   \u251c\u2500\u2500 plugin.json \u25cf created\n\u2502   \u2514\u2500\u2500 README.md \u25cf created\n\u251c\u2500\u2500 api/lib/barkpark/plugins/\n\u2502   \u2514\u2500\u2500 {{.plugin_name}}.ex \u25cf created\n\u251c\u2500\u2500 api/priv/plugins/{{.plugin_name}}/schemas/\n\u2502   \u2514\u2500\u2500 .gitkeep \u25cf created\n\u2514\u2500\u2500 api/test/barkpark/plugins/\n    \u2514\u2500\u2500 {{.plugin_name}}_test.exs \u25cf created",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-011",
+      "level": 3,
+      "text": "Add a Plugin Auth Bucket  \u00b7  bp scaffy run add-plugin-bucket.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffold a new plugin auth-tier in api/lib/barkpark_web/router.ex: one `pipeline :<bucket> do ... (3 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-012",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-013",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 api/lib/barkpark_web/\n    \u2514\u2500\u2500 router.ex \u25cb injected \u00d72",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-014",
+      "level": 3,
+      "text": "Add a Plugin Route  \u00b7  bp scaffy run add-plugin-route.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Append one route entry to a plugin's register_routes/1 list -- the in-plugin leg add-plugin-bucket names as separate work, now real. (6 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-015",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-016",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 api/lib/barkpark/plugins/\n    \u2514\u2500\u2500 {{.plugin}}.ex \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-017",
+      "level": 3,
+      "text": "Add a bp CLI Verb  \u00b7  bp scaffy run add-cli-verb.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Give a plugin a working `bp <noun> <verb>` by appending one data map to its cli_commands/0 list. (4 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-018",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-019",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 api/lib/barkpark/plugins/tickets/\n    \u2514\u2500\u2500 cli.ex \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-020",
+      "level": 3,
+      "text": "Add a Plugin-Declared Schema Type  \u00b7  bp scaffy run add-schema-type.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffold a new plugin-declared document type in the MINIMAL-template shape (charter D54c/D59): create the plugin's bundled schema JSON (name/title/icon/visibility/fields \u2014 one sample field, NO dataset key, NO type key) and wire it into the plugin module's register_schemas/1 as a second byte-identical 6-key SchemaDefinition wrap, exactly the scaffy/bulldocs/sheets shape. (5 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-021",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-022",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u251c\u2500\u2500 api/priv/plugins/{{.plugin}}/schemas/\n\u2502   \u2514\u2500\u2500 {{.schema-name}}.json \u25cf created\n\u2514\u2500\u2500 api/lib/barkpark/plugins/\n    \u2514\u2500\u2500 {{.plugin}}.ex \u25cb injected \u00d72",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-023",
+      "type": "divider"
+    },
+    {
+      "id": "scf-024",
+      "level": 2,
+      "text": "PortableDoc & rendering",
+      "type": "heading"
+    },
+    {
+      "id": "scf-025",
+      "level": 3,
+      "text": "Add PortableDoc Block Type  \u00b7  bp scaffy run add-block-type.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffold a new PortableDoc block type across all three required code surfaces \u2014 Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) \u2014 plus the cross-surface golden-parity harness leg (@inputs fixture, both count pins, regenerated golden mirrors: the exact gate CI runs on any compose.ex diff, closing the local-green/CI-red gap) \u2014 idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper). (5 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-026",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-027",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u251c\u2500\u2500 internal/pdrender/\n\u2502   \u251c\u2500\u2500 {{.block_name}}.go \u25cf created\n\u2502   \u251c\u2500\u2500 {{.block_name}}_test.go \u25cf created\n\u2502   \u2514\u2500\u2500 pdrender.go \u25cb injected\n\u251c\u2500\u2500 js/packages/react/src/blocks/\n\u2502   \u2514\u2500\u2500 core.ts \u25cb injected \u00d72\n\u251c\u2500\u2500 js/packages/react/tests/\n\u2502   \u2514\u2500\u2500 PortableDoc.test.tsx \u25cb injected \u00d72\n\u251c\u2500\u2500 api/lib/barkpark/portable_doc/render/\n\u2502   \u2514\u2500\u2500 compose.ex \u25cb injected\n\u251c\u2500\u2500 api/lib/mix/tasks/\n\u2502   \u2514\u2500\u2500 barkpark.portable_doc.gen_pd_parity.ex \u25cb injected\n\u251c\u2500\u2500 scripts/\n\u2502   \u2514\u2500\u2500 pd-parity-completeness.sh \u25cb injected\n\u2514\u2500\u2500 api/test/barkpark/portable_doc/render/\n    \u2514\u2500\u2500 pd_golden_parity_test.exs \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-028",
+      "level": 3,
+      "text": "Classify a PortableDoc Block Type  \u00b7  bp scaffy run classify-block-type.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Add a block type to its composition-doctrine tier entry list in api/lib/barkpark/portable_doc/tiers.ex \u2014 the step add-block-type could only describe as manual prose (its conditional step 1, the D11 gap). (2 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-029",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-030",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 api/lib/barkpark/portable_doc/\n    \u2514\u2500\u2500 tiers.ex \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-031",
+      "type": "divider"
+    },
+    {
+      "id": "scf-032",
+      "level": 2,
+      "text": "API & SDK",
+      "type": "heading"
+    },
+    {
+      "id": "scf-033",
+      "level": 3,
+      "text": "Add an API Error Shape  \u00b7  bp scaffy run add-error-shape.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Land a new v1 JSON error code end-to-end: a fix-suggesting @hints entry, a build/1 clause that maps its {:error, :code} tuple to a {code, message, status} envelope, and a unit test \u2014 idempotently, accreting behind marks. (4 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-034",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-035",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u251c\u2500\u2500 api/lib/barkpark/content/\n\u2502   \u2514\u2500\u2500 errors.ex \u25cb injected \u00d72\n\u2514\u2500\u2500 api/test/barkpark/content/\n    \u2514\u2500\u2500 errors_test.exs \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-036",
+      "level": 3,
+      "text": "Add a JS SDK Client Method  \u00b7  bp scaffy run add-sdk-method.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Land a new @barkpark/core client method end-to-end \u2014 the six-file layer-parity chore the SDK repeats ~3x/month (34 commits in 12 months touch types.ts + client.ts + index.ts together): a starter module wrapping a dataset-scoped GET in the house transport pattern, Result/Options types plus the BarkparkClient interface signature, the createClient wiring entry, both index.ts barrel exports, an msw test pair, and the changesets entry the js/ CI gate requires \u2014 the corpus's first changeset-creating command. (4 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-037",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-038",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u251c\u2500\u2500 js/packages/core/src/\n\u2502   \u251c\u2500\u2500 {{.method-name}}.ts \u25cf created\n\u2502   \u251c\u2500\u2500 types.ts \u25cb injected \u00d72\n\u2502   \u251c\u2500\u2500 client.ts \u25cb injected \u00d72\n\u2502   \u2514\u2500\u2500 index.ts \u25cb injected \u00d72\n\u251c\u2500\u2500 js/packages/core/tests/\n\u2502   \u2514\u2500\u2500 {{.method-name}}.test.ts \u25cf created\n\u2514\u2500\u2500 js/.changeset/\n    \u2514\u2500\u2500 sdk-{{.method-name}}.md \u25cf created",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-039",
+      "type": "divider"
+    },
+    {
+      "id": "scf-040",
+      "level": 2,
+      "text": "Infrastructure chores",
+      "type": "heading"
+    },
+    {
+      "id": "scf-041",
+      "level": 3,
+      "text": "Add Oban Cron Worker  \u00b7  bp scaffy run add-oban-worker.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffold an Oban cron worker (worker module + test) and register its crontab tuple in the static Oban.Plugins.Cron block in config/config.exs \u2014 idempotently, on the shared :default queue. (2 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-042",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-043",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u251c\u2500\u2500 api/lib/barkpark/workers/\n\u2502   \u2514\u2500\u2500 {{.worker_name}}.ex \u25cf created\n\u251c\u2500\u2500 api/test/barkpark/workers/\n\u2502   \u2514\u2500\u2500 {{.worker_name}}_test.exs \u25cf created\n\u2514\u2500\u2500 api/config/\n    \u2514\u2500\u2500 config.exs \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-044",
+      "level": 3,
+      "text": "Add Ecto Migration  \u00b7  bp scaffy run add-migration.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffold one timestamped Ecto migration under api/priv/repo/migrations \u2014 a single change/0 that alters a table, adds a column, and creates a partial index. (5 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-045",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-046",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 api/priv/repo/migrations/\n    \u2514\u2500\u2500 {{.Ts}}_{{.migration_name}}.exs \u25cf created",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-047",
+      "level": 3,
+      "text": "Add a Backfill Mix Task  \u00b7  bp scaffy run add-backfill-task.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffold a safe-by-default one-shot backfill Mix.Task \u2014 a bare run is a DRY RUN that streams the target rows, counts them, and writes nothing; `--apply` performs the mutation. (2 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-048",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-049",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u251c\u2500\u2500 api/lib/mix/tasks/\n\u2502   \u2514\u2500\u2500 barkpark.{{.task_name}}.ex \u25cf created\n\u2514\u2500\u2500 api/test/mix/tasks/\n    \u2514\u2500\u2500 barkpark.{{.task_name}}_test.exs \u25cf created",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-050",
+      "level": 3,
+      "text": "Add a Console Pure Helper  \u00b7  bp scaffy run add-console-helper.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffold one node-pinned pure helper across the Cloud console SPA pair in a single run: the `function` skeleton planted in app.js's console-helpers zone, its export entry planted in the console-hook-map zone (the __bpTestHook object tail), and its starter test group planted in __app.test.mjs's console-tests zone -- the three-site chore EVERY console feature repeats by hand (55 of the 82 app.js commits in 12 months co-touch the harness; the house law is stamped on dozens of hook groups: pure helpers node-pinned via __bpTestHook, DOM mounts browser-verified). (2 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-051",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-052",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 cloud/priv/static/\n    \u251c\u2500\u2500 app.js \u25cb injected \u00d72\n    \u2514\u2500\u2500 __app.test.mjs \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-053",
+      "type": "divider"
+    },
+    {
+      "id": "scf-054",
+      "level": 2,
+      "text": "Docs symmetry pair",
+      "type": "heading"
+    },
+    {
+      "id": "scf-055",
+      "level": 3,
+      "text": "Add Docs Card  \u00b7  bp scaffy run add-docs-card.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Create a docs/cards/<name>.md card (G1 header, Code anchors section, <=2400 bytes) and wire it into the doc spine: a routing-table row in CLAUDE.md and the Cards: brace list in docs/INDEX.md \u2014 idempotently, with MARK handles for symmetric removal by remove-docs-card. (3 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-056",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-057",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u251c\u2500\u2500 docs/cards/\n\u2502   \u2514\u2500\u2500 {{.card-name}}.md \u25cf created\n\u251c\u2500\u2500 CLAUDE.md \u25cb injected\n\u2514\u2500\u2500 docs/\n    \u2514\u2500\u2500 INDEX.md \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-058",
+      "level": 3,
+      "text": "Remove Docs Card  \u00b7  bp scaffy run remove-docs-card.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Retract everything add-docs-card planted: un-sweep the Cards: brace list in docs/INDEX.md, remove the CLAUDE.md routing row plus its MARK comment, delete the card file \u2014 byte-clean, idempotent (a second run is a guarded no-op). (3 variables, DIRECTION remove.)"
+        }
+      ],
+      "id": "scf-059",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-060",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u251c\u2500\u2500 docs/\n\u2502   \u2514\u2500\u2500 INDEX.md \u25cb injected\n\u251c\u2500\u2500 CLAUDE.md \u25cb injected\n\u2514\u2500\u2500 docs/cards/\n    \u2514\u2500\u2500 {{.card-name}}.md \u2715 deleted",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-061",
+      "type": "divider"
+    },
+    {
+      "id": "scf-062",
+      "level": 2,
+      "text": "The ensure family",
+      "type": "heading"
+    },
+    {
+      "id": "scf-063",
+      "level": 3,
+      "text": "Ensure an Elixir import  \u00b7  bp scaffy run ensure-import.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Idempotently make sure a module `import` line exists in an Elixir file \u2014 insert it once after a caller-named anchor line, skip forever after. (3 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-064",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-065",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 {{.TargetFile}} \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-066",
+      "level": 3,
+      "text": "Ensure a bp completion noun  \u00b7  bp scaffy run ensure-cli-noun.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Idempotently make sure a top-level noun appears in both scaffy-owned copies of the bp CLI noun set \u2014 append its quoted literal once to completionNouns (shell completion) and once to usageBuiltins (the top-level usage built-ins line), skip each forever after. (1 variable, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-067",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-068",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 internal/cli/\n    \u251c\u2500\u2500 builtins.go \u25cb injected\n    \u2514\u2500\u2500 usage.go \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-069",
+      "level": 3,
+      "text": "Plant a @canonical Marker  \u00b7  bp scaffy run add-canonical-marker.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Plant the two-line `@canonical capability:<slug>` marker above any PUBLIC entry point so a cold agent's `grep '@canonical capability:'` LANDS on the one true implementation of a capability. (5 variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-070",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-071",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 {{.TargetFile}} \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-072",
+      "type": "divider"
+    },
+    {
+      "id": "scf-073",
+      "level": 2,
+      "text": "Zone planters",
+      "type": "heading"
+    },
+    {
+      "id": "scf-074",
+      "level": 3,
+      "text": "Ensure router marker zones  \u00b7  bp scaffy run ensure-router-zones.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Idempotently plant the three named scaffy:zone marker comments in api/lib/barkpark_web/router.ex -- the catalog's #1 unserved accretion file (175 commits / 1283 co-change partners in 12 months per bp scaffy discover), twice ruled unservable (W1: ordering-hostile, anchors are positional text; W5: add-api-route-parity retired as scoped). (zero variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-075",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-076",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 api/lib/barkpark_web/\n    \u2514\u2500\u2500 router.ex \u25cb injected \u00d73",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-077",
+      "level": 3,
+      "text": "Ensure root layout marker zones  \u00b7  bp scaffy run ensure-root-layout-zones.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Idempotently plant the two named scaffy:zone marker comments in api/lib/barkpark_web/layouts/root.html.heex -- the repo's second-hottest accretion file (169 commits/12 months), which W1 and W7 both ruled un-anchorable because its append streams had no stable landing sites. (zero variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-078",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-079",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 api/lib/barkpark_web/layouts/\n    \u2514\u2500\u2500 root.html.heex \u25cb injected \u00d72",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-080",
+      "level": 3,
+      "text": "Ensure console hook zones  \u00b7  bp scaffy run ensure-console-hook-zones.scaffy",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Idempotently plant the three named scaffy:zone marker comments across the Cloud console SPA pair -- cloud/priv/static/app.js (#7 discover hotspot: 81 commits / 60 MOSTLY_ADD in 12 months) and its co-accreting node harness cloud/priv/static/__app.test.mjs (#14: 56 commits, 55 of the 82 app.js commits touch it) -- the cloud subsystem's ONLY mechanically append-shaped seams. (zero variables, DIRECTION add.)"
+        }
+      ],
+      "id": "scf-081",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-082",
+      "legend": "\u25cf created \u00b7 \u25cb injected \u00b7 \u2715 deleted",
+      "text": "\u2514\u2500\u2500 cloud/priv/static/\n    \u251c\u2500\u2500 app.js \u25cb injected \u00d72\n    \u2514\u2500\u2500 __app.test.mjs \u25cb injected",
+      "type": "filetree"
+    },
+    {
+      "id": "scf-083",
+      "type": "divider"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A \u25cf file is wholly owned by the command \u2014 remove deletes it. A \u25cb site is a mark-bounded injection \u2014 remove excises exactly the planted span, drift-refusing loudly if the region was hand-mutated. Zone-planter trees show \u25cb only: their whole job is planting anchors that make every FUTURE command's tree possible."
+        }
+      ],
+      "id": "scf-084",
+      "title": "Read the trees as contracts",
+      "tone": "info",
+      "type": "callout"
+    }
+  ],
+  "description": "The 21-command atlas: every served Scaffy command with its exact file footprint (created/injected/deleted) rendered as native filetree blocks \u2014 each tree derived mechanically from the command's own ops, grouped by lifecycle: plugins, PortableDoc, API/SDK, infrastructure, docs, the ensure family, and the zone planters.",
+  "tags": [
+    {
+      "rationale": "The complete command atlas with derived footprints.",
+      "strength": 90,
+      "tag": "scaffy"
+    },
+    {
+      "rationale": "Native filetree blocks carry every footprint \u2014 the block demonstrating itself at scale.",
+      "strength": 55,
+      "tag": "filetree"
+    },
+    {
+      "rationale": "Reference companion to the showcase and benchmark papers.",
+      "strength": 35,
+      "tag": "docs"
+    }
+  ]
+}

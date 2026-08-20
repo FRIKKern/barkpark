@@ -27,11 +27,20 @@ defmodule Barkpark.Content.Papers do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, CallerContext, Document, DraftId, Envelope, SchemaDefinition}
-  alias Barkpark.Content.Papers.BlockOps
-  alias Barkpark.PortableDoc.BodyWalk
-  alias Barkpark.PortableDoc.Render
-  alias Barkpark.PortableDoc.Synthesis
+
+  alias Barkpark.Content.{
+    Broadcast,
+    CallerContext,
+    Document,
+    DraftId,
+    Envelope,
+    Labels,
+    SchemaDefinition
+  }
+
+  alias Barkpark.Content.Papers.{BlockOps, Hollow}
+  alias Barkpark.PortableDoc.{BodyWalk, HtmlSanitizer, Projection, Render, Synthesis}
+  alias Barkpark.Repo
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -45,6 +54,380 @@ defmodule Barkpark.Content.Papers do
 
   @doc "The document type discriminator for papers."
   def paper_type, do: @paper_type
+
+  # The closed blocks-type whitelist (session-handoff Task 2): every document
+  # type whose write path rides the generalized `upsert_blocks_doc/3` /
+  # `BlockOps.upsert_blocks_doc/3` machinery (blocks body + metadata fields).
+  # Deliberately closed and hand-maintained, mirroring `AuthoringWall`'s
+  # `@walled_types` pattern — widening it is a reviewed one-line decision.
+  #
+  # SOLE SOURCE OF TRUTH lives in `BlockOps` (a compile-time module attribute
+  # there, required so its `upsert_blocks_doc/3` guard clause can pattern
+  # against it) — both delegates below defer to it rather than keeping an
+  # independent literal, so there is exactly one list to widen.
+  @doc "The closed whitelist of document types that ride the blocks-doc write path."
+  defdelegate blocks_types(), to: BlockOps
+
+  @doc "Whether `type` is in the blocks-doc whitelist (`blocks_types/0`)."
+  defdelegate blocks_type?(type), to: BlockOps
+
+  @doc """
+  Fetch a blocks-doc (a document whose type rides `upsert_blocks_doc/3`) by
+  `{slug, type, dataset}`. Generalizes `get_paper/3` off the hardcoded
+  `"paper"` type — same shape, `%Document{} | nil`.
+  """
+  def get_blocks_doc(slug, type, dataset \\ @paper_default_dataset, opts \\ [])
+      when is_binary(slug) and is_binary(type) do
+    case Content.get_document(slug, type, dataset, opts) do
+      {:ok, doc} -> doc
+      {:error, :not_found} -> nil
+    end
+  end
+
+  @doc "Return one visibility-safe canonical source for any historical Paper shape."
+  def reader_source(paper, dataset, scope_opts \\ [])
+
+  def reader_source(%Document{} = paper, dataset, scope_opts) do
+    scope_opts = reader_schema_scope(paper, scope_opts || [])
+    had_structured_source? = is_list(Projection.read_blocks(paper.content || %{}))
+
+    schema =
+      case Content.get_schema(@paper_type, dataset, scope_opts) do
+        {:ok, value} -> value
+        value when is_struct(value, SchemaDefinition) -> value
+        _ -> nil
+      end
+
+    envelope = Envelope.render(paper, schema, CallerContext.anonymous())
+
+    # Envelope promotes every historical block shape to the canonical top-level
+    # key *before* redaction. Read only that destination: falling back through a
+    # redacted legacy `body` here would bypass a private `blocks` field.
+    case Map.get(envelope, "blocks") do
+      blocks when is_list(blocks) ->
+        classify_reader_blocks(paper, blocks, envelope, dataset)
+
+      _ when had_structured_source? ->
+        # A structured source existed but disappeared at the Envelope boundary,
+        # so visibility redaction removed it. `body_html` is a derived cache of
+        # that same prose; falling through would disclose what was just hidden.
+        {:error, :redacted_source}
+
+      _ ->
+        case envelope["body_html"] do
+          html when is_binary(html) ->
+            sanitized = HtmlSanitizer.sanitize(html)
+
+            if semantic_html?(sanitized),
+              do: {:html, sanitized},
+              else: {:error, :semantic_empty}
+
+          _ ->
+            {:error, :semantic_empty}
+        end
+    end
+  end
+
+  def reader_source(_, _dataset, _scope_opts), do: {:error, :not_found}
+
+  defp classify_reader_blocks(paper, blocks, envelope, dataset) do
+    cond do
+      not valid_reader_blocks?(blocks) ->
+        {:error, :invalid_blocks}
+
+      Hollow.hollow?(blocks) ->
+        {:error, :semantic_empty}
+
+      true ->
+        case cache_provenance(paper, blocks, envelope["body_html"], dataset) do
+          :coherent ->
+            {:blocks, blocks}
+
+          {:stale, rendered} ->
+            refresh_html_cache(paper, blocks, rendered)
+            {:blocks, blocks}
+
+          :divergent ->
+            {:error, :ambiguous_source}
+        end
+    end
+  end
+
+  defp valid_reader_blocks?(blocks) do
+    Enum.all?(blocks, fn
+      %{"type" => type} when is_binary(type) -> String.trim(type) != ""
+      _ -> false
+    end)
+  end
+
+  # Classify a byte mismatch between the stored `body_html` cache and a fresh
+  # render of the selected blocks. A bare `rendered != html` cannot do this: it
+  # conflates two populations with OPPOSITE correct handling, and answering
+  # "ambiguous" to both is what made honest drift a hard 422.
+  #
+  #   :coherent        — no cache, or the cache IS this render. Serve blocks.
+  #   {:stale, html}   — the cache was rendered from THESE blocks by a renderer
+  #                      that is no longer ours (or its resolved externals have
+  #                      since moved). Blocks are canonical, so serve them and
+  #                      rewrite the derived cache. No 422.
+  #   :divergent       — the stamp IS the current renderer's digest, so the row
+  #                      claims this renderer emitted these bytes from these
+  #                      blocks; the byte compare says otherwise and nothing
+  #                      external can explain the gap. The cache carries content
+  #                      the blocks do not. This is the population the 422 was
+  #                      built for; it keeps it, and ONLY it.
+  #
+  # Provenance comes from `content["body_html_sv"]` — a sha256 digest of the
+  # renderer's own source, stamped at every fresh block→HTML render. Compare it
+  # with `==` ONLY: a content hash has no total order, so "older/newer" is not a
+  # question it can answer. Anything that is not that digest — an old digest,
+  # the honest pre-digest integer, or nothing — is a LAGGING stamp, i.e. stale.
+  defp cache_provenance(_paper, _blocks, html, _dataset)
+       when not is_binary(html) or html == "",
+       do: :coherent
+
+  defp cache_provenance(paper, blocks, html, dataset) do
+    content = paper.content || %{}
+    style = get_in(content, ["style"])
+    scope = [workspace_id: paper.workspace_id, project_id: paper.project_id]
+    rendered = Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope))
+
+    cond do
+      rendered == html ->
+        :coherent
+
+      # EXTERNAL REFERENT DRIFT — a third class the drift/divergence split does
+      # not name, and the rule above is UNSOUND without it. `paper_render_opts`
+      # injects ref/codelist resolver closures that run LIVE queries, and the
+      # resolved value reaches the emitted bytes. So renaming a REFERENCED
+      # document moves this render while the blocks, the cache, the stamp AND
+      # the renderer are all untouched — a byte gap with a current stamp that is
+      # emphatically NOT divergence. For a block list that resolves externals,
+      # the byte-compare cannot prove divergence AT ALL, with or without a
+      # stamp, so it must not be the thing that 422s. This narrows the
+      # detector's INPUT; every other document keeps the full safety property.
+      #
+      # Deliberately NOT fixed by freezing the resolved label into provenance:
+      # a frozen label makes "stamp matches" true while the correct rendering
+      # legitimately differs, so the reader would serve the OLD title behind a
+      # matching stamp — trading a loud false 422 for a silent wrong value.
+      resolver_dependent?(blocks) ->
+        {:stale, rendered}
+
+      true ->
+        # DIVERGENCE IS THE NARROW CASE: only a stamp that IS the current
+        # renderer's digest can carry the claim "this renderer, fed these
+        # blocks, emitted these bytes" — and only that claim, contradicted by
+        # the byte compare, is divergence. Every other stamp state is a LAGGING
+        # stamp: an old hex digest, the renderer's own honest pre-digest integer
+        # (`@body_html_render_version 1..3`, before it became a sha256 hex), or
+        # no stamp at all. None of them claims this renderer, so none of them
+        # can contradict it, and blocks stay canonical: re-render, serve,
+        # restamp.
+        #
+        # Measured (guerrilla, 2026-08-17 — recipe in
+        # tooling/grip/ledger/pe-w2-guerrilla-live-writes-2026-08-17.md): the
+        # old `_ -> :divergent` catch-all sent 119 papers stamped with the
+        # integer 3 into this branch, and 59 of them answered 422 to every
+        # reader for ~4 weeks. The remaining 60 served only via the
+        # `rendered == html` short-circuit above, so any renderer change would
+        # have gone dark too; 42 null-stamped papers carried the same hazard.
+        # Fail-closed on an unverifiable stamp is not a safety property — it is
+        # a reader outage with no upper bound.
+        #
+        # PROD REPAIR (ops, after this merges — the reader self-heals each row on
+        # first read via `refresh_html_cache/3`, this just does it in bulk):
+        #
+        #     mix barkpark.rehydrate_body_html --type paper --published-only
+        #     mix barkpark.rehydrate_body_html --type paper --published-only --write
+        #
+        # The first line is the DRY-RUN TALLY (dry run is that task's default —
+        # it reports and writes nothing). An integer stamp reads as "stamp
+        # foreign" there, so it lands on the rewrite arm; only `is_nil(sv)` rows
+        # with drifted bytes are report-only, and those are exactly the ones the
+        # reader now heals itself.
+        if Map.get(content, "body_html_sv") == Render.body_html_render_version(),
+          do: :divergent,
+          else: {:stale, rendered}
+    end
+  end
+
+  # Does any block in the list resolve an EXTERNAL referent at render time?
+  # The guards mirror `Render.resolve_ref_title/2` and `resolve_code_label/2`
+  # exactly — same types, same non-empty binary `"value"` condition — so this
+  # predicate is true precisely when a resolver closure can move the bytes.
+  # Descends into nested block lists: a reference inside a column or callout
+  # resolves the same way one at the top level does.
+  defp resolver_dependent?(blocks) when is_list(blocks),
+    do: Enum.any?(blocks, &resolver_dependent?/1)
+
+  defp resolver_dependent?(%{"type" => type, "value" => value})
+       when type in ["field-reference", "codelist"] and is_binary(value) and value != "",
+       do: true
+
+  defp resolver_dependent?(block) when is_map(block),
+    do: block |> Map.values() |> Enum.any?(&resolver_dependent?/1)
+
+  defp resolver_dependent?(_), do: false
+
+  # Rewrite the derived HTML cache with the render we just proved canonical, so
+  # the next read takes the `:coherent` path instead of re-rendering.
+  #
+  # Two conditions, each load-bearing. The paper must be a persisted row (a
+  # bare in-memory %Document{} has no id — the pure unit seam must never touch
+  # the Repo). And the blocks we rendered from must be byte-identical to the
+  # STORED blocks: `blocks` arrives from the Envelope, i.e. post-redaction, and
+  # persisting a cache rendered from a redacted view would destroy content.
+  #
+  # Best-effort by construction: this runs inside a READ. A concurrent write, a
+  # stale rev, or no database at all must never turn a servable paper into an
+  # error, so every failure is swallowed and the blocks are served regardless.
+  defp refresh_html_cache(%Document{id: id} = paper, blocks, rendered) when not is_nil(id) do
+    content = paper.content || %{}
+
+    if Projection.read_blocks(content) == blocks do
+      new_content =
+        content
+        |> Map.put("body_html", rendered)
+        |> Map.put("body_html_sv", Render.body_html_render_version())
+
+      try do
+        paper
+        |> Document.changeset(%{"content" => new_content})
+        |> Ecto.Changeset.optimistic_lock(:rev, fn _ ->
+          :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+        end)
+        |> Repo.update()
+      rescue
+        _ -> :error
+      catch
+        _, _ -> :error
+      end
+    end
+
+    :ok
+  end
+
+  defp refresh_html_cache(_paper, _blocks, _rendered), do: :ok
+
+  # Semantic validity mirrors the reader audit: hidden nodes and non-image
+  # accessibility metadata are not authored visible content; visible text and
+  # image alt text are. Numeric entities are decoded, and common named entities
+  # are normalized before applying the shared letter/number/symbol predicate.
+  defp semantic_html?(html) do
+    visible_html = strip_hidden_html(html)
+
+    text =
+      visible_html
+      |> then(
+        &Regex.replace(
+          ~r/<img\b[^>]*\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/i,
+          &1,
+          fn _full, double, single, bare -> " " <> (double <> single <> bare) <> " " end
+        )
+      )
+      |> String.replace(~r/<[^>]*>/s, " ")
+      |> decode_visible_entities()
+      |> String.trim()
+
+    Hollow.semantic_text?(text)
+  end
+
+  defp strip_hidden_html(html) do
+    {_stack, visible} =
+      ~r/<[^>]*>|[^<]+/s
+      |> Regex.scan(html)
+      |> List.flatten()
+      |> Enum.reduce({[], []}, &strip_hidden_token/2)
+
+    visible
+    |> Enum.reverse()
+    |> IO.iodata_to_binary()
+  end
+
+  @html_void_elements ~w(area base br col embed hr img input link meta param source track wbr)
+
+  defp strip_hidden_token(token, {stack, visible}) do
+    cond do
+      closing_html_tag?(token) ->
+        [_, tag] = Regex.run(~r/^<\s*\/\s*([a-z][a-z0-9:-]*)[^>]*>$/is, token)
+        hidden? = hidden_stack?(stack)
+        next_stack = close_html_tag(stack, String.downcase(tag))
+        {next_stack, if(hidden?, do: visible, else: [token | visible])}
+
+      opening_html_tag?(token) ->
+        [_, tag, attrs] = Regex.run(~r/^<\s*([a-z][a-z0-9:-]*)\b(.*)>$/is, token)
+        tag = String.downcase(tag)
+        hidden? = hidden_stack?(stack) or hidden_html_attrs?(attrs)
+        void? = tag in @html_void_elements or Regex.match?(~r/\/\s*>$/, token)
+        next_stack = if void?, do: stack, else: [{tag, hidden?} | stack]
+        {next_stack, if(hidden?, do: visible, else: [token | visible])}
+
+      hidden_stack?(stack) ->
+        {stack, visible}
+
+      true ->
+        {stack, [token | visible]}
+    end
+  end
+
+  defp closing_html_tag?(token),
+    do: Regex.match?(~r/^<\s*\/\s*[a-z][a-z0-9:-]*[^>]*>$/is, token)
+
+  defp opening_html_tag?(token),
+    do: Regex.match?(~r/^<\s*[a-z][a-z0-9:-]*\b.*>$/is, token)
+
+  defp hidden_stack?([{_tag, hidden?} | _]), do: hidden?
+  defp hidden_stack?([]), do: false
+
+  defp hidden_html_attrs?(attrs) do
+    Regex.match?(~r/(?:^|\s)hidden(?:\s|=|$)/i, attrs) or
+      Regex.match?(~r/(?:^|\s)aria-hidden\s*=\s*(?:"true"|'true'|true)(?:\s|$)/i, attrs)
+  end
+
+  defp close_html_tag(stack, tag) do
+    case Enum.split_while(stack, fn {open_tag, _hidden?} -> open_tag != tag end) do
+      {_unclosed, []} -> stack
+      {_unclosed, [_matched | rest]} -> rest
+    end
+  end
+
+  defp decode_visible_entities(text) do
+    text
+    |> then(
+      &Regex.replace(~r/&#x([0-9a-f]+);?/i, &1, fn _full, hex ->
+        html_codepoint(hex, 16)
+      end)
+    )
+    |> then(&Regex.replace(~r/&#([0-9]+);?/, &1, fn _full, dec -> html_codepoint(dec, 10) end))
+    |> String.replace(~r/&(?:amp|lt|gt|quot|apos);/i, fn entity ->
+      case String.downcase(entity) do
+        "&amp;" -> "&"
+        "&lt;" -> "<"
+        "&gt;" -> ">"
+        "&quot;" -> "\""
+        "&apos;" -> "'"
+      end
+    end)
+    |> String.replace(~r/&(?:nbsp|ensp|emsp|thinsp|zwnj|zwj|lrm|rlm|shy);/i, " ")
+    |> String.replace(~r/&(?:mdash|ndash|hellip|middot|bull|laquo|raquo);/i, " — ")
+    # Remaining named entities represent a visible authored glyph. A semantic
+    # marker preserves that fact without pretending to implement an HTML parser.
+    |> String.replace(~r/&[a-z][a-z0-9]+;/i, " ∑ ")
+  end
+
+  defp html_codepoint(digits, base) do
+    case Integer.parse(digits, base) do
+      {cp, ""} when cp in 0..0xD7FF or cp in 0xE000..0x10FFFF -> <<cp::utf8>>
+      _ -> ""
+    end
+  end
+
+  defp reader_schema_scope(paper, scope_opts) do
+    scope_opts
+    |> Keyword.put_new(:workspace_id, paper.workspace_id)
+    |> Keyword.put_new(:project_id, paper.project_id)
+  end
 
   @doc """
   Per-doc PubSub topic for a paper, SCOPED to the owning workspace:
@@ -742,12 +1125,35 @@ defmodule Barkpark.Content.Papers do
     # no schema query.
     Barkpark.PortableDoc.TaskResolver.resolve(
       blocks,
-      fn query -> Barkpark.Tasks.Query.rows_for_query(query, scope) end,
-      fn query -> Barkpark.Tasks.Query.agg_for_query(query, scope, dataset: dataset) end
+      fn query ->
+        query
+        |> task_query_dataset(dataset)
+        |> Barkpark.Tasks.Query.rows_for_query(scope, dataset: dataset)
+      end,
+      fn query ->
+        query
+        |> task_query_dataset(dataset)
+        |> Barkpark.Tasks.Query.agg_for_query(scope, dataset: dataset)
+      end
     )
   end
 
   def resolve_tasks_in_blocks(blocks, _scope, _dataset), do: blocks
+
+  # A reader's dataset is the implicit task-query dataset. Explicit authoring
+  # stays authoritative: row queries keep a top-level `dataset`, while
+  # aggregate queries keep `filter.dataset`. Stamping both harmlessly lets the
+  # two closed query shapes share one fail-closed defaulting seam.
+  defp task_query_dataset(query, dataset) when is_map(query) and is_binary(dataset) do
+    query
+    |> Map.put_new("dataset", dataset)
+    |> Map.update("filter", %{"dataset" => dataset}, fn
+      filter when is_map(filter) -> Map.put_new(filter, "dataset", dataset)
+      other -> other
+    end)
+  end
+
+  defp task_query_dataset(query, _dataset), do: query
 
   @doc """
   Pre-resolve every note-embed (`![[note]]`) target in a block list into the
@@ -891,16 +1297,53 @@ defmodule Barkpark.Content.Papers do
   """
   def get_public_document(type, slug, dataset \\ @paper_default_dataset)
       when is_binary(type) and is_binary(slug) do
+    case get_public_document_with_workspace(type, slug, dataset) do
+      {doc, _workspace} -> doc
+      nil -> nil
+    end
+  end
+
+  @doc """
+  `get_public_document/3` that ALSO returns the resolved Default `%Workspace{}`
+  — `{doc, workspace}` or `nil`. The am-w1-s3 reader dedupe seam: the public
+  reader needs the workspace row again after the read (theme identity), and
+  re-fetching what this resolve already loaded was a measured per-mount
+  statement. Same pinned-Default scoping, same fail-closed posture.
+  """
+  def get_public_document_with_workspace(type, slug, dataset \\ @paper_default_dataset)
+      when is_binary(type) and is_binary(slug) do
     case Barkpark.Tenancy.get_default_workspace() do
-      %{id: ws_id} when is_binary(ws_id) ->
-        case Content.get_document(slug, type, dataset, workspace_id: ws_id) do
-          {:ok, doc} -> doc
-          {:error, :not_found} -> nil
-        end
+      %{id: ws_id} = workspace when is_binary(ws_id) ->
+        # Typeless batched read + type pick, NOT `get_document/4`: the typed
+        # read pays an `owner_scoped?` schema round-trip on every call, pure
+        # overhead on this public pinned-tenant resolve (am-w1-s3). The scoping
+        # stack is the documented typeless-read precedent
+        # (`Query.resolve_docs_by_ids/3` — dataset + workspace_or_global +
+        # unconditional `scope_to_owner(nil)`, byte-identical for
+        # non-owner_scoped types whose rows carry a NULL `owner_id`, and the
+        # same unowned-rows-only posture `get_document/4` reaches for an
+        # anonymous caller when the type IS owner-scoped). The list return
+        # makes the type pick exact — a same-slug document of another type can
+        # never shadow the requested one.
+        doc =
+          [slug]
+          |> Content.resolve_docs_by_ids(dataset, workspace_id: ws_id)
+          |> Enum.find(&(&1.type == type))
+
+        doc && {doc, workspace}
 
       _ ->
         nil
     end
+  end
+
+  @doc """
+  `get_public_paper/2` that also returns the resolved Default `%Workspace{}` —
+  see `get_public_document_with_workspace/3`.
+  """
+  def get_public_paper_with_workspace(slug, dataset \\ @paper_default_dataset)
+      when is_binary(slug) do
+    get_public_document_with_workspace(@paper_type, slug, dataset)
   end
 
   @doc """
@@ -1158,6 +1601,14 @@ defmodule Barkpark.Content.Papers do
   true` escape. See `Barkpark.Content.Papers.BlockOps.upsert_paper/2`.
   """
   defdelegate upsert_paper(attrs, opts \\ []), to: BlockOps
+
+  @doc """
+  Upsert a blocks-doc keyed by `{dataset, slug}` for any type in the
+  `blocks_types/0` whitelist (`upsert_paper/2` generalized off the hardcoded
+  `"paper"` type — session-handoff Task 2). See
+  `Barkpark.Content.Papers.BlockOps.upsert_blocks_doc/3`.
+  """
+  defdelegate upsert_blocks_doc(type, attrs, opts \\ []), to: BlockOps
 
   @doc """
   Apply a single portable-doc `op` (a DocPatchOp map) to a paper's block list,

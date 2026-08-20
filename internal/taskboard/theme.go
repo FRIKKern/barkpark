@@ -48,8 +48,8 @@ func (r Role) String() string {
 type palette struct {
 	ok, danger                          lipgloss.AdaptiveColor
 	info, warn, done, ready, open, canc lipgloss.AdaptiveColor
-	neutral, dim, title                 lipgloss.AdaptiveColor
-	hoverBg, pressedBg                  lipgloss.AdaptiveColor
+	neutral, dim, title, accent         lipgloss.AdaptiveColor
+	pressedBg                           lipgloss.AdaptiveColor
 }
 
 // buildPalette resolves one theme id's board palette. The LIFECYCLE hues
@@ -94,14 +94,13 @@ func buildPalette(theme string) palette {
 		neutral: chrome("chrome-text-secondary"), // zinc mid chrome (chrome_gen)
 		dim:     chrome("chrome-dim"),            // zinc dim chrome (chrome_gen)
 		title:   chrome("chrome-ink"),            // near-fg title chrome (chrome_gen)
+		accent:  chrome("chrome-accent"),         // pointer-hover row highlight (chrome_gen)
 
-		// The board's FIRST legitimate background states (charter D94/D95), both
-		// read from EXISTING chrome roles — zero new colors. hover is the subtle
-		// pointer tint (the desk's inactive-cursor bg, cmd/barkpark/styles.go:104);
-		// pressed is the stronger selection tint reserved for ttm-s4's verb
-		// affordances (the desk's selected-item bg, styles.go:48). Row clicks act on
-		// press, so board rows wear hover only.
-		hoverBg:   chrome("chrome-cursor-bg"),    // subtle row hover tint (chrome_gen)
+		// The board's ONE legitimate background state (charter D94/D95), read from
+		// an EXISTING chrome role — zero new colors: the stronger selection tint
+		// reserved for ttm-s4's verb affordances (the desk's selected-item bg,
+		// styles.go:48). Rows never wear a background — a hovered row restyles its
+		// FOREGROUND to accent instead (hoverStyle).
 		pressedBg: chrome("chrome-selection-bg"), // pressed affordance — reserved for ttm-s4
 	}
 }
@@ -127,11 +126,11 @@ var (
 	neutralColor = defaultPalette.neutral
 	dimColor     = defaultPalette.dim
 	titleColor   = defaultPalette.title
+	accentColor  = defaultPalette.accent
 
-	// Background states (charter D94/D95). hoverBgColor is the subtle full-row
-	// pointer tint (ttm-s3's hoverStyle paints it); pressedBgColor is the stronger
-	// verb-affordance tint verbHoverStyle paints on a hovered footer verb.
-	hoverBgColor   = defaultPalette.hoverBg
+	// pressedBgColor is the verb-affordance background tint verbHoverStyle
+	// paints on a hovered footer verb (charter D94/D95) — the board's only
+	// background state now that row hover is a foreground restyle.
 	pressedBgColor = defaultPalette.pressedBg
 )
 
@@ -150,26 +149,16 @@ var (
 	titleStyle = lipgloss.NewStyle().Foreground(titleColor).Bold(true)
 	boldStyle  = lipgloss.NewStyle().Bold(true)
 
-	// hoverStyle is the board's row background paint (charter D94/D95): a subtle
-	// full-row tint under the mouse pointer. It sets a Background ONLY — never a
-	// foreground — so it composes over a row's existing lifecycle/priority/worker
-	// hues without recoloring them (hoverPaint re-establishes it across the row's
-	// own embedded resets). It is DISTINCT from the flash, which stays
-	// foreground-only (decision 17): hover is a NEW style, never a flashStyle
-	// extension, so the motion_test GetBackground==NoColor guards stay green.
-	hoverStyle = lipgloss.NewStyle().Background(hoverBgColor)
-
-	// faintStyle is the picker-law recede that makes the hover read as "lit up"
-	// (the agent-picker vocabulary: siblings at lower opacity, the focused row at
-	// full brightness). While a pointer hover is resolved onto a selectable spine
-	// row, every OTHER selectable row wears the terminal's faint attribute (SGR 2)
-	// — an ATTRIBUTE, not a color, so it composes over the row's own lifecycle /
-	// priority hues without recoloring them ("color = state" stays intact) and
-	// costs zero new palette entries. It paints ONLY while a hover target is live
-	// (faintPaint re-arms it across a row's embedded resets, hoverPaint-style);
-	// with no pointer the board is byte-identical, so goldens and the at-rest
-	// aliveness budget are untouched.
-	faintStyle = lipgloss.NewStyle().Faint(true)
+	// hoverStyle is the pointer-hover row highlight, on the chat TUI's
+	// Phases-pane selection grammar (chat/render.go focusBar + titleStyle): the
+	// hovered row re-renders whole in the bold accent FOREGROUND — no background
+	// bar, and sibling rows keep full brightness (the earlier bg-tint +
+	// faint-recede picker law is retired). hoverPaint strips the row's own
+	// lifecycle/priority hues first so the accent reads uniformly, the way the
+	// selected phase row does. Transient pointer state only; with no live hover
+	// the frame is byte-identical, so goldens and the at-rest aliveness budget
+	// are untouched.
+	hoverStyle = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 
 	// verbHoverStyle is the pointer-hover affordance on a clickable footer verb
 	// (charter D96), on the D94 background vocabulary: verbs wear the STRONGER
@@ -179,6 +168,14 @@ var (
 	// state — the hover reads as "lit up", not inverted. Transient pointer state
 	// only, painted while a verb is under the cursor; "color = state" stays intact.
 	verbHoverStyle = lipgloss.NewStyle().Foreground(titleColor).Background(pressedBgColor)
+
+	// The wide divider steps through three pointer states without changing
+	// geometry: subdued at rest, readable on hover, and bold accent while held.
+	// Terminal cells have no alpha channel, so palette brightness is the honest
+	// opacity analogue.
+	dividerRestStyle    = lipgloss.NewStyle().Foreground(dimColor)
+	dividerHoverStyle   = lipgloss.NewStyle().Foreground(neutralColor)
+	dividerGrabbedStyle = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 )
 
 // glyphStyleFor paints the STATUS GLYPH by the spec §1 brightness+meaning ladder

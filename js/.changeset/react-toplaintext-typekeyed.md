@@ -1,0 +1,5 @@
+---
+'@barkpark/react': minor
+---
+
+`toPlainText` now understands Barkpark's type-keyed PortableDocument AST, not just legacy Sanity Portable Text. Previously it gated on `_type: 'block'` and returned `''` for every `type`-keyed node (heading/paragraph/list/callout/table/…), so excerpts, SEO meta descriptions, reading-time and search-indexing over a `PortableDoc` value came back empty. It now walks the type-keyed grammar too — extracting the readable body prose of the prose-bearing types (heading, eyebrow, byline, paragraph, ingress, pullquote, list, callout, code, note/notes, table, and the recursing containers figure/card/cards/columns/section/terminal) and deliberately contributing nothing for data-viz, forms, chat, media and structural blocks (they carry labels, numeric series or live-widget chrome, not reading-flow prose). The legacy Sanity `_type: 'block'` path is untouched, and a block that contributes no text injects no stray separator. A new per-type golden test pins the plain-text output for all 42 grammar types against a JS-owned contract with an explicit textless allow-list, so a silent drop is caught and reverting any prose clause goes red.

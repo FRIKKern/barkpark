@@ -28,11 +28,10 @@ defmodule Barkpark.Tasks.Release do
   # Emits a `task.released` mutation_events row (previous_worker + epochs in
   # the document payload) and mirrors the PubSub broadcast post-commit.
 
-  import Ecto.Query
-
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       insert_mutation_event!: 5,
       check_holder: 2,
       task_broadcast: 4,
@@ -126,21 +125,26 @@ defmodule Barkpark.Tasks.Release do
       |> Map.put("released_by", worker_id)
       |> Map.put("released_at", ts_iso)
 
+    # RULING (task-lifecycle-visibility wave, 2026-07-21): release ALWAYS
+    # lands "open" — deliberately NOT a restore of the pre-claim status.
+    # `claim.ex` snapshots no pre-claim lifecycle (a "blocked" label is
+    # already gone the moment the task is claimed), and the TtlSweeper reap
+    # twin makes the same unconditional landing. A true restore would
+    # entangle both twins for a board column that was lost at claim time;
+    # a released task goes back to being claimable, and claimable means
+    # "open". Protected by "a blocked-born task … releases to open" in
+    # release_test.exs — do not make this conditional.
     new_content =
       doc.content
       |> Map.put("lifecycle_status", "open")
       |> Map.put("claim", released_claim)
       |> Map.delete("assignee")
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 -> {:ok, %Document{doc | content: new_content, rev: new_rev}}
-      _ -> {:error, :stale_claim}
+    # PDS-D451: the receipt is the STORED row. Measured before this change —
+    # the reconstruction shipped the CLAIM's `updated_at`, byte-exact.
+    case fenced_content_write(doc, doc.rev, new_content, new_rev) do
+      {:ok, updated} -> {:ok, updated}
+      :stale -> {:error, :stale_claim}
     end
   end
 end

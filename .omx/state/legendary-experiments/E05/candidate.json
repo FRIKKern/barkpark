@@ -1,0 +1,18 @@
+{
+  "schema_version": "legendary-e05-candidate-contract/v1",
+  "assignment_id": "E05",
+  "candidate_id": "candidate-preservation-envelope",
+  "title": "Prototype a preservation-first compatibility envelope",
+  "authority_contract": {
+    "source": "The untouched source payload is the only authority.",
+    "derived_views": "Reader views and Task recommendations are non-authoritative annotations.",
+    "competing_truths": "Populated lower-precedence sources are reported as conflicts and never silently selected."
+  },
+  "fallback_precedence": {
+    "paper": ["blocks", "content.blocks", "body.blocks", "body_html", "body", "description", "content", "title"],
+    "task": ["brief.blocks", "description", "title"],
+    "malformed_authoritative_source": "Explicit supported error plus quarantine; lower precedence cannot mask it."
+  },
+  "rollback": "Remove the envelope and return source; semantic pre-image hash and residue set are verified for every fixture.",
+  "selection_authority": "Experimenter reports evidence only and does not select a winner."
+}

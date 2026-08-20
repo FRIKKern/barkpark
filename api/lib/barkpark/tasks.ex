@@ -53,6 +53,10 @@ defmodule Barkpark.Tasks do
           "epoch"  => 1
         },
         "parent_id" => "<parent-task-doc-id>"   # optional string (hierarchy)
+        "queue_gate" => %{                       # optional strict execution gate
+          "version" => 1,
+          "state" => "executable" | "human_gated" | "parked" | "evidence_stalled"
+        }
       }
 
   The validator enforces only what is REQUIRED + the enum shape of the five
@@ -84,11 +88,14 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.Fence
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue, Release}
+  alias Barkpark.Tasks.ClaimFence
   alias Barkpark.Tasks.Move
   alias Barkpark.Tasks.Prime
   alias Barkpark.Tasks.Pulse
+  alias Barkpark.Tasks.QueueGate
   alias Barkpark.Tasks.Rail
   alias Barkpark.Tasks.Schema
+  alias Barkpark.Tasks.Stage
   alias Barkpark.Tasks.Stamp
   alias Barkpark.Tasks.Validation
 
@@ -141,6 +148,14 @@ defmodule Barkpark.Tasks do
   @spec task_schema(String.t()) :: SchemaDefinition.t()
   def task_schema(dataset \\ "production"), do: Schema.task_schema(dataset)
 
+  @doc """
+  Just the `listener` schema struct (Personal Dev Fleet presence).
+  `dataset` defaults to `"production"`.
+  See `Barkpark.Tasks.Schema.listener_schema/1`.
+  """
+  @spec listener_schema(String.t()) :: SchemaDefinition.t()
+  def listener_schema(dataset \\ "production"), do: Schema.listener_schema(dataset)
+
   # ─── Validation (extracted → Barkpark.Tasks.Validation) ─────────────────────
 
   @doc """
@@ -156,6 +171,14 @@ defmodule Barkpark.Tasks do
   """
   @spec validate_kind_content(String.t(), map() | nil) :: :ok | {:error, map()}
   defdelegate validate_kind_content(kind, content), to: Validation
+
+  @doc "Persistable queue_gate-v1 states."
+  @spec queue_gate_states() :: [String.t()]
+  defdelegate queue_gate_states(), to: QueueGate, as: :persisted_states
+
+  @doc "Derive a Task's current execution class from its gate and live claim."
+  @spec execution_class(map() | nil, String.t() | nil) :: String.t()
+  defdelegate execution_class(content, worker_id \\ nil), to: QueueGate
 
   # ─── Criteria progress (extracted → Barkpark.Tasks.Criteria) ────────────────
 
@@ -388,6 +411,9 @@ defmodule Barkpark.Tasks do
           | {:error, :not_found | :not_ready | :blocked_by_unsatisfied_deps | :stale_claim}
   defdelegate claim_by_id(doc_id, worker_id, opts \\ []), to: Claim
 
+  @doc "Validate an exact live claim for assignment-bound evidence without renewing it."
+  defdelegate verify_claim_fence(task_id, expected), to: ClaimFence, as: :verify
+
   # claim/2, claim_by_id/3 + their helpers (fetch/check/resource-overlap/do_claim)
   # → Tasks.Claim (defdelegated). ready/1 + ready_query/1 → Tasks.Queue.
 
@@ -465,6 +491,23 @@ defmodule Barkpark.Tasks do
   defdelegate close(task_id, worker_id, opts \\ []), to: Close
 
   @doc """
+  Merge-event bridge — auto-stamp a task's explicit `"merge_gate" => true`
+  acceptance criterion when its PR merges, WITHOUT a manual lead close. Reuses
+  #3039's close-time autostamp marker semantics + the shared `merge_criteria`
+  rev-CAS write. STAMP-ONLY: never flips `lifecycle_status`, so every OTHER unmet
+  criterion stays visibly partial and the lead keeps close/3's claim/epoch
+  judgment. Idempotent, named outcomes:
+
+      Tasks.reconcile_merge_gate(task_uuid,
+        %{"prs" => [4621], "commit" => "abc1234"}, worker_id: "github-merge")
+
+  `{:ok, :stamped, [index]}` | `{:ok, :already_stamped}` | `{:ok, :no_marker}` |
+  `{:ok, :no_guardable_marker}` | `{:error, :unknown_task | :stale_rev}`.
+  See `Barkpark.Tasks.Close.reconcile_merge_gate/3`.
+  """
+  defdelegate reconcile_merge_gate(task_id, landed, opts \\ []), to: Close
+
+  @doc """
   Voluntarily RELEASE a claimed task — the on-demand unclaim (the TTL
   sweeper's reap is the timeout twin). Holder-only + epoch-fenced: flips
   `in_progress → open`, clears `claim.worker` and `assignee`, bumps the
@@ -517,6 +560,29 @@ defmodule Barkpark.Tasks do
   def pulse_by_id(task_uuid, worker_id, opts \\ []), do: Pulse.pulse(task_uuid, worker_id, opts)
 
   @doc """
+  Stage a task between the thought/backlog states — the sanctioned
+  `bp task stage <id> <state>` transition verb (`POST /v1/tasks/:doc_id/stage`).
+  Enforces the shared `Barkpark.Tasks.Transitions` legality table, writes the
+  `content.engagement` companion map on `→ considering`/`→ researching` and
+  clears it on `→ open`, emits an additive `task.staged` mutation_event, and
+  broadcasts post-commit. NO epoch machinery — thought is not contended work
+  (charter D3). Kills stay on `close` (`→ cancelled`), claims on `claim`.
+
+      Tasks.stage(task_uuid, "researching", object: "research", holder: "cycle-42")
+
+  Errors: `:not_found`, `{:illegal_transition, from, to}`,
+  `{:invalid_object, object}`, `:stale_claim`. See `Barkpark.Tasks.Stage`.
+  """
+  @spec stage(binary(), String.t(), keyword()) ::
+          {:ok, Document.t()}
+          | {:error,
+             :not_found
+             | :stale_claim
+             | {:illegal_transition, String.t(), String.t()}
+             | {:invalid_object, term()}}
+  defdelegate stage(task_id, to, opts \\ []), to: Stage
+
+  @doc """
   tt5: add/remove `content.labels` entries on a single task, advisory-lock +
   CAS-on-rev guarded, emitting a `task.relabeled` mutation_event. Powers the
   `bp task` labels endpoint (`POST /v1/tasks/:doc_id/labels`) — historically the
@@ -555,6 +621,27 @@ defmodule Barkpark.Tasks do
           {:ok, Document.t()} | {:error, term()}
   def update_paper_refs_by_id(task_id, add_slugs, remove_slugs, caller_token_id \\ nil),
     do: Mutations.update_paper_refs_by_id(task_id, add_slugs, remove_slugs, caller_token_id)
+
+  @doc """
+  Task 5 (session-handoff): add/remove `content.sessions` entries (session
+  doc-ids) on a single task, advisory-lock + CAS-on-rev guarded, emitting a
+  `task.referenced` mutation_event. Mirrors `update_paper_refs_by_id/4`
+  byte-for-byte — the only difference is the content key (`"sessions"`).
+  Sessions are referenced by slug string only; no FK.
+
+  `add_ids` and `remove_ids` are lists of exact session doc-id strings. The
+  result is a union add (dedup-preserving) minus the remove set. Idempotent:
+  re-adding an existing session ref or removing an absent one is a no-op on
+  that ref.
+
+  Returns `{:ok, doc}` (always re-reads + persists, even on a no-op set —
+  the rev bump + event keep the change observable), or `{:error, :not_found}`
+  / `{:error, :stale_claim}`.
+  """
+  @spec update_session_refs_by_id(binary(), [binary()], [binary()], binary() | nil) ::
+          {:ok, Document.t()} | {:error, term()}
+  def update_session_refs_by_id(task_id, add_ids, remove_ids, caller_token_id \\ nil),
+    do: Mutations.update_session_refs_by_id(task_id, add_ids, remove_ids, caller_token_id)
 
   @doc """
   rail-l3: re-parent a task (change `content.parent_id`). `task_uuid` is the

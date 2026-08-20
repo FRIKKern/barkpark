@@ -1,0 +1,6 @@
+# expect: P-002 3
+DIRECTION "add"
+INSERT BEFORE
+::: pinned heading :::
+## Pinned
+::: pinned heading :::

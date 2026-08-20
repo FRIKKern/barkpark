@@ -54,7 +54,7 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
 
     ws = create_workspace!()
     {:ok, %{key: key, raw: raw}} = Keys.mint(%{name: "Sweep — Kari", workspace_id: ws.id})
-    %{key: key, raw: raw}
+    %{key: key, raw: raw, workspace: ws}
   end
 
   test "a live ticket key gets NO more access than an anonymous caller on any route",
@@ -92,18 +92,18 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
   end
 
   test "a REVOKED ticket key is rejected on every gated route (like missing)",
-       %{key: key, raw: raw} do
+       %{key: key, raw: raw, workspace: ws} do
     gated = gated_v1_routes()
-    {:ok, _} = Keys.revoke(key.id)
+    {:ok, _} = Keys.revoke(key.id, ws.id)
 
     for {verb, path, _anon} <- gated do
       assert status_for(verb, path, raw) in [401, 403]
     end
   end
 
-  test "ROTATE kills the old secret instantly", %{key: key, raw: old_raw} do
+  test "ROTATE kills the old secret instantly", %{key: key, raw: old_raw, workspace: ws} do
     gated = gated_v1_routes()
-    {:ok, %{raw: new_raw}} = Keys.rotate(key.id)
+    {:ok, %{raw: new_raw}} = Keys.rotate(key.id, ws.id)
 
     # Context-level: the old secret no longer resolves; the new one does.
     assert {:error, :unauthorized} = Keys.verify(old_raw)
@@ -116,8 +116,8 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
   end
 
   test "a PAUSED key is a distinguishable 403 at the RequireTicketKey gate",
-       %{key: key, raw: raw} do
-    {:ok, _} = Keys.pause(key.id)
+       %{key: key, raw: raw, workspace: ws} do
+    {:ok, _} = Keys.pause(key.id, ws.id)
 
     # No `/v1/tickets` route exists in this worktree, so exercise the gate the
     # exempt prefix will run behind directly. Paused → 403 with the operator
@@ -126,7 +126,7 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
     assert paused.status == 403
     assert Jason.decode!(paused.resp_body)["error"]["message"] =~ "key paused"
 
-    {:ok, _} = Keys.unpause(key.id)
+    {:ok, _} = Keys.unpause(key.id, ws.id)
     live = ticket_gate(raw)
     refute live.halted
     assert live.assigns[:ticket_key].id == key.id

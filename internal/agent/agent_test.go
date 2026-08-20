@@ -242,3 +242,49 @@ func TestRunLoopsUntilContextDone(t *testing.T) {
 		t.Errorf("reportCount = %d, want >= 2", rc)
 	}
 }
+
+// TestHTTPClientNilFallbackHasTimeout proves the nil-HTTPClient fallback is
+// Timeout-bearing (not http.DefaultClient, whose Timeout is 0 == no
+// deadline) — a hung control-plane connection must not freeze the
+// report+poll loop forever with no crash and no log.
+func TestHTTPClientNilFallbackHasTimeout(t *testing.T) {
+	a := &Agent{}
+	c := a.httpClient()
+	if c.Timeout == 0 {
+		t.Fatal("httpClient() with nil HTTPClient has Timeout == 0, want a non-zero deadline")
+	}
+}
+
+// TestRunOnceTimesOutAgainstHangingServer proves a hung control-plane
+// connection surfaces as a timeout error from a single RunOnce iteration
+// rather than blocking forever. It injects a client with a short timeout
+// (rather than waiting out the real 30s fallback) against a server that
+// never writes a response, so the test itself stays fast.
+func TestRunOnceTimesOutAgainstHangingServer(t *testing.T) {
+	const clientTimeout = 50 * time.Millisecond
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/agent/report", func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(10 * clientTimeout) // outlast the client's timeout, then respond
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a := &Agent{
+		ControlURL:   srv.URL,
+		Token:        "tok",
+		HTTPClient:   &http.Client{Timeout: clientTimeout},
+		ReportProbes: ReportConfig{Runner: &gitFakeRunner{head: "x"}},
+	}
+
+	start := time.Now()
+	err := a.RunOnce(context.Background())
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("RunOnce returned nil against a hanging server, want a timeout error")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("RunOnce took %s to return an error, want it to return promptly on client timeout", elapsed)
+	}
+}

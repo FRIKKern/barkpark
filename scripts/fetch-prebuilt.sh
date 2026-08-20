@@ -10,6 +10,7 @@
 #           a checksum failure, or an extract/swap error. The caller
 #           (apply-update.sh) then runs deploy-rebuild.sh — so this is NEVER worse
 #           than compiling; it only ever makes the happy path fast.
+# Exit 3  — blue/green slot layout detected; the slot deployer owns all writes.
 #
 # The stamp gate is the safety core: a build compiled on a different Elixir/erts/
 # arch than this box is REFUSED (bytecode/NIF incompatibility), never swapped in.
@@ -17,6 +18,12 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 REPO="$PWD"
+
+if [ -d "$REPO/.slots" ]; then
+  echo "[fetch-prebuilt] blue/green slot layout detected — use deploy/instance-deploy.sh" >&2
+  exit 3
+fi
+
 SHA="${1:-}"
 [ -n "$SHA" ] || { echo "[fetch-prebuilt] usage: fetch-prebuilt.sh <sha>" >&2; exit 1; }
 

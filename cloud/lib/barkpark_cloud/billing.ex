@@ -34,14 +34,19 @@ defmodule BarkparkCloud.Billing do
     * `billing_portal_url/2` — open a Stripe Customer Portal session for a team.
     * `request_cancel/2`     — customer-initiated cancel (grace or immediate).
 
-  NOT here (still deferred): invoices, proration / quantity changes, refunds,
-  per-tier quotas, and the nightly reconciliation sweep (designed as an Oban
-  `ReconcileWorker`, blocked on the missing `cloud/` Oban substrate). The plan
-  tiers (`free` / `supporter` / `support_plus`) are a `validate_inclusion` list
-  on `Subscription`, not a pricing engine — real prices/price-ids are the human
-  task cloud-17.
+  NOT here (still deferred): invoices, proration / quantity changes, refunds, and
+  per-tier quotas. The nightly reconciliation sweep is NOT among them — it is
+  decided against (charter D657) — grace is enforced synchronously at request time
+  by `entitled?/1`; nothing needs to wake up for it to end. Nor was it ever blocked
+  on a missing substrate: Oban is supervised in `application.ex` and 17 modules
+  under `cloud/lib` already `use Oban.Worker`.
+
+  The plan tiers (`free` / `supporter` / `support_plus`) are a `validate_inclusion`
+  list on `Subscription`, not a pricing engine — real prices/price-ids are the
+  human task cloud-17.
   """
   import Ecto.Query, warn: false
+  require Logger
 
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Accounts.Team
@@ -53,8 +58,12 @@ defmodule BarkparkCloud.Billing do
   @currency "usd"
 
   # The dunning grace window: how long a `past_due` team stays entitled after a
-  # failed payment before its managed boxes are suspended. Anchored deterministically
-  # at `mark_past_due` time (the Stripe Invoice object carries no period end), so the
+  # failed payment. What elapse costs the team is ISOLATION, not a stop: it flips
+  # `entitled?/1`, whose only lib call site outside this module is `router.ex`'s
+  # `entitled_or_trial_started?/1` go-live gate — so the team cannot LAUNCH A NEW
+  # INSTANCE. Nothing running stops, nothing is deleted, the deploy pipeline is
+  # untouched, and Hetzner and Stripe keep billing. Anchored deterministically at
+  # `mark_past_due` time (the Stripe Invoice object carries no period end), so the
   # grace is payload-shape-independent (Coolify keeps a past_due team running ~3 days).
   @grace_days 3
 
@@ -66,6 +75,12 @@ defmodule BarkparkCloud.Billing do
   # so ops can retune without a code change — mirrors `prices` / `limits`).
   @default_trial_days 14
 
+  # Plans that NEVER open a checkout session: `free` is the no-charge signup
+  # tier and `trial` is granted with no card. Subtracted from the schema's plan
+  # enumeration to derive `checkout_plans/0` — so a new tier added to
+  # `Subscription` is checkout-eligible by default rather than silently absent.
+  @never_checkout_plans ~w(free trial)
+
   @doc """
   The configured billing gateway module. Resolved at call time (not compile
   time) so runtime.exs's prod override is honoured — mirrors `Registry.Vault`'s
@@ -76,6 +91,18 @@ defmodule BarkparkCloud.Billing do
   def gateway do
     Application.get_env(:barkpark_cloud, __MODULE__, [])
     |> Keyword.get(:gateway, BarkparkCloud.Billing.StubGateway)
+  end
+
+  # The Registry module `reconcile_plan_limit/1` writes through. Resolved at
+  # call time and swappable ONLY via the same `Application.get_env(:barkpark_cloud,
+  # __MODULE__, [])` keyword this file already uses for `gateway/0` — real code
+  # always gets the real `Registry`; the `:registry` key exists purely so a test
+  # can force ONE barkpark's suspend/unsuspend to fail and prove the per-row
+  # isolation below actually holds (see billing_reconcile_isolation_test.exs).
+  @spec registry() :: module()
+  defp registry do
+    Application.get_env(:barkpark_cloud, __MODULE__, [])
+    |> Keyword.get(:registry, Registry)
   end
 
   @doc "The currency the control plane bills in (ISO-4217, lower-case)."
@@ -94,9 +121,21 @@ defmodule BarkparkCloud.Billing do
   an unpriced plan can't open one). The actual subscription is marked active
   later, when Stripe posts a signed `checkout.session.completed` webhook that
   `subscribe/2` lands.
+
+  PRE-FLIGHT REFUSAL (D553). A resolved price is NOT enough to open a session.
+  With prices wired but no webhook signing secret, `checkout_capability/0` is
+  `:unverifiable`: a REAL hosted session opens and the card is charged, while
+  `StripeGateway.verify_webhook/2` returns `{:error, :no_secret}` forever, so the
+  activation event can never land and the customer pays for nothing. This
+  function therefore consults `checkout_capability/0` and returns
+  `{:error, :billing_not_configured}` BEFORE `create_checkout_session/3` is ever
+  called. The check sits AFTER the price resolution so an unknown/"free" plan
+  keeps its existing `:plan_invalid` answer — the new refusal fires exactly in
+  the hole where a price resolves but the money could never be honoured.
   """
   @spec checkout(Team.t() | binary(), Subscription.plan() | atom() | String.t()) ::
-          {:ok, BarkparkCloud.Billing.Gateway.checkout_url()} | {:error, :plan_invalid | term}
+          {:ok, BarkparkCloud.Billing.Gateway.checkout_url()}
+          | {:error, :plan_invalid | :billing_not_configured | term}
   def checkout(team, plan) do
     plan = to_string(plan)
 
@@ -105,7 +144,11 @@ defmodule BarkparkCloud.Billing do
         {:error, :plan_invalid}
 
       price_id ->
-        gateway().create_checkout_session(team_id(team), plan, price_id: price_id)
+        if checkout_capability() == :available do
+          gateway().create_checkout_session(team_id(team), plan, price_id: price_id)
+        else
+          {:error, :billing_not_configured}
+        end
     end
   end
 
@@ -172,10 +215,18 @@ defmodule BarkparkCloud.Billing do
 
   @doc """
   Whether `team` is AT or OVER its instance ceiling — the create-time QUOTA guard
-  (Coolify's `serverLimitReached`, inclusive `>=`). Counts ALL of the team's
-  instances, INCLUDING reconciler-suspended ones (a suspended overflow box is
-  still "held", re-enabled on re-upgrade), so a downgraded team can never create
-  around its own suspended overflow. `>=` because at-limit blocks the NEXT create.
+  for a MAIN (Coolify's `serverLimitReached`, inclusive `>=`). Counts ALL of the
+  team's instance rows, INCLUDING reconciler-suspended ones (a suspended overflow
+  box is still "held", re-enabled on re-upgrade) AND fleet supports, so a
+  downgraded team can never create around its own suspended overflow. `>=` because
+  at-limit blocks the NEXT create.
+
+  This guard fires on the MAIN create path (`Registry.register_barkpark/2`). It is
+  NOT consulted for fleet SUPPORT inserts: PDF-D86 makes supports quota-exempt, so
+  `Registry.register_support_barkpark/2` inserts directly and never calls this
+  function. A support therefore rides past a saturated ceiling, while a MAIN at
+  the ceiling is still blocked — the exception is role-scoped to support inserts
+  and lives in exactly one place (that function).
 
   The quota gate applies ONLY to a team with an ACTIVE subscription — it is the
   per-PLAN ceiling. A team with no active subscription is NOT "at a quota of 0";
@@ -195,10 +246,19 @@ defmodule BarkparkCloud.Billing do
     end
   end
 
-  # The configured per-plan ceilings, read at call time. Falls back to
-  # @default_limits when nothing is configured.
+  @doc """
+  The configured per-plan managed-instance ceilings, read at call time. Falls
+  back to `@default_limits` when nothing is configured.
+
+  PUBLIC because the ceiling is mirrored OUTSIDE this module: the Cloud console
+  re-declares the same numerals in `app.js`'s `PLAN_CATALOG`, where they drive
+  the tier cards' feature copy. `cch-w49-s3`'s cross-layer mirror guard
+  (`test/barkpark_cloud/billing_client_mirror_test.exs`) calls this from the
+  booted BEAM and compares it against the console's own exported constant, so
+  the two sides cannot drift silently. Read-only; no caller mutates the map.
+  """
   @spec limits() :: %{optional(String.t()) => non_neg_integer()}
-  defp limits do
+  def limits do
     Application.get_env(:barkpark_cloud, __MODULE__, [])
     |> Keyword.get(:limits, @default_limits)
   end
@@ -216,7 +276,10 @@ defmodule BarkparkCloud.Billing do
 
   Keys STRICTLY on the `"quota_exceeded"` reason: a box suspended by a BILLING
   lapse (`"billing_lapsed"` / `"billing_past_due"`) is NEVER restored here — the
-  two enforcement axes are independent. Returns `%{suspended: n, restored: m}`.
+  two enforcement axes are independent. Returns `%{suspended: n, restored: m}` —
+  counts reflect only the rows that actually transitioned; a single row whose
+  suspend/unsuspend changeset fails is logged and skipped rather than sinking
+  the whole team's batch (see `suspend_one/2` / `unsuspend_one/1`).
   Idempotent; NEVER deletes data (suspend is a reversible flag).
 
   Delivered as a pure context function so it is callable SYNCHRONOUSLY off the
@@ -242,54 +305,147 @@ defmodule BarkparkCloud.Billing do
         live
         |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
         |> Enum.take(overflow)
-        |> Enum.map(fn bp ->
-          {:ok, bp} = Registry.suspend_barkpark(bp, @quota_suspended_reason)
-          Events.broadcast(tid, "barkpark.suspended", %{barkpark_id: bp.id})
-          bp
-        end)
+        |> Enum.map(&suspend_one(&1, tid))
+        |> Enum.reject(&is_nil/1)
 
       %{suspended: length(suspended), restored: 0}
     else
       restored =
         tid
         |> Registry.list_quota_suspended_barkparks()
-        |> Enum.map(fn bp ->
-          {:ok, bp} = Registry.unsuspend_barkpark(bp)
-          Events.broadcast(tid, "barkpark.restored", %{barkpark_id: bp.id})
-          bp
-        end)
+        |> Enum.map(&unsuspend_one(&1, tid))
+        |> Enum.reject(&is_nil/1)
 
       %{suspended: 0, restored: length(restored)}
+    end
+  end
+
+  # Suspend ONE barkpark for the quota reconcile. `{:ok, _}` broadcasts and
+  # returns the updated row; `{:error, changeset}` — a hard-match here would
+  # MatchError and sink the WHOLE team's batch on one bad row — is logged and
+  # skipped (returns nil, filtered by the caller), mirroring the
+  # log-don't-crash-continue intent of `Health.StalenessWorker.evaluate/1`.
+  defp suspend_one(bp, tid) do
+    case registry().suspend_barkpark(bp, @quota_suspended_reason) do
+      {:ok, updated} ->
+        Events.broadcast(tid, "barkpark.suspended", %{barkpark_id: updated.id})
+        updated
+
+      {:error, changeset} ->
+        Logger.error(
+          "Billing.reconcile_plan_limit: suspend failed for barkpark #{bp.id}: #{inspect(changeset.errors)}"
+        )
+
+        nil
+    end
+  end
+
+  # Unsuspend ONE barkpark for the quota reconcile. Same isolation as
+  # `suspend_one/2` — one row's changeset failure is logged and skipped, never
+  # crashes the restore batch.
+  defp unsuspend_one(bp, tid) do
+    case registry().unsuspend_barkpark(bp) do
+      {:ok, updated} ->
+        Events.broadcast(tid, "barkpark.restored", %{barkpark_id: updated.id})
+        updated
+
+      {:error, changeset} ->
+        Logger.error(
+          "Billing.reconcile_plan_limit: unsuspend failed for barkpark #{bp.id}: #{inspect(changeset.errors)}"
+        )
+
+        nil
     end
   end
 
   @doc """
   Is the billing gateway fully configured to actually take money right now?
 
-  For the in-memory `StubGateway` (dev/test) this is always true — it needs no
-  external config. For the real `StripeGateway` it is true only when at least one
-  plan price is wired (`STRIPE_PRICE_*`) AND a webhook signing secret is set
-  (`STRIPE_WEBHOOK_SECRET`) — without both, a checkout can't resolve a price and
-  an activation webhook can't be verified, so the team could never actually
-  subscribe. The router uses this to surface an operator-actionable
-  `billing_not_configured` instead of a misleading `plan_invalid` (BILL-2).
+  A PROJECTION of `checkout_capability/0` (`== :available`) — the two cannot
+  drift because there is only one computation. True only when at least one plan
+  price is wired (`STRIPE_PRICE_*`) AND a webhook signing secret is set
+  (`STRIPE_WEBHOOK_SECRET`); always true for the in-memory `StubGateway`, which
+  needs no external config. The router uses this to surface an
+  operator-actionable `billing_not_configured` instead of a misleading
+  `plan_invalid` (BILL-2). Callers that need to know WHICH way it fails — a dead
+  button vs. a chargeable-but-unactivatable session — want the enum, not this.
   """
   @spec configured?() :: boolean()
-  def configured? do
+  def configured?, do: checkout_capability() == :available
+
+  @doc """
+  The plans a customer could actually be sent to checkout for RIGHT NOW — the
+  checkout-eligible universe filtered by whether each plan's gateway price id
+  resolves at this moment.
+
+  DERIVED, never declared: the universe is the `Subscription` plan enumeration
+  minus the plans that never open a checkout (`free` is the no-charge signup
+  tier; `trial` is granted with no card), and membership is decided by CALLING
+  `price_id/1`. So a half-wired deploy (only `supporter` priced) reports exactly
+  `["supporter"]` instead of a constant that claims both paid tiers — the case a
+  `configured?` boolean structurally cannot express, and the case where the
+  console otherwise blames the customer's plan choice for the deploy's gap.
+  """
+  @spec priced_plans() :: [String.t()]
+  def priced_plans do
+    Enum.filter(checkout_plans(), &is_binary(price_id(&1)))
+  end
+
+  @doc """
+  The checkout-eligible plan universe: every `Subscription` plan except the ones
+  that never open a checkout session. Server-owned — nothing client-supplied
+  reaches it — and derived from the schema's enumeration so a new tier is in
+  scope the moment it is added there.
+  """
+  @spec checkout_plans() :: [String.t()]
+  def checkout_plans, do: Subscription.plans() -- @never_checkout_plans
+
+  @doc """
+  Can this deploy actually take money right now, and if not, HOW does it fail?
+
+  A three-value answer because the two failure modes are not the same event:
+
+    * `:unconfigured` — no paid plan has a price id, so `checkout/2` can only
+      ever refuse. Harmless: the button is dead, no card is touched.
+    * `:unverifiable` — at least one plan IS priced but there is no webhook
+      signing secret. This is the DANGEROUS one: a real hosted Checkout Session
+      opens, the customer's card IS charged, and `verify_webhook/2` returns
+      `{:error, :no_secret}` forever, so the activation event can never be
+      trusted and the subscription can never go active. `checkout/2` refuses
+      pre-flight (see its docs) precisely so this state cannot move money.
+    * `:available` — priced and verifiable; checkout may proceed.
+
+  For the in-memory `StubGateway` (dev/test) this is always `:available` — it
+  needs no external config and moves no money.
+
+  `configured?/0` is a PROJECTION of this function (`== :available`), so the
+  boolean and the enum can never drift apart.
+  """
+  @spec checkout_capability() :: :available | :unconfigured | :unverifiable
+  def checkout_capability do
     case gateway() do
       BarkparkCloud.Billing.StripeGateway ->
-        prices =
-          Application.get_env(:barkpark_cloud, __MODULE__, []) |> Keyword.get(:prices, %{})
-
-        secret =
-          Application.get_env(:barkpark_cloud, BarkparkCloud.Billing.StripeGateway, [])
-          |> Keyword.get(:webhook_secret)
-
-        map_size(prices) > 0 and is_binary(secret) and secret != ""
+        cond do
+          priced_plans() == [] -> :unconfigured
+          not webhook_secret?() -> :unverifiable
+          true -> :available
+        end
 
       _ ->
-        true
+        :available
     end
+  end
+
+  # Is a non-empty webhook signing secret wired? Read at call time, same seam
+  # `StripeGateway.verify_webhook/2` reads — if this is false that function
+  # returns {:error, :no_secret} for every event, forever.
+  @spec webhook_secret?() :: boolean()
+  defp webhook_secret? do
+    secret =
+      Application.get_env(:barkpark_cloud, BarkparkCloud.Billing.StripeGateway, [])
+      |> Keyword.get(:webhook_secret)
+
+    is_binary(secret) and secret != ""
   end
 
   @doc """
@@ -474,9 +630,32 @@ defmodule BarkparkCloud.Billing do
       "active" ->
         case subscription_by_customer(cus) do
           %Subscription{status: "past_due"} = sub -> recover_subscription(sub)
-          %Subscription{status: "active"} -> {:ok, :ignored}
+          %Subscription{status: "active"} = sub -> sync_cancel_flag(sub, object)
           _ -> activate_from_metadata(object)
         end
+
+      _ ->
+        {:ok, :ignored}
+    end
+  end
+
+  # An already-active row is not a no-op event: a Stripe Customer Portal
+  # UN-CANCEL (or a re-cancel) arrives as exactly this — status unchanged at
+  # "active", `cancel_at_period_end` flipped. Before cch-w57-s2 the whole payload
+  # was discarded, so a team that un-cancelled in the portal kept an "Ending" pill
+  # and no Cancel control in the console forever. Lift ONLY that one flag, and
+  # only when the payload STATES it as a boolean and it DIFFERS from the row — an
+  # absent field means "Stripe said nothing", never `false`.
+  #
+  # Deliberately NOT syncing `current_period_end` here (charter D672): that single
+  # column carries the dunning grace anchor, the trial expiry AND Stripe's renewal
+  # date, and both `entitled?/1` and `maybe_enforce/1` branch on exactly it — a
+  # payload-sourced write there can extend grace, suspend boxes in-band, or (on an
+  # absent field) write nil and leave an unpaid team entitled forever.
+  defp sync_cancel_flag(%Subscription{} = sub, object) do
+    case Map.get(object, "cancel_at_period_end") do
+      flag when is_boolean(flag) and flag != sub.cancel_at_period_end ->
+        update_status(sub, %{cancel_at_period_end: flag})
 
       _ ->
         {:ok, :ignored}
@@ -562,15 +741,46 @@ defmodule BarkparkCloud.Billing do
         {:ok, :already_active}
 
       nil ->
-        %Subscription{}
-        |> Subscription.changeset(%{
-          team_id: team_id,
-          plan: plan,
-          status: "active",
-          gateway_customer_id: customer_id,
-          gateway_subscription_id: subscription_id
-        })
-        |> Repo.insert()
+        inserted =
+          %Subscription{}
+          |> Subscription.changeset(%{
+            team_id: team_id,
+            plan: plan,
+            status: "active",
+            gateway_customer_id: customer_id,
+            gateway_subscription_id: subscription_id
+          })
+          |> Repo.insert()
+
+        # cch-w50-s3: a team reaching this branch after a CANCEL still has every
+        # managed box suspended with `"billing_lapsed"` — a reason the quota
+        # reconciler never restores (see reconcile_plan_limit/1). Lift the billing
+        # suspension here so the console's "your instances come back when you
+        # resubscribe" is actually executed by something.
+        #
+        # ORDER IS LOAD-BEARING: this runs INSIDE do_activate_from_session, i.e.
+        # BEFORE activate_from_session's reconcile_plan_limit/1. Resume-then-
+        # reconcile makes the fleet visible to the reconciler, which then re-stamps
+        # any overflow as `"quota_exceeded"` against the NEW ceiling. Moving it
+        # after the reconcile inverts that: the reconciler would see zero live
+        # boxes, suspend nothing, and the blanket resume would then run a 5-box
+        # fleet on a 3-box plan. Pinned by billing_lifecycle_test.exs
+        # "resubscribing on a SMALLER plan restores only up to the new ceiling".
+        #
+        # cch-w55-s4: this is `resume_billing_suspended/1`, NOT the reason-blind
+        # `resume_team_barkparks/1` it used to be. The blind resume also cleared
+        # `quota_exceeded` rows; here that was self-correcting (the reconcile
+        # below re-stamped them, at the cost of a reset `suspended_at` and an
+        # UNPAIRED `barkpark.suspended` in the event feed, since the bulk
+        # `update_all` broadcasts nothing). At the OTHER call site —
+        # recover_subscription/1 — nothing followed it, so the over-grant was
+        # permanent. Both call sites are narrowed together: the billing axis
+        # lifts the billing reasons, on managed rows, and no others.
+        with {:ok, %Subscription{}} <- inserted do
+          {:ok, _count} = Registry.resume_billing_suspended(team_id)
+        end
+
+        inserted
     end
   end
 
@@ -628,8 +838,16 @@ defmodule BarkparkCloud.Billing do
   Invoice object has no period end — only the Subscription object does) we anchor
   grace at `now + #{@grace_days}d` so a past_due team is NOT entitled forever. A
   past_due sub is STILL entitled within grace (Coolify keeps a past_due team
-  running and emails admins) — `maybe_enforce/1` only suspends the team's managed
-  boxes once the grace window has elapsed.
+  running and emails admins).
+
+  Grace elapse does NOT suspend anything on the webhook path. Because this
+  function re-anchors `current_period_end` `#{@grace_days}` days FORWARD on every
+  call that carries no explicit one (`Map.put_new_lazy/3`, below), `maybe_enforce/1`'s
+  `:gt -> :ok` arm always fires and its `Registry.suspend_team_barkparks/2` call is
+  unreachable in production — only a caller passing an explicit PAST
+  `current_period_end` (the tests do) reaches it. What elapsed grace actually costs
+  the team is ISOLATION: `entitled?/1` goes false and the go-live gate refuses to
+  launch a NEW instance. Nothing stops, nothing is deleted.
   """
   ## dunning-email-dedup: a first `active → past_due` transition returns the
   ## `%Subscription{}` (the router seam emails the team ONCE); a repeat call on a
@@ -637,9 +855,10 @@ defmodule BarkparkCloud.Billing do
   ## dunning event — returns `{:ok, :already_past_due}` so the router skips the
   ## duplicate email. This mirrors `recover_or_ignore/1`, which only recovers a
   ## sub that IS `past_due`. The transition is detected BEFORE the write, but the
-  ## write STILL runs on both paths: `past_due` stays set, the grace anchor
-  ## re-applies, and `maybe_enforce/1` re-runs — so the DB (and the deferred
-  ## reconcile's re-anchor-into-the-past) is idempotently correct either way.
+  ## write STILL runs on both paths: `past_due` stays set and `maybe_enforce/1`
+  ## re-runs. Note what the re-applied anchor does — it slides FORWARD, another
+  ## `@grace_days` out on every attr-less repeat, so a redelivery EXTENDS
+  ## grace rather than letting it elapse (billing_lifecycle_test.exs drives this).
   ## ONLY the email is de-duplicated.
   @spec mark_past_due(Subscription.t(), map()) ::
           {:ok, Subscription.t() | :already_past_due} | {:error, term}
@@ -678,22 +897,32 @@ defmodule BarkparkCloud.Billing do
 
   @doc """
   Recover `sub` from dunning back to `active` (a failed invoice was paid). Clears
-  `past_due` and RESUMES the team's suspended Barkparks.
+  `past_due` and lifts the team's BILLING suspensions —
+  `Registry.resume_billing_suspended/1`, reason- and mode-scoped.
+
+  cch-w55-s4: this used to call the reason-blind `resume_team_barkparks/1` with
+  NOTHING behind it (no reconcile), so paying a failed invoice also cleared
+  `"quota_exceeded"` flags a downgrade had set — free capacity, with nothing
+  scheduled to take it back — and revived `self_hosted` rows the suspend side
+  refuses to touch. A paid invoice settles the billing axis and only that.
   """
   @spec recover_subscription(Subscription.t()) :: {:ok, Subscription.t()} | {:error, term}
   def recover_subscription(%Subscription{} = sub) do
     with {:ok, sub} <-
            update_status(sub, %{status: "active", past_due: false, canceled_at: nil}) do
-      {:ok, _count} = Registry.resume_team_barkparks(sub.team_id)
+      {:ok, _count} = Registry.resume_billing_suspended(sub.team_id)
       {:ok, sub}
     end
   end
 
-  # past_due is entitled while inside the grace window; past it (or with no known
-  # period end set explicitly in the past) the team's managed boxes are
-  # suspended with the softer "billing_past_due" reason. The nightly reconcile
-  # sweep (deferred, §6) is the belt-and-braces for a grace that elapses with no
-  # further webhook.
+  # past_due is entitled while inside the grace window; past it, the team's managed
+  # boxes are suspended with the softer "billing_past_due" reason. In PRODUCTION
+  # that suspend is unreachable: the only caller is `mark_past_due/2`, which
+  # re-anchors the period end `@grace_days` FORWARD whenever the caller supplies
+  # none, so the `:gt -> :ok` arm always wins. Only an explicit PAST
+  # `current_period_end` gets here. Nothing sweeps in behind it either — charter
+  # D657 decided against a nightly reconciler: a grace that elapses with no further
+  # webhook is enforced synchronously at request time by `entitled?/1`.
   defp maybe_enforce(%Subscription{status: "past_due", current_period_end: pe, team_id: tid}) do
     if is_nil(pe) or DateTime.compare(pe, DateTime.utc_now()) == :gt do
       :ok

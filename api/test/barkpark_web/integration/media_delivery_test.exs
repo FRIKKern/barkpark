@@ -9,6 +9,12 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
 
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
 
+  # Visibility-aware policy for PUBLIC local media (charter http-edge-truth
+  # D12). Uploads default to bp_visibility "public", so every asset served in
+  # this file lands on the public arm; the non-public arms are pinned at the
+  # unit level in test/barkpark/media/delivery/urls_test.exs.
+  @public_policy "public, max-age=86400, must-revalidate"
+
   setup do
     Auth.create_token(
       "barkpark-dev-token",
@@ -97,7 +103,7 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
         |> get(url)
 
       assert conn.status == 200
-      assert get_resp_header(conn, "cache-control") == ["public, max-age=31536000, immutable"]
+      assert get_resp_header(conn, "cache-control") == [@public_policy]
       assert get_resp_header(conn, "etag") != []
 
       etag = List.first(get_resp_header(conn, "etag"))
@@ -114,35 +120,28 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
   end
 
   describe "GET /media/renditions/:id/:preset" do
+    # Excluded by default (test_helper.exs) so a machine without libvips stays
+    # green via a real ExUnit skip instead of an in-test `assert true`. Opt in
+    # with `mix test --include requires_vips` — on a box that lacks `vips`,
+    # this then fails for real instead of passing vacuously.
     @tag :requires_vips
     test "serves generated thumb rendition", %{conn: conn} do
-      unless vips_available?() do
-        assert true
-      else
-        created =
-          conn
-          |> authed()
-          |> post(~p"/v1/media/production/upload", %{"file" => png_upload()})
-          |> json_response(201)
+      created =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/upload", %{"file" => png_upload()})
+        |> json_response(201)
 
-        thumb_url = created["result"]["thumbnailUrl"]
+      thumb_url = created["result"]["thumbnailUrl"]
 
-        conn =
-          build_conn()
-          |> get(thumb_url)
+      conn =
+        build_conn()
+        |> get(thumb_url)
 
-        assert conn.status == 200
-        assert get_resp_header(conn, "cache-control") == ["public, max-age=31536000, immutable"]
+      assert conn.status == 200
+      assert get_resp_header(conn, "cache-control") == [@public_policy]
 
-        cleanup(created)
-      end
-    end
-  end
-
-  defp vips_available?() do
-    case System.find_executable("vips") do
-      nil -> false
-      _ -> true
+      cleanup(created)
     end
   end
 

@@ -1,0 +1,1374 @@
+{
+  "pin": "591fdcd53",
+  "cells": {
+    "add-error-shape--A--1": {
+      "cell": "add-error-shape--A--1",
+      "chore": "add-error-shape",
+      "arm": "A",
+      "rep": "1",
+      "cap_usd": 1.5,
+      "total_cost_usd": 0.5633282999999999,
+      "tokens": {
+        "input": 16,
+        "output": 1478,
+        "cache_creation": 61828,
+        "cache_read": 567141
+      },
+      "tokens_total": 630463,
+      "duration_ms": 56000,
+      "warm_ms": 85000,
+      "gates_green": true,
+      "diff_sha256": "17f6ffab2bd310833e91a574ecc01579267e233f85660ecce32b08eedf5044dd",
+      "reversible": true,
+      "agent_gate": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "add-error-shape--A--2": {
+      "cell": "add-error-shape--A--2",
+      "chore": "add-error-shape",
+      "arm": "A",
+      "rep": "2",
+      "cap_usd": 1.5,
+      "total_cost_usd": 0.6080534999999999,
+      "tokens": {
+        "input": 18,
+        "output": 1969,
+        "cache_creation": 63679,
+        "cache_read": 654635
+      },
+      "tokens_total": 720301,
+      "duration_ms": 64000,
+      "warm_ms": 115000,
+      "gates_green": true,
+      "diff_sha256": "17f6ffab2bd310833e91a574ecc01579267e233f85660ecce32b08eedf5044dd",
+      "reversible": true,
+      "agent_gate": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "add-error-shape--A--3": {
+      "cell": "add-error-shape--A--3",
+      "chore": "add-error-shape",
+      "arm": "A",
+      "rep": "3",
+      "cap_usd": 1.5,
+      "total_cost_usd": 0.4152822,
+      "tokens": {
+        "input": 14,
+        "output": 1333,
+        "cache_creation": 45584,
+        "cache_read": 405804
+      },
+      "tokens_total": 452735,
+      "duration_ms": 52000,
+      "warm_ms": 107000,
+      "gates_green": true,
+      "diff_sha256": "17f6ffab2bd310833e91a574ecc01579267e233f85660ecce32b08eedf5044dd",
+      "reversible": true,
+      "agent_gate": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "add-error-shape--Ap--1": {
+      "cell": "add-error-shape--Ap--1",
+      "chore": "add-error-shape",
+      "arm": "Ap",
+      "rep": "1",
+      "cap_usd": 1.5,
+      "total_cost_usd": 0.5297577,
+      "tokens": {
+        "input": 14,
+        "output": 2159,
+        "cache_creation": 58991,
+        "cache_read": 477949
+      },
+      "tokens_total": 539113,
+      "duration_ms": 55000,
+      "warm_ms": 85000,
+      "gates_green": true,
+      "diff_sha256": "a0530fb9bb61143295dfb4527e4e1abc27ab6831aaa9bab236ae4e0201a5c9c6",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "add-error-shape--Ap--2": {
+      "cell": "add-error-shape--Ap--2",
+      "chore": "add-error-shape",
+      "arm": "Ap",
+      "rep": "2",
+      "cap_usd": 1.5,
+      "total_cost_usd": 0.5060627999999999,
+      "tokens": {
+        "input": 16,
+        "output": 1805,
+        "cache_creation": 53509,
+        "cache_read": 526286
+      },
+      "tokens_total": 581616,
+      "duration_ms": 53000,
+      "warm_ms": 92000,
+      "gates_green": true,
+      "diff_sha256": "a0530fb9bb61143295dfb4527e4e1abc27ab6831aaa9bab236ae4e0201a5c9c6",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "add-error-shape--B--1": {
+      "cell": "add-error-shape--B--1",
+      "chore": "add-error-shape",
+      "arm": "B",
+      "rep": "1",
+      "cap_usd": 3.0,
+      "total_cost_usd": 0.55239,
+      "tokens": {
+        "input": 16,
+        "output": 2143,
+        "cache_creation": 59117,
+        "cache_read": 551650
+      },
+      "tokens_total": 612926,
+      "duration_ms": 56000,
+      "warm_ms": 91000,
+      "gates_green": true,
+      "diff_sha256": "d731cf7325ac8eee2edf6f13b390b03a8eb70a11f967fa010212c19c9d7464d4",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "add-error-shape--B--2": {
+      "cell": "add-error-shape--B--2",
+      "chore": "add-error-shape",
+      "arm": "B",
+      "rep": "2",
+      "cap_usd": 3.0,
+      "total_cost_usd": 0.5509188,
+      "tokens": {
+        "input": 16,
+        "output": 2055,
+        "cache_creation": 59101,
+        "cache_read": 551466
+      },
+      "tokens_total": 612638,
+      "duration_ms": 54000,
+      "warm_ms": 94000,
+      "gates_green": true,
+      "diff_sha256": "a0530fb9bb61143295dfb4527e4e1abc27ab6831aaa9bab236ae4e0201a5c9c6",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "add-error-shape--B--3": {
+      "cell": "add-error-shape--B--3",
+      "chore": "add-error-shape",
+      "arm": "B",
+      "rep": "3",
+      "cap_usd": 3.0,
+      "total_cost_usd": 0.5540250000000001,
+      "tokens": {
+        "input": 16,
+        "output": 2121,
+        "cache_creation": 59184,
+        "cache_read": 556860
+      },
+      "tokens_total": 618181,
+      "duration_ms": 55000,
+      "warm_ms": 91000,
+      "gates_green": true,
+      "diff_sha256": "a0530fb9bb61143295dfb4527e4e1abc27ab6831aaa9bab236ae4e0201a5c9c6",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "add-error-shape--C--1": {
+      "cell": "add-error-shape--C--1",
+      "chore": "add-error-shape",
+      "arm": "C",
+      "rep": "1",
+      "cap_usd": 0.0,
+      "total_cost_usd": 0.0,
+      "tokens": null,
+      "tokens_total": 0,
+      "duration_ms": 8000,
+      "warm_ms": 103000,
+      "gates_green": true,
+      "diff_sha256": "17f6ffab2bd310833e91a574ecc01579267e233f85660ecce32b08eedf5044dd",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [],
+      "asserts": [
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:error-hint-duel_probe"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:error-shape-duel_probe"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:error-test-duel_probe"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverag"
+        }
+      ]
+    },
+    "add-error-shape--C--2": {
+      "cell": "add-error-shape--C--2",
+      "chore": "add-error-shape",
+      "arm": "C",
+      "rep": "2",
+      "cap_usd": 0.0,
+      "total_cost_usd": 0.0,
+      "tokens": null,
+      "tokens_total": 0,
+      "duration_ms": 9000,
+      "warm_ms": 106000,
+      "gates_green": true,
+      "diff_sha256": "17f6ffab2bd310833e91a574ecc01579267e233f85660ecce32b08eedf5044dd",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [],
+      "asserts": [
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:error-hint-duel_probe"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:error-shape-duel_probe"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:error-test-duel_probe"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverag"
+        }
+      ]
+    },
+    "add-error-shape--C--3": {
+      "cell": "add-error-shape--C--3",
+      "chore": "add-error-shape",
+      "arm": "C",
+      "rep": "3",
+      "cap_usd": 0.0,
+      "total_cost_usd": 0.0,
+      "tokens": null,
+      "tokens_total": 0,
+      "duration_ms": 8000,
+      "warm_ms": 93000,
+      "gates_green": true,
+      "diff_sha256": "17f6ffab2bd310833e91a574ecc01579267e233f85660ecce32b08eedf5044dd",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [],
+      "asserts": [
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:error-hint-duel_probe"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:error-shape-duel_probe"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:error-test-duel_probe"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverag"
+        }
+      ]
+    },
+    "ensure-cli-noun--A--1": {
+      "cell": "ensure-cli-noun--A--1",
+      "chore": "ensure-cli-noun",
+      "arm": "A",
+      "rep": "1",
+      "cap_usd": 1.5,
+      "total_cost_usd": 1.3440366,
+      "tokens": {
+        "input": 70,
+        "output": 12141,
+        "cache_creation": 65953,
+        "cache_read": 2553312
+      },
+      "tokens_total": 2631476,
+      "duration_ms": 233000,
+      "warm_ms": 3000,
+      "gates_green": true,
+      "diff_sha256": "3bbe8be0f269f431bba5c349d73426dc0adc4179642e9b305f54238b393ab477",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "ensure-cli-noun--A--2": {
+      "cell": "ensure-cli-noun--A--2",
+      "chore": "ensure-cli-noun",
+      "arm": "A",
+      "rep": "2",
+      "cap_usd": 1.5,
+      "total_cost_usd": 1.0754751000000002,
+      "tokens": {
+        "input": 48,
+        "output": 10178,
+        "cache_creation": 64729,
+        "cache_read": 1780957
+      },
+      "tokens_total": 1855912,
+      "duration_ms": 185000,
+      "warm_ms": 3000,
+      "gates_green": true,
+      "diff_sha256": "46069a8c1637dc50d300c7e9c9f95278c8b4ac66b7ebf7f6a8ad0d2fcb319ca3",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "ensure-cli-noun--A--3": {
+      "cell": "ensure-cli-noun--A--3",
+      "chore": "ensure-cli-noun",
+      "arm": "A",
+      "rep": "3",
+      "cap_usd": 1.5,
+      "total_cost_usd": 0.7919013,
+      "tokens": {
+        "input": 36,
+        "output": 5669,
+        "cache_creation": 57852,
+        "cache_read": 1198821
+      },
+      "tokens_total": 1262378,
+      "duration_ms": 126000,
+      "warm_ms": 4000,
+      "gates_green": true,
+      "diff_sha256": "3bbe8be0f269f431bba5c349d73426dc0adc4179642e9b305f54238b393ab477",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "ensure-cli-noun--B--1": {
+      "cell": "ensure-cli-noun--B--1",
+      "chore": "ensure-cli-noun",
+      "arm": "B",
+      "rep": "1",
+      "cap_usd": 3.0,
+      "total_cost_usd": 1.5265041000000001,
+      "tokens": {
+        "input": 76,
+        "output": 10979,
+        "cache_creation": 76768,
+        "cache_read": 3003277
+      },
+      "tokens_total": 3091100,
+      "duration_ms": 218000,
+      "warm_ms": 3000,
+      "gates_green": true,
+      "diff_sha256": "599b19d8617bec9e5cd9262e70c31003d487562e6cdfcd3359a3a6e9c056737c",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "ensure-cli-noun--B--2": {
+      "cell": "ensure-cli-noun--B--2",
+      "chore": "ensure-cli-noun",
+      "arm": "B",
+      "rep": "2",
+      "cap_usd": 3.0,
+      "total_cost_usd": 1.8059712,
+      "tokens": {
+        "input": 84,
+        "output": 15109,
+        "cache_creation": 93019,
+        "cache_read": 3403234
+      },
+      "tokens_total": 3511446,
+      "duration_ms": 300000,
+      "warm_ms": 3000,
+      "gates_green": true,
+      "diff_sha256": "4f3e79a6965dcd6646add0467ed14366dd60bdff8ded627525e765cd2d7e7699",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "ensure-cli-noun--B--3": {
+      "cell": "ensure-cli-noun--B--3",
+      "chore": "ensure-cli-noun",
+      "arm": "B",
+      "rep": "3",
+      "cap_usd": 3.0,
+      "total_cost_usd": 1.5124811999999999,
+      "tokens": {
+        "input": 70,
+        "output": 12788,
+        "cache_creation": 79391,
+        "cache_read": 2813684
+      },
+      "tokens_total": 2905933,
+      "duration_ms": 210000,
+      "warm_ms": 5000,
+      "gates_green": true,
+      "diff_sha256": "64ace4b2ecb0a8b531f9d705f5aae2e7be073381345553a0995f4b18a0af726e",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "ensure-cli-noun--C--1": {
+      "cell": "ensure-cli-noun--C--1",
+      "chore": "ensure-cli-noun",
+      "arm": "C",
+      "rep": "1",
+      "cap_usd": 0.0,
+      "total_cost_usd": 0.0,
+      "tokens": null,
+      "tokens_total": 0,
+      "duration_ms": 12000,
+      "warm_ms": 5000,
+      "gates_green": true,
+      "diff_sha256": "105599809a24b1918f7496b69c2db62375a2c4c35713b2cfe7403a4a9847ca8b",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [],
+      "asserts": [
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "\"duelnoun\""
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1"
+        }
+      ]
+    },
+    "ensure-cli-noun--C--2": {
+      "cell": "ensure-cli-noun--C--2",
+      "chore": "ensure-cli-noun",
+      "arm": "C",
+      "rep": "2",
+      "cap_usd": 0.0,
+      "total_cost_usd": 0.0,
+      "tokens": null,
+      "tokens_total": 0,
+      "duration_ms": 15000,
+      "warm_ms": 4000,
+      "gates_green": true,
+      "diff_sha256": "105599809a24b1918f7496b69c2db62375a2c4c35713b2cfe7403a4a9847ca8b",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [],
+      "asserts": [
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "\"duelnoun\""
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1"
+        }
+      ]
+    },
+    "ensure-cli-noun--C--3": {
+      "cell": "ensure-cli-noun--C--3",
+      "chore": "ensure-cli-noun",
+      "arm": "C",
+      "rep": "3",
+      "cap_usd": 0.0,
+      "total_cost_usd": 0.0,
+      "tokens": null,
+      "tokens_total": 0,
+      "duration_ms": 12000,
+      "warm_ms": 3000,
+      "gates_green": true,
+      "diff_sha256": "105599809a24b1918f7496b69c2db62375a2c4c35713b2cfe7403a4a9847ca8b",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [],
+      "asserts": [
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "\"duelnoun\""
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1"
+        }
+      ]
+    },
+    "add-oban-worker--A--1": {
+      "cell": "add-oban-worker--A--1",
+      "chore": "add-oban-worker",
+      "arm": "A",
+      "rep": "1",
+      "cap_usd": 1.5,
+      "total_cost_usd": 0.43388790000000005,
+      "tokens": {
+        "input": 18,
+        "output": 1394,
+        "cache_creation": 42616,
+        "cache_read": 524093
+      },
+      "tokens_total": 568121,
+      "duration_ms": 64000,
+      "warm_ms": 92000,
+      "gates_green": true,
+      "diff_sha256": "f614a3d4b67b283d9ad0303dfac7c1de9149be9a5311095fb823e59b08f4fc4f",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/workers",
+          "rc": 0
+        }
+      ],
+      "asserts": []
+    },
+    "add-oban-worker--A--2": {
+      "cell": "add-oban-worker--A--2",
+      "chore": "add-oban-worker",
+      "arm": "A",
+      "rep": "2",
+      "cap_usd": 1.5,
+      "total_cost_usd": 0.4836879,
+      "tokens": {
+        "input": 20,
+        "output": 2183,
+        "cache_creation": 45261,
+        "cache_read": 597723
+      },
+      "tokens_total": 645187,
+      "duration_ms": 67000,
+      "warm_ms": 83000,
+      "gates_green": true,
+      "diff_sha256": "f614a3d4b67b283d9ad0303dfac7c1de9149be9a5311095fb823e59b08f4fc4f",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/workers",
+          "rc": 0
+        }
+      ],
+      "asserts": []
+    },
+    "add-oban-worker--B--1": {
+      "cell": "add-oban-worker--B--1",
+      "chore": "add-oban-worker",
+      "arm": "B",
+      "rep": "1",
+      "cap_usd": 3.0,
+      "total_cost_usd": 0.448425,
+      "tokens": {
+        "input": 16,
+        "output": 2464,
+        "cache_creation": 45042,
+        "cache_read": 470550
+      },
+      "tokens_total": 518072,
+      "duration_ms": 112000,
+      "warm_ms": 87000,
+      "gates_green": true,
+      "diff_sha256": "38796285df7764508908b28537ff36ec0c50bfca4b0605383b4594030e86ef00",
+      "reversible": false,
+      "agent_gate": [],
+      "tier_ci_forced": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/workers",
+          "rc": 0
+        }
+      ],
+      "asserts": []
+    },
+    "add-oban-worker--B--2": {
+      "cell": "add-oban-worker--B--2",
+      "chore": "add-oban-worker",
+      "arm": "B",
+      "rep": "2",
+      "cap_usd": 3.0,
+      "total_cost_usd": 0.5012208,
+      "tokens": {
+        "input": 20,
+        "output": 3022,
+        "cache_creation": 45412,
+        "cache_read": 611196
+      },
+      "tokens_total": 659650,
+      "duration_ms": 77000,
+      "warm_ms": 93000,
+      "gates_green": true,
+      "diff_sha256": "38796285df7764508908b28537ff36ec0c50bfca4b0605383b4594030e86ef00",
+      "reversible": false,
+      "agent_gate": [],
+      "tier_ci_forced": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/workers",
+          "rc": 0
+        }
+      ],
+      "asserts": []
+    },
+    "add-oban-worker--C--1": {
+      "cell": "add-oban-worker--C--1",
+      "chore": "add-oban-worker",
+      "arm": "C",
+      "rep": "1",
+      "cap_usd": 0.0,
+      "total_cost_usd": 0.0,
+      "tokens": null,
+      "tokens_total": 0,
+      "duration_ms": 22000,
+      "warm_ms": 82000,
+      "gates_green": true,
+      "diff_sha256": "f614a3d4b67b283d9ad0303dfac7c1de9149be9a5311095fb823e59b08f4fc4f",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/workers",
+          "rc": 0
+        }
+      ],
+      "asserts": [
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "defmodule Barkpark.Workers.DuelSmokeReaper do"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "assert :ok = DuelSmokeReaper.perform"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:oban-cron-duel-smoke-reaper"
+        },
+        {
+          "kind": "cmd",
+          "tier": "ci",
+          "status": "deferred",
+          "text": "cd api && mix test test/barkpark/workers/duel_smoke_reaper_test.exs"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "defmodule Barkpark.Workers.DuelSmokeSweeper do"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "assert :ok = DuelSmokeSweeper.perform"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:oban-cron-duel-smoke-sweeper"
+        },
+        {
+          "kind": "cmd",
+          "tier": "ci",
+          "status": "deferred",
+          "text": "cd api && mix test test/barkpark/workers/duel_smoke_sweeper_test.exs"
+        }
+      ]
+    },
+    "add-oban-worker--C--2": {
+      "cell": "add-oban-worker--C--2",
+      "chore": "add-oban-worker",
+      "arm": "C",
+      "rep": "2",
+      "cap_usd": 0.0,
+      "total_cost_usd": 0.0,
+      "tokens": null,
+      "tokens_total": 0,
+      "duration_ms": 22000,
+      "warm_ms": 90000,
+      "gates_green": true,
+      "diff_sha256": "f614a3d4b67b283d9ad0303dfac7c1de9149be9a5311095fb823e59b08f4fc4f",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [
+        {
+          "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/workers",
+          "rc": 0
+        }
+      ],
+      "asserts": [
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "defmodule Barkpark.Workers.DuelSmokeReaper do"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "assert :ok = DuelSmokeReaper.perform"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:oban-cron-duel-smoke-reaper"
+        },
+        {
+          "kind": "cmd",
+          "tier": "ci",
+          "status": "deferred",
+          "text": "cd api && mix test test/barkpark/workers/duel_smoke_reaper_test.exs"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "defmodule Barkpark.Workers.DuelSmokeSweeper do"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "assert :ok = DuelSmokeSweeper.perform"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:oban-cron-duel-smoke-sweeper"
+        },
+        {
+          "kind": "cmd",
+          "tier": "ci",
+          "status": "deferred",
+          "text": "cd api && mix test test/barkpark/workers/duel_smoke_sweeper_test.exs"
+        }
+      ]
+    },
+    "boundary--A--1": {
+      "cell": "boundary--A--1",
+      "chore": "boundary",
+      "arm": "A",
+      "rep": "1",
+      "cap_usd": 3.0,
+      "total_cost_usd": 0.4310481,
+      "tokens": {
+        "input": 16,
+        "output": 2892,
+        "cache_creation": 41793,
+        "cache_read": 456207
+      },
+      "tokens_total": 500908,
+      "duration_ms": 55000,
+      "warm_ms": 6000,
+      "gates_green": true,
+      "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reversible": true,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go vet ./internal/agent/...",
+          "rc": 0
+        },
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/agent/... -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": [],
+      "reviewer_judgment": {
+        "method": "git-restore (diff vs HEAD empty; transcript: restored the committed state)",
+        "test_equivalent_to_fix_subtests": true,
+        "test_equivalence_note": "trivially \u2014 the restored test IS TestExecRunnerDeadline from the fix commit",
+        "preexisting_tests_green": true,
+        "go_vet_clean": true,
+        "command_runner_signature_unchanged": true,
+        "derivation_evidence": "none \u2014 the fix was recovered from git history, not derived",
+        "verdict": "mechanically green; judgment legs pass vacuously via git recovery"
+      }
+    },
+    "boundary--A--2": {
+      "cell": "boundary--A--2",
+      "chore": "boundary",
+      "arm": "A",
+      "rep": "2",
+      "cap_usd": 3.0,
+      "total_cost_usd": 0.47924310000000003,
+      "tokens": {
+        "input": 16,
+        "output": 3561,
+        "cache_creation": 46792,
+        "cache_read": 483427
+      },
+      "tokens_total": 533796,
+      "duration_ms": 65000,
+      "warm_ms": 3000,
+      "gates_green": true,
+      "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reversible": true,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go vet ./internal/agent/...",
+          "rc": 0
+        },
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/agent/... -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": [],
+      "reviewer_judgment": {
+        "method": "git-restore (diff vs HEAD empty; transcript: 'the checkout was in a strange state ... a reversion of the exact fix requested')",
+        "test_equivalent_to_fix_subtests": true,
+        "test_equivalence_note": "trivially \u2014 restored TestExecRunnerDeadline",
+        "preexisting_tests_green": true,
+        "go_vet_clean": true,
+        "command_runner_signature_unchanged": true,
+        "derivation_evidence": "none",
+        "verdict": "mechanically green; judgment legs pass vacuously via git recovery"
+      }
+    },
+    "boundary--B--1": {
+      "cell": "boundary--B--1",
+      "chore": "boundary",
+      "arm": "B",
+      "rep": "1",
+      "cap_usd": 3.0,
+      "total_cost_usd": 0.397746,
+      "tokens": {
+        "input": 14,
+        "output": 1991,
+        "cache_creation": 41623,
+        "cache_read": 393670
+      },
+      "tokens_total": 437298,
+      "duration_ms": 51000,
+      "warm_ms": 5000,
+      "gates_green": true,
+      "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go vet ./internal/agent/...",
+          "rc": 0
+        },
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/agent/... -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": [],
+      "reviewer_judgment": {
+        "method": "git-restore (diff vs HEAD empty; transcript names commit 4adadf0e0 / PR #3768 explicitly)",
+        "test_equivalent_to_fix_subtests": true,
+        "test_equivalence_note": "trivially \u2014 restored TestExecRunnerDeadline",
+        "preexisting_tests_green": true,
+        "go_vet_clean": true,
+        "command_runner_signature_unchanged": true,
+        "derivation_evidence": "none",
+        "verdict": "mechanically green; judgment legs pass vacuously via git recovery"
+      }
+    },
+    "boundary--B--2": {
+      "cell": "boundary--B--2",
+      "chore": "boundary",
+      "arm": "B",
+      "rep": "2",
+      "cap_usd": 3.0,
+      "total_cost_usd": 0.6524534999999999,
+      "tokens": {
+        "input": 28,
+        "output": 4571,
+        "cache_creation": 51561,
+        "cache_read": 914795
+      },
+      "tokens_total": 970955,
+      "duration_ms": 83000,
+      "warm_ms": 6000,
+      "gates_green": true,
+      "diff_sha256": "f0b7e1d94dace162654aa56de4f378fd746fe01002845a8577c801035613b300",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go vet ./internal/agent/...",
+          "rc": 0
+        },
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/agent/... -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": [],
+      "reviewer_judgment": {
+        "method": "authored fix (108-line diff: context.WithTimeout inside ExecRunner.Run + var execRunnerTimeout + new TestExecRunnerRun)",
+        "test_equivalent_to_fix_subtests": true,
+        "test_equivalence_note": "TestExecRunnerRun has exactly the two required subtests: 'stuck command times out' (lowered deadline, sleep 5, asserts timeout error + no hang) and 'fast command happy path unchanged' (echo hello round-trips)",
+        "preexisting_tests_green": true,
+        "go_vet_clean": true,
+        "command_runner_signature_unchanged": true,
+        "signature_note": "func (ExecRunner) Run(name string, args ...string) (string, error) byte-identical; deadline lives entirely inside Run; no call-site touched",
+        "derivation_evidence": "full \u2014 the only authentic boundary datum in the matrix",
+        "verdict": "FULL PASS on the D67 bar, by authorship"
+      }
+    },
+    "flagship--A--1": {
+      "cell": "flagship--A--1",
+      "chore": "flagship",
+      "arm": "A",
+      "rep": "1",
+      "cap_usd": 1.5,
+      "total_cost_usd": 0.3744093,
+      "tokens": {
+        "input": 20,
+        "output": 2696,
+        "cache_creation": 20563,
+        "cache_read": 701771
+      },
+      "tokens_total": 725050,
+      "duration_ms": 88000,
+      "warm_ms": 80000,
+      "gates_green": true,
+      "diff_sha256": "42ec6e0e63cc7d949100c5b100c8607ab9b9bf6a795ef5396da80b9ed94bcd3f",
+      "reversible": false,
+      "agent_gate": [
+        {
+          "cmd": "CC=/usr/bin/clang go test ./internal/pdrender/ -count=1",
+          "rc": 0
+        }
+      ],
+      "tier_ci_forced": [],
+      "asserts": []
+    },
+    "flagship--C--1": {
+      "cell": "flagship--C--1",
+      "chore": "flagship",
+      "arm": "C",
+      "rep": "1",
+      "cap_usd": 0.0,
+      "total_cost_usd": 0.0,
+      "tokens": null,
+      "tokens_total": 0,
+      "duration_ms": 29000,
+      "warm_ms": 83000,
+      "gates_green": true,
+      "diff_sha256": "42ec6e0e63cc7d949100c5b100c8607ab9b9bf6a795ef5396da80b9ed94bcd3f",
+      "reversible": true,
+      "agent_gate": [],
+      "tier_ci_forced": [],
+      "asserts": [
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "func (duelmarkRenderer) Render(b Block, ctx RenderCtx) []string"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "func TestDuelmarkRenderer(t *testing.T)"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:go-registry-duelmark"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:js-emitter-duelmark"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:js-map-duelmark"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:js-case-duelmark"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "toHaveLength(47)"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:ex-compose-duelmark"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "MARK:parity-input-duelmark"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "EXPECTED_COUNT=47"
+        },
+        {
+          "kind": "file-contains",
+          "tier": null,
+          "status": "pass",
+          "text": "== 47"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "go vet ./internal/pdrender/..."
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "CC=/usr/bin/clang go build ./internal/pdrender/"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "go test ./internal/pdrender/ -run TestDuelmarkRenderer -count=1"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "cd js && pnpm install && pnpm build"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "cd js/packages/react && npx tsc --noEmit"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "cd js/packages/react && npx vitest run"
+        },
+        {
+          "kind": "cmd",
+          "tier": "ci",
+          "status": "deferred",
+          "text": "cd api && mix test test/barkpark/portable_doc/render_test.exs"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "cd api && MIX_ENV=test CC=/usr/bin/clang mix barkpark.portable_doc.gen_pd_parity"
+        },
+        {
+          "kind": "file-exists",
+          "tier": null,
+          "status": "pass",
+          "text": "api/test/support/fixtures/pd-parity/duelmark.golden.json"
+        },
+        {
+          "kind": "file-exists",
+          "tier": null,
+          "status": "pass",
+          "text": "js/packages/react/tests/fixtures/pd-golden/duelmark.golden.json"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "bash scripts/pd-parity-completeness.sh"
+        },
+        {
+          "kind": "cmd",
+          "tier": null,
+          "status": "pass",
+          "text": "cd api && CC=/usr/bin/clang mix test test/barkpark/portable_doc/render/pd_golden_parity_test.exs"
+        }
+      ]
+    }
+  },
+  "aggregates": {
+    "add-error-shape--A": {
+      "n": 3,
+      "median_cost_usd": 0.5633,
+      "median_tokens_total": 630463,
+      "median_output_tokens": 1478,
+      "median_duration_ms": 56000,
+      "green": 3,
+      "reversible": 3,
+      "distinct_diff_shas": 1
+    },
+    "add-error-shape--Ap": {
+      "n": 2,
+      "median_cost_usd": 0.5179,
+      "median_tokens_total": 560364,
+      "median_output_tokens": 1982,
+      "median_duration_ms": 54000,
+      "green": 2,
+      "reversible": 0,
+      "distinct_diff_shas": 1
+    },
+    "add-error-shape--B": {
+      "n": 3,
+      "median_cost_usd": 0.5524,
+      "median_tokens_total": 612926,
+      "median_output_tokens": 2121,
+      "median_duration_ms": 55000,
+      "green": 3,
+      "reversible": 0,
+      "distinct_diff_shas": 2
+    },
+    "add-error-shape--C": {
+      "n": 3,
+      "median_cost_usd": 0.0,
+      "median_tokens_total": 0,
+      "median_output_tokens": 0,
+      "median_duration_ms": 8000,
+      "green": 3,
+      "reversible": 3,
+      "distinct_diff_shas": 1
+    },
+    "add-oban-worker--A": {
+      "n": 2,
+      "median_cost_usd": 0.4588,
+      "median_tokens_total": 606654,
+      "median_output_tokens": 1788,
+      "median_duration_ms": 65500,
+      "green": 2,
+      "reversible": 2,
+      "distinct_diff_shas": 1
+    },
+    "add-oban-worker--B": {
+      "n": 2,
+      "median_cost_usd": 0.4748,
+      "median_tokens_total": 588861,
+      "median_output_tokens": 2743,
+      "median_duration_ms": 94500,
+      "green": 2,
+      "reversible": 0,
+      "distinct_diff_shas": 1
+    },
+    "add-oban-worker--C": {
+      "n": 2,
+      "median_cost_usd": 0.0,
+      "median_tokens_total": 0,
+      "median_output_tokens": 0,
+      "median_duration_ms": 22000,
+      "green": 2,
+      "reversible": 2,
+      "distinct_diff_shas": 1
+    },
+    "boundary--A": {
+      "n": 2,
+      "median_cost_usd": 0.4551,
+      "median_tokens_total": 517352,
+      "median_output_tokens": 3226,
+      "median_duration_ms": 60000,
+      "green": 2,
+      "reversible": 2,
+      "distinct_diff_shas": 1
+    },
+    "boundary--B": {
+      "n": 2,
+      "median_cost_usd": 0.5251,
+      "median_tokens_total": 704126,
+      "median_output_tokens": 3281,
+      "median_duration_ms": 67000,
+      "green": 2,
+      "reversible": 0,
+      "distinct_diff_shas": 2
+    },
+    "ensure-cli-noun--A": {
+      "n": 3,
+      "median_cost_usd": 1.0755,
+      "median_tokens_total": 1855912,
+      "median_output_tokens": 10178,
+      "median_duration_ms": 185000,
+      "green": 3,
+      "reversible": 0,
+      "distinct_diff_shas": 2
+    },
+    "ensure-cli-noun--B": {
+      "n": 3,
+      "median_cost_usd": 1.5265,
+      "median_tokens_total": 3091100,
+      "median_output_tokens": 12788,
+      "median_duration_ms": 218000,
+      "green": 3,
+      "reversible": 0,
+      "distinct_diff_shas": 3
+    },
+    "ensure-cli-noun--C": {
+      "n": 3,
+      "median_cost_usd": 0.0,
+      "median_tokens_total": 0,
+      "median_output_tokens": 0,
+      "median_duration_ms": 12000,
+      "green": 3,
+      "reversible": 3,
+      "distinct_diff_shas": 1
+    },
+    "flagship--A": {
+      "n": 1,
+      "median_cost_usd": 0.3744,
+      "median_tokens_total": 725050,
+      "median_output_tokens": 2696,
+      "median_duration_ms": 88000,
+      "green": 1,
+      "reversible": 0,
+      "distinct_diff_shas": 1
+    },
+    "flagship--C": {
+      "n": 1,
+      "median_cost_usd": 0.0,
+      "median_tokens_total": 0,
+      "median_output_tokens": 0,
+      "median_duration_ms": 29000,
+      "green": 1,
+      "reversible": 1,
+      "distinct_diff_shas": 1
+    }
+  },
+  "total_spend_usd": 16.5383,
+  "n_cells": 32,
+  "n_registered": 32
+}

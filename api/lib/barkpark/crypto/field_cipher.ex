@@ -30,15 +30,24 @@ defmodule Barkpark.Crypto.FieldCipher do
   def encrypted?(_), do: false
 
   @doc """
-  Encrypt `value` under the active DEK for `scope`. Returns the envelope map.
-  Already-encrypted values pass through untouched (idempotent — re-saving a doc
-  whose secret field is already ciphertext does not double-encrypt).
-  """
-  @spec encrypt(term(), String.t()) :: map()
-  def encrypt(value, _scope) when is_map(value) and is_map_key(value, @marker), do: value
+  Encrypt `value` under the active DEK for `(workspace_id, scope)`. Returns the
+  envelope map. Already-encrypted values pass through untouched (idempotent —
+  re-saving a doc whose secret field is already ciphertext does not
+  double-encrypt).
 
-  def encrypt(value, scope) when is_binary(scope) do
-    {version, dek} = DataKeys.active_dek(scope)
+  The DEK is selected per-workspace (charter D51-D54) but the AAD stays the BARE
+  `scope` — the same scope binding a ciphertext cannot be replayed under another
+  dataset. `workspace_id` defaults to `nil` (the NULL-workspace DEK), so the
+  arity-2 call site and the direct-crypto tests are unchanged.
+  """
+  @spec encrypt(term(), String.t(), binary() | nil) :: map()
+  def encrypt(value, scope, workspace_id \\ nil)
+
+  def encrypt(value, _scope, _workspace_id) when is_map(value) and is_map_key(value, @marker),
+    do: value
+
+  def encrypt(value, scope, workspace_id) when is_binary(scope) do
+    {version, dek} = DataKeys.active_dek(workspace_id, scope)
     iv = :crypto.strong_rand_bytes(@iv_bytes)
     plaintext = Jason.encode!(value)
     {ct, tag} = :crypto.crypto_one_time_aead(:aes_256_gcm, dek, iv, plaintext, scope, true)
@@ -52,14 +61,16 @@ defmodule Barkpark.Crypto.FieldCipher do
   A non-envelope value returns `{:ok, value}` unchanged (so callers can decrypt
   blindly over a content map).
   """
-  @spec decrypt(term(), String.t()) :: {:ok, term()} | :error
+  @spec decrypt(term(), String.t(), binary() | nil) :: {:ok, term()} | :error
+  def decrypt(envelope, scope, workspace_id \\ nil)
+
   # LOW-17: GUARD the payload shape. A crafted envelope with a non-integer "k" or
-  # a non-binary "v" used to raise (FunctionClauseError in `DataKeys.dek_for_version/2`
+  # a non-binary "v" used to raise (FunctionClauseError in `DataKeys.dek_for_version/3`
   # / `Base.decode64/1`) on the admin reveal path. Now a malformed envelope falls
   # through to the `%{@marker => _} -> :error` clause below — fail closed, no raise.
-  def decrypt(%{@marker => @version, "k" => version, "v" => encoded}, scope)
+  def decrypt(%{@marker => @version, "k" => version, "v" => encoded}, scope, workspace_id)
       when is_binary(scope) and is_integer(version) and is_binary(encoded) do
-    with {:ok, dek} <- DataKeys.dek_for_version(scope, version),
+    with {:ok, dek} <- DataKeys.dek_for_version(workspace_id, scope, version),
          {:ok, <<iv::binary-size(@iv_bytes), tag::binary-size(@tag_bytes), ct::binary>>} <-
            Base.decode64(encoded),
          plaintext when is_binary(plaintext) <-
@@ -71,6 +82,6 @@ defmodule Barkpark.Crypto.FieldCipher do
     end
   end
 
-  def decrypt(%{@marker => _}, _scope), do: :error
-  def decrypt(value, _scope), do: {:ok, value}
+  def decrypt(%{@marker => _}, _scope, _workspace_id), do: :error
+  def decrypt(value, _scope, _workspace_id), do: {:ok, value}
 end

@@ -1007,6 +1007,166 @@ func TestOnrampWriteAgentsMdMalformedSkipped(t *testing.T) {
 	}
 }
 
+// TestOnrampWriteAgentsMdCRLFPreserved locks the byte-preservation property V1
+// proved live-once (charter D32): the markdown merger treats a consumer's foreign
+// AGENTS.md as OPAQUE bytes and never normalizes line endings (unlike the
+// JSON/TOML path at onramp_write.go:328/354/381 which CRLF-rewrites). A marker-less
+// CRLF file is APPENDED to — every \r\n in the foreign region survives byte-for-byte,
+// the barkpark block lands after it, and a re-run is a byte-stable 'unchanged'.
+func TestOnrampWriteAgentsMdCRLFPreserved(t *testing.T) {
+	t.Chdir(t.TempDir())
+	// A real Windows-authored AGENTS.md: CRLF throughout, no barkpark markers.
+	existing := []byte("# My Repo\r\n\r\nContributors: run the tests before pushing.\r\n")
+	crlfBefore := bytes.Count(existing, []byte("\r\n"))
+	if err := os.WriteFile("AGENTS.md", existing, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := agentsMdMergeFile(t)
+
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("append merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated (append, no markers)", act.Action)
+	}
+	result := mustRead(t, "AGENTS.md")
+
+	// The foreign region survives byte-for-byte as a verbatim prefix — every CRLF
+	// intact, nothing normalized to LF.
+	if !bytes.HasPrefix(result, existing) {
+		t.Errorf("CRLF foreign region was not preserved byte-for-byte as a prefix.\n--- got %q", result)
+	}
+	// The emitted barkpark block is LF-only, so it contributes zero CRLF: the
+	// file's CRLF count equals the foreign region's exactly (no \r leaked into the
+	// appended block, none stripped from the foreign prose).
+	if got := bytes.Count(result, []byte("\r\n")); got != crlfBefore {
+		t.Errorf("CRLF count = %d, want %d (foreign \\r\\n preserved, block stays LF)", got, crlfBefore)
+	}
+	// No BARE \r survived (every \r is part of a \r\n) — nothing was half-mangled.
+	if got := bytes.Count(result, []byte("\r")); got != crlfBefore {
+		t.Errorf("stray bare \\r found: %d total \\r vs %d \\r\\n — a CR was mangled", got, crlfBefore)
+	}
+	// The canonical block landed after the foreign prose, verbatim (not CRLF-ified).
+	if !bytes.Contains(result, []byte(f.Content)) {
+		t.Errorf("appended barkpark block missing (or CRLF-mangled) — f.Content not found verbatim")
+	}
+
+	// Now that markers exist, a re-run is byte-stable 'unchanged'.
+	act2, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("re-run: %v", err)
+	}
+	if act2.Action != "unchanged" {
+		t.Errorf("re-run action = %q, want unchanged", act2.Action)
+	}
+	if !bytes.Equal(result, mustRead(t, "AGENTS.md")) {
+		t.Errorf("unchanged re-run mutated the CRLF file bytes")
+	}
+}
+
+// TestOnrampWriteAgentsMdBOMPreserved locks that a UTF-8 BOM (EF BB BF) at byte 0
+// of a foreign AGENTS.md survives the append verbatim (charter D32): the merger
+// treats the whole file as opaque bytes, so the BOM is never stripped nor pushed
+// down and the entire foreign region is byte-identical.
+func TestOnrampWriteAgentsMdBOMPreserved(t *testing.T) {
+	t.Chdir(t.TempDir())
+	bom := []byte{0xEF, 0xBB, 0xBF}
+	existing := append(append([]byte{}, bom...), []byte("# BOM Repo\n\nHumans wrote this with a byte-order mark.\n")...)
+	if err := os.WriteFile("AGENTS.md", existing, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := agentsMdMergeFile(t)
+
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("BOM append merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated", act.Action)
+	}
+	result := mustRead(t, "AGENTS.md")
+
+	// The BOM stays exactly at byte 0 — never stripped, never relocated.
+	if !bytes.HasPrefix(result, bom) {
+		t.Errorf("UTF-8 BOM no longer at byte 0: first bytes % x", result[:3])
+	}
+	// The whole BOM-prefixed foreign region survives byte-identical as a prefix.
+	if !bytes.HasPrefix(result, existing) {
+		t.Errorf("BOM-prefixed foreign region was not preserved byte-for-byte.\n--- got %q", result)
+	}
+	// The barkpark block landed after the foreign prose.
+	if !bytes.Contains(result, []byte(f.Content)) {
+		t.Errorf("appended barkpark block missing after BOM prose")
+	}
+}
+
+// TestOnrampWriteAgentsMdForceCRLFMixedEnding locks the D32 documented-expected
+// mixed-ending: --force refreshing a STALE marker block inside a CRLF foreign file
+// preserves the CRLF foreign prose (every byte OUTSIDE the begin→end span
+// unchanged) while the freshly-emitted barkpark block is LF. This is the decided
+// non-issue asserted as the EXPECTED result, NOT a defect — uniform-ending
+// rewriting would mean mutating the user's foreign bytes, which violates the whole
+// idempotence contract.
+func TestOnrampWriteAgentsMdForceCRLFMixedEnding(t *testing.T) {
+	t.Chdir(t.TempDir())
+	head := []byte("# My Repo\r\n\r\nIntro the humans wrote.\r\n\r\n")
+	tail := []byte("\r\n\r\n## Footer\r\n\r\nMore human prose below the block.\r\n")
+	staleBlock := []byte(agentsMDMarkerBegin + "\n## Task tracking — Barkpark (bp)\n\nSTALE outdated body from an old bp version.\n" + agentsMDMarkerEnd)
+	stale := append(append(append([]byte{}, head...), staleBlock...), tail...)
+	foreignCRLF := bytes.Count(head, []byte("\r\n")) + bytes.Count(tail, []byte("\r\n"))
+	if err := os.WriteFile("AGENTS.md", stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := agentsMdMergeFile(t)
+
+	// Without --force the differing block is skipped and the CRLF file is untouched.
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("skip merge: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("action = %q, want skipped without --force", act.Action)
+	}
+	if !bytes.Equal(stale, mustRead(t, "AGENTS.md")) {
+		t.Errorf("skipped write mutated the CRLF file")
+	}
+
+	// --force replaces ONLY the begin→end span with the canonical LF block.
+	act, err = mergeOnrampFile(f, true, false)
+	if err != nil {
+		t.Fatalf("force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("force action = %q, want updated", act.Action)
+	}
+	result := mustRead(t, "AGENTS.md")
+
+	// The stale body is gone; the canonical block is present verbatim (LF).
+	if bytes.Contains(result, []byte("STALE outdated body")) {
+		t.Errorf("stale block body survived the force replace")
+	}
+	if !bytes.Contains(result, []byte(f.Content)) {
+		t.Errorf("canonical LF block not written on force")
+	}
+	// The foreign CRLF prose OUTSIDE the span is byte-identical: the head is a
+	// verbatim prefix and the tail a verbatim suffix (both CRLF).
+	if !bytes.HasPrefix(result, head) {
+		t.Errorf("CRLF prose above the block was mangled.\n--- got %q", result)
+	}
+	if !bytes.HasSuffix(result, tail) {
+		t.Errorf("CRLF prose below the block was mangled.\n--- got %q", result)
+	}
+	// Total CRLF count equals the foreign count — the emitted block added none
+	// (mixed CRLF-foreign + LF-block is the EXPECTED D32 shape, not a bug).
+	if got := bytes.Count(result, []byte("\r\n")); got != foreignCRLF {
+		t.Errorf("CRLF count = %d, want %d — the emitted barkpark block must be LF (mixed-ending expected per D32)", got, foreignCRLF)
+	}
+	if got := bytes.Count(result, []byte("\r")); got != foreignCRLF {
+		t.Errorf("stray bare \\r: %d vs %d \\r\\n — a CR was mangled", got, foreignCRLF)
+	}
+}
+
 // runOnrampWriteJSON drives `bp onramp <args...> --write -o json` through the REAL
 // command entry point (runOnramp → buildOnrampSpec → runOnrampWrite) and decodes
 // the structured report. Server is pinned to guerrilla so the emission is
@@ -1327,4 +1487,158 @@ func canonicalWithoutBarkpark(t *testing.T, raw []byte) []byte {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// TestBOMBricksOnrampMerge locks BP-ONB-12 (onramp half): a UTF-8 BOM (EF BB BF)
+// at byte 0 of a target mcp.json — what Windows editors prepend — no longer
+// bricks the merge. Go's json decoder rejects a BOM ("invalid character 'ï'"), so
+// BEFORE the fix this test FAILS at the merge call; unmarshalObject now strips the
+// BOM at the parse boundary. Protective: revert the bytes.TrimPrefix(raw, onrampUTF8BOM)
+// and this test reds. Foreign server survives, barkpark is added, output is
+// BOM-free.
+func TestBOMBricksOnrampMerge(t *testing.T) {
+	dir := t.TempDir()
+	f := serverMapFileAt(t, "cursor", dir, ".cursor/mcp.json")
+	existing := append(append([]byte{}, onrampUTF8BOM...),
+		[]byte("{\n  \"mcpServers\": {\n    \"other\": { \"command\": \"foo\" }\n  }\n}\n")...)
+	if err := os.MkdirAll(filepath.Dir(f.Path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.Path, existing, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("BOM-prefixed target did not merge (BOM not tolerated?): %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated", act.Action)
+	}
+	result := mustRead(t, f.Path)
+	if bytes.HasPrefix(result, onrampUTF8BOM) {
+		t.Errorf("merged output still carries a UTF-8 BOM: first bytes % x", result[:3])
+	}
+	var top map[string]any
+	if err := json.Unmarshal(result, &top); err != nil {
+		t.Fatalf("merged output is not valid JSON: %v\n%s", err, result)
+	}
+	servers, _ := top["mcpServers"].(map[string]any)
+	if _, ok := servers["other"]; !ok {
+		t.Errorf("foreign server 'other' was lost across the BOM-tolerant merge")
+	}
+	if _, ok := servers["barkpark"]; !ok {
+		t.Errorf("barkpark entry was not added")
+	}
+}
+
+// TestOnrampWriteAgentsMdCompetingTrackerWarns locks BP-ONB-14: appending the
+// Barkpark teach block onto an AGENTS.md that ALREADY mandates a competing tracker
+// (here Jira) would leave two mutually exclusive authoritative policies — so the
+// merge WARNS (skipped, note names the tracker + --force hint) and leaves the file
+// byte-untouched, instead of silently appending. Protective: revert the
+// competingTrackerMandate guard and the action flips to a silent 'updated' append.
+// With --force the block is appended anyway.
+func TestOnrampWriteAgentsMdCompetingTrackerWarns(t *testing.T) {
+	t.Chdir(t.TempDir())
+	existing := "# My Repo\n\n## Task tracking\n\nAll engineers must log every task in Jira before starting work.\n"
+	if err := os.WriteFile("AGENTS.md", []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := agentsMdMergeFile(t)
+
+	// No --force: warn — skipped, note names the tracker + the --force hint, and
+	// not one byte of the file is touched.
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("competing-tracker merge: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("action = %q, want skipped (a competing tracker mandate is present)", act.Action)
+	}
+	if !strings.Contains(act.Note, "jira") {
+		t.Errorf("skip note %q must name the competing tracker", act.Note)
+	}
+	if !strings.Contains(act.Note, "--force") {
+		t.Errorf("skip note %q must carry the --force hint (onrampAnySkipped greps it)", act.Note)
+	}
+	if !bytes.Equal([]byte(existing), mustRead(t, "AGENTS.md")) {
+		t.Errorf("a competing-tracker skip must not touch the file at all")
+	}
+
+	// --force: the block is appended, user content preserved verbatim as a prefix.
+	act, err = mergeOnrampFile(f, true, false)
+	if err != nil {
+		t.Fatalf("force append: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("force action = %q, want updated", act.Action)
+	}
+	result := mustRead(t, "AGENTS.md")
+	if !bytes.HasPrefix(result, []byte(existing)) {
+		t.Errorf("force append rewrote the user's existing content.\n--- got ---\n%s", result)
+	}
+	if !bytes.Contains(result, []byte(f.Content)) {
+		t.Errorf("barkpark block was not appended on --force")
+	}
+}
+
+// TestOnrampWritePartialReceiptHonest injects a failure on file 2 of 3 and asserts
+// the receipt is HONEST about the partial write: it names N of M written, the file
+// that failed, and that a re-run heals. File 1 lands, file 2 errors (a flat file
+// whose content lacks its TopKey), file 3 is never attempted (the loop breaks). A
+// re-run with file 2 fixed heals — file 1 reports 'unchanged' (idempotent), file 3
+// 'created' — and carries no partial receipt.
+func TestOnrampWritePartialReceiptHonest(t *testing.T) {
+	dir := t.TempDir()
+	f1 := serverMapFileAt(t, "cursor", dir, "a/mcp.json")
+	f2 := onrampFile{Path: filepath.Join(dir, "env.json"), Content: "{}", MergeKind: mergeFlat, TopKey: "install"}
+	f3 := serverMapFileAt(t, "cursor", dir, "c/mcp.json")
+	spec := onrampSpec{Target: "cursor", Files: []onrampFile{f1, f2, f3}, Verify: "reload"}
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	if code := runOnrampWrite(w, spec, false, false); code != exitGeneric {
+		t.Fatalf("exit = %d, want exitGeneric on a mid-loop failure; stderr=%s", code, se.String())
+	}
+	out := so.String()
+	for _, want := range []string{"1 of 3", f2.Path, "heals", "unchanged"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("partial receipt missing %q\n--- receipt ---\n%s", want, out)
+		}
+	}
+	if _, err := os.Stat(f1.Path); err != nil {
+		t.Errorf("file 1 should have been written before the failure: %v", err)
+	}
+	if _, err := os.Stat(f3.Path); !os.IsNotExist(err) {
+		t.Errorf("file 3 must not be written after the mid-loop break (stat err=%v)", err)
+	}
+
+	// Heal: fix file 2 and re-run. The idempotent per-file merges make file 1
+	// 'unchanged' and file 3 'created'; the run is clean (no partial receipt).
+	f2ok := serverMapFileAt(t, "cursor", dir, "b/mcp.json")
+	spec2 := onrampSpec{Target: "cursor", Files: []onrampFile{f1, f2ok, f3}, Verify: "reload"}
+	var so2, se2 bytes.Buffer
+	w2 := newWriter(&so2, &se2)
+	w2.output = "json"
+	if code := runOnrampWrite(w2, spec2, false, false); code != exitOK {
+		t.Fatalf("healed re-run exit = %d, want exitOK; stderr=%s", code, se2.String())
+	}
+	var res onrampWriteResult
+	if err := json.Unmarshal(so2.Bytes(), &res); err != nil {
+		t.Fatalf("healed re-run json did not decode: %v\n%s", err, so2.String())
+	}
+	if res.Partial != nil {
+		t.Errorf("a clean re-run must carry no partial receipt, got %+v", res.Partial)
+	}
+	byPath := map[string]string{}
+	for _, a := range res.Actions {
+		byPath[a.Path] = a.Action
+	}
+	if byPath[f1.Path] != "unchanged" {
+		t.Errorf("healed re-run: file 1 = %q, want unchanged (idempotent)", byPath[f1.Path])
+	}
+	if byPath[f3.Path] != "created" {
+		t.Errorf("healed re-run: file 3 = %q, want created", byPath[f3.Path])
+	}
 }

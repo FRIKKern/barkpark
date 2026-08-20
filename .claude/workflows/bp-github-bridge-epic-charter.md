@@ -97,6 +97,36 @@ human gate and it blocks nothing in code.
   `github.adopt`/`github.status` set `scoped_prefix`. Inbound: optional `intake_workspace_id`
   (env-resolved via Settings; absent → default workspace, today's behavior) threaded into
   ingest opts. Never accept raw tenancy params that bypass membership enforcement.
+- **D16 (wave 9). Scoping/exposure is HUMAN-gated; the mechanism is FILED, never front-run.** The public
+  mirror discloses the entire internal backlog (2026-07-13: 277 open / 1193 total issues on public
+  FRIKKern/barkpark, 100% App-authored, ~195/day, full engineering bodies with file:line + internal
+  doc_ids). The remedy is a human choice among FIVE distinct options (keep-public / dataset-scope /
+  allowlist / body-strip / separate-private-repo) owned by task `github-bridge-mirror-exposure-decision`
+  (open, needs-human, 0/3). No outbound mirror-eligibility predicate or reconcile-over-shared reap ships
+  until that ruling — building any specific predicate SOURCE pre-selects an option and front-runs the human
+  (the task's own crit-2: enactment slices are filed AFTER the ruling, carrying its parameters). When built:
+  the DEFAULT is mirror-all (zero regression), and an explicit `adopt` is operator consent ⇒ the eligibility
+  branch EXEMPTS non-nil-state links (adopted/synced), gating only never-adopted, born-outbound tasks. The
+  enforcement seam is `MirrorJob.reconcile/3` (the sole funnel `converge/5` is reached through; an
+  outbox/cursor-only gate LEAKS because `handle_defer`/`handle_flatten` self-reenqueue via `Oban.insert`).
+  Filed as `github-bridge-spine-outbound-scoping`, blocked on the ruling.
+- **D17 (wave 9). Conflict rows discriminate by `detail.source`, never by a new kind (extends D14).** Four
+  semantically-distinct problems reuse the frozen `out_of_band_edit` kind (human drift = no source; graphql;
+  sub_issue_rejected; client_error), and `Conflicts` dedups by `{repo,issue,kind}` → two co-occurring
+  distinct problems on ONE issue collapse to one operator row and one Resolve silently clears both. Fix:
+  widen the dedup key to `{repo,issue,kind,COALESCE(detail->>'source','')}` in BOTH `Conflicts.open_row/1`
+  AND the partial unique index `github_sync_conflicts_open_key` (lockstep migration). COALESCE guards the
+  Postgres null-is-distinct trap so "five human edits (no source) = one row" holds. Merge-not-overwrite (the
+  other half of the charter's two options) already shipped in wave 8; this closes the operator-visible
+  conflation only, no new kind (Health's 3-kind bucketing untouched).
+- **D18 (wave 9). GitHub-status read-scope honors the token's OWN dataset.** `Health.snapshot/1` today
+  DISCARDS its argument (param is `_opts`, always aggregates all `Settings.datasets()`) and the `:token`
+  route sets scope to the seeded Default → any valid operator token reads whole-fleet health (a
+  cross-boundary read). Fix (string-scope): make `Health.snapshot/1` actually filter by the dataset string
+  AND constrain the effective dataset to `conn.assigns.api_token.dataset` in the controller — NOT via
+  `ScopeHelpers.scope_opts/1` (returns the seeded Default on flat routes = still leaky). True per-workspace
+  isolation (net-new `workspace_id` columns on `github_sync_conflicts` + `sync_push_cursors` + backfill) is a
+  separate filed slice, not this wave.
 
 ## Ownership matrix
 
@@ -172,7 +202,75 @@ first, no lifecycle write ever); thread tenancy at the adopt/intake edges (D15) 
 (full-stack signed-body ConnCase, conflicts detail merge-not-overwrite, Health `db_ok` liveness);
 then ONE live human-opened issue driven intake→adopt→backlink. **See the "Wave 8 CUT" section.**
 
+**Wave 9 — exposure hardening + scoping-gate reconciliation — 🔨 CUT (2026-07-13):** two un-gated named-failure
+fixes (D17 conflict-source dedup; D18 github-status dataset read-scope) + reconcile the human exposure gate in
+the ledger (cite/enrich `github-bridge-mirror-exposure-decision`, refresh the count, correct its phantom-charter
+citation) + file the outbound-scoping SPINE as a needs-human-blocked backlog child (D16). Two opus slices,
+file-disjoint, each with a fail-before Bypass test. **See the "Wave 2026-07-13 — Wave 9 CUT" wave-log entry.**
+
 ## Wave log
+
+### Wave 2026-07-13 — Wave 9 CUT — exposure hardening + scoping-gate reconciliation (architect pass, two rounds of ground truth)
+
+**Reconciliation (audited vs `main` + the live guerrilla ledger + FRIKKern/barkpark, 2026-07-13):**
+- The lead brief's "waves 1-3 shipped" is STALE — waves 1-6 merged (#1232-#1238), wave 7 (human App gate) done,
+  wave 8 S1-S4 merged and LIVE on guerrilla (D13 intake gate, D14 inbound breadth, D15 tenancy; `content_probe` +
+  `inbound_events` + `db_ok` all on main). The bridge is live and mirroring.
+- **w8-S5 is a human live-proof gate, not loop-buildable.** The charter's earlier "HALTED" prose (the S5 builder
+  refused to run against a then-undeployed intake gate) is superseded: s1-s4 are deployed; S5 remains the one
+  human-driven one-issue journey (born-dark → pre-adopt edit untouched → adopt → consent mirror → clean close).
+  No code blocks it. Not in this wave.
+- **The exposure OPEN QUESTION is now OWNED, not unfiled.** Task `github-bridge-mirror-exposure-decision`
+  (open, needs-human, priority 2, 0/3) is the ruling gate — filed twice (an earlier 442-count version
+  `task-7b4f323525daa2d5` was cancelled as a duplicate). Fresh count at cut: 277 open / 1193 total / 916 closed,
+  ~195 issues/day (was 134/609 on 2026-07-10 — roughly DOUBLED). Re-count at ruling time.
+- **Charter-desync corrected:** the decision task cites a section 'Wave 2026-07-10 — LIVE-PROOF CUT FIRED,
+  decision 4' that does NOT exist (git log stopped at wave 8, #1994). THIS section + D16 are the real owner of
+  the exposure-ruling context; the decision task now carries `wave_paper` + a Decide reconciliation note pointing
+  here.
+
+**The crux Decide ruled (evidence overrode the Strategize lean "build the knob either way"):** two rounds of
+verification proved the decision task is STRICTER than that lean — its crit-1 is a HUMAN choice among five
+distinct options and its crit-2 files enactment slices AFTER the ruling carrying its parameters. An inert
+default=mirror-all knob is compatible with crit-3's narrow "zero destructive action" text, BUT building any
+specific predicate SOURCE (label/workspace/flag) pre-selects an option and front-runs crit-1 — exactly the "two
+parallel un-reconciled records" the survey warned against. RULING: this wave builds NO spine. It ships the two
+un-gated named-failure fixes, reconciles the human gate in the ledger, and files the spine fully pre-specified so
+the human ruling → one-wave enactment (D16).
+
+**Wave = 2 slices (both opus — Fable exhausted; file-disjoint, parallel):**
+- **S1 (D17) conflict-source dedup** — `github-bridge-w9-s1-conflict-source-dedup`. Widen dedup to
+  `{repo,issue,kind,COALESCE(detail->>'source','')}` in `Conflicts.open_row/1` + a lockstep migration recreating
+  the `github_sync_conflicts_open_key` partial unique index. Reverse the now-wrong merge-collapse test
+  (`conflicts_test.exs:101-126` → 2 rows) + a net-new fail-before test: graphql + sub_issue_rejected on the SAME
+  `{repo,issue}` → 2 distinct open rows (fails before, passes after) + a protective test that five no-source human
+  edits still dedup to ONE row (COALESCE null-trap guard). No new kind (D14 held). Gate:
+  `cd api && CC=/usr/bin/clang mix test test/barkpark/plugins/github/conflicts_test.exs`.
+- **S2 (D18) github-status dataset read-scope** — `github-bridge-w9-s2-health-dataset-scope`. Make
+  `Health.snapshot/1` honor its dataset arg (filter datasets_snapshot + conflicts by the string) AND constrain the
+  controller's effective dataset to `conn.assigns.api_token.dataset` so no token reads whole-fleet. Fail-before: a
+  token scoped to dataset A must NOT see dataset B's health. NOT ScopeHelpers (seeded-Default trap). Gate:
+  `cd api && CC=/usr/bin/clang mix test test/barkpark/plugins/github/health_test.exs test/barkpark_web/controllers/github_status_controller_test.exs`.
+
+**Backlog filed (published children, needs-human / blocked):**
+- `github-bridge-spine-outbound-scoping` (child of the decision task) — SPINE-A eligibility gate + SPINE-B
+  reconcile-over-shared reap, pre-specified with the settled seam (`reconcile/3`), the adopt-exemption ruling
+  (D16), and the dead-code `Client.close_issue/4` reuse (close + `Link.put(state:detached)` to avoid the D7
+  reopen-storm). Blocked on the human ruling; builder claims the moment an option is chosen.
+- `github-bridge-w9-health-workspace-isolation` (child of epic) — the BIGGER GAP-2 upgrade: net-new
+  `workspace_id`/`dataset_id` columns on `github_sync_conflicts` + `sync_push_cursors` + backfill + populate from
+  MirrorJob's carried `workspace_id`, so a token in workspace A never sees workspace B's "production" health.
+
+**Doctrine unchanged and LAW:** Barkpark is the single source of truth; mirror is OUTBOUND-only; inbound is
+intake/bookkeeping-only; `mutation_events.source` stays EXACTLY `"github"`; no field is bidirectional;
+`Conflicts.record` stays DB-only; source is never read back; plugin off by default.
+
+**Verify fleet proofs (trust > prose):** github plugin suites run GREEN locally in the main checkout with a warm
+build — conflicts 22/0, health+status-controller 20/0, mirror_job 38/0, client 33/0. A bare worktree fails at
+`mix deps.get`; builders borrow main's `deps` + `cp -a _build/test` (lockfree-worktree-gate), never symlink
+`_build` under concurrent compile. GAP-1 premise partly refuted (merge-not-overwrite already shipped; the
+residual is the operator-visible conflation D17 fixes). GAP-2 sharper than framed (`?dataset=` is a dead param,
+not just "blank"). Paper: `github-bridge-wave-2026-07-13`.
 
 ### Wave 2026-07-07 — Wave 1 foundation (5/5 green, merge-ready)
 
@@ -1695,3 +1793,29 @@ before declaring failure. All agents on Opus. `@canonical capability:github-inbo
 `needs-human`/flips ownership/posts a backlink), conflict quarantine (D7 `github_sync_conflicts`
 record-then-converge), deleted-issue → `detached`. The `github.state == "intake"` bookkeeping value this
 wave stamps is the wave-4 adopt action's find-key.
+
+### Wave 2026-07-13 — Wave 9 landed (steward-merged, grade A-)
+
+**Landed.** The 2-slice named-failure wave shipped; the exposure spine stays human-gated (per D16 — building a specific eligibility predicate would front-run the open `github-bridge-mirror-exposure-decision` task's crit-1, a human choice among five options). **#2908** (`28b43636`) = D17 conflict-source dedup: `Conflicts.open_row/1` AND the partial unique index now key on `{repo,issue,kind,COALESCE(detail->>'source','')}` (lockstep migration; COALESCE guards the null-is-distinct trap; NO new kind — D14 held) so two co-occurring distinct-source problems on one issue stay two operator rows instead of silently collapsing to one. **#2909** (`47bbf463`) = D18 status dataset read-scope: `GET /v1/plugins/github/status` no longer leaks whole-fleet sync health to any operator token — `Health.snapshot/1` now honors its dataset arg (was a dead `_opts` param) and the controller constrains to `conn.assigns.api_token.dataset` (NOT ScopeHelpers, which returns the seeded Default on flat `:token` routes) — a cross-tenant read-leak sealed. Both merge-gated criteria closed with evidence; both slices carried fail-before protective tests, gates green.
+
+**Steward notes.** (1) The Decide-phase charter commit `8c6c2974` (D16-D18 + wave-9 cut) never reached origin/main — the recurring "charter never pushed" trap; recovered by cherry-pick onto main (`32942c08`) before the fix PRs. (2) #2909's Sobelow reddened on a baseline DRIFT (not a new risk): D18's ~53 added lines shifted the two safe `@queue_states` `String.to_atom` findings from health.ex:255/266 → 308/319 (bounded module-attribute list, Low Confidence) — baseline refreshed on-branch.
+
+**Backlog filed:** `github-bridge-spine-outbound-scoping` (the fully-specified but human-gated mirror-eligibility predicate — build only after the exposure decision rules), `github-bridge-w9-health-workspace-isolation`.
+
+**Next wave takes:** resolve `github-bridge-mirror-exposure-decision` (needs a human ruling among the five scoping options) → then build `github-bridge-spine-outbound-scoping` + the reconcile-over-shared path for the ~277 already-mirrored issues; `github-bridge-w9-health-workspace-isolation`.
+
+### Wave 2026-07-13 — Wave 6 RECONCILE BUILT + REVIEWED (1/1 green, grade A, merge-ready)
+
+> **Charter reconcile note (for the steward):** the main-checkout working tree carries an UNCOMMITTED architect-pass entry titled "Wave 6 RECONCILE + console DB-outage honesty (architect pass, two rounds of ground truth)" that was authored AFTER this review worktree branched from origin/main, so it is absent here. On integration, keep BOTH: the architect plan entry, then this review-outcome entry. They do not contradict.
+
+**The wish was STALE; the wave reconciled and shipped one honest slice.** The "Wave 6 — observability" wish asked to BUILD the `/admin/github` :ops console, the `bp github status` verb, `Health.snapshot/1`, and both W5 deferrals — all of which shipped six days ago as **#1238** (`f7f47cc8`) and were hardened by Waves 7/8/9 (verified against origin/main by grep + running the suites + hitting live guerrilla). Vein A (`resolve_doc_actions/2` Access raise) is DEAD (Wave 8 #1994; fail-before probe reproduced 5 failures, restore → 19/0). Vein C (shared-kind detail collapse) is SEALED by D17 #2908. Rebuilding any of it would be false-done waste. The wave built the ONE honest loop-buildable residual.
+
+**Built + reviewed (ONE slice, opus):**
+- **`github-bridge-console-db-honesty` — GREEN, final branch `loop-epic/console-db-outage-honesty-surface-db-ok--0-r`.** The console under-surfaced the Wave-8 `db_ok` liveness field: `render/1` never read it, and the "Plugin not provisioned — credentials missing" banner keyed on `not active`, which ALSO degrades to false through `safe/2` during a real DB outage — misreporting an outage as missing credentials. Fix (presentation-only, reuses only the shipped `db_ok`, invents no new sync state, adds no v1 route → no openapi regen): a pure `health_banner/1` (`:db_down` when `db_ok==false` regardless of active; `:inactive` only when `db_ok==true and not active`; else `:ok`) that `render/1` calls once to drive both banners — no branch logic duplicated in HEEx; a distinct db-down banner (`data-role="github-health-db-down"`); `db_ok` surfaced as its own reachable/unreachable indicator (`data-role="github-db-status"` via pure `db_status_label/1`); a lag-vs-pending caption. The `:db_down` path is proven by a direct unit test over the pure helper (the in-process test Repo is always up, so a full mount cannot force an outage) — genuine fail-before (13 tests, 1 failure; compiler flagged the missing `:db_down` clause unreachable) → green 13/0.
+- **Reviewer fix in place (commit `b4df907d`):** the db-down banner hardcoded `hsl(0 70% 50% / 0.10)` + a `var(--danger,#d13)` border fallback; aligned it to the sibling not-provisioned banner's token-driven form (`border: var(--danger)`, `background: hsl(var(--danger-hsl) / 0.10)`) so it shifts correctly for dark mode. Gate stayed 13/0. Nothing else changed — logic, HEEx escaping, defensive `parse_id` no-op, and empty/db-down/inactive states were already correct.
+
+**Ledger audit: CLEAN, no fixes required.** Slice task `in_progress` (correct — not done), criteria 0-5 stamped with concrete evidence AS built, criterion 6 left open + MERGE-GATED for the lead. Epic `wave_status` honestly records the single-slice cut + the stale-wish finding. Backlog (`w6-console-live-proof` needs-human, `w9-health-workspace-isolation` open, `mirror-exposure-decision` human + its blocked `spine-outbound-scoping` child) all filed as published open children. No task outside this wave touched.
+
+**Grade: A.** The wave's highest-value act was the decision NOT to build — it caught a stale wish that would have rebuilt six-day-old shipped code (a false-done trap), proved the reconciliation by running suites + hitting live guerrilla, and shipped the one genuine operator-honesty fix with a real fail-before test. Not A+ only because the visible build output is a single presentation-only slice (the epic's loop-buildable frontier was already essentially done) and the console it hardens still has never been eyeballed live — correctly deferred as needs-human.
+
+**Lead on merge:** close the MERGE-GATED criterion 6 on `github-bridge-console-db-honesty` and flip its lifecycle to `done`; integrate the `-r` branch (carries the token-polish commit `b4df907d` atop the builder's `56501f4a`). No docs/openapi.json regen. **Next wave headline:** `github-bridge-w9-health-workspace-isolation` (a tenancy-hardening wave — NOT read-only observability). Wave Paper: `github-bridge-wave-2026-07-13`.

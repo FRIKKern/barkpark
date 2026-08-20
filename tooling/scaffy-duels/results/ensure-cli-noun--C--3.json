@@ -1,0 +1,36 @@
+{
+  "cell": "ensure-cli-noun--C--3",
+  "chore": "ensure-cli-noun",
+  "arm": "C",
+  "rep": "3",
+  "cap_usd": 0.0,
+  "worktree": "/private/tmp/scaffy-duel-ensure-cli-noun--C--3",
+  "duration_ms": 12000,
+  "warm_ms": 3000,
+  "meter": {
+    "total_cost_usd": 0.0,
+    "usage": null,
+    "source": "engine"
+  },
+  "score": {
+    "gates_green": true,
+    "asserts": [
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "\"duelnoun\""
+      },
+      {
+        "kind": "cmd",
+        "tier": null,
+        "status": "pass",
+        "text": "go test ./internal/cli/ -run TestCompletionNounsCoverAllDispatchedBuiltins -count=1"
+      }
+    ],
+    "tier_ci_forced": [],
+    "agent_gate": [],
+    "diff_sha256": "105599809a24b1918f7496b69c2db62375a2c4c35713b2cfe7403a4a9847ca8b",
+    "reversible": true
+  }
+}

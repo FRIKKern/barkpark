@@ -8,6 +8,19 @@ defmodule BarkparkWeb.LiveAuth do
       and any LiveView that exposes plugin-secret reveal/audit, schema CRUD,
       or other privileged surfaces.
 
+    * `:scoped_admin` — the TARGET-workspace admin gate for the scoped admin
+      live_sessions (`/w/:workspace_slug/...` — connectors W26, D219-D222).
+      `:admin` above answers a GLOBAL question (token permissions[] / the
+      Default-workspace role), which is the wrong question on a scoped URL:
+      a flat-global-admin principal that is only a MEMBER of workspace B
+      could mount B's scoped admin LiveViews (the W24-proven escalation).
+      This hook resolves the workspace FROM THE URL PARAMS — the same
+      workspace the page writes to — and requires an owner/admin membership
+      role THERE (`Tenancy.Auth.workspace_admin?/2`), for token and user
+      principals alike. Fail-closed on a missing/unknown slug or a
+      non-admin role. The dev browser token stays instance-root (nil
+      outside `:dev`), so the local self-hosted host is unaffected.
+
     * `:ops` — requires the `"ops"` *or* `"admin"` permission (Phase 8 WI5).
       Used by the `/admin/bokbasen` operations console. Admin tokens
       retain ops capabilities; this is purely an *additive* role so a
@@ -57,6 +70,20 @@ defmodule BarkparkWeb.LiveAuth do
 
   def on_mount(:admin, _params, session, socket) do
     authorize(socket, session, ["admin"], "Admin access required")
+  end
+
+  # W26 (charter D219-D222) — authorize against the workspace IN THE URL, not a
+  # flat/Default-pinned one. The membership ROLE in the target workspace is the
+  # grant for BOTH principal arms (`workspace_admin?/2`, role-only — NOT
+  # `authorize/3(:admin)`, whose token arm folds global permissions back in and
+  # would reopen the hole). Fronts the `:scoped_plugin_admin` and
+  # `:scoped_admin_studio` live_sessions (router.ex); the flat sessions and the
+  # global-registry `:scoped_admin_studio_dataset` stay on `:admin`.
+  def on_mount(:scoped_admin, params, session, socket) do
+    case scoped_target_workspace(params) do
+      %{id: _} = ws -> scoped_admin_authorize(socket, session, ws)
+      nil -> scoped_admin_deny(socket)
+    end
   end
 
   def on_mount(:ops, _params, session, socket) do
@@ -181,6 +208,76 @@ defmodule BarkparkWeb.LiveAuth do
          |> put_flash(:error, denial_flash)
          |> redirect(to: denial_target(socket, session))}
     end
+  end
+
+  # ── :scoped_admin (W26) ────────────────────────────────────────────────────
+
+  # The SAME resolver LiveScope calls (live_scope.ex) — one slug→workspace
+  # truth, never a second resolver. nil (unknown slug / missing param) is a
+  # deny: an unresolvable target workspace can never be authorized against.
+  defp scoped_target_workspace(%{"workspace_slug" => slug}) when is_binary(slug) and slug != "",
+    do: Barkpark.Tenancy.get_workspace_by_slug(slug)
+
+  defp scoped_target_workspace(_params), do: nil
+
+  # Token arm first (mirrors `authorize/4`): the first candidate that verifies
+  # AND holds the grant wins and rides the socket as `:api_token` (LiveScope's
+  # read gate + the LVs' per-write re-gates read it). No token grant → the
+  # user-session arm decides. The dev fallback is the local host's
+  # instance-root credential — exempt from the membership check by design
+  # ([[local-dev-host-is-admin]]); `dev_browser_token_fallback/0` is nil
+  # outside :dev, so the exemption is inert in test/prod.
+  defp scoped_admin_authorize(socket, session, ws) do
+    granted =
+      Enum.find_value(scoped_admin_candidates(session), fn {kind, raw} ->
+        with {:ok, api_token} <- Auth.verify_token(raw),
+             true <- scoped_admin_grant?(kind, api_token, ws) do
+          api_token
+        else
+          _ -> nil
+        end
+      end)
+
+    case granted do
+      nil -> scoped_admin_authorize_user(socket, session, ws)
+      api_token -> {:cont, assign(socket, :api_token, api_token)}
+    end
+  end
+
+  defp scoped_admin_candidates(session) do
+    Enum.filter(
+      [dev_root: dev_browser_token_fallback(), session: session["api_token"]],
+      fn {_kind, raw} -> is_binary(raw) end
+    )
+  end
+
+  defp scoped_admin_grant?(:dev_root, api_token, _ws),
+    do: Auth.has_permission?(api_token, "admin")
+
+  # A session token's grant is its membership ROLE in the target workspace —
+  # never its global permissions[]. A flat-global-admin token that is only a
+  # member (or non-member) of the URL workspace is denied here.
+  defp scoped_admin_grant?(:session, api_token, ws),
+    do: Barkpark.Tenancy.Auth.workspace_admin?(api_token, ws.id)
+
+  # User-session arm: same role-only bar, against the TARGET workspace — a
+  # Default-workspace admin who is only a member of the URL workspace is
+  # denied, and a legit target-workspace admin needs NO Default role at all
+  # (the D207 over-tight lockout this clause also fixes).
+  defp scoped_admin_authorize_user(socket, session, ws) do
+    with %Barkpark.Accounts.User{} = user <- user_from_session(session),
+         true <- Barkpark.Tenancy.Auth.workspace_admin?(user, ws.id) do
+      {:cont, assign(socket, :current_user, user)}
+    else
+      _ -> scoped_admin_deny(socket)
+    end
+  end
+
+  defp scoped_admin_deny(socket) do
+    {:halt,
+     socket
+     |> put_flash(:error, "Admin access required")
+     |> redirect(to: "/studio")}
   end
 
   # D69 — the email-notification promise. An ANONYMOUS visitor bounced off a chat

@@ -1,0 +1,38 @@
+{
+  "run_id": "grip-20260723T075532Z",
+  "recipes": [
+    {
+      "subject": "test/barkpark_web/live/studio/shared_publish_wall_test.exs",
+      "quantity": "mix:test",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && CC=clang mix test test/barkpark_web/live/studio/shared_publish_wall_test.exs test/barkpark_web/live/studio/shared_publish_advisory_test.exs test/barkpark_web/live/studio/studio_live_doc_actions_test.exs test/barkpark_web/live/studio/studio_live_crash_class_test.exs",
+      "derived_level": "L3",
+      "deps": [
+        "test/barkpark_web/live/studio/shared_publish_wall_test.exs",
+        "test/barkpark_web/live/studio/shared_publish_advisory_test.exs",
+        "test/barkpark_web/live/studio/studio_live_doc_actions_test.exs",
+        "test/barkpark_web/live/studio/studio_live_crash_class_test.exs"
+      ],
+      "observed_at": "2026-07-23T07:55:32Z"
+    },
+    {
+      "subject": "test/barkpark_web/live/studio/shared_publish_wall_test.exs",
+      "quantity": "mix:test",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && CC=clang mix test test/barkpark_web/live/studio/shared_publish_wall_test.exs --trace",
+      "derived_level": "L3",
+      "deps": [
+        "test/barkpark_web/live/studio/shared_publish_wall_test.exs"
+      ],
+      "observed_at": "2026-07-23T07:55:32Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/live/studio/studio_live/shared.ex",
+      "quantity": "git:diff",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git diff HEAD origin/main -- api/lib/barkpark_web/live/studio/studio_live/shared.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/live/studio/studio_live/shared.ex"
+      ],
+      "observed_at": "2026-07-23T07:55:32Z"
+    }
+  ]
+}

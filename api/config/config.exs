@@ -10,14 +10,34 @@ import Config
 config :barkpark,
   ecto_repos: [Barkpark.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true],
-  media_upload_dir: Path.expand("../uploads", __DIR__)
+  media_upload_dir: Path.expand("../uploads", __DIR__),
+  # Where the workspace-bundle export streams its per-table spills and
+  # assembles the tar. Anchored under the app's own data dir, NEVER a bare
+  # System.tmp_dir!/0 — `Archive.spill_dir/0` asserts at runtime that the
+  # chosen path is not memory-backed, because a tmpfs spill would reinstate
+  # the full-bundle RSS peak the streamed export exists to remove.
+  bundle_spill_dir: Path.expand("../tmp/bundle-spill", __DIR__)
+
+# Media blob byte storage. :local (the default) keeps today's on-disk layout
+# under :media_upload_dir, byte-identical to the pre-blobstore behaviour.
+# :s3 moves ORIGINALS to any S3-compatible bucket (Cloudflare R2, AWS S3,
+# MinIO, …) with local disk demoted to a regenerable write-through cache —
+# see `Barkpark.Media.Blobstore` and the BARKPARK_MEDIA_STORAGE / BARKPARK_S3_*
+# wiring in runtime.exs.
+config :barkpark, :media_storage, backend: :local
 
 # Configure the endpoint
 config :barkpark, BarkparkWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [html: BarkparkWeb.ErrorHTML, json: BarkparkWeb.ErrorJSON],
+    # JSON-first: Phoenix renders the FIRST format when Accept can't be
+    # resolved, and NoRouteError fires before the :accepts plug runs — so the
+    # Go apiclient (no Accept header on ordinary calls) and the JS SDK (sends
+    # the vendor Accept registered below, which is otherwise unmapped) both
+    # need JSON to win by default. Browsers are unaffected: they always send
+    # an explicit `Accept: text/html`.
+    formats: [json: BarkparkWeb.ErrorJSON, html: BarkparkWeb.ErrorHTML],
     layout: false
   ],
   pubsub_server: Barkpark.PubSub,
@@ -35,6 +55,15 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Register the JS SDK's vendor Accept header so it resolves to the JSON error
+# format above instead of falling through to ErrorHTML. Mapping it under the
+# "json" extension also makes :mime's reverse extension->type lookup
+# ambiguous ("extension .json currently maps to different mime-types") unless
+# we pin the canonical reverse mapping back to application/json — the vendor
+# type still resolves forward, it just isn't what .json reverse-resolves to.
+config :mime, :types, %{"application/vnd.barkpark+json" => ["json"]}
+config :mime, :extensions, %{"json" => "application/json"}
+
 # Mailer (core auth email flows — verify-email / password reset). Swoosh's
 # default API client (hackney) is unused: dev renders to the local mailbox,
 # test captures in-process, prod sends via SMTP (gen_smtp) — wired in
@@ -49,6 +78,22 @@ config :barkpark, :rate_limits,
   write_per_minute: 60,
   datasets: %{}
 
+# Trust boundary for x-forwarded-for on every IP-keyed rate bucket
+# (Barkpark.RateLimiter.client_ip/1). Loopback is trusted UNCONDITIONALLY and is
+# not listed here — Caddy is co-located and dials localhost:4000, which is the
+# whole self-host/instance topology. This list ADDS non-loopback fronts whose
+# relayed chain may be believed: in practice the Barkpark Cloud control plane's
+# egress address, which relays the caller's IP on the revoke DELETE. Empty by
+# default: a self-hosted box has no second front, and an unlisted relay is
+# disbelieved (its own address becomes the bucket key) rather than trusted.
+#
+# Entries are :inet address tuples, INDIVIDUAL ADDRESSES ONLY — never a CIDR
+# range. A range re-opens the forgery hole this exists to close: an attacker
+# whose real (appended) address falls inside it has that hop SKIPPED, and the
+# forged hop to its left is believed instead. Overridden at runtime from
+# BARKPARK_TRUSTED_PROXIES (runtime.exs), which raises on a malformed entry.
+config :barkpark, :trusted_proxies, []
+
 # Per-key abuse rails for the low-trust ticket-key WRITE surface (Barkpark
 # Tickets, charter Decision 9). Per-HOUR budgets, billed per {key_id, class};
 # reads (the poll-with-key loop) are exempt. See
@@ -59,6 +104,17 @@ config :barkpark, :ticket_rate_limits,
   create: 10,
   message: 60,
   attachment: 30
+
+# Per-IP abuse rails for UNAUTHENTICATED auth writes, per HOUR, billed in a
+# bucket of their own ON TOP of the shared 60/min anon-write meter
+# (BarkparkWeb.Plugs.AuthWriteRateLimit). `register` = POST /v1/auth/register,
+# which mails a third party on every call (confirmation for a fresh address,
+# re-notification for an existing account), so the meaningful ceiling is MAIL
+# volume, not request volume: 5/hour/IP fits a human signing up with retries and
+# bounds the mailbomb. Prod-tunable without a rebuild via
+# BARKPARK_AUTH_RATE_REGISTER (runtime.exs). Throttle only — invite codes /
+# allowlists / closing signup are the instance owner's policy call.
+config :barkpark, :auth_write_rate_limits, register: 5
 
 # The preview-JWT signing secret is env-specific and is NEVER a hardcoded
 # default in this shared base (closes Sobelow Config.Secrets, config.exs:64
@@ -103,17 +159,67 @@ config :barkpark, :tmux_console, enabled: true, backend: ExPTY
 # `claude` binary is not installed.
 config :barkpark, :claude_chat, enabled: true
 
+# Connectors — the Elixir edge of the chat-bridge seam (connectors D50/D51).
+#
+# `connect_secret: nil` is the DEFAULT and a fully supported state: an instance
+# with no CONNECTORS_CONNECT_SECRET simply has no connect seam (the bridge does
+# not mount the connect routes; the Studio catalog renders read-only with a
+# banner). It must never raise at boot and never leave an unauthenticated route
+# — which is also what removes the merge-order hazard between the bridge slice
+# and the deploy step that generates the secret.
+#
+# `bridge_url` is LOOPBACK by construction: the bridge binds 127.0.0.1:4020 on
+# the same box as the BEAM (CONNECTORS_HTTP_ADDR), and the connect routes 404 on
+# any request carrying `x-forwarded-*` — so the raw chat token never traverses
+# anything but the loopback interface.
+config :barkpark, Barkpark.Connectors,
+  bridge_url: "http://127.0.0.1:4020/connectors",
+  connect_secret: nil,
+  # The connectors HTTP path prefix — the Caddy route + `webhook-server.ts`'s
+  # `{prefix}/webhooks/:provider[/:installKey]` grammar both hang off it. Studio
+  # mirrors it to DISPLAY the per-install webhook/interactions URL an operator
+  # pastes into a vendor portal (connectors D260). Distinct from `bridge_url`
+  # (loopback, for the connect wire) — this joins the PUBLIC base, never loopback.
+  path_prefix: "/connectors",
+  bridge: Barkpark.Connectors.BridgeClient
+
 config :barkpark, :media_cdn,
   base_url: nil,
   invalidation: [adapter: :noop]
 
 config :barkpark, :media_webhooks, endpoints: []
 
+# Audit-webhook fan-out mode (era-w7 bridge). TRUE = the post-commit audit
+# bridge dispatches on a supervised fire-and-forget task so a slow endpoint
+# never blocks `Audit.emit`. config/test.exs flips it FALSE so the fan-out runs
+# SYNCHRONOUSLY in the test's own process — an unawaited task on the shared
+# `Barkpark.TaskSupervisor` outlives its DataCase sandbox drain and its leaked
+# audit SELECT deadlocks a concurrent raw-DDL test (Postgrex 40P01). Read by
+# `Barkpark.Webhooks.Dispatcher.dispatch_audit_async/1`.
+config :barkpark, :audit_dispatch_async, true
+
 # Auto-disable a webhook endpoint after this many CONSECUTIVE terminal delivery
 # give-ups (permanent 4xx / SSRF block / retry exhaustion). The counter resets to
 # 0 on any successful delivery, so only a persistently-dead endpoint trips it.
 # `Barkpark.Webhooks.auto_disable_threshold/0` reads this (module default 20).
 config :barkpark, :webhook_auto_disable_threshold, 20
+
+# INBOUND GitHub webhook body cap (BYTES), read by `BarkparkWeb.Plugs.CacheBodyReader`.
+# The endpoint parses up to `length: 100_000_000` (100 MB) BEFORE the HMAC gate
+# runs, and CacheBodyReader tees the raw bytes on the webhook path — so an
+# unauthenticated, bogus-signature sender can force pre-auth buffering up to that
+# global bound. GitHub documents a hard 25 MB payload ceiling (larger events are
+# never delivered), so a per-route cap at 26 MB rejects zero legitimate deliveries
+# while bounding the pre-signature buffering. NOTE: this BOUNDS buffering (reads up
+# to the cap before the {:more} → 413 short-circuits), it does not PREVENT it.
+#
+# DESCOPE (felix-w27): the original slice also proposed a per-probe RATE LIMIT on
+# this route. That half is deliberately dropped — `Settings.webhook_secret_cached/0`
+# already memoizes the secret (short-TTL `:persistent_term`), so a burst of bogus
+# signatures no longer forces a DB read + audit row per request; the marginal cost
+# of an unauthenticated probe is now near-zero. The body cap is the load-bearing
+# resource bound; a rate limiter would add moving parts without a measured win.
+config :barkpark, :github_webhook_body_cap, 26_000_000
 
 # Config-gated media upload allowlist + per-upload size cap (SECURITY, PART 2).
 # Ships OFF: empty lists + nil cap = allow-all, i.e. accept every server-derived
@@ -128,6 +234,16 @@ config :barkpark, :media_uploads,
 
 config :barkpark, :media_processing_callback_token, "dev-media-processing-callback-token"
 
+# Workspace-bundle IMPORT switch (Personal-Development-Server W1, G3). FAIL-CLOSED
+# by default: a bundle import writes another instance's workspace data into THIS
+# one, so it stays OFF everywhere unless an operator opts in via
+# BARKPARK_ALLOW_BUNDLE_IMPORT (runtime.exs). `bin/barkpark up` writes =1 into the
+# personal-local scratch .env — the free local twin is the intended pull TARGET —
+# while prod boxes (which never set the env) keep import denied. Enforcement of
+# this key lives in the import path (pds-w1-merge-import); this is the default it
+# reads.
+config :barkpark, :allow_bundle_import, false
+
 # Fallback CORS allowlist for API routes without a dataset path segment
 # (e.g. /v1/meta, /media without ?dataset=, legacy /api/*).
 config :barkpark, :default_cors_origins, []
@@ -137,8 +253,13 @@ config :barkpark, :default_cors_origins, []
 # fallback); dev.exs/test.exs set a local default.
 config :barkpark, :ingest_token, nil
 
+# Plain STRING, not a ~r sigil: a compiled Regex in config cannot be
+# serialized into sys.config by `mix release` on Elixir 1.19 (the Dockerfile's
+# build stage), and 1.18 (CI) rejects invented workarounds. The consumer
+# (Barkpark.Search.Sanitizer.compile_pattern/1) compiles binaries with "i" at
+# runtime, so a string here is behavior-identical on both toolchains.
 config :barkpark, :search_query_exclude_patterns, [
-  ~r/^(test|asdf|qwerty|foo|bar)$/i
+  "^(test|asdf|qwerty|foo|bar)$"
 ]
 
 # Engine → retriever registry for the document search SEAM. The Indx plugin
@@ -173,6 +294,13 @@ config :barkpark, Oban,
   # even though `github` is a registered plugin. Low concurrency (2) is a
   # deliberate secondary-rate-limit guard (epic D9): a snoozed job re-reads
   # current state when it runs, so throttling loses no intent.
+  # `playground_ttl` drives Barkpark.Tenancy.Workers.PlaygroundReaper (two-stage
+  # TTL reaper for ephemeral playground workspaces — suspend@expires_at,
+  # swept-delete@+24h). Tenancy is core, NOT a plugin, so — like `indx` /
+  # `edge_projector` — its queue MUST be declared statically here; a queue that
+  # only a plugin's oban-merge added would sit `available` forever (plugins can
+  # add CRONTAB but not queues). Concurrency 1: at most one reaper tick runs at a
+  # time, defense-in-depth alongside the worker's `unique` window.
   queues: [
     default: 10,
     bokbasen: 4,
@@ -181,13 +309,21 @@ config :barkpark, Oban,
     tasks_compact: 1,
     indx: 2,
     edge_projector: 2,
-    github_mirror: 2
+    github_mirror: 2,
+    playground_ttl: 1
   ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
        {"30 3 * * *", Barkpark.Search.Workers.Crystallize},
+       # authoring-excellence D45 — daily per-type tag-count distribution
+       # heartbeat over the published corpus (paper/task). Pure/derivable read
+       # (Barkpark.Content.TagDistribution) that only Logger.info's the top-N
+       # tags per type — no table, no persisted artifact. Placed one minute
+       # after Crystallize (both nightly, disjoint queries) so the two heavy
+       # nightly reads never kick off in the same tick.
+       {"31 3 * * *", Barkpark.Workers.TagDistribution},
        {"0 4 * * *", Barkpark.Search.Workers.Prune},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
@@ -199,7 +335,14 @@ config :barkpark, Oban,
        {"* * * * *", Barkpark.Webhooks.StuckDeliverySweeper},
        # era-w5 — stream the append-only audit log to configured SIEM sinks
        # (cursor-based tail-shipping; a no-op when no active sink exists).
-       {"* * * * *", Barkpark.Audit.ExportWorker}
+       {"* * * * *", Barkpark.Audit.ExportWorker},
+       # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
+       # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
+       # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a
+       # plugin), so this cron entry lives in the static crontab alongside the
+       # webhook/audit sweepers and runs on the static `playground_ttl` queue
+       # declared above. A no-op tick when no playground has expired.
+       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper}
        # The W7-05 TTL sweep ({"* * * * *", Barkpark.Tasks.TtlSweeper}) and
        # W7-06 compaction ({"0 */6 * * *", Barkpark.Tasks.Compactor}) cron
        # entries now live in the Tasks plugin's `oban_crontab/0`
@@ -231,6 +374,19 @@ config :barkpark, Oban,
 # higher than the rest of the fleet (Search.Crystallize / Prune are
 # daily).
 config :barkpark, :task_lease_ttl_seconds, 2700
+
+# tlv-s6 — engagement honesty lease (TLV charter D4). The THOUGHT states
+# (considering/researching) carry a content.engagement companion whose `ts`
+# the holder refreshes; the TtlSweeper's second sweep lapses rows whose ts
+# went stale (researching → considering, engagement cleared; considering →
+# engagement cleared, stays considering). 900 s / 15 min: thought idles much
+# faster than the 45-min work lease above — an investigation that hasn't
+# touched its engagement in 15 minutes belongs back in the considering pool,
+# and lapsing is cheap (no epoch fence, no re-claim ceremony; the next cycle
+# just re-engages). Tests override to 0/1 for determinism. Runtime override:
+# BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS (see runtime.exs). Cadence rides the
+# same per-minute Oban.Cron job as the lease sweep.
+config :barkpark, :task_engagement_ttl_seconds, 900
 
 # One-way PULL sync (Barkpark.Sync) — DORMANT default so a fresh install boots
 # with sync OFF. runtime.exs maps the BARKPARK_SYNC_* env vars and flips
@@ -275,6 +431,56 @@ config :barkpark, Barkpark.SelfUpdate.Runner,
   rollback_preflight_command: {"bash", ["deploy/instance-deploy.sh", "--rollback-preflight"]},
   cd: nil,
   max_log_lines: 500
+
+# Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner) — runs deploy/site-deploy.sh
+# for a content-bound STATIC site (site-spawner charter D22/D23/D24). Same
+# fail-closed default as the self-update Runner: `enabled: false` means
+# POST /v1/admin/site-deploy answers 503 and nothing can ever execute; prod's
+# runtime.exs flips it on ONLY when BARKPARK_SITE_DEPLOY_APPLY=1.
+#
+# Deliberately a SEPARATE runner from Barkpark.SelfUpdate.Runner: the slug and
+# build_id come from each REQUEST (the self-update command is compile-time
+# config), and the single-flight slot is per-slug (self-update's is global, and
+# a box auto-deploys itself on every merge). `cd: nil` resolves to the repo root
+# at runtime — the BEAM's cwd is api/, so the parent is /opt/barkpark, where
+# `bash deploy/site-deploy.sh` resolves.
+# `runner_mode: :auto` resolves to the systemd transient-unit path (an in-flight
+# build survives a barkpark.service restart; the runner re-attaches on boot) when
+# `systemd-run` is on the box, else the in-process Port fallback (dev/macOS/CI).
+# `run_state_dir` (default `<repo>/.bp-site-deploy-runs`) MUST survive a BEAM
+# restart — it is how init/1 finds units to re-attach.
+config :barkpark, Barkpark.Sites.DeployRunner,
+  enabled: false,
+  runner_mode: :auto,
+  command: {"bash", ["deploy/site-deploy.sh"]},
+  rollback_command: {"bash", ["deploy/site-deploy.sh", "--rollback"]},
+  cd: nil,
+  run_state_dir: nil,
+  memory_max: "1500M",
+  cpu_quota: "150%",
+  max_log_lines: 500,
+  run_deadline_ms: 1_800_000,
+  # Hard deadline for the synchronous control-plane System.cmd calls (systemd-run
+  # launch, `systemctl is-active`, `systemctl stop`) that run inside the singleton
+  # GenServer — a hung systemd/systemctl can't wedge {:trigger}/{:status} or the
+  # {:unit_deadline} watchdog. Bounds the CTL call, not the build (run_deadline_ms).
+  ctl_cmd_timeout_ms: 15_000
+
+# Site SOURCE PROVISIONER (Barkpark.Sites.Provisioner) — materializes a shipped
+# starter template into `<sites_dir>/<slug>/src` before BUILD (site-spawner
+# D33/D34, search-template D7). The template is chosen by the request's
+# `template` slug (falling back to the runtime_target default), and EACH shipped
+# starter has its OWN overridable source-dir key so a test/box can point any one
+# at a stand-in: `:template_dir` (astro-starter), `:node_template_dir`
+# (next-starter), `:search_template_dir` (search-starter). All nil here ⇒ the
+# module's cwd-relative `templates/<slug>` defaults; runtime.exs maps the
+# BARKPARK_*_TEMPLATE_DIR env vars over them, and BARKPARK_SITES_DIR over
+# `:sites_dir`.
+config :barkpark, Barkpark.Sites.Provisioner,
+  sites_dir: nil,
+  template_dir: nil,
+  node_template_dir: nil,
+  search_template_dir: nil
 
 # Master KEK for envelope encryption (core auth/secrets, Phase 0). This is the
 # compile-time DEV/TEST default — a deterministic, non-secret 32-byte key.

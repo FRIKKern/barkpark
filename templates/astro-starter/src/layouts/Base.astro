@@ -1,0 +1,84 @@
+---
+/**
+ * Base HTML shell. Bakes the deploy markers the site-spawner engine greps for
+ * in its HEALTH stage:
+ *
+ *   <meta name="bp-build-id">     — which build produced this HTML
+ *   <meta name="bp-content-rev">  — the content revision it was cut against
+ *   <meta name="bp-doc-id">       — the featured document id  (content-truth)
+ *   <meta name="bp-doc-title">    — the featured document title (content-truth)
+ *   <meta name="bp-site-base">    — the Astro `base` this site was built under
+ *
+ * The engine can assert `bp-content-rev` matches the revision it intended to
+ * ship AND that `bp-doc-id` is non-empty, so a build that lost its content
+ * link never passes health and never reaches visitors.
+ */
+export interface Props {
+  title: string
+  buildId: string
+  contentRev: string
+  docId: string
+  docTitle: string
+}
+
+const { title, buildId, contentRev, docId, docTitle } = Astro.props
+
+// The Astro `base` this site was built under (from BARKPARK_SITE_BASE via
+// astro.config.mjs). Baked as a marker so the deploy engine can assert the
+// build targets the right `/sites/<slug>/` path.
+const siteBase = import.meta.env.BASE_URL
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="bp-build-id" content={buildId} />
+    <meta name="bp-content-rev" content={contentRev} />
+    <meta name="bp-doc-id" content={docId} />
+    <meta name="bp-doc-title" content={docTitle} />
+    <meta name="bp-site-base" content={siteBase} />
+    <title>{title}</title>
+    <style is:global>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #16181d;
+        --muted: #5b6472;
+        --card: #f6f7f9;
+        --border: #e4e7ec;
+        --accent: #3b5bdb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0e1117;
+          --fg: #e6e9ef;
+          --muted: #99a2b2;
+          --card: #171b23;
+          --border: #262c37;
+          --accent: #7c93f5;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      main {
+        max-width: 42rem;
+        margin: 0 auto;
+        padding: 4rem 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>

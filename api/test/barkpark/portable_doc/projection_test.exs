@@ -28,6 +28,40 @@ defmodule Barkpark.PortableDoc.ProjectionTest do
     end
   end
 
+  describe "read_blocks/1" do
+    test "prefers a present top-level block list, including an empty list" do
+      nested = [%{"id" => "nested", "type" => "paragraph"}]
+
+      assert Projection.read_blocks(%{
+               "blocks" => [],
+               "body" => %{"blocks" => nested}
+             }) == []
+    end
+
+    test "falls back to the projected body block list" do
+      nested = [%{"id" => "nested", "type" => "paragraph"}]
+
+      assert Projection.read_blocks(%{"body" => %{"blocks" => nested}}) == nested
+    end
+
+    test "accepts a bare body block array" do
+      blocks = [%{"id" => "bare", "type" => "divider"}]
+      assert Projection.read_blocks(%{"body" => blocks}) == blocks
+    end
+
+    test "adapts a non-blank legacy Markdown body" do
+      assert [%{"type" => "heading", "text" => "Legacy"} | _] =
+               Projection.read_blocks(%{"body" => "# Legacy\n\nStill readable."})
+
+      assert Projection.read_blocks(%{"body" => "  \n"}) == nil
+    end
+
+    test "returns nil when neither representation contains a block list" do
+      assert Projection.read_blocks(%{}) == nil
+      assert Projection.read_blocks(%{"blocks" => "invalid", "body" => %{}}) == nil
+    end
+  end
+
   describe "project/3 — the sole writer of content[fieldName] + content[\"body\"]" do
     test "each bound block projects value to content[fieldName]; free blocks → body" do
       blocks = [

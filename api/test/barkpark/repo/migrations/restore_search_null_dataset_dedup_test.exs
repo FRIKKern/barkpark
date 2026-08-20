@@ -15,11 +15,12 @@ defmodule Barkpark.Repo.Migrations.RestoreSearchNullDatasetDedupTest do
   dedup is enforced again.
   """
 
-  # See the migration-test note in codelist_issue_version_test.exs: the
-  # Ecto.Migrator / repo.query! path races on sandbox connection checkout, so
-  # these are tagged :flaky and excluded from the default run. Drive with:
-  #
-  #     mix test test/barkpark/repo/migrations --include flaky
+  # These tests drive the migration via `apply_up/1` / `apply_down/1` directly
+  # on the shared sandbox connection — NOT Ecto.Migrator, so there is no spawned
+  # task and no advisory lock to contend for. The corrected diagnosis (see
+  # codelist_issue_version_test.exs) proved they are deterministic (0 failures
+  # across 20+5 seeds); the original :flaky tag — which blamed a non-existent
+  # Sandbox.allow gap — has been dropped so they run in the default suite.
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Repo
@@ -36,9 +37,10 @@ defmodule Barkpark.Repo.Migrations.RestoreSearchNullDatasetDedupTest do
 
   alias Barkpark.Repo.Migrations.RestoreSearchNullDatasetDedup
 
-  # Drive the migration body via apply_up/1 / apply_down/1 on the sandbox
-  # connection — NOT Ecto.Migrator, which spawns its own (un-allowed) task and
-  # races on sandbox checkout (see the :flaky note in codelist_issue_version_test).
+  # Drive the migration body via apply_up/1 / apply_down/1 on the shared sandbox
+  # connection — NOT Ecto.Migrator, which spawns a task that would contend for
+  # the parent-held connection (see the corrected diagnosis in
+  # codelist_issue_version_test).
   defp migrate_up, do: RestoreSearchNullDatasetDedup.apply_up(Repo)
   defp migrate_down, do: RestoreSearchNullDatasetDedup.apply_down(Repo)
 
@@ -97,7 +99,6 @@ defmodule Barkpark.Repo.Migrations.RestoreSearchNullDatasetDedupTest do
   end
 
   describe "Option-A restore on search_synonyms" do
-    @tag :flaky
     test "collapses byte-duplicate NULL rows, stamps dataset_id, and re-enforces dedup" do
       scope = nondoc_scope()
 
@@ -149,7 +150,6 @@ defmodule Barkpark.Repo.Migrations.RestoreSearchNullDatasetDedupTest do
       assert count_synonyms("documents", scope, "lite", "light", "alt_correction") == 1
     end
 
-    @tag :flaky
     test "down/0 reverts the search-only stamp + seeded dataset (reversible)" do
       scope = nondoc_scope()
       insert_synonym_raw("documents", scope, "fcolor", "color", "one_way", nil)

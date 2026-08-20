@@ -1,0 +1,25 @@
+{
+  "name": "@barkpark/astro-decoy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Non-vacuous guard for @barkpark/astro-parity (charter D18): a trivial client:load React island whose vitest INVERTS the parity package's two zero-JS checks and proves they turn RED when hydration IS shipped. Deliberately a SEPARATE package so @astrojs/react never enters the parity path (D22). Test-only — never published.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "astro build",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "astro": "5.18.2",
+    "@astrojs/react": "4.4.2",
+    "happy-dom": "^20.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

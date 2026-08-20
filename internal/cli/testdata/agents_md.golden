@@ -5,22 +5,28 @@ All task tracking uses Barkpark — never markdown TODO lists, never a TODO tool
 The `bp` CLI talks to the configured server (`~/.config/barkpark/`).
 
 - `bp task ready` — list available work
-- `bp task next <worker>` — atomically claim the next ready task; claim FIRST — the claim returns the brief and an epoch
+- `bp task next <worker>` — atomically claim the next ready task; claim FIRST — it returns the brief and an epoch
 - `bp task get <id>` — task detail (carries children + child_count)
-- `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. If the claim lapsed, re-claim the same task for a fresh epoch, then close.
+- `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. Lapsed? re-claim for a fresh epoch, then close.
 - `bp task create ...` — file new work (older binaries lack this verb; fall back to `bp doc create task`)
 - `bp task prime <worker>` — one-call rehydration: your in-progress claims, ready head, recent events
-- `bp task stamp <id> <worker> <epoch> --criterion N --met --evidence "…"` — record evidence on ONE criterion mid-claim (`--miss --note "…"` logs an honest attempt without flipping the lock)
-- `bp task pulse <id> <worker> --now "…"` — write the now-line and renew the lease in one write (no epoch arg — it bumps the claim epoch)
+- `bp task stamp <id> <worker> <epoch> --criterion N --criterion-text "<its wording>" --met --evidence "…"` — evidence on ONE criterion mid-claim. N is ZERO-BASED (first = 0); `--criterion-text` is REQUIRED for `--met` — an unguarded flip is REFUSED. `--miss --note "…"` = honest attempt, no flip.
+- `bp task pulse <id> <worker> --now "…"` — now-line + lease renewal in one write (no epoch arg — it bumps the claim epoch)
 - `bp capabilities -o json` — the whole API manifest when unsure
 
 Conventions:
 - Worker id: `<tool>-<your-name-or-branch>` — pick one and keep it for claim/close symmetry.
 - `lifecycle_status` is the done-signal (`open` → `done`), not the claim record.
-- Closing can mark acceptance criteria in the same atomic write:
-  `--set 'criteria:=[{"index":0,"met":true,"evidence":"..."}]'`
+- Closing marks criteria in the same atomic write; a met:true entry MUST carry the criterion's exact wording:
+  `--set 'criteria:=[{"index":0,"met":true,"evidence":"...","criterion":"<wording>"}]'`
 - Nest large work with `parent_id` (a slug) for a Goal → sub-task tree; keep it flat otherwise.
-- If a close 409s with `doc_changed_since_claim`, the brief changed under you — re-read the task, then close again.
+- If a close 409s `doc_changed_since_claim`, re-read the changed brief, then close with `--set observed_rev=<current_rev>` (the rev the 409 names); a bare re-read then close just repeats the 409.
+
+Papers (design docs, specs, reports) live in Barkpark too — never hand-roll an HTML file:
+- `bp bulldocs publish <slug> --file payload.json` — the write door; the same slug MUST also appear as `"slug"` INSIDE the JSON, not just on the command line.
+- The payload is `blocks` — the renderer's own block deck (chart, diagram, asciicast, diff, table, callout, …). `body_html` is a legacy last resort that renders flat.
+- Inline leaves are VALUE-KEYED: every `items`/`cells` entry is an object carrying a `value` key, never a bare string — a bare string publishes clean and renders BLANK.
+- `bp paper view <slug>` reads one back in the terminal. Authoring guide: `/papers/paper-authoring-excellence`.
 
 MCP-native surface? The same verbs are first-class MCP tools via `bp mcp serve` — see `docs/setup/AGENT-ONRAMPS.md`.
 <!-- barkpark:onramp:end -->

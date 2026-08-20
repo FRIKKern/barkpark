@@ -47,6 +47,33 @@ defmodule Barkpark.StudioChat.ProbeTest do
     """)
   end
 
+  defp fake_codex(version, account_response, behavior \\ :respond) do
+    account_branch =
+      case behavior do
+        :respond -> "echo '#{account_response}'"
+        :garbage -> "echo 'not-json'"
+        :stall -> "sleep 2"
+      end
+
+    fake_binary("""
+    if [ "$1" = "--version" ]; then
+      echo "codex-cli #{version}"
+      exit 0
+    fi
+
+    while IFS= read -r line; do
+      case "$line" in
+        *'"method":"initialize"'*)
+          echo '{"id":1,"result":{"codexHome":"/tmp/codex","platformFamily":"unix","platformOs":"linux","userAgent":"codex-cli/#{version}"}}'
+          ;;
+        *'"method":"account/read"'*)
+          #{account_branch}
+          ;;
+      esac
+    done
+    """)
+  end
+
   describe "probe(:claude)" do
     test "binary missing → honest not-found struct (no version, not authed)" do
       put_probe_config(claude_binary: "definitely-not-a-real-claude-binary-xyzzy")
@@ -124,6 +151,39 @@ defmodule Barkpark.StudioChat.ProbeTest do
     end
   end
 
+  describe "probe(:claude) is time-boxed (resource bound)" do
+    # FAIL-BEFORE: the unbounded `defp run/2` called System.cmd directly, so this
+    # sleeper stub blocks each of the two shell-outs (--version, auth status) for
+    # 2s → probe returns ~4s later with version "2.1.207" and authed?: true.
+    #
+    # PASS-AFTER: each shell-out is brutal-killed at the 150ms deadline, so the
+    # version/auth reads degrade to the honest not-ready shape AND the whole probe
+    # returns well under the 2s a single stub would take to exit on its own.
+    test "a stalled claude CLI degrades to not-ready AND the wall-clock is cut" do
+      slow =
+        fake_binary("""
+        case "$1" in
+          --version) sleep 2; echo "2.1.207 (Claude Code)"; exit 0 ;;
+          auth) sleep 2; echo '{"loggedIn":true,"authMethod":"oauth"}'; exit 0 ;;
+          *) exit 0 ;;
+        esac
+        """)
+
+      put_probe_config(claude_binary: slow, timeout_ms: 150)
+
+      {micros, probe} = :timer.tc(fn -> Probe.probe(:claude) end)
+
+      # Binary is present, but the wedged shell-outs yield the not-ready struct.
+      assert probe.binary == true
+      assert probe.version == nil
+      assert probe.authed? == false
+      assert probe.account == nil
+
+      assert micros < 1_500_000,
+             "probe blocked #{micros}µs — the deadline did not bound the claude shell-outs"
+    end
+  end
+
   describe "probe(:bp)" do
     test "present → binary/path reported; authed?: nil (mint-driven, no login step)" do
       path = fake_binary("exit 0\n")
@@ -146,7 +206,7 @@ defmodule Barkpark.StudioChat.ProbeTest do
     end
   end
 
-  describe "probe(:codex) — designed-not-built stub" do
+  describe "probe(:codex) — pinned app-server account/read readiness" do
     test "missing on a real host → binary: false (the expected everyday state)" do
       put_probe_config(codex_binary: "definitely-not-a-real-codex-binary-xyzzy")
 
@@ -160,12 +220,62 @@ defmodule Barkpark.StudioChat.ProbeTest do
              } = Probe.probe(:codex)
     end
 
-    test "present binary is reported honestly, but no version/auth is probed (lane not wired)" do
-      path = fake_binary("exit 0\n")
-      put_probe_config(codex_binary: path)
+    test "present but unauthed uses account/read without a paid turn" do
+      path =
+        fake_codex("0.144.1", ~s({"id":2,"result":{"account":null,"requiresOpenaiAuth":true}}))
 
-      assert %Probe{provider: :codex, binary: true, path: ^path, version: nil, authed?: false} =
+      put_probe_config(codex_binary: path, timeout_ms: 500)
+
+      assert %Probe{
+               provider: :codex,
+               binary: true,
+               path: ^path,
+               version: "0.144.1",
+               authed?: false,
+               ready?: false,
+               reason: :not_authenticated
+             } = Probe.probe(:codex)
+    end
+
+    test "present and authed reports only account/read metadata" do
+      path =
+        fake_codex(
+          "0.144.1",
+          ~s({"id":2,"result":{"account":{"type":"apiKey"},"requiresOpenaiAuth":true}})
+        )
+
+      put_probe_config(codex_binary: path, timeout_ms: 500)
+
+      assert %Probe{
+               version: "0.144.1",
+               authed?: true,
+               ready?: true,
+               reason: nil,
+               account: %{"type" => "apiKey"}
+             } = Probe.probe(:codex)
+    end
+
+    test "incompatible version fails closed before app-server startup" do
+      path =
+        fake_codex(
+          "0.144.4",
+          ~s({"id":2,"result":{"account":{"type":"apiKey"},"requiresOpenaiAuth":true}})
+        )
+
+      put_probe_config(codex_binary: path, timeout_ms: 500)
+
+      assert %Probe{ready?: false, authed?: false, reason: :incompatible_version} =
                Probe.probe(:codex)
+    end
+
+    test "garbage and timeout both degrade to named not-ready states" do
+      garbage = fake_codex("0.144.1", "", :garbage)
+      put_probe_config(codex_binary: garbage, timeout_ms: 500)
+      assert %Probe{ready?: false, reason: :malformed_response} = Probe.probe(:codex)
+
+      stalled = fake_codex("0.144.1", "", :stall)
+      put_probe_config(codex_binary: stalled, timeout_ms: 100)
+      assert %Probe{ready?: false, reason: :timeout} = Probe.probe(:codex)
     end
   end
 end

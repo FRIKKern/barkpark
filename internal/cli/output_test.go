@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -166,5 +167,76 @@ func TestRenderYAMLTopLevelEmptyContainer(t *testing.T) {
 	w.renderYAML(map[string]any{})
 	if got := buf.String(); got != "{}\n" {
 		t.Fatalf("top-level empty map = %q, want %q", got, "{}\n")
+	}
+}
+
+// renderRaw is the -o json passthrough (task get / paper / cloud / tinker all
+// route through it). Its contract: stdout is ALWAYS valid JSON. Regression for
+// bp-json-escape-emit-bug — the old not-JSON branch dumped bytes verbatim, so a
+// payload carrying an unescaped backslash sequence (a stamped `awk '/<\/style>/'`
+// gate command is the canonical trigger) reached `jq` as an "Invalid escape" and
+// broke every downstream pipeline. Mutation proof: the input here is deliberately
+// INVALID JSON (a bare `\x`, an escape json.Unmarshal rejects); reverting the fix
+// to `fmt.Fprintln(w.stdout, string(b))` re-emits those bytes verbatim and this
+// test goes RED because stdout no longer parses. valuesJSON asserts stdout is
+// strictly valid JSON AND that the original bytes round-trip recoverably.
+func TestRenderRawInvalidJSONStaysParseable(t *testing.T) {
+	// A JSON object whose string value carries `\x` — NOT a legal JSON escape,
+	// so json.Unmarshal rejects the whole document and renderRaw takes the
+	// not-JSON branch. This is exactly the byte shape a raw-interpolated
+	// backslash evidence string produced.
+	bad := []byte(`{"evidence": "awk '/<\x/style>/' end"}`)
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.renderRaw(bad)
+
+	// stdout MUST be valid JSON — the whole contract. Parse it strictly; a
+	// verbatim dump of `bad` fails here (the mutation-red condition).
+	var got any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("renderRaw emitted invalid JSON on stdout (contract broken): %v\nstdout:\n%s", err, stdout.String())
+	}
+
+	// The raw bytes must round-trip: re-encoding as a JSON string means the
+	// decoded value is the original payload verbatim, nothing lost.
+	s, ok := got.(string)
+	if !ok {
+		t.Fatalf("expected a JSON string wrapping the raw payload, got %T: %v", got, got)
+	}
+	if s != string(bad) {
+		t.Fatalf("raw payload not recoverable: got %q, want %q", s, string(bad))
+	}
+
+	// The anomaly is surfaced to the human on stderr, never swallowed.
+	if !strings.Contains(stderr.String(), "not valid JSON") {
+		t.Errorf("expected a stderr warning about the non-JSON body, got:\n%s", stderr.String())
+	}
+	// And stdout must NOT carry the naked invalid escape a verbatim dump would.
+	if strings.Contains(stdout.String(), `\x`) && !strings.Contains(stdout.String(), `\\x`) {
+		t.Errorf("stdout carries an unescaped \\x (verbatim dump leaked through):\n%s", stdout.String())
+	}
+}
+
+// The happy path is untouched: valid JSON bytes re-encode compact and identical
+// in value, taking the Unmarshal-succeeds branch (no stderr warning).
+func TestRenderRawValidJSONRoundTrips(t *testing.T) {
+	in := []byte(`{"a": 1, "note": "back\\slash and quote \" ok"}`)
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.renderRaw(in)
+
+	var got, want any
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("valid input produced invalid stdout: %v\n%s", err, stdout.String())
+	}
+	if err := json.Unmarshal(in, &want); err != nil {
+		t.Fatalf("test input is not valid JSON: %v", err)
+	}
+	if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", want) {
+		t.Fatalf("valid JSON not preserved: got %v, want %v", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("valid JSON should not warn on stderr, got: %s", stderr.String())
 	}
 }

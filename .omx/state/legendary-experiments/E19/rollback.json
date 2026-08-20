@@ -1,0 +1,13 @@
+{
+  "deployment_id": null,
+  "deployment_torn_down": true,
+  "fixture_preimages_accounted": 36,
+  "fixture_preimages_expected": 36,
+  "fixture_records_created": 0,
+  "fixture_records_removed_or_restored": 36,
+  "production_mutations": 0,
+  "rollback_coverage_percent": 100,
+  "schema_version": "legendary-e19-rollback/v1",
+  "secrets_persisted": false,
+  "teardown_mode": "NO_DEPLOYMENT_CREATED_PREDEPLOYMENT_STOP"
+}

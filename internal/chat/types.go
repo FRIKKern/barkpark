@@ -1,55 +1,100 @@
 package chat
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sort"
 
-// Wire types for the /v1/chat contract (charter §Wire contract v1). Field
-// names mirror the server's chat_sessions/chat_messages JSON verbatim so the
-// decoder is a straight unmarshal — no projection layer (charter D8).
+	"github.com/FRIKKern/barkpark/internal/apiclient"
+)
 
-// SessionSummary is one row of GET /v1/chat/sessions — the sidebar shape
-// (`list_sessions/1`). It deliberately OMITS draft/model_choice/effort_choice:
-// only the full GET carries those (charter D14's documented vacuous-green
-// trap), so resume must always re-GET the session.
-type SessionSummary struct {
-	ID               string `json:"id"`
-	Title            string `json:"title"`
-	Status           string `json:"status"`
-	MessageCount     int    `json:"message_count"`
-	PendingApprovals int    `json:"pending_approvals"`
-	LastActiveAt     string `json:"last_active_at"`
-	Summary          string `json:"summary"`
+// Wire types for the /v1/chat contract are OWNED by internal/apiclient — the ONE
+// shared chat client (charter D26 / ct-bl-tui-apiclient-dedup). The chat package
+// consumes them by ALIAS so the reducer, the shell, and render.go keep their
+// short local names (Session/SessionSummary/Message) while there is exactly ONE
+// set of wire structs and ONE SSE decoder in the tree — no fork, no second
+// projection to drift.
+//
+// The apiclient structs are a 3-way merge against the live server projection
+// (chat_controller full_session_json / sidebar_json / message_json): the fork's
+// render-bearing shape (Message.Metadata; the summary counters
+// MessageCount/PendingApprovals/LastActiveAt) is preserved, rail_snapshot + the
+// flat usage metrics are added, and the fields the server never emits are
+// dropped. See internal/apiclient/chat.go for the per-field wire docs — and for
+// the card answer-path accessors (RequestID/ApprovalStatus/Resolved) that ride
+// on ChatMessage now that Message is that wire type by alias.
+type (
+	// Session is the FULL GET /v1/chat/sessions/:id struct — the D14 continuity
+	// set + message tail + rail_snapshot + usage metrics.
+	Session = apiclient.ChatSession
+	// SessionSummary is the sidebar row (GET /v1/chat/sessions): NO
+	// draft/rail/choices (the D14 vacuous-green trap), so resume must re-GET.
+	SessionSummary = apiclient.ChatSessionSummary
+	// Message is one persisted transcript row; assistant rows carry `blocks`.
+	Message = apiclient.ChatMessage
+	// SessionWorkflow is the compact pre-folded epic-cycle summary the list wire
+	// carries per workflow row (wsc D3/D10/D12) — the session card's two lines,
+	// decoded straight off the summary. NOT rail_snapshot (the list never carries
+	// that, D14): no Go fold, no decodeRail on the list path.
+	SessionWorkflow = apiclient.ChatWorkflowSummary
+	// EpicGoal is the second card line's task-spine truth (wsc D9): epic title +
+	// slices closed/total. Absent "PRs open" is deliberate (D8: no data source).
+	EpicGoal = apiclient.ChatEpicGoal
+)
+
+// isCard reports whether this row is one of the three interactive card roles.
+// The card-role SET is single-sourced in render.go's cardRoles map (the same map
+// that carries each card's display title), so "what is a card" has one owner.
+func isCard(m Message) bool { _, ok := cardRoles[m.Role]; return ok }
+
+// answerable is true for a card row still awaiting a decision (pending + a
+// request_id to answer). A resolved card, or a malformed one with no request_id,
+// is not answerable — the answer keys skip it.
+func answerable(m Message) bool {
+	return isCard(m) && m.ApprovalStatus() == "pending" && m.RequestID() != ""
 }
 
-// Session is the FULL session struct from GET /v1/chat/sessions/:id —
-// including the D14 continuity set (draft, mode, model_choice, effort_choice)
-// and the message rows seq-asc.
-type Session struct {
-	ID           string    `json:"id"`
-	Title        string    `json:"title"`
-	Draft        string    `json:"draft"`
-	Mode         string    `json:"mode"`
-	Model        string    `json:"model"`
-	ModelChoice  string    `json:"model_choice"`
-	EffortChoice string    `json:"effort_choice"`
-	Status       string    `json:"status"`
-	Cwd          string    `json:"cwd"`
-	Messages     []Message `json:"messages"`
+// RailEntry is one decoded row of the agents rail (charter D47), keyed by
+// task_id. It mirrors the fields Studio's rail_entry renders from the SAME
+// rail_snapshot map: a status glyph, a label (the sub-agent's description /
+// task_type), and its token usage. The rich workflow-journey (phases) is
+// deliberately NOT decoded here — the header line is the honest MVP the terminal
+// rail band shows; the phase tree stays a Studio-only richness this wave. This
+// is the render projection of the rail; apiclient.ChatRailEntry is the raw wire
+// shape — decodeRail is the terminal-render decode.
+type RailEntry struct {
+	TaskID    string
+	Status    string // "running" | "completed" | "interrupted"
+	Label     string // row.description || row.task_type || "agent"
+	Tokens    int    // usage.total_tokens
+	HasTokens bool
 }
 
-// Message is one persisted chat_messages row. Assistant rows additionally
-// carry `blocks` — the server-computed PortableDoc block array
-// (FromMarkdown.blocks/1, charter D8) — alongside the raw source_markdown.
-// Role is a free string: user/assistant plus the structural rows the Recorder
-// persists (tool, todo, thinking, approval, question, plan, system).
-type Message struct {
-	Seq            int             `json:"seq"`
-	Role           string          `json:"role"`
-	SourceMarkdown string          `json:"source_markdown"`
-	Blocks         json.RawMessage `json:"blocks"`
-	Metadata       map[string]any  `json:"metadata"`
-}
-
-// sessionsEnvelope is the GET /v1/chat/sessions response body.
-type sessionsEnvelope struct {
-	Sessions []SessionSummary `json:"sessions"`
+// decodeRail turns the rail_snapshot map (task_id => entry) into a task-id-sorted
+// slice — stable order so a resumed session's rail reads identically every paint.
+// Malformed entries are skipped (forward-compatible, same tolerance as the rest
+// of the decoder); an empty/absent snapshot yields nil (no rail band). It
+// projects from decodeRailWire (workflow.go) — the ONE parsing of the rail wire
+// shape, shared with the below-composer workflow panel's decodeWorkflow.
+func decodeRail(raw json.RawMessage) []RailEntry {
+	m := decodeRailWire(raw)
+	if len(m) == 0 {
+		return nil
+	}
+	entries := make([]RailEntry, 0, len(m))
+	for tid, e := range m {
+		label := e.Row.Description
+		if label == "" {
+			label = e.Row.TaskType
+		}
+		if label == "" {
+			label = "agent"
+		}
+		re := RailEntry{TaskID: tid, Status: e.Status, Label: label}
+		if e.Usage.TotalTokens != nil {
+			re.Tokens, re.HasTokens = *e.Usage.TotalTokens, true
+		}
+		entries = append(entries, re)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].TaskID < entries[j].TaskID })
+	return entries
 }

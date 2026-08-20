@@ -1,0 +1,28 @@
+{
+  "assignment_id": "E11",
+  "rules": [
+    {
+      "fixture": "adv-long-token",
+      "forbidden": ["horizontal clipping", "content loss", "silent truncation"],
+      "required": "A reader-visible and non-visual explicit degradation marker with the full token preserved or an explicit supported error.",
+      "surfaces": ["tui", "real_client_email"],
+      "status": "UNPROVEN_BLOCKED"
+    },
+    {
+      "fixture": "adv-malformed-legacy",
+      "forbidden": ["silent blank", "lower-precedence source masking malformed authority"],
+      "required": "Explicit supported error plus quarantine evidence; never silently select a lower-precedence source.",
+      "surfaces": ["authenticated_studio", "public_reader", "tui", "real_client_email", "cli_api"],
+      "status": "UNPROVEN_BLOCKED"
+    },
+    {
+      "fixture": "adv-missing-fields",
+      "forbidden": ["silent blank", "fabricated authored content"],
+      "required": "Explicit supported error or deterministic non-blank fallback with provenance.",
+      "surfaces": ["authenticated_studio", "public_reader", "tui", "real_client_email", "cli_api"],
+      "status": "UNPROVEN_BLOCKED"
+    }
+  ],
+  "schema_version": "legendary-e11-explicit-degradation/v1",
+  "verdict": "REJECT_UNTIL_REAL_CAPTURES_PROVE_EVERY_RULE"
+}

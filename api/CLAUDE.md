@@ -21,17 +21,18 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 
 ## Bulldocs (the Papers surface)
 
-The built-in **Papers** feature is the **Bulldocs plugin**. Bulldocs is the plugin/producer brand; a **paper** is the artifact — persisted `type` stays `"paper"`, reader URL stays `/papers/:slug` (no data migration, no public-URL break). **Core keeps the reusable machinery, the plugin is thin wiring.**
+**Papers** is the **Bulldocs plugin** — plugin/producer brand; a **paper** is the artifact (persisted `type` stays `"paper"`, reader URL `/papers/:slug`). **Core keeps the reusable machinery, the plugin is thin wiring.**
 
-- **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis}` (block engine); `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
+- **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis,Bpml}` (block engine); `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
 - **Bulldocs-owned:** `BarkparkWeb.BulldocsLive` (reader), `BulldocsIngestController` / `BulldocsIntentsController`, `Barkpark.Plugins.Bulldocs.Events`, `layouts/bulldocs.html.heex`.
-- **Plugin module:** `register_schemas/1` (the `paper` schema) + `register_routes/1` — reader on the `:public_root` bucket, ingest API on `:ingest` (`/v1/plugins/bulldocs/*`). Any plugin needing a public reader page or token-gated ingest API reuses these buckets.
+- **Plugin module:** `register_schemas/1` + `register_routes/1` — reader on `:public_root`, ingest API on `:ingest` (`/v1/plugins/bulldocs/*`). Reused by any plugin wanting a reader or token-gated ingest.
+- **Sessions:** 2nd blocks type (whitelist `{paper, session}`); routes `/v1/plugins/bulldocs/sessions*`; private+unwalled schema; Studio pane read-only v1 (`bp session publish` writes).
 
-**Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` for legacy external producers — externally gated; do NOT drop unilaterally. Ingest auth: `:ingest_token` from `BARKPARK_INGEST_TOKEN` (legacy `PAPERFLOW_INGEST_TOKEN` still honored). See `docs/decisions/deferred.md`.
+**Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` for legacy producers — externally gated, do NOT drop. Ingest auth: `:ingest_token` from `BARKPARK_INGEST_TOKEN` (legacy `PAPERFLOW_INGEST_TOKEN`). See `docs/decisions/deferred.md`.
 
 ## Sheets
 
-`type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot — the Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant).
+`type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot — Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant).
 
 - **Core:** `Barkpark.Plugins.Sheets.Core` (A1 + snapshot synthesis, 200k cap), `Sheets.Engine` (formula subset; eager-IF deps → `#CYCLE!`), `Sheets.Session` (lazy per-sheet GenServer; serialized cell/structural/undo ops, ≤1000/call, debounced persist 2s/25-ops + terminate), `Sheets.Structure` (ref-shift), `SheetsReaderLive`, `Studio.SheetGrid`.
 - **Plugin (`plugins/sheets.ex`):** `sheet` schema; before_save gate (A1 keys, XFD grid bounds, merge ≤10k) → 409 `halted`; `:ingest` API: import (xlsx/csv/tsv; size/cell caps) · export `.{xlsx,csv,tsv,md,html}` (flush-first) · `/ops` (batch caps); `:public_root` reader `/sheets/:slug` (published-only). Error envelopes (413/422/503) in `plugins/sheets.ex`.

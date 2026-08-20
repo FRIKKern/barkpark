@@ -118,9 +118,11 @@ func applyAutoupdate(out *writer, verb, ref string, patch map[string]any) int {
 		return autoupdateFail(out, ref, perr)
 	}
 
+	applied := autoupdateApplied(verb, policy)
+
 	if out.output == "json" || out.output == "yaml" {
 		out.emitStructured(map[string]any{
-			"ok":       true,
+			"ok":       applied,
 			"instance": ref,
 			"autoupdate": map[string]any{
 				"enabled":        policy.Enabled,
@@ -128,29 +130,79 @@ func applyAutoupdate(out *writer, verb, ref string, patch map[string]any) int {
 				"pinned_release": policy.PinnedRelease,
 			},
 		})
+		if !applied {
+			return exitGeneric
+		}
 		return exitOK
 	}
 
 	out.outf("%s", autoupdateReceipt(verb, ref, policy))
 	out.outf("  policy: %s", autoupdatePolicySummary(policy))
+	if !applied {
+		out.userErr("the control plane accepted the %s request but its returned policy does not carry the change — re-run, or check `bp cloud status`", verb)
+		return exitGeneric
+	}
 	return exitOK
+}
+
+// autoupdateApplied reads the SERVER-RETURNED policy and reports whether it
+// actually carries the change the verb asked for. This is the whole point of the
+// PATCH returning a policy: a 200 means "the request was accepted", it does NOT
+// mean the box's policy now says what the operator asked for. Anything that
+// prints a checkmark on the 200 alone is claiming a post-condition it never read
+// (PDS success-claim law, class A3 → A2).
+func autoupdateApplied(verb string, policy cloudclient.AutoupdatePolicy) bool {
+	switch verb {
+	case "pin":
+		return strings.TrimSpace(policy.PinnedRelease) != ""
+	case "unpin":
+		return strings.TrimSpace(policy.PinnedRelease) == ""
+	case "pause":
+		return policy.Paused
+	case "resume":
+		return !policy.Paused
+	default:
+		// An unknown verb makes no specific claim, so there is nothing to
+		// contradict — the receipt below reports the policy verbatim instead.
+		return true
+	}
 }
 
 // autoupdateReceipt is the one-line human confirmation per verb — the immediate
 // feedback that names WHAT changed, in the operator's words, and (for pin) the
 // honest "holds at or above, does not roll back" caveat.
+//
+// Every branch READS the returned policy: the success wording only prints when
+// the policy the control plane echoed back actually carries the change, and the
+// contradicting wording says so in the same breath rather than asserting a state
+// nobody measured. Feed this function a policy that contradicts the verb and the
+// printed sentence CHANGES — that property is what
+// success_claim_registry_test.go enrolls it for.
 func autoupdateReceipt(verb, ref string, policy cloudclient.AutoupdatePolicy) string {
+	pin := strings.TrimSpace(policy.PinnedRelease)
 	switch verb {
 	case "pin":
-		return fmt.Sprintf("✓ %s pinned to %s — autoupdate holds it at or above this version (a pin does not roll back).", ref, policy.PinnedRelease)
+		if pin == "" {
+			return fmt.Sprintf("✗ %s is NOT pinned — the control plane returned a policy with no pin, so nothing is holding this box.", ref)
+		}
+		return fmt.Sprintf("✓ %s pinned to %s — autoupdate holds it at or above this version (a pin does not roll back).", ref, pin)
 	case "unpin":
+		if pin != "" {
+			return fmt.Sprintf("✗ %s is STILL pinned to %s — the control plane did not clear the pin.", ref, pin)
+		}
 		return fmt.Sprintf("✓ %s unpinned — autoupdate rides blessed releases again.", ref)
 	case "pause":
+		if !policy.Paused {
+			return fmt.Sprintf("✗ %s is NOT paused — the control plane returned an unpaused policy, so it can still update.", ref)
+		}
 		return fmt.Sprintf("✓ %s autoupdate paused — it will not update until resumed.", ref)
 	case "resume":
+		if policy.Paused {
+			return fmt.Sprintf("✗ %s is STILL paused — the control plane did not lift the hold.", ref)
+		}
 		return fmt.Sprintf("✓ %s autoupdate resumed.", ref)
 	default:
-		return fmt.Sprintf("✓ %s autoupdate updated.", ref)
+		return fmt.Sprintf("✓ %s autoupdate updated — %s.", ref, autoupdatePolicySummary(policy))
 	}
 }
 

@@ -1,0 +1,15 @@
+{
+  "block_reason": "E19_NOT_PASS_AND_NO_LIVE_IMMUTABLE_DEPLOYMENT",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "client_open_timestamps": 0,
+  "delivery_receipts": 0,
+  "deployment_id": null,
+  "endpoint_browser_or_raw_mime_substitutions": 0,
+  "fake_or_proxy_receipts": 0,
+  "messages_required": 36,
+  "messages_sent": 0,
+  "real_client_name": null,
+  "schema_version": "legendary-e20-delivery-manifest/v1",
+  "status": "NOT_STARTED_DEPENDENCY_BLOCK",
+  "transport": null
+}

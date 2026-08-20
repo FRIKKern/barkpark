@@ -58,7 +58,7 @@ func TestTaskChipPriorityZeroIsValidHighest(t *testing.T) {
 	out := chipDoc(t, node, func(string) *TaskChip {
 		return &TaskChip{Title: "Urgent", Status: "in_progress", Priority: 0, HasPriority: true}
 	})
-	if !strings.Contains(out, "◐ in_progress · P0") {
+	if !strings.Contains(out, "⠋ in_progress · P0") {
 		t.Fatalf("P0 (highest) must render, got: %q", out)
 	}
 }
@@ -169,7 +169,27 @@ func TestTaskChipEmptyTitleFallsBackToAlias(t *testing.T) {
 	out := chipDoc(t, node, func(string) *TaskChip {
 		return &TaskChip{Status: "done"}
 	})
-	if !strings.Contains(out, "● done") || !strings.Contains(out, "chip alias") {
+	if !strings.Contains(out, "✓ done") || !strings.Contains(out, "chip alias") {
 		t.Fatalf("empty-title chip must fall back to the alias label, got: %q", out)
+	}
+}
+
+// Delegate-parity tripwire (D100): the in-body chip glyph MUST equal the
+// status-manifest-gated vocabulary (glyphForRole ∘ roleForStatus) for every
+// known lifecycle status — no glyph_budget_test walks pdrender chips today, so
+// this is the anti-refork guard. A future hand-edit that re-hardcodes a chip
+// glyph diverging from gridblocks.go fails HERE.
+func TestTaskChipGlyphDelegatesToGatedVocabulary(t *testing.T) {
+	for _, status := range []string{"open", "ready", "in_progress", "blocked", "done", "closed", "cancelled", "considering", "researching"} {
+		got := taskStatusGlyph(status)
+		want := glyphForRole(roleForStatus(status))
+		if got != want {
+			t.Fatalf("taskStatusGlyph(%q) = %q, must delegate to glyphForRole(roleForStatus) = %q", status, got, want)
+		}
+	}
+	// The unknown-status sentinel must NOT be swept into the delegate (roleForStatus
+	// defaults unknowns to role "open"/○, which would erase the ▸ pointer).
+	if got := taskStatusGlyph("someday"); got != "▸" {
+		t.Fatalf("unknown status must keep the ▸ sentinel, got %q", got)
 	}
 }

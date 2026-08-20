@@ -10,6 +10,7 @@ defmodule Barkpark.Tasks.Claim do
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       current_epoch: 1,
       insert_mutation_event!: 5,
       caller_stamp: 1,
@@ -20,14 +21,16 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
-  alias Barkpark.Tasks.{Edges, Queue, WorkDigest}
+  alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
 
   @event_task_claimed "task.claimed"
-  @ready_lifecycle_statuses ~w(open blocked)
+  # Derived at compile time from the ONE claimability source of truth
+  # (Validation.claimable_statuses/0 — ~w(open blocked)); never fork a local
+  # literal. Keeps `check_ready_for_targeted_claim/1` in lockstep with the
+  # ready-queue allowlist in Tasks.Queue.
+  @ready_lifecycle_statuses Validation.claimable_statuses()
 
   def claim(worker_id, opts \\ []) when is_binary(worker_id) do
-    caller_token_id = Keyword.get(opts, :caller_token_id)
-
     result =
       Repo.transaction(fn ->
         case opts
@@ -38,7 +41,7 @@ defmodule Barkpark.Tasks.Claim do
             {:ok, nil}
 
           %Document{} = doc ->
-            do_claim(doc, worker_id, [], caller_token_id)
+            do_claim(doc, worker_id, [], opts)
         end
       end)
 
@@ -88,12 +91,16 @@ defmodule Barkpark.Tasks.Claim do
             # recovery path after a fence bump. A DIFFERENT worker falls through
             # to check_ready and still gets :not_ready.
             if renewal?(doc, worker_id) do
-              do_renew(doc, worker_id, caller_token_id)
+              with :ok <- check_executable_for_targeted_claim(doc, worker_id),
+                   :ok <- validate_renewal_execution_policy(doc, opts) do
+                do_renew(doc, worker_id, caller_token_id)
+              end
             else
-              with :ok <- check_ready_for_targeted_claim(doc),
+              with :ok <- check_executable_for_targeted_claim(doc, worker_id),
+                   :ok <- check_ready_for_targeted_claim(doc),
                    :ok <- check_deps_satisfied(doc),
                    :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
-                do_claim(doc, worker_id, resources, caller_token_id)
+                do_claim(doc, worker_id, resources, opts)
               end
             end
         end
@@ -156,6 +163,10 @@ defmodule Barkpark.Tasks.Claim do
       s when s in @ready_lifecycle_statuses -> :ok
       _ -> {:error, :not_ready}
     end
+  end
+
+  defp check_executable_for_targeted_claim(%Document{content: content}, worker_id) do
+    if QueueGate.executable?(content, worker_id), do: :ok, else: {:error, :not_ready}
   end
 
   defp check_deps_satisfied(%Document{} = doc) do
@@ -228,7 +239,49 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
-  defp do_claim(%Document{} = doc, worker_id, resources, caller_token_id) do
+  defp do_claim(%Document{} = doc, worker_id, resources, opts) do
+    task_policy = Map.get(doc.content || %{}, "execution_policy")
+
+    case ExecutionPolicy.resolve(
+           Keyword.get(opts, :execution_policy_override),
+           task_policy,
+           Keyword.get(opts, :session_execution_policy),
+           Keyword.get(opts, :provider_execution_policy)
+         ) do
+      {:ok, snapshot} ->
+        do_claim_resolved(
+          doc,
+          worker_id,
+          resources,
+          Keyword.get(opts, :caller_token_id),
+          snapshot
+        )
+
+      {:error, errors} ->
+        {:error, {:invalid_execution_policy, errors}}
+    end
+  end
+
+  # A renewal keeps the execution-policy snapshot frozen at the original
+  # claim, but caller-supplied layers still have to satisfy the same strict
+  # policy contract as a fresh claim. Resolve all four layers for validation
+  # only, then deliberately discard the newly resolved snapshot so do_renew/3
+  # preserves the existing claim.execution_policy value byte-for-byte.
+  defp validate_renewal_execution_policy(%Document{} = doc, opts) do
+    task_policy = Map.get(doc.content || %{}, "execution_policy")
+
+    case ExecutionPolicy.resolve(
+           Keyword.get(opts, :execution_policy_override),
+           task_policy,
+           Keyword.get(opts, :session_execution_policy),
+           Keyword.get(opts, :provider_execution_policy)
+         ) do
+      {:ok, _snapshot} -> :ok
+      {:error, errors} -> {:error, {:invalid_execution_policy, errors}}
+    end
+  end
+
+  defp do_claim_resolved(%Document{} = doc, worker_id, resources, caller_token_id, snapshot) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     next_epoch = current_epoch(doc) + 1
@@ -253,6 +306,9 @@ defmodule Barkpark.Tasks.Claim do
       |> then(fn claim ->
         if resources == [], do: claim, else: Map.put(claim, "resources", resources)
       end)
+      |> then(fn claim ->
+        if is_nil(snapshot), do: claim, else: Map.put(claim, "execution_policy", snapshot)
+      end)
 
     new_content =
       doc.content
@@ -260,16 +316,8 @@ defmodule Barkpark.Tasks.Claim do
       |> Map.put("assignee", worker_id)
       |> Map.put("claim", new_claim)
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 ->
-        updated = %{doc | content: new_content, rev: new_rev}
-
+    case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+      {:ok, updated} ->
         ev =
           insert_mutation_event!(
             updated,
@@ -281,7 +329,7 @@ defmodule Barkpark.Tasks.Claim do
 
         {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}
 
-      0 ->
+      :stale ->
         {:error, :stale_claim}
     end
   end
@@ -331,16 +379,8 @@ defmodule Barkpark.Tasks.Claim do
       |> Map.put("claim", new_claim)
       |> Map.put("assignee", worker_id)
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 ->
-        updated = %{doc | content: new_content, rev: new_rev}
-
+    case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+      {:ok, updated} ->
         ev =
           insert_mutation_event!(
             updated,
@@ -352,7 +392,7 @@ defmodule Barkpark.Tasks.Claim do
 
         {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}
 
-      0 ->
+      :stale ->
         {:error, :stale_claim}
     end
   end

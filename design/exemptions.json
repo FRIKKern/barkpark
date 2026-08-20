@@ -1,51 +1,51 @@
 {
-  "_rule": "Frozen baseline of hand-stamped color literals that the theme compiler did NOT emit. design/check.mjs Part E re-counts each file and FAILS on ANY drift from `count` — growth (a new literal) OR shrink (a literal was tokenized). A ratchet: every change to a file's literal count MUST update its baseline in THIS SAME DIFF. The ledger only shrinks over time; it can never silently grow. Counting rule lives next to the implementation in design/check.mjs Part E (LEDGER_LITERAL regex + stripLedgerNoise): a color literal is `#hex` (3-8 digits) or an rgb()/rgba()/hsl()/hsla() whose first argument is NOT var() — `hsl(var(--x))` is compiler-driven token consumption, not a hand-stamp, so it is excluded (this is what lets a literal→var conversion register as a shrink). Marker regions — ANY `BEGIN/END GENERATED: <name>` block, i.e. `tokens` (design/emit.mjs), `paper-surface` (the reader→editor mirror), and `status-tones` (the status skin) — and comments (CSS /* */, HTML <!-- -->, HEEx <%!-- --%> and <%# %>) are blanked before counting, so generator-emitted literals and e.g. the `#940` PR-ref in app.css never count as hand-stamps.",
-  "_note": "The per-file `count` splits as {hex + literal-rgb/rgba + literal-hsl}. These are the surfaces still holding hand-stamped color the theme-system compiler has not yet reached; as tokenization lands, LOWER the number here in the same diff.",
-  "entries": [
-    {
-      "path": "api/lib/barkpark_web/layouts/root.html.heex",
-      "count": 165,
-      "note": "Studio root layout, outside the single GENERATED block: 126 hex + 39 literal rgb/rgba. Ratcheted 219 → 165 by ssp-w1-theme-root-sweep: all generic Studio-chrome elevation shadows / modal scrims / neutral hovers moved onto single-source HSL-triplet tokens (--bp-shadow-hsl / --bp-scrim-hsl / --bp-neutral-hsl, consumed as hsl(var(--…) / a)), the stale --primary-muted blue selection tints repointed to the emitted --primary-soft, and every dead `var(--ring|--accent, #3b82f6)` hex fallback dropped (the shared token is always emitted). The REMAINING 165 are the paper-surface + Sheets-grid + --st- status families (the --sheet-ref-* categorical palette, --paper-* value defs, sheet selection/find/notice/err hues, --st- status dupes ~L976-986 + attr-selector couplings): they live under their own token systems inside the studio-literal-check.sh skip-begin/end region (L2598-4631) and are genuinely exempt this wave. This ledger freezes the raw count so none can grow silently."
-    },
-    {
-      "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
-      "count": 103,
-      "note": "Paper reader layout, outside the GENERATED marker ts-w1 added: 87 hex + 15 literal rgb/rgba. ssp-w1 ratcheted 137 -> 102 by threading the article action bar, goal rail, and goal-diff modal onto the reader --paper-*/--paper-accent-soft/--bp-tone-* tokens (which also fixes their prefers-color-scheme dark mode — the modal is no longer stranded light on a dark reader). The remainder is DELIBERATE byte-rendered skin, not un-tokenized chrome: the terminal + mail popup traffic-light dots (#ff5f56/#ffbd2e/#27c93f), the terminal window panel (#0b0e13/#232a35) + TUI-preview surface (#05070a), the TUI/email view-toggle pills, and the two Mermaid theme configs (lines ~1234-1265) — JS init JSON that needs concrete hex, not CSS vars. Out of scope for studio-literal-check.sh; frozen here. gp-w5 (#2273) added ONE print-reset literal (`background: #fff` in the @media print stylesheet — print output is white paper regardless of theme, genuinely un-tokenizable) but never raised this baseline; its inline `lit-allow` comment has no mechanism in check.mjs. Ratified 102 -> 103 by the w12 integration (repairing #2273's drift, not adding a literal)."
-    },
-    {
-      "path": "cloud/priv/static/app.css",
-      "count": 57,
-      "note": "Cloud SPA, outside the single GENERATED block: 14 hex + 8 literal rgb/rgba + 35 literal hsl. Provider brand marks + mask geometry + overlay/shadow tints — exempt-by-design but previously untracked by every gate, now tripwired. The `#940` PR-ref in the /* Pre-claim queued state */ comment is excluded by comment-stripping."
-    },
-    {
-      "path": "internal/cli/setup/assets/deploy.sh",
-      "count": 4,
-      "note": "The bare-server holding page (inline <style> in a heredoc): background #0f1115, text #e7e9ee, spinner track #2a2f3a, spinner head #6ea8fe. A self-contained pre-boot page with no token pipeline — previously blind to every gate."
-    },
-    {
-      "path": "api/assets/paper-editor/src/styles.css",
-      "count": 57,
-      "note": "Paper-editor Studio bundle (the scoped embedder source), outside the GENERATED: paper-surface mirror block (L30-324, blanked by Part E's generalized marker): 43 hex + 14 literal rgb/rgba. The residue is un-tokenizable in place: dead `var(--paper-*, #hex)` fallbacks (the token is always emitted, so the fallback never paints but must stay for the de-scoped custom-element build path), the independent `.bp-wikilink-menu` pre-paint theme scope (its own --paper-* capture — a sans-serif chrome menu that renders before the reader tokens attach), and the render.ex attribute-selector string-matches (`div[style*=\"background:#ffffff\"]`, `a[style*=\"color:#1d4ed8\"]`) that repaint server-inlined block styles — the hex there is a SELECTOR literal matching emitted markup, not a paint value. Frozen here; previously blind to every gate."
-    },
-    {
-      "path": "web/public/assets/bp-paper-editor.css",
-      "count": 107,
-      "note": "The web reader's shipped paper-editor stylesheet — the built, minified, de-scoped (`:root,:host`) bundle loaded by the `<bp-paper-editor>` custom element (web/components/paper-editor-mount.tsx), the web-surface counterpart of the Studio styles.css above: 86 hex + 21 literal rgb/rgba (higher raw count than the source because minification inlines and there are no GENERATED markers to blank). Same residue classes: the `:root`/`:root[data-theme=dark]` token-capture origin (--paper-*/--bp-tone-*/--st-* defaults — the hand-authored theme values the compiler mirrors), `var(--paper-*, #hex)` fallbacks, the `.bp-wikilink-menu` independent scope, and render attribute-selector string-matches. A build artifact — never hand-edited; its token layer tracks the lockstep via design/paper-editor-mirror.mjs + emit.mjs. Frozen here; previously untracked by every gate."
-    },
-    {
-      "path": "api/assets/paper-surface/paper-surface.css",
-      "count": 35,
-      "note": "The ONE canonical paper-surface source, outside its two GENERATED blocks (status-tones L299-306 + tokens L308-520, both blanked by Part E's generalized marker): 33 hex + 2 literal rgb/rgba. The residue: the --bp-tone-*/--paper-* light+dark capture origin (hand-authored theme defaults the emitter reads as its source of truth — tokenizing them would be circular), the traffic-light status dots, and chart dead `var(--…, #hex)` fallbacks. Un-tokenizable by construction (it is the origin, not a consumer). Frozen here; previously blind to every gate."
-    },
-    {
-      "path": "web/public/bp-graph.js",
-      "count": 91,
-      "note": "Graph-view Canvas renderer (web copy), one of a byte-identical mirror pair reconciled by 5c10b76e / #2248: 33 hex + 58 literal rgb/rgba. Canvas 2D `ctx.fillStyle`/`strokeStyle` cannot consume CSS `var()` — the renderer assigns concrete color strings at paint time, so these are structurally un-tokenizable in place. Tokenization (resolve tokens to concrete hex in JS at init, fed from the lockstep — never a parallel palette) is spun off as backlog task au-r6; until then the pair is byte-frozen so it cannot drift while exempt. MUST stay byte-identical to api/priv/static/assets/bp-graph.js below. Frozen here; previously blind to every gate."
-    },
-    {
-      "path": "api/priv/static/assets/bp-graph.js",
-      "count": 91,
-      "note": "Graph-view Canvas renderer (api-served copy), the byte-identical mirror of web/public/bp-graph.js above (pair reconciled by 5c10b76e / #2248): 33 hex + 58 literal rgb/rgba. Same Canvas-fillStyle-can't-take-var() rationale, same au-r6 tokenization backlog. MUST stay byte-identical to its web counterpart; if one baseline moves the other moves in the SAME diff."
-    }
-  ]
+ "_rule": "Frozen baseline of hand-stamped color literals that the theme compiler did NOT emit. design/check.mjs Part E re-counts each file and FAILS on ANY drift from `count` \u2014 growth (a new literal) OR shrink (a literal was tokenized). A ratchet: every change to a file's literal count MUST update its baseline in THIS SAME DIFF. The ledger only shrinks over time; it can never silently grow. Counting rule lives next to the implementation in design/check.mjs Part E (LEDGER_LITERAL regex + stripLedgerNoise): a color literal is `#hex` (3-8 digits) or an rgb()/rgba()/hsl()/hsla() whose first argument is NOT var() \u2014 `hsl(var(--x))` is compiler-driven token consumption, not a hand-stamp, so it is excluded (this is what lets a literal\u2192var conversion register as a shrink). Marker regions \u2014 ANY `BEGIN/END GENERATED: <name>` block, i.e. `tokens` (design/emit.mjs), `paper-surface` (the reader\u2192editor mirror), and `status-tones` (the status skin) \u2014 and comments (CSS /* */, HTML <!-- -->, HEEx <%!-- --%> and <%# %>) are blanked before counting, so generator-emitted literals and e.g. the `#940` PR-ref in app.css never count as hand-stamps.",
+ "_note": "The per-file `count` splits as {hex + literal-rgb/rgba + literal-hsl}. These are the surfaces still holding hand-stamped color the theme-system compiler has not yet reached; as tokenization lands, LOWER the number here in the same diff.",
+ "entries": [
+  {
+   "path": "api/lib/barkpark_web/layouts/root.html.heex",
+   "count": 165,
+   "note": "Studio root layout, outside the single GENERATED block: 126 hex + 39 literal rgb/rgba. Ratcheted 219 \u2192 165 by ssp-w1-theme-root-sweep: all generic Studio-chrome elevation shadows / modal scrims / neutral hovers moved onto single-source HSL-triplet tokens (--bp-shadow-hsl / --bp-scrim-hsl / --bp-neutral-hsl, consumed as hsl(var(--\u2026) / a)), the stale --primary-muted blue selection tints repointed to the emitted --primary-soft, and every dead `var(--ring|--accent, #3b82f6)` hex fallback dropped (the shared token is always emitted). The REMAINING 165 are the paper-surface + Sheets-grid + --st- status families (the --sheet-ref-* categorical palette, --paper-* value defs, sheet selection/find/notice/err hues, --st- status dupes ~L976-986 + attr-selector couplings): they live under their own token systems inside the studio-literal-check.sh skip-begin/end region (L2598-4631) and are genuinely exempt this wave. This ledger freezes the raw count so none can grow silently."
+  },
+  {
+   "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
+   "count": 103,
+   "note": "Paper reader layout, outside the GENERATED marker ts-w1 added: 87 hex + 15 literal rgb/rgba. ssp-w1 ratcheted 137 -> 102 by threading the article action bar, goal rail, and goal-diff modal onto the reader --paper-*/--paper-accent-soft/--bp-tone-* tokens (which also fixes their prefers-color-scheme dark mode \u2014 the modal is no longer stranded light on a dark reader). The remainder is DELIBERATE byte-rendered skin, not un-tokenized chrome: the terminal + mail popup traffic-light dots (#ff5f56/#ffbd2e/#27c93f), the terminal window panel (#0b0e13/#232a35) + TUI-preview surface (#05070a), the TUI/email view-toggle pills, and the two Mermaid theme configs (lines ~1234-1265) \u2014 JS init JSON that needs concrete hex, not CSS vars. Out of scope for studio-literal-check.sh; frozen here. gp-w5 (#2273) added ONE print-reset literal (`background: #fff` in the @media print stylesheet \u2014 print output is white paper regardless of theme, genuinely un-tokenizable) but never raised this baseline; its inline `lit-allow` comment has no mechanism in check.mjs. Ratified 102 -> 103 by the w12 integration (repairing #2273's drift, not adding a literal)."
+  },
+  {
+   "path": "cloud/priv/static/app.css",
+   "count": 31,
+   "note": "Cloud SPA, outside the single GENERATED block. Ratcheted 57\u219235 by the GUI-remake GR7 alias bridge (wave 2); 35\u219233 by GR37 (gr-p4-hygiene, phase 4): the dark --btn-bg/--btn-fg hsl literals (hsl(163 45% 30%) / hsl(0 0% 100%)) became identity-aware var(--primary)/var(--primary-fg), tokenizing 2 more hand-stamps. 33\u219231 by gr-p5r7-ring-soft-accent-invariant: the two hand-stamped --ring-soft declarations (hsl(163 42% 30% / 0.15) light, hsl(160 42% 62% / 0.2) dark) were PROMOTED into cloudAccentVars(), so the focus ring now rides each identity's own ring channel instead of a frozen evergreen green. The residue is mask geometry + overlay/shadow tints + the --btn-danger-*/--console-*/--elev-* literals the emitter does not yet own (alias retirement continues screen-by-screen in phases 2\u20134). The `#940` PR-ref in the /* Pre-claim queued state */ comment is excluded by comment-stripping."
+  },
+  {
+   "path": "internal/cli/setup/assets/deploy.sh",
+   "count": 4,
+   "note": "The bare-server holding page (inline <style> in a heredoc): background #0f1115, text #e7e9ee, spinner track #2a2f3a, spinner head #6ea8fe. A self-contained pre-boot page with no token pipeline \u2014 previously blind to every gate."
+  },
+  {
+   "path": "api/assets/paper-editor/src/styles.css",
+   "count": 57,
+   "note": "Paper-editor Studio bundle (the scoped embedder source), outside the GENERATED: paper-surface mirror block (L30-324, blanked by Part E's generalized marker): 43 hex + 14 literal rgb/rgba. The residue is un-tokenizable in place: dead `var(--paper-*, #hex)` fallbacks (the token is always emitted, so the fallback never paints but must stay for the de-scoped custom-element build path), the independent `.bp-wikilink-menu` pre-paint theme scope (its own --paper-* capture \u2014 a sans-serif chrome menu that renders before the reader tokens attach), and the render.ex attribute-selector string-matches (`div[style*=\"background:#ffffff\"]`, `a[style*=\"color:#1d4ed8\"]`) that repaint server-inlined block styles \u2014 the hex there is a SELECTOR literal matching emitted markup, not a paint value. Frozen here; previously blind to every gate."
+  },
+  {
+   "path": "web/public/assets/bp-paper-editor.css",
+   "count": 107,
+   "note": "The web reader's shipped paper-editor stylesheet \u2014 the built, minified, de-scoped (`:root,:host`) bundle loaded by the `<bp-paper-editor>` custom element (web/components/paper-editor-mount.tsx), the web-surface counterpart of the Studio styles.css above: 86 hex + 21 literal rgb/rgba (higher raw count than the source because minification inlines and there are no GENERATED markers to blank). Same residue classes: the `:root`/`:root[data-theme=dark]` token-capture origin (--paper-*/--bp-tone-*/--st-* defaults \u2014 the hand-authored theme values the compiler mirrors), `var(--paper-*, #hex)` fallbacks, the `.bp-wikilink-menu` independent scope, and render attribute-selector string-matches. A build artifact \u2014 never hand-edited; its token layer tracks the lockstep via design/paper-editor-mirror.mjs + emit.mjs. Frozen here; previously untracked by every gate."
+  },
+  {
+   "path": "api/assets/paper-surface/paper-surface.css",
+   "count": 45,
+   "note": "The ONE canonical paper-surface source, outside its two GENERATED blocks (status-tones L299-306 + tokens L308-520, both blanked by Part E's generalized marker): 33 hex + 2 literal rgb/rgba. The residue: the --bp-tone-*/--paper-* light+dark capture origin (hand-authored theme defaults the emitter reads as its source of truth \u2014 tokenizing them would be circular), the traffic-light status dots, and chart dead `var(--\u2026, #hex)` fallbacks. Un-tokenizable by construction (it is the origin, not a consumer). Frozen here; previously blind to every gate. rpu-w1-chat-tokens RAISED 35 -> 51 (+16): the 5 chat-block base tokens (--primary/--muted-surface/--border-muted/--fg-dim/--font-mono) hand-authored below the GENERATED block in the 4-block dual-swap shape; the 4 colour values are lifted VERBATIM from root.html.heex's default Studio theme (must match Studio bytes exactly, not an emit-derived value) and --font-mono aliases the surface-local --paper-font-mono - genuinely un-tokenizable per the Part E escape hatch. Ratcheted 51 -> 45 by the chart-annotation slice: the six pre-existing dead var(--bp-tone-*-fg, #hex) fallbacks on the chart series rules were dropped (the tone tokens are always emitted), and the new annotation-layer rules consume the same tokens with no fallback."
+  },
+  {
+   "path": "web/public/bp-graph.js",
+   "count": 114,
+   "note": "Graph-view Canvas renderer (web copy), one of a byte-identical mirror pair reconciled by 5c10b76e / #2248: 33 hex + 58 literal rgb/rgba. Canvas 2D `ctx.fillStyle`/`strokeStyle` cannot consume CSS `var()` \u2014 the renderer assigns concrete color strings at paint time, so these are structurally un-tokenizable in place. Tokenization (resolve tokens to concrete hex in JS at init, fed from the lockstep \u2014 never a parallel palette) is spun off as backlog task au-r6; until then the pair is byte-frozen so it cannot drift while exempt. MUST stay byte-identical to api/priv/static/assets/bp-graph.js below. Frozen here; previously blind to every gate. RAISED 91 -> 114 (+23) by stw9-graph-constellation (#6213): the constellation's type-hue palette (tag/command/metric/session hues), theme-aware tooltip chrome, and the light/dark legend+controls panel objects \u2014 all Canvas-paint-time or JS-injected inline styles under the same fillStyle-can't-take-var() rationale; au-r6 (init-time token resolution fed from the lockstep) remains the tokenization path."
+  },
+  {
+   "path": "api/priv/static/assets/bp-graph.js",
+   "count": 114,
+   "note": "Graph-view Canvas renderer (api-served copy), the byte-identical mirror of web/public/bp-graph.js above (pair reconciled by 5c10b76e / #2248): 33 hex + 58 literal rgb/rgba. Same Canvas-fillStyle-can't-take-var() rationale, same au-r6 tokenization backlog. MUST stay byte-identical to its web counterpart; if one baseline moves the other moves in the SAME diff. RAISED 91 -> 114 (+23) by stw9-graph-constellation (#6213): the constellation's type-hue palette (tag/command/metric/session hues), theme-aware tooltip chrome, and the light/dark legend+controls panel objects \u2014 all Canvas-paint-time or JS-injected inline styles under the same fillStyle-can't-take-var() rationale; au-r6 (init-time token resolution fed from the lockstep) remains the tokenization path."
+  }
+ ]
 }

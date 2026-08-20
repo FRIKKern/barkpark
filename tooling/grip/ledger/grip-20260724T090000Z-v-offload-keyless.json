@@ -1,0 +1,33 @@
+{
+  "grip_id": "v-offload-keyless-2026-07-24",
+  "verifier": "v-offload-keyless",
+  "wave": "personal-dev-fleet-wave-mvp0-2026-07-24",
+  "assignment": "Rule whether a fleet order can complete claim->working->done on a support box WITHOUT a provider key (ANTHROPIC_API_KEY/OPENAI_API_KEY), given PDF-D62 forbids automating the key hand-off. Read fleet-run.sh + listener protocol + support provisioner + r3 harness R5/offload rung + poc-fleet-order tasks.",
+  "verdict": "NO KEYLESS ORDER EXISTS. Every order is an LLM agent turn (agent_exec -> `claude -p` / `codex exec`), which reads the provider key from the systemd EnvironmentFile at exec time. The provisioner (bp cloud support add) writes fleet-run.sh + protocol + agent CLI (fail-open) + 0600 env with only BARKPARK_API_URL/_API_TOKEN/FLEET_WORKER/FLEET_AGENT[/FLEET_MAX_CLASS] and NEVER the provider key; it prints a manual SSH one-liner for the developer to append the key (PDF-D62 / chat-hands D5). The listener comes ONLINE (beats capacity) keyless, but the first order FAILS keyless. The r3 harness R5 rung does NOT even file a ledger order: it SSHes and runs `claude -p 'pong'` directly, and that paid leg is a NAMED SKIP unless ANTHROPIC_API_KEY is in the harness env. RULING: the key moment must enter Screen 2 (a real credential hand-off step) OR the proof's offload rung needs a pre-seeded key AND the journey text needs an honest caveat. The 'unaided in the browser' offload as literally specified is structurally broken without either.",
+  "recipes": [
+    {
+      "claim": "Order execution ALWAYS runs a headless LLM agent turn — do_order calls agent_exec on the brief; agent_exec runs `claude -p` or `codex exec`. No shell-only / keyless order branch exists.",
+      "rerun": "sed -n '23,31p;219,242p' tooling/fleet/fleet-run.sh"
+    },
+    {
+      "claim": "The support provisioner installs the agent CLI FAIL-OPEN and NEVER writes the provider key; it prints a manual SSH one-liner (`printf 'ANTHROPIC_API_KEY=<your-key>' >> env && restart`). Comment cites PDF-D62 / chat-hands D5: keys handed over BY THE DEVELOPER.",
+      "rerun": "sed -n '134,140p;660,721p' internal/cli/cloud_support_cmd.go"
+    },
+    {
+      "claim": "The 0600 fleet-listener.env written by provisioning carries only BARKPARK_API_URL / BARKPARK_API_TOKEN / FLEET_WORKER / FLEET_AGENT [/ FLEET_MAX_CLASS]. No ANTHROPIC_API_KEY / OPENAI_API_KEY line.",
+      "rerun": "sed -n '1399,1421p' internal/cli/cloud_support_cmd.go"
+    },
+    {
+      "claim": "The systemd unit ExecStart runs `fleet-run.sh listen ${FLEET_WORKER}` with EnvironmentFile=/etc/barkpark/fleet-listener.env, and its own header states provider keys are NEVER written by the provisioner (PDF-D62); developer appends them over SSH.",
+      "rerun": "sed -n '19,34p' deploy/systemd/barkpark-fleet-listener.service"
+    },
+    {
+      "claim": "r3 harness (stranded commit 6c24833a4, scripts/pdf-support-proof.sh) R5 rung: paid leg runs ONLY if ANTHROPIC_API_KEY is in the HARNESS env, passed on the SSH command line; else NAMED SKIP. It runs `claude -p 'pong'` directly over SSH — it does NOT file a ledger order / prove claim->working->done through the listener.",
+      "rerun": "git show 6c24833a4:scripts/pdf-support-proof.sh | sed -n '84,86p;1449,1491p'"
+    },
+    {
+      "claim": "poc-fleet-order-a (done) proves an authenticated listener completes claim->working->done, NOT keyless: its brief asks for a haiku (an LLM-only output) and evidence reads 'written by fresh-context headless claude run under worker poc-support-1'.",
+      "rerun": "bp task get poc-fleet-order-a -o json | python3 -c \"import sys,json;d=json.load(sys.stdin)['doc'];c=d['content'];print(''.join(n.get('value','') for bl in c['brief']['blocks'] for n in (bl.get('content') or [])));print([a.get('evidence') for a in c['acceptance_criteria']])\""
+    }
+  ]
+}

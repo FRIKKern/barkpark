@@ -45,7 +45,11 @@ defmodule BarkparkWeb.Components.FieldInputs do
     5. `color`
     6. `reference` (`refType` required)
     7. `image`
-    8. default fallback (string, slug, unknown — text input)
+    8. `source` (read-only verbatim monospace `<pre>`, no form input — the
+       scaffy `command` type's `.scaffy` bytes; edits go through the repo, never
+       the form)
+    9. `array` / `object` (read-only pretty-printed JSON, no form input)
+    10. default fallback (string, slug, unknown — text input)
   """
 
   use Phoenix.Component
@@ -278,6 +282,29 @@ defmodule BarkparkWeb.Components.FieldInputs do
     <div style="display:flex;gap:6px;align-items:center;">
       <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" />
       <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} title="Generate from title">Generate</button>
+    </div>
+    """
+  end
+
+  # "source" field (the scaffy `command` type's `source`): the verbatim
+  # `.scaffy` bytes. Render the RAW multi-line value in a read-only monospace
+  # `<pre>` and emit NO form input — the `.scaffy` file is the source of truth
+  # and edits go through the repo, never the Studio form. Rendering it as a
+  # `text` textarea would round-trip an editable, form-submitted value that a
+  # Studio save could silently diverge from the repo; rendering it via
+  # `readonly_json` would collapse the multi-line source to a one-line escaped
+  # blob. `<%= @v %>` HTML-escapes the raw string. Because the field is absent
+  # from the submitted `doc[...]` params, the save path
+  # (`Content.classic_save_content/4`) preserves the stored bytes
+  # byte-identically.
+  def input(%{field: %{"type" => "source", "name" => name}} = assigns) do
+    val = Map.get(assigns.editor_form, name)
+    assigns = assign(assigns, n: name, v: to_string(val || ""))
+
+    ~H"""
+    <div data-readonly-field={@n} data-source-field>
+      <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;line-height:1.5;white-space:pre;overflow:auto;max-height:60vh;opacity:0.85;"><%= @v %></pre>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — the .scaffy source of truth; edit in the repo</span>
     </div>
     """
   end

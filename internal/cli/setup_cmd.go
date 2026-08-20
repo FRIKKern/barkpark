@@ -31,6 +31,8 @@ func (configStoreAdapter) Save(s setup.SavedConfig) error {
 	cfg.RememberServer(ServerEntry{
 		Name:          s.Name,
 		Server:        s.Server,
+		InstanceID:    s.InstanceID,
+		Team:          s.Team,
 		Token:         s.Token,
 		Workspace:     s.Workspace,
 		Project:       s.Project,

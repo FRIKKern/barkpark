@@ -113,12 +113,53 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
   # POST a raw string body through the live endpoint with the given signature
   # header. The `content-type: application/json` makes Plug.Parsers engage the
   # JSON parser, whose read runs the `CacheBodyReader` tee on this path.
-  defp deliver(body, sig_header) do
+  defp deliver(body, sig_header), do: deliver(body, sig_header, "issues")
+
+  defp deliver(body, sig_header, event) do
     build_conn()
     |> put_req_header("content-type", "application/json")
-    |> put_req_header("x-github-event", "issues")
+    |> put_req_header("x-github-event", event)
     |> put_req_header("x-hub-signature-256", sig_header)
     |> post(@path, body)
+  end
+
+  @gate_text "MERGE GATE: PR merged to origin/main"
+
+  # A task carrying an explicit `merge_gate:true` criterion at index 1, seeded in
+  # the SAME default scope the scope-less webhook path resolves against.
+  defp mk_gated_task!(scope, doc_id) do
+    content = %{
+      "kind" => "task",
+      "lifecycle_status" => "open",
+      "acceptance_criteria" => [
+        %{"criterion" => "feature built", "met" => true, "evidence" => "PR #1"},
+        %{"criterion" => @gate_text, "met" => false, "merge_gate" => true}
+      ]
+    }
+
+    {:ok, doc} =
+      Content.create_document(
+        "task",
+        %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
+        @dataset,
+        scope
+      )
+
+    doc
+  end
+
+  # The exact JSON string we sign AND post for a merged `pull_request` close whose
+  # body carries the `Task: <doc_id>` trailer.
+  defp merged_pr_body(doc_id, number, sha) do
+    Jason.encode!(%{
+      "action" => "closed",
+      "pull_request" => %{
+        "number" => number,
+        "merged" => true,
+        "merge_commit_sha" => sha,
+        "body" => "Some description\n\nTask: #{doc_id}"
+      }
+    })
   end
 
   test "a signed issues.opened delivery → 2xx and a real gh-<num> task is born" do
@@ -155,5 +196,73 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
     # Neither payload's issue produced a task — the request never reached Intake.
     assert task_rows(number) == []
     assert task_rows(number + 999) == []
+  end
+
+  # PDS — the `stamped:` receipt of github_webhook_controller.ex:189 asserted
+  # against the STORED ROW, not against a stubbed callee return. Every other
+  # webhook controller test injects `merge_events_fun()` through the app-env seam,
+  # so it can only prove "given a stub returns tag X, the body says Y" — a mapping.
+  # This drives the REAL MergeEvents → Tasks.reconcile_merge_gate → Postgres and
+  # asserts the printed sentence AND the row it claims. Neuter the stamp write and
+  # the JSON assertion still passes while the Repo assertion reds: that gap IS the
+  # differential.
+  test "a signed merged pull_request → the stamped: receipt matches the stored row", %{
+    scope: scope
+  } do
+    doc_id = "pds-w36-e2e-#{System.unique_integer([:positive])}"
+    task = mk_gated_task!(scope, doc_id)
+    assert Enum.at(task.content["acceptance_criteria"], 1)["met"] == false
+
+    body = merged_pr_body(doc_id, 4621, "abc1234def")
+    sig = Signature.sign(body, @secret)
+
+    conn = deliver(body, sig, "pull_request")
+
+    # THE RECEIPT — controller line 189, verbatim shape.
+    assert %{"ok" => true, "stamped" => true, "task" => ^doc_id, "criteria" => [1]} =
+             json_response(conn, 200)
+
+    # THE STORED ROW — the post-condition the receipt asserts.
+    reloaded = Repo.get!(Document, task.id)
+    gate = Enum.at(reloaded.content["acceptance_criteria"], 1)
+
+    assert gate["met"] == true,
+           "receipt said stamped: true but the stored merge_gate criterion is still unmet"
+
+    assert gate["criterion"] == @gate_text
+    assert gate["evidence"] =~ "PR #4621"
+    assert gate["evidence"] =~ "commit abc1234def"
+
+    # STAMP-ONLY at the wire: the receipt never implies a lifecycle flip.
+    assert reloaded.content["lifecycle_status"] == "open"
+    assert reloaded.rev != task.rev, "a stamp that changed nothing would leave rev untouched"
+  end
+
+  # MARGINAL COST PROBE — the same fixture proves controller line 194's
+  # `reconciled: "already_stamped"` receipt against the row it implies (NO second
+  # write). A redelivery must not double-stamp: the rev is the post-condition.
+  test "a REDELIVERED merged pull_request → reconciled: already_stamped and NO second write", %{
+    scope: scope
+  } do
+    doc_id = "pds-w36-replay-#{System.unique_integer([:positive])}"
+    task = mk_gated_task!(scope, doc_id)
+
+    body = merged_pr_body(doc_id, 4622, "beef0001")
+    sig = Signature.sign(body, @secret)
+
+    assert %{"ok" => true, "stamped" => true} =
+             json_response(deliver(body, sig, "pull_request"), 200)
+
+    after_first = Repo.get!(Document, task.id)
+
+    assert %{"ok" => true, "reconciled" => "already_stamped", "task" => ^doc_id} =
+             json_response(deliver(body, sig, "pull_request"), 200)
+
+    after_replay = Repo.get!(Document, task.id)
+
+    assert after_replay.rev == after_first.rev,
+           "reconciled: already_stamped claims NO write — the rev moved anyway"
+
+    assert after_replay.content == after_first.content
   end
 end

@@ -1,0 +1,246 @@
+name: connectors
+
+# The connectors/ bridge's merge gate (charter D45). BLOCKING — no
+# continue-on-error anywhere in this file, on purpose.
+#
+# Why this workflow had to exist: the state-layer proofs (schema isolation,
+# resolveOrMint idempotency, tenant install resolution) can only be proven
+# against a REAL Postgres — pg-mem treats `SET search_path` as a no-op and
+# diverges from Postgres on `ON CONFLICT DO NOTHING ... RETURNING`, so a green
+# from a fake would be a fabricated green. The suite therefore SKIPS those
+# proofs (loudly) when no database is reachable, which is honest locally but
+# lethal in CI: before this file, zero of the repo's 29 workflows touched
+# connectors/, and a runner without Postgres would have reported GREEN while
+# running none of the proofs.
+#
+# Reproduced on main, 2026-07-14:
+#   CONNECTORS_TEST_DATABASE_URL=postgres://localhost:1/nope npx vitest run
+#   → exit 0 · "Test Files 8 passed (8)" · "Tests 103 passed | 15 skipped (118)"
+#
+# So this job does two things a plain `vitest run` does not:
+#   1. Stands up a real postgres:15 service and sets CONNECTORS_REQUIRE_DB=1,
+#      which turns an unreachable database from a skip into a hard failure.
+#   2. Asserts skipped == 0 from the JSON reporter. The exit code alone is NOT
+#      enough: the protective proof for the search_path pin surfaces as a
+#      SUITE-level failure plus a skip-count anomaly rather than per-test reds,
+#      so a misconfigured service container could otherwise fool an
+#      exit-code-only gate into a hollow green. The skip count is the tripwire.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "connectors/**"
+      # The Cloud execution-profile shim + its confinement proof (Connectors
+      # Wave 12, D122) — invisible to every CI path filter before this line, so a
+      # regression in cloud-sandbox-runner.mjs's local-vercel env allowlist could
+      # ship unproven. The shim-confinement job below runs its black-box proof.
+      - "scripts/connectors/**"
+      - ".github/workflows/connectors.yml"
+  pull_request:
+    paths:
+      - "connectors/**"
+      - "scripts/connectors/**"
+      - ".github/workflows/connectors.yml"
+
+concurrency:
+  group: connectors-${{ github.ref }}
+  # Never cancel main (the 2026-06-10 elixir starvation lesson); collapse
+  # superseded PR runs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # The Cloud execution-profile shim's confinement proof (Connectors Wave 12,
+  # D121/D122). A SEPARATE job from `test`: it needs neither Postgres nor
+  # `connectors/`'s npm install — only node + bash + a generated fake `vercel`. It
+  # drives the REAL scripts/connectors/cloud-sandbox-runner.mjs end to end and
+  # asserts the local `vercel` child is env-confined (the minted BARKPARK token and
+  # ANTHROPIC key never leak into it), the turn exec carries exactly one
+  # `--env ANTHROPIC_API_KEY`, HOME/cwd are isolated, and the principal gate fails
+  # closed. No continue-on-error, matching this file's whole-workflow discipline:
+  # a red here fails THIS JOB and means a real confinement regression. It does
+  # not stop a merge — this job's context is not in the required set of
+  # .github/required-checks.json and carries no exclusion row there either. The
+  # sentence that stood here claimed the opposite, in the one word this repo
+  # reads as a claim of merge authority; it was corrected rather than annotated
+  # as deliberately-advisory, because the claim was only ever about the absence
+  # of continue-on-error and the wording above now says exactly that.
+  shim-confinement:
+    name: Cloud shim confinement + session-sandbox proofs (black-box, no real Vercel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Hermetic: the proofs generate a fake `vercel` and never touch the real
+      # platform. `node --check` + `shellcheck -S error` mirror the local gate; the
+      # ubuntu runner has `shellcheck` preinstalled.
+      - name: Shim confinement proof (D121 env allowlist)
+        run: |
+          node --check scripts/connectors/cloud-sandbox-runner.mjs
+          shellcheck -S error scripts/connectors/w12-shim-confinement-proof.sh
+          bash scripts/connectors/w12-shim-confinement-proof.sh
+
+      # The Wave-14 session-sandbox lifecycle (D137/D138): --sandbox-id reuse,
+      # --keep-sandbox stop-not-remove, the bp_sandbox sideband frame, and the
+      # byte-preserved flag-less path. Same fake-vercel technique; no real Vercel.
+      - name: Session-sandbox lifecycle proof (D137/D138)
+        run: |
+          shellcheck -S error scripts/connectors/w14-session-sandbox-proof.sh
+          bash scripts/connectors/w14-session-sandbox-proof.sh
+
+      # The Wave-25 credential config-embed proof (D213-D216): the shim fetches
+      # FINISHED tool headers host-side from the bridge's D71 loopback route and
+      # delivers the credential-bearing MCP config via `vercel sandbox copy` of a
+      # 0600 tmpfile — never argv/env. Same fake-vercel technique plus a stub
+      # loopback bridge (node http.createServer); no real Vercel, no real
+      # credential. Asserts the (a)-(g) confinement set incl. the cross-workspace
+      # fail-closed refusal and create→reuse per-turn freshness.
+      - name: Credential config-embed proof (W25, D213-D216)
+        run: |
+          shellcheck -S error scripts/connectors/w25-credential-embed-proof.sh
+          bash scripts/connectors/w25-credential-embed-proof.sh
+
+      # The Wave-29 per-connector egress-allowlist proof (D238/D240/D241/D242):
+      # repeated `--egress-host` shim flags union with the ALLOWED_DOMAIN base
+      # into repeated `--allowed-domain` pairs on the SNAPSHOT create path —
+      # proven by SET-EQUALITY (never containment) on the create argv: a github
+      # install widens to exactly base+github, no installs preserves exactly the
+      # deny-all-except-anthropic base, and a repeated base dedupes to one pair.
+      # Also pins --network-policy never co-emitted and no comma-joined hosts.
+      # Same fake-vercel technique; no real Vercel, no real egress.
+      - name: Egress-allowlist union proof (W29, D238-D242)
+        run: |
+          shellcheck -S error scripts/connectors/w29-egress-allowlist-proof.sh
+          bash scripts/connectors/w29-egress-allowlist-proof.sh
+
+      # The Wave-30 shim error-sanitize proof (D213): the shim's stderr tail is
+      # broadcast VERBATIM to every viewer's ChatLive, and three call sites fold
+      # the local vercel child's raw stderr (res.err) into a thrown Error.message
+      # (create / npm-install fallback / version probe) — the version-probe path
+      # also log()s it. W30 routes all four through ONE sanitizeErr() belt at
+      # message construction. The proof drives the REAL shim against a fake vercel
+      # that prints a secret-shaped string to stderr and asserts the planted
+      # env-assignment / bearer / base64 markers do NOT survive into the shim's
+      # stderr while the failing-verb diagnostic does. Same fake-vercel technique;
+      # no real Vercel, no real secret.
+      - name: Shim error-sanitize proof (W30, D213)
+        run: |
+          shellcheck -S error scripts/connectors/w30-shim-sanitize-proof.sh
+          bash scripts/connectors/w30-shim-sanitize-proof.sh
+
+      # The Wave-34 host preflight (D267): preflight-vercel.sh chains the four host
+      # prerequisites (vercel present, authenticated, sandbox entitlement under
+      # --scope guerrilla, ANTHROPIC_API_KEY) — each miss loud, named, exit 1 — and
+      # NEVER runs `vercel sandbox create`. The offline self-test drives a fake
+      # vercel on PATH through every leg (all-green + four named misses) plus a
+      # call-log tripwire that create is never invoked; sub-second, no real Vercel.
+      # This workflow hardcodes proof scripts BY NAME (it never glob-discovers
+      # scripts/connectors/), so this NAMED step is what makes the preflight run in CI.
+      - name: Vercel host preflight self-test (W34, D267)
+        run: |
+          shellcheck -S error scripts/connectors/preflight-vercel.sh
+          bash scripts/connectors/preflight-vercel.sh --self-test
+
+      # The Wave-35 LIVE turn driver's hermetic self-test (D270/D271/D279):
+      # w35-live-turn-driver.sh is the instrument the human sitting drives to
+      # close connectors-hg-live-isolated-cloud-turn / -cloud-multiturn (w11 is
+      # 401-locked, w14 is hermetic — neither can assert a real-key SUCCESS).
+      # The self-test proves, against a fake vercel (no credentials, no real
+      # Vercel): preflight-first refusal with ZERO creates, the egress lock on
+      # the create argv when a snapshot is set (and the LOUD allow-all warning
+      # when not), the multiturn --session-id/--resume wiring incl. a MUTATION
+      # leg that goes RED when the resume flag is dropped, bake's npm-registry
+      # check BEFORE any create, full teardown lifecycle (remove + snapshots
+      # delete + both ls sweeps), and planted-key custody (the key rides ONLY
+      # the shim's single --env pair, never argv/logs). BLOCKING, one named
+      # step (this workflow hardcodes proof scripts by name).
+      - name: Live-turn driver self-test (W35, D270)
+        run: |
+          shellcheck -S error scripts/connectors/w35-live-turn-driver.sh
+          bash scripts/connectors/w35-live-turn-driver.sh --self-test
+
+  test:
+    name: Typecheck + tests (real Postgres, zero skips)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: connectors
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # An ADMIN url on purpose: the state-layer tests CREATE and DROP an
+      # ephemeral database of their own (connectors_bridge_test_<pid>_<ts>) and
+      # connect the bridge pool to that, never to this one.
+      CONNECTORS_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      # Unreachable database ⇒ hard failure, not a skip. This is the flag the
+      # suite reads (test/thread-session-map.test.ts, test/tenant.test.ts).
+      CONNECTORS_REQUIRE_DB: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # npm, NOT pnpm — connectors/ is a standalone service with its own
+      # package-lock.json (the js/ monorepo is the pnpm one).
+      - name: Install
+        run: npm ci
+
+      # BLOCKING, unlike js-tests.yml's and elixir.yml's advisory format jobs —
+      # and deliberately so. Those two are advisory for reasons connectors/ does
+      # not have: js-tests.yml checks a partial glob (a parity signal, not the
+      # whole tree) and elixir.yml's `mix format` tracks a pinned toolchain whose
+      # formatter drifts between versions. connectors/ pins prettier ^3.3 in its
+      # own package.json, `format:check` covers the WHOLE package, and the tree is
+      # clean today — so a red here always means a real, one-command-fixable drift
+      # (`npm run format`), never a false alarm. Cheapest possible step: no
+      # Postgres, no build, runs before typecheck so a formatting red fails fast.
+      - name: Format check (prettier)
+        run: npm run format:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Two reporters: `default` keeps the run readable in the CI log, `json`
+      # writes the machine-readable results the skip assertion below consumes.
+      - name: Test (real Postgres, CONNECTORS_REQUIRE_DB=1)
+        run: npx vitest run --reporter=default --reporter=json --outputFile.json=vitest-results.json
+
+      # The zero-skip assertion — the reason this gate is not vacuous.
+      # A skipped DB proof means the service container never came up, and that
+      # must be RED, not a quiet 103/118 green.
+      - name: "Assert zero skipped tests (no vacuous green)"
+        run: |
+          node -e "
+          const r = require('./vitest-results.json');
+          const all = r.testResults.flatMap((f) => f.assertionResults);
+          const skipped = all.filter((a) => a.status === 'pending' || a.status === 'skipped');
+          console.log('tests', all.length, 'skipped', skipped.length);
+          if (skipped.length > 0) {
+            for (const a of skipped) console.error('  skipped:', a.fullName);
+            console.error('VACUOUS GREEN: DB tests were skipped — Postgres was not reachable, so the schema-isolation and tenant-resolution proofs never ran.');
+            process.exit(1);
+          }
+          "

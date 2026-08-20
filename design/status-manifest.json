@@ -8,23 +8,28 @@
     "blocked": "blocked",
     "done": "done",
     "closed": "done",
-    "cancelled": "cancel"
+    "cancelled": "cancel",
+    "considering": "considering",
+    "researching": "researching"
   },
   "default_role": "open",
 
   "roles": [
-    { "role": "open",     "glyph": "○", "spinner": false, "label": "open",        "meaning": "backlog — not ready yet" },
-    { "role": "ready",    "glyph": "○", "spinner": false, "label": "ready",       "meaning": "unchecked — claim it now" },
-    { "role": "progress", "glyph": "",  "spinner": true,  "label": "in progress", "meaning": "being worked right now" },
-    { "role": "blocked",  "glyph": "!", "spinner": false, "label": "blocked",     "meaning": "something is required first" },
-    { "role": "done",     "glyph": "✓", "spinner": false, "label": "done",        "meaning": "complete" },
-    { "role": "cancel",   "glyph": "✕", "spinner": false, "label": "cancelled",   "meaning": "abandoned or superseded" }
+    { "role": "open",        "glyph": "○", "spinner": false, "label": "open",        "meaning": "backlog — not ready yet" },
+    { "role": "ready",       "glyph": "○", "spinner": false, "label": "ready",       "meaning": "unchecked — claim it now" },
+    { "role": "progress",    "glyph": "",  "spinner": true,  "label": "in progress", "meaning": "being worked right now" },
+    { "role": "blocked",     "glyph": "!", "spinner": false, "label": "blocked",     "meaning": "something is required first" },
+    { "role": "done",        "glyph": "✓", "spinner": false, "label": "done",        "meaning": "complete" },
+    { "role": "cancel",      "glyph": "✕", "spinner": false, "label": "cancelled",   "meaning": "abandoned or superseded" },
+    { "role": "considering", "glyph": "◌", "spinner": false, "label": "considering", "meaning": "a candidate being weighed" },
+    { "role": "researching", "glyph": "◎", "spinner": false, "label": "researching", "meaning": "under active investigation" }
   ],
 
   "tones": {
     "info":   { "light": "#2563eb", "dark": "#60a5fa" },
     "ok":     { "light": "#0d9488", "dark": "#2dd4bf" },
     "warn":   { "light": "#d97706", "dark": "#fbbf24" },
-    "danger": { "light": "#dc2626", "dark": "#f87171" }
+    "danger": { "light": "#dc2626", "dark": "#f87171" },
+    "violet": { "light": "#7c3aed", "dark": "#a78bfa" }
   }
 }

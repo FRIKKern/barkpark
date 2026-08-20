@@ -1,5 +1,5 @@
 defmodule Barkpark.TenancyTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.{Workspace, Project, Membership}
@@ -137,6 +137,36 @@ defmodule Barkpark.TenancyTest do
       {:ok, _} = Tenancy.create_project(ws, %{slug: "mango", name: "Mango"})
 
       slugs = Enum.map(Tenancy.list_projects(ws), & &1.slug)
+      assert slugs == ["analytics", "mango", "zebra"]
+    end
+  end
+
+  describe "list_datasets/1 ordering" do
+    test "puts the production-slug dataset FIRST, then the rest alphabetically" do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "ds-ord-ws", name: "DsOrd"})
+      {:ok, project} = Tenancy.create_project(ws, %{slug: "default", name: "Default"})
+
+      # Insert out of order to prove the query — not insertion — drives ordering.
+      {:ok, _} = Tenancy.create_dataset(project, %{slug: "zebra", name: "Zebra"})
+      {:ok, _} = Tenancy.create_dataset(project, %{slug: "production", name: "Production"})
+      {:ok, _} = Tenancy.create_dataset(project, %{slug: "analytics", name: "Analytics"})
+
+      slugs = Enum.map(Tenancy.list_datasets(project), & &1.slug)
+      assert slugs == ["production", "analytics", "zebra"]
+      # The mobile cascade's single-option auto-select contract: first dataset
+      # == the canonical production.
+      assert List.first(Tenancy.list_datasets(project)).slug == "production"
+    end
+
+    test "with no production-slug dataset, ordering stays pure alphabetical" do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "ds-ord-ws-no-prod", name: "NoProd"})
+      {:ok, project} = Tenancy.create_project(ws, %{slug: "default", name: "Default"})
+
+      {:ok, _} = Tenancy.create_dataset(project, %{slug: "zebra", name: "Zebra"})
+      {:ok, _} = Tenancy.create_dataset(project, %{slug: "analytics", name: "Analytics"})
+      {:ok, _} = Tenancy.create_dataset(project, %{slug: "mango", name: "Mango"})
+
+      slugs = Enum.map(Tenancy.list_datasets(project), & &1.slug)
       assert slugs == ["analytics", "mango", "zebra"]
     end
   end

@@ -1,5 +1,5 @@
 defmodule Barkpark.AccountsMagicLinkTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Accounts
   alias Barkpark.Accounts.UserEmailToken

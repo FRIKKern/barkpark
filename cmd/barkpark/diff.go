@@ -6,6 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
@@ -43,6 +45,20 @@ var (
 			Foreground(roleColor("ok"))
 )
 
+// diffTwinStatusMessage maps a non-OK published-twin read to the status line
+// openDiffView shows instead of opening the modal. NotFound means the draft
+// has genuinely never been published — today's copy, byte-identical, shown
+// as a neutral info line. Unreachable means the probe itself failed (5s
+// timeout, transport error, bad body) — it must NOT be reported as "never
+// published" (that would assert the twin is absent when we simply don't
+// know), so it gets a distinct, error-styled message instead.
+func diffTwinStatusMessage(outcome apiclient.DocReadOutcome) (msg string, isErr bool) {
+	if outcome == apiclient.DocReadNotFound {
+		return "never published — every field is new", false
+	}
+	return "could not check published twin — network error, try again", true
+}
+
 // openDiffView builds the field diff for the doc in the editor. Inert (status
 // message, no modal) when the doc is not a draft or has no published twin —
 // there is nothing to compare against.
@@ -56,9 +72,14 @@ func (m *model) openDiffView() {
 		return
 	}
 	bare := strings.TrimPrefix(doc.ID, "drafts.")
-	pub, ok := m.ds.Get(m.editorSchema.Name, bare)
-	if !ok {
-		m.setStatusInfo("never published — every field is new")
+	pub, outcome := m.ds.GetPerspectiveResult(m.editorSchema.Name, bare, "")
+	if outcome != apiclient.DocReadOK {
+		msg, isErr := diffTwinStatusMessage(outcome)
+		if isErr {
+			m.setStatus(msg, true)
+		} else {
+			m.setStatusInfo(msg)
+		}
 		return
 	}
 	m.diffLines = m.buildDiffLines(&pub)

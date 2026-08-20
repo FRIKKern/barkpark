@@ -44,6 +44,15 @@ defmodule Barkpark.Media.Storage.MediaFile do
     |> unique_constraint([:path, :dataset_id],
       name: :media_files_path_dataset_id_index
     )
+    # FK-abort containment: all three tenancy columns are real Postgres FKs
+    # (migrations 20260527110100 + 20260527131000, default-derived names
+    # media_files_<col>_fkey). Without these, a reference to a vanished row —
+    # a workspace/project deleted concurrently mid-upload, or a cross-instance
+    # blob push carrying a foreign id — raises Ecto.ConstraintError (500) out
+    # of Repo.insert instead of returning {:error, changeset}.
+    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:dataset_id)
   end
 
   # MIME types the browser will execute (script) if it navigates to the blob on
@@ -65,9 +74,6 @@ defmodule Barkpark.Media.Storage.MediaFile do
   )
 
   @neutralized_mime "application/octet-stream"
-
-  @doc "The content-type a neutralized (attachment-served) dangerous blob carries."
-  def neutralized_mime, do: @neutralized_mime
 
   @doc """
   True when `mime` is a browser-executable type (svg/html/xml/js). The base type

@@ -13,10 +13,35 @@ defmodule Barkpark.Search.Intelligence do
   alias Barkpark.Search.{Crystal, Event, MergePattern, Sanitizer, Synonyms}
   alias Barkpark.Repo
 
+  @typedoc """
+  Why an interaction was not recorded. `:recording_disabled` is a deliberate
+  no-op; every other reason means a signal was lost, and callers are expected
+  to render the two differently.
+  """
+  @type interaction_skip_reason ::
+          :recording_disabled | :incomplete_reference | :unknown_query_event | :error
+
+  @typedoc """
+  Outcome of a correction signal. `:recorded` is the only value that means a
+  `correction` event reached the table.
+  """
+  @type correction_status :: :recorded | :recording_disabled | :blank | :identical | :error
+
   @popular_window_days 30
   @retention_days 90
   @default_limit 8
   @min_search_count 3
+  @default_source_cap 500
+
+  # Generous per-source SQL LIMIT for the popular/nohits suggestion aggregates.
+  # `query_normalized` is attacker-mintable on the anonymous suggestion/correction
+  # routes, so every GROUP BY aggregate must carry an explicit SQL-side bound:
+  # without it an attacker forces a full-table GROUP BY sorted in BEAM memory.
+  # The cap (default #{@default_source_cap}/source) sits far above the caller's
+  # output limit (<= #{@default_limit}), so normal-cardinality output is unchanged;
+  # runtime-overridable via `config :barkpark, :search_suggestions_source_cap`.
+  defp source_cap,
+    do: Application.get_env(:barkpark, :search_suggestions_source_cap, @default_source_cap)
 
   @doc "Default retention for raw search events (days)."
   @spec retention_days() :: pos_integer()
@@ -77,21 +102,35 @@ defmodule Barkpark.Search.Intelligence do
 
   @doc """
   Record a click or select interaction against a prior search event.
-  Returns `{:ok, event_id}` or `:skipped`. Never raises.
+
+  Returns `{:ok, event_id}` when a row was written, otherwise `{:skipped, reason}`.
+  The reason is the whole point: a caller must be able to tell a recorder that was
+  deliberately switched off from one that lost the write.
+
+    * `:recording_disabled` — recording is off for this request. A deliberate
+      no-op; nothing was lost.
+    * `:incomplete_reference` — the request carried no usable `query_event_id`
+      or `object_id`. A bad request, not a server fault.
+    * `:unknown_query_event` — the referenced search event does not exist for
+      this surface/scope, so the interaction has no parent to hang off.
+    * `:error` — an exception or exit was swallowed on the way to the insert
+      (a failed insert arrives here as a `MatchError`). A real failure.
+
+  Never raises — analytics must not break search.
   """
   @spec record_interaction(String.t(), String.t(), map(), keyword()) ::
-          {:ok, Ecto.UUID.t()} | :skipped
+          {:ok, Ecto.UUID.t()} | {:skipped, interaction_skip_reason()}
   def record_interaction(surface, scope, attrs, opts \\ [])
       when is_binary(surface) and is_binary(scope) and is_map(attrs) do
     if Keyword.get(opts, :disabled, false) do
-      :skipped
+      {:skipped, :recording_disabled}
     else
       safe_record_interaction(surface, scope, attrs, opts)
     end
   rescue
-    _ -> :skipped
+    _ -> {:skipped, :error}
   catch
-    _, _ -> :skipped
+    _, _ -> {:skipped, :error}
   end
 
   @doc """
@@ -102,14 +141,15 @@ defmodule Barkpark.Search.Intelligence do
       when is_binary(surface) and is_binary(scope) do
     limit = Keyword.get(opts, :limit, @default_limit)
     min_count = Keyword.get(opts, :min_search_count, @min_search_count)
+    workspace_id = Keyword.get(opts, :workspace_id)
     prefix = normalize_suggest_prefix(prefix)
 
     suggest_opts = [min_search_count: min_count]
 
     %{
-      recent: recent_queries(surface, scope, actor_key, prefix, limit),
-      popular: popular_queries(surface, scope, prefix, limit, suggest_opts),
-      nohits: nohits_queries(surface, scope, prefix, min(limit, 5))
+      recent: recent_queries(surface, scope, actor_key, prefix, limit, workspace_id),
+      popular: popular_queries(surface, scope, prefix, limit, suggest_opts, workspace_id),
+      nohits: nohits_queries(surface, scope, prefix, min(limit, 5), workspace_id)
     }
   end
 
@@ -117,6 +157,7 @@ defmodule Barkpark.Search.Intelligence do
   def insights(surface, scope, opts \\ [])
       when is_binary(surface) and is_binary(scope) do
     period = opts |> Keyword.get(:period, "week") |> normalize_period()
+    workspace_id = Keyword.get(opts, :workspace_id)
 
     period_start =
       case Keyword.get(opts, :period_start) do
@@ -124,9 +165,12 @@ defmodule Barkpark.Search.Intelligence do
         _ -> default_period_start(period)
       end
 
-    quality = quality_stats(surface, scope, period, period_start)
-    prev_counts = previous_period_search_counts(surface, scope, period, period_start)
-    rates = search_rates(surface, scope, period, period_start)
+    quality = quality_stats(surface, scope, period, period_start, workspace_id)
+
+    prev_counts =
+      previous_period_search_counts(surface, scope, period, period_start, workspace_id)
+
+    rates = search_rates(surface, scope, period, period_start, workspace_id)
 
     top_queries =
       from(c in Crystal,
@@ -137,6 +181,7 @@ defmodule Barkpark.Search.Intelligence do
         order_by: [desc: c.search_count],
         limit: 20
       )
+      |> scope_ws(workspace_id)
       |> Repo.all()
       |> Enum.map(&crystal_payload(&1, prev_counts))
 
@@ -148,6 +193,7 @@ defmodule Barkpark.Search.Intelligence do
         order_by: [desc: m.transition_count],
         limit: 30
       )
+      |> scope_ws(workspace_id)
       |> Repo.all()
       |> Enum.map(&merge_pattern_payload/1)
 
@@ -160,14 +206,18 @@ defmodule Barkpark.Search.Intelligence do
       topQueries: top_queries,
       mergePatterns: merge_patterns,
       synonymCandidates:
-        Synonyms.candidates(surface, scope, period: period, period_start: period_start),
+        Synonyms.candidates(surface, scope,
+          period: period,
+          period_start: period_start,
+          workspace_id: Keyword.get(opts, :workspace_id)
+        ),
       zeroHitRate: rates.zero_hit_rate,
       recoveryRate: rates.recovery_rate,
       hints: improvement_hints(top_queries, merge_patterns, quality)
     }
   end
 
-  defp search_rates(surface, scope, period, period_start) do
+  defp search_rates(surface, scope, period, period_start, workspace_id) do
     rows =
       from(e in Event,
         where:
@@ -177,6 +227,7 @@ defmodule Barkpark.Search.Intelligence do
             e.inserted_at < ^period_end_dt(period, period_start),
         select: {e.zero_hits, e.metadata}
       )
+      |> scope_ws(workspace_id)
       |> Repo.all()
 
     total = length(rows)
@@ -239,6 +290,12 @@ defmodule Barkpark.Search.Intelligence do
     base = %{
       surface: surface,
       scope: scope,
+      # Tenant attribution stamped at INGEST — without it every event is
+      # workspace_id=nil and the crystallizer folds two tenants sharing a scope
+      # STRING into one summed roll-up. Threaded from the controller's resolved
+      # `current_workspace`; nil on unscoped/legacy callers (behaviour-identical
+      # to pre-tenancy).
+      workspace_id: Keyword.get(opts, :workspace_id),
       result_count: total,
       zero_hits: total == 0,
       actor_key: actor_key,
@@ -255,22 +312,21 @@ defmodule Barkpark.Search.Intelligence do
         :skipped
 
       {:reject, reason} ->
-        {:ok, _event} =
-          insert_event(
-            Map.merge(base, %{
-              query: "",
-              query_normalized: "",
-              filters: %{},
-              quality: "rejected",
-              reject_reason: Atom.to_string(reason)
-            })
-          )
+        submit_event(
+          Map.merge(base, %{
+            query: "",
+            query_normalized: "",
+            filters: %{},
+            quality: "rejected",
+            reject_reason: Atom.to_string(reason)
+          })
+        )
 
         {:rejected, reason}
 
       {:ok, query, query_normalized} ->
-        {:ok, event} =
-          insert_event(
+        {:ok, id} =
+          submit_event(
             Map.merge(base, %{
               query: query,
               query_normalized: query_normalized,
@@ -280,16 +336,16 @@ defmodule Barkpark.Search.Intelligence do
             })
           )
 
-        {:ok, event.id}
+        {:ok, id}
     end
   end
 
   defp safe_record_interaction(surface, scope, attrs, opts) do
     do_record_interaction(surface, scope, attrs, opts)
   rescue
-    _ -> :skipped
+    _ -> {:skipped, :error}
   catch
-    _, _ -> :skipped
+    _, _ -> {:skipped, :error}
   end
 
   defp do_record_interaction(surface, scope, attrs, opts) do
@@ -299,7 +355,7 @@ defmodule Barkpark.Search.Intelligence do
     position = interaction_position(attrs)
 
     if is_nil(query_event_id) or object_id in [nil, ""] do
-      :skipped
+      {:skipped, :incomplete_reference}
     else
       case Repo.get(Event, query_event_id) do
         %Event{surface: ^surface, scope: ^scope, event_type: "search"} = search ->
@@ -307,6 +363,9 @@ defmodule Barkpark.Search.Intelligence do
             insert_event(%{
               surface: surface,
               scope: scope,
+              # Inherit the parent search event's tenant so an interaction can
+              # never re-attribute a click to nil/another workspace.
+              workspace_id: Keyword.get(opts, :workspace_id) || search.workspace_id,
               event_type: event_type,
               query: search.query,
               query_normalized: search.query_normalized,
@@ -328,7 +387,7 @@ defmodule Barkpark.Search.Intelligence do
           {:ok, event.id}
 
         _ ->
-          :skipped
+          {:skipped, :unknown_query_event}
       end
     end
   end
@@ -347,35 +406,55 @@ defmodule Barkpark.Search.Intelligence do
        an anonymous client can never alone trip the gate.
     4. When the distinct-session count is `>= 2` and no enabled synonym already
        maps `from → to`, write an `alt_correction` synonym via
-       `Synonyms.promote/3` (`source: "auto"`); a unique-constraint conflict is
+       `Synonyms.promote/4` (`source: "auto"`); a unique-constraint conflict is
        treated as "already exists".
 
-  Returns `{:ok, %{promoted: boolean, distinct_sessions: non_neg_integer}}`.
+  Returns `{:ok, %{status: status, promoted: boolean, distinct_sessions: non_neg_integer}}`.
+
+  `promoted: false, distinct_sessions: 0` is returned by four causally different
+  outcomes, so `status:` is what tells them apart:
+
+    * `:recorded` — a `correction` event was written.
+    * `:recording_disabled` — recording is off for this request (a no-op).
+    * `:blank` — `from` or `to` normalized to an empty string.
+    * `:identical` — `from` and `to` normalized to the same string.
+    * `:error` — an exception or exit was swallowed. The signal was lost.
+
   Never raises — wraps insert + promote so a correction signal can't break the
   request.
   """
   @spec record_correction(String.t(), String.t(), map(), keyword()) ::
-          {:ok, %{promoted: boolean(), distinct_sessions: non_neg_integer()}}
+          {:ok,
+           %{
+             status: correction_status(),
+             promoted: boolean(),
+             distinct_sessions: non_neg_integer()
+           }}
   def record_correction(surface, scope, attrs, opts \\ [])
       when is_binary(surface) and is_binary(scope) and is_map(attrs) do
     if Keyword.get(opts, :disabled, false) do
-      {:ok, %{promoted: false, distinct_sessions: 0}}
+      {:ok, correction_result(:recording_disabled)}
     else
       safe_record_correction(surface, scope, attrs, opts)
     end
   rescue
-    _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+    _ -> {:ok, correction_result(:error)}
   catch
-    _, _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+    _, _ -> {:ok, correction_result(:error)}
   end
 
   defp safe_record_correction(surface, scope, attrs, opts) do
     do_record_correction(surface, scope, attrs, opts)
   rescue
-    _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+    _ -> {:ok, correction_result(:error)}
   catch
-    _, _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+    _, _ -> {:ok, correction_result(:error)}
   end
+
+  # Every non-recorded correction outcome carries the same counters; only the
+  # status separates a deliberate no-op from a lost signal.
+  defp correction_result(status),
+    do: %{status: status, promoted: false, distinct_sessions: 0}
 
   defp do_record_correction(surface, scope, attrs, opts) do
     from_raw = correction_string(attrs, :from, "from")
@@ -383,19 +462,21 @@ defmodule Barkpark.Search.Intelligence do
     from_norm = if from_raw, do: Sanitizer.normalize(from_raw), else: ""
     to_norm = if to_raw, do: Sanitizer.normalize(to_raw), else: ""
     session_key = Keyword.get(opts, :session_key)
+    workspace_id = Keyword.get(opts, :workspace_id)
 
     cond do
       from_norm == "" or to_norm == "" ->
-        {:ok, %{promoted: false, distinct_sessions: 0}}
+        {:ok, correction_result(:blank)}
 
       from_norm == to_norm ->
-        {:ok, %{promoted: false, distinct_sessions: 0}}
+        {:ok, correction_result(:identical)}
 
       true ->
         _ =
           insert_event(%{
             surface: surface,
             scope: scope,
+            workspace_id: Keyword.get(opts, :workspace_id),
             event_type: "correction",
             query: from_raw,
             query_normalized: from_norm,
@@ -413,39 +494,45 @@ defmodule Barkpark.Search.Intelligence do
         distinct = count_distinct_correction_sessions(surface, scope, from_norm, to_norm)
 
         promoted =
-          distinct >= 2 and not synonym_exists?(surface, scope, from_norm, to_norm) and
-            promote_correction(surface, scope, from_norm, to_norm)
+          distinct >= 2 and
+            not synonym_exists?(surface, scope, from_norm, to_norm, workspace_id) and
+            promote_correction(surface, scope, from_norm, to_norm, workspace_id)
 
-        {:ok, %{promoted: promoted, distinct_sessions: distinct}}
+        {:ok, %{status: :recorded, promoted: promoted, distinct_sessions: distinct}}
     end
   end
 
   defp count_distinct_correction_sessions(surface, scope, from_norm, to_norm) do
+    # SQL COUNT(DISTINCT session_key) — never fetch every distinct session row into
+    # Elixir just to take length/1 (these are anonymous, attacker-driven writes).
     from(e in Event,
       where:
         e.surface == ^surface and e.scope == ^scope and e.event_type == "correction" and
           e.query_normalized == ^from_norm and e.object_id == ^to_norm,
-      select: e.session_key,
-      distinct: true
+      select: count(e.session_key, :distinct)
     )
-    |> Repo.all()
-    |> length()
+    |> Repo.one()
   end
 
-  defp synonym_exists?(surface, scope, from_norm, to_norm) do
+  defp synonym_exists?(surface, scope, from_norm, to_norm, workspace_id) do
     surface
-    |> Synonyms.list(scope)
+    |> Synonyms.list(scope, workspace_id)
     |> Enum.any?(fn s ->
       s.enabled and s.from == from_norm and s.to == to_norm
     end)
   end
 
-  defp promote_correction(surface, scope, from_norm, to_norm) do
-    case Synonyms.promote(surface, scope, %{
-           "from" => from_norm,
-           "to" => to_norm,
-           "kind" => "alt_correction"
-         }) do
+  defp promote_correction(surface, scope, from_norm, to_norm, workspace_id) do
+    case Synonyms.promote(
+           surface,
+           scope,
+           %{
+             "from" => from_norm,
+             "to" => to_norm,
+             "kind" => "alt_correction"
+           },
+           workspace_id
+         ) do
       {:ok, _row} -> true
       # Unique-constraint conflict (a concurrent promote landed first): treat as
       # already-exists, not a failure.
@@ -521,6 +608,36 @@ defmodule Barkpark.Search.Intelligence do
     |> Repo.insert()
   end
 
+  # Submit a search event WITHOUT stalling the caller's response. The record
+  # write sat synchronously inside every keystroke's request; normally ~free,
+  # but any DB contention (crystallizer roll-up, Oban, a checkpoint) stalled
+  # THE SEARCH RESPONSE by exactly that hiccup — the observed "sometimes 450ms"
+  # spikes on an otherwise ~100ms path. The event id is PRE-GENERATED so the
+  # response's `searchEventId` contract (click attribution) is unchanged; the
+  # INSERT rides Barkpark.TaskSupervisor (Task.* propagates `$callers`, so the
+  # test sandbox and its DataCase drain still own the connection). Config
+  # `:search_intel_record_async` (default true; test.exs sets false so every
+  # existing assertion stays deterministic). Failures degrade exactly like the
+  # sync path: telemetry-only, never a caller error.
+  defp submit_event(attrs) do
+    id = Ecto.UUID.generate()
+    attrs = Map.put(attrs, :id, id)
+
+    if Application.get_env(:barkpark, :search_intel_record_async, true) do
+      {:ok, _pid} =
+        Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+          _ = insert_event(attrs)
+        end)
+
+      {:ok, id}
+    else
+      case insert_event(attrs) do
+        {:ok, event} -> {:ok, event.id}
+        error -> error
+      end
+    end
+  end
+
   defp qualify_query(raw_query, filters) do
     has_filters = filters != %{} and map_size(filters) > 0
 
@@ -545,7 +662,23 @@ defmodule Barkpark.Search.Intelligence do
     )
   end
 
-  defp recent_queries(surface, scope, actor_key, prefix, limit) do
+  # Tenant leaf for every crystal/event read. `nil` = the legacy/unscoped bucket
+  # (`workspace_id IS NULL`), matching the pre-tenancy default so existing
+  # callers stay behaviour-identical; a real workspace_id narrows to that tenant
+  # so a scope STRING shared across workspaces no longer unions their roll-ups.
+  # Binds on `workspace_id`, present on Crystal, MergePattern and Event alike.
+  defp scope_ws(queryable, nil), do: from(x in queryable, where: is_nil(x.workspace_id))
+
+  defp scope_ws(queryable, workspace_id),
+    do: from(x in queryable, where: x.workspace_id == ^workspace_id)
+
+  # Anonymous actors collapse to ONE globally-shared `actor_key == "anon"`, so an
+  # anon recent-queries read would union every anonymous session/tenant. Fail
+  # closed: anon actors get no recent history at all (popular/nohits still serve
+  # them). Non-anon callers (client:<x>, token:<id>, reader) keep their recents.
+  defp recent_queries(_surface, _scope, "anon", _prefix, _limit, _workspace_id), do: []
+
+  defp recent_queries(surface, scope, actor_key, prefix, limit, workspace_id) do
     base =
       from(e in Event,
         where: e.surface == ^surface and e.scope == ^scope and e.actor_key == ^actor_key,
@@ -555,6 +688,7 @@ defmodule Barkpark.Search.Intelligence do
       |> accepted_events()
 
     base
+    |> scope_ws(workspace_id)
     |> maybe_prefix(prefix)
     |> Repo.all()
     |> dedupe_recent(limit)
@@ -590,16 +724,23 @@ defmodule Barkpark.Search.Intelligence do
     }
   end
 
-  defp popular_queries(surface, scope, prefix, limit, opts) do
+  defp popular_queries(surface, scope, prefix, limit, opts, workspace_id) do
     min_count = Keyword.get(opts, :min_search_count, @min_search_count)
     today = Date.utc_today()
     window_start = Date.add(today, -@popular_window_days)
 
     crystal_rows =
-      popular_from_crystals(surface, scope, prefix, window_start, Date.add(today, -1))
+      popular_from_crystals(
+        surface,
+        scope,
+        prefix,
+        window_start,
+        Date.add(today, -1),
+        workspace_id
+      )
 
     today_start = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
-    raw_rows = popular_from_events(surface, scope, prefix, today_start)
+    raw_rows = popular_from_events(surface, scope, prefix, today_start, workspace_id)
 
     crystal_rows
     |> merge_count_rows(raw_rows)
@@ -615,7 +756,9 @@ defmodule Barkpark.Search.Intelligence do
     end)
   end
 
-  defp popular_from_crystals(surface, scope, prefix, period_start, period_end) do
+  defp popular_from_crystals(surface, scope, prefix, period_start, period_end, workspace_id) do
+    cap = source_cap()
+
     base =
       from(c in Crystal,
         where:
@@ -624,6 +767,8 @@ defmodule Barkpark.Search.Intelligence do
             c.query_normalized != "" and c.query_normalized != "__quality__" and
             c.success_count > 0,
         group_by: c.query_normalized,
+        order_by: [desc: sum(c.success_count)],
+        limit: ^cap,
         select: %{
           query_normalized: c.query_normalized,
           count: sum(c.success_count),
@@ -632,6 +777,7 @@ defmodule Barkpark.Search.Intelligence do
       )
 
     base
+    |> scope_ws(workspace_id)
     |> maybe_prefix_on_crystal(prefix)
     |> Repo.all()
     |> Enum.map(fn row ->
@@ -643,12 +789,16 @@ defmodule Barkpark.Search.Intelligence do
     end)
   end
 
-  defp popular_from_events(surface, scope, prefix, since) do
+  defp popular_from_events(surface, scope, prefix, since, workspace_id) do
+    cap = source_cap()
+
     from(e in Event,
       where:
         e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^since and
           e.zero_hits == false and e.query_normalized != "",
       group_by: e.query_normalized,
+      order_by: [desc: count(e.id)],
+      limit: ^cap,
       select: %{
         query_normalized: e.query_normalized,
         display_query: max(e.query),
@@ -657,6 +807,7 @@ defmodule Barkpark.Search.Intelligence do
       }
     )
     |> accepted_events()
+    |> scope_ws(workspace_id)
     |> maybe_prefix_on_normalized(prefix)
     |> Repo.all()
     |> Enum.map(fn row ->
@@ -668,15 +819,22 @@ defmodule Barkpark.Search.Intelligence do
     end)
   end
 
-  defp nohits_queries(surface, scope, prefix, limit) do
+  defp nohits_queries(surface, scope, prefix, limit, workspace_id) do
     today = Date.utc_today()
     window_start = Date.add(today, -@popular_window_days)
 
     crystal_rows =
-      nohits_from_crystals(surface, scope, prefix, window_start, Date.add(today, -1))
+      nohits_from_crystals(
+        surface,
+        scope,
+        prefix,
+        window_start,
+        Date.add(today, -1),
+        workspace_id
+      )
 
     today_start = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
-    raw_rows = nohits_from_events(surface, scope, prefix, today_start)
+    raw_rows = nohits_from_events(surface, scope, prefix, today_start, workspace_id)
 
     crystal_rows
     |> merge_count_rows(raw_rows)
@@ -685,7 +843,9 @@ defmodule Barkpark.Search.Intelligence do
     |> Enum.map(fn row -> %{query: row.query, count: row.count} end)
   end
 
-  defp nohits_from_crystals(surface, scope, prefix, period_start, period_end) do
+  defp nohits_from_crystals(surface, scope, prefix, period_start, period_end, workspace_id) do
+    cap = source_cap()
+
     base =
       from(c in Crystal,
         where:
@@ -694,6 +854,8 @@ defmodule Barkpark.Search.Intelligence do
             c.query_normalized != "" and c.query_normalized != "__quality__" and
             c.zero_hit_count > 0,
         group_by: c.query_normalized,
+        order_by: [desc: sum(c.zero_hit_count)],
+        limit: ^cap,
         select: %{
           query_normalized: c.query_normalized,
           count: sum(c.zero_hit_count)
@@ -701,20 +863,26 @@ defmodule Barkpark.Search.Intelligence do
       )
 
     base
+    |> scope_ws(workspace_id)
     |> maybe_prefix_on_crystal(prefix)
     |> Repo.all()
     |> Enum.map(fn row -> %{query: row.query_normalized, count: row.count} end)
   end
 
-  defp nohits_from_events(surface, scope, prefix, since) do
+  defp nohits_from_events(surface, scope, prefix, since, workspace_id) do
+    cap = source_cap()
+
     from(e in Event,
       where:
         e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^since and
           e.zero_hits == true and e.query_normalized != "",
       group_by: e.query_normalized,
+      order_by: [desc: count(e.id)],
+      limit: ^cap,
       select: %{query: max(e.query), count: count(e.id)}
     )
     |> accepted_events()
+    |> scope_ws(workspace_id)
     |> maybe_prefix_on_normalized(prefix)
     |> Repo.all()
   end
@@ -739,15 +907,20 @@ defmodule Barkpark.Search.Intelligence do
   defp round_result_count(value) when is_float(value), do: round(value)
   defp round_result_count(value) when is_integer(value), do: value
 
-  defp quality_stats(surface, scope, period, period_start) do
-    case Repo.get_by(Crystal,
-           surface: surface,
-           scope: scope,
-           period: period,
-           period_start: period_start,
-           query_normalized: "__quality__",
-           filter_fingerprint: ""
-         ) do
+  defp quality_stats(surface, scope, period, period_start, workspace_id) do
+    # Query (not get_by): a `nil` workspace_id must match `IS NULL` via scope_ws,
+    # and Ecto forbids `= nil` in a keyword get_by.
+    row =
+      from(c in Crystal,
+        where:
+          c.surface == ^surface and c.scope == ^scope and c.period == ^period and
+            c.period_start == ^period_start and c.query_normalized == "__quality__" and
+            c.filter_fingerprint == ""
+      )
+      |> scope_ws(workspace_id)
+      |> Repo.one()
+
+    case row do
       nil ->
         %{rejected: 0, accepted: 0}
 
@@ -756,7 +929,7 @@ defmodule Barkpark.Search.Intelligence do
     end
   end
 
-  defp previous_period_search_counts(surface, scope, period, period_start) do
+  defp previous_period_search_counts(surface, scope, period, period_start, workspace_id) do
     prev_start = previous_period_start(period, period_start)
 
     from(c in Crystal,
@@ -765,6 +938,7 @@ defmodule Barkpark.Search.Intelligence do
           c.period_start == ^prev_start and c.query_normalized != "__quality__",
       select: {c.query_normalized, c.search_count}
     )
+    |> scope_ws(workspace_id)
     |> Repo.all()
     |> Map.new()
   end

@@ -199,6 +199,32 @@ for (const role of ["hetzner", "azure"]) {
   }
 }
 
+// --- cloudChrome shell vocabulary (color.cloudChrome): identity-INVARIANT ----
+// passthrough (GR2). Most roles are {light,dark} HEX; line-rgb is an "R,G,B"
+// border triplet. A new family is otherwise validated by NOTHING, so this gates
+// its shape. GR29/GR37 (gr-p4-hygiene): 13 HEX roles — the 11 zero-consumer roles
+// (azure/backdrop/blue-hover/cloudflare/fg5/github/hetzner/on-red/spark-dim/
+// toast/toast-fg) are retired here IN LOCKSTEP with tokens.json + emit.mjs
+// CC_ROLES (this list is the gate that gr-p3 lacked, which reverted the retire).
+const cloudChrome = color.cloudChrome || {};
+const CC_HEX_ROLES = [
+  "bg", "bg-side", "card", "card2", "modal",
+  "fg", "fg2", "fg3", "fg4",
+  "red", "red-strong", "blue", "amber",
+];
+for (const role of CC_HEX_ROLES) {
+  const o = cloudChrome[role];
+  ok(o && typeof o === "object", `color.cloudChrome.${role} is required`);
+  if (o) {
+    ok(HEX.test(o.light || ""), `color.cloudChrome.${role}.light must be #rrggbb, got ${JSON.stringify(o.light)}`);
+    ok(HEX.test(o.dark || ""), `color.cloudChrome.${role}.dark must be #rrggbb, got ${JSON.stringify(o.dark)}`);
+  }
+}
+const RGB_TRIPLET = /^\d{1,3},\d{1,3},\d{1,3}$/;
+for (const theme of ["light", "dark"]) {
+  ok(RGB_TRIPLET.test((cloudChrome["line-rgb"] || {})[theme] || ""), `color.cloudChrome.line-rgb.${theme} must be an "R,G,B" triplet, got ${JSON.stringify((cloudChrome["line-rgb"] || {})[theme])}`);
+}
+
 // --- auth button fills (color.authButton): HSL channels OR var(--role) -------
 const authButton = color.authButton || {};
 for (const role of ["bg", "fg", "bgHover"]) {
@@ -225,6 +251,12 @@ for (const role of ["bg", "fg", "muted", "card", "line"]) {
 const statusHealth = color.statusHealth || {};
 for (const role of ["operational", "degraded", "partial_outage", "major_outage", "unknown"]) {
   ok(HEX.test(statusHealth[role] || ""), `color.statusHealth.${role} must be #rrggbb, got ${JSON.stringify(statusHealth[role])}`);
+}
+
+// --- fleet listener-status tones (color.fleetStatus): 5 single hex ----------
+const fleetStatus = color.fleetStatus || {};
+for (const role of ["working", "idle", "blocked", "provisioning", "offline"]) {
+  ok(HEX.test(fleetStatus[role] || ""), `color.fleetStatus.${role} must be #rrggbb, got ${JSON.stringify(fleetStatus[role])}`);
 }
 
 // --- error page palette (color.errorPage): 3 single fixed-dark hex ----------
@@ -259,11 +291,139 @@ for (const step of ["body", "h1", "h2", "h3"]) {
   ok(s && typeof s.size === "number" && typeof s.lineHeight === "number", `type.reading.${step} needs {size,lineHeight}`);
 }
 ok(type.reading && type.reading.headingWeight === 600, "type.reading.headingWeight must be 600");
+// The EDITORIAL SCALE floor. A reading scale whose display size barely clears
+// its prose reads as a memo, not a paper — the reader shipped h1 32 over body
+// 18 (1.78) until pe-w1-reader-editorial-typography. Floor the ratio here so the
+// scale cannot drift flat again without someone deciding to.
+if (type.reading && type.reading.h1 && type.reading.body) {
+  const ratio = type.reading.h1.size / type.reading.body.size;
+  ok(ratio >= 2.0, `type.reading h1/body is ${ratio.toFixed(2)}; the editorial scale floor is 2.0`);
+}
+// Tracking is optional per step, but when present it is an em number — the
+// emitter appends the unit, so a string here would emit `-0.02emem`.
+for (const step of ["body", "h1", "h2", "h3"]) {
+  const ls = ((type.reading || {})[step] || {}).letterSpacing;
+  ok(ls === undefined || typeof ls === "number", `type.reading.${step}.letterSpacing must be a number (em)`);
+}
 
 // --- scalar ladders --------------------------------------------------------
 for (const k of ["1", "2", "3", "4", "5", "6", "7", "8"]) {
   ok(typeof (tokens.space || {})[k] === "number", `space.${k} is required (px)`);
 }
+// space.air — the reader's EVIDENCE beat scale, stored as ratios of `beat`.
+// Two floors, both of which encode the law rather than the numbers:
+//   1. every step is a real OPENING — >= 1.0x the paragraph beat. A step below 1
+//      would make an evidence block sit TIGHTER than two paragraphs, which is the
+//      exact defect this scale exists to fix (the reader's table opened at 0px).
+//   2. the ladder is MONOTONIC in the documented order, so the heavier a block is
+//      the more room it takes. Flattening it is a decision, not a typo.
+const AIR_LADDER = ["code", "table", "asciicast", "callout", "stats", "figure"];
+const air = (tokens.space || {}).air || {};
+ok(typeof air.beat === "number" && air.beat > 0, "space.air.beat is required (px, the paragraph beat the scale is a ratio of)");
+let prevAir = 0;
+for (const k of AIR_LADDER) {
+  const v = air[k];
+  ok(typeof v === "number", `space.air.${k} is required (a ratio of space.air.beat)`);
+  if (typeof v !== "number") continue;
+  ok(v >= 1.0, `space.air.${k} is ${v}; an evidence block must open at or above the paragraph beat (1.0x)`);
+  ok(v >= prevAir, `space.air ladder is not monotonic: ${k} (${v}) opens tighter than the step before it (${prevAir})`);
+  prevAir = v;
+}
+for (const k of Object.keys(air)) {
+  if (k === "_note" || k === "beat") continue;
+  ok(AIR_LADDER.includes(k), `space.air.${k} is not on the emitted ladder — a token with no consumer is the drift this gate exists to catch; add it to AIR_STEPS in design/emit.mjs and to AIR_LADDER here, or delete it`);
+}
+
+// space.section — the boundary between two sections of a paper: the air that ends
+// one (a ratio of the same `space.air.beat` the evidence ladder hangs off) and the
+// rule + gap that open the next. Three floors, each the LAW rather than the number:
+//   1. `beat` clears the heaviest evidence step. A section boundary that opened
+//      tighter than a figure would rank a picture above a whole argument — and it
+//      is the failure this token was added to fix (h2 opened at 1.9em = 51.3px,
+//      BELOW figure's 1.82x = 40px only because the h2 is bigger than a paragraph;
+//      measured against the same beat it was barely twice a paragraph's air).
+//   2. `rule >= 1` — a zero-width rule leaves the token emitted, consumed and
+//      INVISIBLE: the shape that looks single-sourced until you photograph it.
+//   3. `gap >= rule` — the words must sit further from the rule than the rule is
+//      thick, or the head reads as underlined text rather than a ruled opening.
+const SECTION_KEYS = ["beat", "rule", "gap"];
+const sec = (tokens.space || {}).section || {};
+for (const k of SECTION_KEYS) {
+  ok(typeof sec[k] === "number" && sec[k] > 0, `space.section.${k} is required (a positive number)`);
+}
+for (const k of Object.keys(sec)) {
+  if (k === "_note") continue;
+  ok(SECTION_KEYS.includes(k), `space.section.${k} is not emitted — a token with no consumer is the drift this gate exists to catch; add it to SECTION_KEYS in design/emit.mjs + check.mjs Part L, or delete it`);
+}
+if (SECTION_KEYS.every((k) => typeof sec[k] === "number")) {
+  const heaviestAir = Math.max(...AIR_LADDER.map((k) => air[k] || 0));
+  ok(
+    sec.beat > heaviestAir,
+    `space.section.beat is ${sec.beat}x but the heaviest evidence step opens at ${heaviestAir}x; a section boundary must out-air every block INSIDE a section, or the reader cannot tell an argument ended from a figure starting`,
+  );
+  ok(sec.rule >= 1, `space.section.rule is ${sec.rule}px; below 1 the rule is emitted, consumed and invisible — the air would be doing the whole job alone`);
+  ok(sec.gap >= sec.rule, `space.section.gap is ${sec.gap}px against a ${sec.rule}px rule; the head's words must clear the rule by more than its own thickness or it reads as underlined text`);
+}
+
+// space.rule — the OTHER rung of the same ladder: the weight every horizontal
+// line that is not a section boundary draws at. One floor, and it is the whole
+// point of naming the weight at all: a hairline that grows to meet the
+// structural rule does not make the page louder, it makes the SECTION BOUNDARY
+// mean nothing, because weight stops distinguishing structure from chrome. The
+// benchmark artifact keeps the gap at exactly 2:1 (2px sec-head over 1px
+// everything); this floors the ORDER and leaves the ratio to taste.
+const RULE_KEYS = ["hairline"];
+const rul = (tokens.space || {}).rule || {};
+for (const k of RULE_KEYS) {
+  ok(typeof rul[k] === "number" && rul[k] > 0, `space.rule.${k} is required (a positive number of pixels)`);
+}
+for (const k of Object.keys(rul)) {
+  if (k === "_note") continue;
+  ok(RULE_KEYS.includes(k), `space.rule.${k} is not emitted — a token with no consumer is the drift this gate exists to catch; add it to RULE_KEYS in design/emit.mjs + check.mjs Part M, or delete it`);
+}
+if (typeof rul.hairline === "number" && typeof sec.rule === "number") {
+  ok(
+    sec.rule > rul.hairline,
+    `space.rule.hairline is ${rul.hairline}px against a ${sec.rule}px space.section.rule; a chrome line that weighs as much as a section boundary does not make the page louder — it makes the boundary stop meaning anything, because weight is the only thing separating structure from chrome`,
+  );
+}
+
+// space.evidence — the width a block that improves with width may claim when it
+// steps OUT of the prose column. Four floors, each encoding the LAW rather than
+// the number, so a band that has quietly stopped being a band reds here:
+//   1. `bandMax > band` — the wide step must actually be wider. A flattened pair
+//      leaves the growth clause emitted, consumed, and inert: the shape that
+//      looks single-sourced and honoured until you measure at two widths.
+//   2. `0 < fill < 1` — the band is a FRACTION of the available inline space. At
+//      1 the evidence would eat the whole viewport and the gutters would be the
+//      only thing left holding the page together.
+//   3. `band / fill > band + 2 * gutter` — the viewport at which the band starts
+//      GROWING must be wider than the one at which it first fits. Violate it and
+//      the band overshoots its own base before ever sitting at it, so the
+//      artifact-sourced `band` literal would never be observable on any screen.
+//   4. `gutter >= 16` — the band must never reach the viewport edge, and the
+//      gutter is also what keeps a classic scrollbar (~15px) out of the 100cqw
+//      the width is computed from. Below 16 the page can scroll sideways.
+const EVIDENCE_KEYS = ["band", "bandMax", "fill", "gutter", "caption"];
+const ev = (tokens.space || {}).evidence || {};
+for (const k of EVIDENCE_KEYS) {
+  ok(typeof ev[k] === "number" && ev[k] > 0, `space.evidence.${k} is required (a positive number)`);
+}
+for (const k of Object.keys(ev)) {
+  if (k === "_note") continue;
+  ok(EVIDENCE_KEYS.includes(k), `space.evidence.${k} is not emitted — a token with no consumer is the drift this gate exists to catch; add it to design/emit.mjs + check.mjs Part K, or delete it`);
+}
+if (EVIDENCE_KEYS.every((k) => typeof ev[k] === "number")) {
+  ok(ev.bandMax > ev.band, `space.evidence.bandMax (${ev.bandMax}) must exceed band (${ev.band}); an equal pair makes the wide step inert and the band stops growing with the screen`);
+  ok(ev.fill > 0 && ev.fill < 1, `space.evidence.fill is ${ev.fill}; the band is a fraction of the available inline space and must sit strictly between 0 and 1`);
+  ok(
+    ev.band / ev.fill > ev.band + 2 * ev.gutter,
+    `space.evidence: growth begins at ${Math.round(ev.band / ev.fill)}px (band/fill) but the band already fits at ${ev.band + 2 * ev.gutter}px (band + 2*gutter); the ${ev.band}px base would never be observable at any width`,
+  );
+  ok(ev.gutter >= 16, `space.evidence.gutter is ${ev.gutter}px; below 16 the band can reach the viewport edge and 100cqw's scrollbar allowance disappears — the page scrolls sideways`);
+  ok(ev.caption >= 45 && ev.caption <= 85, `space.evidence.caption is ${ev.caption}ch; a caption inside a wide figure is prose and must stay inside the editorial measure band (45-85 characters)`);
+}
+
 for (const k of ["sm", "base", "lg", "pill"]) {
   ok(typeof (tokens.radius || {})[k] === "number", `radius.${k} is required`);
 }
@@ -279,11 +439,16 @@ for (const k of ["tabnav", "topbar", "menu", "modal", "toast"]) {
 
 // --- lifecycle: every required state present, reconciled with Go source ----
 const life = tokens.lifecycle || {};
-const REQUIRED_LIFE = ["in_progress", "blocked", "done", "closed", "cancelled", "ready", "open"];
-// role reconciled 1:1 with internal/semrole/semrole.go taskLifecycleRoles
+const REQUIRED_LIFE = ["in_progress", "blocked", "done", "closed", "cancelled", "ready", "open", "considering", "researching"];
+// role reconciled 1:1 with internal/semrole/semrole.go taskLifecycleRoles.
+// considering + researching are the pre-open thought states (task-lifecycle-
+// visibility epic): both neutral-role ('') — the dotted circle (considering) and
+// the violet bullseye (researching) are glyph/hue voices, NOT semantic status
+// roles (there is no violet status token), exactly as ready/open/cancelled carry
+// a bespoke hue at role ''.
 const EXPECTED_ROLE = {
   in_progress: "info", blocked: "warn", done: "ok", closed: "ok",
-  cancelled: "", ready: "", open: "",
+  cancelled: "", ready: "", open: "", considering: "", researching: "",
 };
 for (const state of REQUIRED_LIFE) {
   const e = life[state];
@@ -320,5 +485,5 @@ console.log("OK: design/tokens.json is well-formed and complete.");
 console.log("  color roles: 10 base + 4 status (ok/warn/danger/info), light+dark");
 console.log(`  lifecycle states: ${REQUIRED_LIFE.length} reconciled 1:1 with internal/semrole + taskboard`);
 console.log("  fonts: chrome (self-hosted Inter) / mono / reading; type: chrome + reading scales");
-console.log("  paper/email/callout/mailChrome/provider/authButton/statusChrome/statusHealth/errorPage/readerInfo: shape-gated");
+console.log("  paper/email/callout/mailChrome/provider/cloudChrome/authButton/statusChrome/statusHealth/fleetStatus/errorPage/readerInfo: shape-gated");
 process.exit(0);

@@ -9,7 +9,7 @@ defmodule Barkpark.OrgSessionPolicyTest do
   and strictest (smallest positive) wins per axis. Both bounds NULL = the
   byte-identical zero-tax default (30-day / no-idle).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query, warn: false
 

@@ -1,0 +1,75 @@
+{
+  "run_id": "grip-20260724T003919Z",
+  "recipes": [
+    {
+      "subject": "scripts/docs-anchors-check.sh",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '104,142p' scripts/docs-anchors-check.sh",
+      "derived_level": "L3",
+      "deps": [
+        "scripts/docs-anchors-check.sh"
+      ],
+      "observed_at": "2026-07-24T00:39:19Z"
+    },
+    {
+      "subject": "internal/manifest",
+      "quantity": "grep:-rn:internal/manifest",
+      "rerun": "grep -rn 'internal/manifest' docs/cards/",
+      "derived_level": "L3",
+      "deps": [
+        "internal/manifest",
+        "docs/cards"
+      ],
+      "observed_at": "2026-07-24T00:39:19Z"
+    },
+    {
+      "subject": ".github/workflows/cli-release.yml",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:.github/workflows/cli-release.yml",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/cli-release.yml"
+      ],
+      "observed_at": "2026-07-24T00:39:19Z"
+    },
+    {
+      "subject": ".github/workflows/go-tests.yml",
+      "quantity": "git:show",
+      "rerun": "git show origin/main:.github/workflows/go-tests.yml",
+      "derived_level": "L2",
+      "deps": [
+        ".github/workflows/go-tests.yml"
+      ],
+      "observed_at": "2026-07-24T00:39:19Z"
+    },
+    {
+      "subject": "docs/cli/fixtures",
+      "quantity": "grep:-rl:docs/cli/fixtures",
+      "rerun": "grep -rl 'docs/cli/fixtures' --include=*.go internal/",
+      "derived_level": "L3",
+      "deps": [
+        "docs/cli/fixtures",
+        "internal"
+      ],
+      "observed_at": "2026-07-24T00:39:19Z"
+    },
+    {
+      "subject": "docs/contracts/dispatch-areas.md",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '76,100p' docs/contracts/dispatch-areas.md",
+      "derived_level": "L3",
+      "deps": [
+        "docs/contracts/dispatch-areas.md"
+      ],
+      "observed_at": "2026-07-24T00:39:19Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get task-8ad8d5cfe98c70aa -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-24T00:39:19Z"
+    }
+  ]
+}

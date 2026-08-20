@@ -15,23 +15,53 @@ config :barkpark, Barkpark.Repo,
   hostname: System.get_env("BARKPARK_TEST_DB_HOST", "localhost"),
   database: "barkpark_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2,
+  # Flat, generous, env-overridable pool — was `System.schedulers_online() * 2`.
+  # On a cgroup-throttled CI runner schedulers_online() can report 1–2, giving a
+  # pool of only 2–4; a handful of legitimate boot-time holds (Indx monitor/
+  # recovery, the post-boot Sharing.refresh/check_pg_trgm probes, Postgrex
+  # reconnect churn) then starve it, and test_helper.exs's very first CREATE
+  # SCHEMA sits in the checkout queue until it is DROPPED — reddening the whole
+  # gate before a single test runs (run 29665467133: 89.7s in-queue, 0 tests).
+  # postgres:15's default max_connections is 100, so 20 is comfortably safe.
+  # DIAGNOSTIC VALUE: if the boot checkout STILL starves for ~90s at pool 20,
+  # the cause is a lock/held-connection or a wedged CI Postgres service — NOT
+  # pool math — and the fix belongs at the workflow/infra layer.
+  pool_size: String.to_integer(System.get_env("BARKPARK_TEST_POOL_SIZE", "20")),
   # Per-hold watchdog. At the 15s default, a legitimately long single hold
   # under saturated-suite CPU (the EDItEUR/Thema codelist seed's big JSONB
   # register) gets force-disconnected mid-query — killing a pool connection
   # and starving concurrent tests' setups (same poisoning as the orphan-task
   # leak drained by DataCase.setup_sandbox). 45s stays under ExUnit's 60s
   # test timeout so a truly hung test still fails as a test, not a disconnect.
-  timeout: 45_000
+  timeout: 45_000,
+  # Checkout-queue tolerance. The pool is only schedulers_online()*2 (≈8 on the
+  # 4-core CI runner) yet the async suite fans out schedulers_online() concurrent
+  # tests, each spawning $callers-scoped Tasks that also check out. Under that
+  # contention — plus a service-container Postgres still warming at job start —
+  # a checkout can miss the default 50ms target / 1000ms interval and get DROPPED
+  # after ~5s ("connection not available and request was dropped from queue"),
+  # reddening the WHOLE gate: at boot it kills test_helper's first CREATE SCHEMA
+  # before a single test runs; mid-suite it fails a random test. Widen the wait
+  # so a transient spike QUEUES instead of dropping. This never masks a real hang
+  # (that still hits :timeout above / ExUnit's 60s) — it only stops declaring a
+  # busy-but-healthy pool dead. Ecto's own remedy #4 for this exact error.
+  queue_target: 5_000,
+  queue_interval: 30_000
 
 # Mount the test-only /__error_test__/boom route (router.ex) so the RenderErrors
 # integration tests can exercise ErrorJSON/ErrorHTML through the real endpoint.
 config :barkpark, error_test_routes: true
 
+# Search-intel record writes are async in prod (a keystroke must never stall on
+# the event INSERT); tests run them sync so every existing "row exists after
+# record" assertion stays deterministic. The async path has its own test.
+config :barkpark, search_intel_record_async: false
+
 # Preview-JWT test signing secret (throwaway). Kept OUT of config.exs so Sobelow
 # Config.Secrets stays clean (test.exs is in Sobelow's config skip-list). Merges
 # with the ttl_seconds/issuer base set in config.exs.
 config :barkpark, :preview, secret: "test-preview-secret-change-in-prod-please-32"
+config :barkpark, :cycle_release_capture_hmac_secret, String.duplicate("capture-test-secret-", 2)
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
@@ -65,6 +95,17 @@ config :barkpark, Oban, testing: :manual
 # Search analytics inserts run synchronously in tests (no Task race).
 config :barkpark, :search_analytics_async, false
 
+# The post-commit audit-webhook fan-out runs SYNCHRONOUSLY in the test's process
+# (no unawaited `Task.Supervisor.start_child` spawn on the shared
+# `Barkpark.TaskSupervisor`). The async spawn's DataCase drain is scoped to its
+# ORIGINATING test, and ExUnit gives no ordering guarantee it finishes before a
+# concurrent raw-DDL test opens its window — so the leaked audit SELECT
+# (AccessShareLock on webhooks/search_synonyms) deadlocks the `ALTER TABLE`
+# (AccessExclusiveLock) with a Postgrex 40P01. Inline delivery joins the caller's
+# sandbox connection and dies with the test. Read by
+# `Barkpark.Webhooks.Dispatcher.dispatch_audit_async/1`.
+config :barkpark, :audit_dispatch_async, false
+
 # Self-update stays OFF (no Checker in the tree) and the upstream client is
 # the scripted Fake — tests prime it per-call via Application env.
 config :barkpark, Barkpark.SelfUpdate,
@@ -73,6 +114,15 @@ config :barkpark, Barkpark.SelfUpdate,
 
 # Core-auth mailer captured in-process during tests (assert_email).
 config :barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Test
+
+# The prod register ceiling is 5/HOUR/IP (BarkparkWeb.Plugs.AuthWriteRateLimit),
+# and the limiter's ETS bucket is process-global with an hourly refill — so the
+# suite's own anonymous registers (auth_controller_test, org_require_mfa_test,
+# webauthn_controller_test, …) all bill the SAME 127.0.0.1 bucket and would trip
+# it within seconds of the run starting. Effectively-off here; the real ceiling
+# is pinned by test/barkpark_web/plugs/auth_write_rate_limit_test.exs, which sets
+# a small budget explicitly and drives the live route until it 429s.
+config :barkpark, :auth_write_rate_limits, register: 1_000_000
 
 # Fixed paper-ingest secret for tests.
 config :barkpark, :ingest_token, "barkpark-test-ingest-token"
@@ -164,3 +214,10 @@ config :barkpark, Barkpark.StudioChat,
 # tests start their own anonymous instance with injected seams. Mirrors the
 # Sync.PushWorker `enabled?` gate. (Auth is lazy and stays boot-started.)
 config :barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: false
+
+# Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner). Pin the classic in-process
+# Port lifecycle in test: `:auto` would flip to the systemd transient-unit path
+# on any host where `systemd-run` happens to resolve (some Linux CI images),
+# making the stub-command tests host-dependent. The unit-path tests opt into
+# `:systemd` explicitly with a stubbed launcher + is-active probe.
+config :barkpark, Barkpark.Sites.DeployRunner, runner_mode: :port

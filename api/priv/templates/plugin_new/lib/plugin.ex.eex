@@ -19,4 +19,35 @@ defmodule <%= @module %> do
   """
 
   use Barkpark.Plugin, manifest_path: "<%= @manifest_rel %>"
+
+  # ── Composition seams (scaffy) ──────────────────────────────────────────
+  # Three registration callbacks ship OPEN so the scaffy plugin command family
+  # composes on this module with zero hand-bridged edits (the "plant the
+  # contract" doctrine). Each returns [] today; each add-* command anchors on
+  # the openers/marks below and inserts one element:
+  #   * register_routes/1  -- `bp scaffy run add-plugin-route`  (a route tuple)
+  #   * cli_commands/0      -- `bp scaffy run add-cli-verb`      (a verb map)
+  #   * register_schemas/1  -- `bp scaffy run add-schema-type`   (a schema wrap)
+  # Leave the `do`/`[` openers and the zone comments intact -- they are anchors.
+
+  @impl Barkpark.Plugin
+  def register_routes(_ctx) do
+    [
+    ]
+  end
+
+  @impl Barkpark.Plugin
+  def cli_commands do
+    [
+    ]
+  end
+
+  @impl Barkpark.Plugin
+  def register_schemas(_opts) do
+    # scaffy:zone register-schemas-reads (add-plugin) -- add-schema-type plants each raw_<name> read pipeline below. MARK:zone-register-schemas-reads
+
+    # scaffy:zone register-schemas-list (add-plugin) -- add-schema-type plants each %SchemaDefinition{} wrap below the [ opener. MARK:zone-register-schemas-list
+    [
+    ]
+  end
 end

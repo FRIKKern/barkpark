@@ -35,6 +35,11 @@ defmodule Barkpark.Tenancy.Workspace do
 
   @slug_format ~r/^[a-z0-9][a-z0-9-]*$/
 
+  # Known non-normal workspace tiers. `nil` (the common case) is a normal
+  # workspace and is never validated here (validate_inclusion only runs on a
+  # cast, non-nil value). Only `"playground"` exists today.
+  @tiers ~w(playground)
+
   schema "workspaces" do
     field :slug, :string
     field :name, :string
@@ -55,6 +60,15 @@ defmodule Barkpark.Tenancy.Workspace do
     field :suspended_reason, :string
     field :suspended_at, :utc_datetime_usec
 
+    # Ephemeral-playground TTL + tier (perfect-plan-build W2c, charter D25/D27).
+    # `expires_at` NULL = never expires (every normal workspace is permanent);
+    # a playground workspace is stamped `now + 48h` at provision. `tier` NULL =
+    # a normal workspace; `"playground"` marks a disposable quota-capped one
+    # minted by the front door. Both cast below; the TTL reaper (W3) scans the
+    # `expires_at` index.
+    field :expires_at, :utc_datetime_usec
+    field :tier, :string
+
     # Thin Organization tier (era-w1-org): nullable, additive, not read by any
     # authorization path — a workspace joins an org when SSO/SCIM is configured.
     belongs_to :organization, Barkpark.Tenancy.Organization
@@ -71,7 +85,7 @@ defmodule Barkpark.Tenancy.Workspace do
 
   def changeset(workspace, attrs) do
     workspace
-    |> cast(attrs, [:slug, :name, :organization_id, :settings])
+    |> cast(attrs, [:slug, :name, :organization_id, :settings, :expires_at, :tier])
     |> validate_required([:slug, :name])
     |> validate_length(:slug, min: 1, max: 63)
     |> validate_length(:name, min: 1, max: 255)
@@ -79,6 +93,7 @@ defmodule Barkpark.Tenancy.Workspace do
       message: "must be lowercase alphanumeric with hyphens"
     )
     |> validate_exclusion(:slug, @reserved_slugs, message: "is reserved")
+    |> validate_inclusion(:tier, @tiers, message: "is not a known tier")
     |> unique_constraint(:slug)
     |> foreign_key_constraint(:organization_id)
   end

@@ -5,7 +5,7 @@ defmodule Barkpark.Tasks.Queue do
   # definition is what makes "claim returns exactly what ready would have picked"
   # a property of the code, not a documentation promise.
   #
-  # Readiness gating happens on THREE independent axes, all folded into the base
+  # Readiness gating happens on FOUR independent axes, all folded into the base
   # `WHERE` so ready/1 and the atomic claim can never disagree:
   #
   #   1. `blocks`-edge gate (task_edges rows) — the authoritative graph store.
@@ -17,6 +17,8 @@ defmodule Barkpark.Tasks.Queue do
   #      published-task mutate leaves behind) is suppressed while its published
   #      twin exists in scope, so a twinned task yields exactly ONE ready/claimable
   #      row (published-wins, matching `Tasks.Board`/`Content.published_id`).
+  #   4. queue_gate — only a missing/null legacy gate or the exact executable-v1
+  #      shape is admitted. Non-executable and malformed persisted gates fail closed.
   #
   # Phase scoping (`maybe_filter_phase`) normalizes the `drafts.` prefix on BOTH
   # sides of the `parent_id` match, the SAME edge `Tasks.Rail` uses, so a child
@@ -27,10 +29,13 @@ defmodule Barkpark.Tasks.Queue do
 
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Repo
-  alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.{Edge, QueueGate, Validation}
 
   @ready_default_limit 50
-  @ready_lifecycle_statuses ~w(open blocked)
+  # Derived at compile time from the ONE claimability source of truth
+  # (Validation.claimable_statuses/0 — ~w(open blocked)); never fork a local
+  # literal. The raw-SQL CTE below binds this same list via `= ANY(?)`.
+  @ready_lifecycle_statuses Validation.claimable_statuses()
 
   def ready(opts \\ []) do
     opts
@@ -44,6 +49,8 @@ defmodule Barkpark.Tasks.Queue do
     dataset = Keyword.get(opts, :dataset)
     phase_id = Keyword.get(opts, :phase_id)
     limit = Keyword.get(opts, :limit, @ready_default_limit)
+    offset = Keyword.get(opts, :offset, 0)
+    order = Keyword.get(opts, :order, :compatibility)
     workspace_uuid = workspace_id && Ecto.UUID.dump!(workspace_id)
 
     done_tasks =
@@ -84,10 +91,11 @@ defmodule Barkpark.Tasks.Queue do
           WHERE candidate.type = 'task'
             AND candidate.workspace_id = ?
             AND candidate.content->>'kind' = 'task'
-            AND candidate.content->>'lifecycle_status' IN ('open', 'blocked')
+            AND candidate.content->>'lifecycle_status' = ANY(?)
             AND done.normalized_id IS NULL
           """,
-          ^workspace_uuid
+          ^workspace_uuid,
+          ^@ready_lifecycle_statuses
         ),
         select: %{id: field(u, :id)}
       )
@@ -98,6 +106,7 @@ defmodule Barkpark.Tasks.Queue do
         where: d.type == "task",
         where: fragment("?->>'kind'", d.content) == "task",
         where: fragment("?->>'lifecycle_status'", d.content) in ^@ready_lifecycle_statuses,
+        where: ^QueueGate.executable_query(),
         # (1) blocks-edge gate: no outbound `blocks` edge to a non-`done` target.
         #
         # TWIN-EDGE GAP (documented; follow-up filed): `task_edges` FKs reference
@@ -162,11 +171,8 @@ defmodule Barkpark.Tasks.Queue do
               select: 1
             )
           ),
-        order_by: [
-          asc_nulls_last: fragment("(?->>'priority')::int", d.content),
-          asc: d.inserted_at
-        ],
-        limit: ^limit
+        limit: ^limit,
+        offset: ^offset
       )
 
     base
@@ -175,7 +181,41 @@ defmodule Barkpark.Tasks.Queue do
     |> maybe_filter_dataset(dataset)
     |> maybe_filter_phase(phase_id)
     |> Scope.scope_to_workspace(workspace_id, project_id)
+    |> apply_order(order)
   end
+
+  defp apply_order(query, :closure_nearest) do
+    from([doc: d] in query,
+      order_by: [
+        asc:
+          fragment(
+            """
+            CASE WHEN jsonb_typeof(?->'acceptance_criteria') = 'array'
+                 THEN (SELECT count(*) FROM jsonb_array_elements(?->'acceptance_criteria') AS criterion
+                       WHERE criterion->'met' IS DISTINCT FROM 'true'::jsonb)
+                 ELSE 0 END
+            """,
+            d.content,
+            d.content
+          ),
+        asc: d.inserted_at,
+        asc: d.doc_id
+      ]
+    )
+  end
+
+  defp apply_order(query, order) when order in [nil, :compatibility] do
+    from([doc: d] in query,
+      order_by: [
+        asc_nulls_last: fragment("(?->>'priority')::int", d.content),
+        asc: d.inserted_at,
+        asc: d.id
+      ]
+    )
+  end
+
+  defp apply_order(_query, order),
+    do: raise(ArgumentError, "unsupported ready order: #{inspect(order)}")
 
   defp maybe_filter_dataset(query, nil), do: query
 

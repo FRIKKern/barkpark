@@ -17,7 +17,7 @@ defmodule Barkpark.Tasks.RailTest do
   child description edit.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query, only: [from: 2]
 

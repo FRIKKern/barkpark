@@ -102,7 +102,9 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
     alias Barkpark.Content.Forms
 
     @select_schema %{
-      fields: [%{"name" => "role", "type" => "select", "options" => ["editor", "writer", "admin"]}]
+      fields: [
+        %{"name" => "role", "type" => "select", "options" => ["editor", "writer", "admin"]}
+      ]
     }
 
     test "unset optional select (empty param) is NOT persisted" do
@@ -484,6 +486,39 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
         })
 
       assert with_prefix =~ ~s(id="f-title")
+    end
+  end
+
+  describe "source clause (scaffy command source, W4 D45)" do
+    test "renders the raw multi-line value in a read-only monospace <pre> with NO form input" do
+      source = "COMMAND \"add-note\"\n\nVARIABLE 1 \"NoteName\"\n  <tag> & {{.note-name}}"
+
+      html =
+        render_input(%{
+          field: %{"type" => "source", "name" => "source"},
+          editor_form: %{"source" => source}
+        })
+
+      # The multi-line bytes survive verbatim (HTML-escaped, never collapsed to
+      # a one-line JSON blob) inside the monospace <pre>.
+      assert html =~
+               "COMMAND &quot;add-note&quot;\n\nVARIABLE 1 &quot;NoteName&quot;\n  &lt;tag&gt; &amp; {{.note-name}}"
+
+      assert html =~ ~s(data-readonly-field="source")
+      assert html =~ ~s(data-source-field)
+      assert html =~ "font-family:var(--font-mono)"
+      # NO form input — the field stays absent from the submitted doc[...]
+      # params, so Content.classic_save_content/4 preserves the stored bytes.
+      refute html =~ ~s(name="doc[)
+      assert html =~ "read-only"
+    end
+
+    test "missing value renders an empty read-only pre without crashing" do
+      html =
+        render_input(%{field: %{"type" => "source", "name" => "source"}, editor_form: %{}})
+
+      assert html =~ ~s(data-source-field)
+      refute html =~ ~s(name="doc[)
     end
   end
 end

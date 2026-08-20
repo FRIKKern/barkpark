@@ -8,6 +8,7 @@
   "members",
   "notifications",
   "onboarding",
+  "site.deploy.stage",
   "sites",
   "subscription"
 ]

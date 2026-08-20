@@ -34,9 +34,10 @@ defmodule BarkparkCloud.Registry.ProviderTest do
   end
 
   describe "kinds/0 + inclusion" do
-    test "both hetzner and azure are known kinds" do
+    test "hetzner, azure, and cloudflare are known kinds" do
       assert "hetzner" in Provider.kinds()
       assert "azure" in Provider.kinds()
+      assert "cloudflare" in Provider.kinds()
     end
 
     test "a hetzner credential is valid" do
@@ -107,6 +108,57 @@ defmodule BarkparkCloud.Registry.ProviderTest do
     test "azure_fields/0 lists the four required fields" do
       assert Enum.sort(Provider.azure_fields()) ==
                ~w(client_id client_secret subscription_id tenant_id)
+    end
+  end
+
+  describe "cloudflare credential shape" do
+    test "a bare API token string is valid" do
+      cs =
+        changeset(%{
+          kind: "cloudflare",
+          credential: "cf-bare-token-abc123",
+          encrypted_token: "ct"
+        })
+
+      assert cs.valid?
+    end
+
+    test "a JSON blob carrying api_token (+ optional account/zone) is valid" do
+      blob =
+        Jason.encode!(%{
+          "api_token" => "cf-blob-token",
+          "account_id" => "acc-123",
+          "zone_id" => "zone-456"
+        })
+
+      assert changeset(%{kind: "cloudflare", credential: blob, encrypted_token: "ct"}).valid?
+    end
+
+    test "a JSON blob with only api_token (no optional scope) is valid" do
+      blob = Jason.encode!(%{"api_token" => "cf-blob-token"})
+      assert changeset(%{kind: "cloudflare", credential: blob, encrypted_token: "ct"}).valid?
+    end
+
+    test "a blank credential is rejected on the credential field" do
+      cs = changeset(%{kind: "cloudflare", credential: "   ", encrypted_token: "ct"})
+      refute cs.valid?
+      assert Map.has_key?(errors_on(cs), :credential)
+      # The error is on the virtual credential, NEVER the stored ciphertext.
+      refute Map.has_key?(errors_on(cs), :encrypted_token)
+    end
+
+    test "a JSON blob missing api_token is rejected" do
+      blob = Jason.encode!(%{"account_id" => "acc-123", "zone_id" => "zone-456"})
+      cs = changeset(%{kind: "cloudflare", credential: blob, encrypted_token: "ct"})
+      refute cs.valid?
+      assert Map.has_key?(errors_on(cs), :credential)
+    end
+
+    test "a JSON blob with a blank api_token is rejected" do
+      blob = Jason.encode!(%{"api_token" => ""})
+      cs = changeset(%{kind: "cloudflare", credential: blob, encrypted_token: "ct"})
+      refute cs.valid?
+      assert Map.has_key?(errors_on(cs), :credential)
     end
   end
 

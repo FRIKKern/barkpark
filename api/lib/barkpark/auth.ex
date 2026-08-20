@@ -241,6 +241,53 @@ defmodule Barkpark.Auth do
   end
 
   @doc """
+  Resolve a RAW bearer to its `%ApiToken{}` row regardless of revocation or
+  expiry — `verify_token/1`'s administrative sibling (mob-w2-app-token-revoke).
+  `verify_token/1` is the fail-closed auth choke point and filters
+  revoked/expired rows in its WHERE clause; this lookup exists so a lifecycle
+  surface (the app-token revoke route) can act on an already-dead row — an
+  idempotent re-revoke must find the row it already killed. Same
+  `kind == "api"` boundary: a low-trust ticket key stays invisible here too.
+  """
+  @spec get_api_token_by_raw(binary()) :: ApiToken.t() | nil
+  def get_api_token_by_raw(raw_token) when is_binary(raw_token) do
+    hash = ApiToken.hash_token(raw_token)
+
+    ApiToken
+    |> where([t], t.token_hash == ^hash)
+    |> where([t], t.kind == "api")
+    |> Repo.one()
+  end
+
+  @doc """
+  Revoke every LIVE `app:<email>`-labelled api token — the "logout everywhere"
+  half of the app-token revoke path (mob-w2-app-token-revoke). Instance-wide by
+  label on purpose: the app-token mint labels every phone token `app:<email>`
+  whatever workspace it is bound to, and a logout must kill them all. Tokens
+  carrying `admin` are excluded fail-safe — a label collision must never let a
+  member-reachable proxy revoke the stored custody credential. Returns the
+  revoke count (0 is a fine, idempotent answer); each revoke goes through
+  `revoke_token/1`, so every one is individually audited.
+  """
+  @spec revoke_app_tokens_for_email(String.t()) :: non_neg_integer()
+  def revoke_app_tokens_for_email(email) when is_binary(email) do
+    label = "app:" <> email
+
+    ApiToken
+    |> where([t], t.label == ^label)
+    |> where([t], t.kind == "api")
+    |> where([t], is_nil(t.revoked_at))
+    |> Repo.all()
+    |> Enum.reject(&("admin" in (&1.permissions || [])))
+    |> Enum.reduce(0, fn token, acc ->
+      case revoke_token(token) do
+        {:ok, _} -> acc + 1
+        _ -> acc
+      end
+    end)
+  end
+
+  @doc """
   Mint an API token. When `workspace_id` is given (the tenancy-aware path),
   the token is bound to that workspace AND a `Barkpark.Tenancy.Membership`
   row is created in the same transaction — role derived from permissions
@@ -270,6 +317,118 @@ defmodule Barkpark.Auth do
     else
       insert_token_with_membership(token_attrs, ws_id, permissions)
     end
+  end
+
+  # ── Connectors: the per-install chat token (D36/D48) ───────────────────────
+
+  # THE ONLY PLACE the connector chat permission set is written. HARDCODED, in
+  # ONE place, on purpose.
+  #
+  # `create_token/5` above does NOT hardcode anything — it mints whatever
+  # permission list it is handed. Before this extraction the `["chat"]` literal
+  # lived in `ChatTokenController`, which made the HTTP endpoint safe and left
+  # every IN-PROCESS caller (a LiveView, a Mix task, a plugin) one keystroke from
+  # `["admin"]` — and `TenancyAuth.role_for_permissions/1` would then escalate the
+  # minted token's own membership row to `admin`: a token that can mint more
+  # tokens. Studio's Connect button is exactly such an in-process caller.
+  #
+  # Consequences of ANY change to this list, both proven in
+  # `chat_token_controller_test.exs`:
+  #   * adding "admin" → `RequireChatAccess.chat_scope/1` checks `admin` FIRST →
+  #     `:global` → `StudioChat` stamps `owner_workspace_id = NULL` → every bridge
+  #     session becomes TENANT-LESS and any other `:global` caller reads them all.
+  #   * that suite reds with `expected owner_workspace_id=…, got nil` and a
+  #     literal `CROSS-TENANT LEAK` assertion. It now protects BOTH callers.
+  @chat_permissions ["chat"]
+
+  @doc """
+  The permission set every connector chat token carries — `#{inspect(["chat"])}`,
+  and nothing else. Exposed so callers (the controller's 201 body, the LiveView)
+  can ECHO it without re-declaring it.
+  """
+  @spec chat_permissions() :: [String.t()]
+  def chat_permissions, do: @chat_permissions
+
+  @doc """
+  Mint a workspace-bound `chat` API token (Connectors D36/D48) — the ONE mint
+  path for a connector install's credential, shared by the HTTP endpoint
+  (`ChatTokenController`) and the in-process Studio connect loop.
+
+  The raw token is returned ONCE (only its SHA-256 hash is persisted) and must
+  never be logged, never assigned to a LiveView socket, and never put in a URL.
+  It rides the connect POST body over loopback to the bridge, which seals it into
+  `connector_installs.chat_token_ref`.
+
+  `label` is load-bearing for CONNECTORS: `Barkpark.Connectors.Catalog.token_label/2`
+  produces `connector:<provider>:<install_key>`, and that label is the ONLY handle
+  DISCONNECT has on the token — the bridge holds no token id and the sealed
+  `chat_token_ref` is never opened by Elixir.
+
+  Fail-closed on a missing workspace: a `chat` token with a NULL `workspace_id`
+  is precisely the tenant-less operator credential this whole wave exists to
+  delete, so it is an error, never a Default-workspace fallback.
+  """
+  @spec create_chat_token(String.t(), String.t(), binary()) ::
+          {:ok, binary(), ApiToken.t()} | {:error, :workspace_required | term()}
+  def create_chat_token(label, dataset, workspace_id)
+      when is_binary(label) and is_binary(dataset) and is_binary(workspace_id) and
+             workspace_id != "" do
+    raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+    case create_token(raw, label, dataset, @chat_permissions, workspace_id) do
+      {:ok, %ApiToken{} = token} -> {:ok, raw, token}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def create_chat_token(_label, _dataset, _workspace_id), do: {:error, :workspace_required}
+
+  @doc """
+  Every LIVE (non-revoked) api_token in `workspace_id` carrying `label` — the
+  disconnect side of `create_chat_token/3`.
+
+  Scoped to the workspace on purpose: two workspaces could each connect a bot and
+  (pathologically) land the same `install_key`, and one tenant must never revoke
+  another's credential.
+  """
+  @spec live_tokens_by_label(binary(), String.t()) :: [ApiToken.t()]
+  def live_tokens_by_label(workspace_id, label)
+      when is_binary(workspace_id) and is_binary(label) do
+    case Repo.uuid_or_nil(workspace_id) do
+      nil ->
+        []
+
+      uuid ->
+        ApiToken
+        |> where([t], t.workspace_id == ^uuid)
+        |> where([t], t.label == ^label)
+        |> where([t], is_nil(t.revoked_at))
+        |> Repo.all()
+    end
+  end
+
+  def live_tokens_by_label(_workspace_id, _label), do: []
+
+  @doc """
+  Relabel an api_token in place (Connectors D179) — a plain changeset update on
+  the `label` column, nothing else touched.
+
+  The Add-to-Slack flow (D62/D63) mints its workspace chat token BEFORE the OAuth
+  callback learns the team_id, so it is labelled `connector:slack:oauth`. Once the
+  callback lands the install, `Barkpark.Connectors.Catalog.token_label/2` gives the
+  canonical `connector:slack:<install_key>`, and this reconciles the token to it so
+  DISCONNECT can revoke it by the same single label as every other provider.
+
+  A RELABEL, never a revoke: the credential the live install is authenticating
+  with must keep working. `label` has no uniqueness constraint, so there is no
+  conflict path; relabelling to the current label is a clean no-op update.
+  """
+  @spec relabel_token(ApiToken.t(), String.t()) ::
+          {:ok, ApiToken.t()} | {:error, Ecto.Changeset.t()}
+  def relabel_token(%ApiToken{} = token, new_label) when is_binary(new_label) do
+    token
+    |> Ecto.Changeset.change(label: new_label)
+    |> Repo.update()
   end
 
   defp insert_token_with_membership(token_attrs, ws_id, permissions) do
@@ -561,9 +720,12 @@ defmodule Barkpark.Auth do
   @claude_session_default_ttl 4 * 3600
   @claude_session_max_ttl 24 * 3600
   # Curated REAL permissions — the task/doc/search verbs the loopback needs
-  # ride the ordinary `read`/`write` tiers. NEVER `share-edit-*` (opaque share
-  # perms), NEVER `admin`, NEVER caller-supplied.
-  @claude_session_permissions ~w(read write)
+  # ride the ordinary `read`/`write` tiers; `chat` lets the loopback reach
+  # `/v1/chat` (herd-s4). The mint is workspace-bound (below), so
+  # `RequireChatAccess` resolves it to `{:workspace, ws}` — fail-closed tenant
+  # inheritance by construction, never instance-global. NEVER `share-edit-*`
+  # (opaque share perms), NEVER `admin`, NEVER caller-supplied.
+  @claude_session_permissions ~w(read write chat)
   @claude_session_token_prefix "bpcs_"
 
   @doc """

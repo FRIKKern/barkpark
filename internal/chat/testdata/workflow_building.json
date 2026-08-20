@@ -1,0 +1,15 @@
+{
+  "label": "wsc-wave — session-card workflow",
+  "ticks": ["done", "done", "done", "done", "active", "future", "future"],
+  "phase": "Build",
+  "phase_index": 5,
+  "phases_total": 7,
+  "agents_done": 13,
+  "agents_total": 17,
+  "running": 4,
+  "terminal?": false,
+  "outcome": "live",
+  "tokens": 1543000,
+  "started_at": 1783633546962,
+  "ended_at": null
+}

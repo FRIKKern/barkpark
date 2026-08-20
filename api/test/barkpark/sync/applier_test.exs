@@ -196,14 +196,16 @@ defmodule Barkpark.Sync.ApplierTest do
       source = "cur-#{System.unique_integer([:positive])}"
       assert Cursor.get(source, @dataset) == 0
 
-      assert :ok = Cursor.put(source, @dataset, 5)
+      # workspace_id (charter D55) is a stamped attribution column, NOT in the
+      # {source, dataset} key — nil here exercises the monotonic mechanics.
+      assert :ok = Cursor.put(nil, source, @dataset, 5)
       assert Cursor.get(source, @dataset) == 5
 
       # A lower value never rewinds the high-water mark.
-      assert :ok = Cursor.put(source, @dataset, 3)
+      assert :ok = Cursor.put(nil, source, @dataset, 3)
       assert Cursor.get(source, @dataset) == 5
 
-      assert :ok = Cursor.put(source, @dataset, 9)
+      assert :ok = Cursor.put(nil, source, @dataset, 9)
       assert Cursor.get(source, @dataset) == 9
     end
   end
@@ -365,6 +367,53 @@ defmodule Barkpark.Sync.ApplierTest do
     end
   end
 
+  describe "w14: transient vs terminal error classification at the dead-letter boundary" do
+    # MUTATION-PROOF for the error-class fold (applier.ex record_failure boundary).
+    # Revert the classification (route every {:error,_} down the terminal path, as
+    # the pre-w14 code did) and the TRANSIENT frame below would dead-letter +
+    # advance the cursor past a possibly-VALID mutation — the exact w14 gap
+    # (HANDOFF.md P1b follow-up). The two arms are proved in one test so the
+    # discrimination itself is the assertion.
+    test "a TRANSIENT error (plugin before_save halt) HALTS + replays and NEVER advances; a TERMINAL error still dead-letters",
+         %{ctx: base_ctx} do
+      ctx = Map.put(base_ctx, :max_attempts, 1)
+
+      # TRANSIENT: a createOrReplace for a `type:sheet` doc whose cells map carries
+      # a non-A1 key trips the Sheets before_save gate → {:error, {:halted, _}}.
+      # A before_save gate can fail for ENVIRONMENTAL reasons, so this shape is
+      # transient: even at max_attempts:1 it must NOT dead-letter or advance,
+      # because the mutation could be valid once the gate recovers.
+      transient =
+        "id: 11\nevent: mutation\n" <>
+          ~s(data: {"result":{"_id":"trans","_type":"sheet","_draft":false,"content":{"tabs":[{"cells":{"NOTANADDRESS":{"v":"x"}}}]}},"type":"sheet"}\n\n)
+
+      {results, _rest} = Sync.apply_frames(transient, ctx)
+
+      # Halt + replay: {:error, {:halted, _}}, NOT {:ok, :dead_lettered}.
+      assert [{11, {:error, {:halted, _}}}] = results
+
+      # Cursor did NOT advance — the event replays on the next pass.
+      assert Cursor.get(ctx.source, ctx.dataset) == 0
+
+      # It never reached the bounded dead letter.
+      assert DeadLetter.list_dead(ctx.source, ctx.dataset) == []
+
+      # TERMINAL: an invalid `type:task` content violation — the CONTENT can never
+      # apply — DOES dead-letter + advance at the same max_attempts:1 threshold.
+      # (Revert the classification and the transient frame above takes THIS path.)
+      poison =
+        "id: 12\nevent: mutation\n" <>
+          ~s(data: {"result":{"_id":"term","_type":"task","title":"x","content":{"kind":"nope"}},"type":"task"}\n\n)
+
+      {[{12, {:ok, :dead_lettered}}], _} = Sync.apply_frames(poison, ctx)
+      assert Cursor.get(ctx.source, ctx.dataset) == 12
+
+      assert [row] = DeadLetter.list_dead(ctx.source, ctx.dataset)
+      assert row.event_id == 12
+      assert row.status == "dead"
+    end
+  end
+
   describe "F3: pull primes the push CAS ledger (clone -> edit -> push-back)" do
     test "applying a pulled upsert primes PushDocRev under BOTH doc_id forms with the remote rev",
          %{event: event, ctx: ctx} do
@@ -412,7 +461,12 @@ defmodule Barkpark.Sync.ApplierTest do
         {:ok, "remote-after-edit-#{ev.id}"}
       end
 
-      push_ctx = %{source: ctx.source, dataset: @dataset}
+      push_ctx = %{
+        workspace_id: Keyword.get(ctx.scope, :workspace_id),
+        source: ctx.source,
+        dataset: @dataset
+      }
+
       funs = %{push_fun: push_fun, claim_fun: nil, close_fun: nil}
 
       {results, _cursor} = Pusher.drain([edit], push_ctx, funs)

@@ -12,7 +12,8 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Content, Sharing}
+  alias Barkpark.{Auth, Content, EpicFleet, Repo, Sharing}
+  alias Barkpark.Content.{Document, Revision}
 
   import Barkpark.TenancyFixtures
 
@@ -25,7 +26,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
     # Create a real paper (doc_id == slug, NOT a `drafts.` row) in this scope,
     # carrying a known body_html so we can assert it renders.
-    {:ok, _paper} =
+    {:ok, paper} =
       Content.upsert_paper(
         Barkpark.LabelFixtures.paper_attrs(%{
           "slug" => "shared-paper",
@@ -36,9 +37,11 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
         })
       )
 
+    paper = pin_released_revision!(paper)
+
     # The conn is anonymous (no Bearer / no session token) — so the only way it
     # can read this scope is via a public share.
-    {:ok, Map.merge(ctx, %{conn: conn, ws: ws, project: project})}
+    {:ok, Map.merge(ctx, %{conn: conn, ws: ws, project: project, paper: paper})}
   end
 
   defp paper_path(ws, project, slug), do: "/w/#{ws.slug}/p/#{project.slug}/papers/#{slug}"
@@ -62,7 +65,8 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
     test "returns 200 and renders the paper for an anonymous caller", %{
       conn: conn,
       ws: ws,
-      project: project
+      project: project,
+      paper: paper
     } do
       with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
 
@@ -71,6 +75,80 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
       assert body =~ "Hello Shared Paper"
       assert body =~ "scoped body"
+      assert_revision_headers(conn, paper)
+    end
+
+    test "PIPELINE ORDER: a conditional replay through the ROUTER is a CSP-free 304 with the pinned cache-control",
+         %{conn: conn, ws: ws, project: project} do
+      with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
+
+      conn200 = get(conn, paper_path(ws, project, "shared-paper"))
+      assert [etag] = get_resp_header(conn200, "etag")
+
+      conn304 =
+        build_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get(paper_path(ws, project, "shared-paper"))
+
+      assert conn304.status == 304
+      assert conn304.resp_body == ""
+      assert get_resp_header(conn304, "etag") == [etag]
+
+      assert get_resp_header(conn304, "cache-control") ==
+               ["private, max-age=0, must-revalidate"]
+
+      # Second-review condition 3: on the scoped route PaperRevisionHeaders is
+      # the LAST plug of :shared_paper_browser, so the 304 halt must keep
+      # :paper_reader_csp from ever minting a nonce (and the delete strips the
+      # pipeline's own static CSP). Only a ROUTER-level test can catch a future
+      # pipeline reorder that leaks a fresh-nonce CSP onto a 304 — the direct
+      # plug-call test structurally cannot.
+      assert get_resp_header(conn304, "content-security-policy") == []
+    end
+
+    test "block-backed scoped reader rejects a conflicting body_html cache", %{
+      conn: conn,
+      ws: ws,
+      project: project
+    } do
+      with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
+
+      blocks = [
+        %{
+          "id" => "scoped-authority",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Scoped blocks are authoritative."}]
+        }
+      ]
+
+      {:ok, paper} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "shared-paper",
+            "dataset" => @dataset,
+            "blocks" => blocks,
+            "workspace_id" => ws.id,
+            "project_id" => project.id
+          })
+        )
+
+      paper = pin_released_revision!(paper)
+
+      stale_content =
+        paper.content
+        |> Map.put("body_html", "<p>STALE SCOPED CACHE</p>")
+        |> Map.put(
+          "body_html_sv",
+          Barkpark.PortableDoc.Render.body_html_render_version()
+        )
+
+      paper
+      |> Ecto.Changeset.change(content: stale_content)
+      |> Barkpark.Repo.update!()
+
+      assert_raise BarkparkWeb.BulldocsLive.InvalidSource, fn ->
+        get(conn, paper_path(ws, project, "shared-paper"))
+      end
     end
   end
 
@@ -91,6 +169,8 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       assert conn.status in [401, 403, 404]
       refute conn.status == 200
       refute conn.resp_body =~ "Hello Shared Paper"
+      assert get_resp_header(conn, "etag") == []
+      assert get_resp_header(conn, "x-barkpark-paper-revision") == []
     end
 
     test "sharing a DIFFERENT scope does not make THIS scope public", %{
@@ -106,6 +186,8 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       assert conn.status in [401, 403, 404]
       refute conn.status == 200
       refute conn.resp_body =~ "Hello Shared Paper"
+      assert get_resp_header(conn, "etag") == []
+      assert get_resp_header(conn, "x-barkpark-paper-revision") == []
     end
   end
 
@@ -127,21 +209,16 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
   end
 
   describe "GET /w/:ws/p/:project/papers/:slug — (d) shared scope, missing slug" do
-    test "a non-existent slug in a shared scope renders the pending shell, leaking nothing", %{
+    test "a non-existent slug in a shared scope returns the canonical 404", %{
       conn: conn,
       ws: ws,
       project: project
     } do
       with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
 
-      conn = get(conn, paper_path(ws, project, "does-not-exist"))
-
-      # P4: the scoped reader is the LIVE BulldocsLive — a missing slug
-      # renders the empty live shell (200) and streams the paper in if it
-      # is published later (the flat reader's contract, now shared). The
-      # no-leak property is about CONTENT, which stays absent.
-      assert conn.status == 200
-      refute conn.resp_body =~ "Hello Shared Paper"
+      assert_raise BarkparkWeb.BulldocsLive.NotFound, fn ->
+        get(conn, paper_path(ws, project, "does-not-exist"))
+      end
     end
   end
 
@@ -274,7 +351,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
       {default_ws, default_project} = ensure_default_scope!()
 
-      {:ok, _paper} =
+      {:ok, paper} =
         Content.upsert_paper(
           Barkpark.LabelFixtures.paper_attrs(%{
             "slug" => "default-public-paper",
@@ -285,11 +362,19 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
           })
         )
 
-      {:ok, conn: conn, default_ws: default_ws, default_project: default_project}
+      paper = pin_released_revision!(paper)
+
+      {:ok,
+       conn: conn, default_ws: default_ws, default_project: default_project, default_paper: paper}
     end
 
     test "an anonymous caller reads a Default-scope published paper (parity with /papers/:slug)",
-         %{conn: conn, default_ws: default_ws, default_project: default_project} do
+         %{
+           conn: conn,
+           default_ws: default_ws,
+           default_project: default_project,
+           default_paper: paper
+         } do
       # Sanity: the flat public reader serves this paper anonymously.
       flat = get(conn, "/papers/default-public-paper")
       assert html_response(flat, 200) =~ "Default Public Paper"
@@ -300,16 +385,14 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
       assert body =~ "Default Public Paper"
       assert body =~ "default body"
+      assert_revision_headers(conn, paper)
     end
 
-    test "a missing slug in the Default scope renders the pending shell, leaking nothing",
+    test "a missing slug in the Default scope returns the canonical 404",
          %{conn: conn, default_ws: default_ws, default_project: default_project} do
-      conn = get(conn, paper_path(default_ws, default_project, "no-such-paper-xyz"))
-
-      # Same contract as the flat reader / shared-scope reader: live shell 200,
-      # no content, no existence oracle.
-      assert conn.status == 200
-      refute conn.resp_body =~ "Default Public Paper"
+      assert_raise BarkparkWeb.BulldocsLive.NotFound, fn ->
+        get(conn, paper_path(default_ws, default_project, "no-such-paper-xyz"))
+      end
     end
 
     test "the allowance is ANONYMOUS-only: a token that is not a Default member still 403s",
@@ -384,5 +467,72 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       body = html_response(conn, 200)
       assert body =~ "Hello Shared Paper"
     end
+  end
+
+  describe "Paper revision response authority" do
+    test "missing and unpublished Papers never receive revision authority headers", %{
+      ws: ws,
+      project: project,
+      paper: paper
+    } do
+      missing =
+        Plug.Test.conn(:get, paper_path(ws, project, "missing-paper"))
+        |> Plug.Conn.assign(:current_workspace, ws)
+        |> Plug.Conn.assign(:current_project, project)
+        |> BarkparkWeb.Plugs.PaperRevisionHeaders.call([])
+
+      assert Plug.Conn.get_resp_header(missing, "etag") == []
+      assert Plug.Conn.get_resp_header(missing, "x-barkpark-paper-revision") == []
+
+      paper |> Ecto.Changeset.change(status: "draft") |> Repo.update!()
+
+      unpublished =
+        Plug.Test.conn(:get, paper_path(ws, project, paper.doc_id))
+        |> Plug.Conn.assign(:current_workspace, ws)
+        |> Plug.Conn.assign(:current_project, project)
+        |> BarkparkWeb.Plugs.PaperRevisionHeaders.call([])
+
+      assert Plug.Conn.get_resp_header(unpublished, "etag") == []
+      assert Plug.Conn.get_resp_header(unpublished, "x-barkpark-paper-revision") == []
+    end
+  end
+
+  defp assert_revision_headers(conn, paper) do
+    paper = Repo.get!(Document, paper.id)
+
+    assert get_resp_header(conn, "x-barkpark-paper-revision") == [paper.released_revision_id]
+
+    # http-edge-truth D9: weak, 7-day-bucketed validator — W/"sha256:<digest>.<bucket>".
+    bucket = div(System.os_time(:second), 604_800)
+
+    assert get_resp_header(conn, "etag") == [
+             ~s(W/"sha256:#{EpicFleet.canonical_digest(paper.content)}.#{bucket}")
+           ]
+  end
+
+  defp pin_released_revision!(paper) do
+    revision =
+      %Revision{}
+      |> Revision.changeset(%{
+        document_id: paper.id,
+        doc_id: paper.doc_id,
+        type: paper.type,
+        dataset: paper.dataset,
+        dataset_id: paper.dataset_id,
+        workspace_id: paper.workspace_id,
+        project_id: paper.project_id,
+        title: paper.title,
+        status: paper.status,
+        action: "publish",
+        content: paper.content
+      })
+      |> Repo.insert!()
+
+    paper
+    |> Ecto.Changeset.change(
+      current_revision_id: revision.id,
+      released_revision_id: revision.id
+    )
+    |> Repo.update!()
   end
 end

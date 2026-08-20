@@ -214,6 +214,36 @@ defmodule BarkparkCloud.OAuth do
     deleted == 1
   end
 
+  @doc """
+  Delete every `oauth_states` row whose TTL has lapsed. Returns `%{reaped: n}`.
+
+  Hygiene only — correctness never depends on it running, because expiry is
+  already enforced IN BAND twice over: `verify_state/2` rejects `exp <= now` from
+  the signed payload before it ever queries, and `consume_state/2`'s own DELETE
+  filters `expires_at > now`. A row past `expires_at` is unredeemable by
+  construction, so there is NO grace window here (contrast
+  `AgentRetentionWorker`, whose day-scale grace exists because its rows are still
+  READABLE evidence after their retention date — these are not: a lapsed nonce
+  can never be redeemed, and it is not evidence of anything).
+
+  It is nonetheless required. BOTH oauth GET legs `Repo.insert!` a row per hit on
+  an UNAUTHENTICATED route, and the only DELETE anywhere in `cloud/` was
+  `consume_state/2`'s single redeemed row — so every abandoned flow (and every
+  scanner hit) left a permanent row. Unauthenticated unbounded table growth.
+
+  Idempotent: a sweep that finds nothing returns `%{reaped: 0}` and never raises.
+  """
+  @spec reap_expired_states() :: %{reaped: non_neg_integer()}
+  def reap_expired_states do
+    now = DateTime.utc_now()
+
+    {count, _} =
+      from(s in State, where: s.expires_at <= ^now)
+      |> Repo.delete_all()
+
+    %{reaped: count}
+  end
+
   ## Internals — exchange steps
 
   defp exchange_code(module, config, provider, code) do

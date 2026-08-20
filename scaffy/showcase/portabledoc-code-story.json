@@ -1,0 +1,271 @@
+{
+  "slug": "portabledoc-code-story",
+  "style": "article",
+  "description": "The paper that renders itself: PortableDoc's new diff and filetree blocks — scaffolded by bp scaffy run in 9 ms with zero tokens, then grown into real renderers on all three surfaces — demonstrate themselves on their own birth commits, alongside the honest W7 benchmark and the convenience verdict.",
+  "tags": [
+    {
+      "tag": "scaffy",
+      "strength": 90,
+      "rationale": "The W7 dogfood finale — the blocks Scaffy scaffolded tell their own story."
+    },
+    {
+      "tag": "diff",
+      "strength": 60,
+      "rationale": "Contains the first native diff block in production, showing its own birth commit."
+    },
+    {
+      "tag": "filetree",
+      "strength": 55,
+      "rationale": "Contains the first native filetree block, replacing the hand-faked ● / ○ code-fence idiom."
+    },
+    {
+      "tag": "benchmark",
+      "strength": 40,
+      "rationale": "Carries the D83 scaffold-vs-grow timing table with gate cost separated."
+    }
+  ],
+  "blocks": [
+    {
+      "id": "pcs-001",
+      "type": "eyebrow",
+      "text": "Scaffy · Wave 7 · The Dogfood Wave"
+    },
+    {
+      "id": "pcs-002",
+      "type": "heading",
+      "level": 1,
+      "text": "PortableDoc Code Story — the blocks that render their own birth",
+      "role": "title"
+    },
+    {
+      "id": "pcs-003",
+      "type": "ingress",
+      "content": [
+        {
+          "type": "text",
+          "value": "On 2026-07-17 the PortableDoc grammar grew from 46 to 48 block types. The two newcomers — diff and filetree — were scaffolded by "
+        },
+        {
+          "type": "code",
+          "value": "bp scaffy run add-block-type"
+        },
+        {
+          "type": "text",
+          "value": " with parity on every surface at birth, then grown into real renderers. This paper is written in them: the diff block below shows the commit that created the diff block."
+        }
+      ]
+    },
+    {
+      "id": "pcs-004",
+      "type": "stats",
+      "items": [
+        { "label": "Block types", "value": "46 → 48" },
+        { "label": "Engine scaffold", "value": "9 ms" },
+        { "label": "Tokens scaffolding", "value": "0" },
+        { "label": "Surfaces in lockstep", "value": "3" }
+      ]
+    },
+    { "id": "pcs-005", "type": "divider" },
+    {
+      "id": "pcs-006",
+      "type": "heading",
+      "level": 2,
+      "text": "The diff block, showing its own birth"
+    },
+    {
+      "id": "pcs-007",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "This is a native diff block rendering a verbatim excerpt of merged commit 368ac75d9 — the scaffold run that registered both renderers in the Go TUI, plus the classify injection with its famous one-word hand-edit (the second same-tier classify is structurally refused, so "
+        },
+        { "type": "code", "value": "filetree" },
+        {
+          "type": "text",
+          "value": " was added by hand — one word). Hunk headers stay verbatim and dim, git file headers become bold path sub-headers, and the +/− prefixes carry the semantics without color."
+        }
+      ]
+    },
+    {
+      "id": "pcs-008",
+      "type": "diff",
+      "diff": "diff --git a/internal/pdrender/pdrender.go b/internal/pdrender/pdrender.go\nindex 7cbcead53..02bb15049 100644\n--- a/internal/pdrender/pdrender.go\n+++ b/internal/pdrender/pdrender.go\n@@ -247,6 +247,10 @@ func DefaultRegistry(theme Theme) *Registry {\n \tir := r.inline\n \tr.blocks[\"heading\"] = headingRenderer{ir: ir}\n+\t// scaffy:add-block-type Filetree MARK:go-registry-filetree\n+\tr.blocks[\"filetree\"] = filetreeRenderer{}\n+\t// scaffy:add-block-type Diff MARK:go-registry-diff\n+\tr.blocks[\"diff\"] = diffRenderer{}\n \tr.blocks[\"paragraph\"] = paragraphRenderer{ir: ir}\ndiff --git a/api/lib/barkpark/portable_doc/tiers.ex b/api/lib/barkpark/portable_doc/tiers.ex\nindex 092f20ff0..be38ebe9f 100644\n--- a/api/lib/barkpark/portable_doc/tiers.ex\n+++ b/api/lib/barkpark/portable_doc/tiers.ex\n@@ -72,7 +72,8 @@ defmodule Barkpark.PortableDoc.Tiers do\n-  @widget ~w(\n+  # scaffy:classify-block-type diff MARK:tier-widget-diff\n+  @widget ~w(diff filetree\n     callout figure terminal table"
+    },
+    {
+      "id": "pcs-009",
+      "type": "heading",
+      "level": 2,
+      "text": "The filetree block, showing the wave's footprint"
+    },
+    {
+      "id": "pcs-010",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Every earlier Scaffy paper hand-faked this idiom in code fences and taught the glyphs in prose. It is now a native block, self-describing via its legend row. Below: the whole W7 footprint — 6 files created, 8 injection sites — exactly as the scaffold ops touched them."
+        }
+      ]
+    },
+    {
+      "id": "pcs-011",
+      "type": "filetree",
+      "text": "barkpark/  (W7: diff + filetree, 46 → 48)\n├── internal/pdrender/\n│   ├── diff.go ● created — verbatim-parse renderer over the shared chat diff rows\n│   ├── diff_test.go ● created\n│   ├── filetree.go ● created — annotation spans, legend row, honest degrade\n│   ├── filetree_test.go ● created\n│   └── pdrender.go ○ injected — registry marks for both blocks\n├── js/packages/react/\n│   ├── src/blocks/core.ts ○ injected — emitter + coreEmitters map + CASES\n│   ├── tests/PortableDoc.test.tsx ○ injected — census pin 46 → 48\n│   └── tests/fixtures/pd-golden/\n│       ├── diff.golden.json ● created — regenerated mirror\n│       └── filetree.golden.json ● created — regenerated mirror\n├── api/lib/barkpark/portable_doc/\n│   ├── render/compose.ex ○ injected — compose clauses for both blocks\n│   └── tiers.ex ○ injected — classify :widget + the D79 one-word hand-edit\n├── api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex ○ injected — @inputs\n├── api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs ○ injected — census pin\n└── scripts/pd-parity-completeness.sh ○ injected — census 46 → 48",
+      "legend": "● created (6) · ○ injected (8) — goldens mirrored byte-identically in api/test/support/fixtures/pd-parity/"
+    },
+    { "id": "pcs-012", "type": "divider" },
+    {
+      "id": "pcs-013",
+      "type": "heading",
+      "level": 2,
+      "text": "The benchmark, honestly"
+    },
+    {
+      "id": "pcs-014",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Per charter D83, the numbers are kept apart: the engine's scaffold time (deterministic text ops, zero tokens), the ASSERT CMD gate cost (go build/test, pnpm, vitest — a CI cost that runs whether or not a scaffold produced the code), and the grow time (the judgment work of writing real renderers, metered from this wave's own task ledger)."
+        }
+      ]
+    },
+    {
+      "id": "pcs-015",
+      "type": "table",
+      "head": [
+        [ { "type": "text", "value": "Step" } ],
+        [ { "type": "text", "value": "Wall-clock" } ],
+        [ { "type": "text", "value": "Tokens" } ],
+        [ { "type": "text", "value": "What it is" } ]
+      ],
+      "rows": [
+        [
+          [ { "type": "text", "value": "Engine scaffold (add-block-type, dry-run)" } ],
+          [ { "type": "text", "value": "9 ms" } ],
+          [ { "type": "text", "value": "0" } ],
+          [ { "type": "text", "value": "11 ops per block: 2 files created, 9 injections — skeleton, wiring, test parity on all three surfaces" } ]
+        ],
+        [
+          [ { "type": "text", "value": "Classify (diff → :widget)" } ],
+          [ { "type": "text", "value": "9 ms" } ],
+          [ { "type": "text", "value": "0" } ],
+          [ { "type": "text", "value": "One tier injection; the second same-tier run is structurally refused — filetree was a one-word hand-edit (D79)" } ]
+        ],
+        [
+          [ { "type": "text", "value": "Gate cost, cold (Diff real run)" } ],
+          [ { "type": "text", "value": "36.2 s" } ],
+          [ { "type": "text", "value": "0" } ],
+          [ { "type": "text", "value": "ASSERT CMD gates: first go build/test + pnpm install/build + vitest — CI cost, never conflated into scaffold time" } ]
+        ],
+        [
+          [ { "type": "text", "value": "Gate cost, warm (Filetree real run)" } ],
+          [ { "type": "text", "value": "21.5 s" } ],
+          [ { "type": "text", "value": "0" } ],
+          [ { "type": "text", "value": "The same gates on warm caches" } ]
+        ],
+        [
+          [ { "type": "text", "value": "Grow, Go TUI renderers" } ],
+          [ { "type": "text", "value": "426 s" } ],
+          [ { "type": "text", "value": "agent session" } ],
+          [ { "type": "text", "value": "Real diff/filetree renderers on the shared chat-row helpers; full pdrender suite green, chat golden parity 8/8" } ]
+        ],
+        [
+          [ { "type": "text", "value": "Grow, web (Elixir + JS + CSS)" } ],
+          [ { "type": "text", "value": "952 s" } ],
+          [ { "type": "text", "value": "agent session" } ],
+          [ { "type": "text", "value": "Byte-identical Elixir/JS renderers, 48×2 golden regen, all gates (mix 157, react 260, tsc clean)" } ]
+        ]
+      ]
+    },
+    {
+      "id": "pcs-016",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The point, plainly: the skeleton, the cross-surface wiring, and the test parity were free and byte-consistent on every surface — the engine reproduced an independent prior scaffold byte-for-byte. All the time went where the judgment is: growing starters into real renderers. And one honesty rule stands: "
+        },
+        {
+          "type": "text",
+          "marks": [ "strong" ],
+          "value": "no measured pre-scaffy baseline exists for adding a block type"
+        },
+        {
+          "type": "text",
+          "value": " — W6 scoped the add-block-type duel to A-vs-C, so this paper makes no hand-vs-scaffold comparison for this chore. For duel-measured A-vs-B numbers, see the W6 benchmark paper at /papers/scaffy-benchmark."
+        }
+      ]
+    },
+    { "id": "pcs-017", "type": "divider" },
+    {
+      "id": "pcs-018",
+      "type": "heading",
+      "level": 2,
+      "text": "The convenience verdict"
+    },
+    {
+      "id": "pcs-019",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "This wave doubled as the deferred convenience fixture: if building two blocks back-to-back exposed real friction, Scaffy would earn new machinery. It mostly didn't."
+        }
+      ]
+    },
+    {
+      "id": "pcs-020",
+      "type": "list",
+      "ordered": false,
+      "items": [
+        [
+          {
+            "type": "text",
+            "marks": [ "strong" ],
+            "value": "Chain primitive: rejected (D80). "
+          },
+          {
+            "type": "text",
+            "value": "The lived chain is two commands — add-block-type folded the parity leg in v2 — and it ran fine as a documented shell recipe. The one real bleed, the structurally refused second same-tier classify (exit 5, nothing written), is a REANCHOR limit that binds regardless of orchestration: no chain or meta-command fixes it. The honest fix — a classify-block-type redesign that appends into the tier list instead of re-anchoring the opener — was backlogged as scaffy-backlog-classify-append-redesign, with this wave as its fixture, and has since shipped: the 2026-07-17 append-friendly restructure turned tiers.ex's ~w sigils into plain string lists, the op into a bare INSERT AFTER FIRST, and a second same-tier classify into an independent clean insert."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "marks": [ "strong" ],
+            "value": "Variable machinery: none added (D81). "
+          },
+          {
+            "type": "text",
+            "value": "Multi-line vars are engine-impossible by design and were not needed; batch vars buy nothing over the shell recipe; value-capture stays deferred with zero new instances."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "marks": [ "strong" ],
+            "value": "What was ratified: prose truth (D82). "
+          },
+          {
+            "type": "text",
+            "value": "The corpus now tells the truth about itself: dry-run always reports ok:false on the two golden EXISTS asserts (cosmetic — read duration_ms), growing a renderer past its starter stales the parity golden and the mandatory regen step is documented, and classify-block-type carries the pairing law plus the same-tier hand-edit recipe."
+          }
+        ]
+      ]
+    },
+    {
+      "id": "pcs-021",
+      "type": "callout",
+      "tone": "success",
+      "title": "The dogfood loop, closed",
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffy scaffolded the blocks; the blocks now render the scaffold. Every diff and filetree you just read was drawn by the code this paper describes."
+        }
+      ]
+    }
+  ]
+}

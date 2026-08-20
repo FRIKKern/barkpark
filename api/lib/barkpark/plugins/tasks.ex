@@ -63,8 +63,12 @@ defmodule Barkpark.Plugins.Tasks do
   require Logger
 
   @doc """
-  Declares the `task` document type by delegating to
-  `Barkpark.Tasks.schema_definitions/1`.
+  Declares the `task` and `listener` document types by delegating to
+  `Barkpark.Tasks.schema_definitions/1` (`listener` is Personal Dev Fleet
+  presence — see `Barkpark.Tasks.Fleet`; its type name is exactly
+  `"listener"`, never `"task"`, so the literal `type == "task"` filters in
+  the GitHub outbox, `/v1/tasks/events` and `/v1/tasks/prime` structurally
+  exclude presence rows).
 
   `dataset` comes from `opts[:dataset]` when supplied (Bootstrap calls this with
   `[]`), defaulting to `"production"` — matching every other seed schema and the
@@ -129,7 +133,9 @@ defmodule Barkpark.Plugins.Tasks do
          :ok <- validate_brief_blocks(blocks) do
       :ok
     else
-      {:halt, _} = halted -> halted
+      {:halt, _} = halted ->
+        halted
+
       _ ->
         {:halt,
          "task brief is required before publish — set content.brief to " <>
@@ -282,7 +288,7 @@ defmodule Barkpark.Plugins.Tasks do
   `Barkpark.Plugins.Registry.collect_desk_items/1` after the host's
   built-in groups — see `Barkpark.Structure.build_desk_items/3`).
 
-  Two entries:
+  Three entries:
 
     * a `:document_list` for the `task` type, gated on the `task` schema
       actually existing in the requested dataset — mirroring how the host
@@ -296,6 +302,10 @@ defmodule Barkpark.Plugins.Tasks do
       presence: the board reads the task corpus globally, so it is reachable
       from any dataset's desk. `/admin/*` (not `/studio/*`) so the desk-link
       scoper leaves the path intact — the pulse dashboard precedent.
+    * a `:link` to **Fleet** (`/admin/fleet`) — the Personal Dev Fleet desk
+      tile (`Barkpark.Plugins.Tasks.Web.FleetLive`), a read-only listener
+      roster. Ungated by schema presence for the same reason: the roster reads
+      the `type:listener` corpus globally (PDF-D19).
   """
   @impl Barkpark.Plugin
   def desk_items(dataset) do
@@ -309,6 +319,15 @@ defmodule Barkpark.Plugins.Tasks do
     # link.
     projects_link = %{type: :link, label: "Projects", path: "/admin/projects", icon: "columns"}
 
+    # The Personal Dev Fleet desk tile — a read-only listener roster at
+    # /admin/fleet (Barkpark.Plugins.Tasks.Web.FleetLive). Ungated by schema
+    # presence, exactly like the Projects link: the roster reads the
+    # type:listener corpus GLOBALLY (PDF-D19), so it is reachable from any
+    # dataset's desk. `/admin/*` (not `/studio/*`) so the desk-link scoper leaves
+    # the path intact — the pulse dashboard precedent. It vanishes with the whole
+    # Tasks plugin (the enablement highway skips a disabled plugin's callbacks).
+    fleet_link = %{type: :link, label: "Fleet", path: "/admin/fleet", icon: "activity"}
+
     task_list =
       if task_schema_present?(dataset) do
         [%{type: :document_list, label: "Tasks", doc_type: "task", icon: "✅"}]
@@ -316,7 +335,7 @@ defmodule Barkpark.Plugins.Tasks do
         []
       end
 
-    task_list ++ [projects_link]
+    task_list ++ [projects_link, fleet_link]
   end
 
   @doc """
@@ -340,6 +359,18 @@ defmodule Barkpark.Plugins.Tasks do
         icon: "columns",
         order: 35,
         active_when: "/admin/projects"
+      },
+      # The Personal Dev Fleet tile (Barkpark.Plugins.Tasks.Web.FleetLive at
+      # /admin/fleet) — the read-only listener roster. `order: 36` sits it right
+      # after Projects (35). Same `:ops` route enforcement + fresh-install
+      # invariant as Projects: the tab disappears entirely when the Tasks plugin
+      # is off. Active for any path under /admin/fleet.
+      %{
+        label: "Fleet",
+        path: "/admin/fleet",
+        icon: "activity",
+        order: 36,
+        active_when: "/admin/fleet"
       }
     ]
   end
@@ -415,18 +446,35 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/claim", BarkparkWeb.TasksController, :claim_by_id,
        auth: :token_root},
       {:post, "/tasks/:doc_id/close", BarkparkWeb.TasksController, :close, auth: :token_root},
+      {:post, "/tasks/:doc_id/release", BarkparkWeb.TasksController, :release, auth: :token_root},
       {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
+      {:post, "/tasks/:doc_id/sessions", BarkparkWeb.TasksController, :sessions,
+       auth: :token_root},
       {:post, "/tasks/:doc_id/move", BarkparkWeb.TasksController, :move, auth: :token_root},
+      {:post, "/tasks/:doc_id/stage", BarkparkWeb.TasksController, :stage, auth: :token_root},
+      # Personal Dev Fleet presence (Wave A) — literal paths mount at
+      # /v1/fleet/* on the same :token_root bucket (the flat /v1/tasks family;
+      # AssignDefaultScope resolves scope — PDF-D19). Presence VOCABULARY, not
+      # an order protocol: beat writes the listener row, roster reads it.
+      {:post, "/fleet/beat", BarkparkWeb.TasksController, :fleet_beat, auth: :token_root},
+      {:get, "/fleet/roster", BarkparkWeb.TasksController, :fleet_roster, auth: :token_root},
       # Barkpark Projects — the native task BOARD (read-only :ops LiveView),
       # mounted at /admin/projects (the :ops bucket). /admin (not /studio) so
       # the desk-link scoper leaves the path intact — see desk_items/1 and the
       # pulse dashboard precedent. This is the GUI realization of the task
       # design-language spec; the tasks plugin owns type:task, so the board
       # belongs in its namespace.
-      {:live, "/projects", Barkpark.Plugins.Tasks.Web.BoardLive, :index, auth: :ops}
+      {:live, "/projects", Barkpark.Plugins.Tasks.Web.BoardLive, :index, auth: :ops},
+      # Personal Dev Fleet desk tile — the read-only listener ROSTER
+      # (Barkpark.Plugins.Tasks.Web.FleetLive), mounted at /admin/fleet (the
+      # :ops bucket, admin-gated). Reads the flat global-per-dataset roster
+      # (PDF-D19), 5s poll, no PubSub. /admin (not /studio) so the desk-link
+      # scoper leaves the path intact — the Projects precedent above. The tasks
+      # plugin owns type:listener presence, so the tile lives in its namespace.
+      {:live, "/fleet", Barkpark.Plugins.Tasks.Web.FleetLive, :index, auth: :ops}
       # NOTE: the content-graph reads (/graph/orphans, /graph/dangling,
       # /graph/:id) are NO LONGER declared here. They moved to CORE
       # (router.ex `scope "/v1" … get("/graph/…")`) because the graph roots on
@@ -444,8 +492,8 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Eleven verbs over eleven routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
-  `:api + :require_token`, NOT admin — claim/close are bearer-gated workflow ops,
+  Thirteen verbs over thirteen routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
+  `:api + :require_token`, NOT admin — claim/close/release are bearer-gated workflow ops,
   not document mutations):
 
     * `ls` — `GET /v1/tasks` (paginated). READ, table.
@@ -456,6 +504,7 @@ defmodule Barkpark.Plugins.Tasks do
     * `get` — `GET /v1/tasks/:doc_id`. READ, table.
     * `claim` — `POST /v1/tasks/:doc_id/claim`. WRITES, minimal receipt.
     * `close` — `POST /v1/tasks/:doc_id/close`. WRITES, minimal receipt.
+    * `release` — `POST /v1/tasks/:doc_id/release`. WRITES, minimal receipt.
     * `stamp` — `POST /v1/tasks/:doc_id/stamp` (criterion-level mid-claim
       evidence, expressive-agent-loops D8). WRITES, minimal receipt.
     * `next` — `POST /v1/tasks/claim` (queue-based: atomically hand me the next
@@ -467,6 +516,17 @@ defmodule Barkpark.Plugins.Tasks do
     * `pulse` — `POST /v1/tasks/:doc_id/pulse` (now-line heartbeat + lease
       renewal, one atomic write; no epoch arg — pulse survives fences). WRITES,
       minimal receipt.
+    * `stage` — `POST /v1/tasks/:doc_id/stage` (sanctioned thought-state
+      transition: considering | researching | open — enforces the Transitions
+      legality table, writes/clears content.engagement, no epoch fence). WRITES,
+      minimal receipt.
+
+  Plus the `fleet` noun (Personal Dev Fleet presence, Wave A):
+
+    * `roster` — `GET /v1/fleet/roster`. READ, table (the `documents` envelope
+      key — PDF-D21).
+    * `beat` — `POST /v1/fleet/beat`. WRITES, minimal receipt (zero-row atomic
+      heartbeat — PDF-D17).
   """
   @impl Barkpark.Plugin
   def cli_commands do
@@ -480,7 +540,8 @@ defmodule Barkpark.Plugins.Tasks do
         auth_tier: "read",
         args: [],
         flags: [
-          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50}
+          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50},
+          %{name: "offset", type: "int", summary: "Task-index row offset.", default: 0}
         ],
         writes: false,
         batch: false,
@@ -493,18 +554,30 @@ defmodule Barkpark.Plugins.Tasks do
         id: "task.ready",
         noun: "task",
         verb: "ready",
-        summary: "List ready (unblocked) tasks.",
+        summary: "List executable, unblocked tasks (priority order by default).",
         http: %{method: "GET", path_template: "/v1/tasks/ready"},
         auth_tier: "read",
         args: [],
         flags: [
-          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50}
+          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50},
+          %{name: "offset", type: "int", summary: "Ready-queue row offset.", default: 0},
+          %{
+            name: "order",
+            type: "string",
+            summary:
+              "Optional closure_nearest campaign order: fewest unmet criteria, then oldest, then logical task id."
+          }
         ],
         writes: false,
         batch: false,
         paginated: true,
         dry_run: false,
         default_output: "table",
+        # Supports the brief/full projection (wave axi-brief-views): agents get
+        # a token-thrifty card list by default, humans the full envelope.
+        # Emitted only under ?views=1 — Capabilities.maybe_gate_views strips it
+        # otherwise, so the default wire shape is byte-identical to today.
+        views: Barkpark.Plugins.Capabilities.agent_views_descriptor(),
         scoped_prefix: nil
       },
       %{
@@ -522,13 +595,28 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary: "Narrow in_progress to this worker's claims."
           },
-          %{name: "limit", type: "int", summary: "Ready-head and event-window size.", default: 10}
+          %{
+            name: "limit",
+            type: "int",
+            summary: "Ready-head and event-window size.",
+            default: 10
+          },
+          %{
+            name: "order",
+            type: "string",
+            summary:
+              "Optional closure_nearest order for the ready head; compatibility order remains the default."
+          }
         ],
         writes: false,
         batch: false,
         paginated: false,
         dry_run: false,
         default_output: "json",
+        # Supports the brief/full projection (wave axi-brief-views): the brief
+        # prime response is the ≤5 KB resume card an agent gets by default.
+        # Emitted only under ?views=1 (Capabilities.maybe_gate_views).
+        views: Barkpark.Plugins.Capabilities.agent_views_descriptor(),
         scoped_prefix: nil
       },
       %{
@@ -632,7 +720,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "close",
         summary:
-          "Close a claimed task by id; --set 'criteria:=[…]' marks acceptance criteria met with evidence in the same atomic write. By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim — re-read, then close again (or --set observed_rev=<rev> for strict full-rev CAS instead).",
+          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "read",
         args: [
@@ -675,10 +763,15 @@ defmodule Barkpark.Plugins.Tasks do
             summary:
               "Extra close-body fields as key=value (key:=json for typed). The expectation " <>
                 "close-out (task-proves-paper): --set 'criteria:=[{\"index\":0,\"met\":true," <>
-                "\"evidence\":\"PR #1234\"}]' flips acceptance_criteria met/evidence atomically " <>
-                "with the close (same rev CAS — no separate racing mutation). Optional " <>
-                "\"criterion\" per entry text-guards against a reordered/edited list (409 " <>
-                "criteria_mismatch). Unmet criteria never block a close (soft warning only). " <>
+                "\"evidence\":\"PR #1234\",\"criterion\":\"<the criterion's exact stored wording>\"}]' " <>
+                "flips acceptance_criteria met/evidence atomically " <>
+                "with the close (same rev CAS — no separate racing mutation). \"criterion\" is " <>
+                "REQUIRED on every entry with met=true: the 0-based index alone is unverifiable, so an " <>
+                "unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently " <>
+                "flipping a neighbouring criterion, and a text that does not match the row at that index " <>
+                "is REJECTED too (409 criteria_mismatch). An entry with met=false needs no text. Optional " <>
+                "evidence is presence-sensitive: omit the key to preserve stored evidence, or " <>
+                "send evidence:\"\" to clear it. Unmet criteria never block a close (soft warning only). " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>
                 "work-digest fence (use when you intend to close against the exact rev you read)."
           },
@@ -697,11 +790,46 @@ defmodule Barkpark.Plugins.Tasks do
         scoped_prefix: nil
       },
       %{
+        id: "task.release",
+        noun: "task",
+        verb: "release",
+        summary: "Release a held task claim without waiting for its lease to expire.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/release"},
+        auth_tier: "read",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id to release."
+          },
+          %{
+            name: "worker_id",
+            required: true,
+            type: "string",
+            summary: "Worker identity that holds the claim."
+          },
+          %{
+            name: "observed_epoch",
+            required: true,
+            type: "int",
+            summary: "Claim epoch returned at claim time (optimistic concurrency guard)."
+          }
+        ],
+        flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
         id: "task.stamp",
         noun: "task",
         verb: "stamp",
         summary:
-          "Stamp ONE acceptance criterion mid-claim: --criterion N with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
+          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stamp"},
         auth_tier: "read",
         args: [
@@ -728,7 +856,14 @@ defmodule Barkpark.Plugins.Tasks do
           %{
             name: "criterion",
             type: "int",
-            summary: "Zero-based index into acceptance_criteria — the criterion to stamp."
+            summary:
+              "ZERO-BASED index into acceptance_criteria — the first criterion is 0, the second is 1 (do NOT pass a 1-based number). This is the criterion to stamp."
+          },
+          %{
+            name: "criterion-text",
+            type: "string",
+            summary:
+              "REQUIRED with --met (optional with --miss): the criterion's exact stored wording, copied verbatim from acceptance_criteria[N].criterion. It is the off-by-one guard — a --met stamp with NO text is REJECTED (409 criterion_text_required), and one whose text does not match the row at --criterion N is REJECTED (409 criteria_mismatch), instead of silently flipping a neighbour."
           },
           %{
             name: "met",
@@ -764,7 +899,7 @@ defmodule Barkpark.Plugins.Tasks do
         id: "task.next",
         noun: "task",
         verb: "next",
-        summary: "Atomically claim the next ready task (priority order).",
+        summary: "Atomically claim the next executable task (priority order by default).",
         http: %{method: "POST", path_template: "/v1/tasks/claim"},
         auth_tier: "read",
         args: [
@@ -782,6 +917,12 @@ defmodule Barkpark.Plugins.Tasks do
           }
         ],
         flags: [
+          %{
+            name: "order",
+            type: "string",
+            summary:
+              "Optional closure_nearest campaign order: fewest unmet criteria, then oldest, then logical task id."
+          },
           %{
             name: "observed_rail_rev",
             type: "string",
@@ -827,6 +968,74 @@ defmodule Barkpark.Plugins.Tasks do
         scoped_prefix: nil
       },
       %{
+        id: "task.stage",
+        noun: "task",
+        verb: "stage",
+        summary:
+          "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open, OR the row's OWN current state. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. THE TERMINAL SAME-STATE ADJUDICATION EDGE (PDS wave 25): a same-state no-op is accepted on EVERY status, not just the stageable ones — done→done, blocked→blocked, in_progress→in_progress — so a FINISHED row can record its disposition/reason/reopen-trigger IN PLACE instead of being resurrected to `open` first (which would leave it saying open while carrying claim.closed_by, and put it back in `bp task ready`). It widens ADJUDICATION, not MOVEMENT: the from-state is read from the locked row, never from your input, so state==current is satisfiable only by a row already in that state, and the write set never includes content.claim — a done→done stage leaves lifecycle_status=done and close attribution byte-identical. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,lapse_ttl_seconds,lapses_at} — an EPHEMERAL lease the TtlSweeper deletes wholesale after ~900s — on →considering/researching and clears it on →open; a `note` does NOT ride that lease, it lands on the DURABLE content.disposition_reason (no sweeper owns it) on EVERY target including →open; emits a task.staged event carrying staged.note_key. PDS wave 24: this verb also owns the ADJUDICATION TRIPLE — --disposition (open|parked|closed, normalised here because one writer means one normaliser), --note/content.disposition_reason and --reopen-trigger are written in that same CAS update or not at all, and a --disposition parked with no trigger on the stage and none on the row is refused BEFORE anything is written. Raw /v1/data/mutate changes of content.disposition on a type:task are refused and name this verb. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. open → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stage"},
+        auth_tier: "read",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id to stage."
+          },
+          %{
+            name: "state",
+            required: true,
+            type: "string",
+            summary:
+              "Target lifecycle state: considering | researching | open — or the row's OWN current state (e.g. done on a done row), the same-state no-op that adjudicates a finished row in place without reopening it."
+          }
+        ],
+        flags: [
+          %{
+            name: "object",
+            type: "string",
+            summary:
+              "What the thought is ABOUT: research | build. Written into content.engagement on a →considering/researching stage (defaults to research); ignored on →open. An invalid value 400s."
+          },
+          %{
+            name: "note",
+            type: "string",
+            summary:
+              "Free-text adjudication reason. Written to the DURABLE content.disposition_reason — NOT to the engagement lease, which the TTL sweeper deletes after ~900s. Recorded on every stageable target; a blank note overwrites nothing."
+          },
+          %{
+            name: "worker",
+            type: "string",
+            summary:
+              "The agent/worker owning the thought, stamped into content.engagement.holder."
+          },
+          %{
+            name: "disposition",
+            type: "string",
+            summary:
+              "The adjudication TERM (PDS wave 24): open | parked | closed, trimmed and downcased by this one writer. Written to the DURABLE content.disposition in the SAME CAS update as the transition and the reason. This verb is the ONLY writer: /v1/data/mutate refuses a raw change of content.disposition on a type:task and names this flag. Omitted → the row's existing term is left exactly as it was. Anything outside the vocabulary is a 400."
+          },
+          %{
+            name: "reopen-trigger",
+            type: "string",
+            summary:
+              "What would make a parked row worth reconsidering. Written to the DURABLE content.reopen_trigger. REQUIRED with --disposition parked unless the row already carries one — a park with no trigger is a 422 (missing_reopen_trigger) and NOTHING is written, because a park that cannot say what would reopen it has decided nothing. Blank counts as absent."
+          },
+          %{
+            name: "rerun",
+            type: "string",
+            summary:
+              "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/D336(a)): a SHARED rerun over distinct rows is the honest shape."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
         id: "task.pulse",
         noun: "task",
         verb: "pulse",
@@ -860,6 +1069,90 @@ defmodule Barkpark.Plugins.Tasks do
             type: "int",
             summary:
               "Optional acceptance_criteria index this pulse is working on (boards spin that lock)."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      # ── The fleet noun (Personal Dev Fleet, Wave A) ──────────────────────
+      # Presence vocabulary over /v1/fleet/* — beat (heartbeat write) and
+      # roster (fail-closed presence read). Dispatch and table rendering are
+      # manifest-driven: ZERO Go changes (the roster envelope's `documents`
+      # key is what every installed bp binary renders as a real table).
+      %{
+        id: "fleet.roster",
+        noun: "fleet",
+        verb: "roster",
+        summary:
+          "The fleet roster: every listener with online/offline computed server-side (offline iff now - last_seen > ttl_s; missing last_seen = offline, fail closed) plus each worker's current in_progress task.",
+        http: %{method: "GET", path_template: "/v1/fleet/roster"},
+        auth_tier: "read",
+        args: [],
+        flags: [
+          %{
+            name: "dataset",
+            type: "string",
+            summary: "Dataset to read the roster from (defaults to production)."
+          }
+        ],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "table",
+        scoped_prefix: nil
+      },
+      %{
+        id: "fleet.beat",
+        noun: "fleet",
+        verb: "beat",
+        summary:
+          "Listener presence heartbeat: upsert this worker's listener row (first beat registers it; every later beat is one zero-row atomic write). last_seen is server-stamped — send ttl as data, never a timestamp.",
+        http: %{method: "POST", path_template: "/v1/fleet/beat"},
+        auth_tier: "write",
+        args: [
+          %{
+            name: "worker",
+            required: true,
+            type: "string",
+            summary: "Worker identity beating (the unique presence key)."
+          }
+        ],
+        flags: [
+          %{
+            name: "status",
+            type: "string",
+            summary: "Self-declared state: idle | working | blocked."
+          },
+          %{
+            name: "ttl",
+            type: "int",
+            summary: "Self-declared staleness budget in seconds (default 120)."
+          },
+          %{
+            name: "agent",
+            type: "string",
+            summary: "What runs the session: claude-code | codex | custom."
+          },
+          %{
+            name: "scope",
+            type: "string",
+            summary: "What the listener works on (repo, area, project)."
+          },
+          %{
+            name: "capacity",
+            type: "string",
+            summary:
+              "Capacity for routing. A JSON object string is validated + stored structured, e.g. '{\"size_class\":\"heavy\",\"slots_total\":2,\"slots_free\":1,\"budget\":5.0}' (size_class: light | standard | heavy | xl); a plain string is a legacy free-form hint, e.g. \"1 task\"."
+          },
+          %{
+            name: "dataset",
+            type: "string",
+            summary: "Dataset to write the listener row into (defaults to production)."
           }
         ],
         writes: true,
@@ -1037,6 +1330,78 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   def hydrate_edges(doc), do: doc
+
+  @doc """
+  Batched `hydrate_edges/1` over a whole corpus — the EdgeProjector rebuild
+  path. Per-doc result identical, but the DB cost is FLAT instead of per-doc:
+  ONE outbound `task_edges` query over every task doc's PK (all kinds) plus
+  ONE `documents` id→doc_id map for the targets — was one `Tasks.edges/2`
+  query per task doc plus one `Repo.get/2` per edge row (the rebuild-path
+  N+1). Non-task docs, and task docs with no resolvable PK, pass through
+  UNCHANGED; input order is preserved.
+  """
+  @spec hydrate_edges_batch([map()]) :: [map()]
+  def hydrate_edges_batch(docs) when is_list(docs) do
+    pks =
+      docs
+      |> Enum.filter(&task_doc?/1)
+      |> Enum.map(&doc_pk/1)
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+
+    if pks == [] do
+      docs
+    else
+      payloads_by_pk = task_edge_payloads_by_pk(pks)
+
+      Enum.map(docs, fn doc ->
+        with true <- is_map(doc) and task_doc?(doc),
+             pk when is_binary(pk) <- doc_pk(doc) do
+          put_task_edges(doc, Map.get(payloads_by_pk, pk, []))
+        else
+          _ -> doc
+        end
+      end)
+    end
+  end
+
+  # ONE outbound task_edges query over all task PKs + ONE Document id→doc_id
+  # map for the targets; rows whose target row no longer exists are dropped
+  # (mirrors edge_row_to_payload/1). Grouped by from_id for the per-doc attach.
+  defp task_edge_payloads_by_pk(pks) do
+    import Ecto.Query, only: [from: 2]
+
+    edge_rows =
+      Barkpark.Repo.all(from(e in Barkpark.Tasks.Edge, where: e.from_id in ^pks))
+
+    doc_id_by_pk =
+      case edge_rows |> Enum.map(& &1.to_id) |> Enum.uniq() do
+        [] ->
+          %{}
+
+        to_pks ->
+          from(d in Barkpark.Content.Document,
+            where: d.id in ^to_pks,
+            select: {d.id, d.doc_id}
+          )
+          |> Barkpark.Repo.all()
+          |> Map.new()
+      end
+
+    edge_rows
+    |> Enum.group_by(& &1.from_id)
+    |> Map.new(fn {from_pk, rows} ->
+      payloads =
+        Enum.flat_map(rows, fn row ->
+          case Map.get(doc_id_by_pk, row.to_id) do
+            to_doc_id when is_binary(to_doc_id) -> [%{to_id: to_doc_id, kind: row.kind}]
+            _ -> []
+          end
+        end)
+
+      {from_pk, payloads}
+    end)
+  end
 
   # Map a `task_edges` row (PK-keyed) to the payload shape the pure callback
   # reads: `%{to_id: <doc_id>, kind: <kind>}`. Resolves the `to_id` PK back to

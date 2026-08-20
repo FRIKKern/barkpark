@@ -25,7 +25,8 @@ defmodule BarkparkWeb.Studio.DatasetSwitcher do
             the compact top-bar sizing on top (sup-w1 PART C). --%>
       <select
         class="dataset-switcher-select form-input"
-        onchange={"window.location = '/studio/' + encodeURIComponent(this.value) + #{section_suffix(@current_section)}"}
+        data-section-suffix={section_suffix(@current_section)}
+        onchange={BarkparkWeb.CSP.dataset_switch_onchange()}
       >
         <%= for ds <- @datasets do %>
           <option value={ds} selected={ds == @current}><%= ds %></option>
@@ -35,8 +36,11 @@ defmodule BarkparkWeb.Studio.DatasetSwitcher do
     """
   end
 
-  defp section_suffix(:structure), do: "''"
-  defp section_suffix(:media), do: "'/media'"
-  defp section_suffix(:api_tester), do: "'/api-tester'"
-  defp section_suffix(_), do: "''"
+  # Raw path suffix carried in the `data-section-suffix` attribute and read by
+  # the (now static, CSP-hashable) onchange handler as `this.dataset.sectionSuffix`
+  # — no JS quoting (the browser stores/returns the literal string).
+  defp section_suffix(:structure), do: ""
+  defp section_suffix(:media), do: "/media"
+  defp section_suffix(:api_tester), do: "/api-tester"
+  defp section_suffix(_), do: ""
 end

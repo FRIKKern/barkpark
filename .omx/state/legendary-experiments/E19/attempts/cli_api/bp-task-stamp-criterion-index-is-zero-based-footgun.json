@@ -1,0 +1,22 @@
+{
+  "accepted_capture": false,
+  "attempt_sha256": "12f21ef78797da3ff5e70de8c89238ce272b5ac961e12ae336399c4032e4b13b",
+  "attempt_status": "BLOCKED",
+  "candidate_capsule_sha256": "89cc254f1d4d61fc3b47721090ad7643f45376527fc8325f473fd811828baf1c",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_source_sha256": "7882f6ed320d13177e24d979dcd837e8de4c872984bd30e0bc0c1b031b5f1744",
+  "capture_sha256": null,
+  "capture_timestamp": null,
+  "deployment_id": null,
+  "evidence_boundary": "RECONCILED_REAL_CELL_ATTEMPT_RECORD_NOT_A_CAPTURE",
+  "explicit_error": "NO_ISOLATED_DEPLOYED_RECORD_WITH_E16_PROVENANCE; LOCAL_CAPSULE_OR_PRODUCTION_API_IS_NOT_ACCEPTED",
+  "fixture_id": "bp-task-stamp-criterion-index-is-zero-based-footgun",
+  "fixture_kind": "task",
+  "invocation_session": "PREDEPLOYMENT_STOP_NO_REAL_SESSION",
+  "production_contacted": false,
+  "proxy_derived": false,
+  "schema_version": "legendary-e19-attempt/v1",
+  "silent_blank": false,
+  "surface": "cli_api"
+}

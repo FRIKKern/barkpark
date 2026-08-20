@@ -82,7 +82,9 @@ defmodule BarkparkWeb.LiveViewTelemetryTest do
     test "the three live_view metrics tag :view; the live_component metric tags :component" do
       by_event =
         Telemetry.prometheus_metrics()
-        |> Enum.filter(&(&1.event_name in [@lv_mount, @lv_handle_params, @lv_handle_event, @lc_handle_event]))
+        |> Enum.filter(
+          &(&1.event_name in [@lv_mount, @lv_handle_params, @lv_handle_event, @lc_handle_event])
+        )
         |> Map.new(&{&1.event_name, &1})
 
       for ev <- [@lv_mount, @lv_handle_params, @lv_handle_event] do
@@ -105,7 +107,13 @@ defmodule BarkparkWeb.LiveViewTelemetryTest do
     test "the live_component tag_values reads the TOP-LEVEL :component key, never socket.view" do
       metric = metric_for(@lc_handle_event)
       # component is top-level; a socket is also present but must be IGNORED.
-      md = %{socket: %{view: BarkparkWeb.SomeLive}, component: BarkparkWeb.SomeComponent, event: "x", params: %{}}
+      md = %{
+        socket: %{view: BarkparkWeb.SomeLive},
+        component: BarkparkWeb.SomeComponent,
+        event: "x",
+        params: %{}
+      }
+
       taken = metric.tag_values.(md) |> Map.take(metric.tags)
 
       assert taken == %{component: BarkparkWeb.SomeComponent},

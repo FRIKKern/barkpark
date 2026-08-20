@@ -1,0 +1,22 @@
+{
+  "accepted_capture": false,
+  "attempt_sha256": "f221631c2932afb52919bc9028c503c8dd8683c04f148fde72878986d47302b4",
+  "attempt_status": "BLOCKED",
+  "candidate_capsule_sha256": "2a404d742adc4ff01bb13375dfebbdd62924343595d3ce8724bf26059a448f9f",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_source_sha256": "201c5ae6d548a04326051e8871c3ff1f5f98ab3a1769098554365f882aa68414",
+  "capture_sha256": null,
+  "capture_timestamp": null,
+  "deployment_id": null,
+  "evidence_boundary": "RECONCILED_REAL_CELL_ATTEMPT_RECORD_NOT_A_CAPTURE",
+  "explicit_error": "NO_ISOLATED_DEPLOYED_RECORD_WITH_E16_PROVENANCE; LOCAL_CAPSULE_OR_PRODUCTION_API_IS_NOT_ACCEPTED",
+  "fixture_id": "adv-missing-fields",
+  "fixture_kind": "adversarial",
+  "invocation_session": "PREDEPLOYMENT_STOP_NO_REAL_SESSION",
+  "production_contacted": false,
+  "proxy_derived": false,
+  "schema_version": "legendary-e19-attempt/v1",
+  "silent_blank": false,
+  "surface": "cli_api"
+}

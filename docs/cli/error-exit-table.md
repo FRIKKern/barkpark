@@ -36,6 +36,21 @@ last resort the CLI keys the bucket off the HTTP status (5xx→`8`, 429→`7`,
 chars so an HTML page never spews to stderr. A JSON envelope whose `code` is merely
 unknown still falls to exit 1.
 
+**Compound reason tokens.** The tasks API mints reasons that carry their detail
+inline — `not_holder:<worker>`, `not_in_progress:<status>`, `criteria_unmet:<i,j>`,
+`invalid_lifecycle:<s>`, `sentinel_worker_id:<w>`. The CLI looks up the literal
+token first, then the family name before the first `:` (`reasonKey` /
+`lookupExit` in `internal/cli/errors.go`). This is a lookup on the reason STRING
+only — it still never reads the HTTP status. `lookupExit` is the ONE consult, shared
+by the coded envelope, the `{"ok":false,"reason":…}` shape and the bare-string
+`{"error":"<token>"}` shape, so a token cannot mean two exit codes depending on
+which envelope carried it.
+
+**Retryability is what 5 vs 6 encodes** for the stamp/close family: `6` means the
+world moved (re-read/re-claim, then retry); `5` means the request itself is wrong
+and retrying it verbatim can never work. A wrapper that branches on the exit code
+alone gets the right behaviour without parsing the message.
+
 ## The stable exit-code scheme
 
 > **Codes 0–5 are byte-identical in meaning to the published CLI handbook; 6–8 are
@@ -86,11 +101,17 @@ is the status the API actually returns for that code.
 | `block_not_found` | 422 | `5` | Patch target block id absent (dynamic). | `block not found: <block_id>`. |
 | `type_mismatch` | 422 | `5` | Patch op type mismatch (dynamic). | `type mismatch in op`. |
 | `duplicate_id` | 422 | `5` | Patch would create a duplicate block id (dynamic). | `duplicate id: <id>`. |
+| `invalid_path` | 422 | `5` | Blob push rejected: the relative path failed the server-blob allowlist (traversal / absolute / malformed segment), refused before any disk write. | `invalid blob path: <path>` — the sidecar path must be the server-generated `YYYY/MM/<slug>-<hex8>.<ext>` shape. |
+| `empty_body` | 422 | `5` | Blob push rejected: zero-byte body (commonly a mislabeled content-type that `Plug.Parsers` consumed). | `empty blob body` — send the raw bytes as `application/octet-stream`. |
 | `rev_mismatch` | 409 | `6` | Optimistic-concurrency revision mismatch. | `conflict: document changed; re-fetch and retry`. |
 | `precondition_failed` | 412 | `6` | `ifRev` precondition failed (carries `expected`/`actual`). | `precondition failed: expected rev <e>, got <a>`. |
 | `conflict` | 409 | `6` | Generic write conflict. | `conflict: <message>` — retry or re-fetch. |
 | `halted` | 409 | `6` | Plugin lifecycle veto (canonical envelope). | `halted: <message>` — the plugin's reason. The bare-string `{"error":"halted"}` shape is also handled (see below); both bucket to `6`. |
 | `fenced_off` · `stale_claim` · `not_ready` · `blocked_by_unsatisfied_deps` · `resource_conflict` · `already_claimed`† | 409 | `6` | Task claim/close contention (`/v1/tasks/*` `ok:false` reasons). †`already_claimed` is a defensive CLI mapping (`internal/cli/errors.go`) for forward compatibility — the API does not currently emit it; the five confirmed server-side reasons are the other codes in this row. | Re-claim / re-fetch; `resource_conflict` carries `conflicts[]` naming the holders. |
+| `not_holder` · `not_in_progress` | 409 | `6` | Stamp/close refused: the lease moved (another worker holds the claim) or the task left `in_progress`. The server mints these COMPOUND — `not_holder:<worker>`, `not_in_progress:<status>` (`tasks_controller/params.ex` `reason_to_string/1`); the CLI keys on the part before the first `:`. | `re-read with bp task get, re-claim under your worker id, then retry` — RETRYABLE. |
+| `doc_changed_since_claim` · `claimed_has_worker` | 409 | `6` | The task's brief changed under your claim, or the claim is held by a named worker. | Re-read / reconcile, then retry (the CLI hint names the recovery). |
+| `criteria_mismatch` · `criteria_index_out_of_range` · `criterion_text_required` · `note_required` | 409/422 | `5` | Stamp payload guards: the `--criterion-text` does not match the row at `--criterion N`, the index is off the end, a `--met` arrived without its text, or a `--miss` without a note. | `fix the flag and re-send` — NOT retryable as sent. |
+| `illegal_transition` | 422 | `5` | A lifecycle stage the task cannot make from its current state (`tasks_controller.ex` `put_status(:unprocessable_entity)`). Also arrives as a BARE-STRING `{"error":"illegal_transition"}` from the cloud router; both shapes bucket to `5`. | `the transition is impossible from this state` — the one member of this family that a retry can NEVER satisfy. |
 | `share_expired` | 410 | `4` | Media collection share link expired/gone. | `share expired` — treat as gone (not-found bucket). |
 | `rate_limited` | 429 | `7` | Throttled. | `rate limited; retry after <Retry-After>s`. |
 | `rate_limited` (+`details.retry_after`) | 429 | `7` | Throttled with explicit retry hint. | Same; use `details.retry_after` for the backoff. |

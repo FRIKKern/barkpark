@@ -40,6 +40,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
   require Logger
 
+  alias Barkpark.Accounts.User
+  alias Barkpark.Auth
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
   alias Barkpark.Content.Analytics
   alias Barkpark.Plugins.Enablement
@@ -48,6 +51,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   alias Barkpark.Plugins.Settings.Masking
   alias Barkpark.Structure
   alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @placement_labels [
     {"main", "Main structure"},
@@ -86,6 +90,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       if connected?(socket) do
         socket
         |> assign(:bp_theme, Tenancy.workspace_theme(socket.assigns[:current_workspace]))
+        |> assign(
+          :execution_profile,
+          workspace_execution_profile(socket.assigns[:current_workspace])
+        )
         |> assign_plugin_rows()
       else
         socket
@@ -117,6 +125,11 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       # Empty defaults for the dead render — the connected `handle_params`
       # loads the real theme + plugin rows once, on connect (see there).
       bp_theme: nil,
+      # Per-workspace chat execution profile (connectors W23-2/D207). Seeded
+      # `nil` for the dead render; `handle_params` projects the persisted
+      # `settings["chat"]["execution_profile"]` once on connect. `nil`/anything
+      # other than `"cloud"` reads as the self-hosted default in the switch.
+      execution_profile: nil,
       plugin_rows: []
     )
   end
@@ -137,6 +150,151 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   end
 
   def handle_event("reveal", %{"plugin_name" => name}, socket) do
+    guard_installation_admin(socket, fn ->
+      do_reveal(socket, name)
+    end)
+  end
+
+  def handle_event("reveal_field", %{"field" => field}, socket) do
+    guard_installation_admin(socket, fn ->
+      do_reveal_field(socket, field)
+    end)
+  end
+
+  def handle_event("save", %{"plugin_name" => name} = params, socket) do
+    guard_installation_admin(socket, fn ->
+      fields = fields_for(name)
+
+      if fields == [] do
+        save_generic(socket, name, params)
+      else
+        save_typed(socket, name, fields, params)
+      end
+    end)
+  end
+
+  def handle_event("delete", %{"plugin_name" => name}, socket) do
+    guard_installation_admin(socket, fn ->
+      do_delete(socket, name)
+    end)
+  end
+
+  # Workspace theme picker (ts-w4e). Persists `settings["theme"]` on the current
+  # workspace and re-assigns `:bp_theme` so the hidden `#bp-theme-mirror` element
+  # re-renders → the `BpThemeMirror` hook stamps `document.documentElement`
+  # instantly (preview with no reload). The server-side stamp on the next full
+  # load comes from StudioChrome resolving the persisted value.
+  def handle_event("set_workspace_theme", %{"theme" => theme} = params, socket) do
+    guard_bound_ws(socket, params, fn ->
+      guard_ws_admin(socket, "theme", fn ->
+        do_set_workspace_theme(socket, theme)
+      end)
+    end)
+  end
+
+  # ── Per-workspace plugin surfacing (studio-structure-polish D2/D4/D10) ──
+  #
+  # An admin flips an installed plugin on/off for THIS workspace, or moves it
+  # between the MAIN Desk Structure / the Plugins folder / the top menu. State
+  # persists into `workspaces.settings["plugins"]` (merged, so the theme key is
+  # preserved) and is re-read through `Enablement.effective/1` so the row always
+  # reflects the merged declaration-default + override truth. Disabling never
+  # deletes: the doc types move to the …Rest folder.
+  def handle_event("toggle_plugin", %{"plugin" => name} = params, socket) do
+    guard_bound_ws(socket, params, fn ->
+      guard_ws_admin(socket, "plugins", fn ->
+        case current_row(socket, name) do
+          %{enabled: enabled} ->
+            put_plugin_override(socket, name, %{"enabled" => not enabled},
+              flash:
+                if(enabled,
+                  do: "Disabled #{display_name(name)} for this workspace.",
+                  else: "Enabled #{display_name(name)} for this workspace."
+                )
+            )
+
+          nil ->
+            {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
+        end
+      end)
+    end)
+  end
+
+  def handle_event(
+        "set_plugin_placement",
+        %{"plugin" => name, "placement" => placement} = params,
+        socket
+      )
+      when placement in ["main", "plugins", "top_menu"] do
+    guard_bound_ws(socket, params, fn ->
+      guard_ws_admin(socket, "plugin placement", fn ->
+        # Same unknown-plugin guard as toggle_plugin: a forged plugin name must
+        # not persist a junk override entry into the workspace settings.
+        case current_row(socket, name) do
+          %{} ->
+            put_plugin_override(socket, name, %{"placement" => placement},
+              flash: "Moved #{display_name(name)} to #{placement_label(placement)}."
+            )
+
+          nil ->
+            {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
+        end
+      end)
+    end)
+  end
+
+  # ── Per-workspace chat execution profile (connectors W23-2, D207/D211) ──
+  #
+  # Flip THIS workspace's chat turns between the self-hosted runner (default)
+  # and the cloud sandbox. State persists into `workspaces.settings["chat"]
+  # ["execution_profile"]` via the D205 Tenancy pair (merged, so the theme and
+  # plugin keys are preserved); `ClaudeChat.Session.init/1` resolves it once per
+  # spawn, fail-safe to `:self_hosted`.
+  #
+  # SECURITY (D211): the execution profile is routing-security-relevant — it
+  # routes a tenant's turns into a sandbox that shares ONE flat instance key —
+  # so the coarse mount gate (a GLOBAL-permission admin check that does NOT
+  # enforce admin OF THE TARGET workspace; see live_auth.ex) is NOT sufficient.
+  # This handler RE-GATES per write on `TenancyAuth.workspace_admin?/2` (the
+  # ConnectorsLive precedent), fail-closed: a principal who merely passes the
+  # mount gate but is not an owner/admin of the bound workspace is REFUSED with
+  # NOTHING written. `guard_bound_ws/3` still runs first (the stale-scope belt);
+  # the re-gate is the per-target-workspace authority check it does not do.
+  def handle_event("toggle_execution_profile", %{"ws" => _} = params, socket) do
+    guard_bound_ws(socket, params, fn ->
+      do_toggle_execution_profile(socket)
+    end)
+  end
+
+  # ── Fail-closed scope-write guard (ssp-w3, charter D17) ─────────────────
+  #
+  # Every workspace-scoped WRITE (theme / plugin toggle / placement) stamps the
+  # RENDERED workspace id into its control (`phx-value-ws` / a hidden `ws`
+  # field). Here we compare that snapshot against the LIVE URL-bound
+  # `current_workspace.id` — LiveScope's independent truth, re-bound from the
+  # URL on every scoped navigation. A mismatch means the DOM the admin acted on
+  # is stale relative to the bound scope (a scope switch raced the click): we
+  # REFUSE, flash, and re-bind the rows — NEVER silently retarget another
+  # workspace's settings. `credentials` are installation-global (settings.ex),
+  # so they are out of this guard's scope by design.
+  #
+  # A control that omits `ws` (a legacy/forged event) falls through to the write,
+  # which still targets the URL-bound `current_workspace` — the scoping itself,
+  # not this stamp, is what kills the wrong-workspace hazard; the stamp is the
+  # belt-and-suspenders that refuses a visibly-stale action.
+
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("studio: unhandled event #{inspect(event)}")
+    {:noreply, socket}
+  end
+
+  # ── Credential handler bodies (reveal / reveal_field / delete) ───────────
+  #
+  # Invoked ONLY inside `guard_installation_admin/2` (see the handlers above);
+  # hoisted out of the handle_event/3 clause group so the clauses stay grouped.
+  defp do_reveal(socket, name) do
     case Settings.reveal(name, user_id: user_id(socket)) do
       {:ok, map} ->
         fields = socket.assigns.settings_fields
@@ -174,7 +332,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     end
   end
 
-  def handle_event("reveal_field", %{"field" => field}, socket) do
+  defp do_reveal_field(socket, field) do
     fields = socket.assigns.settings_fields
     plugin_name = socket.assigns.plugin_name
 
@@ -204,17 +362,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     end
   end
 
-  def handle_event("save", %{"plugin_name" => name} = params, socket) do
-    fields = fields_for(name)
-
-    if fields == [] do
-      save_generic(socket, name, params)
-    else
-      save_typed(socket, name, fields, params)
-    end
-  end
-
-  def handle_event("delete", %{"plugin_name" => name}, socket) do
+  defp do_delete(socket, name) do
     case Settings.delete(name, user_id: user_id(socket)) do
       :ok ->
         {:noreply,
@@ -234,88 +382,6 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Nothing to delete.")}
     end
-  end
-
-  # Workspace theme picker (ts-w4e). Persists `settings["theme"]` on the current
-  # workspace and re-assigns `:bp_theme` so the hidden `#bp-theme-mirror` element
-  # re-renders → the `BpThemeMirror` hook stamps `document.documentElement`
-  # instantly (preview with no reload). The server-side stamp on the next full
-  # load comes from StudioChrome resolving the persisted value.
-  def handle_event("set_workspace_theme", %{"theme" => theme} = params, socket) do
-    guard_bound_ws(socket, params, fn ->
-      do_set_workspace_theme(socket, theme)
-    end)
-  end
-
-  # ── Per-workspace plugin surfacing (studio-structure-polish D2/D4/D10) ──
-  #
-  # An admin flips an installed plugin on/off for THIS workspace, or moves it
-  # between the MAIN Desk Structure / the Plugins folder / the top menu. State
-  # persists into `workspaces.settings["plugins"]` (merged, so the theme key is
-  # preserved) and is re-read through `Enablement.effective/1` so the row always
-  # reflects the merged declaration-default + override truth. Disabling never
-  # deletes: the doc types move to the …Rest folder.
-  def handle_event("toggle_plugin", %{"plugin" => name} = params, socket) do
-    guard_bound_ws(socket, params, fn ->
-      case current_row(socket, name) do
-        %{enabled: enabled} ->
-          put_plugin_override(socket, name, %{"enabled" => not enabled},
-            flash:
-              if(enabled,
-                do: "Disabled #{display_name(name)} for this workspace.",
-                else: "Enabled #{display_name(name)} for this workspace."
-              )
-          )
-
-        nil ->
-          {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
-      end
-    end)
-  end
-
-  def handle_event(
-        "set_plugin_placement",
-        %{"plugin" => name, "placement" => placement} = params,
-        socket
-      )
-      when placement in ["main", "plugins", "top_menu"] do
-    guard_bound_ws(socket, params, fn ->
-      # Same unknown-plugin guard as toggle_plugin: a forged plugin name must not
-      # persist a junk override entry into the workspace settings.
-      case current_row(socket, name) do
-        %{} ->
-          put_plugin_override(socket, name, %{"placement" => placement},
-            flash: "Moved #{display_name(name)} to #{placement_label(placement)}."
-          )
-
-        nil ->
-          {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
-      end
-    end)
-  end
-
-  # ── Fail-closed scope-write guard (ssp-w3, charter D17) ─────────────────
-  #
-  # Every workspace-scoped WRITE (theme / plugin toggle / placement) stamps the
-  # RENDERED workspace id into its control (`phx-value-ws` / a hidden `ws`
-  # field). Here we compare that snapshot against the LIVE URL-bound
-  # `current_workspace.id` — LiveScope's independent truth, re-bound from the
-  # URL on every scoped navigation. A mismatch means the DOM the admin acted on
-  # is stale relative to the bound scope (a scope switch raced the click): we
-  # REFUSE, flash, and re-bind the rows — NEVER silently retarget another
-  # workspace's settings. `credentials` are installation-global (settings.ex),
-  # so they are out of this guard's scope by design.
-  #
-  # A control that omits `ws` (a legacy/forged event) falls through to the write,
-  # which still targets the URL-bound `current_workspace` — the scoping itself,
-  # not this stamp, is what kills the wrong-workspace hazard; the stamp is the
-  # belt-and-suspenders that refuses a visibly-stale action.
-
-  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
-  # the session. Keep LAST among handle_event/3 clauses.
-  def handle_event(event, _params, socket) do
-    Logger.warning("studio: unhandled event #{inspect(event)}")
-    {:noreply, socket}
   end
 
   defp guard_bound_ws(socket, params, fun) do
@@ -345,6 +411,86 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     end
   end
 
+  # ── Per-write workspace-admin authority re-gate (connectors W34, D268) ──
+  #
+  # The scoped-admin mount gate (W26 `LiveAuth.:scoped_admin`) authorizes the
+  # actor against the TARGET workspace AT MOUNT — but a LiveView outlives that
+  # single check. A role downgrade (admin → member, or the actor removed from
+  # the workspace) AFTER mount leaves a still-mounted socket able to fire these
+  # theme / plugin writes under authority that is no longer true. So every
+  # state-changing workspace mutation re-reads the actor's LIVE membership role
+  # at the write boundary, exactly as `do_toggle_execution_profile/1` does
+  # (D211): `workspace_admin?/2` runs a FRESH `Repo.one` per call
+  # (auth.ex membership/2 — zero socket cache), so a mid-socket downgrade IS
+  # seen here. Fail-closed, negated-cond-first: a principal who is not an
+  # owner/admin of the bound workspace is REFUSED with ZERO writes. This is the
+  # per-target-workspace authority check `guard_bound_ws/3` (the stale-scope
+  # belt) does not perform; the two compose, guard_bound_ws first.
+  defp guard_ws_admin(socket, thing, fun) do
+    ws = socket.assigns[:current_workspace]
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    cond do
+      not (is_map(ws) and not is_nil(principal) and
+               TenancyAuth.workspace_admin?(principal, ws.id)) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "You need to be an owner or admin of this workspace to change its #{thing}."
+         )}
+
+      true ->
+        fun.()
+    end
+  end
+
+  # ── Installation-admin re-gate on the credential handlers (connectors W35, D274) ──
+  #
+  # Plugin credentials live in the installation-GLOBAL `plugin_settings` store
+  # (PK `plugin_name`, NO tenant column — `SettingsRecord`): ONE
+  # bokbasen/indx account per deployment, shared by EVERY tenant. The W26
+  # `:scoped_admin` mount gate only proves the actor administers the URL
+  # workspace — an admin of workspace B and ONLY B cleared it and could
+  # reveal / overwrite / delete every tenant's credentials (#5972 explicitly
+  # scoped credentials OUT of its per-write belt; this guard supplies the
+  # missing authority check). So each credential handler (reveal /
+  # reveal_field / save / delete) re-gates on INSTALLATION-level admin
+  # authority: a token principal must hold the global "admin" permission
+  # (`Auth.has_permission?/2` — the pre-W26 flat-:admin invariant restored for
+  # this subset); a user principal must be an owner/admin of the seeded
+  # Default (installation) workspace, via the `TenancyAuth.authorize/3`
+  # chokepoint. Fail-closed, negated-cond-first: a missing/unknown principal,
+  # an unseeded Default workspace, or insufficient authority is REFUSED with
+  # ZERO `Settings.*` calls — nothing revealed, written, or deleted.
+  defp guard_installation_admin(socket, fun) do
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    cond do
+      not installation_admin?(principal) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Plugin credentials are installation-wide — managing them requires installation-admin authority."
+         )}
+
+      true ->
+        fun.()
+    end
+  end
+
+  defp installation_admin?(%ApiToken{} = token), do: Auth.has_permission?(token, "admin")
+
+  defp installation_admin?(%User{} = user) do
+    case Tenancy.get_default_workspace() do
+      %{id: ws_id} -> TenancyAuth.authorize(user, ws_id, :admin) == :ok
+      _ -> false
+    end
+  end
+
+  defp installation_admin?(_), do: false
+
   # Workspace theme write, invoked by `set_workspace_theme` inside the
   # fail-closed scope guard. Persists `settings["theme"]` on the URL-bound
   # workspace and re-assigns `:bp_theme` so the `#bp-theme-mirror` hook stamps
@@ -371,6 +517,63 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         {:noreply, put_flash(socket, :error, "No workspace in scope to theme.")}
     end
   end
+
+  # Execution-profile write, invoked inside `guard_bound_ws/3`. Composes the
+  # per-write `workspace_admin?/2` re-gate (D211) with a server-derived next
+  # value: the toggle NEVER trusts a client-supplied profile string — it reads
+  # the current persisted value and flips it (cloud → self_hosted, anything else
+  # → cloud), then guards the derived value against the known set before writing
+  # BY ID through `set_workspace_chat_settings/2` (never the struct, D210).
+  defp do_toggle_execution_profile(socket) do
+    ws = socket.assigns[:current_workspace]
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    cond do
+      not (is_map(ws) and not is_nil(principal) and
+               TenancyAuth.workspace_admin?(principal, ws.id)) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "You need to be an owner or admin of this workspace to change its execution profile."
+         )}
+
+      true ->
+        chat = Tenancy.workspace_chat_settings(ws)
+        next = if chat["execution_profile"] == "cloud", do: "self_hosted", else: "cloud"
+
+        if next in ~w(cloud self_hosted) do
+          merged = Map.put(chat, "execution_profile", next)
+
+          case Tenancy.set_workspace_chat_settings(ws.id, merged) do
+            {:ok, updated} ->
+              {:noreply,
+               socket
+               |> assign(:current_workspace, updated)
+               |> assign(:execution_profile, next)
+               |> put_flash(:info, execution_profile_flash(next))}
+
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Could not save the execution profile.")}
+          end
+        else
+          {:noreply, put_flash(socket, :error, "Unknown execution profile.")}
+        end
+    end
+  end
+
+  # Raw persisted profile string for a workspace (`"cloud" | "self_hosted" |
+  # nil`). Reused by the connected `handle_params` projection and the switch's
+  # `checked` test; guards a nil workspace to `nil` (self-hosted default).
+  defp workspace_execution_profile(ws) do
+    Tenancy.workspace_chat_settings(ws)["execution_profile"]
+  end
+
+  defp execution_profile_flash("cloud"),
+    do: "Chat turns for this workspace now run in the cloud sandbox."
+
+  defp execution_profile_flash("self_hosted"),
+    do: "Chat turns for this workspace now run on the self-hosted runner."
 
   @impl true
   def render(assigns) do
@@ -406,6 +609,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       <% end %>
 
       {render_theme_section(assigns)}
+
+      {render_execution_profile_section(assigns)}
 
       {render_plugins_section(assigns)}
 
@@ -496,6 +701,54 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       <% else %>
         <p role="status" style="color: var(--fg-muted); margin-bottom: 0;">
           No workspace in scope to theme.
+        </p>
+      <% end %>
+    </.bp_card>
+    """
+  end
+
+  # ── Chat execution profile (connectors W23-2, D207/D209) ────────────────
+  #
+  # One `.bp_switch` clone of the plugin-enablement toggle: OFF = self-hosted
+  # runner (the fail-safe default), ON = cloud sandbox. It rides the plugin
+  # toggle's `phx-click` idiom (a discrete event carrying `phx-value-ws`), NOT
+  # the theme `phx-change` form — the handler derives the next value server-side
+  # and re-gates the write on `workspace_admin?/2`. `checked` is true ONLY for a
+  # persisted `"cloud"`, so a nil / unset / malformed value renders as
+  # self-hosted, mirroring the resolver's fail-safe.
+  defp render_execution_profile_section(assigns) do
+    ~H"""
+    <.bp_card aria-labelledby="execution-profile-heading">
+      <.bp_section_header id="execution-profile-heading" title="Chat execution profile" />
+
+      <%= if @current_workspace do %>
+        <div
+          data-test-id="execution-profile-control"
+          data-execution-profile={@execution_profile || "self_hosted"}
+          style="display:flex; flex-wrap:wrap; align-items:center; gap:.75rem;"
+        >
+          <div style="flex:1 1 16rem; min-width:14rem;">
+            <p style="margin:0; color:var(--fg-muted);">
+              Where <strong>{@current_workspace.name}</strong>'s Studio chat turns run.
+              <strong>Self-hosted</strong> uses this instance's runner;
+              <strong>Cloud</strong> routes each turn into an isolated cloud sandbox.
+              Only an owner or admin of this workspace can change it, and a flip
+              takes effect on the workspace's next chat turn.
+            </p>
+          </div>
+
+          <.bp_switch
+            checked={@execution_profile == "cloud"}
+            on_label="Cloud"
+            off_label="Self-hosted"
+            phx-click="toggle_execution_profile"
+            phx-value-ws={@current_workspace.id}
+            aria-label="Run this workspace's chat turns in the cloud sandbox"
+          />
+        </div>
+      <% else %>
+        <p role="status" style="color: var(--fg-muted); margin-bottom: 0;">
+          No workspace in scope to configure.
         </p>
       <% end %>
     </.bp_card>
@@ -609,7 +862,14 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       <.bp_textarea id="settings_json" name="settings_json" rows={14} value={@settings_json} mono />
 
       <div style="display: flex; gap: 8px; margin-top: 12px;">
-        <button type="submit" class="btn btn-primary" disabled={@plugin_name == ""}>Save</button>
+        <button
+          type="submit"
+          class="btn btn-primary"
+          phx-disable-with="Saving..."
+          disabled={@plugin_name == ""}
+        >
+          Save
+        </button>
         <button
           type="button"
           class="btn"
@@ -624,6 +884,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
           class="btn btn-destructive"
           phx-click="delete"
           phx-value-plugin_name={@plugin_name}
+          phx-disable-with="Deleting..."
           data-confirm="Delete settings for this plugin?"
           disabled={not @loaded?}
         >
@@ -648,12 +909,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       </fieldset>
 
       <div style="display: flex; gap: 8px; margin-top: 12px;">
-        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="submit" class="btn btn-primary" phx-disable-with="Saving...">Save</button>
         <button
           type="button"
           class="btn btn-destructive"
           phx-click="delete"
           phx-value-plugin_name={@plugin_name}
+          phx-disable-with="Deleting..."
           data-confirm={"Delete settings for #{@plugin_name}?"}
           disabled={not @loaded?}
         >

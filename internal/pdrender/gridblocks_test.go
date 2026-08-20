@@ -152,8 +152,9 @@ func TestGridOptIn(t *testing.T) {
 	}
 }
 
-// TestStatusLegendShowsFullLadder pins the status-legend to the fixed 6-rung
-// ladder: every rung's glyph AND role name must appear, so a drift in
+// TestStatusLegendShowsFullLadder pins the status-legend to the fixed 8-rung
+// ladder — the six lifecycle states plus the two thought states (considering /
+// researching) at the ladder bottom (charter D9/D12) — so a drift in
 // design/status-manifest.json (or the inlined statusLadder copy) trips this test.
 func TestStatusLegendShowsFullLadder(t *testing.T) {
 	reg := testRegistry()
@@ -161,14 +162,14 @@ func TestStatusLegendShowsFullLadder(t *testing.T) {
 		reg.Render(Block{Type: "status-legend"}, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}),
 		"\n"))
 
-	// All six role names (the "white ladder" order).
-	for _, name := range []string{"open", "ready", "progress", "blocked", "done", "cancel"} {
+	// All eight role names (the "white ladder" order + the two thought states).
+	for _, name := range []string{"open", "ready", "progress", "blocked", "done", "cancel", "considering", "researching"} {
 		if !strings.Contains(out, name) {
 			t.Errorf("status-legend missing role %q, got:\n%s", name, out)
 		}
 	}
-	// All six glyphs (○ appears for both open and ready → at least two).
-	for _, glyph := range []string{"○", "⠋", "!", "✓", "✕"} {
+	// All eight glyphs (○ appears for both open and ready → at least two).
+	for _, glyph := range []string{"○", "⠋", "!", "✓", "✕", "◌", "◎"} {
 		if !strings.Contains(out, glyph) {
 			t.Errorf("status-legend missing glyph %q, got:\n%s", glyph, out)
 		}
@@ -176,10 +177,10 @@ func TestStatusLegendShowsFullLadder(t *testing.T) {
 	if n := strings.Count(out, "○"); n < 2 {
 		t.Errorf("expected the ○ glyph for both open and ready rungs, got %d:\n%s", n, out)
 	}
-	// Exactly six rungs. Each row is `glyph  name  — meaning`, so the meaning
+	// Exactly eight rungs. Each row is `glyph  name  — meaning`, so the meaning
 	// separator is an em-dash preceded by TWO spaces (a meaning body may itself
 	// contain a single-space " — ", so match the wider "  — " to count only rows).
-	if n := strings.Count(out, "  — "); n != 6 {
-		t.Errorf("expected six ladder rungs (six meaning separators), got %d:\n%s", n, out)
+	if n := strings.Count(out, "  — "); n != 8 {
+		t.Errorf("expected eight ladder rungs (eight meaning separators), got %d:\n%s", n, out)
 	}
 }

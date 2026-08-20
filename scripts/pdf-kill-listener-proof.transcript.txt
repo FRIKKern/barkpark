@@ -1,0 +1,283 @@
+# pdf-kill-listener-proof — committed transcript
+# tree: 066949290f4511ee16ae27b07a11a2c3f2e99d32 (origin/main) · host: darwin (nb_NO locale — the LC_ALL=C guard in fcmp/fsub was live-hit here) · 2026-07-22T07:10:40Z
+# command: scripts/pdf-kill-listener-proof.sh          (the proof)
+
+──────────────────────────────────────────────────────────────────────────────
+PDF KILL-A-LISTENER PROOF — run — run 20260722T071040Z-21627
+──────────────────────────────────────────────────────────────────────────────
+tree:        /Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_85b6bfc4-feb-24
+worktree:    066949290f4511ee16ae27b07a11a2c3f2e99d32 (worktree-wf_85b6bfc4-feb-24)
+scratch:     /tmp/pdf.KXsR (13 bytes)
+pointer:     /tmp/pdf.KXsR/pointer (pinned — never the global default)
+ttl_s:       10 · beat every 2s · offline boundary elapsed >= 11 · ceiling 15
+harness PGID 21622 · host :4000 listeners before: 31714
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 0 — PRECONDITION — a target that actually serves /v1/fleet/*
+──────────────────────────────────────────────────────────────────────────────
+  booting the scratch target from this tree (log: /tmp/pdf.KXsR/pdf-boot.log; cold budget
+  15 min — measured 311.7s cold, ~13-33s warm)…
+      scratch root   /private/tmp/pdf.KXsR  (21 bytes, limit 85)
+      http port      20213
+      postgres port  49189
+      media dir      /private/tmp/pdf.KXsR/media
+      boot took 16s
+      target http://localhost:20213 (token from scratch.env — never printed)
+      GET /v1/fleet/roster -> HTTP 200, documents-envelope: yes
+      probe POST /v1/fleet/beat -> ok, server-stamped last_seen=2026-07-22T07:10:56.639309Z
+  PASS   0   target serves the fleet routes: roster 200 with the documents envelope, beat 200 with a server-stamped last_seen
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 1 — SPAWN — two stub listeners, each in its OWN process group
+──────────────────────────────────────────────────────────────────────────────
+      proof-w1   pid=23500 pgid=23500
+      proof-w2 pid=23501 pgid=23501
+      harness             pgid=21622
+      first beats landed: proof-w1 last_seen=2026-07-22T07:10:56.802585Z · proof-w2 last_seen=2026-07-22T07:10:56.803431Z
+  PASS   1   two stub listeners up, three distinct PGIDs (w1=23500, w2=23501, harness=21622), both registered
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 2 — BASELINE — both rows present and non-offline (server-computed)
+──────────────────────────────────────────────────────────────────────────────
+      proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+      proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.803431Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  PASS   2   roster returns both rows, statuses proof-w1=idle proof-w2=idle (both non-offline)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 3 — KILL — group kill the corpse; confirm loop AND curl child dead
+──────────────────────────────────────────────────────────────────────────────
+      group 23500 members before the kill:
+        pid 23500 (bash)
+        pid 23519 (sleep)
+      sent: kill -TERM -- -23500 (the group, never a bare PID — a bare kill leaves the in-flight curl to land a straggler beat, proven 2/2)
+scripts/pdf-kill-listener-proof.sh: line 160: 23500 Terminated: 15          run_stub_loop "$CORPSE" "$W1_LOG"
+      group 23500 members after the kill:
+      (none — loop and curl child both gone)
+      corpse last beat per its own log:    2026-07-22T07:10:56.802585Z
+      corpse last_seen per the roster:     2026-07-22T07:10:56.802585Z
+      byte-identical — the beat response and the roster read agree
+      T_anchor = 2026-07-22T07:10:56.802585Z (epoch 1784704256.802585); the kill landed at elapsed 0.63s
+  PASS   3   corpse group 23500 confirmed dead (loop + curl child); T_anchor pinned from the server-echoed last_seen
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 4 — TTL BRACKET — poll ~1s; non-offline below 10, offline from 11, survivor always returned
+──────────────────────────────────────────────────────────────────────────────
+  poll  1  elapsed=  1.88s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.803431Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  2  elapsed=  3.11s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:58.863877Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  3  elapsed=  4.32s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:11:00.895345Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  4  elapsed=  5.53s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:11:00.895345Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  5  elapsed=  6.81s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:11:02.914560Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  6  elapsed=  8.07s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:11:02.914560Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  7  elapsed=  9.29s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:11:04.954361Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  8  elapsed= 10.56s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:11:06.980422Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  9  elapsed= 11.76s  proof-w1=offline  proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "offline", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:11:06.980422Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll 10  elapsed= 13.07s  proof-w1=offline  proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "offline", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:11:09.003262Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll 11  elapsed= 14.38s  proof-w1=offline  proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "offline", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:11:11.073735Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll 12  elapsed= 15.61s  proof-w1=offline  proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:10:56.802585Z", "scope": null, "status": "offline", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:11:11.073735Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  PASS   4   corpse non-offline at every poll below 10, first offline at elapsed=11.76s (boundary 11, ceiling 15), stayed offline; survivor present AND non-offline at all 12 polls
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 5 — BP CLI — best-effort capture (records, never blocks the proof)
+──────────────────────────────────────────────────────────────────────────────
+      $ bp fleet roster -o table   (BARKPARK_SERVER=<scratch> BP_COLOR=none)
+      status   agent  capacity  last_seen                    scope  task  ttl_s  worker
+      -------  -----  --------  ---------------------------  -----  ----  -----  -----------
+      offline                   2026-07-22T07:10:56.639309Z               10     proof-probe
+      offline                   2026-07-22T07:10:56.802585Z               10     proof-w1
+      idle                      2026-07-22T07:11:11.073735Z               10     proof-w2
+  PASS   5   bp CLI output recorded above (best-effort — an old installed binary may not speak the fleet manifest yet; that is recorded, never a proof failure)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 6 — TEARDOWN — reap the survivor, tear the target down clean
+──────────────────────────────────────────────────────────────────────────────
+scripts/pdf-kill-listener-proof.sh: line 665: 23501 Terminated: 15          run_stub_loop "$SURVIVOR" "$W2_LOG"
+      survivor group 23501 reaped
+      pds-scratch: stopping server + postgres under /private/tmp/pdf.KXsR (PORT=20213, PG=49189)
+      barkpark: stopping server (pid 22884)
+      barkpark-pg: stopping Postgres
+      waiting for server to shut down.... done
+      server stopped
+      pds-scratch: port 20213 released
+      pds-scratch: port 49189 released
+      pds-scratch: zero orphan postgres for this scratch root
+      pds-scratch: removed /private/tmp/pdf.KXsR
+      ---- teardown: PASS
+      host :4000 listeners — before: '31714' · after: '31714'
+  PASS   6   teardown PASS (ports released, zero orphan postgres, scratch root removed); host :4000 untouched
+
+──────────────────────────────────────────────────────────────────────────────
+VERDICT — run: PASS=7 ABORT=0 FAIL=0
+The corpse flipped OFFLINE exactly at its TTL boundary (first offline poll
+at elapsed=11.76s against ttl_s=10, boundary 11) and not before; the
+survivor stayed present and non-offline at every poll. Presence is a
+heartbeat; stale IS offline; fail-closed (PDF-D6/D17/D20).
+──────────────────────────────────────────────────────────────────────────────
+# command: scripts/pdf-kill-listener-proof.sh --negctl (the control that must fire)
+
+──────────────────────────────────────────────────────────────────────────────
+PDF KILL-A-LISTENER PROOF — negctl — run 20260722T071153Z-28844
+──────────────────────────────────────────────────────────────────────────────
+tree:        /Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_85b6bfc4-feb-24
+worktree:    066949290f4511ee16ae27b07a11a2c3f2e99d32 (worktree-wf_85b6bfc4-feb-24)
+scratch:     /tmp/pdf.FSky (13 bytes)
+pointer:     /tmp/pdf.FSky/pointer (pinned — never the global default)
+ttl_s:       10 · beat every 2s · offline boundary elapsed >= 11 · ceiling 15
+harness PGID 28826 · host :4000 listeners before: 31714
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 0 — PRECONDITION — a target that actually serves /v1/fleet/*
+──────────────────────────────────────────────────────────────────────────────
+  booting the scratch target from this tree (log: /tmp/pdf.FSky/pdf-boot.log; cold budget
+  15 min — measured 311.7s cold, ~13-33s warm)…
+      scratch root   /private/tmp/pdf.FSky  (21 bytes, limit 85)
+      http port      46261
+      postgres port  23372
+      media dir      /private/tmp/pdf.FSky/media
+      boot took 56s
+      target http://localhost:46261 (token from scratch.env — never printed)
+      GET /v1/fleet/roster -> HTTP 200, documents-envelope: yes
+      probe POST /v1/fleet/beat -> ok, server-stamped last_seen=2026-07-22T07:12:50.413741Z
+  PASS   0   target serves the fleet routes: roster 200 with the documents envelope, beat 200 with a server-stamped last_seen
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 1 — SPAWN — two stub listeners, each in its OWN process group
+──────────────────────────────────────────────────────────────────────────────
+      proof-w1   pid=34621 pgid=34621
+      proof-w2 pid=34622 pgid=34622
+      harness             pgid=28826
+      first beats landed: proof-w1 last_seen=2026-07-22T07:12:50.646947Z · proof-w2 last_seen=2026-07-22T07:12:50.646875Z
+  PASS   1   two stub listeners up, three distinct PGIDs (w1=34621, w2=34622, harness=28826), both registered
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 2 — BASELINE — both rows present and non-offline (server-computed)
+──────────────────────────────────────────────────────────────────────────────
+      proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:50.646947Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+      proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:50.646875Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  PASS   2   roster returns both rows, statuses proof-w1=idle proof-w2=idle (both non-offline)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 3 — KILL — group kill the corpse; confirm loop AND curl child dead
+──────────────────────────────────────────────────────────────────────────────
+      group 34621 members before the kill:
+        pid 34621 (bash)
+        pid 34656 (sleep)
+      sent: kill -TERM -- -34621 (the group, never a bare PID — a bare kill leaves the in-flight curl to land a straggler beat, proven 2/2)
+scripts/pdf-kill-listener-proof.sh: line 160: 34621 Terminated: 15          run_stub_loop "$CORPSE" "$W1_LOG"
+      group 34621 members after the kill:
+      (none — loop and curl child both gone)
+      corpse last beat per its own log:    2026-07-22T07:12:50.646947Z
+      corpse last_seen per the roster:     2026-07-22T07:12:50.646947Z
+      byte-identical — the beat response and the roster read agree
+      T_anchor = 2026-07-22T07:12:50.646947Z (epoch 1784704370.646947); the kill landed at elapsed 0.69s
+  PASS   3   corpse group 34621 confirmed dead (loop + curl child); T_anchor pinned from the server-echoed last_seen
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 4 — NEGCTL TTL BRACKET — the harness beats the corpse; the offline-assert must FIRE as a failure
+──────────────────────────────────────────────────────────────────────────────
+      the corpse's loop is DEAD, but the harness now beats proof-w1 every 2s
+      at the same cadence — if the offline check below cannot fail under that,
+      it proves nothing (PDS-D20: distrust vacuous green).
+      negctl beat #1 at elapsed=2.11s -> last_seen=2026-07-22T07:12:52.808115Z
+  poll  1  elapsed=  2.11s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:52.808115Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:52.807999Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  2  elapsed=  3.48s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:52.808115Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:52.807999Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+      negctl beat #2 at elapsed=4.81s -> last_seen=2026-07-22T07:12:55.515184Z
+  poll  3  elapsed=  4.81s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:55.515184Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:54.851698Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  4  elapsed=  6.14s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:55.515184Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:54.851698Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+      negctl beat #3 at elapsed=7.44s -> last_seen=2026-07-22T07:12:58.144299Z
+  poll  5  elapsed=  7.44s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:58.144299Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:56.882452Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  6  elapsed=  8.78s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:58.144299Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:58.934125Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+      negctl beat #4 at elapsed=10.11s -> last_seen=2026-07-22T07:13:00.828543Z
+  poll  7  elapsed= 10.11s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:13:00.828543Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:12:58.934125Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll  8  elapsed= 11.56s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:13:00.828543Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:13:00.980000Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+      negctl beat #5 at elapsed=12.87s -> last_seen=2026-07-22T07:13:03.576598Z
+  poll  9  elapsed= 12.87s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:13:03.576598Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:13:03.033452Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+  poll 10  elapsed= 14.36s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:13:03.576598Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:13:03.033452Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+      negctl beat #6 at elapsed=15.73s -> last_seen=2026-07-22T07:13:06.518218Z
+  poll 11  elapsed= 15.73s  proof-w1=idle     proof-w2=idle    
+           proof-w1:   {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:13:06.518218Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w1"}
+           proof-w2: {"agent": null, "capacity": null, "last_seen": "2026-07-22T07:13:05.081891Z", "scope": null, "status": "idle", "task": null, "ttl_s": 10, "worker": "proof-w2"}
+
+      negctl beats sent: 6 (errors: 0) at the same 2s cadence
+      the rung-4 OFFLINE assert (corpse offline at elapsed >= 11) FIRED AS A
+      FAILURE at every poll past the boundary — with beats continuing the corpse
+      never flips. The check CAN fail, so the main run's green is not vacuous.
+  PASS   4   NEGCTL OK — the offline-assert demonstrably fires as a failure when beats continue (4 polls past the boundary, all non-offline)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 5 — BP CLI — best-effort capture (records, never blocks the proof)
+──────────────────────────────────────────────────────────────────────────────
+      $ bp fleet roster -o table   (BARKPARK_SERVER=<scratch> BP_COLOR=none)
+      status   agent  capacity  last_seen                    scope  task  ttl_s  worker
+      -------  -----  --------  ---------------------------  -----  ----  -----  -----------
+      offline                   2026-07-22T07:12:50.413741Z               10     proof-probe
+      idle                      2026-07-22T07:13:06.518218Z               10     proof-w1
+      idle                      2026-07-22T07:13:07.123065Z               10     proof-w2
+  PASS   5   bp CLI output recorded above (best-effort — an old installed binary may not speak the fleet manifest yet; that is recorded, never a proof failure)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 6 — TEARDOWN — reap the survivor, tear the target down clean
+──────────────────────────────────────────────────────────────────────────────
+scripts/pdf-kill-listener-proof.sh: line 665: 34622 Terminated: 15          run_stub_loop "$SURVIVOR" "$W2_LOG"
+      survivor group 34622 reaped
+      pds-scratch: stopping server + postgres under /private/tmp/pdf.FSky (PORT=46261, PG=23372)
+      barkpark: stopping server (pid 31424)
+      barkpark-pg: stopping Postgres
+      waiting for server to shut down.... done
+      server stopped
+      pds-scratch: port 46261 released
+      pds-scratch: port 23372 released
+      pds-scratch: zero orphan postgres for this scratch root
+      pds-scratch: removed /private/tmp/pdf.FSky
+      ---- teardown: PASS
+      host :4000 listeners — before: '31714' · after: '31714'
+  PASS   6   teardown PASS (ports released, zero orphan postgres, scratch root removed); host :4000 untouched
+
+──────────────────────────────────────────────────────────────────────────────
+VERDICT — negctl: PASS=7 ABORT=0 FAIL=0
+NEGCTL OK — the offline check is a real instrument: it fired as a failure
+the moment the corpse was kept alive by beats.
+──────────────────────────────────────────────────────────────────────────────

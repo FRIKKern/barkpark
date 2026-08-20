@@ -15,8 +15,20 @@ defmodule BarkparkWeb.GithubStatusController do
   (`github_sync_conflicts`, the outbound cursor, the `github_mirror` Oban queue).
 
     * no required params — the endpoint always answers
-    * optional `?dataset=<name>` filter — narrow the snapshot to one dataset;
-      blank/absent → the whole-fleet view
+    * the snapshot is ALWAYS pinned to the caller's OWN token dataset
+      (`conn.assigns.api_token.dataset`, default `"production"`) — D18. This is
+      the flat `:token` bucket (`[:api, :require_token]`), whose `:api`
+      AssignDefaultScope seeds `current_workspace` to the DEFAULT regardless of
+      the bearer, so a scope helper would read that Default, not the token — the
+      token's own `dataset` string is the only trustworthy per-caller scope here.
+    * a `?dataset=<name>` param can only ever RESTATE the token's own dataset; a
+      blank OR a foreign dataset can NOT widen the read past the bearer's scope.
+      (A token owns exactly one dataset, so there is nothing narrower to select.)
+
+  True per-workspace isolation (a workspace_id column on the conflict/cursor
+  state) is a net-new schema change tracked separately as
+  `github-bridge-w9-health-workspace-isolation`; this endpoint closes the
+  whole-fleet dataset leak with a string-scope constraint only.
 
   ## Status mapping
 
@@ -44,11 +56,30 @@ defmodule BarkparkWeb.GithubStatusController do
 
   @doc """
   Return the current GitHub sync-health snapshot. Read-only — see the moduledoc.
-  Accepts an optional `dataset` query param; blank/absent means the whole fleet.
+
+  The snapshot is pinned to the caller's OWN token dataset (D18): a blank or
+  foreign `?dataset=` can never widen the read past the bearer's scope.
   """
   def status(conn, params) do
-    dataset = blank_to_nil(Map.get(params, "dataset"))
-    json(conn, %{ok: true, health: status_fun().(dataset)})
+    requested = blank_to_nil(Map.get(params, "dataset"))
+    json(conn, %{ok: true, health: status_fun().(effective_dataset(conn, requested))})
+  end
+
+  # Constrain the effective dataset to the bearer's OWN token dataset (D18) so a
+  # blank or foreign `?dataset=` cannot widen a status read to whole-fleet
+  # health/conflicts. On the flat `:token` bucket `RequireToken` always assigns
+  # `:api_token`, whose `:dataset` defaults to "production" — so this is the
+  # trustworthy per-caller scope (unlike the `:api`-seeded Default workspace,
+  # which `ScopeHelpers.scope_opts/1` would read and leak past). A token whose
+  # dataset is somehow nil/blank pins to "production" (the schema default),
+  # NEVER to the caller's param. Only when there is no token at all (a direct
+  # controller unit call outside the pipeline) does the requested param stand.
+  defp effective_dataset(conn, requested) do
+    case conn.assigns[:api_token] do
+      %{dataset: ds} when is_binary(ds) and ds != "" -> ds
+      %{} -> "production"
+      _ -> requested
+    end
   end
 
   # Health seam: overridable in test via app env, else the real module. The

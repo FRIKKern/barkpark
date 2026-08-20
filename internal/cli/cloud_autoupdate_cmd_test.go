@@ -160,7 +160,11 @@ func TestAutoupdateNotFoundMapsExit(t *testing.T) {
 }
 
 func TestAutoupdateInvalidMapsUsage(t *testing.T) {
-	autoupdateServer(t, 422, `{"error":"invalid"}`)
+	// The real control plane emits the NESTED {"error":{"code":"invalid"}} shape
+	// on this route (not the flat {"error":"invalid"} string) — this fixture
+	// must match production or the test is vacuous (proven pre-fix: it failed
+	// with exitGeneric because routeError couldn't decode the nested body).
+	autoupdateServer(t, 422, `{"error":{"code":"invalid"}}`)
 	_, _, code := runAutoupdate(t, "table", "pin", testInstanceID, "bad")
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want exitUsage", code)

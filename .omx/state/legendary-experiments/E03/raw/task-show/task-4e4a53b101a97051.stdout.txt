@@ -1,0 +1,153 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "Control plane deploys the template to Vercel with all bootstrap env values set, behind a VercelClient seam with a fake (503 feature_not_configured when unwired)",
+          "evidence": "PR #1168 merged 2026-07-05: Vercel.Client seam (Fake/Real over verified-TLS httpc), 19 Elixir tests incl. the 503 gate",
+          "met": true
+        },
+        {
+          "criterion": "Ready screen offers Claim this deployment when configured; the old /new/clone handoff remains as fallback",
+          "evidence": "PR #1168: vercelClaimHtml renders one-click button/claim link when configured, clone-URL anchor when not; 4 SPA builder pins",
+          "met": true
+        },
+        {
+          "criterion": "Transfer code minted per launch; claim URL verified end-to-end on a real Vercel account",
+          "evidence": "Code path built + fake-verified; real-account E2E blocked on the human gate (VERCEL_PLATFORM_TOKEN in cloud/.env on barkpark-cp)",
+          "met": false
+        },
+        {
+          "criterion": "Secrets never appear in any URL or logged Title/Cmd",
+          "evidence": "PR #1168: env values travel only in the authenticated project-create body; claim code Vault-encrypted at rest; 502 detail is a bounded inspect of credential-free tuples",
+          "met": true
+        }
+      ],
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "The /new ready screen hands off to vercel.com/new/clone, whose form can only prefill env NAMES — the user must paste all 6 values (BARKPARKAPIURL/TOKEN/WORKSPACE/PROJECT/DATASET/WEBHOOKSECRET) by hand, and values can never ride the URL (TOKEN + WEBHOOKSECRET are secrets)."
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Lifecycle: open. 3 of 4 acceptance criteria are currently proven."
+              }
+            ],
+            "id": "state-copy",
+            "title": "Task status",
+            "tone": "info",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "id": "done-list",
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "Control plane deploys the template to Vercel with all bootstrap env values set, behind a VercelClient seam with a fake (503 featurenotconfigured when unwired) — proven"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Ready screen offers Claim this deployment when configured; the old /new/clone handoff remains as fallback — proven"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Transfer code minted per launch; claim URL verified end-to-end on a real Vercel account — remaining"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Secrets never appear in any URL or logged Title/Cmd — proven"
+                }
+              ]
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ],
+        "version": 1
+      },
+      "description": "The /new ready screen hands off to vercel.com/new/clone, whose form can only prefill env NAMES — the user must paste all 6 values (BARKPARK_API_URL/TOKEN/WORKSPACE/PROJECT/DATASET/WEBHOOK_SECRET) by hand, and values can never ride the URL (TOKEN + WEBHOOK_SECRET are secrets). Replace with Vercel's Claim Deployments platform flow: after bootstrap, the control plane deploys the template via the Vercel API with ALL env values already set (POST /files + POST /deployments, or repo-linked), mints a transfer code (POST /projects/:id/transfer-request, 24h validity), and the ready screen shows a 'Claim this deployment' button (vercel.com/claim-deployment?code=...&returnUrl=...). User clicks, picks their team, receives the fully configured live project — zero pasting. Keep the existing /new/clone button as fallback when the platform token is absent (503 feature_not_configured pattern, mirroring the GitHub App seam). HUMAN GATE: a Vercel access token for the control plane account must be created and wired into cloud/.env + compose passthrough before this activates. Interim quick win (optional first slice): per-value copy buttons on the ready screen's env block so each Vercel field is one click.",
+      "github": {
+        "issue": 2720,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_rev": "17ab2c7387b87a706881096f4ac9c81c"
+      },
+      "kind": "task",
+      "labels": [
+        "cloud",
+        "dx",
+        "deploy-button",
+        "vercel"
+      ],
+      "lifecycle_status": "open",
+      "priority": 2
+    },
+    "criteria_progress": {
+      "met": 3,
+      "total": 4
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "task-4e4a53b101a97051",
+    "execution_policy": null,
+    "id": "47e19cef-911a-49d1-ba82-36ee2a90a419",
+    "inserted_at": "2026-07-05T17:46:27.959271Z",
+    "kind": "task",
+    "labels": [
+      "cloud",
+      "dx",
+      "deploy-button",
+      "vercel"
+    ],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": null,
+    "priority": 2,
+    "rev": "5e3de363f7c16f98109cc0de613d1e24",
+    "status": "published",
+    "title": "Zero-paste Vercel handoff: claim-deployment flow with env prefilled server-side",
+    "type": "task",
+    "updated_at": "2026-07-12T11:15:44.575130Z"
+  },
+  "ok": true
+}

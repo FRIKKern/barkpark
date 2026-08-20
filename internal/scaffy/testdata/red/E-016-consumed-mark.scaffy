@@ -1,0 +1,10 @@
+# expect: E-016 9
+DIRECTION "remove"
+VARIABLE 1 "WidgetName" TITLE "t" DESCRIPTION "d" EXAMPLES "W"
+IN "internal/widgets/registry.go"
+REMOVE
+::: widget registration :::
+	registry["{{.widget-name}}"] = w{}
+::: widget registration :::
+MARK "registry-{{.widget-name}}"
+ASLONG FILE CONTAIN "= w{}"

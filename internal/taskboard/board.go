@@ -25,6 +25,15 @@ const (
 	lifeDone       = "done"
 	lifeClosed     = "closed"
 	lifeCancelled  = "cancelled"
+	// The pre-open thought states (task-lifecycle-visibility epic): a candidate the
+	// strategizer just named (considering) and one under active investigation
+	// (researching). Neither is claimable — only "open" is (readiness stays derived,
+	// never stored). They sink to childBand's unknown tier (just after open) until a
+	// later slice teaches the bands their pre-open rank; the vocabulary is defined
+	// here now so TestLifecycleConstsMatchGeneratedTokens stays in lockstep with the
+	// generated GenLifecycleOrder.
+	lifeConsidering = "considering"
+	lifeResearching = "researching"
 )
 
 // kindGoal roots an epic. A goal always heads its own section even with no
@@ -281,6 +290,41 @@ func sectionActivity(tasks []Task, evAt map[string]time.Time) time.Time {
 	return la
 }
 
+// recomputeInProgress returns a COPY of a Snapshot's lifecycle Counts with ONLY
+// the in_progress bucket rewritten to the true number of in_progress rows in
+// s.Tasks — every other bucket, and Snapshot.Counts itself, is left untouched
+// (copy-on-write: the returned map is fresh, so the caller's Snapshot cache is
+// never mutated).
+//
+// WHY (charter wave-22 D124): Snapshot has no version field, so a first-paint
+// cache written by an older binary can carry a stale/twin-doubled in_progress
+// prime count. BuildBoard copies Counts verbatim and momentumLine paints
+// Counts["in_progress"] unconditionally, so a cache-primed first frame could
+// claim "42 in flight" while the NOW band — drawn from s.Tasks — shows 2: a
+// dishonest glyph on the very first paint. Recomputing THIS ONE bucket from the
+// rows actually in hand makes the header agree with what is shown.
+//
+// Only in_progress is recomputed: len(s.Tasks) is clamped at 1000, so ready /
+// done / the rest MUST stay the server's corpus totals — recomputing them from
+// the clamped list would break the honest "showing N of M" disclosure
+// (summedLifecycleCounts) by comparing the clamped population against itself.
+// On a live fetch this is a no-op: prime's in_progress count already equals the
+// in_progress rows composeSnapshot assembled.
+func recomputeInProgress(s Snapshot) map[string]int {
+	n := 0
+	for _, t := range s.Tasks {
+		if t.Lifecycle == lifeInProgress {
+			n++
+		}
+	}
+	out := make(map[string]int, len(s.Counts)+1)
+	for k, v := range s.Counts {
+		out[k] = v
+	}
+	out[lifeInProgress] = n
+	return out
+}
+
 // BuildBoard is the ENTIRE zero-config organization policy for the portrait
 // task TUI. It is pure: the same (snapshot, repo, now) always yields the same
 // Board, and it never reads the wall clock — the now parameter is the only
@@ -309,7 +353,7 @@ func sectionActivity(tasks []Task, evAt map[string]time.Time) time.Time {
 //     updated-desc mix, so the live rows sit above the just-closed tail.
 func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	board := Board{
-		Counts:           s.Counts,
+		Counts:           recomputeInProgress(s),
 		Events:           s.Events,
 		ReadyHeadClamped: s.ReadyHeadClamped,
 		TaskCount:        len(s.Tasks),

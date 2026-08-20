@@ -21,6 +21,33 @@ defmodule Barkpark.Content.Document do
     field :content, :map, default: %{}
     field :rev, :string
 
+    # DB-GENERATED STORED scalars mirrored out of `content` for the search path
+    # (search-latency slice b, migration 20260718090000). Reading these narrow
+    # text columns avoids detoasting the ~88KB `content` jsonb per candidate row
+    # in the slug-ILIKE match arm + the author/category facet GROUP BYs. They are
+    # `GENERATED ALWAYS AS (...) STORED` in Postgres — write-only-by-the-DB — so
+    # they are intentionally ABSENT from `changeset/2`'s cast list; the write path
+    # never sets them, and any attempt would be rejected by Postgres. Loaded on
+    # every read; populated for existing rows by the migration's table rewrite.
+    field :slug_text, :string, read_after_writes: true
+    field :author_text, :string, read_after_writes: true
+    field :category_text, :string, read_after_writes: true
+
+    # DB-GENERATED STORED jsonb mirroring the doc's `content.tags` array for the
+    # ranking ORDER BY's weighted-tag boost (search-latency slice d, migration
+    # 20260718100000). It is the VERBATIM `CASE WHEN jsonb_typeof(content->'tags')
+    # = 'array' THEN content->'tags' ELSE '[]'::jsonb END` the boost subquery used
+    # to evaluate inline — materializing it lets the per-candidate boost read a
+    # KB-sized array instead of DETOASTing the ~8.5KB–88KB `content` per matched
+    # row (prod: 2,126 → 0 SubPlan buffers, 47 → 1.6 ms).
+    #
+    # `virtual: true` — like `search_vector` (also GENERATED STORED), it is a real
+    # DB column that Ecto NEVER SELECTs into the struct: it is read ONLY through
+    # the ORDER BY `fragment("?.tags_meta", d)`. So it ships zero payload bytes and
+    # cannot trip the struct-equality parity that forced `read_after_writes` on the
+    # scalar facet columns above.
+    field :tags_meta, :any, virtual: true
+
     # Row/ownership ACL (Phase 4, core-auth). The user who owns this row on an
     # `owner_scoped: true` type. NULL = unowned (visible to everyone). Stamped on
     # the write path ONLY for owner_scoped types from the acting user's id; a
@@ -39,6 +66,8 @@ defmodule Barkpark.Content.Document do
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
+    belongs_to :current_revision, Barkpark.Content.Revision, type: :binary_id
+    belongs_to :released_revision, Barkpark.Content.Revision, type: :binary_id
 
     # W2 additive seam. Association is `:dataset_entity` because the legacy
     # `dataset` STRING field still owns the `:dataset` name (dual presence).
@@ -73,5 +102,29 @@ defmodule Barkpark.Content.Document do
     |> unique_constraint([:doc_id, :type, :dataset_id],
       name: :documents_doc_id_type_dataset_id_index
     )
+    # FK-abort containment (Felix W17). `workspace_id`, `project_id`, and
+    # `dataset_id` are real Postgres foreign keys —
+    # `references(:workspaces/:projects/:datasets, on_delete: :nilify_all)` from
+    # migrations 20260527110100_add_tenancy_columns and
+    # 20260527131000_add_dataset_id_columns, with Ecto-default constraint names
+    # `documents_<col>_fkey`. `owner_id` is NOT this class — it is a plain
+    # `:binary_id` column with no `references()` (migration
+    # 20260629150300_add_owner_id_to_documents) — so it earns no constraint.
+    #
+    # WHO RAISES: both public write routes — POST /v1/data/mutate/:dataset
+    # (MutateController) and POST /api/documents/:type (LegacyController) — flow
+    # through `Content.Writer.upsert_document`/`create_document`, which build this
+    # changeset and call the NON-BANG `Repo.insert()`. On a concurrently-deleted
+    # scope (an admin deletes the workspace/project/dataset between write-token
+    # scope resolution and the insert — a TOCTOU race; per D87 a DB-resolved id
+    # gone stale counts like raw input) the insert raises a raw
+    # `Ecto.ConstraintError` (a 500) instead of returning `{:error, changeset}`.
+    #
+    # RED vs GREEN: without these calls a bad/stale scope ref RAISES out of the
+    # writer (500); with them Ecto translates the Postgres rejection into
+    # `{:error, %Ecto.Changeset{}}` carrying `{"does not exist", _}` on the col.
+    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:dataset_id)
   end
 end

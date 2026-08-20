@@ -1,8 +1,9 @@
 defmodule Barkpark.Tasks.WorkDigest do
   @moduledoc false
   # Semantic "was I edited under my claim?" digest over a task's WORK-DEFINING
-  # fields — `title`, `content.brief`, `content.description`, and
-  # `content.acceptance_criteria`.
+  # fields — `title`, `content.brief`, `content.description`,
+  # `content.acceptance_criteria`, and the optional `content.execution_policy`
+  # and `content.queue_gate` contracts.
   #
   # A claim stamps `content.claim.work_digest` (a short combined hex) plus a
   # per-field companion map `content.claim.work_field_digests`. Close (on the
@@ -27,7 +28,7 @@ defmodule Barkpark.Tasks.WorkDigest do
   # text still trips the fence (the list keeps its order and length).
 
   # The work-defining fields, in the order `changed_fields/3` reports them.
-  @fields ~w(title brief description acceptance_criteria)
+  @fields ~w(title brief description acceptance_criteria execution_policy queue_gate)
 
   @doc """
   Per-field digest map for a task read as `title` (the `documents.title` column)
@@ -42,6 +43,11 @@ defmodule Barkpark.Tasks.WorkDigest do
       "description" => hash(Map.get(content, "description")),
       "acceptance_criteria" => hash(criteria_texts(Map.get(content, "acceptance_criteria")))
     }
+    # Absent-field compatibility: legacy tasks and live claims keep their exact
+    # four-field digest. Optional policy/gate keys exist only when requested;
+    # adding/editing/removing either after claim still trips changed_fields/3.
+    |> maybe_put_execution_policy(content)
+    |> maybe_put_queue_gate(content)
   end
 
   def field_digests(title, _content), do: field_digests(title, %{})
@@ -77,6 +83,22 @@ defmodule Barkpark.Tasks.WorkDigest do
   end
 
   def changed_fields(_stored, _title, _content), do: @fields
+
+  defp maybe_put_execution_policy(digests, content) do
+    if Map.has_key?(content, "execution_policy") do
+      Map.put(digests, "execution_policy", hash(Map.get(content, "execution_policy")))
+    else
+      digests
+    end
+  end
+
+  defp maybe_put_queue_gate(digests, content) do
+    if Map.has_key?(content, "queue_gate") do
+      Map.put(digests, "queue_gate", hash(Map.get(content, "queue_gate")))
+    else
+      digests
+    end
+  end
 
   # D5: reduce each acceptance_criteria entry to its `criterion` string before
   # hashing. Order and length are preserved (reorder/add/remove still trip);

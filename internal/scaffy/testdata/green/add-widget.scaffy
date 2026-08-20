@@ -1,0 +1,108 @@
+# Synthetic add-direction fixture — exercises the full pinned grammar:
+# CREATE (incl. an empty fence = 0-byte file), INSERT AFTER FIRST/LAST,
+# REPLACE + REANCHOR, MARK / MARK VIRTUAL, SNIPPET/USE,
+# OPAQUE / SHAPE "ts14" / SUCCESSOR, ASSERT FILE EXISTS, ASSERT CMD TIER ci.
+COMMAND "add-widget"
+DESCRIPTION "Scaffold a widget across surfaces (synthetic fixture)."
+LAST_UPDATED "16-07-2026-10-00-00"
+DOMAIN "barkpark"
+TAGS "scaffy, synthetic"
+CONCEPT "widget"
+VARIANT "default"
+DIRECTION "add"
+
+VARIABLE 1 "WidgetName" TITLE "Name your widget" DESCRIPTION "Pascal name of the widget." EXAMPLES "Timeline"
+VARIABLE 2 "Ts" OPAQUE SHAPE "ts14" TITLE "Migration timestamp" DESCRIPTION "14-digit UTC timestamp." EXAMPLES "20260716100000"
+VARIABLE 3 "CountBefore" OPAQUE TITLE "Case count before" DESCRIPTION "Current fixture count." EXAMPLES "42"
+VARIABLE 4 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "Case count after" DESCRIPTION "Fixture count after the add." EXAMPLES "43"
+
+SNIPPET widget-div
+::: widget-div shell :::
+<div class="bp-{{.widget-name}}"></div>
+::: widget-div shell :::
+
+CREATE FILE IF ABSENT "internal/widgets/{{.widget_name}}.go"
+::: {{.widget-name}} module :::
+package widgets
+
+// {{.WidgetName}} renders the {{.widget-name}} widget.
+type {{.WidgetName}} struct{}
+::: {{.widget-name}} module :::
+
+CREATE FILE IF ABSENT "internal/widgets/{{.widget_name}}/.gitkeep"
+::: empty gitkeep :::
+::: empty gitkeep :::
+
+CREATE FILE IF ABSENT "web/widgets/{{.widget-name}}.html"
+USE widget-div
+
+CREATE FILE IF ABSENT "api/priv/repo/migrations/{{.Ts}}_add_{{.widget_name}}.exs"
+::: {{.widget-name}} migration :::
+defmodule Barkpark.Repo.Migrations.Add{{.WidgetName}} do
+  use Ecto.Migration
+
+  def change do
+  end
+end
+::: {{.widget-name}} migration :::
+
+IN "internal/widgets/registry.go"
+### Register {{.widget-name}} in the widget registry.
+INSERT AFTER FIRST
+::: registry head anchor :::
+	registry["heading"] = headingWidget{}
+::: registry head anchor :::
+WITH
+::: {{.widget-name}} registration :::
+	// scaffy:add-widget {{.WidgetName}} MARK:registry-{{.widget-name}}
+	registry["{{.widget-name}}"] = {{.widgetName}}Widget{}
+::: {{.widget-name}} registration :::
+MARK "registry-{{.widget-name}}"
+
+IN "web/widgets/index.css"
+INSERT AFTER LAST
+::: css tail anchor :::
+.bp-heading { display: block; }
+::: css tail anchor :::
+WITH
+::: {{.widget-name}} css :::
+/* scaffy:add-widget MARK:css-{{.widget-name}} */
+.bp-{{.widget-name}} { display: block; }
+::: {{.widget-name}} css :::
+MARK "css-{{.widget-name}}"
+
+IN "api/config/config.exs"
+### Comma-list append per A3: re-emit the last tuple WITH a separator,
+### then REANCHOR later runs at the planted mark family (D21).
+REPLACE
+::: cron tail anchor :::
+       {"* * * * *", Barkpark.Workers.Tail}
+::: cron tail anchor :::
+WITH
+::: {{.widget-name}} cron :::
+       {"* * * * *", Barkpark.Workers.Tail},
+       # scaffy:add-widget {{.WidgetName}} MARK:cron-{{.widget-name}}
+       {"0 * * * *", Barkpark.Workers.{{.WidgetName}}}
+::: {{.widget-name}} cron :::
+MARK "cron-{{.widget-name}}"
+REANCHOR "cron-"
+ASLONG FILE DONT CONTAIN "MARK:cron-{{.widget-name}}"
+
+IN "js/widgets/widgets.test.ts"
+### The count bump has no plantable text — a VIRTUAL mark + guard (D24).
+REPLACE
+::: count anchor :::
+  expect(cases).toHaveLength({{.CountBefore}})
+::: count anchor :::
+WITH
+::: count bump :::
+  expect(cases).toHaveLength({{.CountAfter}})
+::: count bump :::
+MARK VIRTUAL "js-count-{{.widget-name}}"
+ASLONG FILE DONT CONTAIN "toHaveLength({{.CountAfter}})"
+
+ASSERT FILE "internal/widgets/registry.go" CONTAINS "MARK:registry-{{.widget-name}}"
+ASSERT FILE "internal/widgets/{{.widget_name}}.go" EXISTS
+ASSERT FILE "api/config/config.exs" CONTAINS "MARK:cron-{{.widget-name}}"
+ASSERT CMD "CC=/usr/bin/clang go build ./internal/widgets/"
+ASSERT CMD "cd api && mix test test/widgets_test.exs" TIER ci

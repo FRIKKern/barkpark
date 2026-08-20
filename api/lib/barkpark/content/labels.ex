@@ -39,8 +39,10 @@ defmodule Barkpark.Content.Labels do
   by `type` when `ref_type` is non-empty. The published id is preferred (a
   reference value stores the published id); both the published row and its
   `drafts.` twin satisfy the `doc_id IN (...)` clause, so an unpublished target
-  still resolves. Used by the View-mode renderer to show the title instead of
-  the raw id.
+  still resolves — UNLESS `opts[:published_only]` is set (the anonymous/public
+  reader), in which case the `drafts.` twin is dropped and a draft-only target
+  degrades to the raw id rather than leaking a draft title. Used by the
+  View-mode renderer to show the title instead of the raw id.
 
   NEVER raises on a non-unique `doc_id`. When `ref_type` is empty there is no
   type narrowing, so the same `doc_id` can match several rows (e.g. `p1` exists
@@ -76,6 +78,20 @@ defmodule Barkpark.Content.Labels do
     query =
       if is_binary(ref_type) and ref_type != "" do
         where(query, [d], d.type == ^ref_type)
+      else
+        query
+      end
+
+    # D5 published-perspective gate (mirrors Query.maybe_published_only/2): an
+    # anonymous/public caller passes `published_only: true` so a `drafts.`-only
+    # target NEVER resolves its title (the `drafts.` twin is dropped and the
+    # published row must actually be published). The reference then degrades to
+    # the raw id instead of leaking a draft title. Absent/false ⇒ query
+    # untouched, so the write/cache render path keeps its explicit behaviour.
+    query =
+      if Keyword.get(opts, :published_only, false) do
+        prefix = DraftId.drafts_prefix() <> "%"
+        where(query, [d], d.status == "published" and not like(d.doc_id, ^prefix))
       else
         query
       end
@@ -119,9 +135,17 @@ defmodule Barkpark.Content.Labels do
   # `field-reference` row shows the referenced doc's TITLE instead of the raw
   # id, and the `codelist` row shows the selected code's LABEL instead of the
   # raw code; everything else in `Render` stays pure.
-  def render_opts(dataset) do
+  def render_opts(dataset), do: render_opts(dataset, [])
+
+  @doc false
+  # Scope-aware twin used by every persisted block render. The legacy arity
+  # above intentionally remains explicit-global for callers whose data model is
+  # global; scoped Paper/document writers bind reference resolution to the row
+  # they are rendering so a same-id document in another tenant cannot leak into
+  # a cached HTML projection.
+  def render_opts(dataset, scope) when is_list(scope) do
     %{
-      ref_resolver: fn value, ref_type -> reference_title(value, ref_type, dataset) end,
+      ref_resolver: fn value, ref_type -> reference_title(value, ref_type, dataset, scope) end,
       codelist_resolver: fn plugin, codelist_id, code ->
         codelist_label(plugin, codelist_id, code)
       end
@@ -134,8 +158,13 @@ defmodule Barkpark.Content.Labels do
   # so an article paper's body_html cache (and delta fragments) come out in the
   # article palette. A nil / non-"article" style adds nothing → email default,
   # byte-unchanged from `render_opts/1`.
-  def paper_render_opts(dataset, "article"), do: Map.put(render_opts(dataset), :style, :article)
-  def paper_render_opts(dataset, _style), do: render_opts(dataset)
+  def paper_render_opts(dataset, style), do: paper_render_opts(dataset, style, [])
+
+  @doc false
+  def paper_render_opts(dataset, "article", scope),
+    do: Map.put(render_opts(dataset, scope), :style, :article)
+
+  def paper_render_opts(dataset, _style, scope), do: render_opts(dataset, scope)
 
   @doc false
   # Resolve the per-doc style marker for an upsert: an explicit `style` in attrs

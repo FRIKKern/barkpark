@@ -14,12 +14,40 @@ defmodule Barkpark.Tasks.Validation do
   (`lifecycle_statuses/0`, `kinds/0`) here so callers are unchanged.
   """
 
-  @lifecycle_statuses ~w(open in_progress blocked done cancelled)
+  # The five original states first (open in_progress blocked done cancelled),
+  # then the two thought states appended (considering researching). Order is
+  # load-bearing for readers that render a ladder; the append keeps every
+  # existing index stable. "OPEN MEANS READY" is held by construction — only
+  # open|blocked is claimable (`claimable_statuses/0` below, the ONE source the
+  # queue.ex/claim.ex allowlists derive from), and the two new states are
+  # simply not in that allowlist.
+  @lifecycle_statuses ~w(open in_progress blocked done cancelled considering researching)
+
+  # The claimability allowlist — which lifecycle states `ready` lists and
+  # `claim`/`claim_by_id` will take. `blocked` is claim-equivalent to `open`
+  # by DECISION (spd-b24 intended-soft ruling): blocking is advisory metadata,
+  # not a hard primitive — the readiness gates (blocks-edges +
+  # content.dependencies) are what actually hold work back.
+  @claimable_statuses ~w(open blocked)
   @kinds ~w(task)
 
-  @doc "The five lifecycle-status string values a task document may carry."
+  # The advertised `outcome.resolution` enum — mirrors the schema select
+  # options (schema.ex, task field "outcome" → "resolution"). Strict and
+  # always-on (charter D23): a present off-enum value — including "" — is
+  # rejected; absent/nil stays fine. No grandfathering: the guerrilla census
+  # found every live value already on-enum.
+  @outcome_resolutions ~w(shipped fixed partial wont_do duplicate superseded discarded)
+
+  alias Barkpark.Tasks.{ExecutionPolicy, QueueGate}
+
+  @doc "The seven lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
   def lifecycle_statuses, do: @lifecycle_statuses
+
+  # @canonical capability:task-claimable-statuses aka:ready,allowlist,open-blocked,claim-equivalent doc:docs/setup/TASK-SYSTEM.md
+  @doc "The lifecycle-status values a task may be claimed from (ready allowlist)."
+  @spec claimable_statuses() :: [String.t()]
+  def claimable_statuses, do: @claimable_statuses
 
   @doc "The `content.kind` discriminator values (only `task`)."
   @spec kinds() :: [String.t()]
@@ -39,12 +67,15 @@ defmodule Barkpark.Tasks.Validation do
 
   Shape-checked when present: `priority` (integer 0..4), `assignee`
   (string), `dependencies` (list of strings), `parent_id` (string),
-  `claim` (map) — plus the dossier fields: `description` / `design` /
+  `claim` (map), `engagement` (map — the thought-state object companion) —
+  plus the dossier fields: `description` / `design` /
   `design_doc` / `due_at` / `blocked_reason` / `close_reason` / `retro`
   (strings), `papers` / `attachments` (lists of strings), `labels` /
-  `history` (lists), `estimate` / `outcome` / `history_summary` (maps),
-  `worklog` / `acceptance_criteria` (lists of maps). Top-level shape only,
-  never sub-keys — the claim-map precedent.
+  `history` (lists), `estimate` / `history_summary` (maps), `outcome`
+  (map; its `resolution`, when present, must be on the advertised enum),
+  `worklog` / `acceptance_criteria` (lists of maps). `execution_policy` and
+  `queue_gate` are the two strict nested versioned contracts; other dossier
+  composites retain top-level-only shape checks.
   """
   @spec validate_task_content(map() | nil) :: :ok | {:error, map()}
   def validate_task_content(content), do: validate_kind_content("task", content)
@@ -99,6 +130,12 @@ defmodule Barkpark.Tasks.Validation do
     |> check_optional_string(content, "parent_id")
     |> check_optional_string_list(content, "dependencies")
     |> check_optional_map(content, "claim")
+    # Engagement companion map (task-lifecycle-visibility): the object a thought
+    # state carries — %{object: "research"|"build", holder, ts, note}. Thought is
+    # not contended work, so this is shape-only (top-level map), NO CAS epochs —
+    # the claim-map precedent. The honesty-lease TTL sweeper (separate slice)
+    # clears a stale engagement; validation only guards the shape.
+    |> check_optional_map(content, "engagement")
     # Dossier fields — shape-only-when-present, following the claim
     # precedent (top-level shape, NO sub-key enforcement). Sub-key
     # contracts live in the schema field descriptions (agent-facing,
@@ -125,7 +162,7 @@ defmodule Barkpark.Tasks.Validation do
     |> check_optional_list(content, "labels")
     |> check_optional_list(content, "history")
     |> check_optional_map(content, "estimate")
-    |> check_optional_map(content, "outcome")
+    |> check_outcome(content)
     # Land digest (task-obsession layer 3): what the task changed —
     # %{"prs","files","capability_slugs"}. Written at close; read by the CI
     # re-land check. Top-level shape only (map), per the claim precedent.
@@ -133,6 +170,8 @@ defmodule Barkpark.Tasks.Validation do
     |> check_optional_map(content, "history_summary")
     |> check_optional_map_list(content, "worklog")
     |> check_optional_map_list(content, "acceptance_criteria")
+    |> check_execution_policy(content)
+    |> check_queue_gate(content)
   end
 
   # ─── Per-field micro-validators ────────────────────────────────────────────
@@ -141,6 +180,9 @@ defmodule Barkpark.Tasks.Validation do
   # `Map.fetch` so a legitimately-present `false` is NOT masked by `||`
   # (which treats `false` as absent and lets an invalid value pass the
   # type check). `String.to_atom` is safe: keys are fixed literals here.
+  # Reachability: every call site passes a literal field name, so the atom table
+  # can only ever gain the fixed set spelled in this module — never a client key.
+  # sobelow_skip ["DOS.StringToAtom"]
   defp fetch(content, key) do
     case Map.fetch(content, key) do
       {:ok, v} -> v
@@ -235,6 +277,57 @@ defmodule Barkpark.Tasks.Validation do
 
       other ->
         Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
+    end
+  end
+
+  # `outcome` map with a validated `resolution` enum (charter D23). Top-level
+  # shape mirrors check_optional_map (kept separate — that helper has seven
+  # unrelated call sites); when the map carries a "resolution" (string key —
+  # HTTP content is string-keyed) the value must be on the advertised enum.
+  # Absent/nil resolution is fine; any present off-enum value — including
+  # `""` — rejects. Other keys (summary, commits, actual_size, …) stay
+  # shape-unchecked here, per the claim-map precedent.
+  defp check_outcome(errors, content) do
+    case fetch(content, "outcome") do
+      nil ->
+        errors
+
+      outcome when is_map(outcome) ->
+        case Map.get(outcome, "resolution") do
+          nil ->
+            errors
+
+          v when is_binary(v) ->
+            if v in @outcome_resolutions do
+              errors
+            else
+              Map.put(errors, "outcome", [
+                "resolution must be one of #{inspect(@outcome_resolutions)}, got #{inspect(v)}"
+              ])
+            end
+
+          other ->
+            Map.put(errors, "outcome", [
+              "resolution must be one of #{inspect(@outcome_resolutions)}, got #{inspect(other)}"
+            ])
+        end
+
+      other ->
+        Map.put(errors, "outcome", ["must be a map when set, got #{inspect(other)}"])
+    end
+  end
+
+  defp check_execution_policy(errors, content) do
+    case ExecutionPolicy.validate(fetch(content, "execution_policy")) do
+      :ok -> errors
+      {:error, policy_errors} -> Map.put(errors, "execution_policy", policy_errors)
+    end
+  end
+
+  defp check_queue_gate(errors, content) do
+    case QueueGate.validate(fetch(content, "queue_gate")) do
+      :ok -> errors
+      {:error, gate_errors} -> Map.put(errors, "queue_gate", gate_errors)
     end
   end
 end

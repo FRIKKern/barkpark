@@ -2,11 +2,14 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
   @moduledoc """
   Instance custom domains — the Registry half. Proves:
 
-    * `set_custom_host/2` — v1 format gate (exactly ONE label under the
-      platform zone), normalization (lowercase / trim / trailing dot), and the
-      cross-surface taken check: a Site domain, another barkpark's custom_host,
-      or a provisioning FQDN each → `{:error, :taken}` (re-setting your OWN
-      host is an idempotent no-op, not a conflict)
+    * `set_custom_host/2` — the platform format gate (exactly ONE label under
+      the platform zone), the V2 external-FQDN gate (any well-formed lowercase
+      customer FQDN; the apex / bare-IP shapes / shell-hostile junk all die at
+      validation), normalization (lowercase / trim / trailing dot), and the
+      cross-surface taken check: a Site domain, another barkpark's custom_host
+      (exact or, cross-team, as a parent of the new host), or ANOTHER row's
+      provisioning FQDN each → `{:error, :taken}` (re-setting your OWN host,
+      custom_host or url, is an idempotent no-op, not a conflict)
     * the attach_domain job queue — enqueue (one active per barkpark via the
       partial index), kind-filtered claim, succeed/fail with the
       deprovision-grade idempotency + claim-token fencing
@@ -16,7 +19,9 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
   use BarkparkCloud.DataCase, async: true
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
+  alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.Registry.{Barkpark, ProvisionJob}
+  alias BarkparkCloud.Usage.Sample
 
   @domain "gyldendal.barkpark.cloud"
 
@@ -35,6 +40,34 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       Registry.register_barkpark(team, Enum.into(attrs, %{name: "BP #{n}", slug: "bp-#{n}"}))
 
     bp
+  end
+
+  # A silence-only "ghost": url squats `host`, agent never phoned home, row is
+  # older than the 7-day abandonment window, no jobs. This is the shape the
+  # carve-out used to release on its own.
+  defp ghost_row(team, host) do
+    barkpark_fixture(team)
+    |> Ecto.Changeset.change(
+      url: "https://" <> host,
+      inserted_at: DateTime.add(DateTime.utc_now(), -30, :day)
+    )
+    |> Repo.update!()
+  end
+
+  defp with_admin_credential(bp) do
+    bp |> Ecto.Changeset.change(admin_token_encrypted: "ciphertext") |> Repo.update!()
+  end
+
+  defp with_usage_sample(bp, measured_at) do
+    Repo.insert!(%Sample{
+      barkpark_id: bp.id,
+      envelope: %{"meters" => %{}},
+      measured_at: measured_at
+    })
+  end
+
+  defp with_active_subscription(team) do
+    Repo.insert!(%Subscription{team_id: team.id, plan: "supporter", status: "active"})
   end
 
   ## set_custom_host/2
@@ -96,6 +129,66 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       assert {:error, :taken} = Registry.set_custom_host(claimer, "occupied.barkpark.cloud")
     end
 
+    test "the LIVE shape (silent, old, no job, credential + sample + subscription) is NOT releasable" do
+      # The exact shape measured on live data 2026-08-08: last_seen_at NULL,
+      # inserted_at far past the abandonment cutoff, no active job — yet the
+      # platform still holds a decryptable admin token for it, sampled it 5
+      # minutes ago, and the owning team is on an ACTIVE subscription. The
+      # silence-only carve-out released this name; three AND-legs now refuse.
+      team = team_fixture()
+      ghost = ghost_row(team, "still-dialled.barkpark.cloud")
+      with_admin_credential(ghost)
+      with_usage_sample(ghost, DateTime.add(DateTime.utc_now(), -5, :minute))
+      with_active_subscription(team)
+
+      assert {:held, :admin_credential, why} =
+               Registry.provisioning_fqdn_claim("still-dialled.barkpark.cloud")
+
+      assert why =~ "decryptable admin token"
+
+      claimer = barkpark_fixture(team_fixture())
+
+      assert {:error, :taken} = Registry.set_custom_host(claimer, "still-dialled.barkpark.cloud")
+    end
+
+    test "MUTATION per leg: dropping one leg at a time shows exactly which leg still refuses" do
+      team = team_fixture()
+      ghost = ghost_row(team, "mutate.barkpark.cloud")
+      ghost = with_admin_credential(ghost)
+      with_usage_sample(ghost, DateTime.add(DateTime.utc_now(), -5, :minute))
+      with_active_subscription(team)
+
+      host = "mutate.barkpark.cloud"
+
+      # All three legs present → the credential leg (the hard block) refuses.
+      assert {:held, :admin_credential, _} = Registry.provisioning_fqdn_claim(host)
+
+      # Drop the credential → the recent-sample leg still refuses.
+      ghost |> Ecto.Changeset.change(admin_token_encrypted: nil) |> Repo.update!()
+      assert {:held, :recent_usage_sample, why} = Registry.provisioning_fqdn_claim(host)
+      assert why =~ "sampled by the usage worker within the last 24h"
+
+      # Drop the sample too → the billing leg still refuses.
+      Repo.delete_all(from(s in "usage_samples"))
+      assert {:held, :active_subscription, why} = Registry.provisioning_fqdn_claim(host)
+      assert why =~ "live subscription"
+
+      # Drop the subscription too → NOW it is a genuine ghost and releases.
+      Repo.delete_all(from(s in Subscription, where: s.team_id == ^team.id))
+      assert :free = Registry.provisioning_fqdn_claim(host)
+
+      claimer = barkpark_fixture(team_fixture())
+      assert {:ok, %Barkpark{custom_host: ^host}} = Registry.set_custom_host(claimer, host)
+    end
+
+    # The two boundary negatives that used to sit here (a usage sample older
+    # than the window, a cancelled subscription) now live in the `:free` case of
+    # registry_name_claim_census_test.exs, alongside the per-leg census that
+    # pins the window and the live-status list themselves. The two tests KEPT
+    # above earn their place: `the LIVE shape …` is the end-to-end path
+    # (claim → set_custom_host → {:error, :taken}), and `MUTATION per leg …` is
+    # the priority CASCADE across legs, which no single-leg case can express.
+
     test "a young silent row keeps the claim (still provisioning, not yet abandoned)" do
       young = barkpark_fixture(team_fixture())
 
@@ -109,13 +202,11 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       assert {:error, :taken} = Registry.set_custom_host(claimer, "fresh.barkpark.cloud")
     end
 
-    test "v1 format gate: anything but ONE label under the platform zone → {:error, changeset}" do
+    test "platform format gate: anything under the zone but ONE label → {:error, changeset}" do
       bp = barkpark_fixture(team_fixture())
 
       for bad <- [
-            # foreign zone — arbitrary customer domains are a later wave
-            "gyldendal.example.com",
-            # two labels under the zone
+            # two labels under the zone — never claimable, we own that DNS
             "a.b.barkpark.cloud",
             # the bare apex
             "barkpark.cloud",
@@ -134,6 +225,80 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       end
 
       assert Registry.get_barkpark(bp.id).custom_host == nil
+    end
+
+    test "V2 external FQDN: a well-formed customer domain persists, ask-gate approves, dns label is nil" do
+      bp = barkpark_fixture(team_fixture())
+
+      refute Registry.domain_registered?("barkpark.jarl.no")
+
+      # The SAME normalization as platform hosts: case, whitespace, trailing dot.
+      assert {:ok, %Barkpark{custom_host: "barkpark.jarl.no"} = bp} =
+               Registry.set_custom_host(bp, "  Barkpark.Jarl.No. ")
+
+      assert Registry.domain_registered?("barkpark.jarl.no")
+      assert Registry.domain_registered?("BARKPARK.jarl.no.")
+
+      # No platform DNS halves for an external host — the customer owns DNS.
+      assert Barkpark.custom_host_label(bp) == nil
+      refute Barkpark.platform_custom_host?(bp.custom_host)
+      assert Barkpark.platform_custom_host?("gyldendal.barkpark.cloud")
+    end
+
+    test "V2 external format gate: malformed / hostile FQDNs → {:error, changeset}" do
+      bp = barkpark_fixture(team_fixture())
+
+      overlong =
+        String.duplicate(String.duplicate("a", 63) <> ".", 4) |> String.trim_trailing(".")
+
+      for bad <- [
+            # a single label is not a customer FQDN
+            "intranet",
+            # bare-IP shape (numeric TLD) — never a Caddy vhost
+            "203.0.113.9",
+            # shell/Caddyfile-hostile junk
+            "foo.bar;rm -rf",
+            "$(x).evil.com",
+            "`x`.evil.com",
+            # unicode / uppercase-after-normalization is fine, raw punycode-less unicode is not
+            "bärkpark.jarl.no",
+            # malformed labels
+            "-bad.jarl.no",
+            "bad-.jarl.no",
+            "a..no",
+            "foo_bar.jarl.no",
+            "foo bar.jarl.no",
+            # over the 63-char label cap / the 253-char FQDN cap
+            String.duplicate("a", 64) <> ".jarl.no",
+            overlong <> ".no"
+          ] do
+        assert {:error, %Ecto.Changeset{}} = Registry.set_custom_host(bp, bad),
+               "expected #{inspect(bad)} to be rejected"
+      end
+
+      assert Registry.get_barkpark(bp.id).custom_host == nil
+    end
+
+    test "V2 suffix guard: a host under a DIFFERENT team's custom host → :taken; under your own team's → ok" do
+      owner_team = team_fixture()
+      owner = barkpark_fixture(owner_team)
+      assert {:ok, _} = Registry.set_custom_host(owner, "barkpark.jarl.no")
+
+      # Another team cannot nest under jarl.no's attached host…
+      intruder = barkpark_fixture(team_fixture())
+      assert {:error, :taken} = Registry.set_custom_host(intruder, "sub.barkpark.jarl.no")
+
+      # …but the SAME team can hang a second instance under its own host.
+      sibling = barkpark_fixture(owner_team)
+      assert {:ok, _} = Registry.set_custom_host(sibling, "sub2.barkpark.jarl.no")
+    end
+
+    test "V2 exact-match taken: another barkpark's external custom_host → :taken" do
+      other = barkpark_fixture(team_fixture())
+      assert {:ok, _} = Registry.set_custom_host(other, "barkpark.jarl.no")
+
+      bp = barkpark_fixture(team_fixture())
+      assert {:error, :taken} = Registry.set_custom_host(bp, "barkpark.jarl.no")
     end
 
     test "taken by a Site domain → {:error, :taken}" do
@@ -159,7 +324,7 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       assert {:ok, %Barkpark{custom_host: @domain}} = Registry.set_custom_host(other, @domain)
     end
 
-    test "taken by a provisioning FQDN (any barkpark's url) → {:error, :taken}" do
+    test "taken by ANOTHER barkpark's provisioning FQDN (url) → {:error, :taken}; your OWN url is attachable" do
       # A clean go-live claims gyldendal.barkpark.cloud as its PRIMARY url.
       {:ok, live} = Registry.register_managed_barkpark(team_fixture(), "Gyldendal", "gyldendal")
       assert live.url == "https://" <> @domain
@@ -167,8 +332,13 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       bp = barkpark_fixture(team_fixture())
       assert {:error, :taken} = Registry.set_custom_host(bp, @domain)
 
-      # Including the instance's OWN primary FQDN — it never needs attaching.
-      assert {:error, :taken} = Registry.set_custom_host(live, @domain)
+      # But NOT its own: a row attaching the FQDN it already serves shadows
+      # nobody, and refusing it would break a legitimate re-attach. Full
+      # coverage of the url leg lives in registry_custom_host_test.exs.
+      assert {:ok, %Barkpark{custom_host: @domain}} = Registry.set_custom_host(live, @domain)
+
+      # Idempotent: the same self-attach again is still {:ok, …}, not a conflict.
+      assert {:ok, %Barkpark{custom_host: @domain}} = Registry.set_custom_host(live, @domain)
     end
   end
 

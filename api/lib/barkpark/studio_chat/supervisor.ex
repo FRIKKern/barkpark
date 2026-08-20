@@ -4,10 +4,16 @@ defmodule Barkpark.StudioChat.Supervisor do
 
   Owns the single-writer `SessionRegistry`, the `RecorderRegistry`, the
   `RuntimeSupervisor` (`DynamicSupervisor` the server-owned Recorders start
-  under), and the `Notifier` (per-session debounce ledger for needs-you mails).
-  Grouping them under one intermediate supervisor contains a crash in any of
-  these to this subtree, so it can no longer count against the top restart
-  budget shared with Repo/Oban/Endpoint.
+  under), the `AgentStateSweeper` (herd-layer staleness sweep, charter D42h — its
+  synchronous init sweep runs here, BEFORE the Endpoint starts, so it beats the
+  first request), the `BlockedSweeper` (herd-layer walk-away safety, charter
+  D57h–D59h — fires one debounced webhook per session blocked past its
+  workspace threshold, boot sweep + 60s re-arm beside `AgentStateSweeper`), and
+  the `FleetHub` (the herd fleet wire, charter D44h/D45h —
+  ONE subscription to the activity topic re-projected onto the fleet stream).
+  Grouping them under one intermediate supervisor contains a
+  crash in any of these to this subtree, so it can no longer count against the
+  top restart budget shared with Repo/Oban/Endpoint.
 
   Needs `Phoenix.PubSub` up first (Recorders rebroadcast frames on it) — started
   before this supervisor in `Barkpark.Application`.
@@ -24,9 +30,10 @@ defmodule Barkpark.StudioChat.Supervisor do
     children = [
       {Registry, keys: :unique, name: Barkpark.StudioChat.SessionRegistry},
       {Registry, keys: :unique, name: Barkpark.StudioChat.RecorderRegistry},
-      {DynamicSupervisor,
-       name: Barkpark.StudioChat.RuntimeSupervisor, strategy: :one_for_one},
-      Barkpark.StudioChat.Notifier
+      {DynamicSupervisor, name: Barkpark.StudioChat.RuntimeSupervisor, strategy: :one_for_one},
+      Barkpark.StudioChat.AgentStateSweeper,
+      Barkpark.StudioChat.BlockedSweeper,
+      Barkpark.StudioChat.FleetHub
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

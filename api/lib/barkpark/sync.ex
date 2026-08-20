@@ -51,9 +51,13 @@ defmodule Barkpark.Sync do
         workspace: workspace,
         project: project
       }) do
-    # workspace/project ride the ctx so the push transport addresses the SCOPED
-    # /w/<ws>/p/<proj> remote path — NOT the flat (Default-workspace) endpoint.
+    # workspace/project (slugs) ride the ctx so the push transport addresses the
+    # SCOPED /w/<ws>/p/<proj> remote path — NOT the flat (Default-workspace)
+    # endpoint. `workspace_id` is the resolved LOCAL id: the push cursor / doc-rev
+    # ledger / conflict tables are now keyed per-workspace, so every local ledger
+    # write is attributed to the configured workspace (never a NULL/global row).
     %{
+      workspace_id: resolve_workspace_id(workspace),
       source: source,
       dataset: dataset,
       url: url,
@@ -142,4 +146,17 @@ defmodule Barkpark.Sync do
   end
 
   defp resolve_scope(_settings), do: []
+
+  # The LOCAL workspace id for the configured slug — the per-workspace attribution
+  # key threaded through the push ledger tables. `nil` when no slug is configured
+  # or it does not resolve (push_active?/1 requires a real workspace, so the live
+  # push path always resolves; the nil path is for direct/test callers).
+  defp resolve_workspace_id(slug) when is_binary(slug) do
+    case Tenancy.get_workspace_by_slug(slug) do
+      %{id: ws_id} -> ws_id
+      _ -> nil
+    end
+  end
+
+  defp resolve_workspace_id(_slug), do: nil
 end

@@ -19,9 +19,105 @@ defmodule BarkparkWeb.ErrorJSONTest do
   test "renders 500 as a generic internal_error envelope with NO leaked detail" do
     assert %{error: env} = BarkparkWeb.ErrorJSON.render("500.json", %{})
     assert env.code == "internal_error"
-    # Generic builder text only — never an exception message / stack.
+    # No fault in scope at all (empty assigns) — the generic builder text, with
+    # no family suffix invented.
     assert env.message == "unknown error"
     refute Map.has_key?(env, :status)
+  end
+
+  # ── The fault FAMILY (the message), with the code held byte-identical ──────
+  #
+  # An operator reading a deploy log has to be able to tell a pool blip from a
+  # code defect. The family is the smallest disclosure that does that; the
+  # exception's own message, the inspected reason and the stack stay out.
+
+  test "names the exception module as the family for a raised error" do
+    assert %{error: env} =
+             BarkparkWeb.ErrorJSON.render("500.json", %{
+               kind: :error,
+               reason: %RuntimeError{message: "boom — secret detail"},
+               stack: []
+             })
+
+    assert env.code == "internal_error"
+    assert env.message == "unknown error (RuntimeError)"
+    refute env.message =~ "boom"
+    refute env.message =~ "secret"
+  end
+
+  test "names a nested exception module in full" do
+    assert %{error: env} =
+             BarkparkWeb.ErrorJSON.render("500.json", %{
+               kind: :error,
+               reason: %DBConnection.ConnectionError{message: "tcp recv: closed"},
+               stack: []
+             })
+
+    assert env.code == "internal_error"
+    assert env.message == "unknown error (DBConnection.ConnectionError)"
+    refute env.message =~ "tcp"
+  end
+
+  test "speaks an allowlisted exit head atom and never its payload" do
+    # `:exit` hands over a BARE TERM (no Exception.normalize), and the payload
+    # carries the GenServer.call argument list — caller data.
+    assert %{error: env} =
+             BarkparkWeb.ErrorJSON.render("500.json", %{
+               kind: :exit,
+               reason: {:timeout, {GenServer, :call, [:some_pool, {:checkout, "s3cret"}, 5000]}},
+               stack: []
+             })
+
+    assert env.code == "internal_error"
+    assert env.message == "unknown error (exit: timeout)"
+    refute env.message =~ "s3cret"
+    refute env.message =~ "GenServer"
+  end
+
+  test "degrades an unlisted exit reason to the bare word exit" do
+    assert %{error: env} =
+             BarkparkWeb.ErrorJSON.render("500.json", %{
+               kind: :exit,
+               reason: {:bad_return_value, %{token: "s3cret"}},
+               stack: []
+             })
+
+    assert env.message == "unknown error (exit)"
+    refute env.message =~ "s3cret"
+    refute env.message =~ "bad_return_value"
+  end
+
+  test "a thrown bare term yields no family at all" do
+    # A throw is arbitrary caller data end to end — there is no safe constant to
+    # name, and reading a struct field off it would raise inside the renderer.
+    assert %{error: env} =
+             BarkparkWeb.ErrorJSON.render("500.json", %{
+               kind: :throw,
+               reason: {:secret_token, "s3cret"},
+               stack: []
+             })
+
+    assert env.code == "internal_error"
+    assert env.message == "unknown error"
+  end
+
+  test "the code stays byte-identical internal_error across every fault kind" do
+    # The cloud deploy poller grants its retry grace on the CODE, never the
+    # message (BarkparkCloud.Sites.Deploy.transient_refusal?/1). Moving the code
+    # would turn that grace terminal — so the message is the ONLY thing that
+    # varies here.
+    faults = [
+      %{},
+      %{kind: :error, reason: %RuntimeError{message: "boom"}, stack: []},
+      %{kind: :exit, reason: {:timeout, {GenServer, :call, []}}, stack: []},
+      %{kind: :exit, reason: :killed, stack: []},
+      %{kind: :throw, reason: :nope, stack: []}
+    ]
+
+    for assigns <- faults do
+      assert %{error: %{code: code}} = BarkparkWeb.ErrorJSON.render("500.json", assigns)
+      assert code == "internal_error"
+    end
   end
 
   test "catch-all template collapses any other status to internal_error" do

@@ -25,14 +25,16 @@ defmodule BarkparkWeb.Studio.SheetGrid.Geometry do
     do: {min(c1, c2), max(c1, c2), min(r1, r2), max(r1, r2)}
 
   # Pure attr expressions for the template (tracked on @active/@anchor/
-  # @read_only — never re-marked by unrelated updates). The reader strips
-  # the active-cell/selection highlight — {0, 0} sits off the 1-based grid,
-  # so no cell matches.
-  def grid_sel(_active, _anchor, true), do: {0, 0, 0, 0}
-  def grid_sel(active, anchor, _read_only), do: selection_rect(active, anchor)
+  # @chrome — never re-marked by unrelated updates). These take the CHROME
+  # axis, not write capability: the `:reader` surface strips the active-cell
+  # and selection highlight — {0, 0} sits off the 1-based grid, so no cell
+  # matches — while every `:studio` viewer keeps a cursor to navigate with,
+  # write-capable or not.
+  def grid_sel(_active, _anchor, :reader), do: {0, 0, 0, 0}
+  def grid_sel(active, anchor, _chrome), do: selection_rect(active, anchor)
 
-  def grid_cursor(_active, true), do: {0, 0}
-  def grid_cursor(active, _read_only), do: active
+  def grid_cursor(_active, :reader), do: {0, 0}
+  def grid_cursor(active, _chrome), do: active
 
   # Excel's Ctrl/Cmd+Arrow data-edge jump, pure over the sparse A1-keyed cells
   # map. From a filled cell whose neighbour in `dir` is also filled: the run's

@@ -1,26 +1,27 @@
 <!-- doc-tier: agent | canonical-for: studio-ui | budget: 500tok -->
 # Studio (LiveView)
 
-`StudioLive` runs the multi-pane Studio at `/w/:ws/p/:proj/d/:dataset/studio` (flat `/studio/*` + legacy 302; `LiveScope` re-auths scope each patch).
+`StudioLive` runs panes at `/w/:ws/p/:proj/d/:dataset/studio` (flat `/studio/*` + legacy 302; `LiveScope` re-auths scope each patch).
 
-## Tiered desk — one server tree, gated display
-- **Tree** (`Structure.build`, also drives the Go TUI): MAIN top-level (Papers/Sheets/Tasks + content/taxonomy/settings, no wrapper) → collapsed **Plugins** node (subtree per ENABLED plugin) → **…Rest** census folder with honest counts (orphaned/ad-hoc types surface). Media → top-menu unless promoted.
-- **Placement + …Rest/Settings reject share ONE harvested `plugin_name → [owned types]` map** per build (`owned_schema_types/0`) — no hardcoded type lists.
-- **PaneBuilder renders the GATED tree** (`panes[0]`); nav resolves gated-first — a stale deep link is REVEALED via its nested Plugins/…Rest ancestors, falling back to the ungated tree when the type is absent (Media, disabled plugin).
+## Tiered desk — one tree, gated display
+- **Tree** (`Structure.build`, also drives the Go TUI): MAIN top-level → collapsed **Plugins** node (subtree per ENABLED plugin) → **…Rest** census folder, honest counts. Media → top-menu unless promoted.
+- **Placement + …Rest/Settings reject share ONE harvested `plugin_name → [owned types]` map** (`owned_schema_types/0`) — no hardcoded types.
+- **PaneBuilder renders the GATED tree** (`panes[0]`); a stale deep link is REVEALED via its Plugins/…Rest ancestors, else falls back to ungated.
 
-## Nav shell — one contract, every route
-- **Model**: ONE source — `@canonical capability:studio-nav-model` in `nav.ex`: baseline tabs + `Registry.collect_top_menu_entries`, order-then-label. `Studio.Nav` is DELETED.
-- **Gating = two axes**. admin: `StudioChrome.shares_admin?` (token OR account admin). plugin: `Enablement.effective(workspace_id)` — `nil` ws → declaration DEFAULTS (never show-all).
-- **Active state**: `current_path` set ONLY by StudioChrome `:handle_params`; ONE active entry.
+## Space-priority — role × priority × bucket
+- Panes carry `data-role` (`content` on all SIX `.editor-panel` roots, else nav) + `data-priority`; `html[data-width-bucket]` (wide/standard/narrow/phone at 1280/1024/640) stamped pre-paint by the head script.
+- `PaneBuilder.display_state/4` resolves `:full | :strip | :hidden` from those three. DERIVED — never on `Structure.Node` nor the `/v1/structure` wire.
+- Content pane WINS every squeeze: paper floor `calc(55ch + 80px)` behind `@container content (min-width: 720px)`, classic `48ch`; pinned by `measure_parity_test`.
 
-## Layout
-- Chrome at `lib/barkpark_web/studio/`; panes via PubSub.
-- **Workspace Settings is SCOPED**: `SettingsLive` at `/w/:ws/p/:proj/d/:ds/studio/settings` in `:scoped_admin_studio` (flat `/studio/settings` redirects there). Writes fail-closed — the URL-bound workspace is truth; a stamped-ws mismatch REFUSES with a flash, never silently retargets.
-- Styling: inline `<style>` in root.html.heex; `sheet` docs open `SheetGrid` (cap 500 rows).
+## Nav shell + layout
+- **Model**: ONE source — `@canonical capability:studio-nav-model` in `nav.ex`: baseline tabs + `Registry.collect_top_menu_entries`, order-then-label.
+- **Gating = two axes**. admin: `StudioChrome.shares_admin?`; plugin: `Enablement.effective(workspace_id)` — `nil` ws → declaration DEFAULTS, never show-all. `current_path` (`:handle_params`) marks ONE active entry.
+- Chrome at `lib/barkpark_web/studio/`; panes via PubSub; CSS inline in root.html.heex; `sheet` opens `SheetGrid` (500-row cap).
+- **Workspace Settings is SCOPED**: `SettingsLive` at `/w/:ws/p/:proj/studio/settings`; writes fail-closed, URL-bound workspace is truth.
 
 ## Code anchors
-- api/lib/barkpark_web/components/studio_components/nav.ex — def studio_tabs; @canonical capability:studio-nav-model
+- api/lib/barkpark_web/components/studio_components/nav.ex — def studio_tabs
 - api/lib/barkpark_web/studio_chrome.ex — def on_mount (shares_admin?, current_path)
-- api/lib/barkpark/structure.ex — def build (tiered tree + owned map)
+- api/lib/barkpark/structure.ex — def build (tiered tree)
 - api/lib/barkpark/plugins/enablement.ex — def effective
-- api/lib/barkpark_web/studio/pane_builder.ex — def build (gated display + reveal)
+- api/lib/barkpark_web/studio/pane_builder.ex — def build; def display_state

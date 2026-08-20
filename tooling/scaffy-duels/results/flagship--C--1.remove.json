@@ -1,0 +1,103 @@
+{
+  "asserts": null,
+  "command": "Add PortableDoc Block Type",
+  "direction": "add",
+  "duration_ms": 5,
+  "ok": true,
+  "ops": [
+    {
+      "index": 10,
+      "kind": "replace",
+      "line": 0,
+      "mark": "parity-count-test-duelmark",
+      "path": "api/test/barkpark/portable_doc/render/pd_golden_parity_test.exs",
+      "status": "restored"
+    },
+    {
+      "index": 9,
+      "kind": "replace",
+      "line": 0,
+      "mark": "parity-count-script-duelmark",
+      "path": "scripts/pd-parity-completeness.sh",
+      "status": "restored"
+    },
+    {
+      "index": 8,
+      "kind": "insert-after-first",
+      "line": 0,
+      "mark": "parity-input-duelmark",
+      "path": "api/lib/mix/tasks/barkpark.portable_doc.gen_pd_parity.ex",
+      "status": "removed"
+    },
+    {
+      "index": 7,
+      "kind": "insert-after-first",
+      "line": 0,
+      "mark": "ex-compose-duelmark",
+      "path": "api/lib/barkpark/portable_doc/render/compose.ex",
+      "status": "removed"
+    },
+    {
+      "index": 6,
+      "kind": "replace",
+      "line": 0,
+      "mark": "js-count-duelmark",
+      "path": "js/packages/react/tests/PortableDoc.test.tsx",
+      "status": "restored"
+    },
+    {
+      "index": 5,
+      "kind": "insert-after-first",
+      "line": 0,
+      "mark": "js-case-duelmark",
+      "path": "js/packages/react/tests/PortableDoc.test.tsx",
+      "status": "removed"
+    },
+    {
+      "index": 4,
+      "kind": "insert-after-first",
+      "line": 0,
+      "mark": "js-map-duelmark",
+      "path": "js/packages/react/src/blocks/core.ts",
+      "status": "removed"
+    },
+    {
+      "index": 3,
+      "kind": "insert-after-first",
+      "line": 0,
+      "mark": "js-emitter-duelmark",
+      "path": "js/packages/react/src/blocks/core.ts",
+      "status": "removed"
+    },
+    {
+      "index": 2,
+      "kind": "insert-after-first",
+      "line": 0,
+      "mark": "go-registry-duelmark",
+      "path": "internal/pdrender/pdrender.go",
+      "status": "removed"
+    },
+    {
+      "index": 1,
+      "kind": "create",
+      "line": 0,
+      "path": "internal/pdrender/duelmark_test.go",
+      "status": "deleted"
+    },
+    {
+      "index": 0,
+      "kind": "create",
+      "line": 0,
+      "path": "internal/pdrender/duelmark.go",
+      "status": "deleted"
+    }
+  ],
+  "receipt": "/private/tmp/scaffy-duel-flagship--C--1/.scaffy/receipts/block-type--duelmark--d0a2dcc34e7d.json",
+  "vars": {
+    "BlockName": "duelmark",
+    "CountAfter": "47",
+    "CountBefore": "46",
+    "ParityCountAfter": "47",
+    "ParityCountBefore": "46"
+  }
+}

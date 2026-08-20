@@ -1,0 +1,95 @@
+name: Deploy harnesses
+
+on:
+  pull_request:
+    paths:
+      - "deploy/**"
+      - ".github/workflows/deploy-harnesses.yml"
+      # Both site engines' self-tests assert on THIS file — the @stage_names
+      # whitelist that decides which BPSTAGE lines become a verdict (ROUTE must
+      # stay out of it, charter D327/D346). Without this entry a PR that adds
+      # ROUTE to @stage_names touches no deploy/** path, so the only shell
+      # assertion protecting that doctrine never fires on the exact change it
+      # exists to catch.
+      #
+      # BELT-AND-BRACES, NOT THE FIX: this workflow is not a required status
+      # check (the required set is "Elixir gate", "PR references an active
+      # task", "Cloud gate", "Console gate"), so it cannot block a merge no
+      # matter what it runs. The blocking guard is
+      # api/test/barkpark/sites/deploy_runner_stage_names_test.exs, which rides
+      # the required Elixir lane. This line just makes the shell half reachable.
+      - "api/lib/barkpark/sites/deploy_runner.ex"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-deploy-harnesses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and assert Caddy
+        # From the OFFICIAL Caddy repo, never Ubuntu's — universe ships 2.6.2,
+        # which predates Caddy's heredoc syntax (>= 2.7). The maintenance block
+        # in instance-deploy.sh uses a heredoc (`body <<BARKPARK_MAINTENANCE`),
+        # so a 2.6 `caddy validate` REJECTS it — and arm_caddy_maintenance then
+        # silently reverts (it never fails a deploy), leaving the box to serve
+        # raw 502s during a deploy instead of the maintenance page. This harness
+        # exists to do REAL caddy validation, so it must validate against a Caddy
+        # that can actually parse the config we ship. Assert the floor, loudly.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+            | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+            | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y caddy
+          command -v caddy
+          caddy version
+          # Heredoc floor (>= 2.7): fail LOUDLY here rather than let the deploy
+          # script's silent revert turn into a green harness on a broken config.
+          ver="$(caddy version | grep -oE 'v[0-9]+\.[0-9]+' | head -1 | tr -d v)"
+          major="${ver%%.*}"; minor="${ver##*.}"
+          if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 7 ]; }; then
+            echo "::error title=Caddy too old::caddy $ver cannot parse the heredoc maintenance block (needs >= 2.7)"
+            exit 1
+          fi
+      - name: Instance deploy harness
+        run: bash deploy/instance-deploy_test.sh
+      - name: Control-plane deploy harness
+        run: bash deploy/cp-deploy_test.sh
+      # The site-spawner deploy engine ships its own offline proof (--self-test:
+      # fixture release dirs in a tmpdir, no npm/caddy/systemd needed). It is
+      # worthless unless it actually RUNS — an untested deploy engine is the
+      # weakest link in the deploy path, so gate it here alongside its siblings.
+      # BARKPARK_SELFTEST_REQUIRE_E2E=1: the engine-e2e block (stage protocol,
+      # content-truth HEALTH gate, "the box ran no npm" on a prebuilt deploy)
+      # SKIPS itself when python3/curl are absent — and the run then prints PASS
+      # and exits 0 with this engine's central claims untested. In CI that skip
+      # is a green vacuum, so make it a hard failure here. The SAME flag also
+      # hard-fails the fleet build admission gate proof (one box, one build) when
+      # flock(1) is missing: that block drives two concurrent deploys against a
+      # REAL flock, and a gate "proven" against the e2e's exit-0 flock stub proves
+      # the stub. ubuntu-latest ships util-linux, so this only ever fires on a
+      # runner image change — loudly, which is the point.
+      - name: Site deploy engine self-test
+        env:
+          BARKPARK_SELFTEST_REQUIRE_E2E: "1"
+        run: bash deploy/site-deploy.sh --self-test
+      # The Node-engine deploy path ships its own offline proof (--self-test:
+      # fixture release dirs in a tmpdir, no npm/caddy/systemd needed) covering
+      # basePath arming, standalone runtime, rollback preflight and more. Same
+      # reasoning as its static sibling above: an untested deploy engine is the
+      # weakest link, so gate it here. The script self-gates and exits non-zero
+      # on any failure — no hardcoded total (check counts grow over time).
+      # BARKPARK_SELFTEST_REQUIRE_E2E=1 for the same reason it is set above: this
+      # engine's gate block proves that the slot process HEALTH boots does not
+      # inherit the box's only build slot (a permanent fleet-wide deny), and that
+      # proof needs a REAL flock(1) — without the flag it would skip itself and
+      # still print PASS.
+      - name: Site deploy engine (Node) self-test
+        env:
+          BARKPARK_SELFTEST_REQUIRE_E2E: "1"
+        run: bash deploy/site-deploy-node.sh --self-test

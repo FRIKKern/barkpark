@@ -30,9 +30,6 @@ defmodule Barkpark.Accounts.UserEmailToken do
 
   @type t :: %__MODULE__{}
 
-  @doc "Allowed contexts."
-  def contexts, do: @contexts
-
   @doc "Validity window (seconds) for a context."
   def validity_seconds(context), do: Map.fetch!(@validity, context)
 

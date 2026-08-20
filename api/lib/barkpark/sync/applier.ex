@@ -80,45 +80,88 @@ defmodule Barkpark.Sync.Applier do
 
   def apply_event(%{id: id, envelope: envelope}, %{source: source, dataset: dataset} = ctx) do
     event_id = id || envelope["eventId"]
+    scope = Map.get(ctx, :scope, [])
+    ws_id = Keyword.get(scope, :workspace_id)
 
     cond do
       not is_integer(event_id) ->
         {:error, :missing_event_id}
 
+      # A resolved workspace is REQUIRED: every cursor/dead-letter/push-ledger
+      # row STAMPS `workspace_id` for per-workspace attribution (charter D55). A
+      # missing workspace_id would write a NULL-attributed sync row (invisible to
+      # its workspace's bundle/teardown), so fail closed — mirroring the
+      # `:unresolved` guard above.
+      not is_binary(ws_id) ->
+        {:error, :unresolved_workspace}
+
       event_id <= Cursor.get(source, dataset) ->
         {:ok, :skipped}
 
       true ->
-        case apply_envelope(envelope, source, dataset, Map.get(ctx, :scope, [])) do
+        case apply_envelope(envelope, ws_id, source, dataset, scope) do
           {:ok, :applied} ->
-            Cursor.put(source, dataset, event_id)
+            Cursor.put(ws_id, source, dataset, event_id)
             {:ok, :applied}
 
           {:error, reason} ->
-            max = Map.get(ctx, :max_attempts, 5)
-            attempts = DeadLetter.record_failure(source, dataset, event_id, envelope, reason)
+            case error_class(reason) do
+              # TRANSIENT/retryable: an ENVIRONMENTAL failure — a schema not yet
+              # registered inside a deploy/migration window, a temporarily-failing
+              # plugin before_save gate — that can block a fully VALID mutation.
+              # The dead-letter path advances the cursor PAST the event, so routing
+              # a transient failure there would skip a recoverable write. Fail SAFE:
+              # halt + replay keeping the cursor (no advance), and never reach the
+              # bounded dead letter. It clears itself the moment the environment
+              # recovers (folds the w14 gap — HANDOFF.md P1b follow-up).
+              :transient ->
+                {:error, reason}
 
-            if attempts >= max do
-              DeadLetter.mark_dead(source, dataset, event_id)
+              # TERMINAL: the event's CONTENT can never apply (a task-contract
+              # violation, a malformed changeset) — retrying identical bytes is
+              # futile, so quarantine it. Bounded dead-letter at max_attempts,
+              # then advance.
+              :terminal ->
+                max = Map.get(ctx, :max_attempts, 5)
 
-              Logger.error(
-                "[Sync] DEAD-LETTER event #{event_id} (#{source}/#{dataset}) after " <>
-                  "#{attempts} attempts: #{inspect(reason)} — recorded + advancing cursor past it"
-              )
+                attempts =
+                  DeadLetter.record_failure(ws_id, source, dataset, event_id, envelope, reason)
 
-              # Advance ONLY after the durable DL write (write-then-advance, R1/R2):
-              # an inspectable quarantine, never a silent skip.
-              Cursor.put(source, dataset, event_id)
-              {:ok, :dead_lettered}
-            else
-              # Below threshold → halt + replay; invariant #3 unchanged.
-              {:error, reason}
+                if attempts >= max do
+                  DeadLetter.mark_dead(source, dataset, event_id)
+
+                  Logger.error(
+                    "[Sync] DEAD-LETTER event #{event_id} (#{source}/#{dataset}) after " <>
+                      "#{attempts} attempts: #{inspect(reason)} — recorded + advancing cursor past it"
+                  )
+
+                  # Advance ONLY after the durable DL write (write-then-advance,
+                  # R1/R2): an inspectable quarantine, never a silent skip.
+                  Cursor.put(ws_id, source, dataset, event_id)
+                  {:ok, :dead_lettered}
+                else
+                  # Below threshold → halt + replay; invariant #3 unchanged.
+                  {:error, reason}
+                end
             end
         end
     end
   end
 
-  defp apply_envelope(envelope, source, dataset, scope) do
+  # Classify an apply failure at the dead-letter boundary. The allowlist is
+  # TERMINAL — a failure whose CAUSE IS THE CONTENT and can never be retried
+  # away: a task-kind contract violation (`{:invalid_task_content, _}`) or a
+  # schema-validation changeset. EVERYTHING ELSE defaults to `:transient`,
+  # deliberately: an unrecognized or environmental error (a plugin before_save
+  # `{:halted, _}` gate, a `{:dedup_unavailable, _}` scan blip) must NOT advance
+  # the cursor past a possibly-valid mutation. Fail-safe on the side of replay,
+  # not silent skip.
+  @spec error_class(term()) :: :terminal | :transient
+  defp error_class({:invalid_task_content, _}), do: :terminal
+  defp error_class(%Ecto.Changeset{}), do: :terminal
+  defp error_class(_reason), do: :transient
+
+  defp apply_envelope(envelope, ws_id, source, dataset, scope) do
     result = envelope["result"] || envelope["document"]
     type = envelope["type"] || (is_map(result) && result["_type"])
 
@@ -132,7 +175,7 @@ defmodule Barkpark.Sync.Applier do
 
       is_map(result) and map_size(result) > 0 ->
         with {:ok, :applied} <- apply_upsert(result, type, dataset, scope) do
-          prime_push_ledger(source, dataset, result)
+          prime_push_ledger(ws_id, source, dataset, result)
           {:ok, :applied}
         end
 
@@ -149,14 +192,14 @@ defmodule Barkpark.Sync.Applier do
   # either "drafts.<id>" or "<id>" depending on the write, so prime BOTH; an
   # unmatched key is non-fatal — F2 turns a missed prime into a SAFE conflict,
   # never an overwrite. Inert when push is off (table only; invariant #1 intact).
-  defp prime_push_ledger(source, dataset, %{"_id" => id, "_rev" => rev})
+  defp prime_push_ledger(ws_id, source, dataset, %{"_id" => id, "_rev" => rev})
        when is_binary(id) and is_binary(rev) do
-    PushDocRev.put(source, dataset, DraftId.draft_id(id), rev)
-    PushDocRev.put(source, dataset, DraftId.published_id(id), rev)
+    PushDocRev.put(ws_id, source, dataset, DraftId.draft_id(id), rev)
+    PushDocRev.put(ws_id, source, dataset, DraftId.published_id(id), rev)
     :ok
   end
 
-  defp prime_push_ledger(_source, _dataset, _result), do: :ok
+  defp prime_push_ledger(_ws_id, _source, _dataset, _result), do: :ok
 
   defp apply_upsert(result, type, dataset, scope) do
     mutations =

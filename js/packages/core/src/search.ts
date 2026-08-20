@@ -74,6 +74,9 @@ export async function searchDocuments<T = BarkparkDocument>(
     count: body.count ?? 0,
     query: body.query ?? q,
     correctedTo: body.correctedTo ?? null,
+    // Top-level on the response (not nested under `result`) — required by the
+    // paired /search/interaction routes to report click/quality signals.
+    searchEventId: data.searchEventId ?? null,
   }
   // Only set the optional fields when present (exactOptionalPropertyTypes).
   if (body.highlights !== undefined) result.highlights = body.highlights

@@ -1,0 +1,18 @@
+{
+  "outcomes": {
+    "authenticated_studio": "FAIL_AUTH_SESSION_AND_DEPLOYMENT_BLOCK",
+    "cli_api": "FAIL_CANDIDATE_ABSENT",
+    "exact_180_candidate_specific_captures": "FAIL_0_OF_180",
+    "explicit_narrow_width_degradation": "FAIL_UNPROVEN_REAL_TUI_AND_EMAIL",
+    "proxy_source_synthetic_substitutions": "PASS_ZERO_PROMOTED",
+    "public_reader": "FAIL_NO_DEPLOYED_E16_PROVENANCE",
+    "real_client_email": "FAIL_ENDPOINT_404_NO_MESSAGE_IMPORTED",
+    "tui": "FAIL_SCHEMA_LOAD_BEFORE_SELECTION",
+    "zero_silent_blanks": "PARTIAL_EXPLICIT_BLOCKS_180_OF_180_BUT_NO_CAPTURE_PROOF"
+  },
+  "schema_version": "legendary-e17-hard-gates/v1",
+  "verdict": {
+    "action": "REWORK",
+    "quality": "FAIL"
+  }
+}

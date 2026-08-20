@@ -1,0 +1,33 @@
+{
+  "grip_id": "v-elixir-test-env-config-seam-2026-07-23",
+  "verifier": "v-elixir-test-env-config-seam",
+  "wave": "connectors-wave-33-2026-07-23",
+  "assignment": "Close W33-1's config-seam axis: is :capabilities_base_url nil in MIX_ENV=test, does Barkpark.Connectors env collide with a new :path_prefix key, what is the connectors_live_test.exs green baseline, and what exact config shape should the builder use (which base-url seam + path_prefix key)?",
+  "verdict": "CONFIRMED nil-in-test + NO collision + 36/0 green baseline. RECOMMEND: read :capabilities_base_url WITHOUT default (nil-honest, DIVERGE from the two consumers' localhost default), add :path_prefix default '/connectors' to config.exs:140 base (NOT runtime connectors_env, NOT test.exs), inject cap_base per-test via put_env (NOT test.exs). Webhook is served by the SEPARATE connectors bridge (D34), so this constructs a display string only.",
+  "recipes": [
+    {
+      "claim": "Application.get_env(:barkpark, :capabilities_base_url) is nil in MIX_ENV=test; Application.get_env(:barkpark, Barkpark.Connectors) = [bridge_url: http://127.0.0.1:4020/connectors, connect_secret: nil, bridge: Barkpark.Connectors.BridgeClient] — NO :path_prefix key, no collision",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/e2-review-w17/api && CC=/usr/bin/clang MIX_ENV=test mix run --no-start -e 'IO.inspect({:cap_base, Application.get_env(:barkpark, :capabilities_base_url)}); IO.inspect({:connectors_env, Application.get_env(:barkpark, Barkpark.Connectors)})'"
+    },
+    {
+      "claim": "connectors_live_test.exs proven-green baseline = 36 tests, 0 failures — the floor the builder's mutation-proof must hold against",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/e2-review-w17/api && CC=/usr/bin/clang MIX_ENV=test mix test test/barkpark_web/live/studio/connectors_live_test.exs"
+    },
+    {
+      "claim": ":capabilities_base_url is written ONLY at runtime.exs:703, inside the config_env()==:prod block (605..933) — set nowhere in config.exs/dev.exs/test.exs, hence nil in test",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/e2-review-w17/api && grep -rn 'capabilities_base_url' config/*.exs && awk 'NR==605{print NR\": \"$0} NR>703 && /^end/{print NR\": \"$0; exit}' config/runtime.exs"
+    },
+    {
+      "claim": "Both existing :capabilities_base_url consumers read WITH a localhost default; the connectors card must DIVERGE (no default) because a localhost webhook URL pasted into Discord/Slack is actively harmful, not a harmless dev fallback",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/e2-review-w17/api && sed -n '416p' lib/barkpark/plugins/capabilities.ex && sed -n '569p' lib/barkpark_web/controllers/cycle_fleet_controller.ex"
+    },
+    {
+      "claim": "The natural home for a non-nil-in-test :path_prefix default is config.exs:140-143 (the Barkpark.Connectors base with bridge_url/connect_secret/bridge); runtime.exs connectors_env is env-var-only + Enum.reject-drops-nil so it is [] in test. CONNECTORS_PATH_PREFIX is referenced in Elixir only as a comment (runtime.exs:156) — no code reads it",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/e2-review-w17/api && sed -n '140,143p' config/config.exs && sed -n '168,181p' config/runtime.exs && grep -rn 'CONNECTORS_PATH_PREFIX' lib/ config/"
+    },
+    {
+      "claim": "No existing public connectors-webhook URL builder exists (webhooks.ex is the unrelated OUTBOUND subscription system on /v1/webhooks/:dataset); the install render block (connectors_live.ex:806-816) prints install_key bare and constructs no URL",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/e2-review-w17/api && grep -rn 'connectors/webhooks\\|def.*webhook_url\\|publicBaseUrl' lib/ && sed -n '806,816p' lib/barkpark_web/live/studio/connectors_live.ex"
+    }
+  ]
+}

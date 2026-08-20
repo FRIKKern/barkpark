@@ -1,5 +1,9 @@
 defmodule Barkpark.Accounts.PrivacyTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
+
+  # TOTP codes come from the window-stable helper ONLY — a code minted inline
+  # can expire in the gap before the server validates it (honest-gates S1).
+  import Barkpark.TotpTestHelper
 
   alias Barkpark.Accounts
   alias Barkpark.Accounts.{Privacy, User, UserSession, UserEmailToken}
@@ -47,7 +51,7 @@ defmodule Barkpark.Accounts.PrivacyTest do
       secret = Accounts.totp_secret()
 
       {:ok, _user, _codes} =
-        Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+        Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
       user = Accounts.get_user(user.id)
       assert {:ok, summary} = Privacy.erase_subject(user)

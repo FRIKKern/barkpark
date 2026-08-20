@@ -31,4 +31,20 @@ defmodule BarkparkWeb.Layouts do
       _ -> nil
     end
   end
+
+  # sobelow_skip ["XSS.Raw"]
+  # SAFE: emits our OWN static PortableDoc stylesheet (server-authored CSS, no
+  # user input) verbatim into the layout <style>. Hoisted out of root.html.heex
+  # so the durable inline skip attaches here via combine_skips — an HEEx inline
+  # comment is inert (XSS.get_template_vulns bypasses combine_skips), so the
+  # template kept reddening the Sobelow gate on pure line-shift drift.
+  @doc """
+  The PortableDoc reader/editor stylesheet, marked safe for inline `<style>`
+  emission from the root layout. This is the ONE raw() the layout needs; keeping
+  it here (not in the template) is what lets Sobelow's inline skip stick.
+  """
+  @spec paper_stylesheet() :: Phoenix.HTML.safe()
+  def paper_stylesheet do
+    Phoenix.HTML.raw(Barkpark.PortableDoc.Render.Stylesheet.css())
+  end
 end

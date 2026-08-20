@@ -1,0 +1,13 @@
+{
+  "_comment": "W4 media fixture (charter D20/D21) — an ASSET-SHAPED image field for the preset->rendition RESOLUTION proof. A deliberate SIBLING of tests/fixtures/pd-golden/, NOT a member of the frozen 42-golden array: pd-golden's image.golden.json is a bare URL with no _ref/_id/preset, so preset resolution has nowhere to live there. The 4 server presets (thumb/preview/hero/og) are aspect-VARYING crops, not width variants, so there is NO srcset ladder — srcset is a reconciled GAP (see image-preset.parity.test.tsx), not an API.",
+  "baseUrl": "https://cdn.barkpark.dev",
+  "presetAsset": {
+    "_id": "media-hero-2400x1200-jpg",
+    "_type": "image",
+    "url": "https://cdn.barkpark.dev/media/files/2026/07/hero-original.jpg",
+    "metadata": { "dimensions": { "width": 2400, "height": 1200 } }
+  },
+  "preset": "hero",
+  "expectedRenditionSuffix": "/media/renditions/media-hero-2400x1200-jpg/hero",
+  "bareUrlAsset": "https://cdn.barkpark.dev/media/files/2026/07/cover.jpg"
+}

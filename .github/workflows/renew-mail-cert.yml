@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  issues: write # so a failed monthly renewal can surface itself to a human
 
 jobs:
   renew:
@@ -28,3 +29,23 @@ jobs:
           install -m 600 /dev/null /tmp/deploy_key
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           DEPLOY_SSH_KEY_FILE=/tmp/deploy_key bash deploy/renew-mail-cert.sh
+
+      # This is the highest-stakes silent failure in the repo: the schedule is
+      # MONTHLY, so an unnoticed red here burns through the remainder of a ~90
+      # day cert and outbound mail dies with no warning. Two more monthly
+      # attempts would run before anyone looked.
+      # `cancelled()` too: `failure()` is FALSE on a cancelled run, and a
+      # MONTHLY job that was cancelled has burned the same month a failed one
+      # has. Both mean the cert did not renew.
+      - name: Report failure to a human
+        if: failure() || cancelled()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: renew-mail-cert
+          CI_FAILURE_DETAIL: |
+            The monthly Let's Encrypt renewal for mail.barkpark.cloud failed.
+            THIS IS TIME-SENSITIVE: the schedule is monthly, so the next
+            automatic attempt is ~30 days away while the live cert keeps
+            ageing toward expiry. Outbound mail from the relay breaks when it
+            expires. Re-run this workflow manually once the cause is fixed.
+        run: bash scripts/file-ci-failure-issue.sh

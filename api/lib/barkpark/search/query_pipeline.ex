@@ -21,28 +21,59 @@ defmodule Barkpark.Search.QueryPipeline do
           highlights: map(),
           recovery: String.t() | nil,
           corrected_to: String.t() | nil,
+          engine_used: String.t() | nil,
           ms: non_neg_integer()
         }
 
   @spec search(String.t(), String.t(), map(), keyword()) :: {:ok, result()}
   def search(surface, scope, context, opts \\ []) when is_binary(surface) and is_binary(scope) do
+    # TIMED: the search READ path had ZERO telemetry — it computed `ms` locally
+    # (t0/System.monotonic_time below) for the response body but never fired a
+    # `:telemetry` event, so "what is p95 of a search?" was unanswerable and the
+    # only search event ([:barkpark, :search, :intel, :record]) is a WRITE with no
+    # `workspace_id`. This is the single choke point every documents+media search
+    # caller funnels through, so one `:telemetry.span` here covers them all.
+    # Mirrors the D12 content-write precedent (content/mutations.ex): the span
+    # emits `[:barkpark, :search, :query, :start | :stop | :exception]` with a
+    # `:duration`; BarkparkWeb.Telemetry subscribes a Prometheus histogram to
+    # `:stop` (p95 via histogram_quantile). `workspace_id` — already live in
+    # `opts` via `scope_opts/1` — tags per-workspace search volume/latency; nil
+    # (anonymous / unscoped caller) coerces to "global" so the Prometheus tag is
+    # always present and never crashes the reporter handler.
+    workspace_id = Keyword.get(opts, :workspace_id) || "global"
+    meta = %{surface: surface, scope: scope, workspace_id: workspace_id}
+
+    :telemetry.span([:barkpark, :search, :query], meta, fn ->
+      {do_search(surface, scope, context, opts), meta}
+    end)
+  end
+
+  defp do_search(surface, scope, context, opts) do
     t0 = System.monotonic_time(:microsecond)
-    config = SurfaceConfigs.get(surface, scope)
+    # Resolve the surface config for the CALLER'S workspace (charter D63). The
+    # resolved `workspace_id` already rides in `opts` (set by scope_opts/1 from
+    # `current_workspace`); thread it STRAIGHT — never coerce to nil, or a
+    # per-workspace admin's search tuning would be attributed on write yet never
+    # reach the read path (the W5 functional regression this closes). A nil
+    # `workspace_id` (anonymous / unscoped) still resolves the global row.
+    config = SurfaceConfigs.get(surface, scope, Keyword.get(opts, :workspace_id))
     raw_query = Map.get(context, :query, "") || ""
     parsed = QueryParser.parse(raw_query)
-    {parsed, corrected_to} = expand_synonyms(surface, scope, parsed)
 
-    {hits, total, recovery, engine_meta} =
+    {parsed, corrected_to} =
+      expand_synonyms(surface, scope, parsed, Keyword.get(opts, :workspace_id))
+
+    {hits, total, recovery, engine_meta, engine_used} =
       case surface do
         "documents" ->
           search_documents(scope, parsed, config, context, opts)
 
         "media" ->
           {h, t, r} = search_media(scope, parsed, config, context, opts)
-          {h, t, r, %{}}
+          {h, t, r, %{}, nil}
 
         _ ->
-          {[], 0, nil, %{}}
+          {[], 0, nil, %{}, nil}
       end
 
     highlights = highlight_hits(surface, hits, parsed, config, scope, opts)
@@ -62,11 +93,17 @@ defmodule Barkpark.Search.QueryPipeline do
        # buckets and the coverage truncation boundary.
        facets: Map.get(engine_meta, :facets),
        truncation: Map.get(engine_meta, :truncation),
+       # Which retriever ACTUALLY served the returned hits — "postgres" whenever
+       # the served result came from the Postgres retriever, even when the
+       # caller asked for another engine (zero-hit recovery, the D3-b tenant
+       # gate, an unregistered engine). The client heuristic guessing this has
+       # shipped dead code twice; the pipeline is the only place that knows.
+       engine_used: engine_used,
        ms: ms
      }}
   end
 
-  defp expand_synonyms(surface, scope, parsed) do
+  defp expand_synonyms(surface, scope, parsed, workspace_id) do
     positive = Map.get(parsed, :terms, []) ++ Map.get(parsed, :phrases, [])
 
     if positive == [] do
@@ -74,7 +111,7 @@ defmodule Barkpark.Search.QueryPipeline do
     else
       extra =
         positive
-        |> Enum.flat_map(fn term -> Synonyms.search_terms(surface, scope, term) end)
+        |> Enum.flat_map(fn term -> Synonyms.search_terms(surface, scope, term, workspace_id) end)
         |> Enum.reject(&(&1 in positive or &1 == ""))
         |> Enum.uniq()
 
@@ -82,7 +119,7 @@ defmodule Barkpark.Search.QueryPipeline do
       # for which an enabled synonym fired — null when nothing matched.
       corrected_to =
         Enum.find_value(positive, fn term ->
-          Synonyms.correction_for(surface, scope, term)
+          Synonyms.correction_for(surface, scope, term, workspace_id)
         end)
 
       {%{parsed | terms: parsed.terms ++ extra}, corrected_to}
@@ -119,7 +156,16 @@ defmodule Barkpark.Search.QueryPipeline do
         # a grant-derived caller's search dropped the flag before either retriever
         # and saw out-of-grant hits (the ag-search-grant-leak deny). nil/absent =
         # ordinary read (no narrowing), so members/tokens/anonymous are unchanged.
-        grant_scoped: Keyword.get(opts, :grant_scoped)
+        grant_scoped: Keyword.get(opts, :grant_scoped),
+        # Retrieval column projection (search-latency slice a). The caller's
+        # `?fields=` allowlist — threaded to the Postgres retriever so a hit set
+        # it will render+project down to a few scalars is SELECTed without the
+        # heavy `content` blobs (a paper's body_html is ~37KB/row; at limit=100
+        # that dominates the DB→Elixir transfer + jsonb decode the pipeline `ms`
+        # measures). The DB-level twin of `Content.Envelope.project/2`: it only
+        # ever DROPS content keys the caller did not ask for, so the rendered
+        # envelope is byte-identical. nil/absent → the full struct (unchanged).
+        fields: Keyword.get(opts, :fields)
       ]
 
     # Engine dispatch lives here (not the controller) so highlights + recovery
@@ -135,6 +181,12 @@ defmodule Barkpark.Search.QueryPipeline do
         Retrievers.resolve(%{"engine" => engine})
       end
 
+    # Engine honesty: the requested engine only counts as SERVED when its own
+    # retriever module answered. Both silent postgres substitutions — the D3-b
+    # tenant gate above and Retrievers.resolve/1's unknown-engine fallback —
+    # resolve to DocumentsRetriever, so the module identity IS the truth.
+    primary_engine = if retriever == DocumentsRetriever, do: "postgres", else: engine
+
     {hits, total, engine_meta} = retriever.search(scope, parsed, config, retriever_opts)
 
     strategy = Map.get(config, "zero_hit_strategy", "drop_tokens")
@@ -143,17 +195,23 @@ defmodule Barkpark.Search.QueryPipeline do
     # below this count (the zero-hit path below is unchanged).
     low_hit_threshold = Map.get(config, "low_hit_threshold", 3)
 
-    {final_hits, final_total, recovery} =
+    # Every branch also reports which retriever the FINAL hits came from: the
+    # recovery passes (recover_documents / try_typo_widen) run the Postgres
+    # DocumentsRetriever regardless of the primary engine, so a successful
+    # recovery is a served-by-postgres answer — the exact silent substitution
+    # (indx request → empty → postgres re-run → happy 200 wearing indx's name)
+    # this field exists to make visible.
+    {final_hits, final_total, recovery, engine_used} =
       cond do
         # No recovery configured.
         total == 0 and strategy == "none" ->
-          {hits, total, nil}
+          {hits, total, nil, primary_engine}
 
         # Zero-hit path — unchanged: drop_tokens then typo_widen.
         total == 0 ->
           case recover_documents(scope, parsed, config, retriever_opts, strategy) do
-            {rh, rt, recovery} -> {rh, rt, recovery}
-            nil -> {hits, total, nil}
+            {rh, rt, recovery} -> {rh, rt, recovery, "postgres"}
+            nil -> {hits, total, nil, primary_engine}
           end
 
         # Thin-results path — widen fuzzy on a positive-but-small result set and
@@ -164,18 +222,18 @@ defmodule Barkpark.Search.QueryPipeline do
         # zero-hit path above still falls back to Postgres for any engine.
         engine == "postgres" and total < low_hit_threshold and strategy != "none" ->
           case try_typo_widen(scope, parsed, config, retriever_opts, strategy) do
-            {rh, rt, _r} when rt > total -> {rh, rt, "typo_widen"}
-            _ -> {hits, total, nil}
+            {rh, rt, _r} when rt > total -> {rh, rt, "typo_widen", "postgres"}
+            _ -> {hits, total, nil, primary_engine}
           end
 
         true ->
-          {hits, total, nil}
+          {hits, total, nil, primary_engine}
       end
 
     # Carry the PRIMARY retriever's engine meta (Indx facets + truncation)
     # regardless of zero-hit recovery — facets describe the whole dataset, so
     # they stay meaningful even when the text matched nothing.
-    {final_hits, final_total, recovery, engine_meta}
+    {final_hits, final_total, recovery, engine_meta, engine_used}
   end
 
   defp recover_documents(scope, parsed, config, opts, strategy) do

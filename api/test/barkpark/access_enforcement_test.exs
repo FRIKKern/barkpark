@@ -13,7 +13,7 @@ defmodule Barkpark.AccessEnforcementTest do
   The whole invariant: grant access ⊆ capabilities ∩ scope. Never wider, never
   a member's byte-identical read altered.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
   import Barkpark.AccessFixtures

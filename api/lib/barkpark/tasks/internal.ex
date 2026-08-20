@@ -5,6 +5,8 @@ defmodule Barkpark.Tasks.Internal do
   # (`Tasks.Mutations`, …) reuse one definition instead of each carrying its own
   # rev/event/broadcast helpers. Pure substrate — no public task API lives here.
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.Content
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Repo
@@ -17,6 +19,48 @@ defmodule Barkpark.Tasks.Internal do
 
   def current_epoch(%Document{content: %{"claim" => %{"epoch" => e}}}) when is_integer(e), do: e
   def current_epoch(_), do: 0
+
+  # ─── The fenced content write (PDS-D451: the receipt is the STORED row) ───
+  #
+  # Every task CAS write path used to do the same two things: run a rev-fenced
+  # `Repo.update_all(set: [content:, rev:, updated_at:])`, which returns a ROW
+  # COUNT and never a row, and then RECONSTRUCT the receipt as
+  # `%{doc | content: new_content, rev: new_rev}`. That reconstruction is a
+  # statement of INTENT, not of storage: `updated_at` is deliberately written to
+  # the DB and deliberately absent from the struct, so every claim/stamp/close
+  # receipt carried the PREVIOUS write's timestamp — measured, byte-exact, on
+  # every verb. Worse as a CLASS: `documents` carries `slug_text`/`author_text`/
+  # `category_text` as `GENERATED ALWAYS AS (…) STORED` (`Content.Document`,
+  # `read_after_writes: true`), which a struct-merge cannot recompute at all.
+  #
+  # IMPLEMENTATION CHOSEN: `select: d` on the update query, so it compiles to
+  # `UPDATE … RETURNING` and the row Postgres actually holds — generated columns
+  # included — comes back in ONE statement. This is the idiom the document spine
+  # already uses (`content/writer.ex` fenced update, `auth.ex consume_login_ticket`).
+  # The alternative, `Repo.get!(Document, doc.id)` in the `{1, _}` branch, is
+  # equally correct under the per-task `pg_advisory_xact_lock` every caller holds,
+  # but costs a second round trip and reads a row the same txn just wrote.
+  # NEVER Ecto's `:returning` option — `update_all` SILENTLY IGNORES it and
+  # yields `{count, nil}` (documented in-repo at `auth.ex` consume_login_ticket).
+  #
+  # Returns `{:ok, stored_doc}` on a won fence and `:stale` on a lost one. The
+  # atom is deliberately NOT an `{:error, …}` tuple: callers map it to their own
+  # existing error (`:stale_claim` for the lifecycle/claim arms, `:stale_rev` for
+  # the merge reconcile), so no caller's return shape moves.
+  def fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev) do
+    query =
+      from(d in Document,
+        where: d.id == ^doc.id and d.rev == ^observed_rev,
+        select: d
+      )
+
+    case Repo.update_all(query,
+           set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+         ) do
+      {1, [stored]} -> {:ok, stored}
+      {0, _} -> :stale
+    end
+  end
 
   # Holder check shared by the holder-gated write paths (release, stamp, pulse):
   # the caller must BE the lease holder — `claim.worker` must equal `worker_id`
@@ -31,6 +75,119 @@ defmodule Barkpark.Tasks.Internal do
     end
   end
 
+  # ─── Close-honesty predicates (PDS-D288 / D289 / D290) ────────────────────
+  #
+  # THESE ARE HONESTY GATES, NOT AUTHORIZATION. `worker_id` is a client-supplied
+  # body param (`tasks_controller.ex` close/2 reads it straight out of the JSON
+  # body), never derived from the api_token — anyone who can call close can name
+  # any worker. What these predicates buy is that the LEDGER stops recording a
+  # close as if the closer held the lease and the criteria were proven when
+  # neither was true: an ACCIDENT is refused, and a DELIBERATE foreign close has
+  # to say so out loud and is auditable afterwards. Do not sell them as access
+  # control.
+
+  # Close-holder predicate (PDS-D288). Deliberately NOT `check_holder/2` above:
+  # that one fails on a nil claim, which would refuse every never-claimed
+  # root/container close AND every self-resume close. Three allow-arms:
+  #
+  #   * `:unclaimed`   — no claim map at all. Nothing was ever leased, so there
+  #     is no holder to contradict (this is what `Close.check_fencing/2`'s bare
+  #     `_ -> :ok` has always permitted, preserved verbatim).
+  #   * `:holder`      — `claim.worker == worker_id`. The ordinary close.
+  #   * `:self_resume` — the lease was given up (`claim.worker` nil) and THIS
+  #     worker is the one who gave it up. BOTH keys are checked on purpose: a
+  #     TTL reap writes `previous_worker` (`ttl_sweeper.ex`) while a voluntary
+  #     release writes `released_by` (`release.ex`), so keying on one silently
+  #     refuses the other path.
+  #
+  # Anything else is `{:error, {:not_holder, held_by}}` — the caller may retry
+  # with an explicit, recorded override (see `Tasks.Close`), never silently.
+  def close_holder(%Document{content: content}, worker_id) when is_binary(worker_id) do
+    case claim_map(content) do
+      nil ->
+        {:ok, :unclaimed}
+
+      claim ->
+        cond do
+          Map.get(claim, "worker") == worker_id ->
+            {:ok, :holder}
+
+          is_nil(Map.get(claim, "worker")) and
+              worker_id in [Map.get(claim, "previous_worker"), Map.get(claim, "released_by")] ->
+            {:ok, :self_resume}
+
+          true ->
+            {:error, {:not_holder, held_by(claim)}}
+        end
+    end
+  end
+
+  # Who the ledger believes holds (or last held) the lease — the `held_by` the
+  # override record has to name. nil when the claim map names nobody at all.
+  def held_by(claim) when is_map(claim) do
+    Map.get(claim, "worker") || Map.get(claim, "previous_worker") ||
+      Map.get(claim, "released_by")
+  end
+
+  def held_by(_), do: nil
+
+  defp claim_map(content) do
+    case Map.get(content || %{}, "claim") do
+      claim when is_map(claim) -> claim
+      _ -> nil
+    end
+  end
+
+  # Every acceptance criterion that is NOT proven, as
+  # `[%{"index" => i, "criterion" => text_or_nil}]` in list order. Counting
+  # matches `Tasks.Criteria.progress/1` exactly: `met` must be EXACTLY `true`,
+  # and garbage (a non-map entry, a missing key, `"yes"`, `1`) counts as UNMET
+  # rather than crashing — an unreadable criterion is not a proven one. Absent
+  # or non-list criteria yield `[]` (nothing to prove, never "0/0").
+  def unmet_criteria(content) do
+    case Map.get(content || %{}, "acceptance_criteria") do
+      list when is_list(list) ->
+        list
+        |> Enum.with_index()
+        |> Enum.reject(fn {entry, _i} -> met?(entry) end)
+        |> Enum.map(fn {entry, i} -> %{"index" => i, "criterion" => criterion_text(entry)} end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp met?(entry) when is_map(entry),
+    do: Map.get(entry, "met") == true or Map.get(entry, :met) == true
+
+  defp met?(_entry), do: false
+
+  defp criterion_text(entry) when is_map(entry) do
+    case Map.get(entry, "criterion") || Map.get(entry, :criterion) do
+      text when is_binary(text) -> text
+      _ -> nil
+    end
+  end
+
+  defp criterion_text(_entry), do: nil
+
+  # Sentinel worker ids (PDS-D290). 21 recorded closes carry the literal string
+  # `"None"` as `closed_by` — a stringified null from some caller's templating,
+  # accepted because `Params.fetch_string/2` only asks for a non-empty binary.
+  # A close attributed to "None" reads as a real close to every downstream gate,
+  # so refuse the shapes that can only be a missing value, at the engine.
+  @sentinel_worker_ids ~w(none null nil -)
+
+  def check_worker_id(worker_id) when is_binary(worker_id) do
+    trimmed = String.trim(worker_id)
+
+    if trimmed == "" or String.downcase(trimmed) in @sentinel_worker_ids do
+      {:error, {:sentinel_worker_id, worker_id}}
+    else
+      :ok
+    end
+  end
+
   # ─── Acceptance-criteria merge (shared by Close and Stamp) ────────────────
   #
   # Applies `[%{"index" => i, ...}]` updates onto content["acceptance_criteria"].
@@ -40,19 +197,39 @@ defmodule Barkpark.Tasks.Internal do
   #     CLOSE-TIME semantics, you are proving the expectation. Callers that
   #     must never flip a lock implicitly (stamp) always pass `met`
   #     EXPLICITLY; the default exists for the close body's back-compat.
-  #     `evidence` is written only when a non-empty string.
+  #     An omitted `evidence` key preserves the stored value; an explicitly
+  #     present string is written verbatim, including `""` to clear it.
   #   * miss (`stamp --miss`): `"attempt" => %{"note","ts","worker"}` appends
   #     to the entry's `attempts` list, bounded to the @attempts_bound most
   #     recent, and PINS `met` to its current stored value — explicitly
   #     written, never inherited from the met→true default above, which would
   #     flip a lock on an honest miss (the proven footgun D8 names).
   #
-  # The stored `criterion` text is never touched. The optional `"criterion"`
-  # guard is a CAS at criteria grain: when given, it must equal the stored
-  # text at that index or the whole write aborts with :criteria_mismatch (the
-  # caller's view of the list is stale — rows reordered/edited since read).
+  # The stored `criterion` text is never touched. The `"criterion"` guard is a
+  # CAS at criteria grain: it must equal the stored text at that index or the
+  # whole write aborts with :criteria_mismatch (the caller's view of the list is
+  # stale — rows reordered/edited since read, or the index is off by one).
   # Conflicts (index out of range, guard mismatch) abort the CALLER's whole
   # transaction — deliberate race handling, not silent partial state.
+  #
+  # FAIL CLOSED ON A MET-FLIP (D56, wave 5). The guard used to be OPTIONAL, so
+  # in the wild it never fired: an index-only `met: true` update landed silently
+  # on whatever row the (frequently 1-based-by-habit) index happened to hit, and
+  # five of eight Wave-4 builders shifted their evidence onto a NEIGHBOUR — one
+  # of them fabricating a met=true on a merge-gated criterion it could not
+  # possibly have proven. A guard that reads as protection and is not is worse
+  # than no guard. So: ANY update whose effective `met` is `true` MUST carry a
+  # non-empty `"criterion"` text, or it is `{:error, :criterion_text_required}`.
+  # The two permissive paths that flip NOTHING are untouched:
+  #
+  #   * `--miss` (an `"attempt"` key) — records an honest attempt, pins `met` to
+  #     its stored value. Nothing to fabricate, no text needed.
+  #   * an explicit `met: false` — un-flipping / an honest unmet close.
+  #
+  # Blast radius is accepted and named: every caller that flips a lock by index
+  # alone now gets a 409 telling it exactly what to pass (see the controller's
+  # `criteria_hint/2`). Close's own merge-gate autostamp threads the stored text
+  # in (close.ex `autostamp_merge_gate/6`) rather than riding the old hole.
   @attempts_bound 5
 
   def merge_criteria(content, []), do: {:ok, content}
@@ -85,12 +262,21 @@ defmodule Barkpark.Tasks.Internal do
       %{} = entry ->
         guard = Map.get(update, "criterion")
 
-        if is_binary(guard) and guard != Map.get(entry, "criterion") do
-          {:error, :criteria_mismatch}
-        else
-          with {:ok, entry} <- apply_entry_update(entry, update) do
-            {:ok, List.replace_at(list, index, entry)}
-          end
+        cond do
+          # Stale/off-by-one view of the list: the caller named a criterion, and
+          # it is not the one stored at `index`. Abort the whole write.
+          is_binary(guard) and guard != Map.get(entry, "criterion") ->
+            {:error, :criteria_mismatch}
+
+          # Fail closed: a met-flip with no text to CAS against is exactly the
+          # false-done vector (an unverifiable index landing on a neighbour).
+          flips_met_true?(update) and not guarded?(guard) ->
+            {:error, :criterion_text_required}
+
+          true ->
+            with {:ok, entry} <- apply_entry_update(entry, update) do
+              {:ok, List.replace_at(list, index, entry)}
+            end
         end
 
       _ ->
@@ -99,6 +285,17 @@ defmodule Barkpark.Tasks.Internal do
   end
 
   defp apply_criteria_update(_list, _update), do: {:error, :invalid_criteria}
+
+  # A guard only guards when it has words: `nil` and `""` are no guard at all.
+  # (An `""` that "matches" a text-less criterion row must not buy a free flip.)
+  defp guarded?(guard), do: is_binary(guard) and guard != ""
+
+  # Does this update flip the lock to true? The miss path (an `"attempt"` key)
+  # never flips — it pins met to the stored value. Everything else is the
+  # met/evidence path, where an ABSENT `"met"` key means true (close's
+  # back-compat default), so an index+evidence update flips too.
+  defp flips_met_true?(%{"attempt" => %{}}), do: false
+  defp flips_met_true?(update), do: Map.get(update, "met", true) == true
 
   # Miss path: append the attempt, bound the list, PIN met explicitly to its
   # current stored value (normalized to a boolean — only a stored `true` is
@@ -123,13 +320,11 @@ defmodule Barkpark.Tasks.Internal do
     if is_boolean(met) do
       entry = Map.put(entry, "met", met)
 
-      entry =
-        case Map.get(update, "evidence") do
-          e when is_binary(e) and e != "" -> Map.put(entry, "evidence", e)
-          _ -> entry
-        end
-
-      {:ok, entry}
+      case Map.fetch(update, "evidence") do
+        :error -> {:ok, entry}
+        {:ok, evidence} when is_binary(evidence) -> {:ok, Map.put(entry, "evidence", evidence)}
+        {:ok, _invalid} -> {:error, :invalid_criteria}
+      end
     else
       {:error, :invalid_criteria}
     end

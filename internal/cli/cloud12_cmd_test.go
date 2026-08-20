@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 	"github.com/charmbracelet/lipgloss"
@@ -626,6 +627,102 @@ func TestSignup422SurfacesValidation(t *testing.T) {
 	}
 }
 
+// TestSignupPostCommitTransportDropRecoversHonestly: when POST /v1/auth/register
+// drops in transport (the connection fails with no HTTP status — the account may
+// already have been committed server-side), runSignupCloud must NOT print a bare
+// "signup failed: <transport>" that strands a possibly-created account. It takes
+// the recovery path: an honest receipt naming that the account may already exist
+// and advising `bp login` with the same credentials — and it writes NO config.
+// The transport failure is injected by closing the test server before the call,
+// so the client dials a dead address (a real transport error, never a
+// *cloudclient.CloudRefusal, which is exactly the seam runSignupCloud keys on).
+func TestSignupPostCommitTransportDropRecoversHonestly(t *testing.T) {
+	withTempConfigHome(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := srv.URL
+	srv.Close() // dialing deadURL now fails in transport — no HTTP status is ever returned
+
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSignupCloud(out, []string{"--email", "ada@x.com", "--password", "hunter2pw!", "--url", deadURL})
+	})
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	// The recovery copy names the ambiguous state and advises login with the same
+	// creds — never the bare "signup failed:" line.
+	if bytes.Contains([]byte(stderr), []byte("signup failed:")) {
+		t.Fatalf("transport drop must NOT print the bare 'signup failed:' line:\n%s", stderr)
+	}
+	for _, want := range []string{"may already have been created", "bp login --email ada@x.com", "same password"} {
+		if !bytes.Contains([]byte(stderr), []byte(want)) {
+			t.Fatalf("recovery receipt missing %q:\n%s", want, stderr)
+		}
+	}
+	// Fail closed: no session is minted from an unconfirmed register.
+	cfg, _ := LoadConfig()
+	if cfg.CloudToken != "" {
+		t.Fatalf("a transport-dropped signup must not persist a token; got %q", cfg.CloudToken)
+	}
+}
+
+// A server REFUSAL (a CloudRefusal — it carries an HTTP status) must NEVER take the
+// ambiguous post-commit recovery path: the server said no, so nothing was committed,
+// and "your account may already have been created" is the transport-drop copy's own
+// failure mode in reverse. Pins the errors.As seam in the WIDENING direction.
+func TestSignupRefusalNeverClaimsAmbiguity(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"422 validation", `{"error":"password_invalid"}`, http.StatusUnprocessableEntity},
+		{"401 unauthorized", `{"error":"nope"}`, http.StatusUnauthorized},
+		{"500 server error", `{"error":"boom"}`, http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withTempConfigHome(t)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			_, stderr, _ := runCloudCapture(t, false, func(out *writer) int {
+				out.output = "table"
+				return runSignupCloud(out, []string{"--email", "ada@x.com", "--password", "weak", "--url", srv.URL})
+			})
+			if bytes.Contains([]byte(stderr), []byte("may already have been created")) {
+				t.Fatalf("a %d REFUSAL must not claim the account may exist:\n%s", tc.status, stderr)
+			}
+		})
+	}
+}
+
+// TestSignupTransportRecoveryKeepsNonDefaultURL: the recovery receipt is only
+// actionable if the login hint reaches the SAME control plane. This path never
+// persists CloudURL, so a first signup against a non-default host must carry the
+// --url through — otherwise `bp login` resolves to the baked default, fails, and
+// the copy's own next clause tells the user their account was not created when it
+// may well have been. Against the default host the flag is redundant and omitted.
+func TestSignupTransportRecoveryKeepsNonDefaultURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := srv.URL
+	srv.Close() // dialing deadURL now fails in transport — no HTTP status is ever returned
+
+	withTempConfigHome(t)
+	_, stderr, _ := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runSignupCloud(out, []string{"--email", "ada@x.com", "--password", "hunter2pw!", "--url", deadURL})
+	})
+	if !bytes.Contains([]byte(stderr), []byte("bp login --email ada@x.com --url "+deadURL)) {
+		t.Fatalf("recovery receipt must send the user back to the SAME control plane %s:\n%s", deadURL, stderr)
+	}
+
+	if got := signupTransportRecoveryMessage("ada@x.com", cloudclient.DefaultBaseURL, "EOF"); strings.Contains(got, "--url") {
+		t.Fatalf("the default control plane needs no --url in the login hint:\n%s", got)
+	}
+}
+
 // TestSignupConfirmMismatchNeverCallsServer: the prompted password is typed twice
 // and the two differ → signup errors BEFORE any network call. We stand up a
 // counting server and assert it received ZERO requests.
@@ -1010,6 +1107,46 @@ func TestBarkparksFleetTableGolden(t *testing.T) {
 	assertGolden(t, "barkparks_fleet_table", stdout.String())
 }
 
+// TestBarkparksFleetTableLastSeen proves the LAST-SEEN column renders a real
+// past stamp as a relative "ago" age (via relativeAge) while a never-seen row
+// (empty LastSeenAt) falls back to the house em-dash (relativeAge("") → "" →
+// hzCell → "—"). This is the NON-golden pin: the golden fixtures deliberately
+// carry no LastSeenAt (so their regenerated cells stay clock-independent), so
+// the wall-clock path itself needs its own deterministic-by-suffix assertion.
+func TestBarkparksFleetTableLastSeen(t *testing.T) {
+	stamp := time.Now().Add(-3 * time.Hour).Format(time.RFC3339)
+	list := []cloudclient.Barkpark{
+		{Name: "seen", Provider: "hetzner", Host: "seen.example.com", Mode: "managed", HealthStatus: "up", AgentStatus: "online", LastSeenAt: stamp},
+		{Name: "never", Provider: "hetzner", Host: "never.example.com", Mode: "managed", HealthStatus: "unknown", AgentStatus: "offline"},
+	}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderCloudBarkparksTable(w, list, false)
+	got := stdout.String()
+
+	if !bytes.Contains([]byte(got), []byte("LAST-SEEN")) {
+		t.Fatalf("fleet table missing the LAST-SEEN header:\n%s", got)
+	}
+	if !bytes.Contains([]byte(got), []byte("3h ago")) {
+		t.Fatalf("a 3-hour-old stamp should render %q via relativeAge:\n%s", "3h ago", got)
+	}
+	// The never-seen row must carry the em-dash for the empty LastSeenAt.
+	var neverLine string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "never") {
+			neverLine = line
+			break
+		}
+	}
+	if neverLine == "" {
+		t.Fatalf("never-seen row not found in output:\n%s", got)
+	}
+	if !strings.Contains(neverLine, "—") {
+		t.Fatalf("never-seen row should render the em-dash for an empty LastSeenAt:\n%q", neverLine)
+	}
+}
+
 // TestBarkparksFleetTableSanitizes proves fleet cells ride through hzCell: a
 // control-plane value carrying a raw ESC (a would-be terminal-injection) is
 // stripped before it reaches the terminal, and a newline flattens to a space —
@@ -1080,7 +1217,7 @@ func TestBarkparksYAMLParity(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"barkparks":[
-			{"id":"bp-1","name":"prod","slug":"prod","url":"https://prod.example.com","mode":"managed","health_status":"up","agent_status":"online","team_id":"team-1"}
+			{"id":"bp-1","name":"prod","slug":"prod","url":"https://prod.example.com","mode":"managed","health_status":"up","agent_status":"online","last_seen_at":"2026-08-18T10:00:00Z","team_id":"team-1"}
 		]}`)
 	}))
 	defer srv.Close()
@@ -1094,7 +1231,7 @@ func TestBarkparksYAMLParity(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
 	}
 	// YAML keys (lowercase) present …
-	for _, want := range []string{"barkparks:", "source:", "name: prod"} {
+	for _, want := range []string{"barkparks:", "source:", "name: prod", "last_seen_at:"} {
 		if !bytes.Contains([]byte(stdout), []byte(want)) {
 			t.Fatalf("yaml output missing %q:\n%s", want, stdout)
 		}
@@ -1476,6 +1613,95 @@ func TestParseLaunchArgsProviderIsOpaque(t *testing.T) {
 	}
 	if provider != "azure" || name != "shop" {
 		t.Fatalf("parseLaunchArgs = (%q,%q), want (azure,shop)", provider, name)
+	}
+}
+
+// TestParseLoginArgsFlagShapedValueRejected: nextFlagValue used to consume
+// args[i+1] unconditionally, so `bp login --password --device-start` bound the
+// password to the literal "--device-start" and left --device-start's own bool
+// false, with NO error. Every login value-flag (--email/--password/
+// --device-poll/--url), followed immediately by any other known login flag or
+// by end-of-args, must now fail with the flag-needs-a-value error instead of
+// silently swallowing the follower. This is the fails-before-fix case.
+func TestParseLoginArgsFlagShapedValueRejected(t *testing.T) {
+	valueFlags := []string{"--email", "--password", "--device-poll", "--url"}
+	followers := append([]string{""}, loginKnownFlags...) // "" stands for end-of-args
+	for _, vf := range valueFlags {
+		for _, follower := range followers {
+			var args []string
+			if follower == "" {
+				args = []string{vf}
+			} else {
+				args = []string{vf, follower}
+			}
+			name := vf + "_then_" + follower
+			if follower == "" {
+				name = vf + "_end_of_args"
+			}
+			t.Run(name, func(t *testing.T) {
+				_, _, _, _, _, _, err := parseLoginArgs(args)
+				if err == nil {
+					t.Fatalf("parseLoginArgs(%v) = nil error, want %q needs a value", args, vf)
+				}
+				if !strings.Contains(err.Error(), vf+" needs a value") {
+					t.Fatalf("parseLoginArgs(%v) error = %q, want it to contain %q", args, err, vf+" needs a value")
+				}
+			})
+		}
+	}
+}
+
+// TestParseLoginArgsLegitValueStillParses: the guard must not reject a value
+// that merely starts with "-" but isn't a flag this parser knows.
+func TestParseLoginArgsLegitValueStillParses(t *testing.T) {
+	email, password, _, _, _, _, err := parseLoginArgs([]string{"--email", "a@b.com", "--password", "-secret"})
+	if err != nil {
+		t.Fatalf("parseLoginArgs: %v", err)
+	}
+	if email != "a@b.com" || password != "-secret" {
+		t.Fatalf("parseLoginArgs = (%q,%q), want (a@b.com,-secret)", email, password)
+	}
+}
+
+// TestParseSignupArgsFlagShapedValueRejected mirrors the login case for
+// `bp signup`'s value-flags (--email/--password/--team/--url).
+func TestParseSignupArgsFlagShapedValueRejected(t *testing.T) {
+	valueFlags := []string{"--email", "--password", "--team", "--url"}
+	followers := append([]string{""}, signupKnownFlags...)
+	for _, vf := range valueFlags {
+		for _, follower := range followers {
+			var args []string
+			if follower == "" {
+				args = []string{vf}
+			} else {
+				args = []string{vf, follower}
+			}
+			name := vf + "_then_" + follower
+			if follower == "" {
+				name = vf + "_end_of_args"
+			}
+			t.Run(name, func(t *testing.T) {
+				_, _, _, _, err := parseSignupArgs(args)
+				if err == nil {
+					t.Fatalf("parseSignupArgs(%v) = nil error, want %q needs a value", args, vf)
+				}
+				if !strings.Contains(err.Error(), vf+" needs a value") {
+					t.Fatalf("parseSignupArgs(%v) error = %q, want it to contain %q", args, err, vf+" needs a value")
+				}
+			})
+		}
+	}
+}
+
+// TestParseSignupArgsLegitValueStillParses: a dash-leading value that isn't a
+// known flag still binds normally.
+func TestParseSignupArgsLegitValueStillParses(t *testing.T) {
+	email, password, team, _, err := parseSignupArgs([]string{"--email", "a@b.com", "--team", "-acme", "--password", "-secret"})
+	if err != nil {
+		t.Fatalf("parseSignupArgs: %v", err)
+	}
+	if email != "a@b.com" || team != "-acme" || password != "-secret" {
+		t.Fatalf("parseSignupArgs = (%q,%q,%q), want (a@b.com,-acme,-secret)", email, password, team)
 	}
 }
 

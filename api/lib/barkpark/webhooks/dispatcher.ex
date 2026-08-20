@@ -30,6 +30,29 @@ defmodule Barkpark.Webhooks.Dispatcher do
   `redeliver/5`, fenced on `updated_at` so it can never double-fire with the
   `StuckDeliverySweeper`. The dedup-LESS back-compat path (no row to resume from)
   keeps the in-task sleep.
+
+  ## Fan-out accounting (a publish that fires NOTHING is countable)
+
+  A fan-out that selects endpoints but mints no `webhook_deliveries` rows used to
+  be indistinguishable from a publish nobody subscribed to: the outcome of
+  `fan_out/3` was discarded, so the only trace of a delivery was the row itself
+  and the failure WAS the absence of a row. Two records now bracket every
+  fan-out (`[:barkpark, :webhooks, :fan_out, :selected]` /
+  `[..., :settled]` telemetry plus a `webhook_fanout ` key=value log line):
+
+    * `selected` is written SYNCHRONOUSLY in the caller, before the fan-out task
+      is spawned — so it survives the task never starting, or being killed;
+    * `settled` is written by the task once the bounded stream drains, carrying
+      `selected` / `settled` / `minted` / `crashed` and an `abort_reason` when the
+      stream itself blew up. `minted < selected` logs at WARNING.
+
+  So both "selected 3, minted 0" and "a `selected` with no `settled`" are durable,
+  greppable facts. `minted` is only meaningful on the dedup path (`dedup=true`);
+  the back-compat `dispatch_async/5` arm creates no rows and reports `dedup=false`
+  with `minted` pinned to 0. Neither record can fail its caller: every recording
+  step is `try`-wrapped, exactly like the audit emit in `Barkpark.Webhooks`.
+  The accounting is a COUNTER, not a diagnosis — it says a fan-out lost
+  deliveries, never why.
   """
 
   require Logger
@@ -76,16 +99,35 @@ defmodule Barkpark.Webhooks.Dispatcher do
     # caller (no workspace_id) keeps the dataset-only behaviour.
     webhooks = Webhooks.active_webhooks_for(dataset, event, type, opts)
 
-    fan_out(webhooks, fn wh -> deliver(wh, body, event_id) end)
+    fan_out(webhooks, fn wh -> deliver(wh, body, event_id) end, %{
+      source: :content,
+      dedup: true,
+      dataset: dataset,
+      event: event,
+      type: type,
+      doc_id: doc_id,
+      event_id: event_id
+    })
   end
 
   # Back-compat: callers that haven't threaded event_id through yet.
-  # Dedup is skipped in this path; retry + signing still apply.
+  # Dedup is skipped in this path; retry + signing still apply. It mints no
+  # `webhook_deliveries` rows at all, so it is accounted with `dedup: false` and
+  # `minted` pinned to 0 — a zero there is BY CONSTRUCTION, never a loss, and it
+  # is excluded from the `minted < selected` warning.
   def dispatch_async(dataset, event, type, doc_id, document) do
     body = Jason.encode!(build_payload(event, type, doc_id, document, dataset))
     webhooks = Webhooks.active_webhooks_for(dataset, event, type)
 
-    fan_out(webhooks, fn wh -> deliver_without_dedup(wh, body) end)
+    fan_out(webhooks, fn wh -> deliver_without_dedup(wh, body) end, %{
+      source: :content_legacy,
+      dedup: false,
+      dataset: dataset,
+      event: event,
+      type: type,
+      doc_id: doc_id,
+      event_id: nil
+    })
   end
 
   # Bounded fan-out. One outer supervised Task keeps the caller non-blocking;
@@ -95,17 +137,154 @@ defmodule Barkpark.Webhooks.Dispatcher do
   # path). Contrast the old `start_child` per webhook, which spawned an
   # unbounded number of long-lived processes on the shared :infinity
   # TaskSupervisor.
-  defp fan_out(webhooks, deliver_fun) do
+  #
+  # ACCOUNTED (see the moduledoc): `selected` is recorded in the CALLER before
+  # the spawn — so a fan-out task that never runs still leaves a trace — and
+  # `settled` is recorded by the task after the stream drains. The stream is
+  # wrapped so an abort mid-drain is reported (with the partial tally) instead
+  # of vanishing.
+  defp fan_out(webhooks, deliver_fun, ctx) do
+    selected = length(webhooks)
+    record(:selected, %{selected: selected}, ctx)
+
     Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-      Barkpark.WebhookDeliverySupervisor
-      |> Task.Supervisor.async_stream_nolink(webhooks, deliver_fun,
-        max_concurrency: delivery_concurrency(),
-        timeout: :infinity,
-        ordered: false
+      started = System.monotonic_time(:millisecond)
+      tally_init()
+
+      abort_reason =
+        try do
+          Barkpark.WebhookDeliverySupervisor
+          |> Task.Supervisor.async_stream_nolink(webhooks, deliver_fun,
+            max_concurrency: delivery_concurrency(),
+            timeout: :infinity,
+            ordered: false
+          )
+          |> Enum.each(&tally_bump/1)
+
+          nil
+        catch
+          kind, reason -> "#{kind}: #{inspect(reason)}"
+        end
+
+      tally = tally_read()
+
+      record(
+        :settled,
+        %{
+          selected: selected,
+          settled: tally.settled,
+          # A row-less path can never mint; reporting its raw tally as `minted`
+          # would invent rows that do not exist.
+          minted: if(ctx.dedup, do: tally.minted, else: 0),
+          crashed: tally.crashed,
+          duration_ms: System.monotonic_time(:millisecond) - started
+        },
+        Map.put(ctx, :abort_reason, abort_reason)
       )
-      |> Stream.run()
     end)
   end
+
+  # Per-fan-out tally, held in the OUTER task's own process dictionary (one
+  # fresh process per fan-out, so there is nothing to collide with). Kept out of
+  # the reduce accumulator on purpose: if the stream aborts mid-drain, the
+  # partial counts are still readable in the `catch`.
+  @tally_key :barkpark_webhook_fan_out_tally
+  @empty_tally %{settled: 0, minted: 0, crashed: 0}
+
+  defp tally_init, do: Process.put(@tally_key, @empty_tally)
+  defp tally_read, do: Process.get(@tally_key) || @empty_tally
+
+  defp tally_bump({:exit, _reason}) do
+    t = tally_read()
+    Process.put(@tally_key, %{t | crashed: t.crashed + 1})
+  end
+
+  defp tally_bump({:ok, result}) do
+    t = tally_read()
+    minted = if minted?(result), do: t.minted + 1, else: t.minted
+    Process.put(@tally_key, %{t | settled: t.settled + 1, minted: minted})
+  end
+
+  # Did this delivery outcome leave a durable `webhook_deliveries` row behind?
+  # Every terminal/scheduled/deduped shape did (the row is claimed BEFORE the
+  # first HTTP attempt, so even an exhausted or 4xx give-up is a row). A bare
+  # `{:error, reason}` is a failed CLAIM — selected, but never minted.
+  defp minted?({:ok, status, _n}) when is_integer(status), do: true
+  defp minted?({:error, reason, _n}) when is_atom(reason), do: true
+  defp minted?({:scheduled, _delivery_id, _next}), do: true
+  defp minted?({:superseded, _delivery_id}), do: true
+  defp minted?({:skipped, :already_delivered}), do: true
+  defp minted?(_), do: false
+
+  # Write one fan-out record: telemetry (for a scraper), a key=value log line
+  # (for journald), and an optional operator/test sink. NEVER raises — a
+  # counter that can fail the publish it counts is worse than no counter.
+  # NOTE the OUTER `safely/1`: `record/3` runs INLINE in the publishing process on
+  # the `:selected` arm, so every statement here — including building `metadata`
+  # itself — has to be inside the guard, not merely the three sinks. Reviewed
+  # 2026-08-07 (W12 review): with the body unguarded, a `record/3` that raises
+  # before the first `safely` took the whole dispatch down with it (proved by
+  # mutation: 27 of 46 dispatcher fixtures failed). The guard is now structural
+  # rather than argued from "ctx is always a literal map at the call sites".
+  defp record(phase, measurements, ctx) do
+    safely(fn ->
+      metadata = Map.put(ctx, :phase, phase)
+
+      safely(fn ->
+        :telemetry.execute([:barkpark, :webhooks, :fan_out, phase], measurements, metadata)
+      end)
+
+      safely(fn -> log_fan_out(phase, measurements, metadata) end)
+      safely(fn -> call_sink(%{phase: phase, measurements: measurements, metadata: metadata}) end)
+    end)
+
+    :ok
+  end
+
+  defp safely(fun) do
+    fun.()
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  defp call_sink(record) do
+    case Application.get_env(:barkpark, :webhook_fanout_sink) do
+      fun when is_function(fun, 1) -> fun.(record)
+      _ -> :ok
+    end
+  end
+
+  defp log_fan_out(phase, m, meta) do
+    line =
+      "webhook_fanout phase=#{phase} source=#{meta.source} dedup=#{meta.dedup} " <>
+        "dataset=#{meta.dataset} event=#{meta.event} type=#{meta.type} " <>
+        "doc_id=#{meta.doc_id} event_id=#{inspect(meta.event_id)} " <>
+        Enum.map_join(Enum.sort(Map.to_list(m)), " ", fn {k, v} -> "#{k}=#{v}" end) <>
+        abort_suffix(meta)
+
+    cond do
+      # THE loss class: endpoints were selected, rows were not minted. Warning
+      # so it is greppable in journald without a metrics pipeline.
+      lost?(m, meta) -> Logger.warning(line)
+      m.selected > 0 -> Logger.info(line)
+      # Nothing subscribed — an honest, uninteresting zero.
+      true -> Logger.debug(line)
+    end
+  end
+
+  defp lost?(m, meta) do
+    Map.get(meta, :dedup) and m.selected > 0 and
+      (Map.get(meta, :abort_reason) != nil or
+         (Map.has_key?(m, :minted) and m.minted < m.selected))
+  end
+
+  defp abort_suffix(%{abort_reason: reason}) when is_binary(reason),
+    do: " abort_reason=#{inspect(reason)}"
+
+  defp abort_suffix(_), do: ""
 
   defp delivery_concurrency do
     Application.get_env(:barkpark, :webhook_delivery_concurrency, 100)
@@ -304,7 +483,43 @@ defmodule Barkpark.Webhooks.Dispatcher do
   """
   def dispatch_audit_async(%Barkpark.Audit.Event{} = event) do
     {webhooks, body} = audit_targets(event)
-    fan_out(webhooks, fn wh -> deliver_audit(wh, body) end)
+    deliver_fun = fn wh -> deliver_audit(wh, body) end
+
+    if audit_dispatch_async?() do
+      fan_out(webhooks, deliver_fun, %{
+        source: :audit,
+        dedup: true,
+        dataset: "-",
+        event: event.action,
+        type: event.category,
+        doc_id: event.subject,
+        event_id: event.id
+      })
+    else
+      # SYNC toggle (test env, `:audit_dispatch_async` false): run the audit
+      # fan-out INLINE in the caller's process instead of the unawaited
+      # `Task.Supervisor.start_child` spawn `fan_out/2` does. The async spawn is
+      # a fire-and-forget task on the shared `Barkpark.TaskSupervisor`; the
+      # DataCase drain is scoped to its ORIGINATING test, and ExUnit gives no
+      # ordering guarantee it finishes before a CONCURRENT raw-DDL test
+      # (extend_workspace_delete_cascade_test) opens its window — so a leaked
+      # audit SELECT (AccessShareLock on webhooks/search_synonyms) deadlocks the
+      # `ALTER TABLE` (AccessExclusiveLock) = Postgrex 40P01. Delivering inline
+      # keeps the work owner-scoped: it joins the caller's Ecto sandbox
+      # connection and dies with the test, leaving nothing on the supervisor.
+      # Only the audit path toggles — content fan-out keeps `fan_out/2` verbatim
+      # (its async-webhook tests depend on the spawn), so blast radius is nil.
+      Enum.each(webhooks, deliver_fun)
+      :ok
+    end
+  end
+
+  # Audit fan-out mode. Default TRUE everywhere (prod/dev): the post-commit audit
+  # bridge must never block `Audit.emit`. Flipped FALSE in config/test.exs so the
+  # fan-out runs synchronously in the test's process (no unawaited task to leak a
+  # DB query past its sandbox owner and deadlock a concurrent DDL test).
+  defp audit_dispatch_async? do
+    Application.get_env(:barkpark, :audit_dispatch_async, true)
   end
 
   @doc """
@@ -318,6 +533,31 @@ defmodule Barkpark.Webhooks.Dispatcher do
 
     case Webhooks.create_audit_delivery(webhook.id, payload) do
       {:ok, delivery} -> attempt(webhook, body, nil, delivery, 1)
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Deliver one CHAT_BLOCKED notification to `webhook` through the durable state
+  machine (herd layer, charter D57h). `payload` is the exact wire map
+  (`session_id`/`title`/`workspace_id`/`blocked_since`/`ask_role` — never message
+  content or tool input); `dedupe_key` is the pending ask's `chat_messages` id
+  stringified.
+
+  Claims an exactly-once slot first (partial UNIQUE(endpoint_id, dedupe_key)):
+  `{:skipped, :already_delivered}` when a re-sweep hits an ask already notified,
+  otherwise the row is created (`source_kind: "chat_blocked"`, `event_id` NULL,
+  body snapshotted for crash-recovery rebuild) and the signed attempt loop runs.
+  `event_id` is nil so the delivery-id headers are omitted (matching media/audit).
+  Same return contract as `deliver/3`.
+  """
+  def deliver_chat_blocked(%Barkpark.Webhooks.Webhook{} = webhook, payload, dedupe_key)
+      when is_map(payload) and is_binary(dedupe_key) do
+    body = Jason.encode!(payload)
+
+    case Webhooks.claim_chat_blocked_delivery(webhook.id, dedupe_key, %{"body" => body}) do
+      {:ok, delivery} -> attempt(webhook, body, nil, delivery, 1)
+      {:error, :already_delivered} -> {:skipped, :already_delivered}
       {:error, _} = err -> err
     end
   end
@@ -407,6 +647,25 @@ defmodule Barkpark.Webhooks.Dispatcher do
   end
 
   @doc """
+  Send a one-shot TEST delivery (GR45) against a freshly-inserted
+  `source_kind: "test"` row: ONE synchronous, HMAC-signed attempt, no retry loop
+  — exactly the single-shot shape of `replay_delivery/3`, but the body is the
+  synthetic probe (no `mutation_events` source) and there is no delivery-id
+  header (`event_id` is nil, like a media delivery). `webhook` carries the REAL
+  url/secret so the signature verifies against the endpoint's live secret; the
+  `delivery` row's `endpoint_id` is NULL, so recording the verdict never touches
+  the endpoint's auto-disable streak (a test that fails must not disable a real
+  endpoint). Returns `{:ok, delivery}` with the refreshed row so the caller can
+  report the ok/failed verdict immediately.
+  """
+  def deliver_test(webhook, body, %Barkpark.Webhooks.Delivery{} = delivery) do
+    warn_if_unsigned(webhook)
+    {_timestamp, headers} = build_request(webhook, body, nil)
+    {latency_ms, result} = timed_post(webhook.url, body, headers)
+    record_single_attempt(delivery, result, latency_ms)
+  end
+
+  @doc """
   Replay a single delivery against an existing (or freshly-claimed) delivery
   row: ONE synchronous attempt, no retry loop, `attempts` bumped by one and
   `status`/`last_status_code`/`last_latency_ms`/`last_error_text` overwritten
@@ -432,6 +691,15 @@ defmodule Barkpark.Webhooks.Dispatcher do
     warn_if_unsigned(webhook)
     {_timestamp, headers} = build_request(webhook, body, event_id)
     {latency_ms, result} = timed_post(webhook.url, body, headers)
+    record_single_attempt(delivery, result, latency_ms)
+  end
+
+  # Record the terminal verdict of ONE synchronous attempt onto `delivery`: bump
+  # `attempts` by one and overwrite status/code/latency/error. Shared by the two
+  # single-shot senders (`replay_delivery/3`, `deliver_test/3`) so a 2xx / non-2xx
+  # / SSRF-block / transport verdict can never be classified two different ways.
+  # NOT used by the retrying `deliver/deliver_media` path (that drives `attempt/5`).
+  defp record_single_attempt(delivery, result, latency_ms) do
     n = delivery.attempts + 1
 
     case result do

@@ -142,9 +142,57 @@ defmodule Barkpark.Tasks.ValidationTest do
     end
   end
 
+  describe "outcome.resolution (validated enum, charter D23)" do
+    @resolutions ~w(shipped fixed partial wont_do duplicate superseded discarded)
+
+    test "every advertised resolution value passes" do
+      for resolution <- @resolutions do
+        assert task_with_outcome(%{"resolution" => resolution}) == :ok
+      end
+    end
+
+    test "off-enum resolution is rejected, naming the allowed list" do
+      assert {:error, %{"outcome" => [msg]}} = task_with_outcome(%{"resolution" => "abandoned"})
+      assert msg =~ "resolution must be one of"
+      for resolution <- @resolutions, do: assert(msg =~ resolution)
+      assert msg =~ "\"abandoned\""
+    end
+
+    test "empty-string resolution is rejected (present-but-empty is off-enum)" do
+      assert {:error, %{"outcome" => [msg]}} = task_with_outcome(%{"resolution" => ""})
+      assert msg =~ "resolution must be one of"
+    end
+
+    test "absent outcome is fine" do
+      assert Validation.validate_task_content(%{
+               "kind" => "task",
+               "lifecycle_status" => "done"
+             }) == :ok
+    end
+
+    test "outcome map without a resolution is fine; unknown other keys stay tolerated" do
+      assert task_with_outcome(%{"summary" => "shipped the thing", "weird_key" => 42}) == :ok
+    end
+
+    test "non-map outcome keeps the existing shape error" do
+      assert {:error, %{"outcome" => [msg]}} = task_with_outcome("shipped")
+      assert msg == "must be a map when set, got \"shipped\""
+    end
+  end
+
   describe "atom-key fallback still works" do
     test "atom keys are accepted equivalently to string keys" do
       assert Validation.validate_task_content(%{kind: "task", lifecycle_status: "open"}) == :ok
     end
+  end
+
+  # Helper for the outcome.resolution describe — ExUnit forbids defp inside
+  # describe blocks, so it lives at module level.
+  defp task_with_outcome(outcome) do
+    Validation.validate_task_content(%{
+      "kind" => "task",
+      "lifecycle_status" => "done",
+      "outcome" => outcome
+    })
   end
 end

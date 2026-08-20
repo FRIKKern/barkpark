@@ -54,11 +54,18 @@ func renderTable(out *writer, payload []byte) {
 // "schemas", webhook.ls "webhooks", plugin.ls "plugins", share.ls "shares",
 // secret.ls "secrets".
 // media.collections uses "collections"; media.collection-assets (and media
-// search) carry their hits under "hits"; doc.backlinks uses "backlinks". A key
-// missing here is not cosmetic: renderTable falls through to renderKV and crams
-// the whole array into ONE key/value cell (and minimal prints a bare "ok") —
-// valid output, zero information. Add a list command's envelope key here
-// whenever its default_output is "table".
+// search) carry their hits under "hits"; doc.backlinks uses "backlinks";
+// doc.related "related"; the tag reads (tag.browse) "tags". A key missing here
+// is not cosmetic: renderTable falls through to renderKV and crams the whole
+// array into ONE key/value cell (and minimal prints a bare "ok") — valid
+// output, zero information. Add a list command's envelope key here whenever its
+// default_output is "table".
+//
+// "related" and "tags" are content-collidable: Envelope.render (api) flattens a
+// document's content fields to the top level, so a doc.get payload (also table
+// output) can carry its OWN top-level "tags" (or "related") array. Those keys
+// are safe here ONLY because envelopeRows refuses the list treatment for a
+// single document (it carries "_id"); a wrapper envelope never does.
 //
 // The tickets plugin's operator list verb — ticket.inbox (triage) — carries its
 // rows under "tickets" (the submitter's own-threads list is curl-only, not a bp
@@ -67,14 +74,25 @@ func renderTable(out *writer, payload []byte) {
 // ("keys" is safe to claim: the only other "keys" payload, the sites env-set
 // receipt, goes through emitStructured and never reaches this renderer.)
 var listEnvelopeKeys = []string{
-	"documents", "docs", "assets", "collections", "hits", "backlinks", "revisions",
-	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares", "secrets",
-	"tickets", "keys",
+	"documents", "docs", "assets", "collections", "hits", "backlinks", "related",
+	"revisions", "workspaces", "projects", "schemas", "webhooks", "plugins",
+	"shares", "secrets", "tickets", "keys", "tags",
 }
 
 // envelopeRows finds the row list of a list-envelope payload, trying the known
 // envelope keys in order. ok=false when none holds a JSON array.
 func envelopeRows(m map[string]any) ([]any, bool) {
+	// A single document is never a list envelope: it carries its own "_id" and
+	// renders as key/value, not as a table of one of its array-valued content
+	// fields. Envelope.render (api) flattens content to the top level, so a
+	// tagged doc.get payload carries a top-level "tags" (and could carry
+	// "related") array — without this guard those content-collidable keys would
+	// hijack `doc get` into tabulating that field instead of showing the doc.
+	// A wrapper envelope ({related:[…],count}, {tags:[…]}, {documents:[…]}) has
+	// no "_id".
+	if _, isDoc := m["_id"]; isDoc {
+		return nil, false
+	}
 	for _, k := range listEnvelopeKeys {
 		if rows, ok := m[k].([]any); ok {
 			return rows, true

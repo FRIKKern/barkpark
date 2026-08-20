@@ -358,13 +358,16 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
 
       {:ok, _} = Content.apply_paper_block_op(slug, op, @dataset)
 
-      # Perform EVERY real enqueued job (config/test.exs runs Oban :manual):
-      # one types-["task"] rebuild from the publish, one types-["paper"]
-      # rebuild the upsert + op enqueues dedup'd into. Both types' rebuilds
-      # must be present and both must run clean.
+      # Perform EVERY real enqueued job (config/test.exs runs Oban :manual).
+      # This is a process-global queue, so a full-suite run may legitimately
+      # contain projector jobs left by tests that exercise non-sandboxed
+      # producers. The invariant here is semantic: this edit must leave BOTH
+      # the task and paper rebuild shapes runnable; unrelated duplicates do not
+      # weaken that proof and must not make the assertion order-dependent.
       jobs = all_enqueued(worker: ProjectorWorker)
       type_sets = jobs |> Enum.map(& &1.args["types"]) |> Enum.sort()
-      assert [["paper"], ["task"]] = type_sets
+      assert ["paper"] in type_sets
+      assert ["task"] in type_sets
 
       for job <- jobs do
         assert :ok = perform_job(ProjectorWorker, job.args)
@@ -374,6 +377,59 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
 
       assert {task.id, "references"} in edge_pairs(paper_pk),
              "the performed rebuild must store paper→task references edge"
+    end
+
+    # THE TEST ABOVE CAUGHT A REAL CRASH BY ACCIDENT, AND COULD STOP DOING SO AT
+    # ANY TIME. Its slug is "wire-loop-#{System.unique_integer([:positive])}",
+    # whose LENGTH tracks the counter's digit count — it is exactly 16
+    # characters only while that integer has 6 digits. Sixteen is the load-
+    # bearing number: `Ecto.UUID.cast/1` carries a `def cast(<<_::128>>)` clause
+    # that accepts ANY 16-byte binary as a raw UUID, while `dump/1` accepts only
+    # the 36-char hyphenated form. `resolve_doc_pks/3` used to filter with
+    # `cast` and then hand the RAW id to the query, so a 16-char slug joined the
+    # `d.id` disjunct and died at dump time, taking the projector job with it.
+    #
+    # This leg pins the boundary by NAME rather than by luck: the slug is
+    # asserted to be exactly 16 characters, so a future edit that changes the
+    # id shape reds HERE instead of silently retiring the coverage.
+    test "a doc_id of exactly 16 characters — the length Ecto.UUID.cast/1 mistakes for a raw UUID — projects without a CastError",
+         %{scope: scope} do
+      slug = "wire-loop-000001"
+      # BYTES, not graphemes — Ecto's trap clause is `<<_::128>>`, a byte width.
+      assert byte_size(slug) == 16, "this leg is worthless unless the slug is 16 BYTES"
+      assert match?({:ok, _}, Ecto.UUID.cast(slug)), "cast/1 must ACCEPT it — that is the trap"
+      assert Ecto.UUID.dump(slug) == :error, "dump/1 must REJECT it — that is the crash"
+
+      task = publish!("task", "t-16char-target", scope)
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            dataset: @dataset,
+            blocks: [%{"id" => "b1", "type" => "paragraph", "text" => "hello"}]
+          })
+        )
+
+      op = %{
+        "op" => "append-block",
+        "block" => %{
+          "id" => "b-link",
+          "type" => "paragraph",
+          "content" => [task_wikilink_node(task.doc_id)]
+        }
+      }
+
+      {:ok, _} = Content.apply_paper_block_op(slug, op, @dataset)
+
+      for job <- all_enqueued(worker: ProjectorWorker) do
+        assert :ok = perform_job(ProjectorWorker, job.args)
+      end
+
+      paper_pk = Content.get_paper(slug, @dataset).id
+
+      assert {task.id, "references"} in edge_pairs(paper_pk),
+             "a 16-char slug must resolve by slug, never by being mistaken for a PK"
     end
   end
 

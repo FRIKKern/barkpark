@@ -1,4 +1,4 @@
-<!-- doc-tier: human | canonical-for: agents-md-onramp | budget: 1600tok -->
+<!-- doc-tier: human | canonical-for: agents-md-onramp | budget: 900tok -->
 # AGENTS.md — the one teach block
 
 `AGENTS.md` is the tool-agnostic convergence standard (~two dozen agents read it: Codex, Aider, and a growing list). One file at your repo root, and any of them knows the Barkpark claim-first task contract before it touches the board. `bp onramp agents-md` emits that block — the ONE canonical teach text — so you never hand-copy it.
@@ -24,7 +24,7 @@ The block is wrapped in managed markers:
 <!-- barkpark:onramp:end -->
 ```
 
-Those markers exist because a consumer's `AGENTS.md` **routinely already exists** — this repo's own root `AGENTS.md` is the proof (it holds shell-danger rules, not Barkpark teach text). The block is emitter output for *your* repo, never a Barkpark-committed asset. When `--write` lands (see below), the markers are how a re-run finds and refreshes only its own block, never your surrounding content.
+Those markers exist because a consumer's `AGENTS.md` **routinely already exists** — this repo's own root `AGENTS.md` is the proof (it holds shell-danger rules, not Barkpark teach text). The block is emitter output for *your* repo, never a Barkpark-committed asset. With `--write` (see [Merge semantics](#merge-semantics---write)), the markers are how a re-run finds and refreshes only its own block, never your surrounding content.
 
 ## One body, three framings
 

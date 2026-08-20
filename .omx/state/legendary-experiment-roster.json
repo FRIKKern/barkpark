@@ -1,0 +1,494 @@
+{
+  "schema_version": "legendary-experiment-roster/v1",
+  "roster_id": "legendary-quality-e03-e15",
+  "generated_at": "2026-07-15T02:20:00Z",
+  "purpose": "Canonical sequential experiment roster that converts the accepted 60-assignment Legendary survey into a format decision and a measured builder capacity without mutating product source or production content.",
+  "readiness": {
+    "verdict": "READY_FOR_SEQUENTIAL_DISPATCH",
+    "next_assignment": "E03",
+    "ready_now": [
+      "E03"
+    ],
+    "gated_later": [
+      "E04-E06 require accepted E03 fixtures, baseline scores, failure taxonomy, and frozen thresholds.",
+      "E07-E09 require all three runnable candidate artifacts from E04-E06.",
+      "E10-E12 require the accepted Round-3 failure matrix and rejection record.",
+      "E13-E15 require one accepted convergence candidate, frozen rubric, golden fixtures, rollback rule, and executable full builder gate."
+    ],
+    "capability_gates": [
+      "Authenticated Studio evidence is mandatory before any candidate can win.",
+      "Real-client email evidence is mandatory before any candidate can win; an isolated HTML harness is not a substitute.",
+      "If either capability is unavailable, record BLOCKED and keep Experiment open rather than averaging away the missing surface."
+    ]
+  },
+  "source_evidence": [
+    {
+      "path": ".omx/state/legendary-quality-baseline.json",
+      "sha256": "15daf197898d05b59ca323080c2c0f20100427c475a7d51f879d41db06f809dc",
+      "accepted_fact": "Survey is 60/60 accepted; E01-E02 are accepted; 13 experiment assignments remain."
+    },
+    {
+      "path": ".omx/state/legendary-survey-roster.json",
+      "sha256": "bfcdb27f4ae20af572d0c8eab2353c180ed6e2037f08710695ec98de31f51c83",
+      "accepted_fact": "Frozen survey scope is 203 Papers, 1,527 Tasks, and five target surfaces."
+    },
+    {
+      "path": ".omx/state/legendary-frozen-manifests/paper-203.json",
+      "sha256": "9c6fb90789ed0ed045ed3a39e1b59541a3fb45963a25abe6a60783f3332d15f5",
+      "accepted_fact": "E01 provides 203 ordered unique Paper ids after one named exclusion."
+    },
+    {
+      "path": ".omx/state/legendary-frozen-manifests/task-classification.json",
+      "sha256": "4a2adb89e5ae869c80dcf477780e2ee96d6d95cbace22274379ec2c203e17930",
+      "accepted_fact": "E02 provides the disjoint complete six-class partition of 1,527 ordered unique Task ids."
+    },
+    {
+      "path": ".codex/skills/legendary-cycle/references/experiment-contract.md",
+      "sha256": "572ba7b67b01512738ac02005ece734ea3f5293d49eefdbf54e670a6ec36e7c3",
+      "accepted_fact": "Five sequential rounds of three assignments are required: Baseline, Diverge, Attack, Converge, Pilot."
+    }
+  ],
+  "accepted_survey_constraints": {
+    "inventory": {
+      "papers": 203,
+      "tasks": 1527,
+      "surface_cells": 1015,
+      "surfaces": [
+        "Studio",
+        "public paper reader",
+        "TUI",
+        "CLI/API",
+        "email"
+      ]
+    },
+    "paper_cohorts": {
+      "canonical_portabledoc": 161,
+      "legacy_root_storage": 13,
+      "html_only": 20,
+      "markdown_only_unreadable": 6,
+      "true_empty_draft_probes": 3,
+      "unsupported_terminal_nodes": {
+        "occurrences": 45,
+        "papers": 5
+      }
+    },
+    "task_cohorts": {
+      "classes": {
+        "executable": 127,
+        "goal": 62,
+        "decision_or_human_gate": 43,
+        "done_or_cancelled_history": 1157,
+        "deferred": 133,
+        "probe": 5
+      },
+      "repair_priority": {
+        "p0": 1,
+        "p1": 5,
+        "p2": 32,
+        "retire": 6,
+        "human_review": 414,
+        "ambiguous_multi_signal": 82
+      },
+      "truth_boundary": "Fixed Cn/7 is advisory mechanical completeness only; class-aware hard gates and evidence determine quality."
+    },
+    "known_failures_and_unknowns": [
+      "Six Markdown-only Papers are raw-readable but fail required reader paths.",
+      "Five frozen Papers contain 45 unsupported terminal nodes; live drift must remain separate.",
+      "The isolated email harness is only a qualified proxy and is not real-client proof.",
+      "Studio content behavior remains authentication-gated.",
+      "Blinded rating and disagreement work lacks sealed paired records.",
+      "Earlier raw-capture bundles and complete production request logs are incomplete.",
+      "Task list pagination is not authoritative; frozen raw-document manifests are authoritative."
+    ]
+  },
+  "execution_contract": {
+    "agent_type": "legendary-experimenter",
+    "round_order": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "within_round": "Three assignments are independent and may run concurrently only after the prior round is accepted.",
+    "round_gate": "All three assignment results must be accepted before the next round starts; retries do not replace or double-count an assignment.",
+    "write_boundary": "Candidate work is limited to isolated candidate worktrees or scratch artifacts. Never mutate production data, the wave Paper, authoritative build tasks, or product/source files from this roster-design task.",
+    "evidence_boundary": "Every result must separate observed facts, inferences, recommendations, unresolved unknowns, and capability blocks.",
+    "fixture_boundary": "Every exercised fixture id must come from the frozen E01/E02 manifests or an explicitly hashed adversarial scratch fixture manifest. No substitute ids may be invented after seeing results.",
+    "selection_authority": "Experimenters report evidence; the leader records the round verdict, rejects candidates, selects the winner, and freezes golden fixtures."
+  },
+  "predeclared_thresholds": {
+    "surface_exercise": "100% of declared target surfaces must have real evidence; inaccessible Studio or email is BLOCKED, not N/A or PASS.",
+    "reader_visibility": "100% of non-excluded fixtures render non-blank content or an explicit supported error on every target reader; zero silent blanks.",
+    "structural_completeness": "100% of required authored semantic nodes and required Task contract fields survive the candidate transformation.",
+    "schema_validity": "100% of candidate outputs pass the applicable PortableDoc/schema validators; zero malformed nodes introduced.",
+    "accessibility": "Zero critical/high accessibility defects; deterministic semantic reading order; headings, lists, links, tables, and status cues retain non-visual meaning.",
+    "width_overflow": "No content loss or horizontal clipping at the narrowest supported TUI and email widths; long unbroken tokens degrade explicitly.",
+    "authored_content_preservation": "100% preservation unless a field is explicitly quarantined with before/after evidence and rollback metadata.",
+    "idempotence": "Two consecutive reruns produce identical canonical semantic hashes and no additional mutations.",
+    "rollback": "100% restoration from the recorded pre-image for every mutated scratch fixture; quarantine path tested for every rejected unit.",
+    "render_test_gate": "100% of the declared candidate gate commands pass on every accepted pilot batch.",
+    "pilot_failure_rate": "Zero critical failures and at most 1% non-critical unit failures; any hard reader, preservation, schema, accessibility, idempotence, or rollback failure rejects the batch.",
+    "capacity_rule": "For each homogeneous unit family, proven_batch_capacity is the largest disjoint pilot batch completing the full gate within 60 minutes with zero hard-gate failures. Do not combine Paper and Task capacity.",
+    "build_formula": "For each homogeneous unit family: max(15, ceil(unit_count / proven_batch_capacity))."
+  },
+  "required_result_fields": [
+    "assignment_id",
+    "round",
+    "candidate_ids",
+    "input_hashes",
+    "fixture_manifest_path",
+    "fixture_manifest_sha256",
+    "commands_or_probes",
+    "observed_facts",
+    "inferences",
+    "recommendations",
+    "unresolved_unknowns",
+    "surface_matrix",
+    "threshold_results",
+    "evidence_paths",
+    "validation",
+    "risks",
+    "stop_condition",
+    "verdict"
+  ],
+  "rounds": [
+    {
+      "round": 1,
+      "name": "Baseline",
+      "durable_result": "Frozen inventories, baseline scores, and failure taxonomy on representative good, bad, and edge fixtures.",
+      "assignments": [
+        {
+          "id": "E01",
+          "status": "accepted",
+          "title": "Freeze the ordered 203-Paper membership",
+          "artifact": ".omx/state/legendary-frozen-manifests/paper-203.json",
+          "artifact_sha256": "9c6fb90789ed0ed045ed3a39e1b59541a3fb45963a25abe6a60783f3332d15f5"
+        },
+        {
+          "id": "E02",
+          "status": "accepted",
+          "title": "Freeze the ordered 1,527-Task membership and six-class partition",
+          "artifact": ".omx/state/legendary-frozen-manifests/task-classification.json",
+          "artifact_sha256": "4a2adb89e5ae869c80dcf477780e2ee96d6d95cbace22274379ec2c203e17930"
+        },
+        {
+          "id": "E03",
+          "status": "ready",
+          "title": "Freeze representative baseline fixtures, scores, and the cross-surface failure taxonomy",
+          "objective": "Complete Round 1 by measuring current Paper and Task formats on exact known-good, known-bad, and adversarial fixtures, while turning missing Studio/email proof and missing raw-capture durability into explicit baseline failures or blocks.",
+          "evidence_basis": [
+            "Zero unconditional-gold Papers; one conditional-gold, two conditional-strong, and two repair candidates.",
+            "Seven adversarial Paper candidates are accepted: six Markdown-only and one nested PortableDoc/unsupported-node case.",
+            "Ten hard-gate failures exist in the ambiguous Task double-rating cohort.",
+            "The 1,015-cell survey matrix is complete as accounting but not sufficient as final truth."
+          ],
+          "fixture_contract": {
+            "paper_minimum": "At least 12 exact frozen ids: >=3 conditional good controls, all six Markdown-only failures, >=1 unsupported nested case, >=1 HTML-only control, and >=1 legacy-root case.",
+            "task_minimum": "At least 18 exact frozen ids, disjoint across all six Task classes and including P0, P1, P2, retire/probe, human-review, ambiguity, and class-vs-Cn disagreement signals.",
+            "adversarial": "Hash scratch fixtures for narrow width, long content, missing fields, malformed legacy nodes, nested lists/tables, and long unbroken tokens before probing."
+          },
+          "deliverables": [
+            "Hashed baseline fixture manifest with exact ids and cohort provenance.",
+            "Baseline Paper and Task rubric scores with facts separated from ratings.",
+            "Five-surface failure matrix including explicit BLOCKED cells.",
+            "Frozen failure taxonomy and threshold file used unchanged by E04-E15.",
+            "Raw request/response capture index sufficient for independent replay."
+          ],
+          "hard_gates": [
+            "Fixture ids reconcile to E01/E02 or a pre-hashed adversarial manifest.",
+            "Known bad fixtures fail for the expected observed reasons; good controls are not assumed gold.",
+            "No missing Studio/email evidence is labeled PASS.",
+            "All baseline scores trace to raw evidence and the candidate rubric."
+          ],
+          "stop_condition": "Stop and return REWORK on fixture overlap, missing manifest hashes, unreconciled counts, absent raw captures, attempted mutation, or inferred ratings presented as source truth."
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "name": "Diverge",
+      "durable_result": "Three materially different runnable candidate formats, each scored against the frozen E03 baseline and thresholds.",
+      "assignments": [
+        {
+          "id": "E04",
+          "status": "blocked_by_round_1",
+          "candidate_id": "candidate-canonical-native",
+          "title": "Prototype a single canonical-native repair format",
+          "objective": "Build an isolated candidate that rewrites eligible Paper content into canonical PortableDoc plus derived HTML and emits class-specific canonical Task fields from one strict repair packet.",
+          "material_difference": "Normalization-first: one canonical storage and repair shape replaces legacy variants.",
+          "must_prove": [
+            "Authored content preservation with explicit before/after semantic hashes.",
+            "No unsupported terminal nodes remain in candidate outputs.",
+            "Task class requirements are explicit rather than padded to a universal field count.",
+            "Runnable renderer, schema, idempotence, and rollback gates."
+          ],
+          "deliverables": [
+            "Runnable scratch candidate",
+            "Transformation manifest",
+            "Candidate-specific fixtures and commands",
+            "Threshold scorecard"
+          ],
+          "stop_condition": "Reject on any destructive semantic loss, silent reader blank, class flattening, or non-idempotent second run."
+        },
+        {
+          "id": "E05",
+          "status": "blocked_by_round_1",
+          "candidate_id": "candidate-preservation-envelope",
+          "title": "Prototype a preservation-first compatibility envelope",
+          "objective": "Build an isolated candidate that preserves authored payloads and adds a canonical compatibility envelope, reader fallbacks, and explicit provenance instead of eagerly rewriting legacy storage.",
+          "material_difference": "Adapter-first: original storage remains authoritative until a proven reader-safe migration is selected.",
+          "must_prove": [
+            "Legacy, HTML-only, and Markdown-only payloads remain byte- or semantic-preserved.",
+            "Every reader receives non-blank output or an explicit supported error.",
+            "Task recommendations remain annotations until authority and evidence gates pass.",
+            "Envelope removal cleanly restores the untouched pre-image."
+          ],
+          "deliverables": [
+            "Runnable scratch adapter",
+            "Fallback precedence contract",
+            "Provenance and rollback manifest",
+            "Threshold scorecard"
+          ],
+          "stop_condition": "Reject if the envelope creates multiple competing truths, masks malformed source, or cannot be removed without residue."
+        },
+        {
+          "id": "E06",
+          "status": "blocked_by_round_1",
+          "candidate_id": "candidate-cohort-rails",
+          "title": "Prototype cohort-specific repair rails with quarantine",
+          "objective": "Build isolated, explicit repair rails per Paper storage cohort and Task class, routing empty probes, ambiguous Tasks, and unsafe units to quarantine or human review instead of forcing one format.",
+          "material_difference": "Cohort-first: multiple narrow transforms share gates and provenance but not a universal content template.",
+          "must_prove": [
+            "Deterministic cohort selection with one rail per unit and overlap zero.",
+            "Explicit exclusions for the three empty Paper probes and evidence-gated retirement candidates.",
+            "Ambiguous Task and unsupported-node cases quarantine rather than guess.",
+            "All rails produce comparable scorecards and reversible manifests."
+          ],
+          "deliverables": [
+            "Runnable scratch rail dispatcher",
+            "Cohort-to-rail manifest",
+            "Quarantine and escalation contract",
+            "Threshold scorecard"
+          ],
+          "stop_condition": "Reject on nondeterministic routing, overlap, silent exclusion, or a rail that lacks the full gate."
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "name": "Attack",
+      "durable_result": "Hostile-reader and preservation failure matrix for all three candidates, with rejected candidates named.",
+      "assignments": [
+        {
+          "id": "E07",
+          "status": "blocked_by_round_2",
+          "title": "Attack every candidate on all five real reader surfaces",
+          "objective": "Exercise the same frozen fixtures against authenticated Studio, public reader, TUI, CLI/API, and real-client email; include narrow widths and explicit delivery/render captures.",
+          "attack_axes": [
+            "authentication and visibility",
+            "blank versus explicit failure",
+            "narrow width and overflow",
+            "email delivery and real-client rendering",
+            "source-to-render traceability"
+          ],
+          "hard_gate": "A candidate is rejected if any target surface is unexercised, silently blank, clips authored content, or lacks replayable evidence.",
+          "stop_condition": "Return BLOCKED rather than proxy-PASS when Studio credentials or real-client email capability is unavailable."
+        },
+        {
+          "id": "E08",
+          "status": "blocked_by_round_2",
+          "title": "Attack accessibility, structure, and hostile content behavior",
+          "objective": "Test all candidates with nested structure, long content, long tokens, missing fields, malformed legacy data, unsupported aliases, tables, lists, links, and status cues.",
+          "attack_axes": [
+            "semantic reading order",
+            "heading and list hierarchy",
+            "non-visual status meaning",
+            "malformed-node containment",
+            "structure preservation at narrow widths"
+          ],
+          "hard_gate": "Reject any candidate with critical/high accessibility defects, semantic reordering, malformed-node propagation, or content loss.",
+          "stop_condition": "Stop on unbounded parser behavior, inaccessible evidence, or any test that mutates authoritative content."
+        },
+        {
+          "id": "E09",
+          "status": "blocked_by_round_2",
+          "title": "Attack evidence truth, idempotence, rollback, and classification safety",
+          "objective": "Run every candidate twice, roll it back, replay it from raw captures, and challenge Task class decisions using sealed blind records and the ambiguity/disagreement registers.",
+          "attack_axes": [
+            "second-run semantic hash stability",
+            "pre-image restoration",
+            "authored-versus-derived provenance",
+            "class-vs-Cn disagreement",
+            "ambiguous and authority-gated decisions",
+            "pagination-independent reproducibility"
+          ],
+          "hard_gate": "Reject on any additional second-run mutation, failed restoration, fabricated provenance, guessed class/authority decision, or dependency on the known-broken Task pagination path.",
+          "stop_condition": "Stop if paired blind records are not sealed before scoring or if raw captures cannot independently reproduce the result."
+        }
+      ]
+    },
+    {
+      "round": 4,
+      "name": "Converge",
+      "durable_result": "One runnable candidate, frozen rubric, golden fixtures, accessibility contract, and migration/idempotence/rollback behavior.",
+      "assignments": [
+        {
+          "id": "E10",
+          "status": "blocked_by_round_3",
+          "title": "Refine the strongest candidate without weakening hard gates",
+          "objective": "Independently reproduce the Round-3 winner, incorporate only evidence-backed improvements, remove rejected mechanisms, and produce the single runnable convergence candidate.",
+          "deliverables": [
+            "Candidate version and content hash",
+            "Frozen functional rubric",
+            "Rejected-candidate decision record",
+            "Exact executable builder gate"
+          ],
+          "stop_condition": "No winner if every candidate failed a hard gate; start another complete three-assignment experiment round instead."
+        },
+        {
+          "id": "E11",
+          "status": "blocked_by_round_3",
+          "title": "Freeze accessibility and cross-reader behavior",
+          "objective": "Refine and independently verify the winner's reading order, semantic cues, width behavior, fallback behavior, and five-surface golden renders.",
+          "deliverables": [
+            "Hashed accessibility fixture set",
+            "Five-surface golden captures",
+            "Automatable accessibility/overflow gates",
+            "Documented explicit-degradation behavior"
+          ],
+          "stop_condition": "Reject convergence on any critical/high defect, silent fallback, missing real surface, or non-reproducible golden."
+        },
+        {
+          "id": "E12",
+          "status": "blocked_by_round_3",
+          "title": "Freeze migration, preservation, idempotence, quarantine, and rollback behavior",
+          "objective": "Refine and independently verify deterministic selection, before/after provenance, two-run stability, pre-image restoration, and quarantine rules across all selected cohorts.",
+          "deliverables": [
+            "Hashed migration manifest schema",
+            "Idempotence and rollback proofs",
+            "Quarantine/authority escalation rules",
+            "Dry-run and failure-injection commands"
+          ],
+          "stop_condition": "Reject convergence if any unit lacks a deterministic route, rollback pre-image, or evidence-truth boundary."
+        }
+      ]
+    },
+    {
+      "round": 5,
+      "name": "Pilot",
+      "durable_result": "Chosen format, frozen golden fixtures, separate proven Paper and Task capacities, elapsed time, failure rate, rollback rule, and build-count inputs.",
+      "assignments": [
+        {
+          "id": "E13",
+          "status": "blocked_by_round_4",
+          "title": "Pilot the high-risk Paper repair batch",
+          "objective": "Run the full builder gate in isolation on all six Markdown-only failures and all five unsupported-node Papers, with the three empty draft probes handled as explicit non-overlapping exclusions rather than padded content.",
+          "batch_contract": {
+            "repair_units": 11,
+            "exclusion_review_units": 3,
+            "overlap_with_E14_E15": 0
+          },
+          "required_metrics": [
+            "units attempted/passed/failed/excluded",
+            "wall-clock and active time",
+            "per-surface gate results",
+            "idempotence and rollback results",
+            "failure rate and smallest failing cohort"
+          ],
+          "stop_condition": "Reject the batch on any hard-gate failure; do not count exclusions as repaired capacity."
+        },
+        {
+          "id": "E14",
+          "status": "blocked_by_round_4",
+          "title": "Pilot a disjoint representative Paper control batch",
+          "objective": "Run the full builder gate on a pre-hashed batch disjoint from E13 containing canonical PortableDoc, legacy-root, and HTML-only controls selected from E01, including long/nested/accessibility cases.",
+          "batch_contract": {
+            "minimum_units": 15,
+            "minimum_per_cohort": 5,
+            "cohorts": [
+              "canonical_portabledoc",
+              "legacy_root_storage",
+              "html_only"
+            ],
+            "overlap_with_E13_E15": 0
+          },
+          "required_metrics": [
+            "units attempted/passed/failed",
+            "wall-clock and active time",
+            "no-op preservation rate for controls",
+            "per-surface gate results",
+            "failure rate and maximum safe Paper batch"
+          ],
+          "stop_condition": "Reject on control drift, unnecessary rewrite, any hard-gate failure, or a fixture manifest created after results are known."
+        },
+        {
+          "id": "E15",
+          "status": "blocked_by_round_4",
+          "title": "Pilot a disjoint class-aware Task batch and freeze capacity",
+          "objective": "Run the full builder gate on a pre-hashed E02-derived Task batch spanning all six classes plus P0/P1/P2, retirement, human-review, ambiguity, and class-vs-Cn disagreement signals without inventing semantic truth.",
+          "batch_contract": {
+            "minimum_units": 18,
+            "minimum_class_coverage": 6,
+            "required_priority_signals": [
+              "p0",
+              "p1",
+              "p2",
+              "retire",
+              "human_review",
+              "ambiguous_multi_signal",
+              "class_vs_cn_disagreement"
+            ],
+            "overlap_with_E13_E14": 0
+          },
+          "required_metrics": [
+            "units attempted/passed/failed/quarantined",
+            "wall-clock and active time",
+            "authority-gated versus mechanical outcomes",
+            "idempotence and rollback results",
+            "failure rate and maximum safe Task batch",
+            "evaluated Paper and Task build formulas"
+          ],
+          "stop_condition": "Reject on fabricated criteria/evidence, guessed authority decisions, class flattening, pagination dependence, or any hard-gate failure."
+        }
+      ]
+    }
+  ],
+  "accounting": {
+    "required_total": 15,
+    "accepted_completed": 2,
+    "remaining_planned": 13,
+    "round_counts": {
+      "1": 3,
+      "2": 3,
+      "3": 3,
+      "4": 3,
+      "5": 3
+    },
+    "ids": [
+      "E01",
+      "E02",
+      "E03",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E10",
+      "E11",
+      "E12",
+      "E13",
+      "E14",
+      "E15"
+    ],
+    "invariants": [
+      "Exactly 15 canonical experiment assignments exist and every id E01..E15 appears once.",
+      "E01-E02 are accepted evidence; E03-E15 are the 13 remaining assignments.",
+      "Each round contains exactly three assignments and rounds execute sequentially.",
+      "A hard reader, preservation, schema, accessibility, idempotence, or rollback failure cannot be averaged away.",
+      "Pilot batches are disjoint and capacity is reported separately for Papers and Tasks.",
+      "No production data, wave Paper, authoritative build task, or product/source file is mutated by experiment roster design."
+    ]
+  }
+}

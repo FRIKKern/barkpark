@@ -1,0 +1,31 @@
+{
+  "run_id": "grip-20260723T032115Z",
+  "recipes": [
+    {
+      "subject": "internal/cli/cli_test.go:TestExecuteBuiltinHelpHonoursGlobalHelp",
+      "quantity": "go-test-timeout-panic:HOST-pipe-deadlock",
+      "rerun": "CC=clang go test ./internal/cli/ -run TestExecuteBuiltinHelpHonoursGlobalHelp -timeout 15s",
+      "derived_level": "L1",
+      "deps": [
+        "internal/cli/cli_test.go",
+        "internal/cli/cloud12_cmd.go",
+        "internal/cli/output.go"
+      ],
+      "observed_at": "2026-07-23T03:21:15Z",
+      "note": "Reproduces deterministically on THIS host in <15s: captureExecuteCode's os.Pipe()-based stdout capture (cli_test.go:2714-2728) deadlocks the first time a single un-drained write exceeds the host's effective pipe buffer. Isolated minimal repro (no CLI code) confirms the host pipe fills at ~512 bytes: a bare os.Pipe()+Fprintf of 1952 bytes hangs after 5s with only 512 bytes delivered. printLoginHelp's help text is 1952 bytes, so it is the very first call in the test loop to hang. Reproduced identically with dangerouslyDisableSandbox:true, so it is not the Bash-tool sandbox-exec profile; it is a property of this host/VM's default pipe buffer (Linux CI runners default to 65536-byte pipes and never hit this). HEAD (0e00f175c9) is a pure ancestor of origin/main (19e2fb96b4, 9 commits behind, 0 ahead) and `git diff HEAD origin/main -- internal/cli/cli_test.go internal/cli/cloud12_cmd.go internal/cli/output.go internal/cli/cli.go` is EMPTY — the exact same code is on origin/main, so this is a pre-existing, environment-specific baseline red, not introduced by this wave. CI (GitHub Actions ubuntu-latest, go-tests.yml) is unaffected. Builders on this host must scope `go test` away from internal/cli's full suite (or run individual -run targets) rather than trust a blanket `go test ./...` to finish; a real code fix (draining the pipe concurrently in captureExecuteCode, e.g. via a goroutine + io.Copy before Execute blocks) would also fix it but is out of scope for this verifier."
+    },
+    {
+      "subject": "go build/vet/gofmt-ceiling",
+      "quantity": "green",
+      "rerun": "CC=clang go build ./... && go vet ./... && bash scripts/go-format-drift-ceiling.sh && gofmt -l .",
+      "derived_level": "L1",
+      "deps": [
+        "go.mod",
+        "go.sum",
+        ".go-format-drift-ceiling"
+      ],
+      "observed_at": "2026-07-23T03:21:15Z",
+      "note": "All three green with no output/diagnostics on HEAD 0e00f175c9. go-format-drift-ceiling.sh: 'OK: 684 Go files scanned; 0 off-roster drift; roster holds 0 grandfathered file(s).' gofmt -l . printed nothing (fully clean). --selftest also passed all 4 cases (A/B/C/D)."
+    }
+  ]
+}

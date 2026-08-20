@@ -75,6 +75,59 @@ func TestGetConditional_ExactLimitAccepted(t *testing.T) {
 	}
 }
 
+// GetConditionalBounded honors the caller's cap, not maxManifestBytes: a body
+// past the manifest cap round-trips when the caller's bound is larger — while
+// GetConditional keeps refusing it, so the manifest's 8 MiB contract is
+// unchanged. This is the taskboard incident regression — /v1/tasks crossed
+// 8 MiB and the board went dark because its fetch borrowed the manifest cap.
+func TestGetConditionalBounded_CallerCapBeatsManifestCap(t *testing.T) {
+	big := strings.Repeat("a", maxManifestBytes+1024)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(big))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Token: "t"})
+	if _, err := c.GetConditional(srv.URL, ""); err == nil {
+		t.Fatal("manifest reader accepted a body above its established 8 MiB limit")
+	}
+	res, err := c.GetConditionalBounded(srv.URL, "", int64(maxManifestBytes)+2048)
+	if err != nil {
+		t.Fatalf("body over the manifest cap but under the caller cap must pass, got: %v", err)
+	}
+	if len(res.Body) != len(big) {
+		t.Fatalf("body length mismatch: got %d want %d", len(res.Body), len(big))
+	}
+}
+
+// GetConditionalBounded refuses a body over the caller's cap, and the error
+// names the bound generically — never "capabilities manifest" for a caller
+// that isn't fetching one. A non-positive cap is a caller bug and is refused
+// outright.
+func TestGetConditionalBounded_RefusesOverCallerCap(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(strings.Repeat("a", 4096)))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Token: "t"})
+	res, err := c.GetConditionalBounded(srv.URL, "", 2048)
+	if err == nil {
+		t.Fatalf("expected an error for a body over the caller cap, got nil (res=%v)", res)
+	}
+	if !strings.Contains(err.Error(), "exceeds 2048 bytes") {
+		t.Fatalf("expected the caller's bound in the error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "manifest") {
+		t.Fatalf("bounded error must not claim to be a manifest fetch, got: %v", err)
+	}
+	if _, err := c.GetConditionalBounded(srv.URL, "", 0); err == nil || !strings.Contains(err.Error(), "must be positive") {
+		t.Fatalf("zero limit error = %v, want positive-limit rejection", err)
+	}
+}
+
 // The 304 path never reads a body and is unaffected by the cap.
 func TestGetConditional_NotModifiedNoBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

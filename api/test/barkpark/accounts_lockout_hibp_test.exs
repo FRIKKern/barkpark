@@ -2,6 +2,10 @@ defmodule Barkpark.AccountsLockoutHibpTest do
   @moduledoc "Per-account login lockout + HIBP breached-password check (era-w7)."
   use Barkpark.DataCase, async: false
 
+  # TOTP codes come from the window-stable helper ONLY — a code minted inline
+  # can expire in the gap before the server validates it (honest-gates S1).
+  import Barkpark.TotpTestHelper
+
   alias Barkpark.Accounts
   alias Barkpark.Audit.Event
 
@@ -49,8 +53,11 @@ defmodule Barkpark.AccountsLockoutHibpTest do
       assert %{failed_login_count: 2} = Accounts.get_user_by_email("reset@example.com")
 
       # A correct login clears the counter…
-      assert %Accounts.User{} = Accounts.get_user_by_email_and_password("reset@example.com", @password)
-      assert %{failed_login_count: 0, locked_until: nil} = Accounts.get_user_by_email("reset@example.com")
+      assert %Accounts.User{} =
+               Accounts.get_user_by_email_and_password("reset@example.com", @password)
+
+      assert %{failed_login_count: 0, locked_until: nil} =
+               Accounts.get_user_by_email("reset@example.com")
 
       # …so a fresh failure streak starts from zero (not near the threshold).
       assert Accounts.get_user_by_email_and_password("reset@example.com", "wrong") == nil
@@ -67,7 +74,8 @@ defmodule Barkpark.AccountsLockoutHibpTest do
       |> Ecto.Changeset.change(%{locked_until: DateTime.add(DateTime.utc_now(), -1, :second)})
       |> Barkpark.Repo.update()
 
-      assert %Accounts.User{} = Accounts.get_user_by_email_and_password("expire@example.com", @password)
+      assert %Accounts.User{} =
+               Accounts.get_user_by_email_and_password("expire@example.com", @password)
     end
 
     test "an unknown email never errors and creates no lock state (no enumeration signal)" do
@@ -114,7 +122,7 @@ defmodule Barkpark.AccountsLockoutHibpTest do
     defp enrol_with_recovery(email) do
       user = user!(email)
       secret = Accounts.totp_secret()
-      code = NimbleTOTP.verification_code(secret)
+      code = totp_code_stable!(secret)
       {:ok, user, [recovery | _] = codes} = Accounts.enable_totp(user, secret, code)
       {user, recovery, codes}
     end
@@ -141,9 +149,7 @@ defmodule Barkpark.AccountsLockoutHibpTest do
 
       assert :error = Accounts.consume_recovery_code(user, "not-a-real-code")
 
-      refute Barkpark.Repo.exists?(
-               from e in Event, where: e.action == "recovery_code_used"
-             )
+      refute Barkpark.Repo.exists?(from e in Event, where: e.action == "recovery_code_used")
     end
   end
 
@@ -199,7 +205,9 @@ defmodule Barkpark.AccountsLockoutHibpTest do
       Application.put_env(:barkpark, :hibp_enabled, true)
       Application.put_env(:barkpark, :hibp_http, MockHibp)
 
-      assert {:error, cs} = Accounts.register_user(%{email: "pwned@example.com", password: @password})
+      assert {:error, cs} =
+               Accounts.register_user(%{email: "pwned@example.com", password: @password})
+
       assert "has appeared in a known data breach — choose a different one" in errors_on(cs).password
 
       # k-anonymity: the client only ever received a 5-char prefix, and it is
@@ -215,7 +223,11 @@ defmodule Barkpark.AccountsLockoutHibpTest do
       # is absent → not breached.
       Application.put_env(:barkpark, :hibp_http, MockHibp)
 
-      assert {:ok, _} = Accounts.register_user(%{email: "clean@example.com", password: "a-totally-different-passphrase-9"})
+      assert {:ok, _} =
+               Accounts.register_user(%{
+                 email: "clean@example.com",
+                 password: "a-totally-different-passphrase-9"
+               })
     end
 
     test "fails OPEN: when HIBP is unreachable, the password is allowed" do

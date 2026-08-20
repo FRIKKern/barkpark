@@ -3,6 +3,72 @@ defmodule Barkpark.Content.ExpandTest do
   alias Barkpark.Content
   alias Barkpark.Content.{Envelope, Expand}
 
+  # Default Ecto telemetry event for a repo with `otp_app: :barkpark`.
+  @repo_query_event [:barkpark, :repo, :query]
+  # The two tables the `?expand=` N+1 was measured against.
+  @ref_sources ~w(documents schema_definitions)
+
+  # Count, within `fun`, the Repo queries `Expand.expand/4` issues against the
+  # documents + schema_definitions tables, split by source. One process owns the
+  # counter via an Agent; the handler only tallies queries fired from THIS test
+  # pid (Ecto emits query telemetry in the caller process), so it stays correct
+  # even under `async: true` while sibling tests query concurrently.
+  defp count_ref_queries(fun) do
+    {:ok, counter} = Agent.start_link(fn -> %{"documents" => 0, "schema_definitions" => 0} end)
+    test_pid = self()
+    handler_id = {__MODULE__, make_ref()}
+
+    :telemetry.attach(
+      handler_id,
+      @repo_query_event,
+      fn _event, _measurements, %{source: source}, _config ->
+        if self() == test_pid and source in @ref_sources do
+          Agent.update(counter, &Map.update!(&1, source, fn n -> n + 1 end))
+        end
+      end,
+      nil
+    )
+
+    try do
+      result = fun.()
+      by_source = Agent.get(counter, & &1)
+
+      {result,
+       %{
+         documents: by_source["documents"],
+         schema: by_source["schema_definitions"],
+         total: by_source["documents"] + by_source["schema_definitions"]
+       }}
+    after
+      :telemetry.detach(handler_id)
+      Agent.stop(counter)
+    end
+  end
+
+  # Seed `n` distinct published authors, each referenced by one published post,
+  # namespaced per `n` so successive counts expand EXACTLY n references.
+  defp seed_ref_posts(n) do
+    for i <- 1..n do
+      aid = "qa#{n}_#{i}"
+      pid = "qp#{n}_#{i}"
+      {:ok, _} = Content.create_document("author", %{"_id" => aid, "title" => "A#{i}"}, "exp")
+      {:ok, _} = Content.publish_document(aid, "author", "exp")
+
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => pid, "title" => "P#{i}", "author" => aid},
+          "exp"
+        )
+
+      {:ok, _} = Content.publish_document(pid, "post", "exp")
+    end
+
+    Content.list_documents("post", "exp", perspective: :published)
+    |> Enum.map(&Envelope.render/1)
+    |> Enum.filter(&String.starts_with?(&1["_id"], "qp#{n}_"))
+  end
+
   setup do
     Content.upsert_schema(
       %{
@@ -316,5 +382,45 @@ defmodule Barkpark.Content.ExpandTest do
     assert [tag1, tag2] = article["tags"]
     assert is_map(tag1) and tag1["_id"] == "t1" and tag1["title"] == "Elixir"
     assert is_map(tag2) and tag2["_id"] == "t2" and tag2["title"] == "CMS"
+  end
+
+  # FAIL-BEFORE query-count probe. The old per-ref `resolve_ref/6` issued one
+  # `Content.get_document` (Repo.one) + two `Content.get_schema` per resolved
+  # reference — MEASURED linear: documents == N, schema == 2N+1 (N=1 -> 4,
+  # N=6 -> 19, N=16 -> 49). The batch rewrite makes the count CONSTANT in N.
+  # MUTATION PROOF (recorded on the task): reintroduce the per-ref loop and this
+  # test goes RED (documents climbs 1 -> 6 -> 16, total climbs 4 -> 19 -> 49).
+  test "?expand= query count is CONSTANT in the resolved-reference count N (kills the N+1)" do
+    counts =
+      for n <- [1, 6, 16] do
+        docs = seed_ref_posts(n)
+        assert length(docs) == n
+
+        {expanded, c} = count_ref_queries(fn -> Expand.expand(docs, :all, "exp") end)
+
+        # Correctness under load: every post's `author` reference is expanded.
+        assert length(expanded) == n
+        assert Enum.all?(expanded, &is_map(&1["author"]))
+        assert Enum.all?(expanded, &(&1["author"]["_type"] == "author"))
+
+        {n, c}
+      end
+
+    by_n = Map.new(counts)
+
+    # The document reads DO NOT scale with N — one batched query per ref_type,
+    # not one Repo.one per ref. Before the fix documents == N (1 / 6 / 16).
+    assert by_n[1].documents == by_n[6].documents
+    assert by_n[6].documents == by_n[16].documents
+    # Strong anti-N+1: 16 references cost far fewer than 16 document queries.
+    assert by_n[16].documents < 16
+
+    # Schema reads are memoized per ref_type — constant, not 2N+1.
+    assert by_n[1].schema == by_n[6].schema
+    assert by_n[6].schema == by_n[16].schema
+
+    # Total documents+schema query count is flat across N (was 4 / 19 / 49).
+    assert by_n[1].total == by_n[6].total
+    assert by_n[6].total == by_n[16].total
   end
 end

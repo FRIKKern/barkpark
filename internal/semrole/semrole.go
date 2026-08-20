@@ -38,6 +38,15 @@ var taskLifecycleRoles = map[string]string{
 	"ready":       "",
 	"open":        "",
 	"cancelled":   "",
+	// The pre-open thought states (task-lifecycle-visibility epic): a candidate the
+	// strategizer just named (considering) and one under investigation (researching).
+	// Both neutral ("") — considering's dotted-circle and researching's violet
+	// bullseye are glyph/hue voices, not semantic status roles (there is no violet
+	// status token), matching the board's RoleFor default for them. Mapped here so
+	// TaskLifecycles publishes the full 9-token set and the taskboard parity test
+	// forces RoleFor to keep up in the same commit.
+	"considering": "",
+	"researching": "",
 }
 
 // TaskLifecycles returns every task-lifecycle token this package maps, sorted.
@@ -87,7 +96,19 @@ func For(status string) string {
 	// distinct from "suspended" (the system-imposed instance state).
 	// "near_limit" is a usage meter approaching its plan quota (warn_at reached
 	// but the ceiling not yet crossed) — attention-worthy, not yet a fault.
-	case "degraded", "unknown", "suspended", "inactive", "near_limit":
+	//
+	// The three D69 triage rungs join this family rather than danger, and the
+	// reason is the LADDER: "strained" (5), "filling" (6) and "unreported" (7)
+	// sit between "degraded" (4, warn) and "behind" (8, info), so painting any
+	// of them danger would make the tone ladder non-monotone — a rung would
+	// shout louder than the more urgent rung above it. All three are the same
+	// grammar as degraded: a box to LOOK AT, not a box that has already failed.
+	// ("filling" shares its 90% number with the usage meter's over_limit, which
+	// paints danger — that meter is judging a PLAN QUOTA, a contractual ceiling;
+	// this is judging triage urgency, and the number, not the tone, is what the
+	// two surfaces are required to agree on.)
+	case "degraded", "unknown", "suspended", "inactive", "near_limit",
+		"strained", "filling", "unreported":
 		return "warn"
 	// "over_limit" is a usage meter at or past its plan quota — a hard ceiling
 	// the operator must act on, so it paints the same danger tone as a failure.

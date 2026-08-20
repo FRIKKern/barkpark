@@ -1,0 +1,59 @@
+{
+  "assignment_id": "E10",
+  "candidates": {
+    "E04": {
+      "candidate_id": "candidate-canonical-native",
+      "e08_reasons": [
+        "authored content preservation:adv-long-content:FAIL",
+        "heading and list hierarchy:adv-nested-list-table:FAIL",
+        "structure at narrow widths:adv-narrow-width:BLOCKED",
+        "semantic reading order and non-visual status:all:BLOCKED",
+        "unsupported alias containment:all:BLOCKED"
+      ],
+      "e08_status": "REJECTED",
+      "e09_hard_gate_failures": [
+        "guessed class/authority decision or derived field without provenance"
+      ],
+      "e09_status": "REJECTED",
+      "e10_decision": "REJECTED"
+    },
+    "E05": {
+      "candidate_id": "candidate-preservation-envelope",
+      "e08_reasons": [
+        "authored content preservation:adv-long-content:FAIL",
+        "heading and list hierarchy:adv-nested-list-table:FAIL",
+        "structure at narrow widths:adv-narrow-width:PARTIAL",
+        "semantic reading order and non-visual status:all:BLOCKED",
+        "unsupported alias containment:all:BLOCKED"
+      ],
+      "e08_status": "REJECTED",
+      "e09_hard_gate_failures": [],
+      "e09_status": "BLOCKED_REWORK",
+      "e10_decision": "BLOCKED_REWORK"
+    },
+    "E06": {
+      "candidate_id": "candidate-cohort-rails",
+      "e08_reasons": [
+        "fixture coverage:all:FAIL",
+        "hostile-content execution:adv-narrow-width:BLOCKED",
+        "hostile-content execution:adv-long-content:BLOCKED",
+        "hostile-content execution:adv-missing-fields:BLOCKED",
+        "hostile-content execution:adv-malformed-legacy:BLOCKED",
+        "hostile-content execution:adv-nested-list-table:BLOCKED",
+        "hostile-content execution:adv-long-token:BLOCKED",
+        "semantic reading order and non-visual status:all:BLOCKED",
+        "unsupported alias containment:all:BLOCKED"
+      ],
+      "e08_status": "REJECTED",
+      "e09_hard_gate_failures": [
+        "raw captures do not independently reproduce the full E03 fixture set"
+      ],
+      "e09_status": "REJECTED",
+      "e10_decision": "REJECTED"
+    }
+  },
+  "decision_rule": "A candidate must clear every frozen hard threshold. A PASS on one attack axis cannot average away a FAIL or BLOCKED result on another axis.",
+  "schema_version": "legendary-e10-decision-record/v1",
+  "strongest_candidate": "E05",
+  "winner_selected": false
+}

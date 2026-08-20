@@ -7,7 +7,7 @@ defmodule Barkpark.TenancyDatasetsTest do
   `dataset_id` to the datasets row whose (project_id, slug) matches the row's
   dataset string.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.{Project, Dataset}

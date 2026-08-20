@@ -1,10 +1,18 @@
 defmodule BarkparkWeb.QueryController do
   use BarkparkWeb, :controller
 
+  import Ecto.Query, only: [from: 2, where: 3]
+
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
+  alias Barkpark.Content.Document
+  alias Barkpark.Content.DraftId
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Expand
+  alias Barkpark.Content.Scope
+  alias Barkpark.Repo
+  alias BarkparkWeb.AnonPerspective
+  alias BarkparkWeb.ErrorResponse
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -13,7 +21,7 @@ defmodule BarkparkWeb.QueryController do
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
     if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) do
       t0 = System.monotonic_time(:microsecond)
-      perspective = resolve_perspective(conn, params)
+      perspective = AnonPerspective.resolve(conn, params)
       # Clamp to the same bounds Content.list_documents enforces (limit [1,1000],
       # offset [0,100_000] — see Content.Query) so the echoed limit/offset in the
       # response body match what the query actually used. Otherwise a paginator
@@ -28,6 +36,14 @@ defmodule BarkparkWeb.QueryController do
       caller_context = CallerContext.from_conn(conn)
 
       cond do
+        # An unparseable flat --filter string normalizes to an {:error, …}
+        # sentinel, never %{} — an empty map here used to slip past both
+        # guards below and SILENTLY return the UNFILTERED set (D75: `--filter
+        # 'tags hasStrong x:50'` exited 0 with every row). A refusal naming
+        # the accepted grammar beats a silent passthrough.
+        match?({:error, _}, filter_map) ->
+          filter_map
+
         # Fail CLOSED on an unknown filter operator. Otherwise it falls through
         # the query builder's catch-all (apply_field_op/4) and SILENTLY returns
         # every row — a typo'd op (?filter[status][bogus]=x) looked like it
@@ -62,7 +78,7 @@ defmodule BarkparkWeb.QueryController do
             |> Expand.expand(
               expand_spec,
               dataset,
-              [published_only: anon_pinned?(conn), caller_context: caller_context] ++
+              [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
                 scope_opts(conn)
             )
             |> project_fields(parse_fields(params["fields"]))
@@ -109,6 +125,241 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
+  @doc """
+  Related documents — shared weighted tags fused with inbound references
+  (authoring-excellence D68–D71). Wraps `Content.Related.related_documents/3`:
+  the tag leg is strength-aware SQL over the `tags_meta` GENERATED column
+  (LEAST min-strength credit per shared name + main_tag bonus), the reference
+  leg reuses `Content.Graph.reverse_referencers/2`'s FAIL-CLOSED hydration
+  (an unreadable referencing source is dropped, never stubbed), and fusion is
+  by doc identity in Elixir. A source with zero weighted tags degrades to
+  backlink-only related. Scoping threads `scope_opts/1` exactly like
+  `backlinks/2`; auth mirrors a doc read: preview or a token, otherwise 404
+  (existence-hiding, like `backlinks`).
+  """
+  def related(conn, %{"dataset" => dataset, "id" => id} = params) do
+    if preview?(conn) or authed?(conn) do
+      related =
+        Content.Related.related_documents(
+          id,
+          dataset,
+          [limit: parse_int(params["limit"], 10)] ++ scope_opts(conn)
+        )
+
+      json(conn, %{
+        result: %{related: related, count: length(related)},
+        syncTags: ["bp:ds:#{dataset}:related:#{id}"]
+      })
+    else
+      {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Bundled per-type published-document counts for a dataset (AXI charter
+  decision 19 / `data.counts`). ONE `GROUP BY d.type` aggregate — never a
+  per-type loop — over the tenancy-scoped, published set, so a bare `bp <noun>`
+  can show live counts across every type in a single cheap round trip
+  (index-covered by `documents_workspace_project_type_dataset_id_index`).
+
+  Perspective is fixed to `:published` (the single perspective agents care
+  about; per-perspective counts change the query shape) and a `?perspective`
+  naming anything else is REFUSED with a 400 (PDS-D303). It used to be read and
+  silently discarded: `?perspective=raw` and `?perspective=zzzbogus` both
+  returned 200 with a byte-identical published body still labelled
+  `"perspective":"published"` — a caller counting drafts got the published
+  number and no way to know. Honouring `raw` here would change a frozen shape
+  AND widen an existence-count surface this design deliberately hides, so the
+  endpoint says no instead of lying. FROZEN response shape, which the CLI slice
+  consumes verbatim:
+
+      {"ok": true, "dataset": "<ds>", "perspective": "published",
+       "counts": {"<type>": N, ...}}
+
+  Tenancy FAILS CLOSED: the aggregate pipes through
+  `Scope.scope_to_workspace/3` (a `nil` workspace yields zero rows, never every
+  tenant's counts) + project narrowing. An unscoped `GROUP BY` would be a
+  cross-tenant existence-count leak — the exact class the batch-count helpers
+  guard against. Auth mirrors a doc read: preview or a token, otherwise 404
+  (existence-hiding, like `backlinks`) — a per-type census across ALL types
+  must not surface private-type existence to an anonymous caller.
+  """
+  def counts(conn, %{"dataset" => dataset} = params) do
+    cond do
+      # Existence-hiding FIRST: an anonymous caller gets the same 404 whatever
+      # perspective it names, so the refusal below never becomes a probe.
+      not (preview?(conn) or authed?(conn)) ->
+        {:error, :not_found}
+
+      unsupported_perspective(params) ->
+        refuse_perspective(conn, unsupported_perspective(params))
+
+      true ->
+        json(conn, %{
+          ok: true,
+          dataset: dataset,
+          perspective: "published",
+          counts: published_type_counts(conn, dataset)
+        })
+    end
+  end
+
+  # `nil` (absent) and "published" are the honoured inputs; anything else comes
+  # back so the refusal can name the value the caller actually sent.
+  defp unsupported_perspective(params) do
+    case Map.get(params, "perspective") do
+      nil -> nil
+      "published" -> nil
+      other -> other
+    end
+  end
+
+  # Canonical 400 `malformed` envelope (code/hint/request_id owned by
+  # Content.Errors), with a message that names the parameter and the one value
+  # this endpoint honours — a refusal a caller can act on, unlike the silent
+  # published body it used to get.
+  defp refuse_perspective(conn, value) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "unsupported perspective #{inspect(value)} on /v1/data/counts — this endpoint " <>
+        "counts the published perspective only; omit ?perspective or pass published",
+      %{parameter: "perspective", supported: ["published"], received: value}
+    )
+  end
+
+  # ONE grouped aggregate: published docs (drafts.-prefixed ids excluded, the
+  # `apply_perspective(:published)` clause), scoped to the tenant + dataset,
+  # grouped by type. Returns `%{type => count}`; an empty scope is `%{}`.
+  defp published_type_counts(conn, dataset) do
+    opts = scope_opts(conn)
+    prefix = DraftId.drafts_prefix() <> "%"
+
+    from(d in Document,
+      where: not like(d.doc_id, ^prefix),
+      group_by: d.type,
+      select: {d.type, count(d.id)}
+    )
+    |> Scope.scope_to_workspace(
+      Keyword.get(opts, :workspace_id),
+      Keyword.get(opts, :project_id)
+    )
+    |> scope_counts_to_dataset(dataset, opts)
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  # Same dataset discriminator `Content.Query.list_documents` applies (resolve
+  # the dataset_id, else fall back to the dataset string), so counts see exactly
+  # the rows a list read of the same dataset would.
+  defp scope_counts_to_dataset(query, dataset, opts) do
+    case Content.resolve_read_dataset_id(dataset, opts) do
+      id when is_binary(id) ->
+        where(query, [d], d.dataset_id == ^id or (is_nil(d.dataset_id) and d.dataset == ^dataset))
+
+      _ ->
+        where(query, [d], d.dataset == ^dataset)
+    end
+  end
+
+  @doc """
+  Tag-registry browse — per-tag per-type published-document counts
+  (authoring-excellence ae-w10 / manifest `tag.browse`). Wraps
+  `Content.TagDistribution.per_type/3` with the CALLER'S tenant scope
+  (`scope_opts/1`) — NEVER the daily worker's `opts: []` global call shape,
+  which here would be a cross-tenant existence-count leak (the exact class
+  `data_counts_test.exs` guards). The SQL rows `{type, tag, count}` are
+  regrouped in Elixir to per-tag rows `{tag, counts: {type => n}, total}`
+  sorted total DESC (tag asc tie-break).
+
+  Perspective is published-only BY DESIGN: draft and published copies are
+  SEPARATE rows, so counting drafts would double-count every doc with an open
+  draft twin — the registry counts the published vocabulary, the corpus the
+  publish wall governs. NOT an extension of the FROZEN `/v1/data/counts`
+  shape (per-TYPE census) — this is the per-TAG registry, a different read.
+  Auth mirrors a doc read: preview or a token, otherwise 404
+  (existence-hiding, like `backlinks`).
+  """
+  def tag_browse(conn, %{"dataset" => dataset} = params) do
+    if preview?(conn) or authed?(conn) do
+      rows =
+        Content.TagDistribution.per_type(parse_types(params["type"]), dataset, scope_opts(conn))
+
+      tags = regroup_tag_rows(rows)
+
+      json(conn, %{
+        result: %{tags: tags, count: length(tags)},
+        syncTags: ["bp:ds:#{dataset}:tags"]
+      })
+    else
+      {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Tag detail — the documents carrying `:tag`, RANKED BY THAT TAG'S STRENGTH
+  (authoring-excellence ae-w10 / manifest `tag.docs`). Wraps
+  `Content.docs_with_tag/4` with `order: :strength`: a `desc_nulls_last`
+  lateral over the `tags_meta` GENERATED column (NULLS LAST is mandatory —
+  legacy unweighted carriers rank last, not first), tie-broken title asc,
+  doc_id asc. Each entry projects `{doc_id, type, title, strength, rationale,
+  main_tag_match}` — the title COLUMN, and the matched (strongest) entry's
+  strength/rationale (NULL for a legacy flat carrier). The generic `order=`
+  grammar cannot express a parameterized per-tag order — dedicated read only.
+
+  Published-only (`published_only: true` — same by-design posture as
+  `tag_browse`); tenancy threads `scope_opts/1` exactly like `backlinks/2`;
+  auth mirrors a doc read: preview or a token, otherwise 404
+  (existence-hiding).
+  """
+  def tag_docs(conn, %{"dataset" => dataset, "tag" => tag} = params) do
+    if preview?(conn) or authed?(conn) do
+      docs =
+        Content.docs_with_tag(
+          tag,
+          parse_types(params["type"]),
+          dataset,
+          [order: :strength, published_only: true] ++ scope_opts(conn)
+        )
+
+      json(conn, %{
+        result: %{tag: tag, documents: docs, count: length(docs)},
+        syncTags: ["bp:ds:#{dataset}:tags:#{tag}"]
+      })
+    else
+      {:error, :not_found}
+    end
+  end
+
+  # The tag reads' `?type=` grammar: a comma list, default paper,task (the two
+  # weighted-tag corpora). Blank/absent falls back to the default.
+  @default_tag_types ~w(paper task)
+  defp parse_types(nil), do: @default_tag_types
+
+  defp parse_types(param) when is_binary(param) do
+    case param |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
+      [] -> @default_tag_types
+      types -> types
+    end
+  end
+
+  defp parse_types(_), do: @default_tag_types
+
+  # `{type, tag, count}` SQL rows → per-tag registry rows, biggest first.
+  defp regroup_tag_rows(rows) do
+    rows
+    |> Enum.group_by(& &1.tag)
+    |> Enum.map(fn {tag, tag_rows} ->
+      %{
+        tag: tag,
+        counts: Map.new(tag_rows, &{&1.type, &1.count}),
+        total: tag_rows |> Enum.map(& &1.count) |> Enum.sum()
+      }
+    end)
+    |> Enum.sort_by(&{-&1.total, &1.tag})
+  end
+
   def show(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
     cond do
       # NO anonymous caller may fetch a draft by id — neither a read-only
@@ -117,7 +368,7 @@ defmodule BarkparkWeb.QueryController do
       # definition). Rejected as not-found BEFORE any get_document call — the
       # same 404 path the controller already returns for a missing doc. An
       # `:edit` share and any token/preview caller pass through unchanged.
-      anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
+      AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
         {:error, :not_found}
 
       preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) ->
@@ -141,7 +392,7 @@ defmodule BarkparkWeb.QueryController do
         |> Expand.expand(
           expand_spec,
           dataset,
-          [published_only: anon_pinned?(conn), caller_context: caller_context] ++
+          [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
             scope_opts(conn)
         )
         |> project_fields(parse_fields(params["fields"]))
@@ -171,13 +422,18 @@ defmodule BarkparkWeb.QueryController do
   # /papers reader already exposes on the same paper. Underneath, the fetcher
   # (Tasks.Query.rows_for_query → Scope.scope_to_workspace) stays fail-closed:
   # a nil workspace resolves to zero rows, never to a cross-tenant leak.
-  defp maybe_resolve_tasks(rendered, conn, %{"resolve" => "tasks"}) when is_list(rendered) do
+  defp maybe_resolve_tasks(rendered, conn, %{"resolve" => "tasks", "dataset" => dataset})
+       when is_list(rendered) do
     scope = api_task_scope(conn)
 
     Enum.map(rendered, fn doc ->
       case doc do
         %{"blocks" => blocks} when is_list(blocks) ->
-          Map.put(doc, "blocks", Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, scope))
+          Map.put(
+            doc,
+            "blocks",
+            Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, scope, dataset)
+          )
 
         _ ->
           doc
@@ -293,12 +549,27 @@ defmodule BarkparkWeb.QueryController do
   # workspace_id filter decides WHICH rows come back.
 
   # Resolve the type's schema (for field-visibility redaction in Envelope.render)
-  # under the SAME tenant scope as the document read. Nil on miss — redaction
-  # then falls back to the schema-free encrypted-field guard only.
+  # under the SAME tenant scope as the document read. On a scoped miss, fall back
+  # to the GLOBAL schema (mirroring content/papers.ex value_schema/3) so a
+  # globally-declared non-encrypted private field still redacts — without this
+  # fallback the schema misses at the render site and the private field renders
+  # PUBLIC (Envelope.render is lenient on a nil schema). Nil on miss otherwise.
+  #
+  # TENANCY GUARD (LOAD-BEARING): the stripped-scope query reads cross-tenant
+  # rows, so accept the fallback ONLY when its workspace_id is nil — the global
+  # schema. Any non-nil workspace_id would substitute a FOREIGN tenant's schema.
   defp fetch_schema(conn, type, dataset) do
-    case Content.get_schema(type, dataset, scope_opts(conn)) do
-      {:ok, schema} -> schema
-      _ -> nil
+    opts = scope_opts(conn)
+
+    case Content.get_schema(type, dataset, opts) do
+      {:ok, schema} ->
+        schema
+
+      _ ->
+        case Content.get_schema(type, dataset, Keyword.drop(opts, [:workspace_id, :project_id])) do
+          {:ok, %{workspace_id: nil} = schema} -> schema
+          _ -> nil
+        end
     end
   end
 
@@ -381,37 +652,40 @@ defmodule BarkparkWeb.QueryController do
 
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])
 
-  defp authed?(conn), do: not is_nil(conn.assigns[:api_token])
-
-  defp resolve_perspective(conn, params) do
-    if anon_pinned?(conn) do
-      # EVERY plain anonymous caller is pinned to the published perspective:
-      # the `?perspective=drafts|raw` param is IGNORED so a tokenless reader
-      # can never pull unpublished/draft content — neither via a read-only
-      # public share NOR via an ordinary public-visibility schema read (found
-      # live 2026-06-10: `curl …?perspective=drafts` with no token returned
-      # every draft). A token, a preview token (forced_perspective) or an
-      # `:edit` share falls through to the unchanged forced/param logic.
-      :published
-    else
-      case conn.assigns[:forced_perspective] do
-        nil -> parse_perspective(Map.get(params, "perspective", "published"))
-        forced -> parse_perspective(forced)
-      end
-    end
+  # "May this caller read at all" — a token or a preview JWT, EXCEPT the
+  # public-read tier, which is treated exactly like an anonymous caller here.
+  #
+  # The parity partner of `DocumentsRetriever.restrict_anonymous_to_public_types/3`,
+  # moved in the SAME commit: both used to key on "is authenticated"
+  # (`not is_nil(:api_token)` / `principal_type in [:api_token, :user]`), and a
+  # public-read token satisfies both. Tightening one alone reproduces the leak
+  # one layer up, so they move together or not at all.
+  #
+  # STILL REACHABLE, which is why this is not cosmetic: the flat reads ride
+  # `:api_grant_read` and the scoped `/v1/data/*` reads ride `:shared_docs_api`,
+  # both of which mount `Plugs.PublicRead` — but the SCOPED PREVIEW block rides
+  # bare `:scoped_api` with no PublicRead, so `authed?/1` was the ONLY thing
+  # between a public-read token and `GET /w/:ws/p/:proj/v1/preview/query/:ds/:type`
+  # on a private type (plus the five preview siblings). Post-clamp those fall to
+  # the same 404 an anonymous caller gets — existence-hiding, not a 403, so the
+  # refusal never becomes a probe. `index`/`show` keep their `schema_public?`
+  # arm, so a public-read token still reads PUBLIC types normally.
+  #
+  # ONE definition of the tier: `Plugs.PublicRead.public_read_token?/1` is public
+  # on purpose (its own comment: "a second copy in the controller is exactly how
+  # a clamp and its downstream filter drift apart"). Never re-derive it here.
+  defp authed?(conn) do
+    not is_nil(conn.assigns[:api_token]) and
+      not BarkparkWeb.Plugs.PublicRead.public_read_token?(conn)
   end
 
-  # True when the caller is pinned to published-only reads: no token, no
-  # preview token, and not an `:edit` share. This covers BOTH the read-only
-  # public share AND the plain tokenless read of a public-visibility schema —
-  # the two anonymous read paths must enforce the same invariant (an anonymous
-  # caller can never pull drafts; publish is the act of making content
-  # public). An `:edit` share is deliberately exempt: it is an anonymous
-  # editing surface, and its draft visibility is part of that contract.
-  defp anon_pinned?(conn) do
-    not authed?(conn) and not preview?(conn) and
-      not (conn.assigns[:share_public] == true and conn.assigns[:share_access] == :edit)
-  end
+  # Perspective resolution + the anon/public-read pin live in ONE place —
+  # `BarkparkWeb.AnonPerspective` (error-emitters-duplicated: this controller
+  # carried private twins of resolve/anon_pinned? that drifted from the shared
+  # chokepoint the search controllers use; stw7-backlog-drafts-clamp-gap
+  # deleted them). `preview?/1` and `authed?/1` stay: they gate
+  # backlinks/related/tag_browse/tag_docs above, a different question
+  # ("may this caller read at all") from perspective pinning.
 
   defp parse_int(nil, d), do: d
 
@@ -478,10 +752,6 @@ defmodule BarkparkWeb.QueryController do
 
   defp parse_order(_), do: :updated_at_desc
 
-  defp parse_perspective("drafts"), do: :drafts
-  defp parse_perspective("raw"), do: :raw
-  defp parse_perspective(_), do: :published
-
   defp parse_expand(nil), do: []
   defp parse_expand(""), do: []
   defp parse_expand("false"), do: []
@@ -493,6 +763,11 @@ defmodule BarkparkWeb.QueryController do
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
   end
+
+  # Catch-all: a list param (`?expand[]=author` → Plug parses to `["author"]`) or
+  # a map param (`?expand[k]=v` → `%{"k" => "v"}`) falls back to no expansion
+  # instead of raising FunctionClauseError → 500.
+  defp parse_expand(_), do: []
 
   # `?fields=title,slug` — projection. Returns the requested content field names, or
   # nil (no projection → whole document) when the param is absent/blank.
@@ -532,16 +807,35 @@ defmodule BarkparkWeb.QueryController do
   # families, tried in order:
   #   1. operator forms — `=`/`==`/`!=`/`>`/`>=`/`<`/`<=` plus the CSS-selector
   #      shorthands `^=`/`$=`/`*=` (starts/ends/contains).
-  #   2. keyword forms — `is null` / `is not null`, and `in` / `not in`.
+  #   2. keyword forms — `is null` / `is not null`, `hasStrong <tag>:<min>`,
+  #      and `in` / `not in`.
   # Operators are tried FIRST so a value that itself contains ` is `/` in ` after
   # an operator is preserved (`notes=a in b` → eq value `a in b`, NOT an `in`
   # filter). Keyword forms only apply to an operator-less string.
-  defp normalize_filter_map(s) when is_binary(s) and byte_size(s) > 0 do
-    trimmed = String.trim(s)
-    parse_scalar_op(trimmed) || parse_scalar_keyword(trimmed) || %{}
+  #
+  # A non-empty string NEITHER family parses is an {:error, {:invalid_flat_filter,
+  # raw}} sentinel, never %{} — the empty-map fall-through was a SILENT
+  # passthrough (D75): the string was discarded as noise, the fail-closed
+  # invalid_filter_op guard had nothing to inspect, and the caller got the
+  # UNFILTERED set with exit 0. index/2 turns the sentinel into a 400 naming
+  # the accepted grammar. Whitespace-only stays a no-filter no-op, like absent.
+  defp normalize_filter_map(s) when is_binary(s) do
+    case String.trim(s) do
+      "" ->
+        %{}
+
+      trimmed ->
+        parse_scalar_op(trimmed) || parse_scalar_keyword(trimmed) ||
+          {:error, {:invalid_flat_filter, trimmed}}
+    end
   end
 
   defp normalize_filter_map(_), do: %{}
+
+  @doc false
+  # Thin public wrapper exposing the pure flat-grammar parser for unit tests
+  # (no ConnCase/DB) — same pattern as invalid_filter_op_for_test/1.
+  def normalize_filter_map_for_test(s), do: normalize_filter_map(s)
 
   # Split on the LEFTMOST operator (2-char ops `^=`/`$=`/`*=`/`>=`/`<=`/`!=`/`==`
   # take precedence at a given index). The non-greedy field capture keeps the split
@@ -566,12 +860,32 @@ defmodule BarkparkWeb.QueryController do
   end
 
   # Keyword forms (only reached for operator-less strings): `<field> is null` /
-  # `is not null` (the scalar form of the SDK's eq/neq null), then `in` / `not in`.
+  # `is not null` (the scalar form of the SDK's eq/neq null), then
+  # `hasStrong`, then `in` / `not in`.
   defp parse_scalar_keyword(trimmed) do
     case Regex.run(~r/^(.+?)\s+is\s+(not\s+)?null$/i, trimmed) do
       [_, field | rest] ->
         not? = String.trim(List.first(rest) || "") != ""
         %{String.trim(field) => %{"is" => if(not?, do: "notnull", else: "null")}}
+
+      nil ->
+        parse_scalar_has_strong(trimmed)
+    end
+  end
+
+  # `<field> hasStrong <tag>:<min>` — the flat form of the weighted-tag
+  # strength-floor op (D75: it had no flat spelling, only the nested
+  # filter[field][hasStrong]=tag:min wire form). Keyword matched
+  # case-insensitively, emitted as the canonical "hasStrong" nested op so ONE
+  # value parser and ONE SQL arm serve both wire forms: the value is checked
+  # up front by invalid_filter_op/1 via Content.Query.parse_has_strong/1, so a
+  # malformed `<tag>:<min>` is a 400 here too, never a silent no-op. Tried
+  # BEFORE `in`/`not in` so a hasStrong value containing ` in ` reads as a
+  # (rejected) hasStrong value rather than a bogus membership filter.
+  defp parse_scalar_has_strong(trimmed) do
+    case Regex.run(~r/^(.+?)\s+hasStrong\s+(.+)$/i, trimmed) do
+      [_, field, value] ->
+        %{String.trim(field) => %{"hasStrong" => unquote_filter_value(value)}}
 
       nil ->
         parse_scalar_in(trimmed)

@@ -10,20 +10,46 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (19 today; the two
+    * **E1** — every table carrying a `workspace_id` column (41 today; the three
+      epic-cycle ledgers `cycle_waves` / `epic_assignments` /
+      `epic_benchmark_experiments` (the 20260715 cycle-fleet schema) ride the
+      generic `WHERE workspace_id = $ws` path, the three
+      registered Chat host / execution tables are workspace-owned, the two
       zero-FK audit tables `audit_events` / `audit_export_sinks` carry the
-      column with no FK to `workspaces`, and `roles` is the 19th).
+      column with no FK to `workspaces`, `roles` is one, both
+      `search_surface_config` (Wave 5 Slice A, charter D45/D49) and `data_keys`
+      (the per-dataset DEK store, bpb-datakeys-write-path-workspace-attribution)
+      were re-pinned from the allowlist, and the five `sync_*` bare-slug tables
+      (`sync_cursors` / `sync_dead_letters` / `sync_push_cursors` /
+      `sync_push_doc_revs` / `sync_push_conflicts`) gained a nullable
+      `workspace_id` attribution column (Wave 5 Slice B, charter D55) — so a
+      shared-slug row travels via the `workspace_id` path instead of a bare,
+      project-ambiguous `scope`/`dataset`), and the run-secrets store
+      `secrets` / `secrets_audit` gained a nullable `workspace_id` FK (Connectors
+      W21, charter D191/D192): a workspace's scoped secret rides the generic
+      `WHERE workspace_id = $ws` export + FK cascade, while an
+      instance-global secret (`workspace_id IS NULL`, e.g. `ingest_token`) is
+      never matched by any workspace scan — the two-tier tenant wall.
     * **E2** — the recursive `pg_constraint` FK descendants of `workspaces`
-      that do NOT themselves carry `workspace_id` (6: `content_edges`,
+      that do NOT themselves carry `workspace_id` (16: `content_edges`,
       `datasets`, `plugin_doc_state`, `role_permissions`, `task_edges`,
-      `webhook_deliveries`). Reached via a real FK, extracted through a
-      parent-join to the nearest `workspace_id`-bearing ancestor.
-    * **E3** — the `dataset`-column tables minus E1 (9), keyed by a `dataset`
-      slug (and, for four of them, a `doc_id`). PLUS an explicit two-table
-      allowlist (`data_keys`, `search_surface_config`) whose tenant key is a
-      `scope` column, not `dataset` — the mechanical `dataset` scan cannot see
-      them, and dropping `data_keys` would render every exported ciphertext
-      permanently undecryptable (it holds the per-dataset DEKs).
+      `webhook_deliveries`, plus the six 20260715 cycle-fleet children
+      `chat_runtime_usage_receipts`, `cycle_build_plans`,
+      `epic_assignment_results`, `epic_assignment_runtime_attempts`,
+      `epic_assignment_tasks`, `epic_benchmark_attempts`, plus the four release
+      evidence tables `cycle_release_gate_captures`,
+      `cycle_release_gate_consumptions`, `cycle_release_paper_candidates`, and
+      `cycle_release_public_smokes`). Reached via a real FK,
+      extracted through a parent-join to the nearest `workspace_id`-bearing
+      ancestor.
+    * **E3** — the `dataset`-column tables minus E1 (4), keyed by a `dataset`
+      slug (and, for two of them, a `doc_id`). The `scope`-column allowlist is
+      now EMPTY: both former members (`search_surface_config`, `data_keys`)
+      gained a `workspace_id` column and moved to E1, and the five `sync_*`
+      bare-slug tables moved to E1 too (charter D55), so a shared-slug row —
+      including a per-dataset DEK or a workspace's sync cursors / dead-letters /
+      push-ledger — is exported and torn down via `WHERE workspace_id = $ws` and
+      is never silently dropped.
 
   ## The reviewed extraction specs
 
@@ -50,41 +76,93 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
 
   @root_table "workspaces"
 
+  # The five `sync_*` tables carry `workspace_id` (charter D55): they were
+  # bare-slug E3 tables (project-ambiguous `dataset` grain) until per-workspace
+  # attribution promoted `workspace_id` into their primary keys, moving the whole
+  # dormant family from E3 → E1 (export keys `WHERE workspace_id=$ws`, delete
+  # rides the FK cascade — the same clean path every other E1 table uses).
+  # cycle_waves / epic_assignments / epic_benchmark_experiments carry a
+  # workspace_id column (the 20260715 epic-cycle / cycle-fleet ledgers). They
+  # ride the generic E1 path like every other workspace_id table — exported via
+  # `WHERE workspace_id = $ws`, torn down the same way — so a workspace's own
+  # cycle/assignment/benchmark rows travel in its bundle and never orphan on
+  # teardown. Pinned here to clear the partition sentinel (they were
+  # live-detected but unpinned, which is exactly what the sentinel raises on).
   @pinned_e1 ~w(
-    access_grants api_tokens audit_events audit_export_sinks documents
-    media_files mutation_events paper_events projects revisions roles
+    access_grants api_tokens audit_events audit_export_sinks chat_execution_events
+    chat_execution_leases cycle_correction_admissions
+    cycle_correction_promotion_events cycle_correction_quarantines
+    cycle_correction_roots cycle_correction_targets
+    cycle_release_gate_admissions cycle_release_gate_challenges cycle_waves
+    data_keys documents epic_assignments
+    epic_benchmark_experiments media_files mutation_events paper_events
+    projects registered_chat_hosts revisions roles
     schema_definitions search_intel_crystals search_intel_events
-    search_intel_merge_patterns search_synonyms share_links webhooks
+    search_intel_merge_patterns search_surface_config search_synonyms
+    secrets secrets_audit share_links sync_cursors sync_dead_letters
+    sync_push_conflicts sync_push_cursors sync_push_doc_revs webhooks
     workspace_memberships
   )
 
-  @pinned_e2 ~w(content_edges datasets plugin_doc_state role_permissions task_edges webhook_deliveries)
+  # The six 20260715 cycle-fleet children are FK-transitive descendants of
+  # `workspaces` that carry NO `workspace_id` of their own — each reaches the
+  # tenant grain through a single many-to-one FK to a workspace_id-bearing parent
+  # (see @e2_joins). They are pinned E2 so the sentinel is satisfied and their
+  # rows travel in the owning workspace's bundle instead of exporting empty:
+  #   * chat_runtime_usage_receipts       → documents (task_id)
+  #   * cycle_build_plans                 → cycle_waves (wave_id)
+  #   * epic_assignment_results           → epic_assignments (assignment_id)
+  #   * epic_assignment_runtime_attempts  → epic_assignments (assignment_id)
+  #   * epic_assignment_tasks             → epic_assignments (assignment_id)
+  #   * epic_benchmark_attempts           → epic_benchmark_experiments (experiment_id)
+  @pinned_e2 ~w(
+    chat_runtime_usage_receipts content_edges cycle_build_plans
+    cycle_release_gate_captures cycle_release_gate_consumptions
+    cycle_release_paper_candidates cycle_release_public_smokes datasets
+    epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
+    epic_benchmark_attempts plugin_doc_state role_permissions task_edges
+    webhook_deliveries
+  )
 
   # E3 tables that carry a `doc_id` → filtered by a (doc_id, dataset) semi-join.
-  @e3_doc_keyed ~w(authoring_exemptions github_sync_conflicts sync_push_conflicts sync_push_doc_revs)
+  # (`sync_push_conflicts` / `sync_push_doc_revs` moved to E1 — charter D55.)
+  @e3_doc_keyed ~w(authoring_exemptions github_sync_conflicts)
 
   # E3 tables with no `doc_id` → filtered by dataset-slug membership.
-  @e3_dataset_keyed ~w(preview_token_jti shares sync_cursors sync_dead_letters sync_push_cursors)
+  # (`sync_cursors` / `sync_dead_letters` / `sync_push_cursors` moved to E1 — D55.)
+  @e3_dataset_keyed ~w(preview_token_jti shares)
 
-  # The `scope`-column allowlist (charter D4/D5). Cannot be dataset-scanned.
-  #   data_keys.scope             = "dataset:" <> slug   (per-dataset DEKs)
-  #   search_surface_config.scope = slug
-  @allowlist %{
-    "data_keys" => "dataset:",
-    "search_surface_config" => ""
-  }
+  # The `scope`-column allowlist (charter D4/D5): tables whose tenant key is a
+  # bare `scope` string, not a `dataset` column, so the mechanical dataset scan
+  # cannot see them.
+  #
+  # EMPTY as of Wave 5 — both former members gained a real `workspace_id` column
+  # and moved to E1 (`@pinned_e1`), exported and torn down via
+  # `WHERE workspace_id = $ws` instead of a bare, project-ambiguous `scope`:
+  #   * `search_surface_config` — Wave 5 Slice A (charter D45/D49), closed a LIVE
+  #     cross-tenant config-overwrite bleed.
+  #   * `data_keys` — bpb-datakeys-write-path-workspace-attribution (D51-D54),
+  #     so a shared-slug DEK is attributed to one workspace, not silently dropped.
+  @allowlist %{}
 
   # Every base table that rolls ABOVE or OUTSIDE the workspace grain (charter
   # D5): global codelists, admin/host state, the org tier, job queue, metrics,
   # user/auth tier, and the residual *_backup tables. A base table that is
   # neither live-tenant nor in this list makes the sentinel RAISE.
+  # chat_runtime_telemetry_events (20260715 cycle-fleet) FK-references
+  # chat_sessions only — it is NOT reachable from `workspaces` by any FK path, so
+  # the live E1/E2/E3 scans never surface it. Like chat_sessions / chat_messages
+  # it is host/admin-scoped runtime telemetry that rolls OUTSIDE the workspace
+  # grain; pinned non-tenant so the "unaccounted base table" sentinel is clear.
   @pinned_non_tenant ~w(
-    chat_messages chat_sessions codelist_value_translations codelist_values
-    codelists collapsed_schema_definitions_backup idempotency_keys login_tickets
+    chat_messages chat_runtime_telemetry_events chat_sessions
+    codelist_value_translations codelist_values
+    codelists collapsed_schema_definitions_backup
+    cycle_release_gate_migration_state_20260719020100 idempotency_keys login_tickets
     oban_jobs oban_peers oidc_connections org_domains organizations
     paper_events_dataset_rescope_backup plugin_settings plugin_settings_audit
     pulse_counters pulse_events pulse_meters saml_connections schema_migrations
-    scim_groups scim_tokens secrets secrets_audit social_identities
+    scim_groups scim_tokens social_identities
     social_providers status_incidents user_email_tokens user_sessions users
     webauthn_credentials
   )
@@ -98,7 +176,31 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     "webhook_deliveries" => {"JOIN webhooks w ON w.id = t.endpoint_id", "w.workspace_id"},
     "content_edges" => {"JOIN documents d ON d.id = t.from_id", "d.workspace_id"},
     "task_edges" => {"JOIN documents d ON d.id = t.from_id", "d.workspace_id"},
-    "plugin_doc_state" => {"JOIN documents d ON d.id = t.doc_id", "d.workspace_id"}
+    "plugin_doc_state" => {"JOIN documents d ON d.id = t.doc_id", "d.workspace_id"},
+    # 20260715 cycle-fleet children. Each FK column is NOT NULL, so the plain
+    # (many-to-one) parent-join neither fans out nor drops a row — the same
+    # shape as every other E2 spec above.
+    "chat_runtime_usage_receipts" => {"JOIN documents d ON d.id = t.task_id", "d.workspace_id"},
+    "cycle_build_plans" => {"JOIN cycle_waves cw ON cw.id = t.wave_id", "cw.workspace_id"},
+    "cycle_release_gate_captures" =>
+      {"JOIN cycle_release_gate_challenges challenge ON challenge.id = t.challenge_id",
+       "challenge.workspace_id"},
+    "cycle_release_gate_consumptions" =>
+      {"JOIN cycle_release_gate_admissions admission ON admission.id = t.admission_id",
+       "admission.workspace_id"},
+    "cycle_release_paper_candidates" =>
+      {"JOIN cycle_waves wave ON wave.id = t.target_wave_id", "wave.workspace_id"},
+    "cycle_release_public_smokes" =>
+      {"JOIN cycle_correction_promotion_events event ON event.id = t.promotion_event_id",
+       "event.workspace_id"},
+    "epic_assignment_results" =>
+      {"JOIN epic_assignments ea ON ea.id = t.assignment_id", "ea.workspace_id"},
+    "epic_assignment_runtime_attempts" =>
+      {"JOIN epic_assignments ea ON ea.id = t.assignment_id", "ea.workspace_id"},
+    "epic_assignment_tasks" =>
+      {"JOIN epic_assignments ea ON ea.id = t.assignment_id", "ea.workspace_id"},
+    "epic_benchmark_attempts" =>
+      {"JOIN epic_benchmark_experiments ee ON ee.id = t.experiment_id", "ee.workspace_id"}
   }
 
   def root_table, do: @root_table
@@ -154,6 +256,57 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
         WHERE table_schema = 'public' AND column_name = 'workspace_id'
       )
     ORDER BY table_name
+    """)
+  end
+
+  @doc """
+  Group-A (live): every table carrying the CANONICAL `dataset_id` column
+  (migration 20260527131000's dual dataset-column family).
+
+  A dataset-scoped export narrows these on `dataset_id` and NEVER on the
+  `dataset` string mirror — the mirror is a denormalized convenience that can
+  name a slug another project also owns, so keying on it would pull a
+  sibling dataset's rows into a dataset-grained bundle (PDS-D7). Derived live
+  for the same reason E1/E2/E3 are: a new dataset_id table inherits the
+  narrowing instead of silently exporting workspace-whole.
+  """
+  def live_dataset_id_tables(repo) do
+    query_col(repo, """
+    SELECT table_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND column_name = 'dataset_id'
+    ORDER BY table_name
+    """)
+  end
+
+  @doc """
+  The columns of `table` that FK-reference `documents.id` (live) — the seam the
+  dev-profile document type-deny CASCADES through (PDS-D27).
+
+  A denied document type (today `ticket`) is filtered out of the `documents`
+  member, but every child keyed to it — `content_edges` (BOTH endpoints),
+  `task_edges`, `plugin_doc_state` — is reached through a type-BLIND join, so
+  without this cascade those rows travel as orphans that violate the FK on
+  import. Live-derived so a new child table inherits the cascade automatically.
+
+  The REFERENCED side is pinned to `documents.id`: the cascade predicate the
+  caller emits is `dtd.id = t.<col>`, so a hypothetical FK pointing at some
+  other `documents` key (or one leg of a composite FK) must NOT be returned —
+  it would either compare mismatched types (a loud SQL error) or, worse, join
+  the wrong row. What this returns is exactly what that predicate is valid for.
+  """
+  def document_fk_columns(repo, table) do
+    query_col(repo, """
+    SELECT a.attname
+    FROM pg_constraint c
+    JOIN pg_class cl ON cl.oid = c.conrelid
+    JOIN pg_class pl ON pl.oid = c.confrelid
+    JOIN unnest(c.conkey) WITH ORDINALITY k(attnum, ord) ON true
+    JOIN unnest(c.confkey) WITH ORDINALITY r(attnum, ord) ON r.ord = k.ord
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+    JOIN pg_attribute ra ON ra.attrelid = c.confrelid AND ra.attnum = r.attnum
+    WHERE c.contype = 'f' AND cl.relname = '#{sql_ident(table)}'
+      AND pl.relname = 'documents' AND ra.attname = 'id'
+    ORDER BY a.attname
     """)
   end
 
@@ -269,6 +422,242 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     end
   end
 
+  # ── Dev-profile partition (PDS charter D4/D5 — classification data only) ─────
+  #
+  # A SECOND partition, orthogonal to the pinned E1/E2/E3 buckets above: every
+  # bundle-reachable table (root + E1 + E2 + E3 + allowlist) classified for the
+  # `--profile dev` pull as
+  #
+  #   * `:copy`                     — travels verbatim in a dev bundle
+  #   * `:deny`                     — never enters a dev bundle (secret /
+  #                                   credential / fleet / size classes)
+  #   * `{:scrub_fields, [field]}`  — travels with the named fields nulled at
+  #                                   export (empty in W1; the shape exists so a
+  #                                   future field-scrub needs no model change)
+  #
+  # `documents` alone carries an extra axis: `{:copy, deny_types: [type]}` —
+  # rows whose `type` is listed never travel (PDS-D5: tickets are customer PII
+  # conversations, full-denied per-type; the snapshot back door through
+  # `revisions` / `mutation_events` is closed by their table-level deny).
+  #
+  # This section is CLASSIFICATION DATA + SENTINEL only — the exporter does not
+  # read it yet (the dev export slice consumes it). The full-fidelity backup
+  # partition above and `assert_partition!/1` are untouched by design: the
+  # md5-parity suite in workspace_bundle_test.exs is the regression tripwire.
+  #
+  # Deny census (PDS-D4, verified live 2026-07-19):
+  #   * credential/secret stores: api_tokens, secrets, secrets_audit, data_keys,
+  #     access_grants, webhooks (live rows carry PLAINTEXT signing secrets),
+  #     webhook_deliveries (payload + signature trail of a denied parent),
+  #     audit_export_sinks (plaintext `secret` sink column), share_links,
+  #     shares (access-granting registry — copying would silently re-open
+  #     public surfaces on the target), registered_chat_hosts,
+  #     preview_token_jti.
+  #   * PII / conversation / audit trails: audit_events, workspace_memberships,
+  #     chat_execution_leases, chat_execution_events, search_intel_events
+  #     (raw user-typed `query` text + `actor_key`/`session_key` identity —
+  #     per-user behavioral telemetry; the DERIVED aggregates
+  #     search_intel_crystals / search_intel_merge_patterns carry only
+  #     normalized-query counts with no actor identity and stay copy).
+  #   * sync family: sync_* (all five), github_sync_conflicts (conflict
+  #     payloads snapshot foreign state that cannot converge on a dev target).
+  #   * cycle/epic fleet ledgers incl. FK children: cycle_*, epic_*,
+  #     chat_runtime_usage_receipts (fleet usage telemetry).
+  #   * SIZE denies: mutation_events (241MB live), revisions (192MB live) —
+  #     keeps a dev bundle ~42MB instead of ~475MB and closes the
+  #     ticket-snapshot cascade in the same stroke.
+
+  @dev_doc_type_deny ~w(ticket)
+
+  @dev_copy ~w(
+    authoring_exemptions content_edges datasets media_files paper_events
+    plugin_doc_state projects role_permissions roles schema_definitions
+    search_intel_crystals search_intel_merge_patterns
+    search_surface_config search_synonyms task_edges workspaces
+  )
+
+  @dev_deny ~w(
+    access_grants api_tokens audit_events audit_export_sinks
+    chat_execution_events chat_execution_leases chat_runtime_usage_receipts
+    cycle_build_plans cycle_correction_admissions
+    cycle_correction_promotion_events cycle_correction_quarantines
+    cycle_correction_roots cycle_correction_targets
+    cycle_release_gate_admissions cycle_release_gate_captures
+    cycle_release_gate_challenges cycle_release_gate_consumptions
+    cycle_release_paper_candidates cycle_release_public_smokes cycle_waves
+    data_keys epic_assignment_results epic_assignment_runtime_attempts
+    epic_assignment_tasks epic_assignments epic_benchmark_attempts
+    epic_benchmark_experiments github_sync_conflicts mutation_events
+    preview_token_jti registered_chat_hosts revisions search_intel_events
+    secrets secrets_audit
+    share_links shares sync_cursors sync_dead_letters sync_push_conflicts
+    sync_push_cursors sync_push_doc_revs webhook_deliveries webhooks
+    workspace_memberships
+  )
+
+  # W1 ships an empty scrub set; the key shape is `table => [field]`.
+  @dev_scrub %{}
+
+  # Traveling tables with a REVIEWED composite primary key. Live census
+  # (2026-07-19): 94/94 base tables carry a PK, but only 86/94 are
+  # single-column — `plugin_doc_state` (3-col) and `authoring_exemptions`
+  # (2-col) are traveling composites. The merge-import arbiter is the
+  # manifest's `order_columns` — the FULL pk column list — so a composite
+  # arbiter is valid (`ON CONFLICT (a, b) DO UPDATE`). What fails closed:
+  # a traveling table with NO pk, or a NEW composite nobody reviewed.
+  @dev_composite_pk_ok ~w(authoring_exemptions plugin_doc_state)
+
+  # Compile-time tripwire: a table listed in two source lists would silently
+  # last-write-win in the merged map — refuse to compile instead.
+  dev_sources = @dev_copy ++ ["documents"] ++ @dev_deny ++ Map.keys(@dev_scrub)
+
+  if dev_sources != Enum.uniq(dev_sources) do
+    raise "WorkspaceBundle.Catalog: dev partition source lists overlap — " <>
+            inspect(dev_sources -- Enum.uniq(dev_sources))
+  end
+
+  @dev_partition Map.new(@dev_copy, &{&1, :copy})
+                 |> Map.merge(Map.new(@dev_deny, &{&1, :deny}))
+                 |> Map.merge(
+                   Map.new(@dev_scrub, fn {table, fields} -> {table, {:scrub_fields, fields}} end)
+                 )
+                 |> Map.put("documents", {:copy, deny_types: @dev_doc_type_deny})
+
+  @doc "The dev-profile classification map: table => :copy | :deny | {:scrub_fields, fields} (PDS-D4)."
+  def dev_partition, do: @dev_partition
+
+  @doc "Document `type`s that never travel in a dev-profile bundle (PDS-D5)."
+  def dev_doc_type_deny do
+    {:copy, deny_types: types} = Map.fetch!(@dev_partition, "documents")
+    types
+  end
+
+  @doc """
+  The normalized dev-profile action for a table: `:copy`, `:deny`, or
+  `{:scrub_fields, fields}`. FAIL-CLOSED: an unclassified table is `:deny` —
+  the export path can never copy a table the partition has not reviewed
+  (the sentinel additionally RAISES on any unclassified reachable table, so
+  this branch is defense-in-depth, not the primary guard).
+  """
+  def dev_action(table) do
+    case Map.fetch(@dev_partition, table) do
+      {:ok, :copy} -> :copy
+      {:ok, {:copy, _axis}} -> :copy
+      {:ok, {:scrub_fields, fields}} -> {:scrub_fields, fields}
+      _deny_or_unclassified -> :deny
+    end
+  end
+
+  @doc "Tables that travel in a dev-profile bundle (`:copy` + `{:scrub_fields, _}`), sorted."
+  def dev_copy_tables do
+    for({table, classification} <- @dev_partition, classification != :deny, do: table)
+    |> Enum.sort()
+  end
+
+  @doc "Tables a dev-profile bundle never carries, sorted."
+  def dev_deny_tables do
+    for({table, :deny} <- @dev_partition, do: table) |> Enum.sort()
+  end
+
+  @doc "Traveling tables whose composite primary key is reviewed as a valid merge arbiter."
+  def dev_composite_pk_ok, do: @dev_composite_pk_ok
+
+  # ── The dev-profile sentinel (PDS-D4: deny-by-default, fail-closed) ──────────
+
+  @doc """
+  Assert the dev-profile partition covers the LIVE bundle-reachable catalog,
+  RAISING on any gap — the fail-closed mirror of `assert_partition!/1`.
+
+  Four checks, all fail-closed:
+
+    1. every classification value is well-formed (`:copy` / `:deny` /
+       `{:scrub_fields, [field]}` / documents' `{:copy, deny_types: [type]}`);
+    2. every bundle-reachable table (root + live E1/E2/E3 + allowlist) is
+       classified — an UNCLASSIFIED new table RAISES, so nothing ever travels
+       (or is silently dropped) unreviewed;
+    3. no phantom entries — a classified table that is no longer reachable
+       RAISES, keeping the map honest;
+    4. every traveling table (copy + scrub) has a primary key the merge-import
+       `ON CONFLICT (pk) DO UPDATE` arbiter (PDS-D8) can use — single-column,
+       unless the composite is on the reviewed `dev_composite_pk_ok/0` list
+       (live census: 94/94 base tables carry a PK; 86/94 single-column).
+
+  The second argument exists for protective tests (injecting a classification
+  the real map would never carry); production callers use the default.
+  """
+  def assert_dev_partition!(repo, partition \\ @dev_partition) do
+    malformed = for {table, c} <- partition, not valid_dev_classification?(c), do: table
+
+    if malformed != [] do
+      raise "WorkspaceBundle.Catalog: dev partition entry for #{inspect(Enum.sort(malformed))} " <>
+              "is malformed — a classification is :copy | :deny | {:scrub_fields, [field]} " <>
+              "(documents alone may carry {:copy, deny_types: [type]})"
+    end
+
+    reachable =
+      ([@root_table] ++
+         live_e1(repo) ++ live_e2(repo) ++ live_e3(repo) ++ Map.keys(@allowlist))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    classified = partition |> Map.keys() |> Enum.sort()
+
+    unclassified = reachable -- classified
+
+    if unclassified != [] do
+      raise "WorkspaceBundle.Catalog: #{length(unclassified)} unclassified bundle-reachable " <>
+              "table(s) #{inspect(unclassified)} — the dev profile is deny-by-default and " <>
+              "FAILS CLOSED: classify each as copy | deny | scrub_fields before a dev " <>
+              "export can run"
+    end
+
+    phantom = classified -- reachable
+
+    if phantom != [] do
+      raise "WorkspaceBundle.Catalog: dev-classified table(s) #{inspect(phantom)} are not " <>
+              "bundle-reachable — remove the stale entry or fix the reachability drift"
+    end
+
+    traveling = for {table, c} <- partition, c != :deny, do: table
+    bad_pk = pk_arbiter_violations(repo, traveling)
+
+    if bad_pk != [] do
+      raise "WorkspaceBundle.Catalog: copy-classified table(s) #{inspect(Enum.sort(bad_pk))} " <>
+              "lack a single-column primary key and are not on the reviewed composite-PK " <>
+              "list — the merge-import ON CONFLICT (pk) DO UPDATE arbiter (PDS-D8) needs " <>
+              "a reviewed pk"
+    end
+
+    :ok
+  end
+
+  defp valid_dev_classification?(:copy), do: true
+  defp valid_dev_classification?(:deny), do: true
+
+  defp valid_dev_classification?({:copy, deny_types: types}) when is_list(types),
+    do: types != [] and Enum.all?(types, &is_binary/1)
+
+  defp valid_dev_classification?({:scrub_fields, fields}) when is_list(fields),
+    do: fields != [] and Enum.all?(fields, &is_binary/1)
+
+  defp valid_dev_classification?(_), do: false
+
+  defp pk_arbiter_violations(repo, tables) do
+    Enum.filter(tables, fn table ->
+      case query_col(repo, """
+           SELECT array_length(c.conkey, 1)
+           FROM pg_constraint c
+           JOIN pg_class cl ON cl.oid = c.conrelid
+           WHERE c.contype = 'p' AND cl.relname = '#{sql_ident(table)}'
+           """) do
+        [1] -> false
+        [n] when is_integer(n) and n > 1 -> table not in @dev_composite_pk_ok
+        # No primary key at all: never a valid merge arbiter.
+        _none -> true
+      end
+    end)
+  end
+
   # ── SQL literal helpers (COPY subqueries take no bind params) ────────────────
 
   @doc """
@@ -292,6 +681,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   @doc "A single-quoted, escaped Postgres text literal."
   def text_literal(value), do: "'#{escape_sql_string(value)}'"
 
+  # SAFETY ASSUMPTION: single-quote doubling is a COMPLETE escape ONLY when
+  # `standard_conforming_strings = on` (the Postgres default since 9.1, and never
+  # flipped in Barkpark). With it off, a backslash would begin a C-style escape
+  # sequence and `''` would no longer be the sole quote path — the doubling below
+  # would be defeated. This is the last line of defense for the COPY-FROM-STDIN
+  # import path, which bypasses the Ecto changeset guards entirely (unlike the
+  # POST /v1/data/mutate write path, where Dataset.changeset now validates slug
+  # format). Do not weaken this to a bare interpolation, and do not disable
+  # standard_conforming_strings.
   defp escape_sql_string(value) when is_binary(value), do: String.replace(value, "'", "''")
 
   # A bare SQL identifier from a catalog-derived table/column name. Every name

@@ -48,7 +48,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   worker — subscription is per-socket only (the github-bridge CI landmine that
   breaks the full ExUnit sandbox).
 
-  When a `{:document_changed, %{type: "task"}}` arrives, `Board.card_from_broadcast/2`
+  When a `{:document_changed, %{type: "task"}}` arrives, `Board.card_from_broadcast/3`
   projects the one changed doc, `Board.apply_change/3` re-buckets it (a LIGHT
   optimistic move, D9) and reports a `change` the render keys its flash/slide off
   (`data-just-moved` + a CSS `@keyframes`, CSP-safe). The done-today tally climbs
@@ -211,11 +211,22 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     # DB-free `Board.build([])`), and load the real snapshot ONCE, on connect.
     board = if connected, do: Board.snapshot(dataset: @dataset), else: Board.build([])
 
+    # FIELD-VISIBILITY SEAL (felix W19): compute the fail-closed visibility
+    # predicate ONCE per mount and thread it into every `card_from_broadcast/3`,
+    # so a realtime broadcast card is gated by the SAME schema decisions as the
+    # `Board.snapshot` fetched cards — WITHOUT re-resolving the schema per event.
+    # On the disconnected (dead) render assign `fn _ -> false end`: no DB touch
+    # (mirrors the L212 no-snapshot-on-static-render guard) and no broadcast can
+    # arrive pre-connect, so fail-closed is free of behavioral cost. `:refresh`
+    # recomputes it, so a schema edit self-heals within one reconcile cadence.
+    readable? = if connected, do: Board.field_visibility_gate(@dataset), else: fn _ -> false end
+
     {:ok,
      socket
      |> assign(:dataset, @dataset)
      |> assign(:loading, not connected)
      |> assign(:board, board)
+     |> assign(:readable?, readable?)
      |> assign(:last_change, nil)
      |> assign(:notice, nil)
      |> assign(:seen, MapSet.new())
@@ -269,7 +280,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     else
       board = socket.assigns.board
       prev = board.cards_by_id[Content.published_id(doc.doc_id)]
-      card = Board.card_from_broadcast(doc, prev)
+      card = Board.card_from_broadcast(doc, prev, socket.assigns.readable?)
       {board, change} = Board.apply_change(board, card)
 
       {:noreply,
@@ -289,9 +300,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_ms)
 
+    # Recompute the visibility predicate alongside the snapshot (felix W19): a
+    # schema edit made after mount self-heals into the realtime path within one
+    # reconcile cadence, never per broadcast.
     {:noreply,
      socket
      |> assign(:board, Board.snapshot(dataset: socket.assigns.dataset))
+     |> assign(:readable?, Board.field_visibility_gate(socket.assigns.dataset))
      |> assign(:last_change, nil)
      |> refresh_peek()
      |> assign_view()}
@@ -445,6 +460,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       {:ok, _} ->
         {:noreply, socket}
 
+      # PDS-D289 refuses a `done` close over unmet acceptance criteria. Saying
+      # "its claim moved under you" here would be the exact defect this wave
+      # exists to kill — a message that names the wrong cause. The board has no
+      # override affordance (that needs a reason, and a drag has nowhere to type
+      # one), so it says what happened and where to fix it.
+      {:error, {:criteria_unmet, indices}} ->
+        {:noreply,
+         rollback(
+           socket,
+           "Couldn't mark that done — acceptance " <>
+             criteria_word(indices) <>
+             " #{Enum.join(indices, ", ")} (0-based) #{plural_verb(indices)} not met yet. " <>
+             "Stamp them with evidence first, or close it from the CLI with a recorded reason."
+         )}
+
       {:error, _} ->
         {:noreply, rollback(socket, "Couldn't close that task — its claim moved under you.")}
     end
@@ -473,6 +503,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     {:noreply,
      assign(socket, :notice, refuse_notice(ctx.from_col, ctx.to_col, ctx.holder, ctx.worker))}
   end
+
+  # Wording helpers for the criteria-unmet refusal above. They live AFTER the
+  # last run_restage/3 clause on purpose: sitting between two clauses of the
+  # same name and arity is a --warnings-as-errors build failure.
+  defp criteria_word([_one]), do: "criterion"
+  defp criteria_word(_many), do: "criteria"
+  defp plural_verb([_one]), do: "is"
+  defp plural_verb(_many), do: "are"
 
   # Optimistically re-bucket the dragged card to its target lifecycle so the
   # board moves the instant you drop (D9). We synthesize a normalized card off
@@ -656,25 +694,59 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         ancestors = peek_ancestors(board, Map.get(content, "parent_id"))
         subtree = peek_subtree(board, lid)
 
+        # Field-visibility seal: this panel hand-picks content fields straight
+        # off the raw doc, so — unlike the sanctioned `tasks/query.ex` read path —
+        # nothing here rides `Envelope.render`. Resolve the SAME task schema ONCE
+        # and gate every hand-picked field through the shared visibility predicate
+        # as an ANONYMOUS, fail-closed caller (mirrors `tasks/query.ex`
+        # measure_field_readable?/2). A field the schema declares private /
+        # owner_only / readable_by is redacted to its empty value so this ungated
+        # board mount can never leak it; an undeclared field stays public (legacy
+        # parity). No task field declares visibility today — fail-closed
+        # hardening, not a behavior change.
+        schema = peek_schema()
+        readable? = fn field -> peek_field_readable?(schema, field) end
+        # nil = SEALED (schema-private field — the section never renders, no
+        # empty shell hints it exists); [] = authored-empty (the criteria-first
+        # reader shows its honest empty state).
+        criteria = if(readable?.("acceptance_criteria"), do: peek_criteria(content), else: nil)
+        blockers = peek_blockers(doc.id)
+        blocks = peek_blocks(doc.id)
+        # The purpose dossier hand-picks content fields itself (purpose, priority,
+        # parent_id, …), so it rides the SAME seal: unreadable fields are dropped
+        # from its input before it derives anything.
+        sealed_content = content |> Enum.filter(fn {k, _} -> readable?.(k) end) |> Map.new()
+
         %{
           doc_id: lid,
           title: doc.title,
           col: card && card.col,
           lifecycle_status: Map.get(content, "lifecycle_status") || "open",
-          priority: Map.get(content, "priority"),
-          parent_id: Map.get(content, "parent_id"),
-          labels: (card && card.labels) || [],
+          priority: if(readable?.("priority"), do: Map.get(content, "priority")),
+          parent_id: if(readable?.("parent_id"), do: Map.get(content, "parent_id")),
+          labels: if(readable?.("labels"), do: (card && card.labels) || [], else: []),
           github: card && card.github,
-          claim: peek_claim(content),
-          description: presence(Map.get(content, "description")),
-          design_doc: presence(Map.get(content, "design_doc")),
-          criteria: peek_criteria(content),
+          claim: if(readable?.("claim"), do: peek_claim(content)),
+          description:
+            if(readable?.("description"), do: presence(Map.get(content, "description"))),
+          design_doc: if(readable?.("design_doc"), do: presence(Map.get(content, "design_doc"))),
+          criteria: criteria,
           ancestors: ancestors,
           subtree: subtree,
           tree: peek_tree(board, lid, ancestors, subtree),
-          blockers: peek_blockers(doc.id),
-          blocks: peek_blocks(doc.id),
-          events: peek_events(lid),
+          purpose:
+            peek_purpose(
+              sealed_content,
+              doc.title,
+              card,
+              ancestors,
+              criteria || [],
+              blockers,
+              blocks
+            ),
+          blockers: blockers,
+          blocks: blocks,
+          events: if(readable?.("events"), do: peek_events(lid), else: []),
           created_at: doc.inserted_at,
           updated_at: doc.updated_at
         }
@@ -705,6 +777,28 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         where: d.doc_id == ^doc_id and d.type == "task" and d.dataset == ^@dataset,
         limit: 1
       )
+    )
+  end
+
+  # Resolve the task schema for the peek field-visibility cross-check,
+  # dataset-scoped to the board's own `@dataset` (mirrors `tasks/query.ex`
+  # load_task_schema/3). nil on miss ⇒ every field undeclared ⇒ public (legacy
+  # parity), never a crash. One indexed `Repo.one` per peek open/refresh.
+  defp peek_schema do
+    case Content.get_schema("task", @dataset, []) do
+      {:ok, schema} -> schema
+      _ -> nil
+    end
+  end
+
+  # ANONYMOUS + fail-closed field-visibility check (mirrors `tasks/query.ex`
+  # measure_field_readable?/2). A declared private / owner_only / readable_by
+  # field is denied to the ungated board viewer; an undeclared field is public.
+  defp peek_field_readable?(schema, field) do
+    Barkpark.Content.Envelope.field_readable?(
+      schema,
+      field,
+      Barkpark.Content.CallerContext.anonymous()
     )
   end
 
@@ -749,6 +843,145 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       _ ->
         []
     end
+  end
+
+  # Purpose is an explicit task dossier when authored and an honest, labelled
+  # projection when an older task has not been migrated yet. Readers should
+  # never need to infer why a task exists from a wall of prose.
+  defp peek_purpose(content, title, card, ancestors, criteria, blockers, blocks) do
+    raw = Map.get(content, "purpose")
+    authored = is_map(raw)
+    raw = if authored, do: raw, else: %{}
+    goal = List.first(ancestors)
+    parent = List.last(ancestors)
+    goal_name = goal && (goal.title || goal.doc_id)
+    parent_name = parent && (parent.title || parent.doc_id)
+    priority = Map.get(content, "priority")
+
+    %{
+      authored: authored,
+      part_of:
+        presence(raw["part_of"]) ||
+          parent_name ||
+          presence(Map.get(content, "parent_id")) || "Standalone task",
+      impact:
+        presence(raw["impact"]) || "blocks #{length(blocks)} · blocked by #{length(blockers)}",
+      statement: presence(raw["statement"]) || presence(title) || "Complete this task",
+      why:
+        presence(raw["why"]) ||
+          derived_purpose_why(goal_name, parent_name),
+      endgame:
+        presence(raw["endgame"]) ||
+          derived_purpose_endgame(criteria, parent_name),
+      importance:
+        purpose_score(raw["importance"], importance_score(priority), importance_reason(priority)),
+      relevance:
+        purpose_score(
+          raw["relevance"],
+          relevance_score(content, card),
+          "derived from current task context"
+        ),
+      proof: purpose_proof(raw["proof"], criteria, content, title)
+    }
+  end
+
+  defp first_criterion([%{text: text} | _]), do: presence(text)
+  defp first_criterion(_), do: nil
+
+  defp derived_purpose_why(goal_name, parent_name)
+       when is_binary(goal_name) and is_binary(parent_name) and goal_name != parent_name do
+    "Why this task is necessary for #{parent_name} within #{goal_name} is not recorded"
+  end
+
+  defp derived_purpose_why(_goal_name, parent_name) when is_binary(parent_name) do
+    "Why this task is necessary to achieve #{parent_name} is not recorded"
+  end
+
+  defp derived_purpose_why(_goal_name, _parent_name) do
+    "Why this task is worth doing is not recorded"
+  end
+
+  defp derived_purpose_endgame(_criteria, parent_name) when is_binary(parent_name) do
+    "Advance #{parent_name} by completing this task"
+  end
+
+  defp derived_purpose_endgame(criteria, _parent_name) when criteria != [] do
+    "Meet all #{length(criteria)} acceptance criteria and close the task"
+  end
+
+  defp derived_purpose_endgame([], _parent_name) do
+    "Define acceptance criteria, then complete the task"
+  end
+
+  defp importance_reason(nil), do: "default score; no priority is recorded"
+  defp importance_reason(priority), do: "derived from P#{priority} queue priority"
+
+  defp purpose_score(%{} = raw, fallback, fallback_reason) do
+    %{
+      score: clamp_score(raw["score"], fallback),
+      reason: presence(raw["reason"]) || fallback_reason
+    }
+  end
+
+  defp purpose_score(_, fallback, reason), do: %{score: fallback, reason: reason}
+
+  defp clamp_score(score, _fallback) when is_integer(score), do: min(100, max(0, score))
+  defp clamp_score(score, fallback) when is_float(score), do: clamp_score(round(score), fallback)
+  defp clamp_score(_, fallback), do: fallback
+
+  defp importance_score(0), do: 100
+  defp importance_score(1), do: 90
+  defp importance_score(2), do: 75
+  defp importance_score(3), do: 55
+  defp importance_score(4), do: 35
+  defp importance_score(_), do: 50
+
+  defp relevance_score(content, card) do
+    cond do
+      Map.get(content, "lifecycle_status") == "in_progress" -> 90
+      presence(Map.get(content, "design_doc")) -> 65
+      card && card.parent_id -> 60
+      true -> 50
+    end
+  end
+
+  defp purpose_proof(list, _criteria, _content, _title) when is_list(list) and list != [] do
+    Enum.flat_map(list, fn
+      %{} = item ->
+        evidence = presence(item["evidence"])
+
+        if evidence do
+          [
+            %{
+              claim: presence(item["claim"]) || "Purpose evidence",
+              evidence: evidence,
+              source: presence(item["source"])
+            }
+          ]
+        else
+          []
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  defp purpose_proof(_, criteria, content, title) do
+    criterion = first_criterion(criteria)
+
+    [
+      presence(title) && %{claim: "Task identity", evidence: title, source: "document.title"},
+      criterion &&
+        %{claim: "Completion is testable", evidence: criterion, source: "acceptance_criteria"},
+      presence(Map.get(content, "parent_id")) &&
+        %{
+          claim: "Parent relationship",
+          evidence: Map.get(content, "parent_id"),
+          source: "parent_id"
+        }
+    ]
+    |> Enum.reject(&is_nil/1)
   end
 
   # Status order for tree rows — in-flight first so the active work leads.
@@ -1904,6 +2137,36 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         font-variant-numeric: tabular-nums; color: var(--ok);
         font-weight: 600; letter-spacing: 0; text-transform: none;
       }
+      .bp-derived {
+        color: var(--muted-text); font-weight: 500; letter-spacing: 0;
+        text-transform: none;
+      }
+      .bp-purpose-grid { display: grid; gap: 0; margin: 0; }
+      .bp-purpose-grid > div {
+        display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px;
+        padding: 6px 0; border-top: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
+      }
+      .bp-purpose-grid > div:first-child { border-top: 0; padding-top: 0; }
+      .bp-purpose-grid dt {
+        color: var(--muted-text); font-size: 10px; font-weight: 700;
+        letter-spacing: 0.07em; line-height: 1.5; text-transform: uppercase;
+      }
+      .bp-purpose-grid dd {
+        min-width: 0; margin: 0; color: var(--text); font-size: 12.5px;
+        line-height: 1.5; overflow-wrap: anywhere;
+      }
+      .bp-purpose-grid dd strong { color: var(--ok); font-variant-numeric: tabular-nums; }
+      .bp-proof {
+        margin-top: 9px; padding: 8px 10px; border-left: 2px solid var(--accent);
+        border-radius: 0 6px 6px 0; background: var(--muted-surface);
+      }
+      .bp-proof h4 {
+        margin: 0 0 5px; color: var(--muted-text); font-size: 10px;
+        letter-spacing: 0.07em; text-transform: uppercase;
+      }
+      .bp-proof p { margin: 4px 0 0; color: var(--text); font-size: 11.5px; line-height: 1.45; }
+      .bp-proof small { display: block; color: var(--muted-text); overflow-wrap: anywhere; }
+      .bp-purpose-note { margin: 8px 0 0; color: var(--muted-text); font-size: 10.5px; line-height: 1.45; }
       .bp-peek-claim {
         margin: 0; font-size: 12.5px; color: var(--text);
         display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline;
@@ -1922,6 +2185,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       .bp-peek-crit-b { flex: 1 1 auto; min-width: 0; }
       .bp-peek-crit-t { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text); }
       .bp-peek-crit li.is-met .bp-peek-crit-t { color: var(--muted-text); }
+      .bp-criteria-empty {
+        margin: 0; color: var(--warn, var(--muted-text)); font-size: 12px; line-height: 1.45;
+      }
       .bp-peek-evidence {
         margin: 4px 0 0; padding: 5px 9px;
         border-left: 2px solid var(--ok); border-radius: 0 6px 6px 0;
@@ -2589,6 +2855,63 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       </header>
 
       <div class="bp-peek-body">
+        <section :if={@peek.criteria} class="bp-peek-sec" data-role="peek-criteria">
+          <h3 class="bp-controls-label">
+            Criteria
+            <span class="bp-peek-count">
+              <%= Enum.count(@peek.criteria, & &1.met) %>/<%= length(@peek.criteria) %>
+            </span>
+          </h3>
+          <ul class="bp-peek-crit">
+            <li :for={c <- @peek.criteria} class={c.met && "is-met"} data-role="peek-criterion">
+              <span class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")} aria-hidden="true">
+                <%= if c.met, do: "✓", else: "○" %>
+              </span>
+              <div class="bp-peek-crit-b">
+                <p class="bp-peek-crit-t"><%= c.text %></p>
+                <p :if={c.evidence} class="bp-peek-evidence" data-role="peek-evidence">
+                  <%= c.evidence %>
+                </p>
+              </div>
+            </li>
+          </ul>
+          <p :if={@peek.criteria == []} class="bp-criteria-empty">
+            No acceptance criteria recorded — completion cannot be verified.
+          </p>
+        </section>
+
+        <section class="bp-peek-sec bp-purpose" data-role="peek-purpose">
+          <h3 class="bp-controls-label">
+            Purpose
+            <span :if={!@peek.purpose.authored} class="bp-derived">derived</span>
+          </h3>
+          <dl class="bp-purpose-grid">
+            <div><dt>Part of</dt><dd><%= @peek.purpose.part_of %></dd></div>
+            <div><dt>Impact</dt><dd><%= @peek.purpose.impact %></dd></div>
+            <div><dt>Does</dt><dd><%= @peek.purpose.statement %></dd></div>
+            <div><dt>Why</dt><dd><%= @peek.purpose.why %></dd></div>
+            <div><dt>Endgame</dt><dd><%= @peek.purpose.endgame %></dd></div>
+            <div>
+              <dt>Important</dt>
+              <dd><strong><%= @peek.purpose.importance.score %>/100</strong> · <%= @peek.purpose.importance.reason %></dd>
+            </div>
+            <div>
+              <dt>Relevant</dt>
+              <dd><strong><%= @peek.purpose.relevance.score %>/100</strong> · <%= @peek.purpose.relevance.reason %></dd>
+            </div>
+          </dl>
+          <div :if={@peek.purpose.proof != []} class="bp-proof" data-role="peek-purpose-proof">
+            <h4>Proof</h4>
+            <p :for={proof <- @peek.purpose.proof}>
+              <strong><%= proof.claim %>:</strong> <%= proof.evidence %>
+              <small :if={proof.source}><%= proof.source %></small>
+            </p>
+          </div>
+          <p :if={!@peek.purpose.authored} class="bp-purpose-note">
+            Derived from live task facts; author a purpose dossier to replace these defaults.
+          </p>
+        </section>
+
         <section :if={@peek.claim} class="bp-peek-sec" data-role="peek-claim">
           <h3 class="bp-controls-label">Claim</h3>
           <p class="bp-peek-claim">
@@ -2664,28 +2987,6 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           >
             ❡ Read the full design paper →
           </a>
-        </section>
-
-        <section :if={@peek.criteria != []} class="bp-peek-sec" data-role="peek-criteria">
-          <h3 class="bp-controls-label">
-            Criteria
-            <span class="bp-peek-count">
-              <%= Enum.count(@peek.criteria, & &1.met) %>/<%= length(@peek.criteria) %>
-            </span>
-          </h3>
-          <ul class="bp-peek-crit">
-            <li :for={c <- @peek.criteria} class={c.met && "is-met"} data-role="peek-criterion">
-              <span class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")} aria-hidden="true">
-                <%= if c.met, do: "✓", else: "○" %>
-              </span>
-              <div class="bp-peek-crit-b">
-                <p class="bp-peek-crit-t"><%= c.text %></p>
-                <p :if={c.evidence} class="bp-peek-evidence" data-role="peek-evidence">
-                  <%= c.evidence %>
-                </p>
-              </div>
-            </li>
-          </ul>
         </section>
 
         <section :if={@peek.blockers != []} class="bp-peek-sec" data-role="peek-blockers">

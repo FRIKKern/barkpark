@@ -105,24 +105,50 @@
               "code": {
                 "enum": [
                   "batch_too_large",
+                  "bpml",
+                  "bpml_unavailable",
+                  "bpml_unprintable",
+                  "build_id_mismatch",
+                  "bundle_import_disabled",
+                  "chat_create_failed",
+                  "chat_unsupported",
                   "conflict",
+                  "conflict_retry",
                   "constraint",
                   "cors_forbidden",
+                  "create_wall",
                   "csrf_required",
+                  "deploy_runner_unavailable",
                   "duplicate_of",
                   "duplicate_task",
                   "event_not_found",
+                  "export_failed",
                   "forbidden",
                   "forbidden_field",
                   "halted",
+                  "hollow_paper",
                   "idempotency_key_in_use",
+                  "import_body_read_failed",
+                  "import_body_too_large",
+                  "import_constraint_violation",
+                  "import_failed",
+                  "import_spill_write_failed",
+                  "insufficient_disk_space",
                   "internal_error",
+                  "invalid_conversation",
+                  "invalid_enrollment",
+                  "invalid_epic_paper_quality",
                   "invalid_filter",
                   "invalid_grant",
+                  "invalid_kind",
+                  "invalid_mode",
                   "invalid_op",
                   "invalid_paper",
+                  "invalid_paper_structure",
                   "invalid_proposal",
                   "invalid_request_id",
+                  "invalid_state_report",
+                  "invalid_text",
                   "label_spine",
                   "malformed",
                   "malformed_op",
@@ -130,6 +156,7 @@
                   "malformed_proposal",
                   "mfa_enrolment_required",
                   "mfa_required",
+                  "missing_slug",
                   "missing_source",
                   "not_found",
                   "payload_too_large",
@@ -137,19 +164,25 @@
                   "quota_exceeded",
                   "rate_limited",
                   "rev_mismatch",
+                  "runtime_capacity",
+                  "runtime_unavailable",
                   "schema_has_documents",
                   "schema_unknown",
                   "session_unavailable",
                   "share_expired",
+                  "slug_mismatch",
                   "source_not_found",
                   "storage_unavailable",
+                  "structure",
                   "unauthorized",
+                  "unknown_format",
                   "unknown_tag",
                   "unprocessable",
                   "unsupported_if_match_for_batch",
                   "unsupported_media_type",
                   "validation_failed",
                   "webhook_not_found",
+                  "workspace_slug_conflict",
                   "workspace_suspended"
                 ],
                 "type": "string"
@@ -235,7 +268,7 @@
             }
           },
           {
-            "description": "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello); or 'field in a,b,c' / 'field not in a,b,c'; or 'field is null' / 'field is not null'.",
+            "description": "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello); or 'field in a,b,c' / 'field not in a,b,c'; or 'field is null' / 'field is not null'; or 'field hasStrong tag:min' (weighted-tag strength floor, e.g. tags hasStrong epic:50). An unparseable filter is a 400 invalid_filter, never silently ignored.",
             "in": "query",
             "name": "filter",
             "required": false,
@@ -415,6 +448,99 @@
           "bulldocs"
         ],
         "x-barkpark-scope": "ingest"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/seal": {
+      "post": {
+        "operationId": "cycle.seal.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: proven_batch_capacity, chosen_format, pilot_evidence, pilot_evidence_revision, failure_rate, failure_threshold, golden_fixtures_json.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Seal post-pilot capacity evidence and the resulting immutable build plan.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/search": {
@@ -664,7 +790,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -799,6 +925,63 @@
           "secret"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/fleet/beat": {
+      "post": {
+        "operationId": "fleet.beat",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: worker.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Listener presence heartbeat: upsert this worker's listener row (first beat registers it; every later beat is one zero-row atomic write). last_seen is server-stamped — send ttl as data, never a timestamp.",
+        "tags": [
+          "fleet"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/media/{dataset}/{id}/checkout": {
@@ -1065,6 +1248,108 @@
         "summary": "Pause a key (403 on use; reversible via unpause — the thread and its history survive).",
         "tags": [
           "ticket-key"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/chat/sessions": {
+      "get": {
+        "operationId": "chat.list_sessions",
+        "parameters": [
+          {
+            "description": "Filter by archived state (query ?archived=<value>).",
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List chat sessions (sidebar shape; omits draft/choices — GET one session for the full struct).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      },
+      "post": {
+        "operationId": "chat.create_session",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start a provider-backed chat session with server-minted public and provider identities.",
+        "tags": [
+          "chat"
         ],
         "x-barkpark-scope": "admin"
       }
@@ -1346,6 +1631,24 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "description": "Ready-queue row offset.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Optional closure_nearest campaign order: fewest unmet criteria, then oldest, then logical task id.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1374,7 +1677,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List ready (unblocked) tasks.",
+        "summary": "List executable, unblocked tasks (priority order by default).",
         "tags": [
           "task"
         ],
@@ -1722,6 +2025,75 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/v1/plugins/bulldocs/sessions/{slug}/events": {
+      "post": {
+        "operationId": "session.log",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append one milestone event to an open session (server stamps ts).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
+      }
+    },
     "/v1/auth/mfa/enroll": {
       "post": {
         "operationId": "auth.mfa-enroll",
@@ -1746,7 +2118,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1869,7 +2241,7 @@
             }
           },
           {
-            "description": "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello); or 'field in a,b,c' / 'field not in a,b,c'; or 'field is null' / 'field is not null'.",
+            "description": "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello); or 'field in a,b,c' / 'field not in a,b,c'; or 'field is null' / 'field is not null'; or 'field hasStrong tag:min' (weighted-tag strength floor, e.g. tags hasStrong epic:50). An unparseable filter is a 400 invalid_filter, never silently ignored.",
             "in": "query",
             "name": "filter",
             "required": false,
@@ -2165,6 +2537,75 @@
           "graph"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/plugins/bulldocs/sessions/{slug}/conversations": {
+      "post": {
+        "operationId": "session.touch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Register or refresh a harness conversation on a session (server stamps first_seen/last_active).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
       }
     },
     "/v1/media/{dataset}/{id}": {
@@ -2544,6 +2985,15 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "description": "Optional closure_nearest order for the ready head; compatibility order remains the default.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2575,6 +3025,71 @@
         "summary": "One-call agent rehydration: my in-progress claims, the ready head, recent events, lifecycle counts.",
         "tags": [
           "task"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/counts/{dataset}": {
+      "get": {
+        "operationId": "data.counts.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Bundled per-type published-document counts for a dataset in one query — {\"counts\":{\"<type>\":N,...}}.",
+        "tags": [
+          "data"
         ],
         "x-barkpark-scope": "read"
       }
@@ -2648,6 +3163,75 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/chat/sessions/{id}/interrupt": {
+      "post": {
+        "operationId": "chat.interrupt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Interrupt a chat session's in-flight turn (no-op when no turn is active).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/auth/mfa/verify": {
       "post": {
         "operationId": "auth.mfa-verify",
@@ -2672,7 +3256,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -2904,11 +3488,88 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Atomically claim the next ready task (priority order).",
+        "summary": "Atomically claim the next executable task (priority order by default).",
         "tags": [
           "task"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/webhooks/{dataset}/{id}/reenable": {
+      "post": {
+        "operationId": "webhook.reenable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Reenable a webhook endpoint after it was auto-disabled.",
+        "tags": [
+          "webhook"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/plugins/tickets/keys/{id}/unpause": {
@@ -3238,6 +3899,79 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}": {
+      "get": {
+        "operationId": "cycle.show.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the canonical CycleFleet reconciliation and projected fleet.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/tasks/{doc_id}/pulse": {
       "post": {
         "operationId": "task.pulse",
@@ -3397,6 +4131,64 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/v1/plugins/bulldocs/sessions": {
+      "post": {
+        "operationId": "session.publish",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "Request body fields: slug.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Upsert session synthesis blocks + metadata (checkpoint or close).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/doc/{dataset}/{type}/{doc_id}": {
       "get": {
         "operationId": "doc.get.scoped",
@@ -3493,6 +4285,115 @@
           "doc"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/release-gates/{release_gate_id}/papers/{role}/stage": {
+      "post": {
+        "operationId": "cycle.release-paper-stage.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "release_gate_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: document_id, title, content_json.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stage one immutable campaign or successor Paper candidate for an admitted release gate.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/webhooks/{dataset}/{id}/deliveries/{event_id}/replay": {
@@ -3758,6 +4659,107 @@
           "task"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/assignments/{assignment_id}/results": {
+      "post": {
+        "operationId": "cycle.result.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: idempotency_key, status, summary, evidence, evidence_revision, payload_json.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append or idempotently replay one typed terminal assignment result.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/{id}/checkout": {
@@ -4072,6 +5074,83 @@
           "doc"
         ],
         "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/webhooks/{dataset}/{id}/test-send": {
+      "post": {
+        "operationId": "webhook.test-send",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send a one-shot synthetic test event to this endpoint (single attempt).",
+        "tags": [
+          "webhook"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/webhooks/{dataset}/{id}/rotate": {
@@ -4448,6 +5527,266 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/release-gates/open": {
+      "post": {
+        "operationId": "cycle.release-gate-open.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: idempotency_key, correction_of_json, correction_of_digest.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Admit and reserve the immutable pre-open contract for one correction.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/release-gates/{release_gate_id}/activate": {
+      "post": {
+        "operationId": "cycle.release-gate-activate.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "release_gate_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: idempotency_key, b1_experiment_id.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Capture every required reader and activate one fully staged release gate.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/data/tags/{dataset}/{tag}": {
+      "get": {
+        "operationId": "tag.docs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma list of document types to include (default paper,task).",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the documents carrying a tag, ranked by that tag's strength — strongest first, legacy unweighted docs last.",
+        "tags": [
+          "tag"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/plugins/github/adopt/{id}": {
       "post": {
         "operationId": "github.adopt.scoped",
@@ -4654,6 +5993,63 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/secrets": {
+      "get": {
+        "operationId": "secret.scoped-ls.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List a workspace's scoped run-secret names with masked values.",
+        "tags": [
+          "secret"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/collections/{id}/members": {
       "post": {
         "operationId": "media.add-member.scoped",
@@ -4771,7 +6167,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -5036,6 +6432,80 @@
         "x-barkpark-scope": "scoped_admin"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/tags/{dataset}": {
+      "get": {
+        "operationId": "tag.browse.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma list of document types to count (default paper,task).",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Browse the tag registry: per-tag per-type published-document counts, biggest first.",
+        "tags": [
+          "tag"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/data/doc/{dataset}/{type}/{doc_id}": {
       "get": {
         "operationId": "doc.get",
@@ -5118,6 +6588,157 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/v1/data/tags/{dataset}": {
+      "get": {
+        "operationId": "tag.browse",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma list of document types to count (default paper,task).",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Browse the tag registry: per-tag per-type published-document counts, biggest first.",
+        "tags": [
+          "tag"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/rollback": {
+      "post": {
+        "operationId": "cycle.rollback.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: idempotency_key, previous_event_id, restore_event_id, evidence, evidence_revision.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append a fenced pointer event restoring an earlier verified correction.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
     "/v1/tasks/{doc_id}": {
       "get": {
         "operationId": "task.get",
@@ -5163,6 +6784,53 @@
         "summary": "Fetch one task by id.",
         "tags": [
           "task"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/fleet/roster": {
+      "get": {
+        "operationId": "fleet.roster",
+        "parameters": [
+          {
+            "description": "Dataset to read the roster from (defaults to production).",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The fleet roster: every listener with online/offline computed server-side (offline iff now - last_seen > ttl_s; missing last_seen = offline, fail closed) plus each worker's current in_progress task.",
+        "tags": [
+          "fleet"
         ],
         "x-barkpark-scope": "read"
       }
@@ -5284,7 +6952,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -5364,6 +7032,351 @@
         "x-barkpark-scope": "scoped_admin"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/secrets/{name}": {
+      "delete": {
+        "operationId": "secret.scoped-rm.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a workspace-scoped run-secret by name.",
+        "tags": [
+          "secret"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      },
+      "get": {
+        "operationId": "secret.scoped-get.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Reveal a workspace-scoped run-secret's unmasked value (audited).",
+        "tags": [
+          "secret"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      },
+      "put": {
+        "operationId": "secret.scoped-set.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: value.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set or rotate a workspace-scoped run-secret value.",
+        "tags": [
+          "secret"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
+    "/v1/chat/sessions/{id}": {
+      "get": {
+        "operationId": "chat.get_session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Return only message rows with seq > <since> (the turn-boundary tail refetch).",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Fetch one chat session in full (draft, rail, mode/model/effort, metrics) plus its messages seq-asc.",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      },
+      "patch": {
+        "operationId": "chat.update_session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Patch a chat session's allowlisted keys (draft | mode | model_choice | effort_choice | title).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/media/{dataset}/{id}/relations": {
       "get": {
         "operationId": "media.relations",
@@ -5435,7 +7448,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -5753,6 +7766,99 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/open": {
+      "post": {
+        "operationId": "cycle.open.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: profile, inventory_json, scale_contract_json.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Freeze a cycle profile, inventory, and experiment contract before fan-out.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
     "/v1/tasks": {
       "get": {
         "operationId": "task.ls",
@@ -5761,6 +7867,15 @@
             "description": "Max tasks to return.",
             "in": "query",
             "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Task-index row offset.",
+            "in": "query",
+            "name": "offset",
             "required": false,
             "schema": {
               "type": "integer"
@@ -6197,6 +8312,75 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/chat/sessions/{id}/archive": {
+      "post": {
+        "operationId": "chat.archive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Archive a chat session — it leaves the active sidebar for the archived shelf (idempotent; liveness untouched).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/webhooks/{dataset}": {
       "get": {
         "operationId": "webhook.ls",
@@ -6487,6 +8671,157 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/tasks/{doc_id}/release": {
+      "post": {
+        "operationId": "task.release",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: worker_id, observed_epoch.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Release a held task claim without waiting for its lease to expire.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/related/{dataset}/{id}": {
+      "get": {
+        "operationId": "doc.related.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max related entries to return (default 10, max 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List documents related to this one: shared weighted tags fused with inbound references, best first.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/media/{dataset}/collections/{id}/assets": {
       "get": {
         "operationId": "media.collection-assets",
@@ -6628,6 +8963,75 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/chat/sessions/{id}/approval": {
+      "post": {
+        "operationId": "chat.approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: request_id, decision.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Answer a pending tool-permission ask on a chat session (allow | deny).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/access": {
       "get": {
         "operationId": "access.ls",
@@ -6728,6 +9132,144 @@
           "access"
         ],
         "x-barkpark-scope": "scoped_admin"
+      }
+    },
+    "/v1/chat/sessions/{id}/messages": {
+      "post": {
+        "operationId": "chat.send_message",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: content.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send a message to a chat session (buffered as its own turn if one is mid-flight).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/tasks/{doc_id}/stage": {
+      "post": {
+        "operationId": "task.stage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: state.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open, OR the row's OWN current state. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. THE TERMINAL SAME-STATE ADJUDICATION EDGE (PDS wave 25): a same-state no-op is accepted on EVERY status, not just the stageable ones — done→done, blocked→blocked, in_progress→in_progress — so a FINISHED row can record its disposition/reason/reopen-trigger IN PLACE instead of being resurrected to `open` first (which would leave it saying open while carrying claim.closed_by, and put it back in `bp task ready`). It widens ADJUDICATION, not MOVEMENT: the from-state is read from the locked row, never from your input, so state==current is satisfiable only by a row already in that state, and the write set never includes content.claim — a done→done stage leaves lifecycle_status=done and close attribution byte-identical. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,lapse_ttl_seconds,lapses_at} — an EPHEMERAL lease the TtlSweeper deletes wholesale after ~900s — on →considering/researching and clears it on →open; a `note` does NOT ride that lease, it lands on the DURABLE content.disposition_reason (no sweeper owns it) on EVERY target including →open; emits a task.staged event carrying staged.note_key. PDS wave 24: this verb also owns the ADJUDICATION TRIPLE — --disposition (open|parked|closed, normalised here because one writer means one normaliser), --note/content.disposition_reason and --reopen-trigger are written in that same CAS update or not at all, and a --disposition parked with no trigger on the stage and none on the row is refused BEFORE anything is written. Raw /v1/data/mutate changes of content.disposition on a type:task are refused and name this verb. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. open → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "read"
       }
     },
     "/v1/schemas/{dataset}": {
@@ -6847,6 +9389,55 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/plugins/bulldocs/sessions/{slug}": {
+      "get": {
+        "operationId": "session.view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a session back: metadata + event trail + synthesis blocks.",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
+      }
+    },
     "/v1/data/search/{dataset}": {
       "get": {
         "operationId": "search.query",
@@ -6914,6 +9505,15 @@
             }
           },
           {
+            "description": "Project each hit's content to a comma-separated allowlist of field names (e.g. title,slug) — a token-thrifty response shape. Already honored by the controller; declared here so agents can discover it.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "published (default) | drafts | raw.",
             "in": "query",
             "name": "perspective",
@@ -6949,6 +9549,168 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/quarantine": {
+      "post": {
+        "operationId": "cycle.quarantine.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: idempotency_key, reason, correction_receipt_json, evidence, evidence_revision.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append immutable evidence that a correction wave cannot be promoted.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/tasks/{doc_id}/sessions": {
+      "post": {
+        "operationId": "session.link-task",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stamp a task with the session it was worked in (appends to the task's sessions[]).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/auth/mfa/disable": {
       "post": {
         "operationId": "auth.mfa-disable",
@@ -6973,7 +9735,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -7057,7 +9819,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Publish (upsert) a paper from a portable-doc or HTML payload.",
+        "summary": "Publish (upsert) a paper from a portable-doc block payload. blocks[] is the door: 56 renderer block types (chart, diagram, asciicast, diff, filetree, pipeline, …) with value-keyed inline leaves — items and cells are objects carrying a value key, never bare strings (a bare string publishes clean and renders blank). Guide: /papers/paper-authoring-excellence. body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables in the terminal reader. Reader spacing law: empty paragraph blocks are editor scaffolds, not published layout — remove them from ingest payloads; shared reader tokens own section rhythm.",
         "tags": [
           "bulldocs"
         ],
@@ -7340,6 +10102,15 @@
             "description": "Restrict to several document types — a comma-separated allowlist (e.g. post,author).",
             "in": "query",
             "name": "types",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Project each hit's content to a comma-separated allowlist of field names (e.g. title,slug) — a token-thrifty response shape. Already honored by the controller; declared here so agents can discover it.",
+            "in": "query",
+            "name": "fields",
             "required": false,
             "schema": {
               "type": "string"
@@ -7931,6 +10702,72 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/data/related/{dataset}/{id}": {
+      "get": {
+        "operationId": "doc.related",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max related entries to return (default 10, max 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List documents related to this one: shared weighted tags fused with inbound references, best first.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/media/{dataset}/collections/{id}/share": {
       "delete": {
         "operationId": "media.revoke-share",
@@ -8070,6 +10907,88 @@
           "media"
         ],
         "x-barkpark-scope": "write"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/tags/{dataset}/{tag}": {
+      "get": {
+        "operationId": "tag.docs.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tag",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma list of document types to include (default paper,task).",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the documents carrying a tag, ranked by that tag's strength — strongest first, legacy unweighted docs last.",
+        "tags": [
+          "tag"
+        ],
+        "x-barkpark-scope": "read"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/{id}": {
@@ -8368,9 +11287,58 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Close a claimed task by id; --set 'criteria:=[…]' marks acceptance criteria met with evidence in the same atomic write. By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim — re-read, then close again (or --set observed_rev=<rev> for strict full-rev CAS instead).",
+        "summary": "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409.",
         "tags": [
           "task"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/data/counts/{dataset}": {
+      "get": {
+        "operationId": "data.counts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Bundled per-type published-document counts for a dataset in one query — {\"counts\":{\"<type>\":N,...}}.",
+        "tags": [
+          "data"
         ],
         "x-barkpark-scope": "read"
       }
@@ -8399,7 +11367,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -8626,11 +11594,197 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Stamp ONE acceptance criterion mid-claim: --criterion N with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
+        "summary": "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
         "tags": [
           "task"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/promote": {
+      "post": {
+        "operationId": "cycle.promote.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: idempotency_key, correction_receipt_json, gate_receipt_json, evidence, evidence_revision.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append a fenced event making one verified correction current.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/assignments": {
+      "post": {
+        "operationId": "cycle.assign.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "epic_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "wave_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: assignment_id, phase, agent_type, effort, snapshot_json.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append one immutable typed assignment snapshot to a cycle wave.",
+        "tags": [
+          "cycle"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/analytics/{dataset}": {
@@ -8711,7 +11865,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -9056,6 +12210,75 @@
         ],
         "x-barkpark-scope": "read"
       }
+    },
+    "/v1/chat/sessions/{id}/unarchive": {
+      "post": {
+        "operationId": "chat.unarchive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unarchive a chat session — it returns from the archived shelf to the active sidebar (idempotent).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
     }
   },
   "servers": [
@@ -9087,6 +12310,10 @@
     {
       "description": "Dataset-level content stats and overview.",
       "name": "dataset"
+    },
+    {
+      "description": "Bundled cross-type reads over a dataset (per-type counts).",
+      "name": "data"
     },
     {
       "description": "Outbound webhook subscriptions.",
@@ -9121,8 +12348,20 @@
       "name": "access"
     },
     {
+      "description": "Epic and Legendary cycle ledgers — one project-scoped authority for local and cloud agents.",
+      "name": "cycle"
+    },
+    {
+      "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve, archive/unarchive. Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",
+      "name": "chat"
+    },
+    {
       "description": "Bulldocs — live, no-reload paper/document surface. Ingests block-structured papers from external producers and renders them at /papers/:slug with real-time per-block streaming. Formerly the built-in Papers feature; now a first-party plugin built on the core portable-doc utilities.",
       "name": "bulldocs"
+    },
+    {
+      "description": "Tasks — the W7 task-document substrate as a first-party plugin. Declares the `task` schema (goals/phases/events are all just tasks) and owns the TTL-sweep + compaction Oban cron jobs. Built on the core Barkpark.Tasks machinery, which stays in core as reusable utilities.",
+      "name": "fleet"
     },
     {
       "description": "GitHub bridge — Barkpark (the guerrilla ledger) stays the single source of truth; this plugin mirrors tasks OUTBOUND to GitHub Issues (debounced, idempotent, App-authenticated), intakes only outsider-opened issues INBOUND as find-or-create tasks awaiting adoption, and projects a READ-ONLY Projects v2 dashboard. No field is ever bidirectional; claims/epochs/fencing/rail_rev never leave Barkpark. Off by default.",
@@ -9131,6 +12370,10 @@
     {
       "description": "ONIX 3.0 book metadata editor — Norwegian-publisher flavoured. Phase 4 skeleton (WI1) — book schema surface only; contributor / Thema / localizedText shapes are filled in by WI2 and codelist seeding lands in WI3.",
       "name": "onixedit"
+    },
+    {
+      "description": "session — plugin-contributed commands.",
+      "name": "session"
     },
     {
       "description": "Tasks — the W7 task-document substrate as a first-party plugin. Declares the `task` schema (goals/phases/events are all just tasks) and owns the TTL-sweep + compaction Oban cron jobs. Built on the core Barkpark.Tasks machinery, which stays in core as reusable utilities.",

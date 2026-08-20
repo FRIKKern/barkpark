@@ -6,14 +6,26 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
 )
 
-// TestCatalogCarriesTheThreeTemplates locks the catalog contents: the three
+// TestCatalogCarriesTheShippedTemplates locks the catalog contents: the shipped
 // deploy templates are present, parsed, and validated — and Names() is the
 // sorted slug list the control-plane allowlist mirrors.
-func TestCatalogCarriesTheThreeTemplates(t *testing.T) {
-	want := []string{"blog-starter", "place-directory", "website-starter"}
+//
+// `want` is append-friendly: one slug per line, sorted before compare, so a
+// new template is one inserted line (scaffy add-site-template plants it at
+// the head) and declaration order never matters — the SET is the lock.
+func TestCatalogCarriesTheShippedTemplates(t *testing.T) {
+	want := []string{
+		"astro-search-starter",
+		"blog-starter",
+		"place-directory",
+		"search-starter",
+		"website-starter",
+	}
+	sort.Strings(want)
 	if got := Names(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Names() = %v, want %v (update the Elixir @known_templates allowlist if this changes)", got, want)
 	}

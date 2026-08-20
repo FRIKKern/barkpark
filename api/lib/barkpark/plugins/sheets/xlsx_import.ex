@@ -67,11 +67,40 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   incrementally across all tabs — the fold halts with
   `{:error, {:cell_cap_exceeded, count}}` the moment the running count
   exceeds the cap, never building the rest.
+
+  ## Resource-exhaustion posture (xlsx decompression bombs)
+
+  An xlsx IS a zip archive, and both readers over the bytes — `XlsxReader.open`
+  (`open_package/1`) and the raw `:zip.extract(binary, [:memory])` in
+  `parse_layout/1` — FULLY inflate the members they touch into RAM. That inflate
+  runs UPSTREAM of every cell/merge/grid cap: a 1.45 MiB archive can materialise
+  ~400 MiB before `cell_cap/0` is ever consulted, and the import controller's
+  15 MB byte cap bounds only the COMPRESSED on-disk size. So `to_content/1`
+  carries an explicit **pre-extract decompressed-size ceiling** — the twin of
+  `Barkpark.Media.ImageBackend.Vix`'s `guard_dimensions/1` for images. The
+  MECHANISM: `:zip.list_dir/1` reports each member's declared UNCOMPRESSED size
+  straight from the central directory WITHOUT inflating anything, so the guard
+  sums those declared sizes and rejects up front with
+  `{:error, :xlsx_decompressed_size_exceeded}` when the total exceeds the
+  ceiling — BEFORE `open_package/1` (covering a bomb hidden in a member
+  `XlsxReader` itself reads, e.g. a huge `xl/sharedStrings.xml`) and before the
+  raw extract in `parse_layout/1`. The ceiling defaults to 256 MiB and is
+  overridable per-env via
+  `config :barkpark, Barkpark.Plugins.Sheets.XlsxImport, max_decompressed_bytes: N`.
   """
 
   alias Barkpark.Plugins.Sheets.Fmt
   alias Barkpark.Plugins.Sheets.Core, as: SheetCore
   alias XlsxReader.Cell
+
+  # Pre-extract ceiling on the SUM of every member's declared uncompressed size,
+  # read from the zip central directory (no inflate). Both inflate vectors
+  # (`open_package/1` and `parse_layout/1`'s `:zip.extract`) run past every
+  # cell/merge/grid cap, so this fails closed on a decompression bomb before any
+  # member is materialised. Mirrors Magick's `-limit memory 256MiB` and the Vix
+  # backend's `@default_max_decode_bytes`. Overridable per-env for tests via
+  # `config :barkpark, __MODULE__, max_decompressed_bytes: N`.
+  @default_max_decompressed_bytes 256 * 1024 * 1024
 
   # xlsx column widths are in "character" units; Excel's default char is
   # ~7px. round(px / 7 * 7) is exact for integers, so widths round-trip.
@@ -91,9 +120,14 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
   Returns `{:ok, %{"tabs" => […]}}` or `{:error, message}`.
   """
   @spec to_content(binary()) ::
-          {:ok, map()} | {:error, String.t() | {:cell_cap_exceeded, pos_integer()}}
+          {:ok, map()}
+          | {:error,
+             String.t()
+             | {:cell_cap_exceeded, pos_integer()}
+             | :xlsx_decompressed_size_exceeded}
   def to_content(binary) when is_binary(binary) do
-    with {:ok, package} <- open_package(binary),
+    with :ok <- guard_decompressed_size(binary),
+         {:ok, package} <- open_package(binary),
          {:ok, layout} <- parse_layout(binary) do
       package
       |> XlsxReader.sheet_names()
@@ -136,6 +170,56 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
     end
   rescue
     _ -> {:error, "invalid xlsx: not an xlsx package"}
+  end
+
+  # Pre-extract decompression-bomb guard: sum every member's DECLARED
+  # uncompressed size from the zip central directory — `:zip.list_dir/1` reads
+  # only the directory, it does NOT inflate — and reject before any member is
+  # materialised when the total exceeds the ceiling. Sits ahead of BOTH inflate
+  # vectors (`open_package/1` and `parse_layout/1`). A binary whose central
+  # directory does not read as a zip is NOT rejected here — `:ok` lets
+  # `open_package/1` produce the canonical `"invalid xlsx"` error instead of
+  # masking a plain not-a-zip as a size violation.
+  defp guard_decompressed_size(binary) do
+    case :zip.list_dir(binary) do
+      {:ok, entries} ->
+        if declared_uncompressed_bytes(entries) > max_decompressed_bytes() do
+          {:error, :xlsx_decompressed_size_exceeded}
+        else
+          :ok
+        end
+
+      _ ->
+        :ok
+    end
+  rescue
+    _ -> :ok
+  end
+
+  # `:zip.list_dir/1` yields `{:zip_comment, _}` plus one
+  # `{:zip_file, name, file_info, comment, offset, comp_size}` per member;
+  # `elem(file_info, 1)` is the uncompressed size record field.
+  defp declared_uncompressed_bytes(entries) do
+    Enum.reduce(entries, 0, fn
+      {:zip_file, _name, file_info, _comment, _offset, _comp}, acc ->
+        acc + uncompressed_size(file_info)
+
+      _entry, acc ->
+        acc
+    end)
+  end
+
+  defp uncompressed_size(file_info) do
+    case elem(file_info, 1) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 0
+    end
+  end
+
+  defp max_decompressed_bytes do
+    :barkpark
+    |> Application.get_env(__MODULE__, [])
+    |> Keyword.get(:max_decompressed_bytes, @default_max_decompressed_bytes)
   end
 
   # ── tab assembly ───────────────────────────────────────────────────────────

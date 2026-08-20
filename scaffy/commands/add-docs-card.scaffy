@@ -1,0 +1,135 @@
+# add-docs-card.scaffy — create a docs/ card and wire it into the doc spine.
+#
+# ==========================================================================
+# SCRATCH-ONLY TODAY: THE 7-CARD CAP IS FULL
+# ==========================================================================
+# docs/cards/ is hard-capped at EXACTLY 7 cards (scripts/check-doc-budgets.sh
+# :70-84 reds on "docs/cards/ holds N cards, hard cap is exactly 7") and all
+# 7 slots are taken: cli, js-sdk, onix-bokbasen, plugins, search-media,
+# studio, tui. Creating a card requires RETIRING OR MERGING one first
+# (CLAUDE.md "Doc contract"). Until a slot frees up, this command CANNOT
+# land for real — it exists as the create half of a symmetric scratch
+# demonstration: apply add-docs-card, inspect and gate the result, then
+# apply remove-docs-card with the SAME --var values and the tree is
+# byte-clean again (git diff empty). The pair proves the remove/retraction
+# half of the scaffy doctrine on the doc-governance surface.
+#
+# Every anchor below was verified against the live tree on 2026-07-16:
+#   CLAUDE.md:23-24                 routing-table header
+#   CLAUDE.md:44                    the Meta catch-all row — the LAST row,
+#                                   grep -cF of the full row = 1
+#   docs/INDEX.md:4                 the Cards: brace-expansion line
+#                                   (file is 1197 B against a 1200 B cap)
+#   scripts/docs-anchors-check.sh:37   the G1 header regex the card's
+#                                   line 1 must match
+#   scripts/check-doc-budgets.sh:70-84 per-card 2400 B cap + exactly-7 count
+
+COMMAND "Add Docs Card" DESCRIPTION "Create a docs/cards/<name>.md card (G1 header, Code anchors section, <=2400 bytes) and wire it into the doc spine: a routing-table row in CLAUDE.md and the Cards: brace list in docs/INDEX.md — idempotently, with MARK handles for symmetric removal by remove-docs-card." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "docs", "card", "routing" CONCEPT "docs-card" VARIANT "add" DIRECTION "add" VARIABLES
+  VARIABLE 1 "CardName" TITLE "Name your card" DESCRIPTION "Card topic, PascalCase. The kebab spelling {{.card-name}} drives the filename, the routing target, the INDEX entry and the canonical-for slug ({{.card-name}}-overview) — the slug must be unique repo-wide or docs-anchors-check.sh gate 5 reds. Pick a fresh name: an existing card's name makes every op below a guarded no-op." EXAMPLES "Wavecheck", "RenderPath", "AgentOnramps"
+  VARIABLE 2 "Group" OPAQUE TITLE "Routing group" DESCRIPTION "The Group column of the CLAUDE.md routing table. OPAQUE: never re-cased, one spelling per file." EXAMPLES "Ops", "API/SDK", "CLI/TUI", "Studio"
+  VARIABLE 3 "TaskPattern" OPAQUE TITLE "Task pattern" DESCRIPTION "The 'Task pattern' cell of the routing row — the phrases an agent matches to get routed to this card. OPAQUE: never re-cased, one spelling per file." EXAMPLES "render path / paper surface", "wavecheck scratch demo"
+
+# --------------------------------------------------------------------------
+# 1. The card file.
+# Line 1 MUST match the G1 header regex (scripts/docs-anchors-check.sh:37):
+#   ^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-z0-9._-]+ \| budget: [0-9]+tok -->
+# canonical-for must be unique repo-wide (gate 5, one owner per fact-topic).
+# The '## Code anchors' section is gate 3's contract: every '- <path> — <desc>'
+# line must point at an existing path. The docs/INDEX.md placeholder below
+# resolves today; replace it with the card's real anchors as the card is
+# filled in. The 2400-byte cap (check-doc-budgets.sh:70-75) binds the
+# FINISHED card, not just this skeleton.
+# --------------------------------------------------------------------------
+CREATE FILE IF ABSENT "docs/cards/{{.card-name}}.md"
+WITH
+::: {{.card-name}} card :::
+<!-- doc-tier: agent | canonical-for: {{.card-name}}-overview | budget: 600tok -->
+# {{.CardName}}
+
+One-paragraph identity: what surface this card owns and when the router
+sends an agent here. Keep the whole card under 2400 bytes — the budget gate
+(scripts/check-doc-budgets.sh) is CI-enforced; on overflow split to the
+owning contract/runbook or retire content, never raise the cap.
+
+- Key fact one (own it here — one owner per fact-topic).
+- Key fact two.
+
+## Code anchors
+- docs/INDEX.md — doc catalog (placeholder: replace with this card's real code anchors before the card ships)
+::: {{.card-name}} card :::
+
+# --------------------------------------------------------------------------
+# 2. The routing row.
+# The routing table header sits at CLAUDE.md:23-24; the Meta catch-all row
+# (CLAUDE.md:44) is the LAST row and greps to exactly one occurrence, so the
+# new row + its MARK comment land below it. The HTML comment terminates the
+# GFM table invisibly (it renders as nothing) and is the handle
+# remove-docs-card anchors at. The guard is the comment's own text —
+# a verbatim substring of what this op writes (payload-derived, D3c).
+# --------------------------------------------------------------------------
+IN "CLAUDE.md"
+### Insert the {{.card-name}} routing row at the end of the routing table
+INSERT AFTER LAST
+::: meta row anchor :::
+| Meta | "is X deferred?" / anything else | `docs/decisions/deferred.md` / `docs/INDEX.md` |
+::: meta row anchor :::
+WITH
+::: {{.card-name}} route row :::
+| {{.Group}} | {{.TaskPattern}} | `docs/cards/{{.card-name}}.md` |
+<!-- scaffy:add-docs-card {{.CardName}} MARK:claude-route-{{.card-name}} -->
+::: {{.card-name}} route row :::
+MARK "claude-route-{{.card-name}}"
+ASLONG FILE DONT CONTAIN "MARK:claude-route-{{.card-name}}"
+
+# --------------------------------------------------------------------------
+# 3. The INDEX sweep.
+# docs/INDEX.md:4 is a brace-expansion line:
+#   Cards: cards/{studio,plugins,cli,js-sdk,onix-bokbasen,search-media,tui}.md
+# A3 comma-append = a fenced REPLACE that re-emits an element. The new
+# element lands BEFORE the final 'tui', not after it: appending after tui
+# would put the token flush against the closing brace — '{{.card-name}}}',
+# a '}}}' run, the exact A5 adjacency violation — so the element goes one
+# slot earlier, commas on both sides. No comment syntax survives inside a
+# brace expansion, so no plantable mark exists here — this is the corpus's
+# MARK VIRTUAL case (D24): the mark is a nominal handle with ZERO in-file
+# bytes, and idempotency must rest ENTIRELY on the required ASLONG guard —
+# the payload literal ',{{.card-name}},tui' (unique, payload-derived,
+# brace-free per A5; the structural target does not survive its own
+# replacement, A4).
+# --------------------------------------------------------------------------
+IN "docs/INDEX.md"
+### Sweep the Cards: brace list with {{.card-name}}
+REPLACE
+::: cards list tail :::
+search-media,tui}.md
+::: cards list tail :::
+WITH
+::: cards list tail swept :::
+search-media,{{.card-name}},tui}.md
+::: cards list tail swept :::
+MARK VIRTUAL "index-cards-{{.card-name}}"
+ASLONG FILE DONT CONTAIN ",{{.card-name}},tui"
+
+# ==========================================================================
+# HONESTY BLOCK — what the gates say MID-SCRATCH (before remove-docs-card)
+# ==========================================================================
+# bash scripts/check-doc-budgets.sh is deliberately NOT asserted here: on
+# today's tree it MUST red after this command runs, and that red is the gate
+# doing its job, not this command misfiring:
+#   1. card count — "docs/cards/ holds 8 cards, hard cap is exactly 7"
+#      (check-doc-budgets.sh:78-84);
+#   2. docs/INDEX.md budget — 1197 B against a 1200 B cap; the swept Cards:
+#      line overflows it for any card name longer than 2 characters;
+#   3. CLAUDE.md budget — 9930 B against a 10000 B cap; the routing row +
+#      MARK comment (~115 B) overflow the 70 B of headroom.
+# The pair's budget-gate PASS lives in remove-docs-card, after the tree is
+# byte-clean again. docs-anchors-check.sh, by contrast, is green
+# mid-scratch: the new card satisfies G1 + gate 3 + gate 5, and the routing
+# row's target exists on disk.
+# ==========================================================================
+
+# Post-conditions
+ASSERT FILE "docs/cards/{{.card-name}}.md" CONTAINS "canonical-for: {{.card-name}}-overview"
+ASSERT FILE "CLAUDE.md" CONTAINS "MARK:claude-route-{{.card-name}}"
+ASSERT FILE "docs/INDEX.md" CONTAINS ",{{.card-name}},tui"
+ASSERT CMD "bash scripts/docs-anchors-check.sh # LOCAL with the clean-checkout caveat: 24s green in a fresh worktree; HANGS (>115s) in a litter-saturated primary checkout — run from a clean checkout only"

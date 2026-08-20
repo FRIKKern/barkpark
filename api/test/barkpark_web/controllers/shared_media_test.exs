@@ -16,7 +16,7 @@ defmodule BarkparkWeb.SharedMediaTest do
 
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Media, Sharing}
+  alias Barkpark.{Auth, Media, Sharing}
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
 
@@ -226,6 +226,237 @@ defmodule BarkparkWeb.SharedMediaTest do
 
       conn = get(conn, media_root(ws_a, proj_a))
       assert conn.status in [401, 403, 404]
+    end
+  end
+
+  # ── (h) RUNTIME MEDIA DIR (pds W1 G1) — Media.upload_dir reads at CALL time ──
+  # `BARKPARK_MEDIA_DIR` (runtime.exs) sets :media_upload_dir; `Media.upload_dir/0`
+  # and `file_path/1` read it at call time so a `barkpark reload` relocates the
+  # blob root without a recompile. Unset ⇒ the config default, byte-identical.
+  describe "(h) media_upload_dir runtime override" do
+    test "upload_dir/0 reflects the app-env value and defaults byte-identically" do
+      prior = Application.get_env(:barkpark, :media_upload_dir)
+
+      on_exit(fn ->
+        if is_nil(prior),
+          do: Application.delete_env(:barkpark, :media_upload_dir),
+          else: Application.put_env(:barkpark, :media_upload_dir, prior)
+      end)
+
+      # Default (unset override) is exactly the configured value — byte-identical.
+      assert Media.upload_dir() == prior
+      assert Media.file_path("a/b.png") == Path.join(prior, "a/b.png")
+
+      # A runtime relocation (what BARKPARK_MEDIA_DIR drives via runtime.exs) is
+      # honored on the very next call — no recompile.
+      relocated = Path.join(System.tmp_dir!(), "bp-media-#{System.unique_integer([:positive])}")
+      Application.put_env(:barkpark, :media_upload_dir, relocated)
+      assert Media.upload_dir() == relocated
+      assert Media.file_path("a/b.png") == Path.join(relocated, "a/b.png")
+    end
+  end
+
+  # ── (f) MISSING-BLOB HONESTY (pds W1) — a row whose blob file is gone 404s ──
+  # A media_files ROW can outlive its blob: right after a workspace bundle import
+  # copies the DB rows but before the blobs are pushed, `serve/2` resolves the
+  # row yet the file is absent. It must answer an HONEST 404, never crash with a
+  # MatchError :enoent 500 out of send_file.
+  describe "(f) missing blob file" do
+    test "serving a row whose blob file does not exist returns 404, not a 500", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      with_shares(share(ws_a, proj_a, :media))
+
+      # A scoped row pointing at a path with NO file on disk (import copied the
+      # row, blob not yet re-pointed).
+      name = "ghost-#{System.unique_integer([:positive])}.png"
+      rel = "uploads/shared-media-test/#{name}"
+      refute File.exists?(Media.file_path(rel))
+
+      row =
+        %MediaFile{}
+        |> MediaFile.changeset(%{
+          filename: name,
+          original_name: name,
+          path: rel,
+          mime_type: "image/png",
+          size: 123,
+          dataset: @dataset,
+          workspace_id: ws_a.id,
+          project_id: proj_a.id
+        })
+        |> Repo.insert!()
+
+      conn = get(conn, serve_path(ws_a, proj_a, row))
+      assert conn.status == 404
+    end
+  end
+
+  # ── (g) BLOB PUSH (pds W1 G2) — admin-gated cross-instance raw-blob write ────
+  # PUT /api/workspaces/:ws/media/blob/*path writes bytes verbatim at a validated
+  # relative path so an imported row's blob can be re-pointed onto THIS instance.
+  # Admin-gated; traversal / malformed paths are refused 422 before any write.
+  describe "(g) admin blob push" do
+    @admin_token "pds-w1-blob-admin-token"
+
+    setup do
+      Auth.create_token(@admin_token, "dev", "pds-w1-blob-push", ["read", "write", "admin"])
+      :ok
+    end
+
+    defp admin_put_blob(conn, ws, rel, body) do
+      conn
+      |> put_req_header("authorization", "Bearer " <> @admin_token)
+      |> put_req_header("content-type", "application/octet-stream")
+      |> put("/api/workspaces/#{ws.slug}/media/blob/#{rel}", body)
+    end
+
+    test "admin PUT writes the bytes verbatim and serve/2 can then read them", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      name = "pushed-#{System.unique_integer([:positive])}.png"
+      rel = "uploads/shared-media-test/#{name}"
+      full = Media.file_path(rel)
+      on_exit(fn -> File.rm_rf(full) end)
+      refute File.exists?(full)
+
+      body = "PUSHED-BLOB-BYTES"
+      resp = admin_put_blob(conn, ws_a, rel, body) |> json_response(200)
+      assert resp["written"] == rel
+      assert resp["path"] == rel, "`path` is the honest name for the legacy `written` key"
+      assert resp["bytes"] == byte_size(body)
+
+      # PDS wave 23: RECEIVED and STORED are separate numbers on the wire, and
+      # `stored` names the read that produced it. Under :local the disk IS the
+      # store, so the post-condition read is a File.stat on the real path.
+      assert resp["stored"] == byte_size(body)
+      assert resp["verified_by"] == "stat"
+      assert resp["unverified_reason"] == nil
+
+      # Bytes landed verbatim on disk.
+      assert File.read!(full) == body
+
+      # And a scoped row over that path now serves the pushed bytes.
+      with_shares(share(ws_a, proj_a, :media))
+
+      row =
+        %MediaFile{}
+        |> MediaFile.changeset(%{
+          filename: name,
+          original_name: name,
+          path: rel,
+          mime_type: "image/png",
+          size: byte_size(body),
+          dataset: @dataset,
+          workspace_id: ws_a.id,
+          project_id: proj_a.id
+        })
+        |> Repo.insert!()
+
+      served = build_conn() |> get(serve_path(ws_a, proj_a, row))
+      assert served.status == 200
+      assert served.resp_body == body
+    end
+
+    # PDS wave 23, reviewer addition. The engine-level proof that a black-hole
+    # bucket is caught lives in blobstore_s3_test.exs; this is the HTTP surface
+    # of that verdict — the 502 envelope was previously read, never rendered.
+    test "a store that ACKs and keeps nothing is a 502 blob_not_stored, never a 200", %{
+      conn: conn,
+      ws_a: ws_a
+    } do
+      previous = Application.get_env(:barkpark, :media_storage)
+      on_exit(fn -> Application.put_env(:barkpark, :media_storage, previous) end)
+
+      # The bucket answers 200 to every PUT and 404 to every HEAD: the write ACK
+      # says yes, the post-condition read says the object is not there.
+      Req.Test.stub(__MODULE__, fn c ->
+        case c.method do
+          "PUT" -> Plug.Conn.send_resp(c, 200, "")
+          _ -> Plug.Conn.send_resp(c, 404, "")
+        end
+      end)
+
+      Application.put_env(:barkpark, :media_storage,
+        backend: :s3,
+        s3: [
+          endpoint: "https://test.r2.example.com",
+          bucket: "bp-shared-media-test",
+          region: "auto",
+          access_key_id: "test-access-key",
+          secret_access_key: "test-secret-key",
+          req_options: [plug: {Req.Test, __MODULE__}]
+        ]
+      )
+
+      rel = "uploads/shared-media-test/blackhole-#{System.unique_integer([:positive])}.png"
+      resp = admin_put_blob(conn, ws_a, rel, "PUSHED-BLOB-BYTES") |> json_response(502)
+
+      assert resp["error"]["code"] == "blob_not_stored"
+      assert resp["error"]["message"] =~ "read-back"
+      # The envelope is stamped like every other error on this surface.
+      assert is_binary(resp["error"]["request_id"])
+    end
+
+    test "a traversal path is rejected 422 and nothing is written", %{conn: conn, ws_a: ws_a} do
+      # A secret OUTSIDE the media root that a naive write would clobber.
+      secret = Media.file_path("../pds-blob-escape-#{System.unique_integer([:positive])}.txt")
+      on_exit(fn -> File.rm_rf(secret) end)
+
+      resp =
+        admin_put_blob(conn, ws_a, "../#{Path.basename(secret)}", "EVIL") |> json_response(422)
+
+      assert resp["error"]["code"] == "invalid_path"
+      refute File.exists?(secret)
+    end
+
+    test "a malformed segment is rejected 422", %{conn: conn, ws_a: ws_a} do
+      resp =
+        admin_put_blob(conn, ws_a, "uploads/2026/.hidden/x.png", "X") |> json_response(422)
+
+      assert resp["error"]["code"] == "invalid_path"
+    end
+
+    test "an empty body is rejected 422 empty_body and nothing is written", %{
+      conn: conn,
+      ws_a: ws_a
+    } do
+      rel = "uploads/shared-media-test/empty-#{System.unique_integer([:positive])}.png"
+
+      resp = admin_put_blob(conn, ws_a, rel, "") |> json_response(422)
+      assert resp["error"]["code"] == "empty_body"
+      refute File.exists?(Media.file_path(rel))
+    end
+
+    test "a mislabeled content-type (json) whose body Plug.Parsers consumed is refused, never a 0-byte blob",
+         %{conn: conn, ws_a: ws_a} do
+      # `application/json` routes the body through Plug.Parsers, which consumes
+      # it before the controller's read_body — the raw body arrives EMPTY. The
+      # guard refuses instead of writing an empty blob serve/2 would stream.
+      rel = "uploads/shared-media-test/mislabeled-#{System.unique_integer([:positive])}.png"
+
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer " <> @admin_token)
+        |> put_req_header("content-type", "application/json")
+        |> put("/api/workspaces/#{ws_a.slug}/media/blob/#{rel}", Jason.encode!(%{not: "bytes"}))
+        |> json_response(422)
+
+      assert resp["error"]["code"] == "empty_body"
+      refute File.exists?(Media.file_path(rel))
+    end
+
+    test "anonymous PUT is gated (no admin token)", %{conn: conn, ws_a: ws_a} do
+      resp =
+        conn
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put("/api/workspaces/#{ws_a.slug}/media/blob/uploads/x/y.png", "X")
+
+      assert resp.status in [401, 403]
     end
   end
 end

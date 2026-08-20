@@ -1,0 +1,71 @@
+{
+  "asserts": [
+    {
+      "index": 0,
+      "kind": "file-contains",
+      "line": 80,
+      "path": "api/lib/barkpark/workers/duel_smoke_sweeper.ex",
+      "status": "pass",
+      "text": "defmodule Barkpark.Workers.DuelSmokeSweeper do"
+    },
+    {
+      "index": 1,
+      "kind": "file-contains",
+      "line": 81,
+      "path": "api/test/barkpark/workers/duel_smoke_sweeper_test.exs",
+      "status": "pass",
+      "text": "assert :ok = DuelSmokeSweeper.perform"
+    },
+    {
+      "index": 2,
+      "kind": "file-contains",
+      "line": 82,
+      "path": "api/config/config.exs",
+      "status": "pass",
+      "text": "MARK:oban-cron-duel-smoke-sweeper"
+    },
+    {
+      "detail": "TIER ci — deferred to the PR, never run locally (D38)",
+      "index": 3,
+      "kind": "cmd",
+      "line": 83,
+      "status": "deferred",
+      "text": "cd api && mix test test/barkpark/workers/duel_smoke_sweeper_test.exs",
+      "tier": "ci"
+    }
+  ],
+  "command": "Add Oban Cron Worker",
+  "direction": "add",
+  "duration_ms": 0,
+  "ok": true,
+  "ops": [
+    {
+      "index": 0,
+      "kind": "create",
+      "line": 8,
+      "path": "api/lib/barkpark/workers/duel_smoke_sweeper.ex",
+      "status": "created"
+    },
+    {
+      "index": 1,
+      "kind": "create",
+      "line": 35,
+      "path": "api/test/barkpark/workers/duel_smoke_sweeper_test.exs",
+      "status": "created"
+    },
+    {
+      "index": 2,
+      "kind": "replace",
+      "line": 65,
+      "mark": "oban-cron-duel-smoke-sweeper",
+      "path": "api/config/config.exs",
+      "reanchored": true,
+      "status": "injected"
+    }
+  ],
+  "receipt": "/private/tmp/scaffy-duel-add-oban-worker--C--2/.scaffy/receipts/oban-worker--duel-smoke-sweeper--eee9daf51754.json",
+  "vars": {
+    "CronExpr": "0 5 * * *",
+    "WorkerName": "DuelSmokeSweeper"
+  }
+}

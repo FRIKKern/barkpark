@@ -968,9 +968,9 @@ export const SLOTS = (() => {
 // can not opt a derivable family out of characterization.
 export const PASSTHROUGH_FAMILIES = [
   "presence", "sheetCf", "matchQuality", "pdrenderChart", "pdrenderHeatmap",
-  "provider", "statusHealth", "statusChrome",
+  "provider", "statusHealth", "fleetStatus", "statusChrome",
   "errorPage", "graphCanvas", "readerInfo", "lifecycle", "instanceLifecycle",
-  "authButton",
+  "authButton", "cloudChrome",
 ];
 
 // ── derive(theme) — the characterization compiler ────────────────────────────

@@ -1,0 +1,101 @@
+{
+  "artifact_hashes": {
+    "README.md": "5d2ad8fb55b24afed5cbbcf67e6924a6a2011a809ffb383f5e616e7fa47df75e",
+    "candidate-schema.json": "1af497921a2cbb470302f2a47a8de59793961bd2167effc8fd476bbb8083389d",
+    "fixtures/adversarial/adv-long-content.json": "13e9fb7c650756273db405782918f02e17fcf7324942cc70e02d3fa0a38eaee1",
+    "fixtures/adversarial/adv-long-token.json": "230573239352efa3a32453378a73927da617491ea1643af303fb67b3e487c46f",
+    "fixtures/adversarial/adv-malformed-legacy.json": "98786b889f23b4d07be2505813abfae132309441e00379b837b09c78307a9c80",
+    "fixtures/adversarial/adv-missing-fields.json": "2e5802a803fcce24e247f11f8af6be1c69535585361e981c79764b185793b2a9",
+    "fixtures/adversarial/adv-narrow-width.json": "5a060d9704bdcfd764dda9d19de44a5a2bebb2c014f8ac067102ba8870e00226",
+    "fixtures/adversarial/adv-nested-list-table.json": "0373c2df49d716c81321a8aeb13b97121c428cd3523916372a814a924f70f1a5",
+    "fixtures/manifest.json": "b2aa5c910d9930d9013caab3afc3d0ff36a07e6d0fd9f9cb2ec558bc4439abf1",
+    "fixtures/source-documents.json": "803ea48c241c50e9018470837a02071980298b102d7d035182cc99c9e7338cbf",
+    "output/repair-packet.json": "33ec828b11b3f5b32578c770c9aeb7979a0a9e52559cdbab88fa38b40b25fd74",
+    "scorecard.json": "905ccb57ae1b93cab27e7cb3faacfdb05aa20596ce5fcbb3a6f69e86b7a8a470",
+    "scripts/build_candidate.py": "d71153f3c7960b38bc3c373314f73969ffd651ca7a66b378a05e242605294eed",
+    "scripts/build_report.py": "ba37823f11ba9757fbd1c3e1582c9124cfa85108df3b68716ae115addd82b248",
+    "scripts/run.sh": "14bfaa25bf1ff7cb87c5ae83bac80120c0f6cbdd337868967c5b970f2a4f4a62",
+    "scripts/verify.py": "fe9072f5d714e92ec262c9d3bf66ee656102b4e510975c3da95b0f6495bba1c7",
+    "transformation-manifest.json": "3ea294a03e2b972a6eabaca8de9d526af0da9ff5e66e7fef9d7760da48f8d47b",
+    "verification.json": "a08faf4f9b921bcff05d63323784ed4bc86d0b2e73504f3199b2df36c9105810"
+  },
+  "assignment_id": "E04",
+  "candidate_id": "candidate-canonical-native",
+  "capability_blocks": [
+    "authenticated Studio content proof unavailable",
+    "real-client email client proof unavailable",
+    "target-reader width/accessibility proof unavailable without those capabilities"
+  ],
+  "commands_or_probes": [
+    "python3 scripts/build_candidate.py (deterministic tracked artifacts)",
+    "python3 scripts/verify.py (two isolated candidate reruns; volatile timing stdout-only)",
+    "python3 scripts/build_report.py (deterministic report regeneration)",
+    "./scripts/run.sh (full replay; clean-tree required)",
+    "python3 -m compileall -q scripts",
+    "sh -n scripts/run.sh"
+  ],
+  "counts": {
+    "accepted_paper_and_adversarial": 16,
+    "frozen_fixtures": 36,
+    "quarantined": 2,
+    "task_classes": 6,
+    "tasks": 18
+  },
+  "generated_at": "2026-07-15T02:46:17.569663+00:00",
+  "hard_threshold_outcomes": {
+    "accessibility": "BLOCKED_AUTHENTICATED_STUDIO_AND_REAL_EMAIL_UNAVAILABLE",
+    "authored_content_preservation": "PASS_36_OF_36_PREIMAGES_AND_ACCEPTED_SEMANTIC_HASHES",
+    "build_formula": "NOT_APPLICABLE_ROUND_2",
+    "capacity_rule": "NOT_APPLICABLE_BEFORE_PILOT",
+    "idempotence": "PASS_TWO_IDENTICAL_RUNS",
+    "pilot_failure_rate": "NOT_APPLICABLE_ROUND_2",
+    "reader_visibility": "PARTIAL_LOCAL_HTML_NONBLANK; TARGET_STUDIO_EMAIL_BLOCKED",
+    "render_test_gate": "PASS_LOCAL_RUNNER_AND_VERIFIER",
+    "rollback": "PASS_36_OF_36_PREIMAGES; TWO_QUARANTINE_PATHS",
+    "schema_validity": "PASS_ACCEPTED_OUTPUTS_USE_SUPPORTED_TERMINAL_TYPES",
+    "structural_completeness": "PASS_SEMANTIC_HASH_AND_SIX_DISTINCT_TASK_CONTRACTS",
+    "surface_exercise": "FAIL_BLOCKED_AUTHENTICATED_STUDIO_AND_REAL_EMAIL",
+    "width_overflow": "BLOCKED_REAL_TUI_AND_EMAIL_CLIENT; LONG_TOKEN_FIXTURE_PRESERVED_LOCALLY"
+  },
+  "idempotence": {
+    "first_sha256": "33ec828b11b3f5b32578c770c9aeb7979a0a9e52559cdbab88fa38b40b25fd74",
+    "second_sha256": "33ec828b11b3f5b32578c770c9aeb7979a0a9e52559cdbab88fa38b40b25fd74",
+    "status": "PASS"
+  },
+  "output_sha256": "33ec828b11b3f5b32578c770c9aeb7979a0a9e52559cdbab88fa38b40b25fd74",
+  "quarantine": [
+    {
+      "id": "adv-missing-fields",
+      "preimage_sha256": "201c5ae6d548a04326051e8871c3ff1f5f98ab3a1769098554365f882aa68414",
+      "reasons": [
+        "empty_or_schema_failure"
+      ]
+    },
+    {
+      "id": "adv-malformed-legacy",
+      "preimage_sha256": "ad1c4b8f97d4ebaf8ca96123e33022ed2219c5f733668919e164ba0422c98dfb",
+      "reasons": [
+        "malformed_source"
+      ]
+    }
+  ],
+  "schema_version": "legendary-e04-result/v1",
+  "timing": {
+    "candidate_reruns_seconds": [
+      0.201478,
+      0.215131
+    ],
+    "max_seconds": 0.215131,
+    "policy": "volatile replay timing is stdout-only; committed measured timing is frozen in verification.json and excluded from regenerated deterministic bytes"
+  },
+  "validation": {
+    "command": "./scripts/run.sh twice",
+    "expected": "E04 VERIFY PASS both times and clean git status",
+    "status": "PASS"
+  },
+  "verdict": {
+    "action": "REWORK",
+    "quality": "PARTIAL",
+    "reason": "Local canonical, schema, preservation, class, idempotence, rollback, and replay-cleanliness gates pass; frozen real-surface Studio/email/accessibility/width gates remain blocked."
+  }
+}

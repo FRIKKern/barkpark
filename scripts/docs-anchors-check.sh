@@ -6,8 +6,14 @@
 #   1. Every routing-table target in root CLAUDE.md resolves to a file.
 #   2. Every docs/INDEX.md entry resolves to a file.
 #   3. Every "Code anchors" line in docs/cards/*.md points at an existing
-#      path; declared symbols (func/def/defmodule) grep to a real definition
-#      with pattern 'func |def |defmodule |^#' (Go + Elixir + headings, A6).
+#      path; declared symbols (func/def/defmodule) grep to a real DEFINITION
+#      with pattern 'func |def |defmodule ' (Go + Elixir). The '^#' heading
+#      alternative (A6) applies to .md anchor paths ONLY — see §3.
+#
+# Self-test:  bash scripts/docs-anchors-check.sh --selftest
+#   drives THIS script against mktemp fixture repos via DOCS_ANCHORS_ROOT,
+#   proving each blocking check still reds on its own planted violation.
+#   Unknown argument => exit 2 (distinct from a gate failure, exit 1).
 #   4. G1 doc-tier header on every non-attic .md under docs/ and on surface
 #      CLAUDE/AGENTS files. Exempt: web/CLAUDE.md (@AGENTS.md import stub),
 #      _attic/, docs/cli/fixtures/. YAML-frontmatter files carry the header
@@ -25,7 +31,170 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Absolute path to THIS script — captured before any `cd`, so --selftest can
+# re-invoke the REAL gate (never a copy) against a fixture root.
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+usage() {
+  echo "usage: docs-anchors-check.sh [--selftest|--help]"
+  echo "  (no args)   run the gate over the repo (exit 0 pass / 1 fail)"
+  echo "  --selftest  run the hermetic fixture suite (exit 0 pass / 1 fail)"
+  echo "  DOCS_ANCHORS_ROOT=<dir> overrides the tree the gate walks"
+}
+
+MODE=run
+if [ "$#" -gt 0 ]; then
+  case "$1" in
+    --selftest) MODE=selftest ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "docs-anchors-check: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+fi
+if [ "$#" -gt 1 ]; then
+  echo "docs-anchors-check: unexpected extra argument: $2" >&2; usage >&2; exit 2
+fi
+
+# --- self-test ---------------------------------------------------------------
+# This gate was DARK: no fixture, no .test.sh, and REPO_ROOT hard-bound to
+# `dirname $0/..`, so the only way to exercise it was to mutate the shared
+# checkout. DOCS_ANCHORS_ROOT breaks that bind; every case below plants ONE
+# violation in a throwaway 4-file repo and asserts the gate reds with a NAMED
+# line — a green a blind harness would also produce is not a seal.
+st_fixture() {
+  local r="$1"
+  mkdir -p "$r/docs/cards" "$r/api/lib"
+  cat > "$r/CLAUDE.md" <<'FIXEOF'
+<!-- doc-tier: agent | canonical-for: fixture-router | budget: 100tok -->
+# Fixture router
+
+| Group | Task pattern | Load |
+|---|---|---|
+| A | anything | `docs/cards/a.md` |
+FIXEOF
+  cat > "$r/docs/INDEX.md" <<'FIXEOF'
+<!-- doc-tier: agent | canonical-for: fixture-index | budget: 100tok -->
+- cards/a.md
+FIXEOF
+  cat > "$r/docs/cards/a.md" <<'FIXEOF'
+<!-- doc-tier: agent | canonical-for: fixture-card-a | budget: 100tok -->
+# Card A
+
+## Code anchors
+
+- api/lib/x.ex — defmodule Fixture.X
+FIXEOF
+  cat > "$r/api/lib/x.ex" <<'FIXEOF'
+defmodule Fixture.X do
+  def real_symbol, do: :ok
+end
+FIXEOF
+}
+
+ST_FAIL=0
+st_case() {
+  # $1 = case name, $2 = expected exit, $3 = substring the output must carry,
+  # $4 = shell snippet mutating the fixture at $FIX
+  local name="$1" want="$2" needle="$3" mutate="$4" out rc fix
+  fix="$(mktemp -d)"
+  st_fixture "$fix"
+  # shellcheck disable=SC2034  # $FIX is consumed by the eval'd mutation snippet
+  FIX="$fix"; eval "$mutate"
+  set +e
+  out=$(DOCS_ANCHORS_ROOT="$fix" bash "$SELF" 2>&1); rc=$?
+  set -e
+  rm -rf "$fix"
+  if [ "$rc" != "$want" ]; then
+    echo "SELFTEST FAIL: $name — expected exit $want, got $rc"
+    printf '%s\n' "$out" | sed 's/^/    | /'
+    ST_FAIL=1
+    return
+  fi
+  if ! printf '%s\n' "$out" | grep -qF "$needle"; then
+    echo "SELFTEST FAIL: $name — exit $rc as expected but output lacks: $needle"
+    printf '%s\n' "$out" | sed 's/^/    | /'
+    ST_FAIL=1
+    return
+  fi
+  echo "ok:   selftest $name (exit $rc)"
+}
+
+if [ "$MODE" = selftest ]; then
+  echo "== docs-anchors-check --selftest =="
+
+  st_case "clean fixture passes" 0 "docs-anchors-check: PASS" ':'
+
+  # §3 / DEFECT A: a symbol that lives ONLY in a '#' comment must NOT satisfy a
+  # code anchor (it did — a card could claim an anchor for a deleted function).
+  st_case "comment-only symbol reds" 1 "anchor symbol 'totallyFakeSymbolXyz' not found" '
+    printf -- "- api/lib/x.ex — func totallyFakeSymbolXyz\n" >> "$FIX/docs/cards/a.md"
+    printf "# totallyFakeSymbolXyz is only a comment\n" >> "$FIX/api/lib/x.ex"'
+
+  # the '^#' arm survives, scoped to .md anchor paths (A6 heading anchors)
+  st_case "md heading anchor still resolves via ^#" 0 "docs/notes.md :: headingSymbol" '
+    printf -- "%s\n" "<!-- doc-tier: agent | canonical-for: fixture-notes | budget: 100tok -->" \
+      "# Notes" "" "# func headingSymbol" > "$FIX/docs/notes.md"
+    printf -- "- docs/notes.md — func headingSymbol\n" >> "$FIX/docs/cards/a.md"'
+
+  # §3 / DEFECT C: the symbol is a LITERAL, not an ERE
+  st_case "dotted symbol does not match its underscored form" 1 "anchor symbol 'Fixture.Sub.Mod' not found" '
+    printf -- "- api/lib/x.ex — defmodule Fixture.Sub.Mod\n" >> "$FIX/docs/cards/a.md"
+    printf "defmodule Fixture_Sub_Mod do\nend\n" >> "$FIX/api/lib/x.ex"'
+  st_case "?-suffixed symbol does not match the bare name" 1 "anchor symbol 'default_enabled?' not found" '
+    printf -- "- api/lib/x.ex — def default_enabled?\n" >> "$FIX/docs/cards/a.md"
+    printf "  def default_enabled, do: true\n" >> "$FIX/api/lib/x.ex"'
+
+  st_case "missing anchor path reds" 1 "anchors missing path: api/lib/gone.ex" '
+    printf -- "- api/lib/gone.ex — def whatever\n" >> "$FIX/docs/cards/a.md"'
+
+  # §1 / §2 / §3b — DEFECT B: an empty grep result must NAME the outcome, never
+  # abort the run under `set -euo pipefail` and skip §3c-§8.
+  st_case "unresolvable routing target reds" 1 "routing-table target does not resolve: docs/cards/ghost.md" '
+    printf -- "| B | ghost | \140docs/cards/ghost.md\140 |\n" >> "$FIX/CLAUDE.md"'
+  st_case "empty routing table fails by name" 1 "no routing-table targets found" '
+    sed "s/^|//" "$FIX/CLAUDE.md" > "$FIX/c.tmp" && mv "$FIX/c.tmp" "$FIX/CLAUDE.md"'
+  st_case "empty INDEX fails by name" 1 "no INDEX.md entries found" '
+    printf -- "<!-- doc-tier: agent | canonical-for: fixture-index | budget: 100tok -->\n" > "$FIX/docs/INDEX.md"'
+  st_case "zero non-card anchor docs is a legitimate pass" 0 "no non-card docs carry a" ':'
+  st_case "stale non-card anchor path reds" 1 "Code-anchor path does not exist: api/lib/moved.ex" '
+    printf -- "%s\n" "<!-- doc-tier: agent | canonical-for: fixture-media | budget: 100tok -->" \
+      "# Media" "" "## Code anchors" "" "- api/lib/moved.ex — the mover" > "$FIX/docs/media.md"'
+
+  # §3c cross-doc links
+  st_case "dead cross-doc link reds" 1 "links to a missing doc" '
+    printf -- "See [gone](../gone.md)\n" >> "$FIX/docs/cards/a.md"'
+
+  # §4 G1 header
+  st_case "missing G1 header reds" 1 "missing G1 doc-tier header" '
+    printf -- "# no header here\n" > "$FIX/docs/bare.md"'
+
+  # §5 canonical-for uniqueness
+  st_case "duplicate canonical-for reds" 1 "has more than one owner" '
+    printf -- "<!-- doc-tier: agent | canonical-for: fixture-card-a | budget: 100tok -->\n" > "$FIX/docs/dup.md"'
+  st_case "two canonical-for: none do not collide" 0 "all canonical-for values unique" '
+    printf -- "<!-- doc-tier: cold | canonical-for: none | budget: 100tok -->\n" > "$FIX/docs/n1.md"
+    printf -- "<!-- doc-tier: cold | canonical-for: none | budget: 100tok -->\n" > "$FIX/docs/n2.md"'
+
+  # §8 @canonical capability markers
+  st_case "marker over a private defp reds" 1 "has no public def/func/export within 6 lines" '
+    printf -- "# @canonical capability:fixture-private\n  defp helper_fn, do: :ok\n" >> "$FIX/api/lib/x.ex"'
+  st_case "duplicate capability slug reds" 1 "claimed by >1 impl" '
+    printf -- "# @canonical capability:fixture-dup\ndef one_fn, do: 1\n# @canonical capability:fixture-dup\ndef two_fn, do: 2\n" >> "$FIX/api/lib/x.ex"'
+  st_case "dead doc: backlink reds" 1 "doc: points at a missing doc" '
+    printf -- "# @canonical capability:fixture-doc doc:docs/nope.md\ndef three_fn, do: 3\n" >> "$FIX/api/lib/x.ex"'
+
+  echo ""
+  if [ "$ST_FAIL" -ne 0 ]; then
+    echo "docs-anchors-check --selftest: FAILED"
+    exit 1
+  fi
+  echo "docs-anchors-check --selftest: PASS"
+  exit 0
+fi
+
+# DOCS_ANCHORS_ROOT lets --selftest (and any future harness) point the gate at a
+# fixture tree instead of the shared checkout. Unset in CI: the default is the
+# repo this script lives in.
+REPO_ROOT="${DOCS_ANCHORS_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$REPO_ROOT"
 
 FAIL=0
@@ -33,6 +202,31 @@ WARN=0
 
 fail() { echo "FAIL: $*"; FAIL=1; }
 warn() { echo "WARN: $*"; WARN=$((WARN + 1)); }
+
+# --- generated / scratch trees: PRUNE at the walk, not after it (D18) --------
+# §5, §7 and §8 walk the whole repo. On a clean CI checkout that is cheap; on a
+# working checkout node_modules (~46k files), js/node_modules (another ~1.3G),
+# _build, deps and the .omx / .claude worktree scratch trees dominate the walk —
+# the run took 17+ minutes and had to be killed, i.e. the gate was not runnable
+# LOCALLY, which is exactly where doc edits are made. Every directory below was
+# ALREADY dropped by a `-not -path` / `grep -v` filter AFTER the walk, so moving
+# the exclusion INTO the walk is a pure performance fix: same result set, one
+# order of magnitude less I/O. Scratch checkouts (.omx, .tmp-bp89, .claude) are
+# copies of the repo — their headers/markers are duplicates by construction and
+# were already excluded by §7 (D26) and by §5's './.claude' exclusion.
+# `find`: name-matched so nested copies (js/node_modules, api/_build) prune too.
+prune_find() {
+  # $@ = extra find predicates applied to the surviving tree
+  find . \
+    \( -name node_modules -o -name _build -o -name deps -o -name .git \
+       -o -name .omx -o -name .tmp-bp89 -o -name .claude -o -name .artifacts \
+       -o -path './_attic' -o -path './cloud/priv/templates' \) -prune -o \
+    "$@"
+}
+# `grep -r`: same trees, minus _attic (§7/§8 filter _attic themselves downstream).
+GREP_PRUNE=(--exclude-dir=node_modules --exclude-dir=_build --exclude-dir=deps
+  --exclude-dir=.git --exclude-dir=.omx --exclude-dir=.tmp-bp89
+  --exclude-dir=.claude --exclude-dir=.artifacts)
 
 HEADER_RE='^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-z0-9._-]+ \| budget: [0-9]+tok -->'
 
@@ -52,7 +246,12 @@ header_line() {
 
 # --- 1. routing-table targets in root CLAUDE.md ----------------------------
 echo "== routing-table targets (CLAUDE.md) =="
-ROUTE_TARGETS=$(grep -E '^\|' CLAUDE.md | grep -oE '`[A-Za-z0-9._/-]+\.md`' | tr -d '`' | sort -u)
+# `|| true`: a table that has been reformatted away makes `grep` exit 1, and
+# under `set -euo pipefail` that aborted the WHOLE run — printing only the
+# section header and leaving the friendly failure below PROVABLY UNREACHABLE
+# (and §3c-§8 never running, so a real duplicate canonical-for stayed hidden
+# behind it). Same idiom §5/§8 already use. A non-match is not an error.
+ROUTE_TARGETS=$(grep -E '^\|' CLAUDE.md | grep -oE '`[A-Za-z0-9._/-]+\.md`' | tr -d '`' | sort -u || true)
 if [ -z "$ROUTE_TARGETS" ]; then
   fail "no routing-table targets found in CLAUDE.md — table missing or reformatted"
 fi
@@ -66,7 +265,13 @@ done
 
 # --- 2. docs/INDEX.md entries ----------------------------------------------
 echo "== INDEX entries (docs/INDEX.md) =="
-INDEX_ENTRIES=$(grep -oE '[A-Za-z0-9._/-]+\.md' docs/INDEX.md | grep -v '^INDEX\.md$' | sort -u)
+# `|| true` for the same pipefail reason as §1: an INDEX.md that lists nothing
+# (or only self-references) is a real failure, but it must be REPORTED, not an
+# undiagnosed exit 1 that also skips every later section.
+INDEX_ENTRIES=$(grep -oE '[A-Za-z0-9._/-]+\.md' docs/INDEX.md | grep -v '^INDEX\.md$' | sort -u || true)
+if [ -z "$INDEX_ENTRIES" ]; then
+  fail "no INDEX.md entries found in docs/INDEX.md — index empty, self-referential, or reformatted"
+fi
 for e in $INDEX_ENTRIES; do
   # entries are relative to docs/ (../_attic/... resolves out of docs/)
   if [ -f "docs/$e" ]; then
@@ -103,11 +308,24 @@ for card in docs/cards/*.md; do
       echo "ok:   $card -> $apath (path only)"
       continue
     fi
+    # The '^#' alternative (A6) is for MARKDOWN heading anchors — but applied to
+    # code it matched any '#' comment, so a symbol surviving only in a comment
+    # satisfied the anchor (proven with a .go file, where '#' is not even a
+    # comment character): a card could claim an anchor for a DELETED function,
+    # the exact rot this section exists to prevent. Scope it to .md paths.
+    case "$apath" in
+      *.md) symbol_pat='(func |def |defmodule |^#)'; symbol_pat_desc='func |def |defmodule |^#' ;;
+      *)    symbol_pat='(func |def |defmodule )';    symbol_pat_desc='func |def |defmodule ' ;;
+    esac
     for sym in $symbols; do
-      if grep -Eq "(func |def |defmodule |^#).*$sym" "$apath"; then
+      # $sym is a LITERAL, not a sub-pattern: unescaped, 'Barkpark.Media.X' was
+      # satisfied by 'Barkpark_Media_X' (dot = any char) and 'default_enabled?'
+      # by 'def default_enabled' (? = optional preceding char).
+      sym_lit=$(printf '%s' "$sym" | sed 's/[][\\.^$*+?(){}|]/\\&/g')
+      if grep -Eq "$symbol_pat.*$sym_lit" "$apath"; then
         echo "ok:   $card -> $apath :: $sym"
       else
-        echo "FAIL: $card anchor symbol '$sym' not found in $apath (pattern: func |def |defmodule |^#)"
+        echo "FAIL: $card anchor symbol '$sym' not found in $apath (pattern: $symbol_pat_desc)"
       fi
     done
   done > /tmp/anchors-out.$$ || true
@@ -125,7 +343,13 @@ done
 # Handles both formats: bare "- path —" and backticked "- `path` —"; requires
 # the " —" separator so prose bullets are skipped, not false-failed.
 echo "== Code anchors in non-card docs (path existence) =="
-NONCARD_ANCHOR_DOCS=$(grep -rl '^## Code anchors' docs --include='*.md' | grep -v '^docs/cards/' | sort -u)
+# `|| true`: ZERO non-card docs carrying a '## Code anchors' section is a
+# LEGITIMATE state — without it the empty grep aborted the run (a FALSE RED with
+# no message, and §3c-§8 silently skipped). Say so by name instead.
+NONCARD_ANCHOR_DOCS=$(grep -rl '^## Code anchors' docs --include='*.md' | grep -v '^docs/cards/' | sort -u || true)
+if [ -z "$NONCARD_ANCHOR_DOCS" ]; then
+  echo "ok:   no non-card docs carry a '## Code anchors' section"
+fi
 for doc in $NONCARD_ANCHOR_DOCS; do
   awk '/^## Code anchors/{on=1; next} /^## /{on=0} on && /^- /' "$doc" |
   while IFS= read -r line; do
@@ -197,12 +421,7 @@ done
 # --- 5. canonical-for uniqueness (repo-wide, non-attic) ----------------------
 echo "== canonical-for uniqueness =="
 DUPES=$(
-  find . -name '*.md' \
-    -not -path './_attic/*' -not -path './node_modules/*' \
-    -not -path '*/node_modules/*' -not -path './.artifacts/*' \
-    -not -path '*/_build/*' -not -path '*/deps/*' \
-    -not -path './.claude/*' \
-    -not -path './cloud/priv/templates/*' |
+  prune_find -name '*.md' -print |
   while IFS= read -r f; do
     h=$(header_line "$f")
     # `grep` returns 1 for a header-less file (README etc.); `|| true` keeps that
@@ -210,11 +429,17 @@ DUPES=$(
     # `set -o pipefail` (GitHub Actions' default shell) — a non-match is not an error.
     printf '%s\n' "$h" | { grep -E "$HEADER_RE" || true; } |
       sed -E 's/.*canonical-for: ([A-Za-z0-9._-]+) \|.*/\1/'
-  done | sort | uniq -d || true
+    # `none` is the explicit "owns no fact-topic" value: cold/ledger evidence
+    # files (tooling/grip/ledger/*.md, wave verdicts) legitimately share it, so
+    # it is exempt from the one-owner-per-topic rule. Only REAL topic slugs must
+    # be unique. Without this, three wave ledger files each declaring `none`
+    # collide on main (each green alone — the stale-green accumulator), redding
+    # doc-gates for a non-violation. Real duplicate slugs are still caught below.
+  done | grep -vxE 'none' | sort | uniq -d || true
 )
 if [ -n "$DUPES" ]; then
   for d in $DUPES; do
-    fail "canonical-for '$d' has more than one owner: $(grep -rl "canonical-for: $d " --include='*.md' . | grep -v _attic | grep -v node_modules | tr '\n' ' ')"
+    fail "canonical-for '$d' has more than one owner: $(grep -rl "canonical-for: $d " --include='*.md' "${GREP_PRUNE[@]}" . | grep -v _attic | grep -v node_modules | tr '\n' ' ')"
   done
 else
   echo "ok:   all canonical-for values unique"
@@ -240,9 +465,15 @@ echo "== duplication tripwires (WARN) =="
 tripwire() {
   # $1 = literal, $2 = space-separated allowlist
   local literal="$1" allow="$2" hits f allowed a
-  hits=$(grep -rlF "$literal" --include='*.md' . 2>/dev/null |
+  # Exclude worktree/scratch trees: .claude (git worktrees + charters), .omx and
+  # .tmp-bp89 (nested-checkout scratch). Use the ANCHORED (^|/)\.claude/ form —
+  # after `sed 's|^\./||'` a top-level hit reads '.claude/…' with NO leading
+  # slash, so an unanchored '/\.claude/' would miss it and leave thousands of
+  # worktree-copy WARNs (D26).
+  hits=$(grep -rlF "$literal" --include='*.md' "${GREP_PRUNE[@]}" . 2>/dev/null |
     sed 's|^\./||' | grep -v '^_attic/' | grep -v node_modules | grep -v '^\.artifacts/' \
-    | grep -v '/_build/' | grep -v '/deps/' || true)
+    | grep -v '/_build/' | grep -v '/deps/' \
+    | grep -vE '(^|/)\.claude/' | grep -vE '(^|/)\.omx/' | grep -vE '(^|/)\.tmp-bp89/' || true)
   for f in $hits; do
     allowed=0
     for a in $allow; do
@@ -280,10 +511,11 @@ tripwire 'barkpark-dev-token' \
 echo "== @canonical capability markers =="
 # (a) uniqueness
 CANON_DUPES=$(
-  grep -rhoE '@canonical capability:[A-Za-z0-9._-]+' \
+  grep -rHoE '@canonical capability:[A-Za-z0-9._-]+' \
     --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
-    --exclude-dir='.claude' \
-    . 2>/dev/null | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' | sort | uniq -d || true
+    "${GREP_PRUNE[@]}" \
+    . 2>/dev/null | grep -vE '/_build/|/deps/|/\.claude/|/node_modules/' \
+    | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' | sort | uniq -d || true
 )
 if [ -n "$CANON_DUPES" ]; then
   for d in $CANON_DUPES; do
@@ -295,7 +527,7 @@ fi
 # (b) each marker sits on a PUBLIC entry point (def / func / export within 6 lines below)
 grep -rn '@canonical capability:' \
   --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
-  --exclude-dir='.claude' \
+  "${GREP_PRUNE[@]}" \
   . 2>/dev/null | grep -vE '/_build/|/deps/|/\.claude/|/node_modules/' > /tmp/canon-hits.$$ || true
 while IFS= read -r hit; do
   [ -z "$hit" ] && continue

@@ -65,6 +65,14 @@ defmodule Barkpark.Plugins.Bulldocs.Event do
     |> validate_required([:event_type])
     |> validate_goal_or_paper()
     |> maybe_default_branch()
+    # W16 FK-abort containment: `workspace_id` / `project_id` are real CASCADE
+    # FKs (paper_events_<col>_fkey, migration 20260527170000). A concurrent
+    # scope-delete (id resolved, row cascades away before insert) would raise
+    # Ecto.ConstraintError out of Repo.insert — escaping block_ops.ex
+    # maybe_append_paper_event/3, whose contract is "logged, never raised".
+    # These map the abort to {:error, changeset} so create_event/1 returns it.
+    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
   end
 
   defp validate_goal_or_paper(changeset) do

@@ -1,0 +1,30 @@
+{
+  "name": "@barkpark/blog-hydration-parity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wave-6 render-path-unification proof: hydratePortableDoc works in the REAL consuming-app surface, not just the isolated media-parity helper. Mounts the ACTUAL create-barkpark-app blog-starter `PortableDocSurface` island (imported read-only, never modified) with the flagship 42-type showcase seed, under a real Playwright chromium browser via @testing-library/react, and OBSERVES its useEffect drive @barkpark/react/client's hydratePortableDoc — a mermaid `diagram` becomes a live <svg> (non-zero viewBox) and an asciicast becomes an attached .ap-player. A neuter island copy (hydratePortableDoc call removed) stays inert, so the proof goes red on revert. Browser mode is the DEFAULT `test` script so it GATES under turbo/CI. Test-only — never published.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@barkpark/react": "workspace:^"
+  },
+  "devDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@testing-library/react": "^16.1.0",
+    "vitest": "^4.1.0",
+    "@vitest/browser": "^4.1.0",
+    "@vitest/browser-playwright": "^4.1.0",
+    "playwright": "^1.48.0",
+    "mermaid": "^11.0.0",
+    "asciinema-player": "^3.8.0"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}

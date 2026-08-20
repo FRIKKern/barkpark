@@ -1,0 +1,112 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "smoke",
+          "met": true
+        }
+      ],
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Deliver persp 1783689557."
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Lifecycle: open. 1 of 1 acceptance criteria are currently proven."
+              }
+            ],
+            "id": "state-copy",
+            "title": "Task status",
+            "tone": "info",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "id": "done-list",
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "smoke — proven"
+                }
+              ]
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ],
+        "version": 1
+      },
+      "github": {
+        "issue": 2156,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_fingerprint": 116407442,
+        "synced_rev": "b2e204475e02f7ed1041dcc97817a380"
+      },
+      "kind": "task",
+      "labels": [
+        "smoke"
+      ],
+      "lifecycle_status": "open"
+    },
+    "criteria_progress": {
+      "met": 1,
+      "total": 1
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "task-1bb04ac51efec9af",
+    "execution_policy": null,
+    "id": "542aa2f9-ffe2-4622-a79a-de0ffbf9feaa",
+    "inserted_at": "2026-07-10T13:19:18.241829Z",
+    "kind": "task",
+    "labels": [
+      "smoke"
+    ],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": null,
+    "priority": null,
+    "rev": "3473df1fb3197b9eabac9a1ca27d1bb5",
+    "status": "published",
+    "title": "persp 1783689557",
+    "type": "task",
+    "updated_at": "2026-07-12T11:15:11.735170Z"
+  },
+  "ok": true
+}

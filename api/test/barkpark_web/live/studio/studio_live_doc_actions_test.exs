@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content
+  alias BarkparkWeb.Studio.StudioLive.DocActions
 
   @dataset "production"
 
@@ -166,6 +167,101 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
       html = render_click(view, "bulk-clear", %{})
 
       refute html =~ ~s(data-test-id="bulk-action-bar")
+    end
+  end
+
+  describe "E4: default_doc_actions ordering (misclick safety)" do
+    # sup-w5-doc-actions-order — the destructive Delete used to sit at index 1,
+    # wedged between History and the Publish CTA, right in the misclick zone.
+    # It must now trail the whole benign list so a stray click near Publish
+    # can't destroy the doc. This asserts the base order directly off
+    # `DocActions.default_doc_actions/2` (no LiveView mount needed) so the
+    # ordering contract is protected independent of render.
+    defp draft_action_names do
+      assigns = %{
+        editor_doc: %{doc_id: "p1"},
+        editor_schema: nil,
+        editor_is_draft: true,
+        published_doc: nil,
+        content_preview_visible: false,
+        content_preview_rendered: nil,
+        diff_visible: false
+      }
+
+      assigns
+      |> DocActions.default_doc_actions(%{})
+      |> Enum.map(&Map.get(&1, "name"))
+    end
+
+    test "Publish leads and Delete trails — Publish index < Delete index" do
+      names = draft_action_names()
+
+      publish_idx = Enum.find_index(names, &(&1 == "publish"))
+      delete_idx = Enum.find_index(names, &(&1 == "delete-doc"))
+
+      assert publish_idx != nil, "expected a publish action for a draft doc"
+      assert delete_idx != nil, "expected a delete-doc action"
+
+      assert publish_idx < delete_idx,
+             "Publish (##{publish_idx}) must precede Delete (##{delete_idx}); " <>
+               "order was #{inspect(names)}"
+    end
+
+    test "Publish is the first action and Delete is the last benign-list action" do
+      names = draft_action_names()
+
+      assert List.first(names) == "publish",
+             "Publish must lead the overflow menu; order was #{inspect(names)}"
+
+      # Delete trails every built-in action (schema actions, if any, append
+      # after — there are none for this nil-schema fixture).
+      assert List.last(names) == "delete-doc",
+             "Delete must be held to the tail; order was #{inspect(names)}"
+    end
+  end
+
+  describe "a schema-declared action whose icon names no glyph" do
+    # `icon/1` RAISES on an unknown name in :test — that is the icons tripwire's
+    # teeth, and it is right for a name a developer wrote down. A plugin's or a
+    # workspace schema's icon string is not that: it is unbounded data from
+    # outside the tree, so `drawable_icon/1` guards it at the call site. Without
+    # that guard any workspace could crash its own editor by typing a glyph name
+    # we happen not to carry.
+    setup do
+      {:ok, _schema} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "icon" => "file-text",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{"name" => "body", "title" => "Body", "type" => "text"}
+            ],
+            "actions" => [
+              %{
+                "name" => "ghost-glyph",
+                "label" => "Ghost Glyph",
+                "kind" => "event",
+                "opts" => %{"event" => "ghost-glyph", "icon" => "definitely-not-a-glyph"}
+              }
+            ]
+          },
+          @dataset
+        )
+
+      :ok
+    end
+
+    test "renders the editor instead of crashing, and falls back to the label", %{conn: conn} do
+      {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/p1"))
+
+      # The action is present and usable...
+      assert html =~ "Ghost Glyph"
+      # ...and the unknown name never reached icon/1, so no <svg> was drawn for
+      # it and, critically, the render did not raise.
+      refute html =~ "definitely-not-a-glyph"
     end
   end
 end

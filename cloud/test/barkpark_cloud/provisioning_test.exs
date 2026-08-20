@@ -297,6 +297,56 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert Registry.claim_next_job("ct-2") == nil
     end
 
+    test "a claimed provision_support job past the GENERIC threshold is NOT re-claimable " <>
+           "(per-kind staleness, task-314de6aa36248bea)" do
+      {_user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      {:ok, main} = main |> Barkpark.fleet_changeset(%{fleet_role: "main"}) |> Repo.update()
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Support Lazy",
+          slug: "support-lazy",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      {:ok, job} = Registry.enqueue_support_provision_job(support)
+      {%ProvisionJob{} = claimed, _} = Registry.claim_next_support_provision_job("sup-A")
+      assert claimed.id == job.id
+
+      # Age the claim past the generic (~12m) threshold but under the support
+      # (35m) budget — the Go support chain legitimately runs to 30 minutes, so
+      # a second worker polling must NOT be handed the still-healthy job.
+      mid_flight_at =
+        DateTime.utc_now()
+        |> DateTime.add(-(Registry.stale_after_seconds() + 60), :second)
+        |> DateTime.truncate(:microsecond)
+
+      _ =
+        from(j in ProvisionJob, where: j.id == ^job.id)
+        |> Repo.update_all(set: [claimed_at: mid_flight_at])
+
+      assert Registry.claim_next_support_provision_job("sup-B") == nil
+      assert Repo.get(ProvisionJob, job.id).claim_token == "sup-A"
+
+      # Past the SUPPORT threshold the claim is honestly abandoned → re-claimable.
+      stale_at =
+        DateTime.utc_now()
+        |> DateTime.add(-(Registry.support_stale_after_seconds() + 60), :second)
+        |> DateTime.truncate(:microsecond)
+
+      _ =
+        from(j in ProvisionJob, where: j.id == ^job.id)
+        |> Repo.update_all(set: [claimed_at: stale_at])
+
+      assert {%ProvisionJob{} = reclaimed, %Barkpark{}} =
+               Registry.claim_next_support_provision_job("sup-B")
+
+      assert reclaimed.id == job.id
+      assert reclaimed.claim_token == "sup-B"
+    end
+
     test "a stale claim past the attempt cap is FAILED instead of re-handed-out" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
@@ -451,7 +501,10 @@ defmodule BarkparkCloud.ProvisioningTest do
   end
 
   describe "succeed_job/2" do
-    test "marks the job succeeded with the ip and flips the barkpark to up at that host" do
+    # cch-w34-s2: succeed_job lands the HOST, and leaves health "unknown" — the
+    # machine exists, but nothing has reported yet, so there is nothing to call
+    # healthy. The row goes green on the first POST /v1/agent/report.
+    test "marks the job succeeded with the ip and leaves health unknown at that host" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team, %{health_status: "unknown", agent_status: "offline"})
       {:ok, job} = Registry.enqueue_provision_job(bp)
@@ -461,7 +514,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert done.result_ip == "203.0.113.7"
 
       reloaded = Registry.get_barkpark(bp.id)
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
       assert reloaded.host == "203.0.113.7"
       assert reloaded.agent_status == "offline"
     end
@@ -487,7 +540,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert {:ok, ^token} = Registry.reveal_admin_token(reloaded)
       # The host/health flip still happened in the same write.
       assert reloaded.host == "203.0.113.7"
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
     end
 
     test "ip-only succeed (no admin_token) leaves the encrypted column nil (back-compat)" do
@@ -501,6 +554,69 @@ defmodule BarkparkCloud.ProvisioningTest do
       reloaded = Registry.get_barkpark(bp.id)
       assert reloaded.admin_token_encrypted == nil
       assert {:ok, nil} = Registry.reveal_admin_token(reloaded)
+      assert reloaded.host == "203.0.113.7"
+    end
+
+    test "provision_support token_id: persists fleet_token_id on the SUPPORT row (task-5866ec745efcd7f7)" do
+      {_user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      n = System.unique_integer([:positive])
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Helper #{n}",
+          slug: "helper-#{n}",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      {:ok, job} = Registry.enqueue_support_provision_job(support)
+
+      assert {:ok, %ProvisionJob{status: "succeeded"}} =
+               Registry.succeed_job(job.id, "203.0.113.7", token_id: "tok_opaque_42")
+
+      reloaded = Registry.get_barkpark(support.id)
+      # The CP row is now the durable token-id holder (PDF-D68) — what
+      # `bp cloud support remove` reads to revoke the support's ledger token.
+      assert reloaded.fleet_token_id == "tok_opaque_42"
+      # The host/health flip happened in the SAME write.
+      assert reloaded.host == "203.0.113.7"
+      assert reloaded.health_status == "unknown"
+    end
+
+    test "ip-only support succeed (no token_id) leaves fleet_token_id nil (older workers, back-compat)" do
+      {_user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      n = System.unique_integer([:positive])
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Helper #{n}",
+          slug: "helper-#{n}",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      {:ok, job} = Registry.enqueue_support_provision_job(support)
+
+      assert {:ok, %ProvisionJob{status: "succeeded"}} =
+               Registry.succeed_job(job.id, "203.0.113.7")
+
+      reloaded = Registry.get_barkpark(support.id)
+      assert reloaded.fleet_token_id == nil
+      assert reloaded.host == "203.0.113.7"
+    end
+
+    test "token_id on a NON-support row is ignored — a main never carries a token id" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, %ProvisionJob{status: "succeeded"}} =
+               Registry.succeed_job(job.id, "203.0.113.7", token_id: "tok_should_not_land")
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.fleet_token_id == nil
       assert reloaded.host == "203.0.113.7"
     end
 
@@ -542,7 +658,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       # UNTOUCHED (the health/host upsert never re-runs).
       assert {:ok, _done} = Registry.succeed_job(job.id, "203.0.113.7")
       bp_after_first = Registry.get_barkpark(bp.id)
-      assert bp_after_first.health_status == "up"
+      assert bp_after_first.health_status == "unknown"
       first_updated_at = bp_after_first.updated_at
 
       # A retried/duplicate succeed (the worker re-POSTs after a dropped response).
@@ -608,10 +724,39 @@ defmodule BarkparkCloud.ProvisioningTest do
       bp = barkpark_fixture(team)
       {:ok, job} = Registry.enqueue_provision_job(bp)
 
-      long_error =
-        "create \"bp-stopwatch\" failed on all 5 candidate type/locations: " <>
-          String.duplicate("- cx23/fsn1: hcloud server create: server limit reached; ", 12)
+      # DERIVED from the producer, not pasted. `CreateWithFallback`
+      # (internal/cli/cloud/provider.go:569-578, READ-ONLY) composes exactly:
+      #
+      #   fmt.Errorf("create %q failed on all %d candidate type/locations:%s",
+      #              base.Name, len(candidates), sb.String())
+      #   fmt.Fprintf(&sb, "\n  - %s/%s: %s", spec.ServerType, spec.Region, err)
+      #
+      # The old pasted fixture wrote "…locations: " followed by "- cx23/fsn1: …"
+      # — a trailing space where the producer has none, and a bare "- " where the
+      # producer emits "\n  - ". That drift is exactly what let a whole-string
+      # substring scan of the aggregate survive two waves (wave 25 S1). The
+      # candidate ladder is HetznerCandidates (provider.go:543-552).
+      ladder = [
+        {"cx22", "fsn1"},
+        {"cx23", "fsn1"},
+        {"cx23", "hel1"},
+        {"cx33", "nbg1"},
+        {"cpx22", "fsn1"}
+      ]
 
+      entries =
+        Enum.map_join(ladder, fn {type, region} ->
+          "\n  - #{type}/#{region}: hcloud server create \"bp-stopwatch\": exit status 1: server limit reached, resource_unavailable for this server type"
+        end)
+
+      long_error =
+        "create \"bp-stopwatch\" failed on all #{length(ladder)} candidate type/locations:" <>
+          entries
+
+      # The shape the producer guarantees: no space after the header's colon, and
+      # every entry newline-two-space-dash prefixed.
+      assert long_error =~ ~r/candidate type\/locations:\n  - /
+      refute long_error =~ "locations: "
       assert String.length(long_error) > 255
       assert {:ok, %ProvisionJob{} = failed} = Registry.fail_job(job.id, long_error)
       assert failed.status == "failed"
@@ -658,7 +803,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert reloaded_job.result_ip == "198.51.100.9"
 
       reloaded_bp = Registry.get_barkpark(bp.id)
-      assert reloaded_bp.health_status == "up"
+      assert reloaded_bp.health_status == "unknown"
       assert reloaded_bp.host == "198.51.100.9"
     end
   end
@@ -1069,6 +1214,76 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert List.last(console)["line"] == "line 305"
     end
 
+    # cch-w33-s3: the PROVISION twin of the deploy-side disclosure. This file had
+    # NO oversized-line fixture at all before this wave — the chop was untested
+    # on this side, so it could have been silently rejecting rather than
+    # truncating and nothing here would have noticed.
+
+    test "cch-w33-s3: an oversized line TRUNCATES and DISCLOSES its original length" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, job} =
+               Registry.append_provision_console(job.id, String.duplicate("x", 5_000))
+
+      assert [%{"line" => line, "truncated_from" => 5_000}] = job.console
+      assert String.length(line) == 2_000
+
+      # PERSISTS — a refetch, not just the returned struct.
+      assert [%{"line" => persisted, "truncated_from" => 5_000}] =
+               Repo.get(ProvisionJob, job.id).console
+
+      assert String.length(persisted) == 2_000
+    end
+
+    test "cch-w33-s3: a line of EXACTLY 2 KB is untouched and carries NO marker" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, job} =
+               Registry.append_provision_console(job.id, String.duplicate("x", 2_000))
+
+      assert [%{"line" => line} = entry] = job.console
+      assert String.length(line) == 2_000
+      refute Map.has_key?(entry, "truncated_from")
+    end
+
+    test "cch-w33-s3: the ring drop DISCLOSES its cumulative count on the oldest survivor" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      for i <- 1..305 do
+        {:ok, _} = Registry.append_provision_console(job.id, "line #{i}")
+      end
+
+      console = Repo.get(ProvisionJob, job.id).console
+      assert List.first(console)["dropped_before"] == 5
+
+      for i <- 306..315 do
+        {:ok, _} = Registry.append_provision_console(job.id, "line #{i}")
+      end
+
+      console = Repo.get(ProvisionJob, job.id).console
+      assert length(console) == 300
+      assert List.first(console)["line"] == "line 16"
+      assert List.first(console)["dropped_before"] == 15
+    end
+
+    test "cch-w33-s3: BELOW the cap nothing is dropped and the count reads 0" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, job} = Registry.append_provision_console(job.id, "create: started")
+
+      assert [entry] = job.console
+      refute Map.has_key?(entry, "dropped_before")
+      assert Map.get(entry, "dropped_before", 0) == 0
+    end
+
     test "best-effort: a late line after the job is terminal still records" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
@@ -1257,7 +1472,7 @@ defmodule BarkparkCloud.ProvisioningTest do
   end
 
   describe "POST /v1/internal/provision-jobs/:id/succeed" do
-    test "worker token + {ip} → 200 ok, job succeeded, barkpark up at ip" do
+    test "worker token + {ip} → 200 ok, job succeeded, barkpark hosted at ip, health unknown" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, job} = Registry.enqueue_provision_job(bp)
@@ -1274,7 +1489,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert json_body(conn)["ok"] == true
 
       reloaded = Registry.get_barkpark(bp.id)
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
       assert reloaded.host == "198.51.100.9"
     end
 
@@ -1310,6 +1525,38 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert reloaded.host == "198.51.100.9"
     end
 
+    test "provision_support token_id: {ip, token_id} over HTTP persists fleet_token_id on the support row (task-5866ec745efcd7f7)" do
+      {_user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      n = System.unique_integer([:positive])
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Helper #{n}",
+          slug: "helper-#{n}",
+          parent_id: main.id,
+          token_id: nil
+        })
+
+      {:ok, job} = Registry.enqueue_support_provision_job(support)
+
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/succeed",
+          %{ip: "198.51.100.9", token_id: "tok_http_reported_1"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+
+      reloaded = Registry.get_barkpark(support.id)
+      assert reloaded.fleet_token_id == "tok_http_reported_1"
+      assert reloaded.host == "198.51.100.9"
+      assert reloaded.health_status == "unknown"
+    end
+
     test "dwb (charter D9): the update-status kick is fire-and-forget — succeed 200s and flips the box live regardless of the probe's fate" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
@@ -1337,7 +1584,7 @@ defmodule BarkparkCloud.ProvisioningTest do
 
       # The synchronous succeed work is unaffected: the box is flipped live.
       reloaded = Registry.get_barkpark(bp.id)
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
       assert reloaded.host == "198.51.100.9"
     end
 
@@ -1518,7 +1765,7 @@ defmodule BarkparkCloud.ProvisioningTest do
 
       reloaded = Repo.get(ProvisionJob, job.id)
       assert reloaded.status == "succeeded"
-      assert Registry.get_barkpark(bp.id).health_status == "up"
+      assert Registry.get_barkpark(bp.id).health_status == "unknown"
     end
   end
 
@@ -2066,6 +2313,506 @@ defmodule BarkparkCloud.ProvisioningTest do
 
       assert conn.status == 409
       assert json_body(conn) == %{"error" => "stale_claim"}
+    end
+  end
+
+  # wave 13 S2. A provision failure is a REMOTE capture — ssh stderr, a provider
+  # body — so it can carry a credential the control plane never chose to print.
+  # Reading it takes nothing but team membership: GET /v1/barkparks is
+  # require_user_or_pat + require_ability("read"), no platform-admin gate on the
+  # path. These drive that exact read as a plain authenticated NON-admin user.
+  describe "GET /v1/barkparks — a remote failure capture is scrubbed before a person reads it" do
+    @secret "sk-live-9aB3xQ7zLmNpR4tV6wY2"
+    @capture "ssh: remote said Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2"
+
+    defp row_for(user, bp) do
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/barkparks", nil, user_token)
+      assert conn.status == 200
+      Enum.find(json_body(conn)["barkparks"], &(&1["id"] == bp.id))
+    end
+
+    test "provision_error is scrubbed, and the DB row keeps the raw bytes" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, @capture)
+
+      row = row_for(user, bp)
+
+      refute row["provision_error"] =~ @secret
+      assert row["provision_error"] == "ssh: remote said Authorization: Bearer [redacted]"
+
+      # The boundary scrubs; the store does not. Ops recovery is via the DB and
+      # the logs, so the raw bytes must still be there.
+      assert Repo.get(ProvisionJob, job.id).error == @capture
+    end
+
+    test "provision_steps[].detail is scrubbed, and the DB row keeps the raw bytes" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      _ =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "create", status: "failed", detail: @capture},
+          @worker_token
+        )
+
+      row = row_for(user, bp)
+
+      assert [%{"detail" => detail}] = row["provision_steps"]
+      refute detail =~ @secret
+      assert detail == "ssh: remote said Authorization: Bearer [redacted]"
+
+      assert [%{"detail" => @capture}] = Repo.get(ProvisionJob, job.id).steps
+    end
+
+    test "provision_console[].line is scrubbed, and the DB row keeps the raw bytes" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      _ =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/console",
+          %{line: @capture},
+          @worker_token
+        )
+
+      row = row_for(user, bp)
+
+      assert [%{"line" => line}] = row["provision_console"]
+      refute line =~ @secret
+      assert line == "ssh: remote said Authorization: Bearer [redacted]"
+
+      assert [%{"line" => @capture}] = Repo.get(ProvisionJob, job.id).console
+    end
+
+    test "a git SHA in the same capture survives the round trip verbatim" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, _} =
+        Registry.fail_job(job.id, "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed")
+
+      assert row_for(user, bp)["provision_error"] ==
+               "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed"
+    end
+  end
+
+  # ── cch-w33-s3: the disclosure reaches the browser, ON THE WIRE ─────────────
+  #
+  # The whole design of this slice rests on one claim: `truncated_from` and
+  # `dropped_before` are EXTRA KEYS on a schemaless jsonb console entry, so they
+  # need NO migration and NO serializer change. That claim is only worth
+  # anything if it is proved end-to-end rather than asserted — both serializer
+  # folds (`scrub_entry/2`, `caption_entry/3`) Map.put back only the keys they
+  # fetched, and a fold that rebuilt the entry instead would drop these silently
+  # while every context-level test above stayed green.
+  describe "cch-w33-s3: console disclosure survives the builder POST → user GET" do
+    defp wire_deployment(team) do
+      bp = barkpark_fixture(team)
+      n = System.unique_integer([:positive])
+      {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+      {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+      {site, d}
+    end
+
+    defp console_over_the_wire(user, site, dep_id) do
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/sites/#{site.id}/deployments", nil, user_token)
+      assert conn.status == 200
+
+      row = Enum.find(json_body(conn)["deployments"], &(&1["id"] == dep_id))
+      assert row, "the deployment must be on the user-authed deployments page"
+      row["console"]
+    end
+
+    test "truncated_from reaches a user-authed GET unchanged (no migration, no serializer change)" do
+      {user, team} = user_with_team()
+      {site, d} = wire_deployment(team)
+
+      # As the BUILDER does it: the real route, the real worker token.
+      conn =
+        call(
+          :post,
+          "/v1/builder/deployments/#{d.id}/console",
+          %{line: String.duplicate("x", 5_000)},
+          @worker_token
+        )
+
+      assert conn.status == 200
+
+      assert [%{"line" => line, "truncated_from" => 5_000}] =
+               console_over_the_wire(user, site, d.id)
+
+      assert String.length(line) == 2_000
+    end
+
+    test "dropped_before reaches the same GET on the oldest surviving entry" do
+      {user, team} = user_with_team()
+      {site, d} = wire_deployment(team)
+
+      for i <- 1..305 do
+        {:ok, _} = Registry.append_deployment_console(d.id, "line #{i}")
+      end
+
+      console = console_over_the_wire(user, site, d.id)
+
+      assert length(console) == 300
+      assert List.first(console)["line"] == "line 6"
+      assert List.first(console)["dropped_before"] == 5
+      refute Map.has_key?(List.last(console), "dropped_before")
+    end
+  end
+
+  # ── dr-w4-s4: the fleet list carries HOST PRESSURE ─────────────────────────
+  #
+  # Until this slice `barkpark_json/3` carried ~30 fields and ZERO vitals, so a
+  # box at 100% cpu and load1 5.57 was indistinguishable, on the wire, from an
+  # idle one. These drive the REAL agent route (POST /v1/agent/report) so the
+  # payload under test is the bytes the agent actually stores — never a
+  # hand-built map with keys deleted, which would prove nothing about the shapes
+  # in the field.
+  describe "GET /v1/barkparks — host pressure rides the fleet row" do
+    # The report body an agent that PREDATES the vitals beat sends: disk + pg +
+    # backup + checks, and no cpu / mem / load1 / swap / beam key at all. This is
+    # five of six boxes in the field today.
+    defp pre_vitals_report do
+      %{
+        "agent_status" => "online",
+        "version" => "0.1.0",
+        "git_commit" => "abc123def",
+        "dirty_tree" => false,
+        "health_status" => "up",
+        "disk_used_percent" => 41,
+        "pg_size_bytes" => 123_456_789,
+        "backup_ok" => true,
+        "backup_detail" => "fresh",
+        "health_checks" => []
+      }
+    end
+
+    defp beat(bp, payload) do
+      {:ok, agent_token, _} = Registry.mint_agent_token(bp, "report")
+      conn = call(:post, "/v1/agent/report", payload, agent_token)
+      assert conn.status == 200
+      :ok
+    end
+
+    defp pressure_for(user, bp) do
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/barkparks", nil, user_token)
+      assert conn.status == 200
+      row = Enum.find(json_body(conn)["barkparks"], &(&1["id"] == bp.id))
+      assert row, "the barkpark must be on its own team's fleet page"
+      row["pressure"]
+    end
+
+    test "a struggling box carries its vitals — cpu, load, swap and the BEAM's own footprint" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          Map.merge(pre_vitals_report(), %{
+            "cpu_percent" => 100,
+            "cpu_cores" => 2,
+            "mem_used_percent" => 58,
+            "load1" => 5.57,
+            "swap_used_percent" => 99,
+            "swap_total_bytes" => 2_147_483_648,
+            "beam_pss_bytes" => 900_000_000,
+            "beam_swap_bytes" => 1_900_000_000
+          })
+        )
+
+      pressure = pressure_for(user, bp)
+
+      assert pressure["cpu_percent"] == 100
+      assert pressure["mem_used_percent"] == 58
+      assert pressure["load1"] == 5.57
+      # The fence's DENOMINATOR (D52): load1 5.57 on 2 cores is 2.79x — strained.
+      # The same 5.57 on an 8-core box is 0.70x — idle. Without cores on the row
+      # the consumer cannot tell those apart, and a hardcoded 2 goes silently
+      # wrong on the first 4-core box.
+      assert pressure["cpu_cores"] == 2
+      assert pressure["disk_used_percent"] == 41
+      # The vital `mem_used_percent` HIDES: MemAvailable clears the floor
+      # precisely because the BEAM has been paged out, so a box reporting a
+      # comfortable 58% memory is at 99% swap. The row has to carry both.
+      assert pressure["swap_used_percent"] == 99
+      assert pressure["swap_total_bytes"] == 2_147_483_648
+      assert pressure["beam_pss_bytes"] == 900_000_000
+      assert pressure["beam_swap_bytes"] == 1_900_000_000
+      assert is_binary(pressure["reported_at"])
+    end
+
+    test "the LATEST beat wins — a newer report replaces an older one on the row" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok = beat(bp, Map.put(pre_vitals_report(), "cpu_percent", 3))
+      :ok = beat(bp, Map.put(pre_vitals_report(), "cpu_percent", 97))
+
+      assert pressure_for(user, bp)["cpu_percent"] == 97
+    end
+
+    test "a pre-vitals agent renders UNMETERED — every absent signal is nil, never 0" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      # A REAL stored beat, exactly as a pre-#9784 agent sends it.
+      :ok = beat(bp, pre_vitals_report())
+
+      # The payload really is missing the keys — if the agent shape ever starts
+      # carrying them this test must be re-cut, not silently pass.
+      assert [%{type: "health", payload: payload} | _] = Registry.recent_events(bp, 5)
+      refute Map.has_key?(payload, "cpu_percent")
+      refute Map.has_key?(payload, "swap_used_percent")
+
+      pressure = pressure_for(user, bp)
+
+      # What it DID measure still arrives.
+      assert pressure["disk_used_percent"] == 41
+
+      # What it did not measure reads "we did not measure" — a 0 here would be a
+      # perfectly idle machine, which is a lie about a box nobody has metered.
+      for key <- ~w(cpu_percent cpu_cores mem_used_percent load1 swap_used_percent
+                    swap_total_bytes beam_pss_bytes beam_swap_bytes) do
+        assert Map.has_key?(pressure, key), "the pressure block must always carry #{key}"
+
+        assert pressure[key] == nil,
+               "#{key} must be unmetered (nil), got #{inspect(pressure[key])}"
+      end
+    end
+
+    test "the agent's -1 'probe not wired' sentinel is unmetered too, never a fake reading" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          Map.merge(pre_vitals_report(), %{
+            "cpu_percent" => -1,
+            "mem_used_percent" => -1,
+            "load1" => -1,
+            "swap_used_percent" => -1,
+            "swap_total_bytes" => -1,
+            "beam_pss_bytes" => -1,
+            "beam_swap_bytes" => -1
+          })
+        )
+
+      pressure = pressure_for(user, bp)
+
+      for key <- ~w(cpu_percent mem_used_percent load1 swap_used_percent
+                    swap_total_bytes beam_pss_bytes beam_swap_bytes) do
+        assert pressure[key] == nil, "the -1 sentinel must render unmetered, got #{key}"
+      end
+
+      # A swapless box is a MEASURED zero and must survive as one — the sentinel
+      # guard is `< 0`, not `falsy`.
+      :ok =
+        beat(
+          bp,
+          Map.merge(pre_vitals_report(), %{"swap_used_percent" => 0, "swap_total_bytes" => 0})
+        )
+
+      swapless = pressure_for(user, bp)
+      assert swapless["swap_used_percent"] == 0
+      assert swapless["swap_total_bytes"] == 0
+    end
+
+    # THE DENOMINATOR AND ITS LATENCY (charter D103). An error RATE without the
+    # request volume it came out of cannot be read: the same 5xx/s is a 7x range
+    # of severity across the traffic levels actually observed on the fleet. Both
+    # values are already on the wire (the agent posts them on every beat) and
+    # already stored in the raw beat payload — this asserts they reach the row.
+    test "the request rate and its p95 ride the row — the denominator a share needs" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          Map.merge(pre_vitals_report(), %{
+            "req_per_s" => 1.75,
+            "p95_ms" => 32_777,
+            "err_5xx_per_s" => 0.22
+          })
+        )
+
+      pressure = pressure_for(user, bp)
+
+      assert pressure["req_per_s"] == 1.75
+      assert pressure["p95_ms"] == 32_777
+      # The pairing is the whole point: 0.22 5xx/s against 1.75 req/s is 12.6%
+      # of traffic. The same 0.22 against 11 req/s is 2.0%. Only the row that
+      # carries both can tell those apart.
+      assert pressure["err_5xx_per_s"] == 0.22
+
+      # A genuinely idle box is a MEASURED zero and must survive as one — the
+      # guard is `< 0`, not `falsy`, or "serving nothing" collapses into
+      # "nobody measured".
+      :ok = beat(bp, Map.merge(pre_vitals_report(), %{"req_per_s" => 0.0, "p95_ms" => 0}))
+
+      idle = pressure_for(user, bp)
+      assert idle["req_per_s"] == 0.0
+      assert idle["p95_ms"] == 0
+    end
+
+    test "req_per_s and p95_ms unmetered: the -1 sentinel AND an absent key both read nil" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      # ARM 1 — the sentinel. Three of the five boxes in the field emit -1 here
+      # today (probe unwired, or the instance predates the request-stats route).
+      # A 0 would make the least-instrumented box read as the fastest and the
+      # quietest in the fleet.
+      :ok = beat(bp, Map.merge(pre_vitals_report(), %{"req_per_s" => -1, "p95_ms" => -1}))
+
+      sentinel = pressure_for(user, bp)
+      assert sentinel["req_per_s"] == nil, "the -1 req/s sentinel must render unmetered"
+      assert sentinel["p95_ms"] == nil, "the -1 p95 sentinel must render unmetered"
+
+      # ARM 2 — the key is absent entirely (an agent predating the fields). The
+      # key must still be PRESENT on the block so a consumer can destructure,
+      # and its value must still be nil.
+      :ok = beat(bp, pre_vitals_report())
+
+      assert [%{type: "health", payload: payload} | _] = Registry.recent_events(bp, 5)
+      refute Map.has_key?(payload, "req_per_s")
+      refute Map.has_key?(payload, "p95_ms")
+
+      absent = pressure_for(user, bp)
+
+      for key <- ~w(req_per_s p95_ms) do
+        assert Map.has_key?(absent, key), "the pressure block must always carry #{key}"
+
+        assert absent[key] == nil,
+               "#{key} must be unmetered (nil), got #{inspect(absent[key])}"
+      end
+    end
+
+    test "a box that has NEVER beaten renders the all-unmetered block (no key, no zeros)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      pressure = pressure_for(user, bp)
+
+      assert pressure["reported_at"] == nil
+
+      for key <- ~w(cpu_percent cpu_cores mem_used_percent load1 disk_used_percent
+                    swap_used_percent swap_total_bytes beam_pss_bytes beam_swap_bytes) do
+        assert Map.has_key?(pressure, key)
+        assert pressure[key] == nil
+      end
+    end
+
+    # ARITY-1 CALL SITE. POST /v1/fleet/supports serializes a row that BY
+    # CONSTRUCTION has never beaten (it was created microseconds ago), which is
+    # exactly why pressure is a PARAMETER: a lookup inside the serializer would
+    # put a per-row query on this WRITE path for a guaranteed miss.
+    test "POST /v1/fleet/supports (arity-1 serializer) renders unmetered, not zeros" do
+      {user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/fleet/supports",
+          %{name: "Support box", parent_id: main.id, host: "10.0.0.9"},
+          user_token,
+          team.id
+        )
+
+      assert conn.status == 201
+      pressure = json_body(conn)["barkpark"]["pressure"]
+
+      assert pressure["reported_at"] == nil
+
+      for key <- ~w(cpu_percent cpu_cores mem_used_percent load1 disk_used_percent
+                    swap_used_percent swap_total_bytes beam_pss_bytes beam_swap_bytes) do
+        assert pressure[key] == nil
+      end
+    end
+
+    # THE N+1 GUARD. `Registry.recent_events/2` is single-barkpark, so mapping it
+    # over the page is a query per row — the same N+1 this domain already found
+    # and fixed once (Usage.latest_samples_by_barkpark/1). One DISTINCT ON query
+    # serves the whole page; this asserts the count, so a future "just look it up
+    # per row" refactor fails here instead of on a production page.
+    test "N boxes cost exactly ONE agent_events query for the whole page" do
+      {user, team} = user_with_team()
+
+      for i <- 1..4 do
+        bp = barkpark_fixture(team, %{slug: "pressure-n1-#{i}"})
+        :ok = beat(bp, Map.put(pre_vitals_report(), "cpu_percent", 10 * i))
+      end
+
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+
+      queries =
+        capture_repo_sql(fn ->
+          conn = call(:get, "/v1/barkparks", nil, user_token)
+          assert conn.status == 200
+          assert length(json_body(conn)["barkparks"]) == 4
+        end)
+
+      agent_event_queries = Enum.filter(queries, &String.contains?(&1, ~s(FROM "agent_events")))
+
+      assert length(agent_event_queries) == 1,
+             """
+             The fleet page must read agent_events ONCE for the whole page.
+             Ran #{length(agent_event_queries)} for 4 boxes:
+
+             #{Enum.join(agent_event_queries, "\n\n")}
+             """
+
+      assert hd(agent_event_queries) =~ "DISTINCT ON",
+             "the one query must be the DISTINCT ON latest-per-box read: #{hd(agent_event_queries)}"
+    end
+
+    # Capture the SQL this TEST PROCESS runs inside `fun`. The `self() == test`
+    # guard is load-bearing: telemetry handlers are global and the suite is
+    # async, so without it a concurrent test's queries would be counted here.
+    defp capture_repo_sql(fun) do
+      test = self()
+      id = {:dr_w4_s4_pressure_sql, make_ref()}
+
+      :telemetry.attach(
+        id,
+        [:barkpark_cloud, :repo, :query],
+        fn _event, _measure, meta, _cfg ->
+          if self() == test, do: send(test, {:dr_w4_s4_sql, meta.query})
+        end,
+        nil
+      )
+
+      try do
+        fun.()
+      after
+        :telemetry.detach(id)
+      end
+
+      drain_repo_sql([])
+    end
+
+    defp drain_repo_sql(acc) do
+      receive do
+        {:dr_w4_s4_sql, sql} -> drain_repo_sql([sql | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
     end
   end
 end

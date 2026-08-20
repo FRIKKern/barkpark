@@ -1,0 +1,13 @@
+# expect: E-008 13
+DIRECTION "add"
+VARIABLE 1 "WidgetName" TITLE "t" DESCRIPTION "d" EXAMPLES "W"
+IN "internal/widgets/registry.go"
+INSERT AFTER FIRST
+::: registry head anchor :::
+	registry["heading"] = headingWidget{}
+::: registry head anchor :::
+WITH
+::: widget registration :::
+	registry["{{.widget-name}}"] = w{}
+::: widget registration :::
+MARK "registry-{{.widget-name}}"

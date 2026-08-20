@@ -1,0 +1,33 @@
+{
+  "run_id": "grip-20260721T142145Z",
+  "recipes": [
+    {
+      "subject": "api/.sobelow-skips",
+      "quantity": "git:show",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:api/.sobelow-skips | grep -c '^[A-Za-z]'",
+      "derived_level": "L2",
+      "deps": [
+        "api/.sobelow-skips"
+      ],
+      "observed_at": "2026-07-21T14:21:45Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/router.ex",
+      "quantity": "git:diff",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git diff HEAD origin/main -- api/lib/barkpark_web/router.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/router.ex"
+      ],
+      "observed_at": "2026-07-21T14:21:45Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:log",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git log --oneline origin/main | grep -c 4c4051308",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-21T14:21:45Z"
+    }
+  ]
+}

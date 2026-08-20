@@ -333,23 +333,9 @@ defmodule Barkpark.Plugins.OnixEdit do
   def codelist_seeders, do: CodelistSeeders.seeders()
 
   @doc """
-  Declarative API test specs the runner can fire on demand (Goal
-  `barkpark-bsp`). Four high-signal smokes covering OnixEdit's main
-  publicly-observable surfaces:
-
-    1. Book schema reachable via the legacy public `/api/schemas` route.
-    2. Book schema reachable via the admin `/v1/schemas/production` route.
-    3. The plugin's top-menu tab + desk-link render in `/studio/production`.
-    4. Mutation round-trip — create a probe book on the admin mutate
-       endpoint, then `:cleanup` deletes it (per plan §0 Q1, cleanup
-       fires always after asserts).
-
-  Auth modes per plan §0 Q3: `:none` for the two public reads, `:admin`
-  for the two write-or-admin endpoints. Single-request only per Q5.
-
-  # TODO: add Bokbasen dryrun spec once credentials are wired via
-  # :plugin_setting auth mode — the sandbox endpoint needs real OAuth
-  # creds and we don't want the default smoke to hit external services.
+  Declarative API test specs the runner can fire on demand. See
+  `Barkpark.Plugins.OnixEdit.ApiTests` (the `specs/0` implementation)
+  for the full catalog and the Bokbasen dryrun TODO.
   """
   @impl Barkpark.Plugin
   def api_tests, do: ApiTests.specs()

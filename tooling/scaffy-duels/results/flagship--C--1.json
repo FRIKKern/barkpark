@@ -1,0 +1,162 @@
+{
+  "cell": "flagship--C--1",
+  "chore": "flagship",
+  "arm": "C",
+  "rep": "1",
+  "cap_usd": 0.0,
+  "worktree": "/private/tmp/scaffy-duel-flagship--C--1",
+  "duration_ms": 29000,
+  "warm_ms": 83000,
+  "meter": {
+    "total_cost_usd": 0.0,
+    "usage": null,
+    "source": "engine"
+  },
+  "score": {
+    "gates_green": true,
+    "asserts": [
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "func (duelmarkRenderer) Render(b Block, ctx RenderCtx) []string"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "func TestDuelmarkRenderer(t *testing.T)"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "MARK:go-registry-duelmark"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "MARK:js-emitter-duelmark"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "MARK:js-map-duelmark"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "MARK:js-case-duelmark"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "toHaveLength(47)"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "MARK:ex-compose-duelmark"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "MARK:parity-input-duelmark"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "EXPECTED_COUNT=47"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "== 47"
+      },
+      {
+        "kind": "cmd",
+        "tier": null,
+        "status": "pass",
+        "text": "go vet ./internal/pdrender/..."
+      },
+      {
+        "kind": "cmd",
+        "tier": null,
+        "status": "pass",
+        "text": "CC=/usr/bin/clang go build ./internal/pdrender/"
+      },
+      {
+        "kind": "cmd",
+        "tier": null,
+        "status": "pass",
+        "text": "go test ./internal/pdrender/ -run TestDuelmarkRenderer -count=1"
+      },
+      {
+        "kind": "cmd",
+        "tier": null,
+        "status": "pass",
+        "text": "cd js && pnpm install && pnpm build"
+      },
+      {
+        "kind": "cmd",
+        "tier": null,
+        "status": "pass",
+        "text": "cd js/packages/react && npx tsc --noEmit"
+      },
+      {
+        "kind": "cmd",
+        "tier": null,
+        "status": "pass",
+        "text": "cd js/packages/react && npx vitest run"
+      },
+      {
+        "kind": "cmd",
+        "tier": "ci",
+        "status": "deferred",
+        "text": "cd api && mix test test/barkpark/portable_doc/render_test.exs"
+      },
+      {
+        "kind": "cmd",
+        "tier": null,
+        "status": "pass",
+        "text": "cd api && MIX_ENV=test CC=/usr/bin/clang mix barkpark.portable_doc.gen_pd_parity"
+      },
+      {
+        "kind": "file-exists",
+        "tier": null,
+        "status": "pass",
+        "text": "api/test/support/fixtures/pd-parity/duelmark.golden.json"
+      },
+      {
+        "kind": "file-exists",
+        "tier": null,
+        "status": "pass",
+        "text": "js/packages/react/tests/fixtures/pd-golden/duelmark.golden.json"
+      },
+      {
+        "kind": "cmd",
+        "tier": null,
+        "status": "pass",
+        "text": "bash scripts/pd-parity-completeness.sh"
+      },
+      {
+        "kind": "cmd",
+        "tier": null,
+        "status": "pass",
+        "text": "cd api && CC=/usr/bin/clang mix test test/barkpark/portable_doc/render/pd_golden_parity_test.exs"
+      }
+    ],
+    "tier_ci_forced": [],
+    "agent_gate": [],
+    "diff_sha256": "42ec6e0e63cc7d949100c5b100c8607ab9b9bf6a795ef5396da80b9ed94bcd3f",
+    "reversible": true
+  }
+}

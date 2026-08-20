@@ -135,8 +135,10 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   Secondary-doc picker modal — reuses the reference-picker visual
   treatment so users get a familiar interaction. Filter is client-side
   string-contains against the candidates list bound on `open-secondary-picker`.
-  Selecting a row fires `select-secondary`; clicking the backdrop or the
-  ✕ fires `close-secondary-picker`.
+  Selecting a row fires `select-secondary`; the ✕ and Escape fire
+  `close-secondary-picker`, and so does a click on the backdrop — via
+  `phx-click-away` on the card, never via a `phx-click` on the backdrop
+  plus an inline stop-propagation (see the markup comment / charter D96).
   """
   attr :show_secondary_picker, :boolean, default: false
   attr :secondary_search, :string, default: ""
@@ -159,7 +161,20 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
 
     ~H"""
     <%= if @show_secondary_picker do %>
-      <div class="modal-backdrop" phx-click="close-secondary-picker" data-test-id="secondary-picker-modal">
+      <div class="modal-backdrop" data-test-id="secondary-picker-modal">
+        <%!--
+        The backdrop does NOT carry its own `phx-click` dismiss and the card does
+        NOT carry an inline `onclick="event.stopPropagation()"`. Both facts are
+        one decision: LiveView's click handling is window-delegated, so an inline
+        stopPropagation on the card kills EVERY `phx-click` inside it — the ✕,
+        every candidate row — and the modal is silently dead while every server
+        handler is innocent (charter D96; five waves of socket-level tests could
+        not see it). The dismiss intent — "a click outside the card closes it,
+        a click inside it does not" — is served by `phx-click-away` on the card
+        itself, which is scoped by containment rather than by cancelling events.
+        Do not re-add either attribute; `studio_live_secondary_pane_dom_test.exs`
+        fails on the rendered markup if you do.
+        --%>
         <div
           class="modal-card"
           role="dialog"
@@ -168,7 +183,6 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
           phx-click-away="close-secondary-picker"
           phx-window-keydown="close-secondary-picker"
           phx-key="escape"
-          onclick="event.stopPropagation()"
         >
           <div class="modal-header">
             <h3 id="secondary-picker-title">Open in new pane</h3>

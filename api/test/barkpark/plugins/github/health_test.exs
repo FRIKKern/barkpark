@@ -348,4 +348,76 @@ defmodule Barkpark.Plugins.Github.HealthTest do
              }
     end
   end
+
+  # --- dataset-scoped snapshot (D18) -----------------------------------------
+
+  describe "dataset-pinned snapshot (D18)" do
+    test "a pinned dataset narrows conflicts + datasets; snapshot(A) differs from snapshot(B)" do
+      # Dark plugin → no repo filter, so the isolation on show is PURELY the
+      # dataset filter (not a repo coincidence).
+      restore_config(nil)
+
+      record_conflict!(%{dataset: "alpha", kind: "detached", issue: 201})
+      record_conflict!(%{dataset: "beta", kind: "detached", issue: 202})
+      record_conflict!(%{dataset: "beta", kind: "out_of_band_edit", issue: 203})
+
+      a = Health.snapshot("alpha")
+      b = Health.snapshot("beta")
+
+      # conflicts filtered to the pinned dataset — the other dataset is invisible
+      assert a.conflicts.total == 1
+      assert a.conflicts.detached == 1
+      assert a.conflicts.out_of_band_edit == 0
+      assert Enum.map(a.conflicts.open, & &1.dataset) == ["alpha"]
+
+      assert b.conflicts.total == 2
+      assert b.conflicts.detached == 1
+      assert b.conflicts.out_of_band_edit == 1
+      assert a.conflicts.open |> Enum.map(& &1.dataset) |> Enum.uniq() == ["alpha"]
+      assert b.conflicts.open |> Enum.map(& &1.dataset) |> Enum.uniq() == ["beta"]
+
+      # per-dataset lag rows narrowed to exactly the pinned dataset
+      assert Enum.map(a.datasets, & &1.dataset) == ["alpha"]
+      assert Enum.map(b.datasets, & &1.dataset) == ["beta"]
+
+      # the two snapshots genuinely differ (the whole-fleet leak is closed)
+      refute a.conflicts == b.conflicts
+    end
+
+    test "a pinned dataset the plugin does not configure still yields its OWN one row" do
+      # Settings.datasets/0 lists only production/staging, but a token scoped to
+      # a third dataset must see its OWN row (zeros), never the configured fleet.
+      put_config(full_creds(github_mirror_datasets: ["production", "staging"]))
+
+      snap = Health.snapshot("gamma")
+
+      assert Enum.map(snap.datasets, & &1.dataset) == ["gamma"]
+    end
+
+    test "blank / non-binary filter is the whole-fleet view (legacy behavior held)" do
+      put_config(full_creds(github_mirror_datasets: ["production", "staging"]))
+
+      record_conflict!(%{
+        repo: "FRIKKern/barkpark",
+        dataset: "production",
+        kind: "detached",
+        issue: 301
+      })
+
+      record_conflict!(%{
+        repo: "FRIKKern/barkpark",
+        dataset: "staging",
+        kind: "detached",
+        issue: 302
+      })
+
+      fleet = Health.snapshot()
+
+      assert fleet.conflicts.total == 2
+      assert Enum.map(fleet.datasets, & &1.dataset) == ["production", "staging"]
+
+      # a blank string trims to "" → whole-fleet, identical to the no-arg call
+      assert Health.snapshot("   ") == fleet
+    end
+  end
 end

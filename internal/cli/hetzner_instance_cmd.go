@@ -172,6 +172,11 @@ func instDNSClient(out *writer, g globals, a *hzArgs) (*hcloud.Client, bool) {
 	return newHetznerClient(tok).HCloud(), true
 }
 
+func instDNSUsesComputeToken(a *hzArgs) bool {
+	return strings.TrimSpace(a.val("dns-token")) == "" &&
+		strings.TrimSpace(os.Getenv("BARKPARK_DNS_HCLOUD_TOKEN")) == ""
+}
+
 // cpFleet is the control-plane registry client, authenticated with the shared
 // WORKER_TOKEN (the same credential the provisioner drains its queues with).
 // nil ⇔ no token available: registry steps are skipped, visibly.
@@ -379,15 +384,67 @@ func instLabelOf(fqdn string) (label, zone string) {
 	return parts[0], parts[1]
 }
 
-// instArchive snapshots srv with the resurrection labels. stop=true quiesces
-// the data writers first (best-effort — an unreachable box degrades to an
-// online, crash-consistent snapshot with a warning, never a hard stop).
-func instArchive(ctx context.Context, out *writer, hc *hcloud.Client, srv *hcloud.Server, fqdn string, stop bool) (*hcloud.Image, error) {
+// instArchiveObs is what an archive OBSERVED, as opposed to what the create
+// action echoed back. The receipt is built from this and nothing else.
+//
+// Two facts in here are the difference between an honest archive receipt and a
+// confident one:
+//
+//   - quiesced. A --stop archive whose SSH quiesce failed degrades to an
+//     online, crash-consistent snapshot. That degradation was reported only
+//     through out.info, and writer.info writes to stderr ONLY WHEN VERBOSE —
+//     so `archive --stop -o json` emitted a BYTE-IDENTICAL receipt for a
+//     cleanly-stopped Postgres and a live one. `quiesced` is therefore NOT
+//     optional: every archive receipt states whether writers were stopped.
+//   - image / confirm. The create action's response echoes an image id. The
+//     action completing says the SNAPSHOT JOB finished, not that a usable
+//     image exists, so the id is re-read (GET /images/<id>) and the receipt
+//     carries the OBSERVED status. A read that cannot confirm is confirmation
+//     unavailable, never a failed verb — the same escape the server verbs take.
+type instArchiveObs struct {
+	image      *hcloud.Image // the image the receipt names (FRESH when confirmed)
+	status     string        // observed image status; "" when unconfirmed
+	confirm    string        // "" = confirmed; else why confirmation is unavailable
+	quiesced   bool          // writers were stopped before the snapshot
+	asked      bool          // --stop asked for the quiesce
+	quiesceErr string        // why the quiesce failed, when it was asked for and failed
+}
+
+// receipt renders the observed half of an archive receipt. Callers merge it
+// into their own payload (fqdn, ipv4, …).
+func (o *instArchiveObs) receipt() map[string]any {
+	extra := map[string]any{
+		"image_id": o.image.ID,
+		"quiesced": o.quiesced,
+	}
+	if o.quiesceErr != "" {
+		extra["quiesce_error"] = o.quiesceErr
+	}
+	if o.confirm != "" {
+		extra["confirmation"] = "unavailable"
+		extra["confirmation_error"] = o.confirm
+		return extra
+	}
+	extra["image_status"] = o.status
+	return extra
+}
+
+// instArchive snapshots srv with the resurrection labels, then RE-READS the
+// image it created. stop=true quiesces the data writers first (best-effort — an
+// unreachable box degrades to an online, crash-consistent snapshot, which the
+// receipt reports as quiesced:false, never a hard stop).
+func instArchive(ctx context.Context, out *writer, hc *hcloud.Client, srv *hcloud.Server, fqdn string, stop bool) (*instArchiveObs, error) {
+	obs := &instArchiveObs{asked: stop}
 	if stop && hzIPv4(srv) != "" {
 		out.info("quiescing %s before the snapshot…", srv.Name)
 		if err := instSSH(hzIPv4(srv), instStopCommand); err != nil {
 			out.info("clean stop failed (%v) — taking an online snapshot instead", err)
+			obs.quiesceErr = err.Error()
+		} else {
+			obs.quiesced = true
 		}
+	} else if stop {
+		obs.quiesceErr = "the box reports no IPv4 address, so the writers could not be reached"
 	}
 	labels := map[string]string{
 		instArchiveLabelKey: "true",
@@ -409,7 +466,39 @@ func instArchive(ctx context.Context, out *writer, hc *hcloud.Client, srv *hclou
 	if err := hzWait(ctx, hc, result.Action); err != nil {
 		return nil, fmt.Errorf("archive of %s: snapshot action failed: %w", srv.Name, err)
 	}
-	return result.Image, nil
+	obs.image = result.Image
+
+	// The post-condition, and the reason this verb is exempt from the SERVER
+	// post-condition table rather than keyed in it: an archive changes no field
+	// on hcloud.Server. What it must produce is an IMAGE, so the honest
+	// confirmation is GET /images/<id> — the same ground create-image declared
+	// and the follow-up row pds-w26-create-image-image-postcondition owns.
+	// `creating` is not settled and not a failure: it is polled, then reported
+	// as unconfirmed. Any other non-available status IS a failure — resurrect
+	// and clone-swap both boot from this image, so shipping a broken one is
+	// worse than failing here.
+	fresh, _, gerr := hc.Image.GetByID(ctx, result.Image.ID)
+	for i := 0; i < instPollMax && gerr == nil && fresh != nil && fresh.Status == hcloud.ImageStatusCreating; i++ {
+		time.Sleep(instPoll)
+		fresh, _, gerr = hc.Image.GetByID(ctx, result.Image.ID)
+	}
+	switch {
+	case gerr != nil:
+		obs.confirm = fmt.Sprintf("the snapshot image %d could not be re-read: %v", result.Image.ID, gerr)
+	case fresh == nil:
+		obs.confirm = fmt.Sprintf("the snapshot image %d is not readable, so the archive could not be confirmed", result.Image.ID)
+	case fresh.Status == hcloud.ImageStatusCreating:
+		obs.image = fresh
+		obs.confirm = fmt.Sprintf("the snapshot image %d still reports status %q after %s, so the archive could not be confirmed",
+			fresh.ID, fresh.Status, time.Duration(instPollMax)*instPoll)
+	case fresh.Status != hcloud.ImageStatusAvailable:
+		return nil, fmt.Errorf("archive of %s: the snapshot action completed but image %d reports status %q, not %q — "+
+			"nothing can be restored from it", srv.Name, fresh.ID, fresh.Status, hcloud.ImageStatusAvailable)
+	default:
+		obs.image = fresh
+		obs.status = string(fresh.Status)
+	}
+	return obs, nil
 }
 
 // instArchivesFor lists archive images, newest first, optionally fqdn-scoped.
@@ -659,14 +748,13 @@ func runInstanceArchive(out *writer, g globals, args []string) int {
 	if srv == nil {
 		return useError(out, "failed", "archive "+fqdn+": no server carries that identity (see `bp cloud hetzner instance audit`)", exitNotFound)
 	}
-	img, aerr := instArchive(ctx, out, hc, srv, fqdn, a.bools["stop"])
+	obs, aerr := instArchive(ctx, out, hc, srv, fqdn, a.bools["stop"])
 	if aerr != nil {
 		return hzFail(out, "archive "+fqdn, aerr)
 	}
-	return hzDone(out, "archive", srv, map[string]any{
-		"image_id": img.ID,
-		"fqdn":     fqdn,
-	})
+	extra := obs.receipt()
+	extra["fqdn"] = fqdn
+	return hzDone(out, "archive", srv, extra)
 }
 
 func runInstanceArchives(out *writer, g globals, args []string) int {
@@ -786,11 +874,23 @@ func runInstanceDecommission(out *writer, g globals, args []string) int {
 	// 1. Archive first — nothing is destroyed before the resurrection point
 	//    exists. Data writers are stopped (the box is about to die anyway).
 	if srv != nil && !a.bools["no-archive"] {
-		img, aerr := instArchive(ctx, out, hc, srv, fqdn, true)
+		obs, aerr := instArchive(ctx, out, hc, srv, fqdn, true)
 		if aerr != nil {
 			return hzFail(out, "decommission "+fqdn, aerr)
 		}
-		report["archive_image_id"] = img.ID
+		report["archive_image_id"] = obs.image.ID
+		report["archive_quiesced"] = obs.quiesced
+		// decommission DESTROYS the box, so this archive is the only
+		// resurrection point there will be — and unlike adopt/eject, nothing
+		// downstream boots from it to prove it works. If instArchive could not
+		// settle the image read, the receipt must say so here too; carrying the
+		// id alone would assert a restorable archive nobody confirmed.
+		if obs.confirm != "" {
+			report["archive_confirmation"] = "unavailable"
+			report["archive_confirmation_error"] = obs.confirm
+		} else {
+			report["archive_image_status"] = obs.status
+		}
 	}
 
 	// 2. Registry row: prefer the control plane's own deprovision queue. When
@@ -1058,15 +1158,17 @@ func runInstanceResurrect(out *writer, g globals, args []string) int {
 
 // instCloneSwap is the shared engine of adopt/eject: archive the current box,
 // boot a clone from that archive, repoint DNS at the clone, health-gate, then
-// destroy the old box. Returns the clone and the archive image. The fqdn (and
-// so the on-box Caddy/PHX_HOST config) is deliberately UNCHANGED — that is
-// what makes the swap zero-reconfig.
-func instCloneSwap(ctx context.Context, out *writer, hc *hcloud.Client, dns *hcloud.Client, srv *hcloud.Server, fqdn, sshKey string, keepOld bool) (*hcloud.Server, *hcloud.Image, error) {
+// destroy the old box. Returns the clone and what the archive OBSERVED (the
+// callers' receipts report the archive's quiesce state, not just its id). The
+// fqdn (and so the on-box Caddy/PHX_HOST config) is deliberately UNCHANGED —
+// that is what makes the swap zero-reconfig.
+func instCloneSwap(ctx context.Context, out *writer, hc *hcloud.Client, dns *hcloud.Client, srv *hcloud.Server, fqdn, sshKey string, keepOld bool) (*hcloud.Server, *instArchiveObs, error) {
 	label, fzone := instLabelOf(fqdn)
-	img, err := instArchive(ctx, out, hc, srv, fqdn, true)
+	obs, err := instArchive(ctx, out, hc, srv, fqdn, true)
 	if err != nil {
 		return nil, nil, err
 	}
+	img := obs.image
 	// Placement comes from the live source box, not the image labels — the
 	// clone must match the box it replaces even if the archive predates it.
 	typ := ""
@@ -1075,21 +1177,21 @@ func instCloneSwap(ctx context.Context, out *writer, hc *hcloud.Client, dns *hcl
 	}
 	clone, err := instCreateFromArchive(ctx, out, hc, img, instServerName(label, img), fqdn, typ, hzServerLocation(srv), sshKey)
 	if err != nil {
-		return nil, img, err
+		return nil, obs, err
 	}
 	if err := instUpsertA(ctx, dns, fzone, label, hzIPv4(clone)); err != nil {
-		return clone, img, fmt.Errorf("clone %s is up at %s but DNS failed: %w", clone.Name, hzIPv4(clone), err)
+		return clone, obs, fmt.Errorf("clone %s is up at %s but DNS failed: %w", clone.Name, hzIPv4(clone), err)
 	}
 	out.info("waiting for https://%s/api/schemas on the clone…", fqdn)
 	if err := instHealth(fqdn, hzIPv4(clone)); err != nil {
-		return clone, img, fmt.Errorf("clone %s is up but the health gate failed: %w (old box %s left untouched)", clone.Name, err, srv.Name)
+		return clone, obs, fmt.Errorf("clone %s is up but the health gate failed: %w (old box %s left untouched)", clone.Name, err, srv.Name)
 	}
 	if !keepOld {
 		if err := instDeleteServer(ctx, hc, srv, fqdn, true); err != nil {
-			return clone, img, fmt.Errorf("clone is serving but deleting the old box failed: %w", err)
+			return clone, obs, fmt.Errorf("clone is serving but deleting the old box failed: %w", err)
 		}
 	}
-	return clone, img, nil
+	return clone, obs, nil
 }
 
 func runInstanceAdopt(out *writer, g globals, args []string) int {
@@ -1133,7 +1235,7 @@ func runInstanceAdopt(out *writer, g globals, args []string) int {
 		return useError(out, "failed", fmt.Sprintf("adopt %s: v1 adoption keeps the fqdn, so it must live under the fleet zone %s", fqdn, zone), exitUsage)
 	}
 
-	clone, img, serr := instCloneSwap(ctx, out, hc, dns, srv, fqdn, a.val("ssh-key"), a.bools["keep-old"])
+	clone, obs, serr := instCloneSwap(ctx, out, hc, dns, srv, fqdn, a.val("ssh-key"), a.bools["keep-old"])
 	if serr != nil {
 		return useError(out, "failed", "adopt "+fqdn+": "+serr.Error(), exitGeneric)
 	}
@@ -1159,7 +1261,8 @@ func runInstanceAdopt(out *writer, g globals, args []string) int {
 	return hzDone(out, "adopt", clone, map[string]any{
 		"fqdn":             fqdn,
 		"ipv4":             hzIPv4(clone),
-		"archive_image_id": img.ID,
+		"archive_image_id": obs.image.ID,
+		"archive_quiesced": obs.quiesced,
 		"registry_id":      row.ID,
 		"team_id":          row.TeamID,
 	})
@@ -1214,22 +1317,54 @@ func runInstanceEject(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "eject "+fqdn+": no registry row — it is already standalone", exitNotFound)
 	}
 
-	clone, img, serr := instCloneSwap(ctx, out, hc, dns, srv, fqdn, a.val("ssh-key"), a.bools["keep-old"])
+	clone, obs, serr := instCloneSwap(ctx, out, hc, dns, srv, fqdn, a.val("ssh-key"), a.bools["keep-old"])
 	if serr != nil {
 		return useError(out, "failed", "eject "+fqdn+": "+serr.Error(), exitGeneric)
 	}
 
 	// The clone is standalone: detach the row registry-only (the worker must
 	// NOT tear the clone down — that's the whole point).
-	if _, derr := cp.Deprovision(row.ID, true); derr != nil {
+	status, derr := cp.Deprovision(row.ID, true)
+	if derr != nil {
 		return useError(out, "failed", "eject "+fqdn+": clone "+clone.Name+" is serving but the registry detach failed: "+derr.Error(), exitGeneric)
 	}
-	return hzDone(out, "eject", clone, map[string]any{
+	extra := map[string]any{
 		"fqdn":             fqdn,
 		"ipv4":             hzIPv4(clone),
-		"archive_image_id": img.ID,
-		"note":             "now standalone — the control plane no longer manages it",
-	})
+		"archive_image_id": obs.image.ID,
+		"archive_quiesced": obs.quiesced,
+		"registry_detach":  status,
+	}
+
+	// THE POST-CONDITION, and why eject may not report on err == nil alone.
+	// Deprovision RETURNS the status the control plane chose ("removed" |
+	// "deprovisioning"); a control plane that ignored the detach key answers
+	// 200 with "deprovisioning" and enqueues a worker teardown — of the clone
+	// this verb just built. So the claim "now standalone" is earned by TWO
+	// observations: the returned status is "removed", and the row is gone from
+	// a fresh cp.List(). Anything else is an unconfirmed detach: not a failed
+	// verb (the clone is serving) and NOT a silent ✓ either — it takes the
+	// same hzPartial / confirmation-unavailable shape runHetznerServerAction
+	// takes when only the confirming read fails, so the operator is told to
+	// look rather than told a fact nobody checked.
+	unconfirmed := ""
+	if status != "removed" {
+		unconfirmed = fmt.Sprintf("the control plane accepted the detach but reports status %q, not \"removed\" — "+
+			"a worker deprovision job may be en route to tear down the clone this eject just built", status)
+	} else if rows, lerr := cp.List(); lerr != nil {
+		extra["confirmation_error"] = lerr.Error()
+		unconfirmed = "the detach reported \"removed\" but the registry could not be re-read to confirm the row is gone"
+	} else if still := cpFindRow(rows, label, fzone, hzIPv4(srv)); still != nil {
+		unconfirmed = fmt.Sprintf("the detach reported \"removed\" but registry row %s is still present — "+
+			"the control plane may still manage this instance", still.ID)
+	}
+	if unconfirmed != "" {
+		extra["confirmation"] = "unavailable"
+		return hzPartial(out, "eject", clone, unconfirmed+" — re-check with `bp cloud hetzner instance audit`", extra)
+	}
+	extra["registry_row"] = "gone"
+	extra["note"] = "now standalone — the control plane no longer manages it (detach reported removed and the row is gone)"
+	return hzDone(out, "eject", clone, extra)
 }
 
 // ---------------------------------------------------------------------------
@@ -1266,6 +1401,7 @@ func runInstanceAudit(out *writer, g globals, args []string) int {
 	if !ok {
 		return exitAuth
 	}
+	dnsUsesComputeToken := instDNSUsesComputeToken(a)
 	dns, ok := instDNSClient(out, g, a)
 	if !ok {
 		return exitAuth
@@ -1281,7 +1417,7 @@ func runInstanceAudit(out *writer, g globals, args []string) int {
 	}
 	rrsets, derr := dns.Zone.AllRRSets(ctx, hzZoneRef(zone))
 	if derr != nil {
-		return hzFail(out, "audit: list dns records", derr)
+		return hzDNSFail(out, "audit: list dns records", derr, dnsUsesComputeToken)
 	}
 	var rows []cpBarkpark
 	cp := instCP(a)

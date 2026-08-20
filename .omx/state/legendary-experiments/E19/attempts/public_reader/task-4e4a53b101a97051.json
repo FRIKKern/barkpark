@@ -1,0 +1,22 @@
+{
+  "accepted_capture": false,
+  "attempt_sha256": "3a99c15349ba3f573a3e9af500eb1e5e05231244fa590faa10271ae3e7f4808a",
+  "attempt_status": "BLOCKED",
+  "candidate_capsule_sha256": "912313a1cb17634c82c928d8f961b447e9866c61348d99f49abc03e383346195",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_source_sha256": "d09357281ba7c09de09cdfad583bbf237784642f436858a72501f7606174a7ff",
+  "capture_sha256": null,
+  "capture_timestamp": null,
+  "deployment_id": null,
+  "evidence_boundary": "RECONCILED_REAL_CELL_ATTEMPT_RECORD_NOT_A_CAPTURE",
+  "explicit_error": "NO_ISOLATED_DEPLOYED_RECORD_WITH_E16_PROVENANCE; URL_REFLECTION_IS_NOT_ACCEPTED",
+  "fixture_id": "task-4e4a53b101a97051",
+  "fixture_kind": "task",
+  "invocation_session": "PREDEPLOYMENT_STOP_NO_REAL_SESSION",
+  "production_contacted": false,
+  "proxy_derived": false,
+  "schema_version": "legendary-e19-attempt/v1",
+  "silent_blank": false,
+  "surface": "public_reader"
+}

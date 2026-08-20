@@ -13,7 +13,9 @@ defmodule Barkpark.Tasks.Schema do
   alias Barkpark.Tasks.Validation
 
   @doc """
-  Returns the `%SchemaDefinition{}` struct the W7 substrate needs: `task`.
+  Returns the `%SchemaDefinition{}` structs the task substrate needs:
+  `task` (the dossier) and `listener` (fleet presence — see
+  `listener_schema/1`).
 
   The schema is the **task dossier** — the complete working memory an AI
   agent needs for one unit of work, in four editor groups: a *Brief* it
@@ -36,7 +38,7 @@ defmodule Barkpark.Tasks.Schema do
   """
   @spec schema_definitions(String.t()) :: [SchemaDefinition.t()]
   def schema_definitions(dataset \\ "production") do
-    [task_schema(dataset)]
+    [task_schema(dataset), listener_schema(dataset)]
   end
 
   @doc "Just the `task` schema struct (callers that only need one)."
@@ -72,6 +74,16 @@ defmodule Barkpark.Tasks.Schema do
 
       # Bookmarkable ?desk= filter chips over the task list pane.
       desk_groups: [
+        # Thought states at the ladder bottom (task-lifecycle-visibility):
+        # candidates being weighed or investigated, before they are felt ready
+        # (open). Mirrors the closed-chip `{"in":[...]}` grouping pattern.
+        %{
+          "name" => "thinking",
+          "title" => "Thinking",
+          "filter" => %{
+            "content.lifecycle_status" => %{"in" => ["considering", "researching"]}
+          }
+        },
         %{
           "name" => "open",
           "title" => "Open",
@@ -202,6 +214,81 @@ defmodule Barkpark.Tasks.Schema do
           "description" =>
             "Concise plain-text/Markdown fallback and search excerpt. Put the presentation-grade brief in brief as PortableDoc; text-only clients read this field."
         },
+        %{
+          "name" => "purpose",
+          "title" => "Purpose",
+          "type" => "composite",
+          "group" => "brief",
+          "description" =>
+            "Why this task exists, its intended endgame, scored importance/relevance with reasons, and evidence for the claims. Readers label any missing-value fallback as derived.",
+          "fields" => [
+            %{"name" => "part_of", "title" => "What this is part of", "type" => "string"},
+            %{
+              "name" => "impact",
+              "title" => "What this blocks or enables",
+              "type" => "text",
+              "rows" => 2
+            },
+            %{
+              "name" => "statement",
+              "title" => "What this accomplishes",
+              "type" => "text",
+              "rows" => 3
+            },
+            %{
+              "name" => "why",
+              "title" => "Why this matters",
+              "type" => "text",
+              "rows" => 3,
+              "description" =>
+                "State the causal reason this task is necessary inside its parent mission: the problem, risk, or missing capability it resolves and why that contribution matters to the larger goal. Do not restate the title, acceptance criteria, or desired outcome."
+            },
+            %{"name" => "endgame", "title" => "Endgame", "type" => "text", "rows" => 3},
+            %{
+              "name" => "importance",
+              "title" => "Importance",
+              "type" => "composite",
+              "fields" => [
+                %{
+                  "name" => "score",
+                  "title" => "Score (0–100)",
+                  "type" => "number",
+                  "validation" => %{"min" => 0, "max" => 100}
+                },
+                %{"name" => "reason", "title" => "Reason", "type" => "text", "rows" => 2}
+              ]
+            },
+            %{
+              "name" => "relevance",
+              "title" => "Relevance",
+              "type" => "composite",
+              "fields" => [
+                %{
+                  "name" => "score",
+                  "title" => "Score (0–100)",
+                  "type" => "number",
+                  "validation" => %{"min" => 0, "max" => 100}
+                },
+                %{"name" => "reason", "title" => "Reason", "type" => "text", "rows" => 2}
+              ]
+            },
+            %{
+              "name" => "proof",
+              "title" => "Proof",
+              "type" => "arrayOf",
+              "ordered" => true,
+              "of" => %{
+                "name" => "proof_item",
+                "type" => "composite",
+                "fields" => [
+                  %{"name" => "claim", "title" => "Claim", "type" => "text", "rows" => 2},
+                  %{"name" => "evidence", "title" => "Evidence", "type" => "text", "rows" => 2},
+                  %{"name" => "source", "title" => "Source", "type" => "string"}
+                ]
+              }
+            }
+          ]
+        },
 
         # Approach sketch inline; the FULL design doc travels as design_doc.
         %{
@@ -269,6 +356,86 @@ defmodule Barkpark.Tasks.Schema do
               "options" => ["xs", "s", "m", "l", "xl"]
             },
             %{"name" => "reason", "title" => "Reason", "type" => "string"}
+          ]
+        },
+
+        # Advisory execution routing only. The strict nested contract lives in
+        # Tasks.ExecutionPolicy; no command/env/cwd/secret/security knobs exist.
+        %{
+          "name" => "execution_policy",
+          "title" => "Execution policy",
+          "type" => "composite",
+          "group" => "brief",
+          "description" =>
+            "Optional version-1 advisory routing hints. Claim freezes a resolved snapshot; this policy cannot execute commands or set environment, cwd, secrets, permissions, or security controls.",
+          "fields" => [
+            %{
+              "name" => "version",
+              "title" => "Version",
+              "type" => "number",
+              "validation" => %{"required" => true, "min" => 1, "max" => 1}
+            },
+            %{
+              "name" => "agent_type",
+              "title" => "Agent type",
+              "type" => "string",
+              "description" => "Advisory typed-agent role, such as executor or verifier."
+            },
+            %{
+              "name" => "model",
+              "title" => "Model",
+              "type" => "string",
+              "description" => "Advisory model identifier; provider availability still governs."
+            },
+            %{
+              "name" => "reasoning_effort",
+              "title" => "Reasoning effort",
+              "type" => "select",
+              "options" => ~w(minimal low medium high xhigh)
+            },
+            %{
+              "name" => "resource_class",
+              "title" => "Resource class",
+              "type" => "select",
+              "options" => ~w(light standard heavy),
+              "description" => "Advisory capacity class; it does not directly control a process."
+            }
+          ]
+        },
+        %{
+          "name" => "queue_gate",
+          "title" => "Execution gate",
+          "type" => "composite",
+          "group" => "brief",
+          "description" =>
+            "Optional strict version-1 execution gate. Legacy or absent gates are executable. foreign_claimed is derived from live claim state and cannot be stored.",
+          "fields" => [
+            %{
+              "name" => "version",
+              "title" => "Version",
+              "type" => "number",
+              "validation" => %{"required" => true, "min" => 1, "max" => 1}
+            },
+            %{
+              "name" => "state",
+              "title" => "State",
+              "type" => "select",
+              "options" => ~w(executable human_gated parked evidence_stalled)
+            },
+            %{
+              "name" => "reason",
+              "title" => "Reason",
+              "type" => "text",
+              "rows" => 3,
+              "description" => "Required for every non-executable state; absent for executable."
+            },
+            %{
+              "name" => "evidence",
+              "title" => "Evidence",
+              "type" => "string",
+              "description" =>
+                "Required for evidence_stalled; optional for other non-executable states."
+            }
           ]
         },
 
@@ -381,7 +548,7 @@ defmodule Barkpark.Tasks.Schema do
           "group" => "work",
           "validation" => %{"required" => true},
           "description" =>
-            "open | in_progress | blocked | done | cancelled. Engine-written by claim/close/sweep; agents do not set in_progress by hand."
+            "considering | researching | open | in_progress | blocked | done | cancelled. OPEN MEANS READY — only open|blocked is claimable. considering/researching are thought states (a candidate the strategizer names, or an investigation in flight) and carry their object in content.engagement. Engine-written by claim/close/sweep; agents do not set in_progress by hand."
         },
         %{
           "name" => "assignee",
@@ -451,6 +618,21 @@ defmodule Barkpark.Tasks.Schema do
           "of" => %{"type" => "reference", "refType" => "mediaAsset"}
         },
 
+        # Task 5 (session-handoff): session doc-ids this task was worked in,
+        # via POST /v1/tasks/:id/sessions {add,remove}. Mirrors `attachments`
+        # byte-for-byte — arrayOf reference, no server-side expansion.
+        # Sessions are referenced by slug string only; no FK.
+        %{
+          "name" => "sessions",
+          "title" => "Sessions",
+          "type" => "arrayOf",
+          "ordered" => false,
+          "group" => "system",
+          "description" =>
+            "session doc-ids this task was worked in, via POST /v1/tasks/:id/sessions {add,remove}. Arrays of references do not server-expand; fetch each by id.",
+          "of" => %{"type" => "reference", "refType" => "session"}
+        },
+
         # ── CLOSE — what `bd close` should leave behind ──────────────────
         %{
           "name" => "outcome",
@@ -465,7 +647,15 @@ defmodule Barkpark.Tasks.Schema do
               "name" => "resolution",
               "title" => "Resolution",
               "type" => "select",
-              "options" => ["shipped", "fixed", "partial", "wont_do", "duplicate", "superseded"]
+              "options" => [
+                "shipped",
+                "fixed",
+                "partial",
+                "wont_do",
+                "duplicate",
+                "superseded",
+                "discarded"
+              ]
             },
             %{
               "name" => "actual_size",
@@ -599,6 +789,101 @@ defmodule Barkpark.Tasks.Schema do
           "visibleWhen" => %{"field" => "history_summary", "operator" => "non_empty"},
           "description" =>
             "Compaction rollup: event_count, first/last ts, status_transitions, workers."
+        }
+      ]
+    }
+  end
+
+  @doc """
+  The `listener` schema struct — Personal Dev Fleet presence (Wave A).
+
+  A listener is a dev-server/agent session that heartbeats its presence into
+  the ledger via `POST /v1/fleet/beat` and is read back by
+  `GET /v1/fleet/roster` (`Barkpark.Tasks.Fleet`). The type name is EXACTLY
+  `"listener"` — NEVER `"task"`: the literal `type == "task"` filters in the
+  GitHub outbox, `/v1/tasks/events` and `/v1/tasks/prime` are what
+  structurally exclude listener rows from those feeds (a task-typed listener
+  would leak as a fake GitHub issue).
+
+  Content fields are FLAT, mirroring the task dossier idiom:
+
+    * `worker` — the unique presence key (`_id` = `listener-<worker>`).
+    * `agent` — what runs the session (`claude-code` | `codex` | `custom`).
+    * `scope` — what the listener works on (free-form, e.g. a repo path).
+    * `status` — self-declared via the beat: `idle | working | blocked`
+      (PDF-D23; `provisioning` is stored vocab too, but written only by the
+      cloud provisioner — Wave C — never beat-declarable). The roster
+      OVERRIDES this to `"offline"` at read time when the beat is stale
+      (fail-closed) — derived status is never stored.
+    * `capacity` — free-form capacity hint (e.g. `"1 task"`).
+    * `last_seen` — ISO8601, SERVER-stamped by the beat write only; clients
+      never send a timestamp.
+    * `ttl_s` — self-declared staleness budget in seconds, default 120.
+  """
+  @spec listener_schema(String.t()) :: SchemaDefinition.t()
+  def listener_schema(dataset \\ "production") do
+    %SchemaDefinition{
+      name: "listener",
+      title: "Listener",
+      icon: "📡",
+      # Presence rows are operational metadata, not public content — private
+      # keeps them off the anonymous read API (the roster endpoint is
+      # token-gated and reads the Repo directly).
+      visibility: "private",
+      dataset: dataset,
+      list_preview: %{
+        "badge" => "status",
+        "meta" => %{"field" => "agent", "prefix" => ""}
+      },
+      fields: [
+        %{
+          "name" => "worker",
+          "title" => "Worker",
+          "type" => "string",
+          "validation" => %{"required" => true},
+          "description" =>
+            "Unique presence key. The beat upserts on this — doc _id is listener-<worker>."
+        },
+        %{
+          "name" => "agent",
+          "title" => "Agent",
+          "type" => "string",
+          "description" => "What runs the session: claude-code | codex | custom."
+        },
+        %{
+          "name" => "scope",
+          "title" => "Scope",
+          "type" => "string",
+          "description" => "What the listener works on (repo, area, project)."
+        },
+        %{
+          "name" => "status",
+          "title" => "Status",
+          "type" => "select",
+          "options" => ["idle", "working", "blocked", "provisioning"],
+          "description" =>
+            "Self-declared via the beat: idle | working | blocked (provisioning is provisioner-written, Wave C). The roster computes offline from last_seen vs ttl_s at read time — offline is never stored."
+        },
+        %{
+          "name" => "capacity",
+          "title" => "Capacity",
+          "type" => "string",
+          "description" =>
+            "Capacity for best-fit routing. A validated structured object — {size_class: light | standard | heavy | xl, slots_total, slots_free (<= slots_total), budget} — declared as a native map or a JSON-object string; or a legacy free-form hint, e.g. \"1 task\". Off-vocab size_class or negative/inverted slots are refused (never silently stored)."
+        },
+        %{
+          "name" => "last_seen",
+          "title" => "Last seen",
+          "type" => "string",
+          "description" =>
+            "ISO8601, server-stamped by POST /v1/fleet/beat. Clients never send a timestamp."
+        },
+        %{
+          "name" => "ttl_s",
+          "title" => "TTL (s)",
+          "type" => "number",
+          "description" =>
+            "Self-declared staleness budget in seconds (default 120). Older than this = offline on the roster."
         }
       ]
     }

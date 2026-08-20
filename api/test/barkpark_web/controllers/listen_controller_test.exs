@@ -11,8 +11,9 @@ defmodule BarkparkWeb.ListenControllerTest do
   proves the invariant for both surfaces.
 
   Invariant: a non-encrypted `private` field must NEVER reach a non-admin
-  subscriber; an admin subscriber sees it; a nil caller (unscoped / back-compat)
-  forwards the snapshot verbatim (byte-identical to the legacy stream).
+  subscriber; an admin subscriber sees it. The former `nil`-caller verbatim
+  forward (a fail-OPEN back-compat seam) was REMOVED (ctx-s3) — an anonymous
+  subscriber now re-renders through the fail-closed `%CallerContext{}` clause.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -115,10 +116,22 @@ defmodule BarkparkWeb.ListenControllerTest do
       # when it falls on a page boundary.
       for i <- 1..3 do
         {:ok, _} =
-          create_document_in!(ws_a, proj_a, "post", %{"doc_id" => "a#{i}", "title" => "A#{i}"}, @dataset)
+          create_document_in!(
+            ws_a,
+            proj_a,
+            "post",
+            %{"doc_id" => "a#{i}", "title" => "A#{i}"},
+            @dataset
+          )
 
         {:ok, _} =
-          create_document_in!(ws_b, proj_b, "post", %{"doc_id" => "b#{i}", "title" => "B#{i}"}, @dataset)
+          create_document_in!(
+            ws_b,
+            proj_b,
+            "post",
+            %{"doc_id" => "b#{i}", "title" => "B#{i}"},
+            @dataset
+          )
       end
 
       events = ListenController.replay_since(@dataset, 0, ws_a.id, batch: 2) |> Enum.to_list()
@@ -147,9 +160,16 @@ defmodule BarkparkWeb.ListenControllerTest do
     assert ListenController.redacted_result(msg, @dataset, admin(), [])["ssn"] == "111-22-3333"
   end
 
-  test "nil caller (unscoped / back-compat) forwards the snapshot verbatim", %{doc: doc} do
+  test "anonymous re-render fails closed; removed nil seam forwards nothing", %{doc: doc} do
     msg = %{doc_id: doc.doc_id, type: "post", document: Envelope.render(doc)}
-    assert ListenController.redacted_result(msg, @dataset, nil, []) == msg.document
+    assert msg.document["ssn"] == "111-22-3333"
+
+    # The deleted `nil` clause used to forward `msg.document` verbatim (fail-OPEN
+    # leak). An anonymous %CallerContext{} re-renders from the DB and drops the
+    # private field — the exact chokepoint a real anonymous SSE subscriber rides.
+    redacted = ListenController.redacted_result(msg, @dataset, CallerContext.anonymous(), [])
+    refute Map.has_key?(redacted, "ssn")
+    assert redacted["_id"] == doc.doc_id
   end
 
   describe "live-leg admin fast-path (efficiency: get_document elided) — task-4469f80374b0bd24" do
@@ -394,6 +414,35 @@ defmodule BarkparkWeb.ListenControllerTest do
       |> frame_data()
 
     assert replay_json["previousRev"] == live_json["previousRev"]
+  end
+
+  # ---------------------------------------------------------------------------
+  # Listener egress guard (PDF-D18): a `type:"listener"` presence broadcast NEVER
+  # rides the SSE fan-out — not even to an unscoped (nil-workspace) subscriber,
+  # which is the exact live leak (eventId 70357). Mirrors the Sync.Outbox
+  # exclusion (#5626). MUTATION-PROOF: remove the `%{type: "listener"}` clause in
+  # forward_event?/2 and the first two assertions below flip to `true` and fail.
+  # ---------------------------------------------------------------------------
+  describe "forward_event?/2 — listener presence never fans out" do
+    test "dropped for an UNSCOPED (nil-workspace) subscriber — the live leak" do
+      refute ListenController.forward_event?(%{type: "listener", workspace_id: nil}, nil)
+    end
+
+    test "dropped for a same-workspace subscriber that would otherwise match" do
+      refute ListenController.forward_event?(
+               %{type: "listener", workspace_id: "ws-1"},
+               "ws-1"
+             )
+    end
+
+    test "a non-listener event is still forwarded (guard is type-narrow)" do
+      assert ListenController.forward_event?(%{type: "post", workspace_id: nil}, nil)
+
+      assert ListenController.forward_event?(
+               %{type: "post", workspace_id: "ws-1"},
+               "ws-1"
+             )
+    end
   end
 
   # Parse the JSON payload out of an SSE frame ("id: ..\nevent: ..\ndata: {json}\n\n").

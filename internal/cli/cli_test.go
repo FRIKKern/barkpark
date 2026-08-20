@@ -2,13 +2,19 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -181,6 +187,52 @@ func TestParseGlobalsErrors(t *testing.T) {
 	}
 }
 
+// A value-taking global flag (-o, -s, --token, ...) followed by another
+// KNOWN global flag must never bind that flag as its value — it must report
+// the same "flag needs a value" usage error the end-of-args case reports,
+// not a confusing downstream error like invalid --output "-v". Fails before
+// the fix: parseGlobals used to consume the following flag as the value,
+// surfacing the enum-validation error for -o/--output instead.
+func TestParseGlobalsFlagShapedValueRejected(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"-o then -s", []string{"-o", "-s", "doc", "ls"}},
+		{"--token then --output", []string{"--token", "--output", "doc", "ls"}},
+		{"-s then -v (bool global)", []string{"-s", "-v", "doc", "ls"}},
+		{"--limit then --offset", []string{"--limit", "--offset", "doc", "ls"}},
+		{"--manifest then --json", []string{"--manifest", "--json", "doc", "ls"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := parseGlobals(tc.args)
+			if err == nil {
+				t.Fatalf("parseGlobals(%v): expected error, got nil", tc.args)
+			}
+			if !strings.Contains(err.Error(), "needs a value") {
+				t.Errorf("parseGlobals(%v) error = %q, want it to mention \"needs a value\"", tc.args, err.Error())
+			}
+			if strings.Contains(err.Error(), "invalid --output") {
+				t.Errorf("parseGlobals(%v) leaked the downstream enum error: %q", tc.args, err.Error())
+			}
+		})
+	}
+}
+
+// A value that merely starts with '-' but is NOT itself a known global flag
+// (an unrecognised long flag, a negative-looking string) is still a
+// legitimate value and must bind normally rather than being rejected.
+func TestParseGlobalsDashShapedNonFlagValueStillBinds(t *testing.T) {
+	g, _, err := parseGlobals([]string{"--token", "-abc123", "doc", "ls"})
+	if err != nil {
+		t.Fatalf("parseGlobals: unexpected error: %v", err)
+	}
+	if g.token != "-abc123" {
+		t.Errorf("token = %q, want -abc123", g.token)
+	}
+}
+
 // An inline value on the --yes bool flag must be a usage error, never a
 // silently-ignored token: `--yes=false` previously set g.yes=true, skipping the
 // prod write-guard — the exact opposite of the caller's intent.
@@ -236,6 +288,33 @@ func TestBindArgs(t *testing.T) {
 	}
 	if _, err := bindArgs(*get, []string{"post", "p2", "extra"}); err == nil {
 		t.Errorf("too many args: expected error")
+	}
+
+	// (a) An empty-string value for a required positional counts as absent and
+	// yields the friendly missing-arg error, not a present-but-empty bind that
+	// blows up later as an unresolved URL placeholder.
+	_, err = bindArgs(*get, []string{"post", ""})
+	if err == nil {
+		t.Fatalf("empty required doc_id: expected missing-arg error")
+	}
+	if want := "missing required argument <doc_id> for doc get"; err.Error() != want {
+		t.Errorf("empty required error = %q, want %q", err.Error(), want)
+	}
+
+	// (b) An empty-string value for an OPTIONAL positional binds as absent — no
+	// map key — so downstream consumers (which all guard `ok && v != ""`) see
+	// exactly the same shape as if the arg were omitted. Zero wire change.
+	optCmd := manifest.Command{
+		Noun: "doc",
+		Verb: "ls",
+		Args: []manifest.Arg{{Name: "type", Required: false}},
+	}
+	m, err = bindArgs(optCmd, []string{""})
+	if err != nil {
+		t.Fatalf("empty optional positional: unexpected error %v", err)
+	}
+	if _, ok := m["type"]; ok {
+		t.Errorf("empty optional should be absent, got map %v", m)
 	}
 }
 
@@ -307,6 +386,81 @@ func TestAuthHeaders(t *testing.T) {
 	// No token in context -> no Authorization header for an auth tier.
 	if h := authHeaders(*wls, manifest.Context{}); h["Authorization"] != "" {
 		t.Errorf("no token -> no auth header: %v", h)
+	}
+}
+
+func TestBuildManifestRequestAuthenticatesNonPublishedPerspective(t *testing.T) {
+	m, tree := loadFixtureTree(t)
+	baseCtx := manifest.Context{
+		Server:  "https://api.barkpark.cloud",
+		Dataset: "production",
+		Token:   "draft-reader-token",
+	}
+
+	for _, verb := range []string{"ls", "query"} {
+		verb := verb
+		cmd, ok := tree.Lookup("doc", verb)
+		if !ok {
+			t.Fatalf("doc %s missing", verb)
+		}
+		cmd.AuthTier = "none"
+		cmd.Flags = append(cmd.Flags, manifest.Flag{Name: "perspective", Type: "string"})
+
+		for _, perspective := range []string{"drafts", "raw"} {
+			perspective := perspective
+			t.Run(verb+"_"+perspective, func(t *testing.T) {
+				req, derr := buildManifestRequest(
+					globals{}, baseCtx, m, *cmd,
+					[]string{"post", "--perspective", perspective},
+					false,
+				)
+				if derr != nil {
+					t.Fatalf("buildManifestRequest: %v", derr)
+				}
+				if got := req.headers["Authorization"]; got != "Bearer draft-reader-token" {
+					t.Errorf("Authorization = %q, want bearer for %s perspective", got, perspective)
+				}
+			})
+		}
+
+		t.Run(verb+"_published_stays_public", func(t *testing.T) {
+			req, derr := buildManifestRequest(
+				globals{}, baseCtx, m, *cmd,
+				[]string{"post", "--perspective", "published"},
+				false,
+			)
+			if derr != nil {
+				t.Fatalf("buildManifestRequest: %v", derr)
+			}
+			if got := req.headers["Authorization"]; got != "" {
+				t.Errorf("published Authorization = %q, want public request unchanged", got)
+			}
+		})
+	}
+}
+
+func TestBuildManifestRequestRejectsNonPublishedPerspectiveWithoutToken(t *testing.T) {
+	m, tree := loadFixtureTree(t)
+	cmd, ok := tree.Lookup("doc", "ls")
+	if !ok {
+		t.Fatal("doc ls missing")
+	}
+	cmd.AuthTier = "none"
+	cmd.Flags = append(cmd.Flags, manifest.Flag{Name: "perspective", Type: "string"})
+
+	_, derr := buildManifestRequest(
+		globals{},
+		manifest.Context{Server: "https://api.barkpark.cloud", Dataset: "production"},
+		m,
+		*cmd,
+		[]string{"post", "--perspective", "drafts"},
+		false,
+	)
+	if derr == nil {
+		t.Fatal("drafts perspective without token must fail loudly")
+	}
+	if !strings.Contains(derr.Error(), "requires an API token") {
+		t.Fatalf("error = %q, want requires an API token", derr)
 	}
 }
 
@@ -1043,6 +1197,448 @@ func TestBuildBodyMutationOp(t *testing.T) {
 	}
 }
 
+// Regression (task-bp-create-drops-long-description): a multi-KB, multi-line
+// --set description must be threaded VERBATIM into the create mutation — never
+// truncated at the first newline, never capped, never dropped. The reported
+// failure was a SILENT drop: `bp doc create task` returned success while the
+// stored draft had no description, which the publish wall later misdiagnosed as
+// a weak label. This pins the whole CLI create pipeline (splitArgs → bindArgs →
+// buildBody) so a large description survives BOTH arg tokenisation and body
+// assembly, alongside the typed sibling sets (tags, acceptance_criteria) that
+// DID land in the report — a byte-for-byte guard, larger than the 5,783 bytes
+// that reproduced it.
+func TestBuildBodyDocCreateLongMultilineDescription(t *testing.T) {
+	createCmd := manifest.Command{
+		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
+		HTTP:  manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args:  []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+		Flags: []manifest.Flag{{Name: "set", Type: "string", Repeatable: true}},
+	}
+
+	// Embedded newlines, colons, and a ':=' token — the marker that must NOT
+	// flip a plain key=value into a typed set. Sized past the reproduced 5,783 B.
+	line := "rationale: a task reason with a colon a:b and a := marker, padding padding padding\n"
+	desc := "Hit twice during round nine.\n\n" + strings.Repeat(line, 84)
+	if len(desc) <= 5783 {
+		t.Fatalf("description must exceed the reproduced 5783 bytes, got %d", len(desc))
+	}
+
+	tail := []string{
+		"task",
+		"--set", "_id=task-x",
+		"--set", "title=ReproTitle",
+		"--set", "description=" + desc,
+		"--set", `tags:=[{"tag":"cli"}]`,
+		"--set", `acceptance_criteria:=[{"criterion":"c1","met":false}]`,
+	}
+	pos, flags, err := splitArgs(createCmd, tail)
+	if err != nil {
+		t.Fatalf("splitArgs: %v", err)
+	}
+	args, err := bindArgs(createCmd, pos)
+	if err != nil {
+		t.Fatalf("bindArgs: %v", err)
+	}
+	body, _, _, err := buildBody(createCmd, flags, args)
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+
+	var payload struct {
+		Mutations []struct {
+			Create map[string]any `json:"create"`
+		} `json:"mutations"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if len(payload.Mutations) != 1 {
+		t.Fatalf("mutations = %d, want 1", len(payload.Mutations))
+	}
+	create := payload.Mutations[0].Create
+
+	got, ok := create["description"].(string)
+	if !ok {
+		keys := make([]string, 0, len(create))
+		for k := range create {
+			keys = append(keys, k)
+		}
+		t.Fatalf("description absent from create body (silent drop) — keys present: %v", keys)
+	}
+	if got != desc {
+		t.Fatalf("description not verbatim: got %d bytes, want %d bytes", len(got), len(desc))
+	}
+	// The siblings that landed in the report must still land.
+	if _, ok := create["tags"].([]any); !ok {
+		t.Errorf("tags dropped or mistyped: %#v", create["tags"])
+	}
+	if _, ok := create["acceptance_criteria"].([]any); !ok {
+		t.Errorf("acceptance_criteria dropped or mistyped: %#v", create["acceptance_criteria"])
+	}
+	if create["type"] != "task" {
+		t.Errorf("type = %v, want task", create["type"])
+	}
+}
+
+func TestBuildBodyDocCreateFileMergeAndDryRun(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.json")
+	if err := os.WriteFile(path, []byte(`{"title":"from-file","type":"wrong","nested":{"ok":true}}`), 0o600); err != nil {
+		t.Fatalf("write document body: %v", err)
+	}
+
+	cmd := manifest.Command{
+		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args: []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+		Flags: []manifest.Flag{
+			{Name: "file", Type: "file"},
+			{Name: "set", Type: "string", Repeatable: true},
+		},
+	}
+
+	body, _, contentType, err := buildBody(cmd, map[string][]string{
+		"file": {path},
+		"set":  {"title=first-set", "count:=2", "title=last-set"},
+	}, map[string]string{"type": "paper"})
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("content type = %q, want application/json", contentType)
+	}
+	if want := `{"mutations":[{"create":{"count":2,"nested":{"ok":true},"title":"last-set","type":"paper"}}]}`; string(body) != want {
+		t.Fatalf("request body = %s, want %s", body, want)
+	}
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "json"
+	if code := dryRun(w, cmd, "https://example.test/v1/data/mutate/production", map[string]string{"Content-Type": contentType}, body); code != exitOK {
+		t.Fatalf("dry-run exit = %d, want %d", code, exitOK)
+	}
+	var preview map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &preview); err != nil {
+		t.Fatalf("dry-run JSON: %v\n%s", err, stdout.String())
+	}
+	mutations := preview["body"].(map[string]any)["mutations"].([]any)
+	create := mutations[0].(map[string]any)["create"].(map[string]any)
+	if create["title"] != "last-set" || create["type"] != "paper" || create["count"] != float64(2) {
+		t.Fatalf("dry-run create body = %#v", create)
+	}
+}
+
+func TestBuildBodyDocCreateStdinAndUnusedPipe(t *testing.T) {
+	cmd := manifest.Command{
+		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args: []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+		// doc.create's real manifest declares the file flag — the unused-pipe
+		// guard only recommends `--file -` for commands that declare it.
+		Flags: []manifest.Flag{{Name: "file", Type: "file"}},
+	}
+
+	withPipe := func(input string, fn func()) {
+		t.Helper()
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		if _, err := io.WriteString(w, input); err != nil {
+			t.Fatalf("write stdin pipe: %v", err)
+		}
+		_ = w.Close()
+		original := os.Stdin
+		os.Stdin = r
+		t.Cleanup(func() {
+			os.Stdin = original
+			_ = r.Close()
+		})
+		fn()
+		os.Stdin = original
+		_ = r.Close()
+	}
+
+	withPipe(`{"title":"stdin"}`, func() {
+		body, _, _, err := buildBody(cmd, map[string][]string{"file": {"-"}}, map[string]string{"type": "paper"})
+		if err != nil {
+			t.Fatalf("buildBody --file -: %v", err)
+		}
+		if want := `{"mutations":[{"create":{"title":"stdin","type":"paper"}}]}`; string(body) != want {
+			t.Fatalf("stdin request body = %s, want %s", body, want)
+		}
+	})
+
+	withPipe(`{"title":"ignored"}`, func() {
+		_, _, _, err := buildBody(cmd, map[string][]string{}, map[string]string{"type": "paper"})
+		if err == nil || !strings.Contains(err.Error(), "piped stdin is unused") || !strings.Contains(err.Error(), "--file -") {
+			t.Fatalf("unused piped stdin error = %v", err)
+		}
+	})
+
+	withPipe(`{"jsonrpc":"2.0","method":"tools/call"}`, func() {
+		body, _, _, err := buildBodyWithStdinOwnership(cmd, map[string][]string{}, map[string]string{"type": "paper"}, false)
+		if err != nil {
+			t.Fatalf("headless body with protocol stdin: %v", err)
+		}
+		if want := `{"mutations":[{"create":{"type":"paper"}}]}`; string(body) != want {
+			t.Fatalf("headless request body = %s, want %s", body, want)
+		}
+
+		_, _, _, err = buildBodyWithStdinOwnership(cmd, map[string][]string{"file": {"-"}}, map[string]string{"type": "paper"}, false)
+		if err == nil || !strings.Contains(err.Error(), "--file - is unavailable in headless dispatch") {
+			t.Fatalf("headless --file - error = %v", err)
+		}
+
+		remaining, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			t.Fatalf("read untouched protocol stdin: %v", err)
+		}
+		if want := `{"jsonrpc":"2.0","method":"tools/call"}`; string(remaining) != want {
+			t.Fatalf("headless dispatch consumed protocol stdin: got %q, want %q", remaining, want)
+		}
+	})
+}
+
+// TestBuildBodyEmptyPipeStdin is the W18-5 regression for the empty-pipe
+// false-trip (task-e6bf5dfd3db4caa8): CI `run:` steps, cron, and Makefile
+// pipelines hand bp a pipe carrying NO data (`: | bp schema apply --file f`),
+// and the unused-stdin guard — whose whole purpose is to stop DATA being
+// silently swallowed — must not hard-error when there is no data. A NON-empty
+// unused pipe still trips (TestBuildBodyDocCreateStdinAndUnusedPipe above
+// stays the unchanged lock for that). The one unacceptable failure mode is a
+// BLOCKING read on an open-but-empty pipe with a live writer — every case
+// below runs under a watchdog so a regression to a blocking probe fails fast
+// instead of hanging the suite.
+func TestBuildBodyEmptyPipeStdin(t *testing.T) {
+	swapStdin := func(t *testing.T, f *os.File) {
+		t.Helper()
+		original := os.Stdin
+		os.Stdin = f
+		t.Cleanup(func() { os.Stdin = original })
+	}
+
+	// buildBody must return promptly whether or not the guard fires: the
+	// stdin probe has to be a non-blocking readiness/size check, never a read.
+	runBuildBody := func(t *testing.T, cmd manifest.Command, flags map[string][]string, args map[string]string) (body []byte, err error) {
+		t.Helper()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			body, _, _, err = buildBody(cmd, flags, args)
+		}()
+		select {
+		case <-done:
+			return body, err
+		case <-time.After(5 * time.Second):
+			t.Fatal("buildBody blocked on an empty stdin pipe (the probe must be non-blocking, never a read)")
+			return nil, nil
+		}
+	}
+
+	docCreate := manifest.Command{
+		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args: []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+		Flags: []manifest.Flag{
+			{Name: "file", Type: "file"},
+			{Name: "set", Type: "string", Repeatable: true},
+		},
+	}
+	schemaApply := manifest.Command{
+		ID: "schema.apply", Noun: "schema", Verb: "apply", Writes: true,
+		HTTP:  manifest.HTTP{Method: "POST", PathTemplate: "/v1/schemas/apply"},
+		Flags: []manifest.Flag{{Name: "file", Type: "file"}},
+	}
+
+	t.Run("closed empty pipe without --file proceeds", func(t *testing.T) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		_ = w.Close()
+		t.Cleanup(func() { _ = r.Close() })
+		swapStdin(t, r)
+
+		body, err := runBuildBody(t, docCreate, map[string][]string{}, map[string]string{"type": "paper"})
+		if err != nil {
+			t.Fatalf("empty pipe must not trip the unused-stdin guard: %v", err)
+		}
+		if want := `{"mutations":[{"create":{"type":"paper"}}]}`; string(body) != want {
+			t.Fatalf("request body = %s, want %s", body, want)
+		}
+	})
+
+	t.Run("closed empty pipe with --file <path> proceeds", func(t *testing.T) {
+		// The live repro this pins: `: | bp schema apply --file f --dry-run`
+		// exited 2 on origin/main while `< /dev/null` exited 0 — the same
+		// invocation must now build the same body either way.
+		path := filepath.Join(t.TempDir(), "schema.json")
+		if err := os.WriteFile(path, []byte(`{"name":"post"}`), 0o644); err != nil {
+			t.Fatalf("write schema fixture: %v", err)
+		}
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		_ = w.Close()
+		t.Cleanup(func() { _ = r.Close() })
+		swapStdin(t, r)
+
+		body, err := runBuildBody(t, schemaApply, map[string][]string{"file": {path}}, nil)
+		if err != nil {
+			t.Fatalf("empty pipe + --file <path> must not trip the unused-stdin guard: %v", err)
+		}
+		if want := `{"name":"post"}`; string(body) != want {
+			t.Fatalf("request body = %s, want %s", body, want)
+		}
+	})
+
+	t.Run("open empty pipe with live writer never blocks", func(t *testing.T) {
+		// A writer that holds the pipe open but has written nothing yet:
+		// missing the unused-stdin warning here is acceptable; blocking is
+		// not (runBuildBody's watchdog is the real assertion).
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		t.Cleanup(func() { _ = w.Close(); _ = r.Close() })
+		swapStdin(t, r)
+
+		if _, err := runBuildBody(t, docCreate, map[string][]string{}, map[string]string{"type": "paper"}); err != nil {
+			t.Fatalf("open-but-empty pipe must not error: %v", err)
+		}
+	})
+
+	t.Run("non-empty pipe on a command without --file trips honestly", func(t *testing.T) {
+		// doc.patch's manifest declares flags [set] only — the guard must
+		// still trip on real unused data, but must NOT recommend --file,
+		// which this command's parser rightly rejects.
+		docPatch := manifest.Command{
+			ID: "doc.patch", Noun: "doc", Verb: "patch", Writes: true, MutationOp: "patch", SetKey: "set",
+			HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+			Args: []manifest.Arg{
+				{Name: "type", Required: true, Type: "string"},
+				{Name: "id", Required: true, Type: "string"},
+			},
+			Flags: []manifest.Flag{{Name: "set", Type: "string", Repeatable: true}},
+		}
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		if _, err := io.WriteString(w, `{"title":"ignored"}`); err != nil {
+			t.Fatalf("write stdin pipe: %v", err)
+		}
+		_ = w.Close()
+		t.Cleanup(func() { _ = r.Close() })
+		swapStdin(t, r)
+
+		_, err = runBuildBody(t, docPatch, map[string][]string{"set": {"title=x"}}, map[string]string{"type": "paper", "id": "p1"})
+		if err == nil || !strings.Contains(err.Error(), "piped stdin is unused") {
+			t.Fatalf("non-empty unused pipe must still trip the guard, got: %v", err)
+		}
+		if strings.Contains(err.Error(), "--file -") {
+			t.Fatalf("guard must not recommend --file for doc patch (manifest declares no file flag): %v", err)
+		}
+	})
+}
+
+// TestMCPStdioWriteIgnoresProtocolPipe is the mutation-sensitive regression for
+// the real transport failure found by Team300. A built bp process keeps JSON-RPC
+// on stdin while task_next must still reach exactly one loopback backend write.
+func TestMCPStdioWriteIgnoresProtocolPipe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skips the go-build-and-exec MCP stdio regression in short mode")
+	}
+
+	var claimHits int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/data/query/production/paper":
+			_, _ = io.WriteString(w, `{"result":[]}`)
+		case "/v1/tasks/claim":
+			atomic.AddInt32(&claimHits, 1)
+			_, _ = io.WriteString(w, `{"ok":false,"reason":"no_ready"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer backend.Close()
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("repo root: %v", err)
+	}
+	bin := filepath.Join(t.TempDir(), "bp")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/barkpark")
+	build.Dir = root
+	build.Env = append(os.Environ(), "CC=/usr/bin/clang")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build bp: %v\n%s", err, out)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "mcp", "serve")
+	cmd.Env = append(os.Environ(),
+		"BARKPARK_MANIFEST="+filepath.Join(root, "docs", "cli", "fixtures", "full-manifest.json"),
+		"BARKPARK_API_URL="+backend.URL,
+		"BARKPARK_API_TOKEN=task304-stub",
+	)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start MCP server: %v", err)
+	}
+
+	writeRPC := func(line string) {
+		t.Helper()
+		if _, err := io.WriteString(stdin, line+"\n"); err != nil {
+			t.Fatalf("write MCP frame: %v", err)
+		}
+	}
+	writeRPC(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"task304-test","version":"1"}}}`)
+	writeRPC(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	writeRPC(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"task_next","arguments":{"worker_id":"task304-noop"}}}`)
+
+	dec := json.NewDecoder(stdout)
+	var initialize map[string]any
+	if err := dec.Decode(&initialize); err != nil {
+		t.Fatalf("decode initialize response: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if initialize["id"] != float64(1) {
+		t.Fatalf("initialize response id = %#v", initialize["id"])
+	}
+	var call map[string]any
+	if err := dec.Decode(&call); err != nil {
+		t.Fatalf("decode tools/call response: %v\nstderr:\n%s", err, stderr.String())
+	}
+	encoded, _ := json.Marshal(call)
+	if call["id"] != float64(2) || !bytes.Contains(encoded, []byte("no_ready")) || bytes.Contains(encoded, []byte(`"isError":true`)) {
+		t.Fatalf("task_next response = %s, want successful no_ready", encoded)
+	}
+	if got := atomic.LoadInt32(&claimHits); got != 1 {
+		t.Fatalf("backend claim hits = %d, want exactly 1", got)
+	}
+
+	_ = stdin.Close()
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("MCP server exit: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("MCP server timed out: %v", ctx.Err())
+	}
+}
+
 // TestArgLocation exercises the path/query/body inference and the explicit
 // arg.In override.
 func TestArgLocation(t *testing.T) {
@@ -1204,6 +1800,61 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 	}
 }
 
+// TestBuildBodyTaskRelease pins the manifest-only voluntary-unclaim command:
+// doc_id is URL-bound, while worker_id + observed_epoch form the generic JSON
+// body. No release-specific Go dispatch branch is needed or allowed.
+func TestBuildBodyTaskRelease(t *testing.T) {
+	m, tree := loadTreeFrom(t, fullManifest)
+	release, ok := tree.Lookup("task", "release")
+	if !ok {
+		t.Fatal("task release missing from full-manifest fixture")
+	}
+	if release.HTTP.Method != "POST" || release.HTTP.PathTemplate != "/v1/tasks/:doc_id/release" {
+		t.Fatalf("task release http = %s %s, want POST /v1/tasks/:doc_id/release", release.HTTP.Method, release.HTTP.PathTemplate)
+	}
+	if !release.Writes || release.AuthTier != "read" || release.DefaultOutput != "minimal" {
+		t.Fatalf("task release contract = writes:%v auth:%q output:%q", release.Writes, release.AuthTier, release.DefaultOutput)
+	}
+
+	args := map[string]string{
+		"doc_id":         "drafts.task a/b",
+		"worker_id":      "paper-agent",
+		"observed_epoch": "42",
+	}
+	body, _, ct, err := buildBody(*release, map[string][]string{}, args)
+	if err != nil {
+		t.Fatalf("buildBody task release: %v", err)
+	}
+	if ct != "application/json" {
+		t.Errorf("release content-type = %q, want application/json", ct)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(body, &obj); err != nil {
+		t.Fatalf("release body not valid JSON: %v: %s", err, body)
+	}
+	if obj["worker_id"] != "paper-agent" || obj["observed_epoch"] != "42" {
+		t.Errorf("release body = %s, want worker_id + observed_epoch", body)
+	}
+	if _, leaked := obj["doc_id"]; leaked {
+		t.Errorf("path arg doc_id must not appear in release body: %s", body)
+	}
+
+	rawURL, err := m.BuildURL(*release, manifest.Context{Server: "http://localhost:4000"}, args)
+	if err != nil {
+		t.Fatalf("BuildURL task release: %v", err)
+	}
+	if want := "http://localhost:4000/v1/tasks/drafts.task%20a%2Fb/release"; rawURL != want {
+		t.Errorf("task release url = %q, want %q", rawURL, want)
+	}
+
+	for _, reason := range []string{"fenced_off", "not_holder", "stale_claim", "not_in_progress:done"} {
+		ae := classifyError(409, []byte(`{"ok":false,"reason":"`+reason+`"}`))
+		if ae.code != reason || ae.exit == exitOK {
+			t.Errorf("release reason %q classified as exit=%d code=%q, want nonzero + exact reason", reason, ae.exit, ae.code)
+		}
+	}
+}
+
 // splitFlagLookup reports whether the command declares the named flag —
 // the gate splitArgs enforces before --<name> is accepted on the command line.
 func splitFlagLookup(cmd manifest.Command, name string) (manifest.Flag, bool) {
@@ -1342,6 +1993,14 @@ func TestRenderMinimalDocReceipt(t *testing.T) {
 	renderMinimal(w, []byte(`{"ok":true,"doc":{"doc_id":"drafts.task-1","title":"x"}}`))
 	if got := strings.TrimSpace(stdout.String()); got != "drafts.task-1" {
 		t.Errorf("no-claim receipt = %q, want \"drafts.task-1\"", got)
+	}
+
+	// Release-shaped doc: the claim remains as a monotonic epoch fence but its
+	// worker is nil. The generic receipt still prints the new epoch + rev.
+	stdout.Reset()
+	renderMinimal(w, []byte(`{"ok":true,"doc":{"doc_id":"task-9","rev":"new-rev","claim":{"worker":null,"epoch":8}}}`))
+	if got := strings.TrimSpace(stdout.String()); got != "task-9 epoch=8 rev=new-rev" {
+		t.Errorf("release receipt = %q, want \"task-9 epoch=8 rev=new-rev\"", got)
 	}
 
 	// Doc with a claim that lacks an epoch: id only, no dangling "epoch=".
@@ -1603,6 +2262,9 @@ func clearBarkparkEnv(t *testing.T) {
 func TestResolveContextNamedServer(t *testing.T) {
 	withTempConfigHome(t)
 	clearBarkparkEnv(t)
+	// A .barkpark.json anywhere above the test's cwd would inject a repo layer
+	// under the flags being asserted — run from a guaranteed-clean tree.
+	t.Chdir(t.TempDir())
 
 	cfg := &Config{
 		Server:    "http://localhost:4000",
@@ -1986,18 +2648,8 @@ func TestBuildBodyTypedSet(t *testing.T) {
 // renders to stderr, receipts to stdout.
 func captureExecute(t *testing.T, args []string) string {
 	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	origOut, origErr := os.Stdout, os.Stderr
-	os.Stdout, os.Stderr = w, w
-	Execute(args)
-	_ = w.Close()
-	os.Stdout, os.Stderr = origOut, origErr
-	body, _ := io.ReadAll(r)
-	_ = r.Close()
-	return string(body)
+	out, _ := captureExecuteCode(t, args)
+	return out
 }
 
 // TestExecuteCommandHelpShowsCommandSignature pins the fix for `bp <noun> <verb>
@@ -2060,10 +2712,20 @@ func captureExecuteCode(t *testing.T, args []string) (string, int) {
 	}
 	origOut, origErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = w, w
+	// Drain the pipe CONCURRENTLY with Execute. A single write larger than the OS
+	// pipe buffer (as small as ~512 bytes on some hosts; 64 KiB on Linux CI) blocks
+	// the writer until a reader drains it — so reading only after Execute returns
+	// deadlocks the moment any help text exceeds the buffer (printLoginHelp is
+	// ~1952 bytes). The goroutine reads while Execute writes; closing w signals EOF.
+	done := make(chan string, 1)
+	go func() {
+		body, _ := io.ReadAll(r)
+		done <- string(body)
+	}()
 	code := Execute(args)
-	_ = w.Close()
 	os.Stdout, os.Stderr = origOut, origErr
-	body, _ := io.ReadAll(r)
+	_ = w.Close()
+	body := <-done
 	_ = r.Close()
 	return string(body), code
 }
@@ -2098,5 +2760,131 @@ func TestExecuteBuiltinHelpHonoursGlobalHelp(t *testing.T) {
 					c.noun, flag, c.header, out)
 			}
 		}
+	}
+}
+
+// --- verbless dispatch on a REAL noun -----------------------------------------
+
+// TestExecuteRealNounFreeTextInfersSoleVerb pins the reported symptom: SIX
+// independent agents in one wave typed `bp search "<text>"`, read back
+// `unknown command "search" "<text>"`, concluded their bp was too stale to
+// search Barkpark, and fell back to grep against standing doctrine. `search` is
+// a real manifest noun whose one verb is `query` — so dispatch must never call
+// the noun unknown, and (one obvious, non-writing answer) may run it.
+func TestExecuteRealNounFreeTextInfersSoleVerb(t *testing.T) {
+	t.Setenv("BARKPARK_MANIFEST", fullManifest)
+	// Point at a closed port: the inference is what is under test, not the HTTP
+	// round trip, and this keeps the test off any locally-running Barkpark.
+	t.Setenv("BARKPARK_API_URL", "http://127.0.0.1:1")
+
+	out, _ := captureExecuteCode(t, []string{"search", "PDS crown proof"})
+
+	// The regression itself: the noun must never be reported as unknown. Match
+	// both the human line and the JSON error envelope (which escapes the quotes).
+	if strings.Contains(out, `unknown command "search"`) || strings.Contains(out, `unknown command \"search\"`) {
+		t.Errorf("real noun `search` reported as an unknown command; got:\n%s", out)
+	}
+	// …and the corrected command must be named, verbatim and runnable.
+	if !strings.Contains(out, "barkpark search query") {
+		t.Errorf("output never names `barkpark search query`; got:\n%s", out)
+	}
+}
+
+// TestExecuteRealNounMultiVerbNamesTheNoun guards the non-inferable half of the
+// rule: `doc` has many verbs, so nothing is guessed — but the error must still
+// say the NOUN is fine and list the verbs, and still exit 2.
+func TestExecuteRealNounMultiVerbNamesTheNoun(t *testing.T) {
+	t.Setenv("BARKPARK_MANIFEST", fullManifest)
+
+	out, code := captureExecuteCode(t, []string{"doc", "PDS crown proof"})
+
+	if code != exitUsage {
+		t.Errorf("usage error exit = %d, want %d", code, exitUsage)
+	}
+	if strings.Contains(out, `unknown command "doc"`) || strings.Contains(out, `unknown command \"doc\"`) {
+		t.Errorf("real noun `doc` reported as an unknown command; got:\n%s", out)
+	}
+	if !strings.Contains(out, "no verb") || !strings.Contains(out, "known noun") {
+		t.Errorf("error does not name the real problem; got:\n%s", out)
+	}
+}
+
+// TestExecuteUnknownNounStillSuggests is the no-regression guard: a genuinely
+// unknown noun keeps its noun-typo suggestion and its exit code, and an
+// unrelated word still gets no misleading hint.
+func TestExecuteUnknownNounStillSuggests(t *testing.T) {
+	t.Setenv("BARKPARK_MANIFEST", fullManifest)
+
+	out, code := captureExecuteCode(t, []string{"serach", "query", "x"})
+	if code != exitUsage {
+		t.Errorf("unknown-noun exit = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(out, `unknown command \"serach\"`) && !strings.Contains(out, `unknown command "serach"`) {
+		t.Errorf("unknown noun lost its unknown-command line; got:\n%s", out)
+	}
+	// An unknown noun must never be mistaken for the known-noun path.
+	if strings.Contains(out, "no verb") {
+		t.Errorf("unknown noun took the known-noun error path; got:\n%s", out)
+	}
+
+	// The suggestion block itself (usageSuggestNouns) is human-output only, so
+	// assert its matcher directly: the typo still resolves, the unrelated word
+	// still gets nothing. TestNearestNoun pins the shared table.
+	nouns := tree0(t).NounNames()
+	if best, ok := nearestNoun("serach", nouns); !ok || best != "search" {
+		t.Errorf("nearestNoun(serach) = %q,%v; want search,true", best, ok)
+	}
+	if best, ok := nearestNoun("zqxwvut", nouns); ok {
+		t.Errorf("unrelated word got a misleading suggestion: %q", best)
+	}
+}
+
+// tree0 loads the full fixture manifest tree for the dispatch tests above.
+func tree0(t *testing.T) *manifest.Tree {
+	t.Helper()
+	_, tr := loadTreeFrom(t, fullManifest)
+	return tr
+}
+
+// TestSoleReadVerbRule drives the inference predicate directly, including the
+// cases the fixture manifest cannot express (a WRITING sole verb).
+func TestSoleReadVerbRule(t *testing.T) {
+	_, tree := loadTreeFrom(t, fullManifest)
+
+	search, ok := lookupNoun(tree, "search")
+	if !ok {
+		t.Fatal("search noun missing from the fixture manifest")
+	}
+	if sole, inferable := soleReadVerb(search, "PDS crown proof"); !inferable || sole.Verb != "query" {
+		t.Errorf("soleReadVerb(search, free text) = %v,%v; want query,true", sole, inferable)
+	}
+	// A near-typo of the sole verb is a mistyped VERB, not an argument — it must
+	// fall through to the typo suggestion rather than be forwarded as a query.
+	if _, inferable := soleReadVerb(search, "quer"); inferable {
+		t.Error("a near-typo of the sole verb must not be inferred as an argument")
+	}
+	// Flag-shaped and empty tokens are never arguments to an inferred verb.
+	for _, typed := range []string{"--json", "-x", ""} {
+		if _, inferable := soleReadVerb(search, typed); inferable {
+			t.Errorf("soleReadVerb(search, %q) fired; want no inference", typed)
+		}
+	}
+
+	// Multi-verb noun: never guess across several verbs.
+	doc, _ := lookupNoun(tree, "doc")
+	if _, inferable := soleReadVerb(doc, "PDS crown proof"); inferable {
+		t.Error("multi-verb noun must never infer a verb")
+	}
+
+	// A destructive sole verb is suggested, never run.
+	destructive := &manifest.TreeNoun{
+		Name:  "nuke",
+		Verbs: []*manifest.Command{{Noun: "nuke", Verb: "purge", Writes: true}},
+	}
+	if _, inferable := soleReadVerb(destructive, "everything"); inferable {
+		t.Error("a writing sole verb must never be inferred")
+	}
+	if msg := noVerbMsg(destructive, "nuke", "everything"); !strings.Contains(msg, "barkpark nuke purge everything") {
+		t.Errorf("noVerbMsg must name the literal corrected command; got %q", msg)
 	}
 }

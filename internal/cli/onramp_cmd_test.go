@@ -380,6 +380,9 @@ func TestOnrampAgentsMdGolden(t *testing.T) {
 		"Conventions:",
 		"parent_id",
 		"doc_changed_since_claim",
+		// The recovery guidance must LEAD with the sequence that actually works —
+		// pin the current rev as observed_rev, not a bare re-read (S2 regression).
+		"--set observed_rev=<current_rev>",
 		// Generalized worker-id + generalized MCP footer.
 		"`<tool>-<your-name-or-branch>`",
 		"docs/setup/AGENT-ONRAMPS.md",

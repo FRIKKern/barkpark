@@ -51,11 +51,35 @@ defmodule BarkparkWeb.IconsTest do
       assert html =~ "M15 2H6"
     end
 
-    test "falls back to the 'file' icon for unknown names" do
-      html = render_component(&Icons.icon/1, name: "nonexistent-icon-xyz")
-      assert html =~ "<svg"
-      # 'file' icon path
-      assert html =~ "M15 2H6"
+    test "raises on an unknown name in :test, naming the offender" do
+      # Was: a silent fall-through to the "file" document glyph. That default
+      # painted a document on the Studio back button and on the AI-not-ready
+      # warning card for months without reddening anything.
+      assert_raise ArgumentError, ~r/nonexistent-icon-xyz/, fn ->
+        render_component(&Icons.icon/1, name: "nonexistent-icon-xyz")
+      end
+    end
+
+    test "the dev/prod policy still falls back to 'file' and never raises" do
+      # The raise above is gated to :test. A cosmetic glyph must never crash a
+      # page, and tab_icon/1 hands icon/1 tenant-supplied strings verbatim, so
+      # the :warn path has to stay total.
+      paths = Icons.resolve_paths("nonexistent-icon-xyz", :warn)
+
+      assert paths =~ "M15 2H6"
+      assert paths == Icons.resolve_paths("file", :warn)
+    end
+
+    test "alert-triangle renders a warning triangle, NOT the 'file' document glyph" do
+      # chat_readiness_card/1 (live/studio/chat_live.ex) asks for this by name on
+      # every AI-provider-not-ready state. Before the glyph existed these two
+      # renders were BYTE-IDENTICAL — the warning card painted a document.
+      alert_html = render_component(&Icons.icon/1, name: "alert-triangle")
+      file_html = render_component(&Icons.icon/1, name: "file")
+
+      refute alert_html == file_html
+      assert alert_html =~ "m21.73 18-8-14"
+      refute alert_html =~ "M15 2H6a2 2 0 0 0-2 2v16"
     end
 
     test "renders a distinct non-fallback path for every new desk/top-bar glyph" do

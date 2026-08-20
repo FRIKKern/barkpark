@@ -14,9 +14,13 @@ bin/barkpark up
 That does, in order:
 
 1. **Secrets** (`Barkpark.Release.Secrets`) — first run generates `SECRET_KEY_BASE`,
-   `PREVIEW_JWT_SECRET`, and `BARKPARK_CLOAK_KEY` into `~/.barkpark/.env` and
-   `chmod 0600`s it. Re-runs only top up *missing* keys — existing values are
-   never overwritten and never printed.
+   `PREVIEW_JWT_SECRET`, `BARKPARK_CLOAK_KEY`, `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET`,
+   and `BARKPARK_KEK` (the master envelope KEK — without it the `:prod` boot below
+   raises) into `~/.barkpark/.env` and `chmod 0600`s it. Re-runs only top up
+   *missing* keys — existing values are never overwritten and never printed. It
+   also writes `BARKPARK_ALLOW_BUNDLE_IMPORT=1` (personal-local is the free twin you
+   *pull cloud data into*, so it opts into workspace-bundle import; a hand-set `=0`
+   is never clobbered).
 2. **Managed Postgres** (`bin/barkpark-pg start`) — a Barkpark-private Postgres
    on **port 5433**, bound to `127.0.0.1` only, with its data dir at
    `~/.barkpark/pgdata`. First run `initdb`s it; later runs detect and reuse the
@@ -81,3 +85,15 @@ not just `up` run twice.
 | `PORT` | `4000` | HTTP port the server listens on |
 | `PHX_HOST` | `localhost` | host for `Endpoint` URL + `check_origin` |
 | `BARKPARK_MIX_ENV` | `prod` | the env `up`/`reload` boot under |
+| `BARKPARK_MEDIA_DIR` | `api/uploads` | media blob root — point it at a portable data dir so pulled cloud blobs land beside your data (read at boot; `reload` picks it up) |
+| `BARKPARK_ALLOW_BUNDLE_IMPORT` | `1` (set by `up`) | allow workspace-bundle import into this instance; fail-closed everywhere else |
+
+## Pulling cloud data down (blob push)
+
+The Personal-Local twin is a **pull target**: `bp cloud workspace import` copies a
+cloud workspace's rows into it, and the blobs are re-pointed via an admin-gated
+raw-blob write — `PUT /api/workspaces/:workspace_slug/media/blob/*path` (bytes
+written verbatim at a strictly-validated relative path; traversal/absolute paths
+are refused `422`). It is a bare infra route, absent from the capabilities
+manifest. A media row whose blob has not been pushed yet serves an honest `404`
+(never a `500`), so an import mid-flight degrades cleanly.

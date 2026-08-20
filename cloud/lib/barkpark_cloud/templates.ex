@@ -37,6 +37,23 @@ defmodule BarkparkCloud.Templates do
 
   @catalog [
     %{
+      slug: "astro-search-starter",
+      title: "Search Starter (Astro)",
+      description:
+        "The flagship search site, statically generated: every document pre-rendered by the canonical PortableDoc at build, the corpus graph baked to JSON, live search browser-direct — pure static files, symlink-swap deploys.",
+      framework: "astro",
+      demo_content: true,
+      what_you_get: [
+        "Every published document pre-rendered as static HTML by the canonical @barkpark/react PortableDoc",
+        "The zero-dependency Canvas2D corpus graph, baked to graph.json at build — instant landing, no runtime token",
+        "Per-keystroke live search straight from the browser (Phoenix WebSocket, HTTP fallback)",
+        "Symlink-swap deploys: immutable releases, health-gated, instant rollback"
+      ],
+      env_keys: @env_common ++ ~w(BARKPARK_DOC_TYPE),
+      repo: @repo,
+      docs: @docs
+    },
+    %{
       slug: "blog-starter",
       title: "Blog Starter",
       description:
@@ -65,6 +82,23 @@ defmodule BarkparkCloud.Templates do
         "Demo places seeded so the map is populated on first deploy"
       ],
       env_keys: @env_common ++ ~w(NEXT_PUBLIC_FINDER_LANDING BARKPARK_WEBHOOK_SECRET),
+      repo: @repo,
+      docs: @docs
+    },
+    %{
+      slug: "search-starter",
+      title: "Search Starter",
+      description:
+        "The flagship search site: instant live search with misspellings widened server-side by Postgres trigram, an interactive corpus graph, and canonical PortableDoc document pages — over any Barkpark dataset.",
+      framework: "nextjs",
+      demo_content: true,
+      what_you_get: [
+        "Instant per-keystroke live search (Phoenix WebSocket, HTTP fallback)",
+        "A zero-dependency Canvas2D corpus graph — documents lit by relevance",
+        "An `entry` content type seeded reference-rich, so the graph is alive from minute one",
+        "Document pages rendered by the canonical @barkpark/react PortableDoc"
+      ],
+      env_keys: @env_common ++ ~w(BARKPARK_DOC_TYPE),
       repo: @repo,
       docs: @docs
     },

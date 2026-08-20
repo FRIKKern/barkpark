@@ -55,11 +55,69 @@ type State struct {
 	Messages  []Message
 	LastSeq   int
 
+	// Model is the OBSERVED wire model id ("claude-opus-4-8[1m]") off the
+	// system/init frame — fact, distinct from the shell's intent alias
+	// (Model.modelChoice, D14 continuity). Empty until the first turn streams;
+	// the header prefers it over the intent.
+	Model string
+
+	// Mode is the session's permission mode for DISPLAY (the Plan ⇄ Autopilot
+	// badge): seeded from the session GET, refreshed at every turn boundary
+	// (how the server-side plan→autopilot switch reaches this surface) and by
+	// the init frame's permissionMode. Continuity write-back stays on the
+	// shell's m.mode — this field never PATCHes.
+	Mode string
+
 	Phase    TurnPhase
 	Tail     string      // live streaming text (event:chat text deltas)
 	Settling bool        // result seen, tail refetch in flight
 	Local    []LocalSend // optimistic sends not yet settled into Messages
 	WedgeAt  time.Time   // interrupt wedge deadline (zero unless interrupting)
+
+	// Gen is the turn generation, bumped once per system/init frame. It is the
+	// settle-race token (charter D77): a turn's tail-settle GET carries the Gen
+	// that issued it, so a STALE turn-1 fetch landing after a queued turn-2's init
+	// already flipped Phase (reduce.go's init handler) can be told apart from a
+	// fetch that still owns the live tail. The old clear guard keyed off
+	// Phase==TurnIdle, which the queued-send init defeats — turn-1 then rendered
+	// twice and turn-2 deltas concatenated onto the stale tail.
+	Gen int
+	// TailGen is the generation the current Tail text belongs to — stamped every
+	// time a delta appends. reduceTailFetched clears the tail ONLY when the
+	// landing GET's Gen equals TailGen (same generation), so a turn-1 settle can
+	// neither blank nor corrupt turn-2's live stream. Init deliberately does NOT
+	// touch Tail/TailGen (that would blank-flash the still-painted prior tail —
+	// the no-blank-flash invariant); the tail carries its generation with it.
+	TailGen int
+
+	// Rail is the decoded agents-rail (charter D47) hydrated from the session's
+	// rail_snapshot — task-keyed mission control that survives a surface switch
+	// (Law-2). Re-decoded on every full session load / turn-boundary refetch.
+	Rail []RailEntry
+
+	// Workflow is the open session's workflow-bearing rail entry (wave
+	// session-card charter D13): the highest-seq entry carrying a workflow node
+	// list, decoded from the SAME rail_snapshot as Rail at the SAME turn-boundary
+	// sites — no new SSE frame, no polling (mid-turn lag is the accepted UX
+	// ceiling). nil for plain chats — the below-composer panel then costs zero.
+	Workflow *Workflow
+
+	// LiveWorkflow is the COMPACT workflow summary pushed MID-TURN over the SSE
+	// `event: workflow` frame (wsc-bl-workflow-sse) — the same
+	// apiclient.ChatWorkflowSummary the list wire carries, NOT the raw *Workflow
+	// rail fold (which has per-agent Nodes this lacks). The collapsed strip prefers
+	// it so its counters/elapsed advance WITHIN a turn without a rail refetch —
+	// that missing refetch IS the D13 lag removed. nil until the first workflow
+	// frame; a Terminal summary drops the strip. The Enter-expanded detail still
+	// reads Workflow (it needs the Nodes) — turn-boundary fresh, the accepted
+	// ceiling (backlogged wsc-bl-workflow-sse-detail).
+	LiveWorkflow *SessionWorkflow
+
+	// AnswerInFlight maps a card's request_id → the decision ("allow"/"deny")
+	// POSTed but not yet confirmed by a refetch — the immediate-feedback layer:
+	// the card reads "answering: allow…" until the server-resolved row lands and
+	// flips it (or the POST errors and it clears).
+	AnswerInFlight map[string]string
 
 	Notice string // one-line footer status (never an error screen)
 	Exited bool   // the session process exited (event:exit)
@@ -88,6 +146,30 @@ type TickEvent struct{}
 type TailFetchedEvent struct {
 	Session Session
 	Err     error
+	// Gen is the generation of the FetchTailEffect that issued this GET, threaded
+	// through the shell (FetchTailEffect.Gen → tailFetchedMsg.gen → here). The
+	// settle guard clears the tail only when Gen == State.TailGen (charter D77) —
+	// zero for the pre-generation call sites (answered/wedge/legacy tests), which
+	// matches a zero TailGen, so their single-turn clear is unchanged.
+	Gen int
+}
+
+// AnswerEvent is the user answering the focused card via a keystroke (charter
+// D27/D28): Decision is "allow" or "deny" ONLY (allow = approve / plan-approve /
+// answer-allow; deny = reject / plan-keep). No caller-supplied updatedInput —
+// rich AskUserQuestion input is deferred (ct-bl-question-updatedinput, D28).
+type AnswerEvent struct {
+	RequestID string
+	Decision  string
+}
+
+// AnsweredEvent is the answer POST completing. On success it triggers a FULL
+// refetch so the server-resolved card flips pending → allowed/denied in place (a
+// resolved row keeps its seq — only its metadata changes — so a since=0 refetch,
+// not a since=LastSeq tail, is what surfaces the flip).
+type AnsweredEvent struct {
+	RequestID string
+	Err       error
 }
 
 func (FrameEvent) isChatEvent()       {}
@@ -95,12 +177,25 @@ func (SendEvent) isChatEvent()        {}
 func (InterruptEvent) isChatEvent()   {}
 func (TickEvent) isChatEvent()        {}
 func (TailFetchedEvent) isChatEvent() {}
+func (AnswerEvent) isChatEvent()      {}
+func (AnsweredEvent) isChatEvent()    {}
 
 // Effect is an IO instruction the shell executes (the reducer never does IO).
 type Effect interface{ isChatEffect() }
 
-// FetchTailEffect — GET the session with ?since=SinceSeq (turn boundary).
-type FetchTailEffect struct{ SinceSeq int }
+// FetchTailEffect — GET the session with ?since=SinceSeq (turn boundary). A
+// SinceSeq of 0 is a FULL refetch (every row, so an in-place metadata flip like
+// a resolved approval is picked up); a positive SinceSeq returns only newer rows.
+type FetchTailEffect struct {
+	SinceSeq int
+	// Gen stamps the turn generation live when this GET was issued so the landing
+	// TailFetchedEvent can prove it belongs to the tail it would clear (charter
+	// D77 settle-race token). Every settle-boundary emit site (result, answered,
+	// wedge-tick, permission) carries State.Gen; the D42 workflow-expand
+	// HYDRATION refetch (keys.go) carries -1 — not a boundary, so its landing
+	// must never clear a live tail.
+	Gen int
+}
 
 // SendEffect — POST the message body.
 type SendEffect struct{ Content string }
@@ -108,9 +203,18 @@ type SendEffect struct{ Content string }
 // InterruptEffect — POST the interrupt.
 type InterruptEffect struct{}
 
+// AnswerEffect — POST {request_id, decision} to /v1/chat/sessions/:id/approval
+// (charter wire contract): allow/deny only, no updatedInput. Answered by an
+// AnsweredEvent carrying the same request_id.
+type AnswerEffect struct {
+	RequestID string
+	Decision  string
+}
+
 func (FetchTailEffect) isChatEffect() {}
 func (SendEffect) isChatEffect()      {}
 func (InterruptEffect) isChatEffect() {}
+func (AnswerEffect) isChatEffect()    {}
 
 // Reduce is the single transition function. It never blocks, never does IO,
 // and never panics on malformed frames — an unknown or unparseable frame is
@@ -127,8 +231,59 @@ func Reduce(st State, ev Event, now time.Time) (State, []Effect) {
 		return reduceTick(st, now)
 	case TailFetchedEvent:
 		return reduceTailFetched(st, ev)
+	case AnswerEvent:
+		return reduceAnswer(st, ev)
+	case AnsweredEvent:
+		return reduceAnswered(st, ev)
 	}
 	return st, nil
+}
+
+// reduceAnswer records the in-flight decision (immediate feedback) and emits the
+// POST. It is a no-op for a blank request_id (nothing to answer) or a decision
+// other than allow/deny (the scope fence, charter D28). The card's terminal flip
+// is server truth, arriving on the AnsweredEvent's full refetch — never guessed
+// locally, so a Studio answer and a TUI answer converge on the SAME row.
+func reduceAnswer(st State, ev AnswerEvent) (State, []Effect) {
+	if ev.RequestID == "" || (ev.Decision != "allow" && ev.Decision != "deny") {
+		return st, nil
+	}
+	if st.AnswerInFlight == nil {
+		st.AnswerInFlight = map[string]string{}
+	}
+	st.AnswerInFlight[ev.RequestID] = ev.Decision
+	st.Notice = answeringNotice(ev.Decision)
+	// An approved plan card is the autopilot promise: say so now — the server
+	// engages Autopilot (steer + persist) and the badge lands on truth at the
+	// turn boundary / next init frame.
+	if ev.Decision == "allow" {
+		for _, msg := range st.Messages {
+			if msg.RequestID() == ev.RequestID && msg.Role == "plan" {
+				st.Notice = "Plan approved — engaging ▶ Autopilot…"
+				break
+			}
+		}
+	}
+	return st, []Effect{AnswerEffect{RequestID: ev.RequestID, Decision: ev.Decision}}
+}
+
+// reduceAnswered handles the POST completing. A transport error clears the
+// in-flight badge and surfaces honestly (the card stays pending — the operator
+// can retry). On success it fires a FULL refetch (SinceSeq 0) so the resolved
+// row's metadata flip lands in place; the in-flight badge lingers until that
+// refetch confirms the terminal status (reduceTailFetched drops it).
+func reduceAnswered(st State, ev AnsweredEvent) (State, []Effect) {
+	if ev.Err != nil {
+		delete(st.AnswerInFlight, ev.RequestID)
+		st.Notice = "answer failed — " + ev.Err.Error()
+		return st, nil
+	}
+	st.Settling = true
+	// The answer refetch carries the CURRENT generation: if no new turn has begun
+	// by the time it lands, its Gen still matches TailGen and the tail clears at
+	// this boundary; if a fresh turn's init/delta advanced TailGen meanwhile, the
+	// mismatch protects that live text (charter D77).
+	return st, []Effect{FetchTailEffect{SinceSeq: 0, Gen: st.Gen}}
 }
 
 // reduceSend appends the optimistic echo and always POSTs immediately — the
@@ -177,7 +332,10 @@ func reduceTick(st State, now time.Time) (State, []Effect) {
 		st.WedgeAt = time.Time{}
 		st.Settling = true
 		st.Notice = "interrupt unacknowledged after 8s — degraded locally; refetching"
-		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq}}
+		// The wedge refetch clears the degraded tail at its boundary: it carries
+		// the current generation, which matches TailGen unless a fresh turn already
+		// advanced it (charter D77).
+		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq, Gen: st.Gen}}
 	}
 	return st, nil
 }
@@ -197,12 +355,25 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 		return st, nil
 	case "chat":
 		return reduceClaudeFrame(st, ev.Data)
+	case "runtime":
+		return reduceRuntimeFrame(st, ev.Data)
+	case "workflow":
+		// Live workflow delta (wsc-bl-workflow-sse): the COMPACT summary pushed
+		// mid-turn so the collapsed strip refreshes without a turn-boundary
+		// refetch. Overwrite LiveWorkflow; NO Effect — that MISSING refetch is the
+		// D13 lag removed. A malformed frame is inert (forward-compat, same
+		// tolerance the exit/message paths show), leaving the last-known summary.
+		var wf SessionWorkflow
+		if err := json.Unmarshal(ev.Data, &wf); err == nil {
+			st.LiveWorkflow = &wf
+		}
+		return st, nil
 	case "permission":
 		// The ask row is persisted by the Recorder — refetch the tail so the
-		// read-only card renders from replay truth (the interactive answer
-		// flow is backlog ct-bl-interactive-cards).
+		// answerable card renders from replay truth (request_id + pending status
+		// in its metadata); the operator then answers it with the card keys.
 		st.Settling = true
-		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq}}
+		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq, Gen: st.Gen}}
 	case "exit":
 		// The public exit frame is EXACTLY {status, reason} over the fixed enum
 		// (charter D23): the transport DROPS the stderr tail, so it is never a
@@ -240,6 +411,8 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 		} `json:"event"`
 		TerminalReason string `json:"terminal_reason"`
 		IsError        bool   `json:"is_error"`
+		Model          string `json:"model"`
+		PermissionMode string `json:"permissionMode"`
 	}
 	if err := json.Unmarshal(data, &frame); err != nil {
 		return st, nil
@@ -247,11 +420,28 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 
 	switch {
 	case frame.Type == "system" && frame.Subtype == "init":
-		// A fresh turn began. Any queued sends' badges clear — the queue is
+		// A fresh turn began — bump the generation FIRST so a still-in-flight
+		// prior-turn settle GET (which captured the OLD Gen) can be told apart when
+		// it lands (charter D77). Tail/TailGen are deliberately untouched: the prior
+		// tail stays painted until its own settle lands (no blank flash), carrying
+		// its own generation with it.
+		st.Gen++
+		// Any queued sends' badges clear — the queue is
 		// now draining, oldest first, exactly like ChatLive's
 		// clear_queued_badges (charter D12).
 		for i := range st.Local {
 			st.Local[i].Queued = false
+		}
+		// The init frame carries the RESOLVED model and permission mode the CLI
+		// actually runs — capture both as observed fact (a frame missing either
+		// never blanks a known value). "default" is the CLI's own post-plan flip:
+		// the server redirects it to Autopilot ("auto") and this surface learns
+		// the truth at the turn boundary, so don't paint the transient here.
+		if frame.Model != "" {
+			st.Model = frame.Model
+		}
+		if frame.PermissionMode != "" && frame.PermissionMode != "default" {
+			st.Mode = frame.PermissionMode
 		}
 		if st.Phase == TurnIdle || st.Phase == TurnWaiting {
 			st.Phase = TurnStreaming
@@ -262,6 +452,10 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 		frame.Event.Type == "content_block_delta" &&
 		frame.Event.Delta.Type == "text_delta":
 		st.Tail += frame.Event.Delta.Text
+		// Stamp the tail with the generation it now belongs to (charter D77): the
+		// settle guard clears the tail only for a GET issued in THIS generation, so
+		// a stale prior-turn fetch can neither wipe nor duplicate this text.
+		st.TailGen = st.Gen
 		if st.Phase == TurnIdle || st.Phase == TurnWaiting {
 			st.Phase = TurnStreaming
 		}
@@ -287,9 +481,81 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 		st.Settling = true
 		// Settle: refetch the tail so the plain-text stream becomes pdrender
 		// blocks AND the AI title lands (charter D8/D15). The tail stays
-		// painted until the fetch returns — never a blank flash.
-		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq}}
+		// painted until the fetch returns — never a blank flash. The GET carries
+		// THIS turn's generation so its landing clears only this turn's tail.
+		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq, Gen: st.Gen}}
 	}
+	return st, nil
+}
+
+// reduceRuntimeFrame handles one normalized Runtime.Event frame (event:
+// runtime) — the codex and remote/RemoteRef text lane, the sibling of
+// event: chat. The wire is the serialized %Runtime.Event{} struct
+// (chat_controller.ex sse_runtime_frame): `kind` is the normalized verb and
+// `native` retains the lossless provider envelope, so the text lives at
+// native.params.delta.
+//
+// The kind is matched EXACTLY, and that is load-bearing: codex's protocol maps
+// item/reasoning/textDelta → thinking_delta and item/commandExecution/
+// outputDelta → tool_delta to the SAME native.params.delta location, so a loose
+// match would splice reasoning and command output into the answer. Everything
+// that is not text_delta or turn_completed is inert here — those rows arrive as
+// persisted truth at the turn boundary, exactly as on the claude lane.
+func reduceRuntimeFrame(st State, data []byte) (State, []Effect) {
+	var frame struct {
+		Kind          string          `json:"kind"`
+		TerminalState string          `json:"terminal_state"`
+		Native        json.RawMessage `json:"native"`
+	}
+	if err := json.Unmarshal(data, &frame); err != nil {
+		return st, nil
+	}
+
+	switch frame.Kind {
+	case "text_delta":
+		// native is decoded lazily and tolerantly: a provider envelope whose
+		// params.delta is not a string leaves the tail untouched rather than
+		// killing the frame's whole decode.
+		var native struct {
+			Params struct {
+				Delta string `json:"delta"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(frame.Native, &native); err != nil || native.Params.Delta == "" {
+			return st, nil
+		}
+		st.Tail += native.Params.Delta
+		// Stamped with the current generation exactly as the claude lane stamps
+		// it (charter D77), so the settle guard sees the same shape on both lanes.
+		// Residual, recorded: Gen advances only on a claude system/init frame, so
+		// a codex turn keeps the generation it started in — the fence is inert
+		// there rather than wrong, and advancing it on runtime turn boundaries is
+		// a separate parity slice.
+		st.TailGen = st.Gen
+		if st.Phase == TurnIdle || st.Phase == TurnWaiting {
+			st.Phase = TurnStreaming
+		}
+		return st, nil
+
+	case "turn_completed":
+		// The codex turn boundary — the sibling of the claude result frame, and
+		// the ONLY settle a codex turn gets. Without it the phase never returns to
+		// idle and the Recorder's persisted answer never reaches the transcript.
+		interrupted := st.Phase == TurnInterrupting || frame.TerminalState == "interrupted"
+		switch {
+		case interrupted:
+			st.Notice = "⊘ Interrupted — session live"
+		case frame.TerminalState == "failed":
+			st.Notice = "the turn ended with an error"
+		default:
+			st.Notice = ""
+		}
+		st.Phase = TurnIdle
+		st.WedgeAt = time.Time{}
+		st.Settling = true
+		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq, Gen: st.Gen}}
+	}
+
 	return st, nil
 }
 
@@ -303,22 +569,83 @@ func reduceTailFetched(st State, ev TailFetchedEvent) (State, []Effect) {
 		st.Notice = "refetch failed — transcript may lag (" + ev.Err.Error() + ")"
 		return st, nil
 	}
+	// Merge by seq: a row we already hold is UPDATED in place (an approval card
+	// flips its approval_status metadata WITHOUT changing its seq, so a full
+	// refetch must replace it, not skip it); a genuinely newer row appends and
+	// advances the cursor. A since=LastSeq tail refetch returns only new rows, so
+	// this loop degrades to the append-only behaviour there.
+	bySeq := make(map[int]int, len(st.Messages))
+	for i, m := range st.Messages {
+		bySeq[m.Seq] = i
+	}
 	fresh := make([]Message, 0, len(ev.Session.Messages))
 	for _, m := range ev.Session.Messages {
-		if m.Seq > st.LastSeq {
+		if idx, ok := bySeq[m.Seq]; ok {
+			st.Messages[idx] = m
+		} else if m.Seq > st.LastSeq {
 			fresh = append(fresh, m)
 			st.LastSeq = m.Seq
 		}
 	}
 	st.Messages = append(st.Messages, fresh...)
 	st.Local = dropSettledLocal(st.Local, fresh)
+	// Law-2 rail continuity: re-hydrate the agents rail from the refetched
+	// snapshot so a resumed session (and every turn boundary) shows the same
+	// mission control Studio shows. The workflow panel re-decodes at the SAME
+	// site — turn-boundary freshness (charter D13), one snapshot, one moment.
+	if len(ev.Session.RailSnapshot) > 0 {
+		st.Rail = decodeRail(ev.Session.RailSnapshot)
+		st.Workflow = decodeWorkflow(ev.Session.RailSnapshot)
+	}
+	// Any in-flight answer whose card is no longer pending has been resolved
+	// server-side (by this TUI's POST or by a Studio answer to the SAME row) —
+	// drop its badge so the card reads its terminal state.
+	for rid := range st.AnswerInFlight {
+		if !cardPending(st.Messages, rid) {
+			delete(st.AnswerInFlight, rid)
+		}
+	}
 	if t := strings.TrimSpace(ev.Session.Title); t != "" {
 		st.Title = t
 	}
-	if st.Phase == TurnIdle {
+	// Turn-boundary mode sync: the store row is where the server-side
+	// plan→autopilot switch lands, so the badge follows it here — no new SSE
+	// frame, the same freshness ceiling as the rail (charter D13).
+	if m := strings.TrimSpace(ev.Session.Mode); m != "" {
+		st.Mode = m
+	}
+	// Settle-race guard (charter D77): clear the streamed tail ONLY when this GET
+	// was issued in the generation the tail still belongs to. A stale prior-turn
+	// settle (its Gen < TailGen because a queued send's init already bumped the
+	// generation and a delta re-stamped the tail) leaves the LIVE tail intact —
+	// the old Phase==TurnIdle guard cleared on the wrong signal and let turn-1
+	// render twice while turn-2 deltas concatenated onto the stale tail.
+	if ev.Gen == st.TailGen {
 		st.Tail = ""
 	}
 	return st, nil
+}
+
+// cardPending reports whether the row carrying request_id is still awaiting a
+// decision. An absent row (or one already resolved) reads not-pending, so its
+// in-flight badge clears.
+func cardPending(msgs []Message, requestID string) bool {
+	for _, m := range msgs {
+		if m.RequestID() == requestID {
+			return m.ApprovalStatus() == "pending"
+		}
+	}
+	return false
+}
+
+// answeringNotice is the immediate-feedback footer line for an answer POST in
+// flight — honest present-tense, replaced by the card's terminal badge once the
+// refetch confirms it.
+func answeringNotice(decision string) string {
+	if decision == "deny" {
+		return "denying…"
+	}
+	return "allowing…"
 }
 
 // exitNotice renders the public exit frame (charter D23 {status, reason}) as one

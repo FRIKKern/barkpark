@@ -1,0 +1,21 @@
+{
+  "asserts": null,
+  "command": "Ensure a bp completion noun",
+  "direction": "add",
+  "duration_ms": 0,
+  "ok": true,
+  "ops": [
+    {
+      "index": 0,
+      "kind": "insert-after-first",
+      "line": 0,
+      "mark": "ensure-cli-noun",
+      "path": "internal/cli/builtins.go",
+      "status": "removed"
+    }
+  ],
+  "receipt": "/private/tmp/scaffy-duel-ensure-cli-noun--C--2/.scaffy/receipts/ensure-cli-noun--duelnoun--21abe7493a7c.json",
+  "vars": {
+    "Noun": "duelnoun"
+  }
+}

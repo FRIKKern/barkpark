@@ -91,11 +91,18 @@ test("diagram uses 'source' (NOT 'mermaid') + optional caption", () => {
   assert.equal("caption" in diagram("x"), false);
 });
 
-test("asciicast uses {src, caption?}", () => {
+test("asciicast uses {src, caption?, poster?}", () => {
   resetBlockIds();
   const a = asciicast("https://x.test/cast.json", "demo");
   assert.equal(a.src, "https://x.test/cast.json");
   assert.equal(a.caption, "demo");
+  // poster is opt-in: omitted → absent, so the renderer keeps its npt:0:1 default.
+  assert.equal("poster" in a, false);
+
+  const withPoster = asciicast("https://x.test/cast.json", "demo", {
+    poster: "npt:0:12",
+  });
+  assert.equal(withPoster.poster, "npt:0:12");
 });
 
 test("image uses {src, alt, width?, height?}", () => {

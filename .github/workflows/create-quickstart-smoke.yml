@@ -1,0 +1,106 @@
+name: create-quickstart-smoke
+
+# The fresh-user AUTH+CREATE arc, locked in CI (agent-onramps epic, wave 4,
+# task ao-w4-create-quickstart-smoke). scripts/create-quickstart-smoke.sh boots
+# an EPHEMERAL clean-profile Barkpark against a throwaway Postgres database on a
+# throwaway port, runs the exact docs/setup/AGENT-ONRAMPS.md CREATE arc, and
+# asserts every phase (capabilities, schema apply, seed, tag registration, walled
+# task publish, walled paper publish + view). It exists so the copy-paste
+# one-step promise cannot silently rot for a new user again (charter D23/D24).
+#
+# UNLIKE the manual-only cmux/media smokes (they write the LIVE guerrilla
+# ledger), this stands up its own isolated instance and touches nothing shared —
+# so it is CI-safe and runs on every PR that could break the arc. This is NEW
+# ephemeral-local CI territory: it mirrors elixir.yml's postgres:15 service, but
+# compiles + boots the app itself (MIX_ENV=dev) rather than only running the
+# ExUnit suite.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/setup/AGENT-ONRAMPS.md
+      - scripts/create-quickstart-smoke.sh
+      - internal/cli/seed_cmd.go
+      - api/config/runtime.exs
+      - .github/workflows/create-quickstart-smoke.yml
+  pull_request:
+    paths:
+      - docs/setup/AGENT-ONRAMPS.md
+      - scripts/create-quickstart-smoke.sh
+      - internal/cli/seed_cmd.go
+      - api/config/runtime.exs
+      - .github/workflows/create-quickstart-smoke.yml
+
+concurrency:
+  group: create-quickstart-smoke-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  smoke:
+    name: CREATE quickstart smoke (ephemeral clean-profile instance)
+    runs-on: ubuntu-latest
+    services:
+      # Mirrors elixir.yml's service block. The smoke creates its OWN uniquely
+      # named database as the postgres superuser (BARKPARK_DEV_DATABASE) and
+      # drops it on exit; the service DB below is just the initial connection
+      # target. dev.exs connects as postgres/postgres @ localhost:5432.
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # The golden-rule clang override, uniform with the local gate — clang is
+      # installed below so /usr/bin/clang exists on the runner.
+      CC: /usr/bin/clang
+    steps:
+      - uses: actions/checkout@v4
+        # fetch-depth: 0 pulls full history + tags so Barkpark.BuildInfo can
+        # derive the version from `git describe --tags` at compile time (same
+        # rationale as elixir.yml's Test job).
+        with:
+          fetch-depth: 0
+
+      - name: Setup BEAM (Elixir/OTP — the app the smoke boots)
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.0"
+          elixir-version: "1.18.1"
+
+      - name: Setup Go (builds bp from source under test)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Cache Elixir deps + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            api/deps
+            api/_build
+          key: ${{ runner.os }}-qs-smoke-mix-27.0-1.18.1-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-qs-smoke-mix-27.0-1.18.1-
+
+      - name: Install system deps (clang for NIF compile, libvips for vix, lsof)
+        # libvips-dev: vix (media renditions) compiles its NIF against libvips at
+        # `mix compile` time regardless of the runtime plugin whitelist (same as
+        # elixir.yml). clang: honor the CC=/usr/bin/clang gate uniformly. lsof:
+        # the smoke kills only its own beam by the port it binds.
+        run: sudo apt-get update && sudo apt-get install -y clang libvips-dev lsof
+
+      - name: Run the CREATE-quickstart smoke
+        # The script builds bp from ./cmd/barkpark, boots an ephemeral
+        # clean-profile phx.server on a throwaway port + throwaway DB, runs the
+        # AUTH+CREATE arc, asserts every phase, and self-cleans. Exit code is the
+        # gate (final `[ $fail -eq 0 ]`).
+        run: bash scripts/create-quickstart-smoke.sh

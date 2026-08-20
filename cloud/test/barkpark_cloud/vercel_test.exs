@@ -6,7 +6,10 @@ defmodule BarkparkCloud.VercelTest do
   and the router endpoint's gate ladder (503 unconfigured → 404 cross-team →
   201 with claim state).
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — this module swaps node-global env (`:barkpark_cloud, Vercel`),
+  # which is ONE value for the whole node and is therefore also in force for
+  # every concurrently running async test. Ratchet: scripts/async_env_seam_scan.exs.
+  use BarkparkCloud.DataCase, async: false
 
   import Plug.Test
   import Plug.Conn

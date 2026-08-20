@@ -4,7 +4,10 @@ defmodule BarkparkCloud.GitHubTest do
   connect-time validation through the seam, encryption at rest, cross-team
   isolation, and the Fake's deterministic + inspectable side effects.
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — this module swaps node-global env (`:barkpark_cloud, GitHub`),
+  # which is ONE value for the whole node and is therefore also in force for
+  # every concurrently running async test. Ratchet: scripts/async_env_seam_scan.exs.
+  use BarkparkCloud.DataCase, async: false
 
   alias BarkparkCloud.GitHub
   alias BarkparkCloud.GitHub.{Fake, Installation}

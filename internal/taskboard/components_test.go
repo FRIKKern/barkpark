@@ -219,15 +219,17 @@ func TestTaskRowRightMetaNoGarble(t *testing.T) {
 	}
 	for _, width := range []int{60, 72, 100} {
 		rows := TaskRow(task, false, false, 0, false, width, 0, testNow)
-		if len(rows) != 1 {
-			t.Fatalf("collapsed row should be 1 line, got %d", len(rows))
+		if len(rows) != 2 {
+			t.Fatalf("active row should be 2 lines, got %d", len(rows))
 		}
-		line := ansi.Strip(rows[0])
-		if w := runewidth.StringWidth(line); w > width {
-			t.Errorf("width %d: row is %d cols: %q", width, w, line)
+		for _, row := range rows {
+			line := ansi.Strip(row)
+			if w := runewidth.StringWidth(line); w > width {
+				t.Errorf("width %d: row is %d cols: %q", width, w, line)
+			}
 		}
-		if !strings.Contains(line, "opus-3") {
-			t.Errorf("width %d: worker meta dropped unexpectedly: %q", width, line)
+		if !strings.Contains(ansi.Strip(rows[1]), "opus-3") {
+			t.Errorf("width %d: worker missing from active detail line: %q", width, ansi.Strip(rows[1]))
 		}
 	}
 }
@@ -241,12 +243,26 @@ func TestTaskRowDegradesBelow60(t *testing.T) {
 		Lifecycle: "in_progress",
 		Claim:     &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-2 * time.Minute)},
 	}
-	line := ansi.Strip(TaskRow(task, false, false, 0, false, 40, 0, testNow)[0])
-	if strings.Contains(line, "opus-3") {
-		t.Errorf("below 60 cols meta should be dropped: %q", line)
+	rows := TaskRow(task, false, false, 0, false, 40, 0, testNow)
+	if len(rows) != 2 {
+		t.Fatalf("narrow active row uses %d lines, want 2", len(rows))
 	}
-	if !strings.Contains(line, "Wire the bridge") && !strings.Contains(line, "Wire") {
-		t.Errorf("title must survive the degrade: %q", line)
+	if !strings.Contains(ansi.Strip(rows[0]), "Wire the bridge") {
+		t.Errorf("title must own the first line: %q", ansi.Strip(rows[0]))
+	}
+	if !strings.Contains(ansi.Strip(rows[1]), "opus-3") {
+		t.Errorf("worker must move to the second line: %q", ansi.Strip(rows[1]))
+	}
+}
+
+func TestActiveTaskSecondLineContinuesTreeOutline(t *testing.T) {
+	task := Task{DocID: "t", Title: "Active child", Lifecycle: lifeInProgress, Priority: "1"}
+	rows := taskRowWithOutline(task, false, false, "│ ├─", 60, 0, testNow)
+	if len(rows) != 2 {
+		t.Fatalf("active outlined task uses %d lines, want 2", len(rows))
+	}
+	if got := ansi.Strip(rows[1]); !strings.HasPrefix(got, "│ │    P1") {
+		t.Fatalf("active detail line lost its continuation rails: %q", got)
 	}
 }
 
@@ -260,24 +276,24 @@ func TestTaskRowUnclaimedInProgressWearsStaleness(t *testing.T) {
 		Lifecycle: "in_progress",
 		UpdatedAt: testNow.Add(-8 * 24 * time.Hour),
 	}
-	line := ansi.Strip(TaskRow(task, false, false, 0, false, 80, 0, testNow)[0])
+	line := ansi.Strip(strings.Join(TaskRow(task, false, false, 0, false, 80, 0, testNow), "\n"))
 	if !strings.Contains(line, "8d") {
 		t.Errorf("unclaimed stale in_progress row must wear its age badge: %q", line)
 	}
 }
 
-// TestTaskRowOpenedWearsCheckedRadio — the picker vocabulary: an ENTERED task
-// (opened=true, a FrameTask on the navigation stack) swaps its lifecycle glyph
-// for the checked radio ●; un-opened it keeps the lifecycle glyph. The color
+// TestTaskRowOpenedWearsCheckedRadio — an ENTERED task (opened=true, a FrameTask
+// on the navigation stack) swaps its lifecycle glyph for the reader-open ◆;
+// un-opened it keeps the lifecycle glyph. The color
 // source (glyphStyleFor) is unchanged — shape yields, color (= state) stays.
 func TestTaskRowOpenedWearsCheckedRadio(t *testing.T) {
 	task := Task{DocID: "t", Title: "Wire the bridge", Lifecycle: "ready", UpdatedAt: testNow}
 	open := ansi.Strip(TaskRow(task, false, true, 0, false, 80, 0, testNow)[0])
-	if !strings.Contains(open, "●") || strings.Contains(open, "○") {
-		t.Errorf("opened row must wear the checked ● instead of ○: %q", open)
+	if !strings.Contains(open, "◆") || strings.Contains(open, "○") {
+		t.Errorf("opened row must wear ◆ instead of ○: %q", open)
 	}
 	closed := ansi.Strip(TaskRow(task, false, false, 0, false, 80, 0, testNow)[0])
-	if !strings.Contains(closed, "○") || strings.Contains(closed, "●") {
+	if !strings.Contains(closed, "○") || strings.Contains(closed, "◆") {
 		t.Errorf("un-opened row must keep its lifecycle glyph: %q", closed)
 	}
 }
@@ -460,13 +476,13 @@ func TestCriteriaLadderCapsAndAbsence(t *testing.T) {
 // checklist when the envelope carried no criteria_progress (a ladder never
 // paints without its fraction).
 func TestTaskRowLadderAndFraction(t *testing.T) {
-	line := ansi.Strip(TaskRow(ladderTask(), false, false, 0, false, 100, 0, testNow)[0])
+	line := ansi.Strip(strings.Join(TaskRow(ladderTask(), false, false, 0, false, 100, 0, testNow), "\n"))
 	if !strings.Contains(line, "✓○! 1/3") {
 		t.Errorf("row missing the ladder+fraction token: %q", line)
 	}
 	derived := ladderTask()
 	derived.Criteria = nil
-	line = ansi.Strip(TaskRow(derived, false, false, 0, false, 100, 0, testNow)[0])
+	line = ansi.Strip(strings.Join(TaskRow(derived, false, false, 0, false, 100, 0, testNow), "\n"))
 	if !strings.Contains(line, "✓○! 1/3") {
 		t.Errorf("fraction should derive from the checklist when criteria_progress is absent: %q", line)
 	}
@@ -495,8 +511,8 @@ func TestTaskRowLadderShedsToFraction(t *testing.T) {
 	// Find a width where the row shows the fraction but no ladder rungs: walk
 	// down from wide and assert the degrade order (rungs vanish before digits).
 	sawFull, sawBare := false, false
-	for width := 100; width >= dropMetaBelow; width-- {
-		line := ansi.Strip(TaskRow(task, false, false, 0, false, width, 0, testNow)[0])
+	for width := 100; width >= 20; width-- {
+		line := ansi.Strip(strings.Join(TaskRow(task, false, false, 0, false, width, 0, testNow), "\n"))
 		hasLadder := strings.Contains(line, "✓✓✓✓○○○!")
 		hasFraction := strings.Contains(line, "4/8")
 		if hasLadder && !hasFraction {

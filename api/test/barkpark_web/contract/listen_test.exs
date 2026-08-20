@@ -28,7 +28,13 @@ defmodule BarkparkWeb.Contract.ListenTest do
 
   test "replay_since respects the cursor", %{conn: _conn} do
     {:ok, _} = Content.create_document("post", %{"_id" => "r3", "title" => "a"}, "rep")
-    first_id = BarkparkWeb.ListenController.replay_since("rep", 0) |> Enum.to_list() |> List.last() |> Map.fetch!(:id)
+
+    first_id =
+      BarkparkWeb.ListenController.replay_since("rep", 0)
+      |> Enum.to_list()
+      |> List.last()
+      |> Map.fetch!(:id)
+
     {:ok, _} = Content.create_document("post", %{"_id" => "r4", "title" => "b"}, "rep")
 
     tail = BarkparkWeb.ListenController.replay_since("rep", first_id)

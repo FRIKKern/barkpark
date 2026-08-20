@@ -4,12 +4,68 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
   alias Barkpark.PortableDoc.Render
 
-  describe "body_html_render_version/0 — cache cutover" do
-    test "is 3 (Stage 2 wave 2: article roles/tones/chrome emit bp-* classes)" do
-      # Bumped 1→2 (bare prose) then 2→3 (roles/tones/chrome → classes) — old
-      # cached v1/v2 HTML (self-styled inline) stays renderable; the stamp lets
-      # `mix barkpark.rehydrate_body_html` detect and refresh the drift.
-      assert Render.body_html_render_version() == 3
+  describe "body_html_render_version/0 — source digest" do
+    test "is a sha256 hex digest, not a hand-typed literal" do
+      # It succeeded a hand-bumped integer (v1→v3) that went four renderer
+      # rounds without a bump. Derived from source, the stamp cannot lag.
+      version = Render.body_html_render_version()
+
+      assert is_binary(version)
+      assert String.match?(version, ~r/\A[0-9a-f]{64}\z/)
+    end
+
+    test "recomputing the digest from the covered files on disk reproduces it" do
+      # The independent recomputation below is what makes the next test's
+      # covered-set assertion load-bearing rather than decorative: if the
+      # module hashed a different set, or in a different order, these diverge.
+      recomputed =
+        [Render.render_source_names(), Render.render_source_files()]
+        |> Enum.zip_reduce(:crypto.hash_init(:sha256), fn [name, path], acc ->
+          :crypto.hash_update(acc, name <> "\0" <> File.read!(path))
+        end)
+        |> :crypto.hash_final()
+        |> Base.encode16(case: :lower)
+
+      assert recomputed == Render.body_html_render_version()
+    end
+
+    test "the covered set is exactly render.ex + slots.ex + every render/*.ex" do
+      # A newly added render/*.ex that nobody lists would fall silently outside
+      # the digest, and every paper it changed would go stale behind a matching
+      # stamp — the exact failure this digest exists to make unreachable. This
+      # assertion is the tripwire: adding a renderer file reds it here.
+      covered = Render.render_source_names()
+
+      assert covered == Enum.sort(covered), "the digest must hash in sorted order"
+
+      assert covered ==
+               Enum.sort(~w(
+                   render.ex slots.ex
+                   render/cards_email.ex render/components.ex render/compose.ex
+                   render/data_viz.ex render/figures.ex render/fleet_email.ex
+                   render/forms.ex render/inline.ex render/math.ex render/palettes.ex
+                   render/panels_email.ex render/status_vocab.ex render/stylesheet.ex
+                   render/tokens_gen.ex render/util.ex render/walk.ex
+                 ))
+
+      # …and the list must still match what is actually on disk.
+      render_dir = Path.join(__DIR__, "../../../lib/barkpark/portable_doc/render")
+      on_disk = render_dir |> Path.join("*.ex") |> Path.wildcard() |> Enum.map(&Path.basename/1)
+
+      assert on_disk != [], "expected to find the render/ source directory"
+
+      assert Enum.sort(on_disk) ==
+               covered
+               |> Enum.filter(&String.starts_with?(&1, "render/"))
+               |> Enum.map(&Path.basename/1)
+               |> Enum.sort()
+    end
+
+    test "every covered path exists and contributes bytes" do
+      for path <- Render.render_source_files() do
+        assert File.exists?(path), "covered file missing: #{path}"
+        assert File.read!(path) != "", "covered file is empty: #{path}"
+      end
     end
   end
 
@@ -957,6 +1013,47 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ ~s(data-cast-src="#")
       refute html =~ "javascript:alert"
     end
+
+    # `poster` — the per-block resting frame. The two hydrating twins
+    # (client.ts / bulldocs.html.heex runAsciicast) default to `npt:0:1`, which
+    # is near-empty black for a cast that opens on a banner and a reading pause;
+    # a block may name a LATER, full frame instead.
+    test "a poster rides data-cast-poster on the article mount" do
+      block = Map.put(@asciicast, "poster", "npt:0:12")
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ ~s(data-cast-poster="npt:0:12")
+    end
+
+    test "no poster → no attribute, so the client keeps its npt:0:1 default" do
+      html = Render.render_block(@asciicast, %{style: :article})
+      refute html =~ "data-cast-poster"
+    end
+
+    test "a blank / whitespace-only poster is treated as unset" do
+      html = Render.render_block(Map.put(@asciicast, "poster", "   "), %{style: :article})
+      refute html =~ "data-cast-poster"
+    end
+
+    test "a non-stringish poster is fail-soft (→ unset, never a crash)" do
+      html =
+        Render.render_block(Map.put(@asciicast, "poster", %{"npt" => 12}), %{style: :article})
+
+      assert html =~ ~s(class="bp-asciicast")
+      refute html =~ "data-cast-poster"
+    end
+
+    test "a poster is attribute-escaped, so it cannot break out of the mount" do
+      block = Map.put(@asciicast, "poster", ~s(npt:0:1" onerror="x))
+      html = Render.render_block(block, %{style: :article})
+      refute html =~ ~s(onerror="x)
+      assert html =~ "&quot;"
+    end
+
+    test "email mode ignores poster — no player runtime to poster" do
+      html = Render.render_block(Map.put(@asciicast, "poster", "npt:0:12"), %{style: :email})
+      refute html =~ "data-cast-poster"
+      assert html =~ "Terminal recording"
+    end
   end
 
   describe "figure block — generic child + caption" do
@@ -1130,6 +1227,42 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "string"
       # And the cells render as <td>, not as empty cells.
       assert html =~ ~s(<td)
+    end
+
+    test "article mode treats scalar columns as a header row without crashing" do
+      block = %{
+        "id" => "t4",
+        "type" => "table",
+        "columns" => ["Corner", "Failure", "Proof"],
+        "rows" => [["Reader", "Empty list", "No empty list elements"]]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+
+      assert html =~ "<thead>"
+      assert html =~ "Corner"
+      assert html =~ "Failure"
+      assert html =~ "Proof"
+      assert html =~ "Reader"
+      assert html =~ "No empty list elements"
+    end
+
+    test "article mode promotes a boolean header when an empty head placeholder exists" do
+      block = %{
+        "id" => "t5",
+        "type" => "table",
+        "header" => true,
+        "head" => [],
+        "rows" => [["Surface", "Proof"], ["TUI", "Visible"]]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+
+      assert html =~ "<thead>"
+      assert html =~ "Surface"
+      assert html =~ "Proof"
+      assert html =~ "TUI"
+      assert html =~ "Visible"
     end
 
     test "email mode keeps the flat <td>-only gray table (regression)" do
@@ -1426,11 +1559,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
-  # Article mode emits semantic <ul>/<ol>/<li> via PdList/PdListItem so the
-  # rendered paper is real HTML lists (a11y, copy-paste, native indentation).
-  # Email mode keeps the byte-stable flex-row scaffold with literal "• " /
-  # "1. " prefix spans — Outlook strips <ul> padding, and that scaffold is
-  # the historical Outlook-safe target.
+  # Every style emits semantic <ul>/<ol>/<li> via PdList/PdListItem so rendered
+  # papers and email retain list structure for assistive technology and
+  # copy-paste. Article structure stays bare for the paper stylesheet; email
+  # keeps its Outlook-safe spacing inline on the semantic elements.
   describe "render_block/2 — list" do
     @list_items [
       [%{"type" => "text", "value" => "a"}],
@@ -1471,21 +1603,24 @@ defmodule Barkpark.PortableDoc.RenderTest do
       refute html =~ "flex-direction"
     end
 
-    test "email/default mode is byte-unchanged (frozen prefix scaffold)" do
+    test "email/default mode emits inline-styled semantic list elements" do
       block = %{"id" => "L", "type" => "list", "items" => @list_items}
 
       expected =
-        ~s(<div style="display:flex;flex-direction:column">) <>
-          ~s(<div style="display:flex;flex-direction:row"><span>• </span><span>a</span></div>) <>
-          ~s(<div style="display:flex;flex-direction:row"><span>• </span><span>b</span></div>) <>
-          ~s(<div style="display:flex;flex-direction:row"><span>• </span><span>c</span></div>) <>
-          ~s(</div>)
+        ~s(<ul style="margin:0 0 24px;padding-left:24px;) <>
+          ~s(font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;) <>
+          ~s(color:#15211d;line-height:1.7">) <>
+          ~s(<li style="margin:4pt 0 0"><span>a</span></li>) <>
+          ~s(<li style="margin:4pt 0 0"><span>b</span></li>) <>
+          ~s(<li style="margin:4pt 0 0"><span>c</span></li></ul>)
 
       assert Render.render_block(block) == expected
       assert Render.render_block(block, %{style: :email}) == expected
+      refute expected =~ "• "
+      refute expected =~ "flex-direction"
     end
 
-    test "empty items: <ul></ul> in article, empty flex-column div in email" do
+    test "empty items remain semantic empty lists in article and email" do
       empty = %{"id" => "L", "type" => "list", "items" => []}
 
       article = Render.render_block(empty, %{style: :article})
@@ -1493,8 +1628,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert String.ends_with?(article, "></ul>")
       refute article =~ "<li"
 
-      assert Render.render_block(empty) ==
-               ~s(<div style="display:flex;flex-direction:column"></div>)
+      email = Render.render_block(empty)
+      assert email =~ "<ul"
+      assert String.ends_with?(email, "></ul>")
+      refute email =~ "<li"
+      refute email =~ "flex-direction"
     end
 
     test "inline marks (bold) inside an item survive inside <li> in article mode" do

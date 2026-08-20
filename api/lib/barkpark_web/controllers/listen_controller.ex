@@ -59,7 +59,26 @@ defmodule BarkparkWeb.ListenController do
       |> put_resp_header("connection", "keep-alive")
       |> send_chunked(200)
 
-    {:ok, conn} = chunk(conn, "event: welcome\ndata: {\"type\":\"welcome\"}\n\n")
+    # Guard the welcome frame the same way every other chunk/2 site here does.
+    # `Plug.Conn.chunk/2`'s own spec is `{:ok, t} | {:error, term} | no_return`,
+    # so a client that disconnects between send_chunked(200) above and this
+    # first frame turned a hard `{:ok, conn} = chunk(...)` bind into a MatchError
+    # — a 500-class error log on a route built for long-lived flaky connections.
+    # Census on the fence (`grep -rnE '(^|[^_[:alnum:]])chunk\(' \
+    # api/lib/barkpark_web/controllers api/lib/barkpark_web/plugs | grep -v write_chunk`):
+    # 11 chunk/2 call sites, 10 already case-guarded — including four in THIS
+    # file (L80, L201, L216, L301) using this exact idiom. This line was the
+    # only unguarded one, so the convention is the guard, not the bind.
+    # NO CONN TEST CAN RED THIS LINE: Plug.Adapters.Test.Conn.chunk/2 returns
+    # {:ok, ...} from every clause, so ConnTest cannot produce the {:error, _}
+    # branch. No mutation proof is shipped with this change and none exists;
+    # the census above is the evidence. The change is a strict widening — the
+    # {:ok, _} path is behaviourally identical.
+    conn =
+      case chunk(conn, "event: welcome\ndata: {\"type\":\"welcome\"}\n\n") do
+        {:ok, c} -> c
+        _ -> conn
+      end
 
     conn =
       if since do
@@ -372,9 +391,10 @@ defmodule BarkparkWeb.ListenController do
   # A real anonymous SSE subscriber arrives as a `%CallerContext{}` (anonymous),
   # NOT nil — `scope_opts/1` → `CallerContext.from_conn/1` always falls back to
   # `anonymous()`, never nil — and is fail-closed through the `%CallerContext{}`
-  # clause below (re-render under the anonymous principal ⇒ public-only). The
-  # `nil` clause is a back-compat no-op that is UNREACHABLE from any request
-  # path; it survives only as the direct testing seam (verbatim snapshot).
+  # clause below (re-render under the anonymous principal ⇒ public-only). There
+  # is NO `nil` clause: a caller-less call has no request-path origin, and the
+  # fail-OPEN verbatim-forward it used to do was REMOVED (ctx-s3). The seam now
+  # has exactly two shapes — the admin fast-path and the fail-closed re-render.
   #
   # When the live document is UNREADABLE for this caller, distinguish the two
   # causes the bare `not_found` conflated:
@@ -390,10 +410,6 @@ defmodule BarkparkWeb.ListenController do
   # — same testing seam as `replay_since/3`, `format_event/2` and
   # `forward_event?/2` (the live `receive` loop is otherwise un-assertable).
   @doc false
-  # nil caller: UNREACHABLE from any request path (scope_opts/1 always yields an
-  # anonymous %CallerContext{}, never nil) — back-compat no-op kept as a test seam.
-  def redacted_result(event, _dataset, nil, _scope), do: event.document
-
   def redacted_result(event, dataset, %CallerContext{} = ctx, scope) do
     case Content.get_document(event.doc_id, event.type, dataset, scope) do
       {:ok, doc} ->
@@ -440,6 +456,14 @@ defmodule BarkparkWeb.ListenController do
   # Public (`@doc false`) so the cross-tenant isolation contract can assert the
   # drop directly — same testing seam as `replay_since/3` and `format_event/2`.
   @doc false
+  # Personal Dev Fleet listener presence NEVER rides the SSE fan-out — not even
+  # to an unscoped (nil-workspace) subscriber, which the clause below would
+  # otherwise forward. A listener heartbeat is per-machine truth, so it must not
+  # reach a generic workspace SSE consumer (the live leak, eventId 70357).
+  # Mirrors `Sync.Outbox`'s `type != "listener"` exclusion (#5626, PDF-D18).
+  # Ordered FIRST so it beats the nil-workspace forward-everything clause.
+  def forward_event?(%{type: "listener"}, _workspace_id), do: false
+
   def forward_event?(_msg, nil), do: true
 
   def forward_event?(%{workspace_id: event_ws}, workspace_id)

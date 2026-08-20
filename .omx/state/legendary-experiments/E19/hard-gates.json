@@ -1,0 +1,23 @@
+{
+  "outcomes": {
+    "applicable_e03_hard_gates": "BLOCKED_NO_REAL_CAPTURE_EVIDENCE",
+    "authenticated_studio": "BLOCKED_NO_AUTHENTICATED_BROWSER_SESSION_OR_DEPLOYMENT",
+    "cli_api": "BLOCKED_NO_DEPLOYED_CANDIDATE_PROVENANCE",
+    "exact_108_real_captures": "FAIL_0_OF_108",
+    "explicit_errors_zero_silent_blanks": "PASS_ATTEMPT_RECORDS_ONLY",
+    "frozen_inputs": "PASS",
+    "identical_candidate_digest": "PASS_ATTEMPT_BINDING_ONLY",
+    "identical_deployment_id": "FAIL_NO_DEPLOYMENT_CREATED",
+    "no_production_mutation": "PASS",
+    "no_secret_persistence": "PASS",
+    "public_reader": "BLOCKED_NO_DEPLOYED_CANDIDATE_PROVENANCE",
+    "rollback": "PASS_36_OF_36_NO_DEPLOYMENT_CREATED",
+    "teardown": "PASS_NO_DEPLOYMENT_CREATED",
+    "zero_missing_duplicate_proxy_attempt_cells": "PASS"
+  },
+  "schema_version": "legendary-e19-hard-gates/v1",
+  "verdict": {
+    "action": "REWORK",
+    "quality": "BLOCKED"
+  }
+}

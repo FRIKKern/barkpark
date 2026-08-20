@@ -42,19 +42,47 @@ import (
 	"github.com/FRIKKern/barkpark/internal/pdrender"
 )
 
-// metricTopSpec is the render order + display shape for one vitals series. `pct`
-// metrics render their headline as a whole-number percent; load carries no unit.
+// metricTopUnit is how one vitals series formats its headline number.
+type metricTopUnit int
+
+const (
+	unitPlain metricTopUnit = iota // a bare number (load average)
+	unitPct                        // a whole-number percent
+	unitBytes                      // a human byte size (the BEAM footprint)
+)
+
+// metricTopSpec is the render order + display shape for one vitals series.
+//
+// THIS LIST IS THE RENDER CONTRACT, and it is not self-enforcing:
+// cloudclient.MetricsResult.Series is a DYNAMICALLY keyed map, so a series the
+// control plane emits and this list omits is dropped with zero red — an
+// invisible number behind a fully green build. It must move with
+// BarkparkCloud.Metrics's @vitals; TestMetricTopSpecsCoverTheControlPlaneVitals
+// is the tripwire.
+//
+// `chart` excludes the byte-scale series from the shared line chart: one axis
+// carrying both a 0-100 percent and a 1.2e9 byte count flattens every percent
+// line to the floor, so bytes keep their stat cell + inline sparkline (each
+// normalised to its OWN swing) and stay out of the mixed plot.
 type metricTopSpec struct {
 	key   string
 	label string
-	pct   bool
+	unit  metricTopUnit
+	chart bool
 }
 
 var metricTopSpecs = []metricTopSpec{
-	{key: "cpu", label: "CPU", pct: true},
-	{key: "mem", label: "Memory", pct: true},
-	{key: "disk", label: "Disk", pct: true},
-	{key: "load", label: "Load", pct: false},
+	{key: "cpu", label: "CPU", unit: unitPct, chart: true},
+	{key: "mem", label: "Memory", unit: unitPct, chart: true},
+	{key: "disk", label: "Disk", unit: unitPct, chart: true},
+	{key: "load", label: "Load", unit: unitPlain, chart: true},
+	// Swap is the vital Memory HIDES: MemAvailable clears the floor precisely
+	// BECAUSE the BEAM was paged out, so a box at 99% swap reports a comfortable
+	// 58% memory. Its headline is overridden by the three-state swap cell below
+	// (the percent alone cannot say "none configured").
+	{key: "swap", label: "Swap", unit: unitPct, chart: true},
+	{key: "beam_pss", label: "BEAM", unit: unitBytes, chart: false},
+	{key: "beam_swap", label: "BEAM swapped", unit: unitBytes, chart: false},
 }
 
 // runCloudInstanceTop is `bp cloud instance top <instance>`: resolve the instance
@@ -158,10 +186,20 @@ func renderInstanceTop(out *writer, ref string, res cloudclient.MetricsResult) {
 	if len(blocks) == 0 {
 		out.outf("")
 		out.outf("No numeric samples in the current window yet.")
-		return
+	} else {
+		out.outf("")
+		out.outf("%s", renderMetricsBlocks(out, blocks))
 	}
-	out.outf("")
-	out.outf("%s", renderMetricsBlocks(out, blocks))
+
+	// What is taking up space — the newest beat's database size and its named
+	// biggest consumers. Absent on a box whose agent does not report them.
+	if head, storage := storageLines(res.Latest); head != "" {
+		out.outf("")
+		out.outf("%s", head)
+		if len(storage) > 0 {
+			out.outf("%s", renderMetricsBlocks(out, storage))
+		}
+	}
 
 	if line := metricsHealthLine(res.ServiceHealth); line != "" {
 		out.outf("")
@@ -254,17 +292,31 @@ func metricsBlocks(res cloudclient.MetricsResult) []pdrender.Block {
 			}
 		}
 		item := map[string]any{"label": spec.label}
-		switch {
-		case current == nil:
-			item["value"] = "—"
-		case spec.pct:
-			item["value"] = fmt.Sprintf("%d%%", int(math.Round(*current)))
-		default:
-			item["value"] = strconv.FormatFloat(math.Round(*current*100)/100, 'f', -1, 64)
+		// The swap headline is a THIRD state the series alone cannot express (a
+		// swapless box's 0% is not a reading, it is "there is no swap"), so it
+		// overrides the numeric formatting when the latest beat can answer it.
+		if headline := swapStatValue(spec.key, res.Latest.Swap); headline != "" {
+			item["value"] = headline
+		} else {
+			switch {
+			case current == nil:
+				item["value"] = "—"
+			case spec.unit == unitPct:
+				item["value"] = fmt.Sprintf("%d%%", int(math.Round(*current)))
+			case spec.unit == unitBytes:
+				item["value"] = humanBytes(*current)
+			default:
+				item["value"] = strconv.FormatFloat(math.Round(*current*100)/100, 'f', -1, 64)
+			}
 		}
-		if len(vals) > 0 {
+		// A swapless box has no swap to trend: its window of honest 0s would draw a
+		// flat line implying a meter that exists. "none configured" is the whole
+		// answer — never a percent, never a plot.
+		if len(vals) > 0 && !swapNoneConfigured(spec.key, res.Latest.Swap) {
 			item["spark"] = vals
-			chartSeries = append(chartSeries, map[string]any{"label": spec.label, "points": vals})
+			if spec.chart {
+				chartSeries = append(chartSeries, map[string]any{"label": spec.label, "points": vals})
+			}
 			anySample = true
 		}
 		items = append(items, item)
@@ -282,6 +334,97 @@ func metricsBlocks(res cloudclient.MetricsResult) []pdrender.Block {
 		})
 	}
 	return blocks
+}
+
+// swapNoneConfigured reports whether the newest beat MEASURED swap and found
+// none: the agent sends the percent and its total as a pair precisely so this
+// case is distinguishable, and total == 0 is the swapless box. A nil total is
+// NOT this state — that is "we could not measure", which falls through to the
+// existing gap arms.
+func swapNoneConfigured(key string, s cloudclient.MetricsSwap) bool {
+	return key == "swap" && s.TotalBytes != nil && *s.TotalBytes == 0
+}
+
+// swapStatValue is the swap headline's THREE honest states, and it mints no new
+// vocabulary — the disambiguation rides in the DATA the agent already sends:
+//
+//   - total == 0  → "none configured" (neutral: the box has no swap; the answer
+//     is not a percent and must never be dressed as one — five of six boxes in
+//     the fleet are swapless, so this is the majority case);
+//   - total > 0   → "<pct>% of <total>" (the percent is only interpretable
+//     against the size it is a percent OF);
+//   - anything else (a nil total, a nil percent, the agent's -1 sentinel the
+//     control plane already nils) → "" so the caller falls through to the
+//     existing unmeasured arm (the honest em dash).
+//
+// It returns "" for every non-swap series, so the caller can ask unconditionally.
+func swapStatValue(key string, s cloudclient.MetricsSwap) string {
+	if key != "swap" {
+		return ""
+	}
+	if swapNoneConfigured(key, s) {
+		return "none configured"
+	}
+	if s.TotalBytes != nil && *s.TotalBytes > 0 && s.UsedPct != nil {
+		return fmt.Sprintf("%d%% of %s", int(math.Round(*s.UsedPct)), humanBytes(*s.TotalBytes))
+	}
+	return ""
+}
+
+// storageLines answers "what is taking up space" for the drill-in view: the
+// database total from the newest beat, then its biggest NAMED consumers as a
+// bar-chart whose bars are shares of that total (a bar length IS the share, so
+// the diagnosis reads without arithmetic). Three honest states, never merged:
+//
+//   - the beat carries no db size AND no relation list (a pre-upgrade agent, or
+//     a failed probe) → nothing is printed rather than a zeroed section;
+//   - the list is nil (unmeasured) → the size still prints, with an honest note
+//     that the breakdown was not reported;
+//   - the list is EMPTY (measured, nothing to report) → says so — a different
+//     fact from "we did not look".
+func storageLines(l cloudclient.MetricsLatest) (string, []pdrender.Block) {
+	if l.DBSize == nil && l.TopRelations == nil {
+		return "", nil
+	}
+	head := "database: —"
+	if l.DBSize != nil {
+		head = "database: " + humanBytes(*l.DBSize)
+	}
+	switch {
+	case l.TopRelations == nil:
+		return head + "  ·  top relations not reported by this beat", nil
+	case len(l.TopRelations) == 0:
+		return head + "  ·  no relations reported", nil
+	}
+
+	max := 0.0
+	if l.DBSize != nil {
+		max = *l.DBSize
+	}
+	bars := make([]any, 0, len(l.TopRelations))
+	named := 0.0
+	for _, rel := range l.TopRelations {
+		named += rel.Bytes
+		bars = append(bars, map[string]any{
+			"label": sanitizeCell(rel.Name) + " " + humanBytes(rel.Bytes),
+			"value": rel.Bytes,
+		})
+	}
+	if l.DBSize != nil && *l.DBSize > 0 {
+		head += fmt.Sprintf("  ·  top %d = %s of it", len(l.TopRelations), pctOf(named, *l.DBSize))
+	}
+	return head, []pdrender.Block{
+		{Type: "bar-chart", Attrs: map[string]any{"bars": bars, "max": max}},
+	}
+}
+
+// pctOf renders a share as a one-decimal percent. A non-positive denominator
+// yields "—" (never a divide-by-zero, never an invented share).
+func pctOf(part, whole float64) string {
+	if whole <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f%%", part/whole*100)
 }
 
 // renderMetricsBlocks renders the adapted blocks through the shared pdrender
@@ -318,9 +461,17 @@ USAGE
 
 WHAT IT DOES
   Reads the on-box agent's rolled beat window through the control plane and
-  renders CPU / memory / disk / load over the window plus a service-health
-  rollup — the SAME truth on every provider and on adopted/self-hosted boxes
-  (monitoring keys off the agent beat, never a provider metrics API).
+  renders CPU / memory / disk / load / swap / the BEAM's own footprint over the
+  window, then the database size with its biggest NAMED relations, then a
+  service-health rollup — the SAME truth on every provider and on
+  adopted/self-hosted boxes (monitoring keys off the agent beat, never a
+  provider metrics API).
+
+  SWAP has three honest states, because a percent alone cannot carry them: a
+  box with no swap configured reads "none configured" (never 0%), a box with
+  swap reads "<pct>% of <total>", and a box whose probe could not measure reads
+  an em dash. Swap is the vital MEMORY HIDES — a box paging its BEAM out can
+  still report comfortable memory.
 
   <instance> is a fleet name or id (the forms bp cloud status shows); needs
   'bp login'. --points requests how many samples to roll (default: the server's
@@ -333,8 +484,9 @@ ONE-SHOT
   the ~60s agent beat).
 
 OUTPUT
-  a header, the beat state, a stat grid + trend chart, and the health rollup.
+  a header, the beat state, a stat grid + trend chart, the storage breakdown,
+  and the health rollup.
   -o json    the metrics envelope verbatim: {ok, collected_at, instance, beat,
-             points, series, service_health}`
+             points, series, latest, service_health}`
 	out.outf("%s", help)
 }

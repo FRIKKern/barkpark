@@ -1,0 +1,78 @@
+{
+  "run_id": "grip-20260731T000000Z",
+  "subject_note": "jarl-platform-followups wave 2026-07-31 — verifier [dedupwall-and-intake-reach]. Re-derivation recipes for the two inferred-not-read claims: (a) does Content.DedupWall run for type:task publishes, (b) does Plugins.Github.Intake retry or drop on {:error, {:dedup_unavailable, _}}.",
+  "recipes": [
+    {
+      "subject": "api/lib/barkpark/content/authoring_wall.ex",
+      "quantity": "elixir:@walled_types",
+      "rerun": "git show origin/main:api/lib/barkpark/content/authoring_wall.ex | grep -n '@walled_types'",
+      "derived_level": "L2",
+      "deps": ["origin/main@e34031104"],
+      "observed_at": "2026-07-31T00:00:00Z",
+      "observed_value": "@walled_types ~w(paper task) — dedup_gate/5 guards `when type in @walled_types`, so DedupWall.check/4 DOES run for type:task publishes"
+    },
+    {
+      "subject": "api/lib/barkpark/content/dedup_wall.ex",
+      "quantity": "elixir:query-budget",
+      "rerun": "git show origin/main:api/lib/barkpark/content/dedup_wall.ex | grep -n 'timeout\\|Repo.transaction\\|catch\\|rescue\\|@candidate_limit'",
+      "derived_level": "L2",
+      "deps": ["origin/main@e34031104"],
+      "observed_at": "2026-07-31T00:00:00Z",
+      "observed_value": "NO :timeout option anywhere; Repo.transaction(fn -> SET LOCAL trgm threshold; Repo.all(limit 500) end) inherits Ecto's 15_000ms default. rescue-only fail-open (Logger.warning + []), NO `catch :exit` — the exact pair Tasks.Dedup has at dedup.ex:256-264."
+    },
+    {
+      "subject": "api/lib/barkpark/tasks/dedup.ex",
+      "quantity": "elixir:query-budget",
+      "rerun": "git show origin/main:api/lib/barkpark/tasks/dedup.ex | grep -n '@query_timeout_ms\\|Repo.all(timeout\\|catch'",
+      "derived_level": "L2",
+      "deps": ["origin/main@e34031104"],
+      "observed_at": "2026-07-31T00:00:00Z",
+      "observed_value": "@query_timeout_ms 5_000 (line 78); Repo.all(timeout: timeout) (line 255); rescue (256) AND catch :exit (261). The bounded twin."
+    },
+    {
+      "subject": "internal/cli/tasks_create_cmd.go",
+      "quantity": "go:mutation-sequence",
+      "rerun": "git show origin/main:internal/cli/tasks_create_cmd.go | sed -n '95,115p'",
+      "derived_level": "L2",
+      "deps": ["origin/main@e34031104"],
+      "observed_at": "2026-07-31T00:00:00Z",
+      "observed_value": "bp task create sends a SECOND mutate {\"publish\":{\"id\":bareID,\"type\":\"task\"}} when publish is true (mcp_tasks.go:433 documents default true). So every default task create pays Tasks.Dedup (bounded) on create AND DedupWall (unbounded) on publish."
+    },
+    {
+      "subject": "api/lib/barkpark/plugins/github/intake.ex",
+      "quantity": "elixir:clause-order",
+      "rerun": "git show origin/main:api/lib/barkpark/plugins/github/intake.ex | sed -n '200,240p'",
+      "derived_level": "L2",
+      "deps": ["origin/main@e34031104"],
+      "observed_at": "2026-07-31T00:00:00Z",
+      "observed_value": "Clause order is {:duplicate_task,_} -> refused/2xx; {:halted,_} -> {:refused, doc_id}/2xx; {:dedup_unavailable, reason} -> returns {:error, {:dedup_unavailable, reason}}; {:error, reason} -> passthrough. The dedup_unavailable clause is BELOW the halted clause (a144d3c81's commit body says 'ABOVE'), which is harmless because the tags are disjoint, but the commit prose does not describe its own code."
+    },
+    {
+      "subject": "api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+      "quantity": "http:status-on-intake-error",
+      "rerun": "git show origin/main:api/lib/barkpark_web/controllers/github_webhook_controller.ex | sed -n '162,177p'",
+      "derived_level": "L2",
+      "deps": ["origin/main@e34031104"],
+      "observed_at": "2026-07-31T00:00:00Z",
+      "observed_value": "handle_intake's {:error, reason} clause does NOT route through Content.Errors — it puts :internal_server_error with code \"intake_failed\". So on the WEBHOOK surface a dedup outage is a real 500. The 409/`halted` in errors.ex:443 is the API-mutate surface only."
+    },
+    {
+      "subject": "api/test/barkpark/plugins/github/",
+      "quantity": "grep:test-coverage",
+      "rerun": "git grep -rn 'dedup_unavailable' origin/main -- api/test",
+      "derived_level": "L2",
+      "deps": ["origin/main@e34031104"],
+      "observed_at": "2026-07-31T00:00:00Z",
+      "observed_value": "Only 3 hits, ALL in api/test/barkpark/tasks/dedup_test.exs (168, 184, 197). ZERO hits under api/test/barkpark/plugins/github — the Intake clause a144d3c81 added is NOT pinned by any test at the Intake or controller level."
+    },
+    {
+      "subject": "git-grep BRE alternation",
+      "quantity": "tooling:false-negative",
+      "rerun": "cd barkpark && git grep -c 'DedupWall\\|authoring_wall' origin/main -- api/lib; echo exit=$?; git grep -c 'DedupWall' origin/main -- api/lib",
+      "derived_level": "L1",
+      "deps": ["local git 2.x"],
+      "observed_at": "2026-07-31T00:00:00Z",
+      "observed_value": "The alternation form exits 1 with NO output; the single-pattern form finds 3 files. `git grep 'A\\|B'` is a SILENT FALSE NEGATIVE in this repo's git — use -E or repeated -e. The wave's own MUST-RUN grep mis-fired this way."
+    }
+  ]
+}

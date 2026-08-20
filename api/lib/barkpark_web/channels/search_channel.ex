@@ -17,7 +17,15 @@ defmodule BarkparkWeb.SearchChannel do
   already pattern-matches `%Phoenix.Socket{}`) threads the exact same
   `workspace_id` / `dataset` filter every other read path uses. A token that
   isn't authorized for the workspace fails the join closed — it never reaches
-  `handle_in`.
+  `handle_in`. The dataset leaf is validated the same way (`get_dataset/2`,
+  scoped to the resolved project) and refused with `"unknown_dataset"`: a topic
+  naming a dataset that does not exist used to join green and return count=0
+  forever, which reads as "the search is broken" instead of "your topic is
+  wrong".
+
+  The `perspective` is PINNED to `:published` in `handle_in` and is never read
+  from the client frame — a socket holding a read token must not be able to
+  ask for drafts. `search_channel_test.exs` guards that with a regression test.
 
   ## Stale-reply ordering
 
@@ -46,7 +54,7 @@ defmodule BarkparkWeb.SearchChannel do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Content.CallerContext
-  alias Barkpark.Content.Envelope
+  alias Barkpark.Search.HitEnvelope
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -57,7 +65,16 @@ defmodule BarkparkWeb.SearchChannel do
     with [ws_slug, proj_slug, dataset] <- String.split(scope, ":"),
          %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
          :ok <- TenancyAuth.authorize(socket.assigns.api_token, ws.id, :read),
-         %Tenancy.Project{} = proj <- Tenancy.get_project(ws_slug, proj_slug) do
+         %Tenancy.Project{} = proj <- Tenancy.get_project(ws_slug, proj_slug),
+         # The dataset leaf of the topic used to be trusted as a free string:
+         # an unknown dataset joined GREEN and then matched zero rows forever,
+         # because the read path degrades to a legacy string filter with no
+         # error anywhere (charter D52). Validate it against THIS project —
+         # `get_dataset/2` scopes by project_id, so a `production` under another
+         # project never satisfies this. The tuple tag is load-bearing: a bare
+         # `%Tenancy.Dataset{} <- …` would fall into the `_` catch-all below and
+         # report a dataset typo as "unauthorized".
+         {:dataset, %Tenancy.Dataset{}} <- {:dataset, Tenancy.get_dataset(proj, dataset)} do
       # P5 live-push: subscribe to the workspace-scoped document mutation topic
       # so any create/update/delete in this (workspace, dataset) wakes the
       # channel to re-run its cached query. The workspace-scoped topic mirrors
@@ -76,6 +93,7 @@ defmodule BarkparkWeb.SearchChannel do
       {:ok, socket}
     else
       [_ | _] -> {:error, %{reason: "bad_topic"}}
+      {:dataset, _} -> {:error, %{reason: "unknown_dataset"}}
       _ -> {:error, %{reason: "unauthorized"}}
     end
   end
@@ -99,6 +117,7 @@ defmodule BarkparkWeb.SearchChannel do
         opts_base = [
           type: params["type"],
           types: parse_types(params["types"]),
+          # PINNED — never read from `params`. See the moduledoc.
           perspective: :published,
           limit: clamp_limit(params["limit"]),
           offset: parse_int(params["offset"], 0),
@@ -109,19 +128,23 @@ defmodule BarkparkWeb.SearchChannel do
 
         {docs, count, meta} = Content.search_documents(query, socket.assigns.dataset, opts)
 
-        reply = build_reply(seq, query, docs, count, meta, socket)
+        reply =
+          build_reply(seq, query, docs, count, meta, socket, params["fields"], params["view"])
 
         # Cache the latest query parameters so a downstream
         # `{:document_changed, _}` PubSub message can re-run the SAME search
         # without the client re-pushing. `opts_base` excludes the tenancy scope
         # — that is re-derived from the socket on each re-run via `scope_opts/1`
         # so a workspace move (today purely defensive) cannot stale-pin the old
-        # tenant filter.
+        # tenant filter. `view` rides along so a brief subscriber's live pushes
+        # stay brief.
         socket =
           assign(socket, :last_query, %{
             seq: seq,
             query: query,
-            opts_base: opts_base
+            opts_base: opts_base,
+            fields: params["fields"],
+            view: params["view"]
           })
 
         {:reply, {:ok, reply}, socket}
@@ -134,7 +157,7 @@ defmodule BarkparkWeb.SearchChannel do
       nil ->
         {:noreply, socket}
 
-      %{seq: seq, query: query, opts_base: opts_base} ->
+      %{seq: seq, query: query, opts_base: opts_base} = last ->
         opts = opts_base ++ scope_opts(socket)
 
         {docs, count, meta} =
@@ -143,7 +166,7 @@ defmodule BarkparkWeb.SearchChannel do
         push(
           socket,
           "results",
-          build_reply(seq, query, docs, count, meta, socket)
+          build_reply(seq, query, docs, count, meta, socket, last[:fields], last[:view])
         )
 
         {:noreply, socket}
@@ -156,24 +179,24 @@ defmodule BarkparkWeb.SearchChannel do
   @impl true
   def handle_info(_msg, socket), do: {:noreply, socket}
 
-  defp build_reply(seq, query, docs, count, meta, socket) do
+  # ONE shared envelope builder (AXI R3) — the same `HitEnvelope.build/5` the
+  # HTTP routes consume, so the client renders identically whether the hit came
+  # over HTTP or the socket. BOTH call sites (the "query" reply and the P5
+  # live-push) go through this function. Per-type schema resolution drops a
+  # non-encrypted private/owner_only/readable_by field for a non-authorized
+  # subscriber; `fields` mirrors the HTTP `?fields=` allowlist; `view: "brief"`
+  # returns brief hit cards (id/type/title/slug/snippet/highlights).
+  defp build_reply(seq, query, docs, count, meta, socket, fields, view) do
     caller_context = CallerContext.from_conn(socket)
 
-    %{
-      seq: seq,
-      # Multi-type live search => resolve each doc's schema by type so a
-      # non-encrypted private/owner_only/readable_by field is dropped for a
-      # non-authorized subscriber (the schema-free guard only catches ciphertext).
-      documents: Envelope.render_many_by_type(docs, schema_resolver(socket), caller_context),
-      count: count,
-      query: query,
-      parsedQuery: meta[:parsed],
-      highlights: meta[:highlights] || %{},
-      recovery: meta[:recovery],
-      correctedTo: meta[:corrected_to],
-      facets: meta[:facets],
-      truncation: meta[:truncation]
-    }
+    docs
+    |> HitEnvelope.build(count, query, meta,
+      caller_context: caller_context,
+      schema_resolver: schema_resolver(socket),
+      fields: fields,
+      view: view
+    )
+    |> Map.put(:seq, seq)
   end
 
   # Per-type schema resolver memoised by `Envelope.render_many_by_type` across

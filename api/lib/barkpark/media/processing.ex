@@ -4,8 +4,7 @@ defmodule Barkpark.Media.Processing do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Media
-  alias Barkpark.Media.{Probe, Renditions}
+  alias Barkpark.Media.{Blobstore, Probe, Renditions}
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Media.Delivery.{Cdn, Events}
   alias Barkpark.Plugins.Media.Assets
@@ -42,14 +41,14 @@ defmodule Barkpark.Media.Processing do
   end
 
   defp maybe_probe_and_patch(doc, %MediaFile{} = file) do
-    src = Media.file_path(file.path)
-
-    case Probe.probe(src, file.mime_type) do
-      {:ok, %{width: w, height: h}} ->
-        patch_dimensions(doc, file, w, h)
-
-      {:error, _} ->
-        doc
+    # ensure_local/1, not file_path/1: with an object-storage backend the
+    # original may not be on this disk (post-import, or a cold cache) — the
+    # blobstore fetches it once into the write-through cache before probing.
+    with {:ok, src} <- Blobstore.ensure_local(file.path),
+         {:ok, %{width: w, height: h}} <- Probe.probe(src, file.mime_type) do
+      patch_dimensions(doc, file, w, h)
+    else
+      _ -> doc
     end
   end
 

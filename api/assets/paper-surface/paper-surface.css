@@ -85,24 +85,184 @@ html[data-theme="dark"] .bp-paper-body {
    design/tokens.json via design/emit.mjs), declared just below on this same
    `.bp-paper-surface, .bp-paper-body` scope, so the un-fallbacked var()s always
    resolve. tokens.json is now the ONE source; change a reading value THERE and
-   `node design/emit.mjs --write` moves View AND Edit together. Only the
-   `--bp-*-tracking` letter-spacings stay hand-authored (no `--tok` twin exists).
+   `node design/emit.mjs --write` moves View AND Edit together. Since
+   pe-w1-reader-editorial-typography the `--bp-*-tracking` letter-spacings bridge
+   too: `type.reading.<step>.letterSpacing` was declared in tokens.json and
+   emitted nowhere, so hand-authored numbers sat beside a source that claimed to
+   own them. A step with no letterSpacing emits no tracking var and no --bp-*
+   twin (h3 today), rather than a var() that resolves to nothing.
    Still byte-aligned with the standalone bundle (api/assets/paper-editor/src/
-   styles.css `:root`, re-derived by the mirror) and with render.ex
-   heading_style/2 INLINE values (h1 1.1/-0.02em, h2 1.2, h3 1.25 — the View
-   inline wins, so these mirror it).
+   styles.css `:root`, re-derived by the mirror). NOT related to walk.ex
+   heading_style/2: that is the NON-ARTICLE (email / stylesheet-less) fallback
+   and is byte-frozen at its own 32/24/20px scale — article headings emit bare
+   `<hN>` and read the tokens below.
    NOTE: the VIEW-only list bottom-margin (`ul,ol { margin:0 0 24px }`) is
    deliberately NOT a token — it belongs to VIEW alone (pulling it into Edit
    re-introduces double-spacing; see styles.css :84). */
 .bp-paper-surface, .bp-paper-body {
   --bp-body-size: var(--tok-reading-body-size);
   --bp-body-lh: var(--tok-reading-body-lh);
-  --bp-body-tracking: 0.005em;
-  --bp-h1-size: var(--tok-reading-h1-size);   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: -0.02em;
-  --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);
+  --bp-body-tracking: var(--tok-reading-body-tracking);
+  --bp-h1-size: var(--tok-reading-h1-size);   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: var(--tok-reading-h1-tracking);
+  --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);   --bp-h2-tracking: var(--tok-reading-h2-tracking);
   --bp-h3-size: var(--tok-reading-h3-size);   --bp-h3-lh: var(--tok-reading-h3-lh);
   --bp-heading-weight: var(--tok-reading-heading-weight);
   --bp-para-margin-top: 12pt;
+  /* ── The AIR scale (space.air → the emitted `--tok-air-*` block below), bridged
+     onto `--bp-air-*` exactly like the type scale above so a block rule reads a
+     `--bp-*` name and the emitted layer stays the one source.
+
+     WHAT IT IS: how much room an EVIDENCE block takes before it starts. The
+     numbers are ratios of `--tok-air-beat` (the benchmark artifact's paragraph
+     beat, 22px), so the LAW ships rather than six literals: code 1.1x, table
+     1.36x, asciicast 1.45x, callout 1.55x, stats 1.64x, figure 1.82x — which
+     resolve within 0.2px of the measured scale in
+     tooling/paper-excellence/evidence/erasure.html (24/30/32/34/36/40px).
+
+     WHY IT WAS NEEDED: `.bp-table` and `.bp-callout` carried NO margin at all, so
+     a table opened 0px under the ingress that introduced it — measured on
+     /papers/eight-minute-erasure. Air is what tells a reader an argument just
+     handed off to its evidence; with none, the evidence reads as another line of
+     the sentence above it.
+
+     Margins here are TOP-ONLY, for the same reason the headings below are: the
+     flat edit ProseMirror has sibling margins that COLLAPSE and the div-wrapped
+     reader has none, so only a one-sided margin lands both surfaces on the same
+     spacing (additive == collapsed when the other side is zero).
+
+     NOT `--bp-para-margin-top`: the reader's paragraph beat is 12pt/16px, the
+     artifact's is ~22px. The air scale is anchored on the ARTIFACT's beat because
+     that is what reproduces its measured evidence spacing. Retuning the reader's
+     prose rhythm to match is a real question, but it is type.reading's to answer,
+     not this scale's. */
+  --bp-air-code: var(--tok-air-code);
+  --bp-air-table: var(--tok-air-table);
+  --bp-air-asciicast: var(--tok-air-asciicast);
+  --bp-air-callout: var(--tok-air-callout);
+  --bp-air-stats: var(--tok-air-stats);
+  --bp-air-figure: var(--tok-air-figure);
+  /* ── The SECTION BOUNDARY (space.section → the emitted `--tok-section-*` block
+     below), bridged onto `--bp-section-*` exactly like the air scale above.
+
+     WHAT IT IS: the air scale spaces the blocks INSIDE an argument. This is the
+     boundary BETWEEN arguments — the two-part device the benchmark artifact
+     (tooling/paper-excellence/evidence/erasure.html) draws with
+     `section { margin-bottom: 92px }` and
+     `.sec-head { border-top: 2px solid var(--ink); padding-top: 16px }`. Air alone
+     reads as a long pause; a rule alone reads as decoration. Together they say
+     one thing ended and another began, which is the only reason to spend 92px.
+
+     WHERE IT LANDS, and why it is the `h2` element rule and not a wrapper. There
+     is no section box to hang it on: a `section` BLOCK flattens into its children
+     (render/compose.ex `compose_section_stack/2`), and a paper's real boundaries
+     are its level-2 headings — all 51 h2s across the six rig fixtures follow
+     non-heading content, so "level-2 heading" and "section opening" are the same
+     event in this corpus. The `h2` element ALSO happens to be the only carrier
+     both surfaces can agree on: View emits a bare one (walk.ex `heading/3`)
+     and Edit is a FLAT ProseMirror document whose heading node admits no wrapper
+     and no sibling chrome. A `.bp-section-head` wrapper div, or a `p + h2`
+     sibling selector, would each exist on exactly one of the two — the drift the
+     parity gate exists to red. So the rule goes on the element, and BOTH surfaces
+     get it from this one declaration.
+
+     WHAT THIS DELIBERATELY DOES NOT SHIP: the artifact's `.sec-head .label`
+     eyebrow above the heading. It needs a slot INSIDE the head, and the two DOMs
+     disagree about where that is — Edit's h2 is a flat sibling of the paragraph
+     before it, the reader's is inside its own keyed stream `div`
+     (bulldocs_live.ex), so the "an eyebrow block directly above an h2 takes the
+     rule" law would need two different selectors and would be true in neither
+     rig nor reader at once. It wants a heading-carried eyebrow slot on both
+     engines, which is a data + editor-node change, not a stylesheet one.
+
+     `beat` is a ratio of `--tok-air-beat` and NOT an `em` of the heading: at
+     1.9em the old margin was hostage to the h2 font size, so a type-scale change
+     silently retuned section rhythm. Anchored on the beat, section air and
+     evidence air retune together — which is the whole point of storing a ratio. */
+  --bp-section-beat: var(--tok-section-beat);
+  --bp-section-rule: var(--tok-section-rule);
+  --bp-section-gap: var(--tok-section-gap);
+  /* ── The RULE LADDER (space.rule → the emitted `--tok-rule-*` block below).
+
+     WHAT IT IS: `--bp-section-rule` above is the STRUCTURAL weight, and it is
+     spent on exactly one thing — the head of a section. This is the other rung:
+     the weight every horizontal line that is NOT a boundary draws at. Two
+     weights, and the difference between them IS the hierarchy — a reader learns
+     at scroll speed that a thick line means a new argument started and a thin
+     one means these rows belong together.
+
+     WHY IT IS A TOKEN AND NOT A `1px` LITERAL. Because a census cannot assert
+     "chrome is quieter than structure" unless both weights have names. The
+     benchmark artifact (tooling/paper-excellence/evidence/erasure.html) draws 59
+     horizontal rules and spends the heavy weight on 8 — its six `.sec-head`
+     openings and the two edges of its closing `.declaration` frame — with every
+     other line at `1px solid var(--rule)`. Measured with the same census, this
+     reader had drifted: a table header underline was 2px, a card's top accent
+     3px, a button's frame 2px, so a table in the middle of an argument drew a
+     line exactly as loud as the boundary between two arguments.
+
+     Both arms of that census are gates now: check.mjs Part M reads every
+     horizontal border DECLARATION in this file and its editor mirror, and
+     tooling/paper-excellence/rig/shoot.mjs counts every rule that actually
+     PAINTS on the rendered panel. A declaration-only census would miss an inline
+     style; a rendered-only census would miss a heavy rule on a class no fixture
+     happens to use. */
+  --bp-rule-hairline: var(--tok-rule-hairline);
+  /* ── The EVIDENCE BAND (space.evidence → the emitted `--tok-evidence-*` block
+     below), bridged onto `--bp-evidence-*` exactly like the air scale above.
+
+     WHAT IT IS: prose holds the 660px reading column because 66-72 characters
+     per line is what a sentence is legible at. A table, a stat strip, a chart, a
+     diagram or a terminal recording is NOT prose — it has no measure to hold,
+     and the column starves it. So a block that IMPROVES WITH WIDTH steps out of
+     the column into a wider band, centered on the same axis, while every prose
+     block stays exactly where it was. The benchmark artifact
+     tooling/paper-excellence/evidence/erasure.html ships the same split:
+     `--measure: 66ch` for `.col`, `--wide: 1040px` for `.wide`, a 1.58x ratio.
+
+     THE LAW, not the literal. `--bp-evidence-width` is ONE expression composed
+     from all five tokens, read by every breakout rule below and by the four
+     article <figure> emitters in render/figures.ex:
+
+       max( 100%,                                    never narrower than the column
+            min( max(band, 100cqw * fill),           grow with the screen, floored
+                 bandMax,                            but capped
+                 100cqw - 2 * gutter ) )             and never touching the edges
+
+     Read outward-in: the band SITS at 1040px (the artifact's number) from ~1120px
+     of available width, starts GROWING once 65% of the screen exceeds it (1600px),
+     and stops at 1240px. Below the column it collapses to `100%` — the component
+     simply fills the column again, which is what makes 360px safe.
+
+     WHY `100cqw` AND NOT `100vw`: cqw resolves against the nearest inline-size
+     container, and the Studio declares one on the editor's content pane
+     (`.editor-with-preview .editor-panel-main.bp-paper-body`, root.html.heex).
+     So inside the editor the band measures the PANE, and on the reader — where
+     no container exists and cqw falls back to the small viewport per spec — it
+     measures the screen. Both correct from one expression. `100vw` would have
+     been correct on the reader and blown out of the pane in the editor, and a
+     viewport @media beside a pane-relative width would have disagreed with
+     itself; that is also why the growth clause is arithmetic and not a
+     breakpoint. The `gutter` doubles as the scrollbar allowance: cqw/vw both
+     COUNT the classic scrollbar, so a band clamped to `100cqw - 80px` cannot
+     reach the edge that a ~15px scrollbar occupies. The page body never scrolls
+     sideways; a component wider than its own band self-scrolls instead
+     (`overflow-x: auto`, the inner boundary pe-w1-air-beat established).
+
+     `--bp-evidence-pull` is the negative margin that re-centers the wider box on
+     the column's own axis: `50%` resolves against the containing block, so the
+     band centers on the COLUMN rather than on the screen, and stays centered
+     under any left rail or pane offset the column itself sits behind.
+
+     Captions do NOT ride the band: `--bp-evidence-caption` returns a figcaption
+     to a 72-character reading measure inside a figure that may be 1240px wide,
+     because a caption is prose and inherits prose's law, not its figure's. */
+  --bp-evidence-band: var(--tok-evidence-band);
+  --bp-evidence-band-max: var(--tok-evidence-band-max);
+  --bp-evidence-fill: var(--tok-evidence-fill);
+  --bp-evidence-gutter: var(--tok-evidence-gutter);
+  --bp-evidence-caption: var(--tok-evidence-caption);
+  --bp-evidence-width: max(100%, min(max(var(--bp-evidence-band), 100cqw * var(--bp-evidence-fill)), var(--bp-evidence-band-max), 100cqw - 2 * var(--bp-evidence-gutter)));
+  --bp-evidence-pull: calc(50% - var(--bp-evidence-width) / 2);
   --bp-li-gap: 4pt;
   --bp-list-indent: 24px;
   --bp-code-size: 0.92em;
@@ -121,11 +281,40 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-codeblock-size: 0.9rem;
   --bp-codeblock-lh: 1.5;
   --bp-codeblock-pad: 0.9rem 1.1rem;
-  --bp-codeblock-margin: 1.2rem 0;
+  --bp-codeblock-margin: var(--bp-air-code) 0 0;
   --bp-codeblock-radius: 0;
   --bp-codeblock-accent-w: 3px;
   --bp-img-margin: 0 0 22px;
   --bp-img-radius: 3px;
+}
+
+/* ── The reading surface's OWN type. Until pe-w1-reader-editorial-typography
+   these six declarations lived ONLY in root.html.heex, so `--bp-body-size`
+   resolved 18px on every surface and exactly one surface consumed it: Studio.
+   The public /papers reader carries `.bp-paper-surface` on its <main> but read
+   nothing from it and inherited the browser's 16px — the token was single-source
+   and unread, which looks identical to single-source and honoured until you
+   measure. Measured on the rig's 5-paper panel at 1440: 16px/26.4px and 86.7
+   characters per line, against an editorial band of 66-72.
+
+   Declared HERE (portable, both sinks) rather than as surface CHROME, which is
+   the one thing the header excludes from this file — the exclusion is about the
+   Studio PAGE (background, column width, padding), not about the type. Type is
+   the portable half: the reader and the canvas must set a word in the same size
+   or every parity rule below compares against a different baseline.
+
+   Left in root.html.heex deliberately: background/color/font-family (the Studio
+   page paints its own), max-width/padding (each surface owns its column). */
+.bp-paper-surface {
+  font-size: var(--bp-body-size);
+  line-height: var(--bp-body-lh);
+  letter-spacing: var(--bp-body-tracking);
+  /* onum = oldstyle figures: numerals that sit on the prose's x-height instead
+     of standing at cap height mid-sentence. */
+  font-feature-settings: "kern", "liga", "onum";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── Block typography (ported from paper.css). These apply to BOTH the
@@ -152,9 +341,62 @@ html[data-theme="dark"] .bp-paper-body {
    source feeds both surfaces; the first heading is clamped to 0 by each surface's
    :first-child rule. */
 .bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
-.bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh);  margin: 1.9em 0 0; }
+.bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
 .bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
-.bp-paper-surface p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
+/* ── THE SECTION HEAD (space.section → the --bp-section-* bridge above) ───────
+   A TOP-LEVEL level-2 heading is a section boundary, and gets both halves of the
+   artifact's device on one element: `--bp-section-beat` of air above the rule
+   (the rule sits INSIDE the heading's border box, so this margin is the gap a
+   reader sees), the rule itself, and `--bp-section-gap` between the rule and the
+   words. It OVERRIDES the 1.9em prose margin on the element rule above, which
+   stays as the rhythm for every OTHER h2 on the surface.
+
+   WHY THIS IS SCOPED AND THE PROSE RULE IS NOT. `h2` is not exclusively a
+   section heading here: component chrome emits bare ones too — `.bp-card` titles
+   inside a grid cell, and (classed) `.bp-diff-title`, `.bp-goal-rail-title`,
+   `.bp-mail-subject`. A card title is not a boundary between arguments, and the
+   element rule cannot tell them apart. Position can: a section head is a block of
+   the DOCUMENT, and every component h2 is nested inside its component.
+
+   THREE LEGS, because the document has three shapes and the law is one:
+     1. `> #paper-body > h2` — the legacy/whole-body reader and the hermetic
+        render rig, which concatenate block HTML directly into the article.
+     2. `> #paper-body > div:not([class]) > h2` — the BLOCK-BACKED reader, where
+        every top-level block is its own keyed stream item
+        (a `div` carrying id + data-block-id, bulldocs_live.ex `phx-update="stream"`). The
+        `:not([class])` is load-bearing: that wrapper carries id + data only,
+        while a `card` block at top level IS a classed div, so this leg reaches
+        the stream item without reaching into the component.
+   The reader's leg 2 is what ships, so the rig renders THAT shape (render.exs
+   mirrors the LiveView wrapper and asserts it) rather than measuring leg 1 and
+   calling the reader proven.
+
+   The EDIT twin — `.bp-paper-editor-body > h2`, the flat ProseMirror document
+   whose heading node is a direct child and admits no wrapper of its own — is the
+   third leg, and lives in the editor bundle beside the other `.bp-paper-editor-body`
+   heading rules (api/assets/paper-editor/src/styles.css), because this file is
+   `.bp-paper-surface`-scoped by its own header. The two are byte-mirrored the same
+   way the h1/h2/h3 margins are, and view_edit_parity_test.exs pins the pair. */
+.bp-paper-surface > #paper-body > h2,
+.bp-paper-surface > #paper-body > div:not([class]) > h2 {
+  margin-top: var(--bp-section-beat);
+  border-top: var(--bp-section-rule) solid var(--paper-ink);
+  padding-top: var(--bp-section-gap);
+}
+/* `hyphens: manual` — the explicit OFF, not the absence of a rule. Automatic
+   hyphenation earns its keep in JUSTIFIED text, where the alternative is rivers
+   of white space; nothing on this surface is justified (text-align stays
+   `start`, ragged right), so all `auto` bought was broken words down the right
+   edge of every paragraph. `manual` still honours an author's own soft hyphen. */
+.bp-paper-surface p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
+/* Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
+   2026-07-31): an exact empty paragraph is never published layout. The engines
+   (walk.ex paragraph/3, blocks/core.ts paragraph) no longer emit `<p></p>` at
+   all; this rule is belt-and-braces for LEGACY CACHED HTML that still carries
+   the scaffold — it must not paint a blank paragraph-height row. View-only by
+   selector: `.bp-paper-editor-body` is untouched, so the editable scaffold
+   stays visible while composing (doctrine invariant 1). */
+.bp-paper-surface p:empty { display: none; }
 .bp-paper-surface a  {
   color: var(--paper-accent); text-decoration: none;
   border-bottom: 1px solid var(--paper-accent-soft);
@@ -190,27 +432,59 @@ html[data-theme="dark"] .bp-paper-body {
    error mark, hr thickness) stays INLINE on the same element. */
 
 /* Text ROLES (apply_text_role). Author marks (italic/bold/colour) still ride
-   inline on the same span; these own only the role typography. */
+   inline on the same span; these own only the role typography.
+
+   ROLE SIZES ARE `em`, NOT `rem` — the rem-inverse trap, and the reason raising
+   the body size alone would have made the page WORSE. `rem` resolves against the
+   ROOT font size, which no paper token touches, so every role was pinned to the
+   browser's 16px while the body moved to 18px: the ingress would have gone from
+   1.28x the prose to 1.14x, the eyebrow from 0.78x to 0.69x, and the editorial
+   hierarchy would have compressed exactly as the body grew. `em` resolves
+   against the inherited body size, so a role holds its RATIO at any body size —
+   which is what the ratio was chosen for. (The `rem` SPACING on these rules
+   stays rem on purpose: margins and padding belong to the page's spacing grid,
+   not to the role's own size, and should not grow when a role does.)
+
+   The fix must never be "clamp the root font-size instead" — moving `:root`
+   moves the roles and leaves the body behind, i.e. the same divergence with the
+   sign flipped, plus it overrides the reader's own browser text-size setting. */
 .bp-paper-surface .bp-role-eyebrow {
   font-family: var(--paper-font-serif); color: var(--paper-accent);
-  letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem;
+  letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em;
 }
 .bp-paper-surface .bp-role-byline {
   border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem;
-  color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem;
+  color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em;
 }
 .bp-paper-surface .bp-role-ingress {
-  color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem;
+  color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em;
 }
 .bp-paper-surface .bp-role-pullquote {
   display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
   border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft);
-  line-height: 1.5; font-size: 1.2rem;
+  line-height: 1.5; font-size: 1.2em;
 }
+
+/* Blockquote — a semantic attributed quotation (distinct from the styled
+   editorial pullquote above). A muted, italic passage behind a left rule, with
+   an optional `<cite>` attribution rendered as a non-italic muted line. */
+.bp-paper-surface .bp-blockquote {
+  margin: 1.4rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
+  border-left: 3px solid var(--paper-rule); color: var(--paper-ink-soft);
+  font-style: italic;
+}
+.bp-paper-surface .bp-blockquote > p { margin: 0; }
+/* `em`, like the roles above: a cite line annotates the quotation it hangs off,
+   so it holds a ratio to the prose rather than to the root. */
+.bp-paper-surface .bp-blockquote__cite {
+  display: block; margin-top: 0.4rem; font-style: normal;
+  font-size: 0.9em; color: var(--paper-ink-soft);
+}
+.bp-paper-surface .bp-blockquote__cite::before { content: "\2014\00a0"; }
 
 /* Callout TONES. `bp-callout` is the card; `bp-callout--<tone>` resolves the
    tone token pair (light + dark, defined above). */
-.bp-paper-surface .bp-callout { padding: 16px; border-left: 4px solid transparent; }
+.bp-paper-surface .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 16px; border-left: 4px solid transparent; }
 .bp-paper-surface .bp-callout--info    { background: var(--bp-tone-info-bg);    color: var(--bp-tone-info-fg);    border-left-color: var(--bp-tone-info-fg); }
 .bp-paper-surface .bp-callout--success { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); border-left-color: var(--bp-tone-success-fg); }
 .bp-paper-surface .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }
@@ -219,10 +493,69 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-callout__summary { cursor: pointer; font-weight: bold; }
 .bp-paper-surface .bp-callout__body { margin-top: 8px; }
 
-/* Table CHROME (also the sheet's outer collapse/width). */
-.bp-paper-surface .bp-table { border-collapse: collapse; width: 100%; }
+/* Table CHROME (also the sheet's outer collapse/width). `display:block` +
+   overflow-x makes a wide table scroll INSIDE its own box instead of widening
+   the document — a 3-col table was the measured mobile-overflow culprit at
+   390px (the reading column must never scroll horizontally). */
+/* The table BREAKS OUT to the evidence band (see --bp-evidence-width above): a
+   data table gains a real column of resolution for every 150px it is given, and
+   the prose column was clipping it. `display: block` + `overflow-x: auto` are
+   the inner boundary: a table too wide for even the band scrolls ITSELF, never
+   the page.
+
+   THE BAND IS A CEILING, NOT AN ISSUE. `width: var(--bp-evidence-width)` handed
+   every table the whole 1040px band whether it had 1040px of data or not, and
+   `display: block` then let the cells shrink-wrap inside that box and settle
+   against its LEFT edge. Measured on the committed panel: four tables with a
+   perfectly centred 1040px box and 291-542px of ink sitting 249-475px left of
+   the column's axis. The box assertion passed all four — the box WAS centred —
+   which is why this needed its own measurement (`inkOffCentre`, now asserted)
+   rather than a wider tolerance.
+
+   The breakout law is that a block IMPROVES WITH WIDTH. A three-column table
+   with 291px of content does not, so it does not claim the band: `fit-content`
+   takes what the data needs, `max-width` caps it at the band, and the negative
+   `margin-inline` pull is what makes the band-width space AVAILABLE to shrink
+   into (with auto margins the available space is the prose column and no table
+   could ever break out at all).
+
+   `left` + `translateX(-50%)` is the centring, and it has to be this rather than
+   `margin-inline: auto` because the two jobs collide in one property: the pull
+   is what widens the available space, and auto margins are what centre — a box
+   cannot have both. Shifting right by half the BAND (a length) and back by half
+   the ELEMENT (a percentage of its own border box) lands any used width on the
+   column's axis without CSS ever having to know what that width came out as.
+   At 360 the band expression collapses to `100%`, so the cap becomes the column
+   and a wide table returns to scrolling inside it — the doc-overflow contract is
+   unchanged at every width (measured: 360/768/1280/1920, all seven fixtures). */
+.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; }
+/* A table with no rows paints NOTHING and still spent `--bp-air-table` doing it.
+   Found by the divider dedup below: `portabledoc-showcase` renders a `sheet`
+   whose cells resolve through a caller-supplied map, so without one it falls back
+   to a table element wrapping one empty tbody — zero height, 29.9px of margin,
+   and a section boundary further down measuring 121.9px instead of 92px because
+   that margin sat inside the gap. Same rule and same reason as `p:empty` above
+   (Reader-Owned Spacing Doctrine): a block that draws nothing must not reserve
+   room. `:not(:has(tr))` rather than `:empty` — the fallback emits a tbody, so
+   the table is not empty, it is ROWLESS.
+
+   NOTE, and it is the second time this has bitten: no raw tag literal may appear
+   in a comment in this file. The sheets HTML export inlines this whole stylesheet
+   into the document it returns, and sheets/html_test.exs asserts that a tabless
+   export contains no table markup — so a CSS COMMENT can satisfy a test looking
+   for a sheet's own tab heading. Name the elements without their angle brackets.
+
+   Scoped to `#paper-body` (the reader and the rig; the editor canvas has no such
+   id) for the reason `p:empty` is View-only: an author building a table starts
+   with a rowless one, and a block that vanishes while you compose it cannot be
+   selected or filled. */
+.bp-paper-surface > #paper-body .bp-table:not(:has(tr)) { display: none; }
+/* A table header underline is CHROME — it groups the rows under it. At 2px it
+   was drawing the same line the head of a section draws, in the middle of an
+   argument (see the rule ladder above; the artifact's own `th` is
+   `1px solid var(--rule)`). */
 .bp-paper-surface .bp-table__th {
-  border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left;
+  border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 8px 12px; text-align: left;
   text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
   color: var(--paper-ink-soft); font-family: var(--paper-font-serif);
 }
@@ -233,7 +566,7 @@ html[data-theme="dark"] .bp-paper-body {
 /* Sheet CHROME (band + cell rules). Author DATA — col width, per-cell
    b/i/bg/al, engine-error red/bold — stays INLINE on the <td> (sheets_parity). */
 .bp-paper-surface .bp-sheet__th {
-  border-bottom: 2px solid var(--paper-rule); padding: 6px 10px; text-align: left;
+  border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 6px 10px; text-align: left;
   text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
   color: var(--paper-ink-soft); font-family: var(--paper-font-serif);
 }
@@ -276,7 +609,7 @@ html[data-theme="dark"] .bp-paper-body {
 /* Buttons — `bp-button` is the secondary (outline); `--primary` overrides to
    the accent fill (no border, matching the pre-Stage-2 inline box exactly). */
 .bp-paper-surface .bp-button {
-  display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent);
+  display: inline-block; padding: 10px 20px; border: var(--bp-rule-hairline) solid var(--paper-accent);
   color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
 }
 .bp-paper-surface .bp-button--primary {
@@ -284,7 +617,44 @@ html[data-theme="dark"] .bp-paper-body {
 }
 
 /* Divider rule — the default; author thickness overrides via inline border-top-width. */
-.bp-paper-surface .bp-hr { border: none; border-top: 1px solid var(--paper-rule); margin: 16px 0; }
+.bp-paper-surface .bp-hr { border: none; border-top: var(--bp-rule-hairline) solid var(--paper-rule); margin: 16px 0; }
+/* ── A DIVIDER IN FRONT OF A SECTION HEAD DRAWS THE SAME LINE TWICE ───────────
+   Papers written before the section head existed end a section by hand: an
+   authored `divider` block, then the next level-2 heading. The head now draws
+   its own boundary, so the reader gets the divider's §-on-a-hairline, then 92px,
+   then a 2px rule — one boundary rendered as two lines, and nothing tells the
+   reader which is the real one. Measured on `portabledoc-showcase`, which does
+   this at 10 of its 11 dividers.
+
+   THIS IS A RENDER DECISION, NOT A DATA ONE, and the distinction is the whole
+   reason it is here and not in a write path. Collapsing the divider by rewriting
+   the document would delete something an author typed, in a store three other
+   engines read: the TUI, the SDK and the ONIX export would each render a
+   document the author never wrote, and moving the heading later would not bring
+   the divider back. What is true is narrower than that — *at this position, in
+   this shell, that line is already being drawn* — and a shell is exactly where a
+   claim about a position belongs. The block stays in the document, keeps
+   round-tripping through every engine, and stops painting a second boundary.
+
+   VIEW ONLY, on the precedent of `p:empty` above (Reader-Owned Spacing
+   Doctrine): in the editor an invisible block is one the author cannot select or
+   delete, so `.bp-paper-editor-body` deliberately keeps drawing it.
+
+   TWO LEGS, the same two the section head has: the flat body (legacy reader and
+   the render rig) and the block-backed reader, where every top-level block is
+   its own keyed class-less stream div.
+
+   IT CANNOT REACH A STRUCTURAL RULE, and that is by construction rather than by
+   care. An AUTHORED divider is `.bp-section-divider` (Figures.section_divider_html/0);
+   the leading and trailing rules a `section` CONTAINER draws are `hr.bp-hr` from
+   `compose_section_stack/2`, and no leg here selects an `hr`. Those two stack a
+   doubled boundary of their own across three engines — a real defect, owned by
+   task-a4d1ae76fdb2a6b0, whose stated order is to remove the TRAILING rule first
+   and only then size the container head. Hiding one of that pair from a
+   stylesheet would leave the TUI and the SDK drawing both while the page looked
+   fixed, which is why this rule stays on the shape it can honestly speak for. */
+.bp-paper-surface > #paper-body > .bp-section-divider:has(+ h2),
+.bp-paper-surface > #paper-body > div:not([class]):has(> .bp-section-divider):has(+ div:not([class]) > h2) { display: none; }
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -297,12 +667,12 @@ html[data-theme="dark"] .bp-paper-body {
    Defined at the surface so every task component inherits — no per-block copy,
    nothing drifts, and the toggle actually moves the status colours. ── */
 /* BEGIN GENERATED: status-tones (from design/status-manifest.json — do not edit by hand; run scripts/status-manifest-check.sh --write) */
-.bp-paper-surface, .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; }
+.bp-paper-surface, .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; --st-violet: #7c3aed; }
 @media (prefers-color-scheme: dark) {
-  .bp-paper-surface, .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
+  .bp-paper-surface, .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-violet: #a78bfa; }
 }
-html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; }
-html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; --st-violet: #7c3aed; }
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-violet: #a78bfa; }
 /* END GENERATED: status-tones */
 
 /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
@@ -359,13 +729,32 @@ html[data-theme="dark"] .bp-paper-body {
   --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
   --tok-reading-heading-weight: 600;
   --tok-reading-body-size: 18px;
-  --tok-reading-body-lh: 1.65;
-  --tok-reading-h1-size: 32px;
-  --tok-reading-h1-lh: 1.1;
-  --tok-reading-h2-size: 24px;
+  --tok-reading-body-lh: 1.6;
+  --tok-reading-body-tracking: 0.005em;
+  --tok-reading-h1-size: 40px;
+  --tok-reading-h1-lh: 1.05;
+  --tok-reading-h1-tracking: -0.02em;
+  --tok-reading-h2-size: 27px;
   --tok-reading-h2-lh: 1.2;
-  --tok-reading-h3-size: 20px;
-  --tok-reading-h3-lh: 1.25;
+  --tok-reading-h2-tracking: -0.01em;
+  --tok-reading-h3-size: 21px;
+  --tok-reading-h3-lh: 1.3;
+  --tok-air-beat: 22px;
+  --tok-air-code: calc(var(--tok-air-beat) * 1.1);
+  --tok-air-table: calc(var(--tok-air-beat) * 1.36);
+  --tok-air-asciicast: calc(var(--tok-air-beat) * 1.45);
+  --tok-air-callout: calc(var(--tok-air-beat) * 1.55);
+  --tok-air-stats: calc(var(--tok-air-beat) * 1.64);
+  --tok-air-figure: calc(var(--tok-air-beat) * 1.82);
+  --tok-section-beat: calc(var(--tok-air-beat) * 4.18);
+  --tok-section-rule: 2px;
+  --tok-section-gap: 16px;
+  --tok-rule-hairline: 1px;
+  --tok-evidence-band: 1040px;
+  --tok-evidence-band-max: 1240px;
+  --tok-evidence-fill: 0.65;
+  --tok-evidence-gutter: 40px;
+  --tok-evidence-caption: 50ch;
   --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
@@ -399,6 +788,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-lg--cancelled { color: #a1a1aa; }
 .bp-lg--ready { color: #18181b; }
 .bp-lg--open { color: #71717a; }
+.bp-lg--considering { color: #a1a1aa; }
+.bp-lg--researching { color: #7c3aed; }
 @media (prefers-color-scheme: dark) {
   .bp-lg--in_progress { color: #60a5fa; }
   .bp-lg--blocked { color: #fbbf24; }
@@ -407,6 +798,8 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   .bp-lg--cancelled { color: #71717a; }
   .bp-lg--ready { color: #e7edf2; }
   .bp-lg--open { color: #5f6b78; }
+  .bp-lg--considering { color: #71717a; }
+  .bp-lg--researching { color: #a78bfa; }
 }
 /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
 html[data-bp-theme="evergreen"] .bp-paper-surface, html[data-bp-theme="evergreen"] .bp-paper-body {
@@ -446,37 +839,37 @@ html[data-bp-theme="evergreen"][data-theme="dark"] .bp-paper-surface, html[data-
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
 }
 html[data-bp-theme="charple"] .bp-paper-surface, html[data-bp-theme="charple"] .bp-paper-body {
-  --paper-bg: #f9fafe;
-  --paper-bg-deep: #ebedf5;
-  --paper-ink: #1d202a;
-  --paper-ink-soft: #50525c;
-  --paper-ink-faint: #797b83;
-  --paper-rule: rgba(29, 32, 42, 0.09);
-  --paper-edit-hover: rgba(29, 32, 42, 0.08);
-  --paper-accent: #3431b4;
-  --paper-accent-soft: rgba(52, 49, 180, 0.10);
-  --paper-chrome-bg: #f9fafe;
-  --paper-chrome-border: rgba(29, 32, 42, 0.12);
-  --paper-reading-accent: #218bc4;
-  --ok-hsl: 145.27 88.36% 28.41%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 2.15 59.33% 48.33%; --info-hsl: 221.63 58.56% 52.81%;
+  --paper-bg: #fcf9fd;
+  --paper-bg-deep: #f0ecf3;
+  --paper-ink: #241e27;
+  --paper-ink-soft: #565059;
+  --paper-ink-faint: #7e7a81;
+  --paper-rule: rgba(36, 30, 39, 0.09);
+  --paper-edit-hover: rgba(36, 30, 39, 0.08);
+  --paper-accent: #7b3a96;
+  --paper-accent-soft: rgba(123, 58, 150, 0.10);
+  --paper-chrome-bg: #fcf9fd;
+  --paper-chrome-border: rgba(36, 30, 39, 0.12);
+  --paper-reading-accent: #302ba5;
+  --ok-hsl: 137.37 45.8% 35.72%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.01 48.12% 48.54%; --info-hsl: 221.09 46.48% 51.51%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
 }
 html[data-bp-theme="charple"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="charple"][data-theme="dark"] .bp-paper-body {
-  --paper-bg: #08090e;
-  --paper-bg-deep: #121219;
-  --paper-ink: #dddee5;
-  --paper-ink-soft: #9e9ea7;
-  --paper-ink-faint: #6b6c72;
-  --paper-rule: rgba(221, 222, 229, 0.10);
-  --paper-edit-hover: rgba(221, 222, 229, 0.09);
-  --paper-accent: #6c52ff;
-  --paper-accent-soft: rgba(108, 82, 255, 0.16);
-  --paper-chrome-bg: #121219;
-  --paper-chrome-border: rgba(221, 222, 229, 0.13);
-  --paper-reading-accent: #52abff;
-  --ok-hsl: 136.37 45.27% 53.58%; --warn-hsl: 40.62 100% 42.95%; --danger-hsl: 4.54 100% 70.09%; --info-hsl: 220.77 100% 73.06%;
+  --paper-bg: #0b080c;
+  --paper-bg-deep: #151117;
+  --paper-ink: #e1dde3;
+  --paper-ink-soft: #a29da4;
+  --paper-ink-faint: #6f6b70;
+  --paper-rule: rgba(225, 221, 227, 0.10);
+  --paper-edit-hover: rgba(225, 221, 227, 0.09);
+  --paper-accent: #c78ae0;
+  --paper-accent-soft: rgba(199, 138, 224, 0.16);
+  --paper-chrome-bg: #151117;
+  --paper-chrome-border: rgba(225, 221, 227, 0.13);
+  --paper-reading-accent: #8480ea;
+  --ok-hsl: 133.37 34.29% 57.81%; --warn-hsl: 36.55 62.65% 53.22%; --danger-hsl: 5.58 76.29% 69.57%; --info-hsl: 220.48 78.3% 71.71%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
@@ -489,71 +882,189 @@ html[data-bp-theme="ember"] .bp-paper-surface, html[data-bp-theme="ember"] .bp-p
   --paper-ink-faint: #827a76;
   --paper-rule: rgba(41, 29, 25, 0.09);
   --paper-edit-hover: rgba(41, 29, 25, 0.08);
-  --paper-accent: #c34e13;
-  --paper-accent-soft: rgba(195, 78, 19, 0.10);
+  --paper-accent: #b34e1e;
+  --paper-accent-soft: rgba(179, 78, 30, 0.10);
   --paper-chrome-bg: #fef9f7;
   --paper-chrome-border: rgba(41, 29, 25, 0.12);
   --paper-reading-accent: #bf321d;
-  --ok-hsl: 138.34 50.65% 34.78%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 3.67 50.42% 48.54%; --info-hsl: 221.2 49.02% 51.79%;
+  --ok-hsl: 136.56 41.81% 36.51%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.3 45.96% 48.52%; --info-hsl: 220.99 44.07% 51.23%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
 }
 html[data-bp-theme="ember"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="ember"][data-theme="dark"] .bp-paper-body {
-  --paper-bg: #0d0805;
-  --paper-bg-deep: #18120d;
-  --paper-ink: #e4ddd8;
-  --paper-ink-soft: #a59d98;
-  --paper-ink-faint: #716b67;
-  --paper-rule: rgba(228, 221, 216, 0.10);
-  --paper-edit-hover: rgba(228, 221, 216, 0.09);
-  --paper-accent: #f7993b;
-  --paper-accent-soft: rgba(247, 153, 59, 0.16);
-  --paper-chrome-bg: #18120d;
-  --paper-chrome-border: rgba(228, 221, 216, 0.13);
+  --paper-bg: #0d0806;
+  --paper-bg-deep: #18110e;
+  --paper-ink: #e5ddd9;
+  --paper-ink-soft: #a69d99;
+  --paper-ink-faint: #726b68;
+  --paper-rule: rgba(229, 221, 217, 0.10);
+  --paper-edit-hover: rgba(229, 221, 217, 0.09);
+  --paper-accent: #e8875a;
+  --paper-accent-soft: rgba(232, 135, 90, 0.16);
+  --paper-chrome-bg: #18110e;
+  --paper-chrome-border: rgba(229, 221, 217, 0.13);
   --paper-reading-accent: #f5855c;
-  --ok-hsl: 134.02 37.1% 56.89%; --warn-hsl: 37.47 67.56% 50.7%; --danger-hsl: 5.31 83.22% 69.77%; --info-hsl: 220.6 86.84% 72.26%;
+  --ok-hsl: 133.24 33.65% 58.01%; --warn-hsl: 36.39 61.56% 53.68%; --danger-hsl: 5.64 74.73% 69.52%; --info-hsl: 220.45 76.42% 71.58%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
 }
 html[data-bp-theme="fjord"] .bp-paper-surface, html[data-bp-theme="fjord"] .bp-paper-body {
-  --paper-bg: #f8fafe;
-  --paper-bg-deep: #eaeef5;
-  --paper-ink: #1c202a;
-  --paper-ink-soft: #4e535c;
-  --paper-ink-faint: #787c83;
-  --paper-rule: rgba(28, 32, 42, 0.09);
-  --paper-edit-hover: rgba(28, 32, 42, 0.08);
-  --paper-accent: #2f56b1;
-  --paper-accent-soft: rgba(47, 86, 177, 0.10);
-  --paper-chrome-bg: #f8fafe;
-  --paper-chrome-border: rgba(28, 32, 42, 0.12);
+  --paper-bg: #f6fbfd;
+  --paper-bg-deep: #e7f0f2;
+  --paper-ink: #162327;
+  --paper-ink-soft: #495559;
+  --paper-ink-faint: #747e81;
+  --paper-rule: rgba(22, 35, 39, 0.09);
+  --paper-edit-hover: rgba(22, 35, 39, 0.08);
+  --paper-accent: #0e6e85;
+  --paper-accent-soft: rgba(14, 110, 133, 0.10);
+  --paper-chrome-bg: #f6fbfd;
+  --paper-chrome-border: rgba(22, 35, 39, 0.12);
   --paper-reading-accent: #0f8299;
-  --ok-hsl: 137.23 45.13% 35.85%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.05 47.78% 48.54%; --info-hsl: 221.08 46.09% 51.46%;
+  --ok-hsl: 133.06 24.42% 40.04%; --warn-hsl: 36.2 52.84% 37.17%; --danger-hsl: 5.71 33.01% 48.02%; --info-hsl: 220.42 30.54% 49.43%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
 }
 html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-body {
-  --paper-bg: #06090e;
-  --paper-bg-deep: #0f1319;
-  --paper-ink: #dadfe5;
-  --paper-ink-soft: #9aa0a7;
-  --paper-ink-faint: #686d72;
-  --paper-rule: rgba(218, 223, 229, 0.10);
-  --paper-edit-hover: rgba(218, 223, 229, 0.09);
-  --paper-accent: #68a2e8;
-  --paper-accent-soft: rgba(104, 162, 232, 0.16);
-  --paper-chrome-bg: #0f1319;
-  --paper-chrome-border: rgba(218, 223, 229, 0.13);
+  --paper-bg: #050a0c;
+  --paper-bg-deep: #0c1417;
+  --paper-ink: #d8e0e3;
+  --paper-ink-soft: #97a1a4;
+  --paper-ink-faint: #666e70;
+  --paper-rule: rgba(216, 224, 227, 0.10);
+  --paper-edit-hover: rgba(216, 224, 227, 0.09);
+  --paper-accent: #6cc4dd;
+  --paper-accent-soft: rgba(108, 196, 221, 0.16);
+  --paper-chrome-bg: #0c1417;
+  --paper-chrome-border: rgba(216, 224, 227, 0.13);
   --paper-reading-accent: #53d6ea;
-  --ok-hsl: 132.78 31.44% 58.66%; --warn-hsl: 35.93 57.77% 55.07%; --danger-hsl: 5.83 69.33% 69.33%; --info-hsl: 220.37 70.04% 71.14%;
+  --ok-hsl: 131.84 26.28% 60%; --warn-hsl: 35.21 48.85% 57.57%; --danger-hsl: 6.23 56.9% 68.81%; --info-hsl: 220.18 55.98% 70.09%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+html[data-bp-theme="iris"] .bp-paper-surface, html[data-bp-theme="iris"] .bp-paper-body {
+  --paper-bg: #f9fafe;
+  --paper-bg-deep: #ecedf5;
+  --paper-ink: #1f1f2a;
+  --paper-ink-soft: #51525b;
+  --paper-ink-faint: #7a7b83;
+  --paper-rule: rgba(31, 31, 42, 0.09);
+  --paper-edit-hover: rgba(31, 31, 42, 0.08);
+  --paper-accent: #5b46d6;
+  --paper-accent-soft: rgba(91, 70, 214, 0.10);
+  --paper-chrome-bg: #f9fafe;
+  --paper-chrome-border: rgba(31, 31, 42, 0.12);
+  --paper-reading-accent: #3692e6;
+  --ok-hsl: 145.96 92.95% 27.76%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 2.06 59.77% 48.31%; --info-hsl: 221.65 59.02% 52.86%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="iris"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="iris"][data-theme="dark"] .bp-paper-body {
+  --paper-bg: #09080e;
+  --paper-bg-deep: #121219;
+  --paper-ink: #dedee5;
+  --paper-ink-soft: #9e9ea6;
+  --paper-ink-faint: #6c6c72;
+  --paper-rule: rgba(222, 222, 229, 0.10);
+  --paper-edit-hover: rgba(222, 222, 229, 0.09);
+  --paper-accent: #9d8cff;
+  --paper-accent-soft: rgba(157, 140, 255, 0.16);
+  --paper-chrome-bg: #121219;
+  --paper-chrome-border: rgba(222, 222, 229, 0.13);
+  --paper-reading-accent: #8cc8ff;
+  --ok-hsl: 134.5 39.04% 56.2%; --warn-hsl: 38.55 77.19% 47.99%; --danger-hsl: 5.1 88.03% 69.88%; --info-hsl: 220.68 92.97% 72.65%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
 }
 /* END GENERATED: tokens */
+
+/* ── Chat-block BASE tokens (hand-authored — charter D6, rpu-w1-chat-tokens). ──
+   The three chat blocks (chat-thinking / chat-todo / chat-tool-diff, emitted by
+   render/components.ex) style themselves with inline
+   `var(--primary | --muted-surface | --border-muted | --fg-dim | --font-mono)`
+   and NO fallback. Those five live only in root.html.heex's Studio <style>, so
+   OUTSIDE Studio — the `/papers` reader, the sheet `.html` export, any embedder
+   that loads only this stylesheet — they resolved to nothing and the chat chrome
+   collapsed to browser defaults. Define them ON the paper surface so chat
+   self-resolves on every surface that inlines Stylesheet.css/0.
+
+   Deliberately NOT in the design/tokens.json GENERATED block above: the four
+   colour values are lifted VERBATIM from root.html.heex's DEFAULT theme (they
+   must match the Studio bytes exactly, not an emit-derived value), and
+   `--font-mono` ALIASES this surface's own `--paper-font-mono` rather than
+   carrying a stack. They follow the SAME 4-block dual-swap shape as the
+   generated status tones (bare-light → prefers-dark → explicit-light →
+   explicit-dark) so an explicit light theme on a dark OS still wins over the
+   `prefers-color-scheme` block, and every dark value is re-skinned in the
+   `@media (prefers-color-scheme: dark)` block the reader reads.
+
+   NOTE (rpu-w1 review): D6 spec light `--border-muted: var(--border)`, but
+   `--border` lives ONLY in root.html.heex (Studio), so on a non-Studio surface
+   it was undefined and `border-top: 1px solid var(--border-muted)` (the
+   chat-tool-diff divider) collapsed to `border-style: none` in light mode.
+   Resolved here to the concrete light value `--border` carries in
+   root.html.heex's default theme — hsl(240 5.9% 90%) — so it self-resolves on
+   every surface with IDENTICAL rendering to Studio, without introducing a bare
+   `--border` token (which the paper-editor mirror would push into the editor's
+   light `:root`, wrongly overriding the inherited Studio dark `--border`). The
+   dark blocks already carry a concrete `--border-muted`. */
+.bp-paper-surface, .bp-paper-body {
+  --primary: hsl(163 46% 22%); --muted-surface: hsl(240 4.8% 95.9%); --border-muted: hsl(240 5.9% 90%); --fg-dim: hsl(240 4% 47%); --font-mono: var(--paper-font-mono);
+}
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface, .bp-paper-body {
+    --primary: hsl(160 42% 62%); --muted-surface: hsl(240 3.7% 12%); --border-muted: hsl(240 3.7% 11%); --fg-dim: hsl(240 5% 51%); --font-mono: var(--paper-font-mono);
+  }
+}
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {
+  --primary: hsl(163 46% 22%); --muted-surface: hsl(240 4.8% 95.9%); --border-muted: hsl(240 5.9% 90%); --fg-dim: hsl(240 4% 47%); --font-mono: var(--paper-font-mono);
+}
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {
+  --primary: hsl(160 42% 62%); --muted-surface: hsl(240 3.7% 12%); --border-muted: hsl(240 3.7% 11%); --fg-dim: hsl(240 5% 51%); --font-mono: var(--paper-font-mono);
+}
+
+/* ── diff + filetree containers (W7 code-story blocks — charter D85). ─────────
+   Both blocks self-style INLINE with the same evergreen tokens as the chat
+   family above (mono, --muted-surface chrome, --ok/--danger diff rows shared
+   with chat-tool-diff per D76), so they read identically in email. These
+   container rules add ONLY the paper-surface chrome (a reading font-size the
+   Studio-only `text-xs` class can't supply here) plus the filetree
+   annotation/legend hooks — no new token layer (D85); every duplicated value
+   agrees byte-for-byte with the emitters' inline declarations. */
+/* Both BREAK OUT to the evidence band: a unified diff and a file tree are
+   fixed-width monospace artifacts whose line length is set by the source, not by
+   the column, and both already carry `overflow-x: auto` — so the column was
+   buying nothing but a scrollbar.
+
+   Unlike .bp-table / .bp-stats / .bp-chart, the breakout for these two is
+   PRODUCED INLINE (components.ex diff_html/filetree_html), and it has to be:
+   these emitters write the whole box as an inline `style=`, and an inline
+   declaration beats any class rule. Declaring the width here and the pull there
+   is precisely the half-breakout Part K and the rig's centre-offset assertion
+   refuse — measured, before it shipped: the diff took the 1040px band and grew
+   entirely to the RIGHT, overflowing portabledoc-showcase by 110px at 1280.
+
+   The emitters are style-BLIND (`diff_html(block)` takes no `:article`/`:email`),
+   shared with the chat-tool-diff family so the two read identically in email
+   (D76). That is why the breakout rides `var(--bp-evidence-*, <fallback>)` rather
+   than a style branch: email defines neither custom property, so the fallbacks
+   resolve to `margin: 4px 0px; width: 100%` — byte-for-byte today's email
+   geometry. The declarations below mirror the emitters' inline ones, which is
+   the invariant this rule block has always kept. */
+.bp-paper-surface .bp-diff, .bp-paper-surface .bp-filetree {
+  font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.5;
+  background: var(--muted-surface); border-radius: 6px; padding: 6px 8px;
+  margin: 4px var(--bp-evidence-pull, 0px);
+  width: var(--bp-evidence-width, 100%); box-sizing: border-box; overflow-x: auto;
+}
+.bp-paper-surface .bp-filetree-note { white-space: pre; }
+.bp-paper-surface .bp-filetree-legend { color: var(--fg-dim); font-size: 11px; margin-top: 4px; }
 
 .bp-paper-surface .bp-tasks {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
@@ -573,6 +1084,8 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
 .bp-paper-surface .bp-g--blocked { color: var(--st-warn); font-weight: 800; } /* ! — needs something */
 .bp-paper-surface .bp-g--done    { color: var(--st-ok); }                     /* ✓ — checked */
 .bp-paper-surface .bp-g--cancel  { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-g--considering { color: var(--paper-ink); opacity: 0.35; } /* ◌ — dim: a candidate, below backlog on the ladder */
+.bp-paper-surface .bp-g--researching { color: var(--st-violet); }                /* ◎ — violet: active investigation, the wave's one new hue */
 .bp-paper-surface .bp-g--progress { color: var(--st-info); }
 /* the in-flight state: the TUI Braille spinner, pure CSS (no JS) */
 .bp-paper-surface .bp-g--progress::before { content: "\2801"; animation: bp-braille 0.9s steps(1) infinite; }
@@ -653,11 +1166,18 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 1.6rem 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-.bp-paper-surface .bp-board__col { background: var(--paper-bg-deep); border-radius: 10px; padding: 10px; border-top: 3px solid var(--paper-ink-faint); }
-.bp-paper-surface .bp-board__col--ready { border-top-color: var(--paper-ink); }
-.bp-paper-surface .bp-board__col--progress { border-top-color: var(--st-info); }
-.bp-paper-surface .bp-board__col--blocked { border-top-color: var(--st-warn); }
-.bp-paper-surface .bp-board__col--done { border-top-color: var(--st-ok); }
+/* Same move as `.bp-card` below, for the same reason and with the same colours:
+   a task board is a ROW of columns, so a 3px top accent drew one heavy line
+   across the whole board. On the left edge it still names each column's state
+   and can no longer be mistaken for a section boundary. No committed fixture
+   renders a task board, so this one is proven by the DECLARATION census
+   (check.mjs Part M) rather than by a photograph — which is the half of the
+   census that exists for exactly this case. */
+.bp-paper-surface .bp-board__col { background: var(--paper-bg-deep); border-radius: 10px; padding: 10px; border-left: 3px solid var(--paper-ink-faint); }
+.bp-paper-surface .bp-board__col--ready { border-left-color: var(--paper-ink); }
+.bp-paper-surface .bp-board__col--progress { border-left-color: var(--st-info); }
+.bp-paper-surface .bp-board__col--blocked { border-left-color: var(--st-warn); }
+.bp-paper-surface .bp-board__col--done { border-left-color: var(--st-ok); }
 .bp-paper-surface .bp-board__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .bp-paper-surface .bp-board__label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
@@ -740,13 +1260,37 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
 .bp-paper-surface .bp-section__cell { min-width: 0; }
 .bp-paper-surface .bp-section__cell > :first-child { margin-top: 0; }
 
+/* ── section frame — the framed-finale device (charter D19). A `section` with
+   variant="framed" carries `.bp-section--framed` on its OWN box div (stamped by
+   compose/walk: fixed literal, :article-gated, whitelisted), one level INSIDE
+   the classless stream wrapper — NEVER on the wrapper itself, which would kill
+   the `div:not([class])` section-head beat above (probed: borderTop 0px vs 2px).
+   The hairline frame REPLACES the section's own two-rule band (the direct-child
+   `.bp-hr` pair), matching the TUI's square border; breathing room is CSS
+   padding — NEVER spacer paragraphs (the publish floor walks the subtree).
+   Mirror: paper-editor/src/styles.css. */
+.bp-paper-surface .bp-section--framed { border: var(--bp-rule-hairline) solid var(--paper-rule); padding: 1.1rem 1.5rem; }
+.bp-paper-surface .bp-section--framed > .bp-hr { display: none; }
+
 /* ── cards: titled rule/feature card grid ── */
 .bp-paper-surface .bp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 1.4rem 0; }
-.bp-paper-surface .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-top: 3px solid var(--paper-chrome-border); }
-.bp-paper-surface .bp-card--info { border-top-color: var(--st-info); }
-.bp-paper-surface .bp-card--ok { border-top-color: var(--st-ok); }
-.bp-paper-surface .bp-card--warn { border-top-color: var(--st-warn); }
-.bp-paper-surface .bp-card--danger { border-top-color: var(--st-danger); }
+/* The verdict accent moved from the card's TOP edge to its LEFT edge, and only
+   the edge moved — the colour, the width and the four status variants are the
+   ones that were already there. A cards grid puts three cards side by side, so a
+   3px top accent drew a heavy horizontal line straight across the page: measured
+   on the committed panel, `portabledoc-showcase` and `hobby-hardening-capstone`
+   spent 13 of their heavy rules on card tops. Weight is how a reader tells a
+   section boundary from chrome, and a component is not allowed to spend it.
+   Colour is the accent's actual signal and it is untouched — which is also how
+   `.bp-callout` (border-left: 4px) and the benchmark artifact's own verdict
+   panels (border-left: 3px) already carry it. A vertical edge cannot compete
+   with a horizontal boundary, so this both quiets the census and puts the card
+   on the same device as everything else that renders a verdict. */
+.bp-paper-surface .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-left: 3px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-card--info { border-left-color: var(--st-info); }
+.bp-paper-surface .bp-card--ok { border-left-color: var(--st-ok); }
+.bp-paper-surface .bp-card--warn { border-left-color: var(--st-warn); }
+.bp-paper-surface .bp-card--danger { border-left-color: var(--st-danger); }
 /* bp-card__t/__d stay: the LEGACY `cards` fleet grid (components.ex cards_html/1)
  * still emits them. The card WIDGET's model-A slot-chrome rules (__media/__action,
  * STEP 4) are GONE (S10, parity2-bug-card-slot-chrome): model B recurses slots to
@@ -792,7 +1336,7 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
    indexed class — author data never carries color. */
 .bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
 
-.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 4px; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; margin: 1.4rem 0; vertical-align: top; }
+.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 4px; min-width: 130px; background: var(--paper-bg-deep); padding: 13px 15px; margin: 1.4rem 0; vertical-align: top; }
 .bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; }
 .bp-paper-surface .bp-stat__l { font-size: 0.72rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; }
 .bp-paper-surface .bp-stat__bar { height: 6px; border-radius: 3px; background: var(--paper-rule); overflow: hidden; margin-bottom: 4px; }
@@ -800,8 +1344,23 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
 .bp-paper-surface .bp-stat__spark { width: 100%; height: 26px; margin-top: 4px; }
 .bp-paper-surface .bp-stat__spark polyline { fill: none; stroke: var(--paper-accent); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 
-.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 1.4rem 0; }
+/* The stat strip BREAKS OUT to the evidence band. This is the clearest case for
+   the whole device: `auto-fit` + `minmax` means the grid does not merely get
+   wider, it REFLOWS — 1040px fits 7 tiles across at the 140px floor, 1240px fits
+   8. The component gains resolution with the screen instead of stacking tiles
+   the reader then has to scroll past. */
+.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--paper-rule); margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
 .bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; }
+
+.bp-paper-surface .bp-gauge { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-gauge__t { font-weight: 700; margin-bottom: 8px; }
+.bp-paper-surface .bp-gauge__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.bp-paper-surface .bp-gauge__l { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 9em; max-width: 33%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-gauge__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
+.bp-paper-surface .bp-gauge__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
+.bp-paper-surface .bp-gauge__d { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 3em; text-align: right; }
+.bp-paper-surface .bp-gauge__n { font-size: 0.68rem; color: var(--paper-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28%; }
+.bp-paper-surface .bp-gauge__note { font-size: 0.72rem; color: var(--paper-ink-soft); }
 
 .bp-paper-surface .bp-heat { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; display: inline-block; }
 .bp-paper-surface .bp-heat__grid { display: grid; gap: 4px; align-items: center; }
@@ -812,22 +1371,35 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
 .bp-paper-surface .bp-heat__legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-family: var(--paper-font-mono); font-size: 0.64rem; color: var(--paper-ink-faint); }
 .bp-paper-surface .bp-heat__legend .bp-heat__c { width: 10px; flex: none; }
 
-.bp-paper-surface .bp-chart { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+/* The chart BREAKS OUT to the evidence band. Its svg is `width: 100%` over a
+   640-unit viewBox with a `min-width: 640px` legibility floor (below), so band
+   width buys real horizontal resolution for the series — the plot stops
+   compressing weeks into pixels — while the tick labels stay at their authored
+   size. */
+.bp-paper-surface .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
 .bp-paper-surface .bp-chart__t { font-size: 0.78rem; font-weight: 600; color: var(--paper-ink); margin-bottom: 8px; }
-.bp-paper-surface .bp-chart svg { display: block; width: 100%; height: auto; }
+/* Legibility floor (probe-figure-fidelity-2026-08-12): the svg's text is sized
+   in viewBox units (640 wide), so a bare width:100% scaled EVERY label with the
+   container — 11px ticks painted 4.26px at a 360 viewport. The min-width pins
+   the svg at its viewBox size so text never paints below its authored px; the
+   scroll wrapper (same idiom as .bp-heat__scroll) scrolls the figure at narrow
+   widths instead of shrinking it. The 720px article shell keeps the wide end
+   unchanged. */
+.bp-paper-surface .bp-chart__scroll { overflow-x: auto; padding-bottom: 2px; }
+.bp-paper-surface .bp-chart svg { display: block; width: 100%; min-width: 640px; height: auto; }
 .bp-paper-surface .bp-chart__grid { stroke: var(--paper-rule); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .bp-paper-surface .bp-chart__axis { stroke: var(--paper-ink-faint); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .bp-paper-surface .bp-chart__tick { fill: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 11px; }
 .bp-paper-surface .bp-chart__s { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 .bp-paper-surface .bp-chart__b { stroke: none; opacity: 0.85; }
 .bp-paper-surface .bp-chart__s0 { stroke: var(--paper-accent); }
-.bp-paper-surface .bp-chart__s1 { stroke: var(--bp-tone-info-fg, #3b82f6); }
-.bp-paper-surface .bp-chart__s2 { stroke: var(--bp-tone-warning-fg, #b45309); }
-.bp-paper-surface .bp-chart__s3 { stroke: var(--bp-tone-danger-fg, #b91c1c); }
+.bp-paper-surface .bp-chart__s1 { stroke: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chart__s2 { stroke: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chart__s3 { stroke: var(--bp-tone-danger-fg); }
 .bp-paper-surface rect.bp-chart__s0 { fill: var(--paper-accent); }
-.bp-paper-surface rect.bp-chart__s1 { fill: var(--bp-tone-info-fg, #3b82f6); }
-.bp-paper-surface rect.bp-chart__s2 { fill: var(--bp-tone-warning-fg, #b45309); }
-.bp-paper-surface rect.bp-chart__s3 { fill: var(--bp-tone-danger-fg, #b91c1c); }
+.bp-paper-surface rect.bp-chart__s1 { fill: var(--bp-tone-info-fg); }
+.bp-paper-surface rect.bp-chart__s2 { fill: var(--bp-tone-warning-fg); }
+.bp-paper-surface rect.bp-chart__s3 { fill: var(--bp-tone-danger-fg); }
 .bp-paper-surface .bp-chart__legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
 .bp-paper-surface .bp-chart__key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-chart__swatch { width: 14px; height: 3px; border-radius: 2px; background: currentColor; }
@@ -835,6 +1407,26 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
 .bp-paper-surface .bp-chart__key .bp-chart__s1 { background: var(--bp-tone-info-fg, #3b82f6); }
 .bp-paper-surface .bp-chart__key .bp-chart__s2 { background: var(--bp-tone-warning-fg, #b45309); }
 .bp-paper-surface .bp-chart__key .bp-chart__s3 { background: var(--bp-tone-danger-fg, #b91c1c); }
+/* chart ANNOTATION layer (regions / refLines / points — data_viz.ex
+   `annotations` attr): washes behind the series, guides above them, labels in
+   the tick voice. Tones ride the same --bp-tone-* family as the series.
+   Region opacity climbs with severity (info/ok 0.10 → warn 0.14 → danger 0.18)
+   so tone reads as weight as well as hue — at a flat 0.08 the info and danger
+   washes were indistinguishable in both themes
+   (probe-figure-fidelity-2026-08-12); the ceiling stays low enough that the
+   series always paints clearly through the wash. */
+.bp-paper-surface .bp-chart__region { fill: var(--paper-ink-soft); opacity: 0.08; }
+.bp-paper-surface .bp-chart__region--info { fill: var(--bp-tone-info-fg); opacity: 0.1; }
+.bp-paper-surface .bp-chart__region--ok { fill: var(--bp-tone-success-fg); opacity: 0.1; }
+.bp-paper-surface .bp-chart__region--warn { fill: var(--bp-tone-warning-fg); opacity: 0.14; }
+.bp-paper-surface .bp-chart__region--danger { fill: var(--bp-tone-danger-fg); opacity: 0.18; }
+.bp-paper-surface .bp-chart__refline { stroke: var(--paper-ink-soft); stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; opacity: 0.65; }
+.bp-paper-surface .bp-chart__refline--info { stroke: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-chart__refline--ok { stroke: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-chart__refline--warn { stroke: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-chart__refline--danger { stroke: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-chart__ann { fill: var(--paper-ink-soft); font-family: var(--paper-font-mono); font-size: 10px; }
+.bp-paper-surface .bp-chart__pt { fill: var(--paper-accent); stroke: var(--paper-bg); stroke-width: 1.5; }
 
 /* ── data-viz slate 2: calendar heatmap, quantile dual-encode, matrix Σ,
    stat denominators (gui-premium w5) ──
@@ -846,6 +1438,53 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
    Calendar heatmaps render EVERY week inside a horizontally scrollable
    container; the web never width-drops weeks the way the terminal must. */
 .bp-paper-surface .bp-stat__denom { font-size: 1.05rem; font-weight: 500; color: var(--paper-ink-soft); }
+
+/* ── jarl figure family: kilde stamp, stat unit/body, duel, lineage
+   (jdf-bl-historiene-renderer-reconciliation) ──
+   THE KILDE LAW: every figure datum carries a source ref, surfaced as the
+   small mono «kilde» stamp under the figure. Units are always their own span
+   beside the display-string number, never fused into it. */
+.bp-paper-surface .bp-stat__unit { font-family: var(--paper-font-mono); font-size: 0.72rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
+.bp-paper-surface .bp-stat__body { font-size: 0.72rem; color: var(--paper-ink-soft); line-height: 1.45; }
+
+.bp-paper-surface .bp-kilde { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-family: var(--paper-font-mono); font-size: 0.64rem; letter-spacing: 0.04em; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-kilde__word { text-transform: uppercase; letter-spacing: 0.06em; }
+.bp-paper-surface .bp-kilde__ref { word-break: break-word; }
+.bp-paper-surface .bp-kilde__ref a { color: inherit; }
+/* Inside the hairline grid the kilde is a grid item over the rule-colored
+   ground — without its own fill the whole footer line paints as a tinted band
+   (synth-proven pe-w3-hairline-grid-ground). Page ground restores flushness:
+   the 1px row gap above reads as the seam between slab and stamp, the
+   padding-top gives the stamp its air below that seam. */
+.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; background: var(--paper-bg); padding-top: 8px; }
+
+.bp-paper-surface .bp-duel { margin: 1.4rem 0; }
+.bp-paper-surface .bp-duel__table { width: 100%; border-collapse: collapse; }
+.bp-paper-surface .bp-duel__th { font-family: var(--paper-font-mono); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); text-align: right; padding: 6px 10px; }
+.bp-paper-surface .bp-duel__th--a { color: var(--paper-accent); }
+.bp-paper-surface .bp-duel__label { font-size: 0.82rem; font-weight: 600; color: var(--paper-ink); text-align: left; padding: 8px 10px; border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-duel__delta { display: block; font-family: var(--paper-font-mono); font-size: 0.66rem; font-weight: 400; color: var(--paper-ink-soft); margin-top: 3px; }
+.bp-paper-surface .bp-duel__val { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.92rem; color: var(--paper-ink); text-align: right; white-space: nowrap; padding: 8px 10px; border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-duel__val--a { color: var(--paper-accent); }
+.bp-paper-surface .bp-duel__unit { font-size: 0.66rem; color: var(--paper-ink-soft); margin-left: 0.35em; }
+
+/* route (sport track): the SVG carries its own presentation attributes (it must
+   survive a CSS-less email client), so the stanza owns only the figure rhythm +
+   the meta/caption typography — the inline sizes in data_viz.ex are the email
+   floor, these refine the reader read. */
+.bp-paper-surface .bp-route { margin: 1.4rem 0; }
+.bp-paper-surface .bp-route__map { display: block; width: 100%; height: auto; }
+.bp-paper-surface .bp-route__meta { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.78rem !important; color: var(--paper-ink-soft) !important; margin-top: 8px !important; }
+.bp-paper-surface .bp-route__caption { font-size: 0.82rem !important; color: var(--paper-ink-soft) !important; font-style: italic; margin-top: 3px !important; }
+
+.bp-paper-surface .bp-lineage { margin: 1.4rem 0; }
+.bp-paper-surface .bp-lineage__nodes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+.bp-paper-surface .bp-lineage__node { border-top: 1px solid var(--paper-rule); padding-top: 8px; }
+.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-lineage__title { font-size: 0.88rem; font-weight: 600; color: var(--paper-ink); margin-top: 4px; }
+.bp-paper-surface .bp-lineage__value { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 650; color: var(--paper-accent); margin-top: 4px; }
+.bp-paper-surface .bp-lineage__unit { font-size: 0.66rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
+.bp-paper-surface .bp-lineage__body { font-size: 0.76rem; color: var(--paper-ink-soft); line-height: 1.45; margin-top: 5px; }
 
 .bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }
 .bp-paper-surface .bp-heat__scroll { overflow-x: auto; padding-bottom: 2px; }
@@ -957,8 +1596,27 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
 /* ── mermaid diagram polish (gui-premium w1) ──
    The SVG palette is baked by the themed init in bulldocs.html.heex; this only
    centers the render inside the (already tokenized) figure card. */
-.bp-paper-surface pre.mermaid { display: flex; justify-content: center; margin: 0; overflow-x: auto; }
-.bp-paper-surface pre.mermaid svg { max-width: 100%; height: auto; }
+/* `safe center`, not `center`: with the PRE-HYDRATION source text (long
+   unbreakable mermaid lines) a plain `center` overflows the flex line
+   symmetrically — the left half clips UNREACHABLY (scrollLeft can't go
+   negative) and the spill widens the document on narrow viewports. `safe`
+   falls back to start-alignment exactly when content overflows, keeping the
+   first character visible and the scroll usable; the centered look is
+   unchanged once the (max-width-bounded) SVG replaces the source. */
+.bp-paper-surface pre.mermaid { display: flex; justify-content: safe center; margin: 0; max-width: 100%; overflow-x: auto; }
+/* Legibility floor (probe-figure-fidelity-2026-08-12): with useMaxWidth the
+   engine emits width="100%" and stamps the diagram's NATURAL width as an
+   inline max-width — so a wide sequence diagram scaled its labels down to
+   3.73px at a 360 viewport. Requesting an over-large width lets the ALWAYS-
+   BINDING max-width clamp resolve the actual size: the engine's inline stamp
+   wins the cascade and pins the svg at EXACTLY its natural width — labels
+   paint at their authored px and the pre's overflow-x:auto scrolls the
+   diagram at narrow widths instead of shrinking its text away — while an
+   unstamped svg falls back to this rule's own max-width:100% and stays
+   container-bound exactly as before. `flex:none` is load-bearing: the pre is
+   a flex row, and default flex-shrink would squeeze the svg right back to
+   the container width. */
+.bp-paper-surface pre.mermaid svg { width: 9999px; max-width: 100%; height: auto; flex: none; }
 
 /* ── unsupported-block degrade (gui-premium w5) ──
    The walker (walk.ex) and compose.ex both emit `<div class="bp-unknown-block">`
@@ -970,3 +1628,120 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
    Appended at the end of the hand-authored section, clear of the data-viz slate
    region above (concurrently owned by gp-w5-dataviz-fidelity). */
 .bp-paper-surface .bp-unknown-block { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
+
+/* ── undelivered-block delivery wave (study /papers/portabledoc-potential-study;
+   tasks task-392e09d6e29c42d1 + task-49fcdc3e45c93c02). ──────────────────────
+   Every family below already EMITS this markup from render/*.ex but had zero
+   reader rules — bare browser defaults (or, for the bar families, literally
+   invisible fills). One section, one family per stanza, everything scoped
+   `.bp-paper-surface` and drawn from the `--paper-*` tokens so all four themes
+   inherit. The bar families mirror the ratified `.bp-gauge` anatomy above. */
+
+/* bar-chart: label + fill track + optional digit (data_viz.ex bar_chart_html). */
+.bp-paper-surface .bp-bar-chart { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-bar-chart__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.bp-paper-surface .bp-bar-chart__l { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 9em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-bar-chart__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
+.bp-paper-surface .bp-bar-chart__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
+.bp-paper-surface .bp-bar-chart__d { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 3em; text-align: right; }
+
+/* criteria-progress: the task family's meter — same row anatomy. */
+.bp-paper-surface .bp-criteria-progress { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-surface .bp-criteria-progress__row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.bp-paper-surface .bp-criteria-progress__l { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 9em; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-criteria-progress__bar { flex: 1; height: 8px; border-radius: 4px; background: var(--paper-rule); overflow: hidden; }
+.bp-paper-surface .bp-criteria-progress__bar i { display: block; height: 100%; border-radius: 4px; background: var(--paper-accent); }
+.bp-paper-surface .bp-criteria-progress__d { font-family: var(--paper-font-mono); font-size: 0.72rem; min-width: 3em; text-align: right; }
+
+/* steps: numbered procedure — counter chip + title + indented body. The
+   ::marker suppression matters: bp-steps is a semantic <ol> and the generic
+   list rules would otherwise paint the browser "1." beside our own chip
+   (double numbering, seen live on the rev-7 essay). */
+.bp-paper-surface .bp-steps { margin: 1.4rem 0 1.4rem 0; padding: 0; list-style: none; counter-reset: bp-step; }
+.bp-paper-surface .bp-steps__step::marker { content: ""; }
+.bp-paper-surface .bp-steps__step { list-style: none; counter-increment: bp-step; position: relative; padding: 0 0 14px 2.6rem; }
+.bp-paper-surface .bp-steps__step::before { content: counter(bp-step); position: absolute; left: 0; top: 0; width: 1.7rem; height: 1.7rem; border-radius: 50%; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.78rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.bp-paper-surface .bp-steps__step:not(:last-child)::after { content: ""; position: absolute; left: 0.82rem; top: 1.9rem; bottom: 0; width: 1px; background: var(--paper-rule); }
+.bp-paper-surface .bp-steps__title { font-weight: 700; margin: 0.15rem 0 0.2rem; }
+.bp-paper-surface .bp-steps__body > :first-child { margin-top: 0.3rem; }
+
+/* tabs / code-tabs: shared strip anatomy. Server HTML shows EVERY panel
+   (no-JS degrade); hydration hides the non-active ones, so the strip must
+   read as controls and the active tab must be visibly marked. */
+.bp-paper-surface .bp-tabs, .bp-paper-surface .bp-code-tabs { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+.bp-paper-surface .bp-tabs__strip, .bp-paper-surface .bp-code-tabs__strip { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-tabs__tab, .bp-paper-surface .bp-code-tabs__tab { appearance: none; background: none; border: none; border-bottom: var(--bp-rule-hairline) solid transparent; padding: 6px 12px 7px; font-family: var(--paper-font-mono); font-size: 0.74rem; color: var(--paper-ink-soft); cursor: pointer; }
+.bp-paper-surface .bp-tabs__tab--active, .bp-paper-surface .bp-code-tabs__tab--active { color: var(--paper-ink); border-bottom-color: var(--paper-accent); font-weight: 700; }
+.bp-paper-surface .bp-tabs__panel, .bp-paper-surface .bp-code-tabs__panel { padding: 12px 15px; }
+.bp-paper-surface .bp-tabs__panel[hidden], .bp-paper-surface .bp-code-tabs__panel[hidden] { display: none; }
+.bp-paper-surface .bp-tabs__section { padding: 10px 15px; }
+.bp-paper-surface .bp-tabs__label, .bp-paper-surface .bp-code-tabs__label { font-family: var(--paper-font-mono); font-size: 0.72rem; font-weight: 700; color: var(--paper-ink-soft); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 4px; }
+
+/* expandable: native <details> chrome (zero-JS disclosure). */
+.bp-paper-surface .bp-expandable { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 0; }
+.bp-paper-surface .bp-expandable > summary { padding: 10px 15px; font-weight: 700; cursor: pointer; color: var(--paper-ink); }
+.bp-paper-surface .bp-expandable > summary:hover { color: var(--paper-accent); }
+.bp-paper-surface .bp-expandable__body { padding: 2px 15px 12px; border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-expandable__body > :first-child { margin-top: 0.6rem; }
+
+/* footnote: the endnote list — small, ruled off from the prose. Sized in `em`
+   with the roles: it is prose ABOUT prose. This is where the em sweep stops.
+   The rest of this sheet's `rem` sizes are COMPONENT chrome — chart keys, gauge
+   labels, task rows, table headers, form furniture — fixed-size UI that happens
+   to sit on a paper, and that should NOT grow when someone raises the reading
+   size. The dividing line is whether a reader reads it as part of the sentence. */
+.bp-paper-surface .bp-footnote { margin: 1.6rem 0; padding: 0.9rem 0 0 1.4rem; border-top: 1px solid var(--paper-rule); font-size: 0.82em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-footnote__note { margin: 0.25rem 0; }
+.bp-paper-surface .bp-footnote__note::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-faint); }
+
+/* equation: centered display math (native MathML) + honest empty degrade. */
+.bp-paper-surface .bp-equation { margin: 1.5rem 0; text-align: center; font-size: 1.08em; overflow-x: auto; }
+.bp-paper-surface .bp-equation--empty { border: 1px dashed var(--paper-chrome-border); border-radius: 10px; padding: 10px 13px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; text-align: left; }
+
+/* api-endpoint: method chip + path + params table. Method tones ride the
+   status palette so GET/POST/DELETE read at a glance without new colors. */
+.bp-paper-surface .bp-api-endpoint { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+.bp-paper-surface .bp-api-endpoint__head { display: flex; align-items: center; gap: 10px; padding: 9px 13px; background: var(--paper-bg-deep); }
+.bp-paper-surface .bp-api-endpoint__method { font-family: var(--paper-font-mono); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 6px; background: var(--paper-rule); color: var(--paper-ink); flex: none; }
+.bp-paper-surface .bp-api-endpoint__method--get { color: var(--st-ok); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__method--post { color: var(--st-info); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__method--put, .bp-paper-surface .bp-api-endpoint__method--patch { color: var(--st-warn); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__method--delete { color: var(--st-danger); border: 1px solid currentColor; background: none; }
+.bp-paper-surface .bp-api-endpoint__path { font-family: var(--paper-font-mono); font-size: 0.8rem; background: none; padding: 0; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-api-endpoint__params { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.bp-paper-surface .bp-api-endpoint__params th { text-align: left; padding: 6px 13px; border-bottom: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-api-endpoint__params td { padding: 6px 13px; border-bottom: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-api-endpoint__params tr:last-child td { border-bottom: none; }
+
+/* toc: the in-paper nav card; sticky variant pins in article mode. */
+.bp-paper-surface .bp-toc { margin: 1.4rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 12px 15px; }
+.bp-paper-surface .bp-toc__list { margin: 0; padding-left: 1.3rem; }
+.bp-paper-surface .bp-toc__item { margin: 3px 0; }
+.bp-paper-surface .bp-toc__item::marker { font-family: var(--paper-font-mono); font-size: 0.8em; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-toc__item[data-level="2"] { margin-left: 1.1rem; font-size: 0.92em; }
+.bp-paper-surface .bp-toc__item[data-level="3"] { margin-left: 2.2rem; font-size: 0.88em; }
+.bp-paper-surface .bp-toc--sticky { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+
+/* asciicast: the player mount — reserve height so the figure never jumps. */
+.bp-paper-surface .bp-asciicast { min-height: 120px; background: var(--paper-bg-deep); }
+/* The player's own control bar draws `border-top: 2px` (asciinema-player 3.8.0,
+   `div.ap-player div.ap-control-bar`), which is a vendor stylesheet loaded from
+   a CDN — so a terminal recording put a section-weight rule inside a figure, and
+   nothing in this repo declared it. Four classes beat the vendor's two-class,
+   two-type selector; only the WIDTH is overridden, so the bar keeps the colour
+   the player computes from the cast's own theme.
+
+   This is the one rule in this file the render rig cannot photograph: the rig
+   blocks every non-loopback host, so the player never hydrates and the bar does
+   not exist in a hermetic capture. It is proven against the vendor bytes
+   instead — the cascade, not the picture. */
+.bp-paper-surface .bp-asciicast .ap-player .ap-control-bar { border-top-width: var(--bp-rule-hairline); }
+
+/* chat transcript blocks (Studio-sourced): one shared quiet-card treatment —
+   their inner layout is inline-styled by components.ex; this supplies the
+   frame those inline styles assumed. */
+.bp-paper-surface .bp-chat-approval, .bp-paper-surface .bp-chat-plan, .bp-paper-surface .bp-chat-question, .bp-paper-surface .bp-chat-thinking, .bp-paper-surface .bp-chat-todo, .bp-paper-surface .bp-chat-tool-diff { margin: 1.1rem 0; border: 1px solid var(--paper-chrome-border); border-radius: 10px; background: var(--paper-bg-deep); padding: 10px 13px; font-size: 0.85rem; }
+
+/* valueref-accept: the inline baseline-accept affordance (walk.ex). */
+.bp-paper-surface .bp-valueref-accept { appearance: none; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg-deep); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.68rem; padding: 1px 7px; margin-left: 6px; cursor: pointer; vertical-align: 1px; }
+.bp-paper-surface .bp-valueref-accept:hover { border-color: var(--paper-accent); }

@@ -1,5 +1,5 @@
 defmodule Barkpark.Search.GoldenEvalTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Search.{GoldenEval, SurfaceConfigs}

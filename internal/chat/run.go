@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/FRIKKern/barkpark/internal/pdrender"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -23,6 +24,12 @@ type Config struct {
 	Workspace string
 	Project   string
 	Dataset   string
+	// Theme is the resolved design-system SKIN IDENTITY (evergreen/charple/ember/
+	// fjord/iris) the transcript renders in — DISTINCT from `bp paper --theme`
+	// which selects a light/dark MODE. The CLI resolves it (flag > BP_THEME/config
+	// > evergreen) before handing it in; an empty or unknown id degrades to
+	// evergreen inside pdrender.ThemeFor. Mode is fixed DARK here (no mode axis).
+	Theme string
 }
 
 // streamer owns the live SSE subscription's lifecycle. The chat stream is
@@ -58,8 +65,9 @@ func (s *streamer) start(sessionID string, lastSeq int) {
 	p, tr := s.program, s.tr
 	go func() {
 		err := tr.Events(ctx, sessionID, lastSeq, func(event string, data []byte) {
-			// Copy the frame payload: readSSE reuses its scanner buffer, so the
-			// []byte handed here must not escape into another goroutine unowned.
+			// Copy the frame payload before it crosses into the update loop: the
+			// adapter hands a fresh []byte per frame, but a defensive copy keeps
+			// this seam safe regardless of the underlying parser's buffer reuse.
 			cp := append([]byte(nil), data...)
 			p.Send(streamFrameMsg{name: event, data: cp})
 		})
@@ -84,6 +92,14 @@ func (s *streamer) stop() {
 // as a command), so a dead server lands an honest error state on the picker
 // instead of freezing the prompt.
 func Run(cfg Config) error {
+	// Reskin the transcript BEFORE the program starts. chatRegistry (render.go) is
+	// the package var every render call reads at CALL time, so reassigning it here
+	// reskins the whole conversation with ZERO edits to render.go — the theme flows
+	// in purely through this seam. This is the SKIN IDENTITY axis (design-system
+	// palette), NOT the light/dark MODE axis `bp paper --theme` drives; mode stays
+	// dark. An empty/unknown cfg.Theme falls back to evergreen inside ThemeFor.
+	chatRegistry = pdrender.DefaultRegistry(pdrender.ThemeFor(cfg.Theme, "dark"))
+
 	tr := NewHTTPTransport(cfg.BaseURL, cfg.Token)
 	stream := &streamer{tr: tr}
 	m := newModel(tr, stream, cfg)
@@ -94,7 +110,25 @@ func Run(cfg Config) error {
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	stream.program = p // the goroutine's p.Send seam, set before Run starts the loop
 
+	// The herd fleet stream: ONE life-of-process goroutine (herd charter D54h,
+	// the taskboard wireLive pattern), started beside the program and NEVER
+	// paused on attach — the herd keeps reducing while a conversation is
+	// foregrounded, so detaching shows current truth with zero flash/refetch.
+	// apiclient.FleetEvents owns reconnect/backoff; its terminal give-up
+	// degrades to a notice (fleetErrMsg), never a crash.
+	fleetCtx, stopFleet := context.WithCancel(context.Background())
+	go func() {
+		err := tr.FleetEvents(fleetCtx, "", func(event string, data []byte) {
+			cp := append([]byte(nil), data...)
+			p.Send(fleetFrameMsg{event: event, data: cp})
+		})
+		if err != nil && fleetCtx.Err() == nil {
+			p.Send(fleetErrMsg{err: err})
+		}
+	}()
+
 	_, err := p.Run()
+	stopFleet()
 	stream.stop()
 	return err
 }

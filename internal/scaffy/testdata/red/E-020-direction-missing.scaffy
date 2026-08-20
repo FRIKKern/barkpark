@@ -1,0 +1,3 @@
+# expect: E-020 1
+COMMAND "no-direction"
+ASSERT FILE "README.md" EXISTS

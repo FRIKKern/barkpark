@@ -4,13 +4,14 @@ package taskboard
 // RenderTaskDetail (charter D15/D16/D24). Goldens are ANSI-stripped WHOLE
 // frames (never substrings) at 60/80/100 cols. Each width golden concatenates
 // THREE fixtures — RICH (every section, real mdlite headings/bullets/code),
-// THIN (title+meta only — proves conditional sections), and BLOCKED (reason
+// THIN (sparse authored data with an honest derived purpose), and BLOCKED (reason
 // strip + a single paper stop) — so one file per width shows the reader the
 // whole vocabulary at once. The DONE fixture drives targeted behavioral tests
 // (lease-alarm suppression, inline close_reason) without a golden. Deterministic
 // fixed clock; reuses the package's shared -update flag.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,12 +81,23 @@ func richDetail() (TaskDetail, []Task) {
 				Worker:    "fable-3",
 				Epoch:     4,
 				ClaimedAt: at("2026-07-04T17:26:00Z"),
+				Now: &ClaimPulse{
+					Text: "checking reconnect backoff",
+					At:   at("2026-07-04T17:29:00Z"),
+				},
 			},
 			Criteria: &Criteria{Met: 2, Total: 3},
 			CriteriaItems: []CriterionItem{
 				{Criterion: "SSE dirty-bit triggers a debounced full snapshot refetch within 750ms", Met: true},
 				{Criterion: "Connection dot renders live/polling/offline honestly", Met: true},
-				{Criterion: "A stuck reconnect can never keep reading ConnLive", Met: false},
+				{
+					Criterion: "A stuck reconnect can never keep reading ConnLive",
+					Met:       false,
+					Attempts: []CriterionAttempt{
+						{Note: "proxy held the socket open", At: at("2026-07-04T16:55:00Z"), Worker: "fable-2"},
+						{Note: "backoff fixture still races", At: at("2026-07-04T17:10:00Z"), Worker: "fable-3"},
+					},
+				},
 			},
 			TwinOf:          "sse-bridge-dup",
 			TwinTitle:       "Wire the SSE bridge (duplicate filing)",
@@ -384,14 +396,11 @@ func TestDetailCursorSelection(t *testing.T) {
 	}
 }
 
-// TestDetailThinIsThin pins the conditional-section promise: a task with only
-// a title and lifecycle renders exactly two lines and zero stops.
+// Even a sparse legacy task must explain itself: the reader derives and labels
+// purpose from recorded facts while keeping the frame free of selectable rails.
 func TestDetailThinIsThin(t *testing.T) {
 	d, children := thinDetail()
 	lines, stops := RenderTaskDetail(d, children, 0, 80, detailNow)
-	if len(lines) != 2 {
-		t.Fatalf("thin task rendered %d lines, want 2:\n%s", len(lines), strings.Join(lines, "\n"))
-	}
 	if len(stops) != 0 {
 		t.Fatalf("thin task produced %d stops, want 0", len(stops))
 	}
@@ -400,6 +409,88 @@ func TestDetailThinIsThin(t *testing.T) {
 	}
 	if got := ansi.Strip(lines[1]); !strings.Contains(got, "open") {
 		t.Errorf("line 1 is not the meta line: %q", got)
+	}
+	frame := ansi.Strip(strings.Join(lines, "\n"))
+	for _, want := range []string{"purpose · derived", "part of", "endgame", "important", "relevant", "proof"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("sparse task missing %q:\n%s", want, frame)
+		}
+	}
+	for _, awkward := range []string{"criteria 0/0", "root mission", "0 direct child"} {
+		if strings.Contains(frame, awkward) {
+			t.Errorf("sparse task retained mechanical placeholder %q:\n%s", awkward, frame)
+		}
+	}
+	for _, want := range []string{"criteria · missing", "standalone task", "Define acceptance criteria"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("sparse task missing intentional fallback %q:\n%s", want, frame)
+		}
+	}
+}
+
+func TestDerivedWhyNeverMistakesCriteriaForRationale(t *testing.T) {
+	d, _ := richDetail()
+	purpose := taskPurposeView(d, nil)
+
+	if strings.Contains(purpose.Why, "acceptance") || strings.Contains(purpose.Why, "criteria") {
+		t.Fatalf("derived why restated the completion contract instead of identifying missing rationale: %q", purpose.Why)
+	}
+	if want := "Why this task is necessary within task-tui-epic is not recorded."; purpose.Why != want {
+		t.Fatalf("derived why = %q, want %q", purpose.Why, want)
+	}
+}
+
+func TestCriteriaLeadEverySubstantiveDetailSection(t *testing.T) {
+	d, children := richDetail()
+	lines, _ := RenderTaskDetail(d, children, 0, 80, detailNow)
+	frame := ansi.Strip(strings.Join(lines, "\n"))
+	criteria := strings.Index(frame, "criteria 2/3")
+	if criteria < 0 {
+		t.Fatal("criteria section missing")
+	}
+	for _, later := range []string{"purpose · derived", "created 2d ago", "The board must repaint", "labels  "} {
+		at := strings.Index(frame, later)
+		if at < 0 || criteria >= at {
+			t.Errorf("criteria must precede %q (criteria=%d later=%d)", later, criteria, at)
+		}
+	}
+}
+
+func TestEveryTaskDetailVariantHasACompleteEarlyOutline(t *testing.T) {
+	for _, fixture := range detailFixtures() {
+		t.Run(fixture.name, func(t *testing.T) {
+			frame := plainDetailFrame(fixture, 80)
+			criteriaAt := strings.Index(frame, "criteria")
+			purposeAt := strings.Index(frame, "purpose")
+			if criteriaAt < 0 || purposeAt < 0 || criteriaAt >= purposeAt {
+				t.Fatalf("criteria/purpose outline missing or out of order (criteria=%d purpose=%d):\n%s", criteriaAt, purposeAt, frame)
+			}
+			for _, field := range []string{"part of", "impact", "does", "why", "endgame", "important", "relevant", "proof"} {
+				if !strings.Contains(frame, field) {
+					t.Errorf("task detail missing outline field %q:\n%s", field, frame)
+				}
+			}
+		})
+	}
+}
+
+func TestPurposeOutlineUsesDistinctSemanticColorRoles(t *testing.T) {
+	partLabel, _ := purposeFactStyles("part of")
+	impactLabel, _ := purposeFactStyles("impact")
+	proofLabel, _ := purposeFactStyles("proof")
+	whyLabel, _ := purposeFactStyles("why")
+	colors := []lipgloss.TerminalColor{
+		partLabel.GetForeground(), impactLabel.GetForeground(), proofLabel.GetForeground(), whyLabel.GetForeground(),
+	}
+	for i := range colors {
+		if colors[i] == (lipgloss.NoColor{}) {
+			t.Fatalf("purpose semantic role %d has no foreground color", i)
+		}
+		for j := 0; j < i; j++ {
+			if colors[i] == colors[j] {
+				t.Fatalf("purpose semantic roles %d and %d collapsed to the same color", i, j)
+			}
+		}
 	}
 }
 
@@ -436,6 +527,61 @@ func TestDetailDoneSuppressesLeaseAlarm(t *testing.T) {
 	}
 }
 
+func TestRenderTaskDetailAttemptsAndNowPulse(t *testing.T) {
+	d := TaskDetail{Task: Task{
+		Title:     "Render honest criterion history",
+		Lifecycle: "in_progress",
+		Claim: &Claim{
+			Worker:    "fable-3",
+			Epoch:     7,
+			ClaimedAt: detailNow.Add(-time.Minute),
+			Now: &ClaimPulse{
+				Text: "writing focused tests",
+				At:   detailNow.Add(-time.Minute),
+			},
+		},
+		CriteriaItems: []CriterionItem{{
+			Criterion: "The detail frame preserves honest misses",
+			Attempts: []CriterionAttempt{
+				{Note: "API returned 503", At: detailNow.Add(-2 * time.Hour), Worker: "fable-1"},
+				{Note: "fixture still missing", At: detailNow.Add(-30 * time.Minute), Worker: "fable-2"},
+			},
+		}},
+	}}
+
+	lines, _ := RenderTaskDetail(d, nil, 0, 100, detailNow)
+	frame := ansi.Strip(strings.Join(lines, "\n"))
+	first := "↳ API returned 503 · 2h ago (Jul 04, 15:30) · fable-1"
+	second := "↳ fixture still missing · 30m ago (Jul 04, 17:00) · fable-2"
+	if !strings.Contains(frame, first) || !strings.Contains(frame, second) {
+		t.Fatalf("detail frame omitted attempt note/ts/worker:\n%s", frame)
+	}
+	if strings.Index(frame, first) > strings.Index(frame, second) {
+		t.Fatalf("detail frame reordered attempts:\n%s", frame)
+	}
+
+	// The detail view must use the board's exact pulseLine vocabulary and
+	// claimRole TTL grading, not a lookalike. Compare the styled line itself at
+	// fresh, leaning, and stale ages so role/color/motion parity stays pinned.
+	for _, age := range []time.Duration{time.Minute, 4 * time.Minute, 6 * time.Minute} {
+		d.Claim.Now.At = detailNow.Add(-age)
+		lines, _ = RenderTaskDetail(d, nil, 0, 100, detailNow)
+		want := "       " + pulseLine(d.Task, d.Claim.Now, 0, 100-7, detailNow)
+		found := false
+		for _, line := range lines {
+			if strings.Contains(ansi.Strip(line), d.Claim.Now.Text) {
+				found = true
+				if line != want {
+					t.Errorf("pulse age %s rendered outside pulseLine/claimRole contract\n got: %q\nwant: %q", age, line, want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("pulse age %s missing from detail frame", age)
+		}
+	}
+}
+
 // TestDetailTimelineCloseReason: the done fixture's timeline carries the
 // close reason inline; the blocked fixture's strip carries its reason.
 func TestDetailReasons(t *testing.T) {
@@ -450,6 +596,84 @@ func TestDetailReasons(t *testing.T) {
 	frame = ansi.Strip(strings.Join(lines, "\n"))
 	if !strings.Contains(frame, "▍ blocked — waiting on the shared-package extraction") {
 		t.Errorf("blocked strip missing:\n%s", frame)
+	}
+}
+
+// TestDetailDispositionStrip pins the durable backlog adjudication onto a
+// VISIBLE surface: content.disposition_reason is written by the park/close
+// paths, and before this strip existed no rendered surface showed it (a
+// write-only adjudication is indistinguishable from none). Deleting the
+// dispositionLabel emitStrip line in RenderTaskDetail REDS this test.
+func TestDetailDispositionStrip(t *testing.T) {
+	const reason = "PARKED until the Hetzner ARM runner exists; reopen when CI grows an arm64 lane."
+	d := TaskDetail{
+		Task:              Task{DocID: "arm-lane", Title: "Build the arm64 CI lane", Lifecycle: "open"},
+		Disposition:       "PARKED",
+		DispositionReason: reason,
+	}
+	lines, _ := RenderTaskDetail(d, nil, 0, 100, detailNow)
+	frame := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(frame, "▍ disposition parked — PARKED until the Hetzner ARM runner exists;") {
+		t.Errorf("disposition strip missing its label or reason:\n%s", frame)
+	}
+	// The tail wraps onto a continuation line that repeats the bar, so the
+	// reason is never truncated away.
+	if !strings.Contains(frame, "reopen when CI grows an arm64") || !strings.Contains(frame, "▍ lane.") {
+		t.Errorf("disposition reason truncated away by the wrap:\n%s", frame)
+	}
+
+	// The label follows the disposition — an OPEN row is never called parked.
+	d.Disposition = "OPEN"
+	lines, _ = RenderTaskDetail(d, nil, 0, 100, detailNow)
+	frame = ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(frame, "▍ disposition open — ") {
+		t.Errorf("OPEN disposition mislabelled:\n%s", frame)
+	}
+	if strings.Contains(frame, "disposition parked") {
+		t.Errorf("OPEN row rendered as parked:\n%s", frame)
+	}
+}
+
+// TestDetailDispositionStripEmptyReason: an un-adjudicated row (and a row whose
+// disposition was set with no reason) renders NO strip and NO stray label —
+// the strip must never manufacture an empty bar.
+func TestDetailDispositionStripEmptyReason(t *testing.T) {
+	for _, c := range []struct{ name, disposition, reason string }{
+		{"never adjudicated", "", ""},
+		{"disposition without reason", "PARKED", ""},
+		{"whitespace-only reason", "CLOSED", "   \n  "},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := TaskDetail{
+				Task:              Task{DocID: "no-reason", Title: "No durable reason", Lifecycle: "open"},
+				Disposition:       c.disposition,
+				DispositionReason: c.reason,
+			}
+			lines, _ := RenderTaskDetail(d, nil, 0, 100, detailNow)
+			frame := ansi.Strip(strings.Join(lines, "\n"))
+			if strings.Contains(frame, "disposition") {
+				t.Errorf("stray disposition label with no reason:\n%s", frame)
+			}
+			if strings.Contains(frame, "▍  —") || strings.Contains(frame, "▍ —") {
+				t.Errorf("empty strip rendered:\n%s", frame)
+			}
+		})
+	}
+}
+
+// TestDetailDispositionHydratesFromWire proves the reason reaches TaskDetail
+// from the SAME list envelope the board already fetches — no extra request.
+func TestDetailDispositionHydratesFromWire(t *testing.T) {
+	w := taskWire{Content: json.RawMessage(`{
+      "disposition":"PARKED",
+      "disposition_reason":"superseded by the wave-23 census"
+    }`)}
+	d := w.toDetail(Task{DocID: "wire", Title: "Wire", Lifecycle: "open"})
+	if d.Disposition != "PARKED" || d.DispositionReason != "superseded by the wave-23 census" {
+		t.Fatalf("disposition not hydrated: %q / %q", d.Disposition, d.DispositionReason)
+	}
+	if empty := (taskWire{Content: json.RawMessage(`{}`)}).toDetail(Task{}); empty.DispositionReason != "" {
+		t.Fatalf("absent disposition_reason invented a value: %q", empty.DispositionReason)
 	}
 }
 
@@ -536,5 +760,67 @@ func TestDetailDeterministic(t *testing.T) {
 	b, _ := RenderTaskDetail(f.detail, f.children, f.cursor, 80, detailNow)
 	if strings.Join(a, "\n") != strings.Join(b, "\n") {
 		t.Fatal("RenderTaskDetail is not deterministic")
+	}
+}
+
+// TestDetailReopenTriggerStrip pins the THIRD part of the adjudication triple.
+// PDS wave 24 made content.reopen_trigger mandatory server-side for a park
+// (Tasks.Stage refuses a park without one, and /v1/data/mutate refuses erasing
+// one), so rendering the reason without the trigger would show half of a thing
+// the server treats as indivisible — the owner would see that a row is parked
+// and why, but not the single fact that tells them when it comes back.
+// Deleting the "reopens when" emitStrip line in RenderTaskDetail REDS this.
+func TestDetailReopenTriggerStrip(t *testing.T) {
+	d := TaskDetail{
+		Task:              Task{DocID: "arm-lane", Title: "Build the arm64 CI lane", Lifecycle: "open"},
+		Disposition:       "parked",
+		DispositionReason: "no arm64 runner exists on the CI fleet.",
+		ReopenTrigger:     "when GitHub Actions offers an arm64 runner on this plan",
+	}
+	lines, _ := RenderTaskDetail(d, nil, 0, 100, detailNow)
+	frame := ansi.Strip(strings.Join(lines, "\n"))
+
+	if !strings.Contains(frame, "▍ reopens when — when GitHub Actions offers an arm64 runner") {
+		t.Errorf("reopen trigger strip missing:\n%s", frame)
+	}
+	// It sits UNDER the reason it qualifies, never above it.
+	reasonAt := strings.Index(frame, "disposition parked")
+	triggerAt := strings.Index(frame, "reopens when")
+	if reasonAt < 0 || triggerAt < 0 || triggerAt < reasonAt {
+		t.Errorf("trigger strip is not below the reason strip (reason=%d trigger=%d):\n%s",
+			reasonAt, triggerAt, frame)
+	}
+
+	// A row with a disposition and NO trigger renders no trigger strip and no
+	// stray label — a pre-wave-24 park must not grow an empty bar.
+	d.ReopenTrigger = "   "
+	lines, _ = RenderTaskDetail(d, nil, 0, 100, detailNow)
+	frame = ansi.Strip(strings.Join(lines, "\n"))
+	if strings.Contains(frame, "reopens when") {
+		t.Errorf("blank trigger rendered a strip anyway:\n%s", frame)
+	}
+}
+
+// TestDetailReopenTriggerHydratesFromWire: the trigger rides the same wire
+// content map as the reason, so it costs zero extra fetches — and an absent
+// key must invent nothing.
+func TestDetailReopenTriggerHydratesFromWire(t *testing.T) {
+	var w taskWire
+	raw := `{"content":{"disposition":"parked","disposition_reason":"why",` +
+		`"reopen_trigger":"when the runner exists"}}`
+	if err := json.Unmarshal([]byte(raw), &w); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	d := w.toDetail(Task{DocID: "x"})
+	if d.ReopenTrigger != "when the runner exists" {
+		t.Errorf("ReopenTrigger = %q, want the wire value", d.ReopenTrigger)
+	}
+
+	var empty taskWire
+	if err := json.Unmarshal([]byte(`{"content":{}}`), &empty); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := empty.toDetail(Task{DocID: "x"}).ReopenTrigger; got != "" {
+		t.Errorf("ReopenTrigger invented %q from an empty content map", got)
 	}
 }

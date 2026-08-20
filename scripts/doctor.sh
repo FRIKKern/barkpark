@@ -36,19 +36,128 @@ else
   skip "fetch failed (offline?) — behind-check skipped"
 fi
 
-# ── 2. Installed bp binary stale? ────────────────────────────────────────────
-# bp embeds its build commit; it is stale only if Go-side inputs changed since.
-if command -v bp >/dev/null 2>&1; then
-  BP_COMMIT="$(bp version 2>/dev/null | sed -n 's/.*"commit": *"\([0-9a-f]*\)".*/\1/p')"
-  if [ -z "$BP_COMMIT" ] || ! git cat-file -e "$BP_COMMIT^{commit}" 2>/dev/null; then
-    skip "bp build commit unknown ($BP_COMMIT) — staleness check skipped"
-  elif [ -n "$(git diff --name-only "$BP_COMMIT" HEAD -- '*.go' go.mod go.sum internal cmd 2>/dev/null | head -1)" ]; then
-    bad "installed bp ($BP_COMMIT) predates Go changes in HEAD — run: make update"
+# ── 1b. Release cadence — has releases/latest drifted behind main? ───────────
+# `bp upgrade` and install-cli.sh resolve published cli-v* releases from the
+# GitHub API rather than trusting releases/latest or local tags. Do the same
+# here: draft/unpublished, prerelease, and non-CLI releases must not make stale
+# cadence look current. Advisory only (exit stays 0); the fix is to cut a fresh
+# CLI release.
+RELEASES_API_URL="${BARKPARK_RELEASES_API_URL:-https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30}"
+RELEASES_JSON="$( { curl -fsSL "$RELEASES_API_URL" 2>/dev/null || wget -qO- "$RELEASES_API_URL" 2>/dev/null || true; } )"
+NEWEST_CLI_TAG=""
+if [ -n "$RELEASES_JSON" ] && command -v jq >/dev/null 2>&1; then
+  NEWEST_CLI_TAG="$(printf '%s' "$RELEASES_JSON" | jq -r '
+    [.[]
+      | select((.draft // false) == false)
+      | select((.prerelease // false) == false)
+      | .tag_name
+      | select(test("^cli-v[0-9]+([.][0-9]+)*$"))
+      | . as $tag
+      | (ltrimstr("cli-v") | split(".") | map(try tonumber catch null)) as $version
+      | select(all($version[]; type == "number"))
+      | select(all($version[]; . >= 0 and . <= 4294967295 and floor == .))
+      | {tag: $tag, version: $version}]
+    | sort_by(.version) | last | .tag // empty
+  ' 2>/dev/null)"
+fi
+if [ -n "$NEWEST_CLI_TAG" ] \
+   && git rev-parse --verify --quiet "$NEWEST_CLI_TAG" >/dev/null 2>&1 \
+   && git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+  TAG_DRIFT="$(git rev-list --count "$NEWEST_CLI_TAG"..origin/main 2>/dev/null || echo 0)"
+  TAG_EPOCH="$(git log -1 --format=%ct "$NEWEST_CLI_TAG" 2>/dev/null || echo 0)"
+  TAG_AGE_DAYS=0
+  [ "$TAG_EPOCH" -gt 0 ] 2>/dev/null && TAG_AGE_DAYS=$(( ( $(date +%s) - TAG_EPOCH ) / 86400 ))
+  if [ "$TAG_DRIFT" -gt 250 ] || [ "$TAG_AGE_DAYS" -gt 14 ]; then
+    bad "release $NEWEST_CLI_TAG is $TAG_DRIFT commit(s) / ${TAG_AGE_DAYS}d behind origin/main — cut a fresh cli release (unpinned installs get releases/latest)"
   else
-    ok "installed bp ($BP_COMMIT) is current"
+    ok "release cadence current ($NEWEST_CLI_TAG: $TAG_DRIFT commit(s) / ${TAG_AGE_DAYS}d behind main)"
   fi
 else
-  skip "no bp on PATH — install: make cli-build && cp dist/bp ~/.local/bin/bp"
+  skip "published stable cli release, jq, or origin/main ref unavailable — release-cadence check skipped"
+fi
+
+# ── 2. Installed bp binary stale? ────────────────────────────────────────────
+# bp embeds its build commit via -ldflags; it is stale only if Go-side inputs
+# changed on the MERGED tip since. The compare-target is origin/main, NOT local
+# HEAD: a binary built in a diverged worktree (behind + ahead of the merged tip)
+# false-greens against HEAD because both sides are stale together — the binary
+# and the worktree it was built from miss the same merged CLI commits. Comparing
+# against origin/main is what makes a behind binary red honestly.
+#
+# The ldflags `commit` field is the ONLY trustworthy provenance signal here. We
+# never read `go version -m` vcs.revision/vcs.modified: Go's -buildvcs walk-up
+# binds to the nearest ancestor `.git` DIRECTORY, so in a worktree nested under
+# the primary checkout it stamps the ANCESTOR repo's HEAD, not the worktree's —
+# unsound for freshness. Only the ldflags stamp reflects the code that was built.
+if command -v bp >/dev/null 2>&1; then
+  # Capture the bare hex SHA even when the build was dirty: a dirty tree stamps
+  # e.g. "2a8b147ee-dirty-purpose", so allow a non-quote suffix after the hex
+  # (\{7,\} anchors on a real short/long SHA, never a stray hex fragment) and
+  # emit only \1 — the bare hex the ancestry check below feeds to git cat-file.
+  BP_COMMIT="$(bp version 2>/dev/null | sed -n 's/.*"commit": *"\([0-9a-f]\{7,\}\)[^"]*".*/\1/p')"
+  # Guard order is load-bearing (proven on the fixture verdict matrix):
+  #   1. no stamp        → loud RED (unverifiable provenance; fix installs one)
+  #   2. commit unknown  → loud skip (can't diff a commit we don't have)
+  #   3. origin/main ref → loud skip when absent (offline/shallow — a BARE
+  #                        `git diff $(git merge-base …) origin/main` FALSE-GREENS
+  #                        here: merge-base errors, $base goes empty, the swallowed
+  #                        error leaves an empty diff that reads ok)
+  #   4. merge-base      → loud skip when empty (no common ancestry to compare)
+  #   5. ancestry        → RED (DIVERGED) when origin/main does not CONTAIN the
+  #                        bp commit and the bp commit does not contain
+  #                        origin/main: the binary carries code main has never
+  #                        seen, so "predates" is FALSE and a rebuild from this
+  #                        same checkout reinstalls the same off-history binary
+  #   6. diff            → RED iff Go inputs changed merge-base→origin/main
+  # The merge-base collapse is why a binary AHEAD with unpushed local Go commits
+  # stays GREEN: its merge-base with origin/main IS origin/main, so the diff is
+  # empty — a bare `git diff BP_COMMIT origin/main` would false-RED that case.
+  if [ -z "$BP_COMMIT" ]; then
+    # No commit field at all → the binary was built by a bare `go build` with no
+    # -ldflags, so its provenance is unverifiable. This is the PATH/dist
+    # divergence trap: the same `bp` name can mean different code across workers.
+    # RED loudly (do not skip); the fix installs a commit-stamped bp.
+    bad "installed bp has NO build-commit stamp (built without -ldflags) — run: make cli-install"
+  elif ! git cat-file -e "$BP_COMMIT^{commit}" 2>/dev/null; then
+    skip "bp build commit not in this checkout ($BP_COMMIT) — staleness check skipped"
+  elif ! git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+    # origin/main is the compare-target; without it there is nothing sound to
+    # diff against. LOUD skip (never a silent ok) — the bare merge-base form
+    # would false-green here.
+    skip "origin/main ref unavailable (offline / never fetched) — bp staleness check skipped"
+  elif ! BP_MERGE_BASE="$(git merge-base "$BP_COMMIT" origin/main 2>/dev/null)" \
+       || [ -z "$BP_MERGE_BASE" ]; then
+    skip "no merge-base between bp commit ($BP_COMMIT) and origin/main — staleness check skipped"
+  elif ! git merge-base --is-ancestor "$BP_COMMIT" origin/main 2>/dev/null \
+       && ! git merge-base --is-ancestor origin/main "$BP_COMMIT" 2>/dev/null; then
+    # DIVERGED — the rung, in the vocabulary of
+    # cloud/lib/barkpark_cloud/github/commit_distance.ex:120 (and its local twin
+    # tooling/grip/provenance.mjs). Neither commit contains the other, so the
+    # binary is not "behind": it is off origin/main's history, carrying commits
+    # main has never seen. The old branch below called this "predates Go
+    # changes" — false — and prescribed `make cli-install`, which is a LOOP:
+    # cli-build runs `go build ./cmd/barkpark` against THIS diverged checkout and
+    # reinstalls the same off-history binary. Only a rebase/pull can end it.
+    #
+    # --is-ancestor's rc=128 ("not in this object database") cannot reach here:
+    # guard 2 already proved BP_COMMIT is in this object database and guard 3
+    # proved origin/main resolves, so both calls answer 0 or 1. Were 128
+    # possible, `!` would read it as "not an ancestor" and turn "I could not
+    # look" into a confident refusal.
+    bad "installed bp ($BP_COMMIT) is DIVERGED from origin/main — it carries commits main does not have, so it does not merely predate main and rebuilding from this checkout reinstalls the same binary — run: git pull --rebase (then: make cli-install)"
+  elif [ -n "$(git diff --name-only "$BP_MERGE_BASE" origin/main -- '*.go' go.mod go.sum internal cmd deploy.sh 2>/dev/null | head -1)" ]; then
+    bad "installed bp ($BP_COMMIT) predates Go changes on origin/main — run: make cli-install"
+  else
+    ok "installed bp ($BP_COMMIT) is current with origin/main"
+  fi
+else
+  # NOT a skip. `skip` prints nothing under --hook (line 20), and a missing bp is
+  # the single most likely failure in a second environment — a fresh clone on
+  # another machine has no bp at all, and the SessionStart hook staying silent
+  # about it is exactly the case the hook exists to catch. `bad` prints in both
+  # modes and counts toward the issue summary; the script still exits 0 below
+  # (doctor is advisory, never a gate).
+  bad "no bp on PATH — install: make cli-install"
 fi
 
 # ── 3. Pending migrations on the local dev DB? ──────────────────────────────

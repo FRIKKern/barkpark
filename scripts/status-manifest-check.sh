@@ -26,6 +26,17 @@
 #     sentence-cases) and `roleMeaning` (the one-line gloss). Both are byte-checked
 #     against the manifest's `roles[].label` / `roles[].meaning` (no exception —
 #     these are prose, not spinner glyphs), so a Go label/meaning drift trips here.
+#   Part 5 — JS/TS twins: two hand-maintained copies mirror the manifest by hand
+#     (the generator is deferred, tlv-bl-js-vocab-generator) — the react legend
+#     vocabulary `STATUS_ROLES` in js/packages/react/src/inline.tsx and the web
+#     board ladder `STATUS_LADDER` in web/lib/component-projections.ts. Each TS
+#     array literal is byte-checked against the manifest: the manifest roles must
+#     appear in manifest ORDER with byte-equal glyph + label, none missing. The
+#     ONE documented exception is the JS-only fail-open `unknown` sentinel (D11) —
+#     it is NEVER a real lifecycle state, so it is the only sanctioned non-manifest
+#     role; ANY other extra/missing/reorder/glyph/label desync reds the gate.
+#     Byte-check only — this gate does NOT generate the TS (that is the deferred
+#     generator); it keeps the hand-copies honest until then.
 #
 # The Elixir emitters need no check here: Render.StatusVocab reads THIS manifest
 # at compile time, so they cannot diverge by construction.
@@ -37,12 +48,25 @@ cd "$(dirname "$0")/.."
 MANIFEST="design/status-manifest.json"
 CSS="api/assets/paper-surface/paper-surface.css"
 GO="internal/pdrender/gridblocks.go"
-MODE="${1:-check}"
+REACT_TSX="js/packages/react/src/inline.tsx"
+WEB_TS="web/lib/component-projections.ts"
+# `MODE="${1:-check}"` used to pass ANY argument straight through to the Python,
+# which treats everything that is not `--write` as check mode — so a typo, or a
+# `--selftest` this gate does not have, ran the ordinary check and exited 0.
+# Refuse what we do not understand instead.
+MODE="check"
+if [ "${1:-}" = "--write" ]; then
+  MODE="--write"
+elif [ -n "${1:-}" ]; then
+  echo "status-manifest-check: unknown argument '$1' (expected --write or none)" >&2
+  exit 2
+fi
 
-python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" <<'PY'
+python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$REACT_TSX" "$WEB_TS" <<'PY'
 import json, re, sys
 
 manifest_path, css_path, mode, go_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+react_path, web_path = sys.argv[5], sys.argv[6]
 m = json.load(open(manifest_path))
 css = open(css_path).read()
 
@@ -228,4 +252,92 @@ if p4_fails:
     sys.exit(1)
 print(f"status-manifest-check part 4: PASS — Go pdrender label+meaning in lockstep "
       f"({len(man_label)} labels, {len(man_meaning)} meanings).")
+
+# ── Part 5: JS/TS status-vocabulary twins ────────────────────────────────────
+# Two hand-maintained TS copies mirror the manifest (the generator is deferred,
+# tlv-bl-js-vocab-generator): STATUS_ROLES in the react package (the legend
+# vocabulary) and STATUS_LADDER in the web app (the board ladder). Byte-check
+# each array literal against the manifest — role set, manifest ORDER, glyph and
+# label. The JS-only fail-open `unknown` sentinel (D11) is NEVER a lifecycle
+# state, so it is the ONE sanctioned non-manifest role; any other extra, any
+# missing role, any reorder, any glyph/label mismatch reds this gate.
+SANCTIONED_EXTRA = {"unknown"}
+man_roles_order = [r["role"] for r in m["roles"]]
+p5_glyph = {r["role"]: r["glyph"] for r in m["roles"]}
+p5_label = {r["role"]: r["label"] for r in m["roles"]}
+
+def parse_ts_ladder(path, var):
+    """Extract the ordered [(role, glyph, label), ...] from a `const <var> = [...]`
+    TS array literal, tolerating single OR double quotes and multi-line objects.
+    The objects hold no nested [] or {}, so a flat scan is exact."""
+    txt = open(path).read()
+    am = re.search(re.escape(var) + r"[^=]*=\s*\[(.*?)\n\]", txt, re.DOTALL)
+    if not am:
+        print(f"status-manifest-check part 5: FAILED — `{var} = [...]` array literal "
+              f"not found in {path}.", file=sys.stderr)
+        sys.exit(1)
+    rows = []
+    for obj in re.finditer(r"\{([^{}]*)\}", am.group(1), re.DOTALL):
+        body = obj.group(1)
+        # (?<![A-Za-z_]) so `glyph_role:` does NOT match `role:`/`glyph:`.
+        rm = re.search(r"(?<![A-Za-z_])role:\s*['\"]([^'\"]*)['\"]", body)
+        gm = re.search(r"(?<![A-Za-z_])glyph:\s*['\"]([^'\"]*)['\"]", body)
+        lm = re.search(r"(?<![A-Za-z_])label:\s*['\"]([^'\"]*)['\"]", body)
+        if not (rm and gm and lm):
+            continue
+        rows.append((rm.group(1), gm.group(1), lm.group(1)))
+    return rows
+
+p5_fails = []
+p5_counts = []
+for path, var in ((react_path, "STATUS_ROLES"), (web_path, "STATUS_LADDER")):
+    rows = parse_ts_ladder(path, var)
+    if not rows:
+        p5_fails.append(f"  {var} ({path}): parsed ZERO role objects — the literal shape changed.")
+        continue
+    ts_order = [r[0] for r in rows]
+    ts_by_role = {}
+    for role, glyph, label in rows:
+        if role in ts_by_role:
+            p5_fails.append(f"  {var} ({path}): duplicate role {role!r} in the array")
+        ts_by_role[role] = (glyph, label)
+    # Non-manifest roles: only the sanctioned `unknown` sentinel is allowed.
+    for r in ts_order:
+        if r not in p5_glyph and r not in SANCTIONED_EXTRA:
+            p5_fails.append(f"  {var} ({path}): non-manifest role {r!r} not in the "
+                            f"sanctioned set {sorted(SANCTIONED_EXTRA)} (hand-added?)")
+    # Every manifest role must be present.
+    for r in man_roles_order:
+        if r not in ts_by_role:
+            p5_fails.append(f"  {var} ({path}): MISSING manifest role {r!r} "
+                            f"(glyph {p5_glyph[r]!r}, label {p5_label[r]!r})")
+    # The manifest roles, in the order they appear in the TS, must equal manifest order.
+    ts_manifest_seq = [r for r in ts_order if r in p5_glyph]
+    if ts_manifest_seq != man_roles_order:
+        p5_fails.append(f"  {var} ({path}): manifest roles OUT OF ORDER — "
+                        f"got {ts_manifest_seq}, want {man_roles_order}")
+    # Glyph + label byte-equality per manifest role.
+    for r in man_roles_order:
+        if r in ts_by_role:
+            g, l = ts_by_role[r]
+            if g != p5_glyph[r]:
+                p5_fails.append(f"  {var} ({path}): glyph[{r!r}] = {g!r} != manifest {p5_glyph[r]!r}")
+            if l != p5_label[r]:
+                p5_fails.append(f"  {var} ({path}): label[{r!r}] = {l!r} != manifest {p5_label[r]!r}")
+    p5_counts.append(f"{var}={len(rows)} roles")
+
+if p5_fails:
+    print("status-manifest-check part 5: FAILED — a JS/TS status-vocabulary twin is STALE vs "
+          "design/status-manifest.json:", file=sys.stderr)
+    for f in p5_fails:
+        print(f, file=sys.stderr)
+    print("\n  Fix: edit the TS array to match design/status-manifest.json — "
+          "js/packages/react/src/inline.tsx (STATUS_ROLES) / "
+          "web/lib/component-projections.ts (STATUS_LADDER). Byte-equal role order, "
+          "glyph and label; the JS-only `unknown` sentinel is the ONLY sanctioned "
+          "non-manifest role. (The generator that would remove this hand-copy is "
+          "deferred: tlv-bl-js-vocab-generator.)", file=sys.stderr)
+    sys.exit(1)
+print(f"status-manifest-check part 5: PASS — JS/TS vocab twins in lockstep "
+      f"({len(man_roles_order)} manifest roles, order+glyph+label byte-equal; {', '.join(p5_counts)}).")
 PY

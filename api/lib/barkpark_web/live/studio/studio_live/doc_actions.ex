@@ -82,8 +82,10 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   # in or out of the returned list.
   #
   # Order is rendering-order inside the editor-header `bp-overflow-menu`:
-  # History → Delete → Publish/Unpublish → Show/Hide XML → Diff toggle →
-  # Duplicate → Open another → schema actions.
+  # Publish/Unpublish (primary CTA leads) → History → Show/Hide preview →
+  # Diff toggle → Discard draft → Duplicate → Open another → View blast radius →
+  # Delete (destructive, held to the TAIL — separated from the CTA so it is
+  # out of the misclick zone) → schema actions.
   @doc false
   def default_doc_actions(assigns, _ctx) do
     assigns = socket_to_assigns(assigns)
@@ -99,29 +101,10 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
     has_content_preview = not is_nil(content_preview_rendered)
 
     base = [
-      %{
-        "name" => "show-history",
-        "label" => "History",
-        "kind" => "event",
-        "scope" => "editor_header",
-        "opts" => %{
-          "event" => "show-history",
-          "class" => "btn btn-ghost btn-sm",
-          "icon" => "history"
-        }
-      },
-      %{
-        "name" => "delete-doc",
-        "label" => "Delete",
-        "kind" => "event",
-        "scope" => "editor_header",
-        "opts" => %{
-          "event" => "delete-doc",
-          "class" => "btn btn-ghost btn-sm",
-          "style" => "color: var(--destructive);",
-          "icon" => "trash-2"
-        }
-      },
+      # Publish/Unpublish leads — the primary CTA is the first thing the
+      # overflow menu offers, and no destructive action sits above it
+      # (sup-w5-doc-actions-order: Delete used to sit between History and the
+      # CTA, a misclick trap adjacent to the button the user actually wants).
       if is_draft do
         %{
           "name" => "publish",
@@ -147,6 +130,17 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
           }
         }
       end,
+      %{
+        "name" => "show-history",
+        "label" => "History",
+        "kind" => "event",
+        "scope" => "editor_header",
+        "opts" => %{
+          "event" => "show-history",
+          "class" => "btn btn-ghost btn-sm",
+          "icon" => "history"
+        }
+      },
       if has_content_preview do
         %{
           "name" => "toggle-content-preview",
@@ -236,7 +230,23 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
             "icon" => "git-fork"
           }
         }
-      end
+      end,
+      # Delete sits LAST — separated from the CTA by every benign action so a
+      # misclick near Publish can't destroy the doc. Still ghost + destructive
+      # red (`color: var(--destructive)`) so it reads as dangerous, just out of
+      # the hot zone (sup-w5-doc-actions-order).
+      %{
+        "name" => "delete-doc",
+        "label" => "Delete",
+        "kind" => "event",
+        "scope" => "editor_header",
+        "opts" => %{
+          "event" => "delete-doc",
+          "class" => "btn btn-ghost btn-sm",
+          "style" => "color: var(--destructive);",
+          "icon" => "trash-2"
+        }
+      }
     ]
 
     # Schema-declared actions land last. These are the entries plugins

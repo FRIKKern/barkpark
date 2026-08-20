@@ -5,6 +5,7 @@ defmodule Barkpark.Content.Revision do
   @primary_key {:id, :binary_id, autogenerate: true}
 
   schema "revisions" do
+    belongs_to :document, Barkpark.Content.Document, type: :binary_id
     field :doc_id, :string
     field :type, :string
     field :dataset, :string, default: "production"
@@ -43,9 +44,40 @@ defmodule Barkpark.Content.Revision do
       :content,
       :action,
       :actor_user_id,
+      :document_id,
       :workspace_id,
       :project_id
     ])
     |> validate_required([:doc_id, :type, :action])
+    # FK-abort containment (Felix W17, the changeset-FK-abort scar-class — the
+    # sibling to Content.Document / MediaFile / bulldocs Event / SchemaDefinition).
+    # `revisions.document_id/workspace_id/project_id/dataset_id` are ALL real
+    # Postgres foreign keys: `workspace_id/project_id/dataset_id` from
+    # `references(:workspaces/:projects/:datasets)` (migration
+    # 20260527160000_cascade_content_on_scope_delete, columns from
+    # 20260527110100 / 20260527131000), and `document_id` from
+    # `references(:documents)` (migration 20260719010000, constraint recreated as
+    # `revisions_document_id_fkey` by 20260719020200) — every one carries the
+    # Ecto-default constraint name `revisions_<col>_fkey`.
+    #
+    # WHO RAISES: revisions are written by the NON-BANG `Broadcast.save_revision`
+    # (broadcast.ex) from `Content.BlockOps.maybe_save_batch_revision` (Studio
+    # paper editing / accept-baseline) and `Content.ValueWriteback`'s
+    # `tap_provenance_revision`. `apply_paper_block_ops` is NOT
+    # transaction-wrapped: the content `Repo.update` commits (scope columns
+    # unchanged, so Postgres does not re-check the FK) and a SEPARATE
+    # `Repo.insert` writes the revision. On a concurrently hard-deleted scope
+    # (a TOCTOU race — per D87 a DB-resolved id gone stale counts like raw
+    # input), that insert RAISES a raw `Ecto.ConstraintError` (a 500) that
+    # bypasses both callers' `{:error, reason}` best-effort handlers.
+    #
+    # RED vs GREEN: without these calls a bad/stale scope (or document) ref
+    # RAISES; with them Ecto translates the Postgres rejection into
+    # `{:error, %Ecto.Changeset{}}` carrying `{"does not exist", _}` on the col,
+    # so the existing best-effort handlers fail-soft as their authors intended.
+    |> foreign_key_constraint(:document_id)
+    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:dataset_id)
   end
 end

@@ -40,7 +40,7 @@ await bp.docs('post').eq('status', 'published').find() // Post[]
 bp.doc('psot', 'p1') // ✗ compile error — 'psot' isn't a known type
 ```
 
-`typedClient` is a **type-only wrapper** (runtime-identical to the client it wraps). The single-type-keyed reads narrow; `getBacklinks`/`getGraph` (mixed-type) and the mutations stay open by design.
+`typedClient` is a **type-only wrapper** (runtime-identical to the client it wraps). The single-type-keyed reads narrow; the mixed-type reads (`getBacklinks`/`getGraph`/`getRelated`/`listTags`/`getTagDocs`) and the mutations stay open by design.
 
 ## Read
 
@@ -59,6 +59,20 @@ const { backlinks, count } = await bp.getBacklinks('p1')
 const graph = await bp.getGraph('p1', { depth: 3, direction: 'out' }) // { nodes, edges, dependents, truncated }
 const orphans = await bp.getOrphans() // documents with zero edges
 const broken = await bp.getDangling() // references whose target is missing
+
+// Related documents — tag overlap fused with backlinks, each entry carries WHY:
+const { related, count } = await bp.getRelated('p1', { limit: 5 })
+related[0].score // fused relatedness; .sources = ['tags'] | ['references'] | both; .shared_tags explains the tag leg
+
+// Weighted-tag registry — browse tags with per-type published counts, biggest first:
+const { tags } = await bp.listTags({ types: ['paper', 'task'] }) // [{ tag, counts: { paper, task }, total }]
+// …and the documents carrying one tag, ranked by that tag's strength (legacy flat carriers last):
+const { documents } = await bp.getTagDocs('search') // [{ doc_id, type, title, strength, rationale, main_tag_match }]
+
+// A document's `tags` field is dual-shape (weighted objects OR flat strings) —
+// normalizeTags() collapses either into { names, entries }:
+import { normalizeTags } from '@barkpark/core'
+const { names, entries } = normalizeTags(post.tags) // names: string[]; entries: WeightedTag[] ({ tag, strength?, rationale? })
 
 // Fluent query builder with semantic operators:
 const featured = await bp

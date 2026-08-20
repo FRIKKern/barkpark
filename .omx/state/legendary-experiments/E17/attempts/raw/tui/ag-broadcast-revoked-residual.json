@@ -1,0 +1,21 @@
+{
+  "accepted_capture": false,
+  "block_reason": "TUI_SCHEMA_LOAD_FAILED_BEFORE_CANDIDATE_SELECTION",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_materialized": false,
+  "candidate_source_sha256": "d08206ebee02d075ce7e4639a89d859b24440817392bf207703c9190b4a064c5",
+  "capture_sha256": null,
+  "evidence_boundary": "REAL_SURFACE_ATTEMPT_ONLY_NOT_A_CAPTURE",
+  "fixture_id": "ag-broadcast-revoked-residual",
+  "observation": {
+    "diagnostic": "^D\b\bqConnecting to https://guerrilla.barkpark.cloud [saved: guerrilla] (workspace=default project=default dataset=production perspective=drafts)...\nError loading schemas: parse schemas: json: cannot unmarshal object into Go struct field .schemas.fields.options of type []string\nIs the Phoenix API running? Start it with: cd api && mix phx.server\n",
+    "exit_code": 1,
+    "stderr_bytes": 0,
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_bytes": 346,
+    "stdout_sha256": "f01f03965de12c017606883adf9ac95720204fd3f29f87a63079cdc68c126809"
+  },
+  "schema_version": "legendary-e17-real-surface-attempt/v1",
+  "surface": "tui",
+  "target": "bp interactive TUI target=candidate-lossless-semantic-tree--ag-broadcast-revoked-residual"
+}

@@ -133,6 +133,38 @@ if (-not $onPath) {
 # Make `bp` work in THIS session too, without reopening the terminal.
 if (($env:Path -split ';') -notcontains $binDir) { $env:Path = "$env:Path;$binDir" }
 
+# --- PATH postcondition (fresh-process verify) --------------------------------
+# The registry write above is the persistence, but writing it does not prove a
+# NEW terminal will resolve bp -- a new process builds PATH from the Machine +
+# User registry, not this installer's in-memory $env:Path (which the line above
+# just tweaked and could mask a failed write). So spawn a fresh, profile-less
+# child whose PATH is rebuilt from the registry exactly as a brand-new terminal
+# would, and confirm it resolves bp.
+function Test-FreshShellResolvesBp {
+  $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+  $user    = [Environment]::GetEnvironmentVariable('Path', 'User')
+  $fresh   = (@($machine, $user) | Where-Object { $_ }) -join ';'
+  # Use the SAME host that is running this script (powershell.exe or pwsh.exe).
+  $self = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+  $probe = "`$env:Path = '$fresh'; if (Get-Command bp -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"
+  & $self -NoProfile -NonInteractive -Command $probe *> $null
+  return ($LASTEXITCODE -eq 0)
+}
+
+if (Test-FreshShellResolvesBp) {
+  Note "verified: a fresh terminal resolves bp on PATH"
+} else {
+  Note "WARNING: a fresh terminal still can't resolve bp; add $binDir to your PATH manually"
+}
+
+# GUI-agent stale-PATH caveat: a Cursor / Claude Desktop / VS Code process
+# spawns 'bp mcp serve' with the PATH captured when the AGENT launched, so an
+# already-running agent won't see bp until it is fully quit and reopened.
+Note "NOTE -- a GUI-launched agent (Cursor, Claude Desktop, VS Code) runs"
+Note "        'bp mcp serve' with the PATH it captured at its own launch, so an"
+Note "        already-running agent won't see bp until you fully quit and reopen"
+Note "        it (a new terminal alone is not enough)."
+
 Note "done."
 Write-Host ""
 Write-Host "  Get started:   bp          (first run launches the setup wizard)"

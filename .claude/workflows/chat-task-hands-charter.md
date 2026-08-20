@@ -14,7 +14,7 @@
 - **D2 · Never fail silent (vocabulary corrected 2026-07-11).** Every not-ready state renders a NAMED next step in the chat surface. The honest taxonomy, split by lane: **claude lane** = no-binary, not-logged-in (expired credentials degrade to not-logged-in by design — the shapes are indistinguishable without an API call); **bp lane** = no-task-hands (token mint refused), task-token-expired. "Expired/denied device code" and "wrong server" are DROPPED — falsified: api/ has zero device-link endpoints (that flow is cloud-control-plane only, a different account system), and the bp URL is always self-derived from this node's Endpoint, so no second value exists to mismatch. Silence is the bug.
 - **D3 · Security posture unchanged — and one leak CLOSED.** Admin-only chat, public-demo hard refuse, per-host opt-out all stand (they keep gating the tab/mount). Barkpark still never sees, stores, or refreshes provider tokens ($HOME OAuth stays the boundary). The bp token minted for chat sessions is scoped and revocable (kind=api, read+write curated, TTL 4h/24h cap, revoked on teardown) — never the host admin token. NEW: the spawn-env slice also SCRUBS the inherited prod secrets (today the child inherits the full BEAM env — DATABASE_URL, SECRET_KEY_BASE, BARKPARK_KEK, every token; live-proven leak) via `{~c"VAR", false}` unsets.
 - **D4 · Dogfood.** The proof of criterion 1 is a live chat transcript claiming/stamping/pulsing/closing a real task — which also closes expressive-agent-loops' open criterion 2. The dogfood session runs ARMED (bypassPermissions): plan mode gates every write behind an approval card, on BOTH substrates (Bash and MCP tools gate identically) — the mode picks the transcript, not the substrate.
-- **D5 · Codex is trigger-gated.** Trigger checked this wave: CLOSED (no demand signal, Claude-depth backlog not dry). Ship `Capabilities.codex/0` stub + probe target returning binary:false; criterion 4 is designed-not-built (honest).
+- **D5 · Codex trigger opened 2026-07-14.** Direct user demand now requires Codex as a first-class provider alongside Claude Code. The old safe-negative `Capabilities.codex/0` and presence-only probe remain the compatibility baseline, not the destination. Provider choice (`claude|codex`) and execution target (`managed|registered_host`) are orthogonal, immutable session identity; provider authentication remains on the selected execution host and Barkpark never copies provider credential files.
 
 ## Verified ground (2026-07-11 — run-proofs, trust these over memory)
 
@@ -70,7 +70,22 @@ Integration order: 1→2→3 (Elixir train, stacked or sequential — 1 and 3 to
 
 Fable strategy/digest/decide/review; Opus builders for well-specified seams; Fable builders for the subtle/cross-surface slices. Never Haiku. Ledger is the spine; wave Paper opens at Strategize and closes as the debrief. Unattended gates acceptable.
 
+## Wave-2 decisions (ratified 2026-07-14 — Codex parity + selectable compute)
+
+1. **Durable identity contract.** Persist `provider=claude|codex`, `execution_target=managed|registered_host`, nullable `execution_host_id`, and opaque set-once `provider_session_id`. Existing rows and omitted client fields resolve to Claude on managed compute; the public Barkpark session UUID remains stable. Provider/target/host identity cannot be patched in place.
+2. **One normalized runtime contract.** `Runtime.Adapter` owns start/resume, turn/send, steer, interrupt, approval answer, close, readiness, and capabilities. Normalized events retain provider and Barkpark/native session-turn-item identifiers, monotonic sequence/idempotency, durable-versus-delta classification, approval correlation, terminal state, sanitized errors, and a lossless provider-native metadata envelope. `Recorder` remains the sole durable projection owner.
+3. **Managed Codex surface.** Integrate pinned `codex app-server` 0.144.1 over stdio JSONL with initialize/initialized, thread start/resume, turn start/steer/interrupt/completed, v2 item approvals, and `account/read`. Pin generated schema digest; default gates use hermetic fixtures and no paid turn. Experimental transports are excluded.
+4. **Registered-host trust boundary.** Enrollment is single-use, workspace-owned, rotated/revocable, and stored hashed or sealed. The runner connects outbound, enforces approved real paths and symlink policy, advertises non-secret versioned capabilities, executes leased/fenced/idempotent commands, relays approvals with actor/audit/ack, resumes from durable cursors, and terminates channels/leases/processes on revocation. Claude/Codex credentials remain host-local.
+5. **Exactly three Build owners.** Slice 1 exclusively owns provider-neutral persistence/runtime/API/UI/client compatibility and publishes the adapter/host-directory checkpoint. Slice 2 exclusively owns managed Codex runtime, schemas, fixtures, capability, and probe. Slice 3 exclusively owns registered-host enrollment/auth/channel/runner/UI. Integration order is 1 → 2 → 3 even when implementation runs concurrently; crossing an exclusion fence stops the slice for leader reconciliation.
+
 ## Wave log
+
+### Wave 2026-07-14 (wave 2 — Codex parity + selectable compute) — Decide frozen
+
+- User demand opened D5. The exact research fleet completed 12/12 typed Survey and 6/6 typed Verify assignments. The verified architecture is one Barkpark Chat contract across Claude/Codex and managed/registered-host execution, with host-local provider authentication.
+- Event normalization is viable only with a versioned canonical envelope that retains provider-native metadata; a lossy lowest-common-denominator stream is rejected.
+- Registered-host execution is not present at baseline. Existing ticket/token/task/approval/supervision controls are reusable, but repository-root authorization, capability freshness, per-turn fencing, cursor reconciliation, output redaction, and revocation-kill proofs are release blockers owned by Slice 3.
+- Exactly three disjoint Build slices are viable. Shared chat persistence/runtime/controller/UI/client hotspots have one owner (Slice 1); managed Codex has one owner (Slice 2); registered-host control and runner have one owner (Slice 3). Builders run at high reasoning effort and must claim/stamp/pulse their published Barkpark child task.
 
 ### Wave 2026-07-11 (wave 1 — the chat gets hands) — reviewed, grade A
 

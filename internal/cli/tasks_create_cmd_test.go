@@ -1,9 +1,16 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
 // The two fields the task schema REQUIRES at creation — the whole reason this
@@ -51,6 +58,36 @@ func TestParseTaskCreateArgs_FlagsAndTypedSet(t *testing.T) {
 	}
 }
 
+// Regression (task-bp-create-drops-long-description): the builtin `bp task
+// create` --set parser (applyTaskSet) and its --description flag must also carry
+// a multi-KB, multi-line description VERBATIM — no newline truncation, no drop —
+// past the 5,783 bytes that reproduced the report.
+func TestParseTaskCreateArgs_LongMultilineDescription(t *testing.T) {
+	line := "rationale: a task reason with a colon a:b and a := marker, padding padding padding\n"
+	desc := "Hit twice during round nine.\n\n" + strings.Repeat(line, 84)
+	if len(desc) <= 5783 {
+		t.Fatalf("description must exceed the reproduced 5783 bytes, got %d", len(desc))
+	}
+
+	// via --set description=<big>
+	viaSet, _, err := parseTaskCreateArgs([]string{"t", "--set", "description=" + desc})
+	if err != nil {
+		t.Fatalf("--set path: %v", err)
+	}
+	if got, _ := viaSet["description"].(string); got != desc {
+		t.Fatalf("--set description not verbatim: got %d bytes, want %d", len(got), len(desc))
+	}
+
+	// via --description <big>
+	viaFlag, _, err := parseTaskCreateArgs([]string{"t", "--description", desc})
+	if err != nil {
+		t.Fatalf("--description path: %v", err)
+	}
+	if got, _ := viaFlag["description"].(string); got != desc {
+		t.Fatalf("--description not verbatim: got %d bytes, want %d", len(got), len(desc))
+	}
+}
+
 func TestParseTaskCreateArgs_SetOverridesDefault(t *testing.T) {
 	body, _, err := parseTaskCreateArgs([]string{"t", "--set", "lifecycle_status=blocked"})
 	if err != nil {
@@ -77,9 +114,157 @@ func TestParseTaskCreateArgs_Errors(t *testing.T) {
 	}
 }
 
+// taskCreateStubMutate is a mutate endpoint that behaves like the real one on
+// the axis these tests exercise: it PERSISTS the create op and echoes the
+// stored record back as results[].document, the way
+// Content.Mutations does with Envelope.render. The receipt reads its claims off
+// that document (PDS wave 48), so a stub that returned a bare id would be
+// testing a receipt with nothing to read.
+func taskCreateStubMutate(t *testing.T, docID string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if !strings.Contains(req.URL.Path, "/v1/data/mutate") {
+			rw.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body struct {
+			Mutations []map[string]map[string]any `json:"mutations"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil || len(body.Mutations) == 0 {
+			rw.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		op := body.Mutations[0]
+		document := map[string]any{"_id": docID, "_draft": true}
+		if create, ok := op["create"]; ok {
+			for k, v := range create {
+				document[k] = v
+			}
+			document["_id"] = docID
+			document["_draft"] = true
+		}
+		if _, ok := op["publish"]; ok {
+			document["_id"] = strings.TrimPrefix(docID, "drafts.")
+			document["_draft"] = false
+		}
+		result := map[string]any{"id": document["_id"], "document": document}
+		json.NewEncoder(rw).Encode(map[string]any{"results": []any{result}})
+	}))
+}
+
+// tlv-s6 (TLV charter D14): the create receipt names the lifecycle_status the
+// task was born with — a birth-as-considering must be visible, never silently
+// assumed "open". PDS wave 48: the value descends from the record the server
+// PERSISTED, not from the request map. Runs the real runTaskCreate against a
+// stub mutate endpoint.
+func TestRunTaskCreateReceiptEchoesBornLifecycle(t *testing.T) {
+	ts := taskCreateStubMutate(t, "drafts.task-9")
+	defer ts.Close()
+
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+
+	cases := []struct {
+		name string
+		tail []string
+		want string
+	}{
+		{"default open", []string{"a task"}, "open"},
+		{"born considering", []string{"a task", "--set", "lifecycle_status=considering"}, "considering"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var so, se bytes.Buffer
+			w := &writer{stdout: &so, stderr: &se, output: "json"}
+			if code := runTaskCreate(w, globals{yes: true}, ctx, tc.tail); code != exitOK {
+				t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+			}
+			var receipt struct {
+				ID              string `json:"id"`
+				Draft           string `json:"draft"`
+				Status          string `json:"status"`
+				LifecycleStatus string `json:"lifecycle_status"`
+			}
+			if err := json.Unmarshal(so.Bytes(), &receipt); err != nil {
+				t.Fatalf("receipt did not parse: %v (%q)", err, so.String())
+			}
+			if receipt.ID != "task-9" || receipt.Draft != "drafts.task-9" || receipt.Status != "draft" {
+				t.Fatalf("receipt = %+v, want id task-9 / draft drafts.task-9 / status draft", receipt)
+			}
+			if receipt.LifecycleStatus != tc.want {
+				t.Fatalf("receipt.lifecycle_status = %q, want %q", receipt.LifecycleStatus, tc.want)
+			}
+		})
+	}
+}
+
+// The human (non-machine) receipt line names the born lifecycle too.
+func TestRunTaskCreateHumanReceiptNamesLifecycle(t *testing.T) {
+	ts := taskCreateStubMutate(t, "drafts.task-3")
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+	tail := []string{"a task", "--set", "lifecycle_status=considering"}
+	if code := runTaskCreate(w, globals{yes: true}, ctx, tail); code != exitOK {
+		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+	}
+	if got := so.String(); !strings.Contains(got, "lifecycle considering") {
+		t.Fatalf("human receipt %q does not name the born lifecycle", got)
+	}
+}
+
+// PDS wave 48. THE DIVERGENCE THE OLD RECEIPT COULD NOT PRINT: the request asks
+// for lifecycle_status=open and the server stores "blocked". The receipt must
+// name what the server STORED — the old `born := body["lifecycle_status"]` read
+// the request map the CLI had defaulted "open" into, so it printed "open" here
+// and no test could ever have caught it.
+func TestRunTaskCreateReceiptNamesTheStoredLifecycleNotTheRequested(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		io.WriteString(rw, `{"results":[{"id":"drafts.task-11","document":{"_id":"drafts.task-11","_draft":true,"lifecycle_status":"blocked"}}]}`)
+	}))
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+	if code := runTaskCreate(w, globals{yes: true}, ctx, []string{"a task"}); code != exitOK {
+		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+	}
+	if got := so.String(); !strings.Contains(got, "lifecycle blocked") {
+		t.Fatalf("receipt %q does not name the STORED lifecycle — it is still speaking for the request", got)
+	}
+}
+
+// A server that echoes no document cannot back the claim, so the receipt says
+// so instead of filling the gap in from what was sent.
+func TestRunTaskCreateReceiptRefusesWhatTheServerDidNotEcho(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		io.WriteString(rw, `{"results":[{"id":"drafts.task-12"}]}`)
+	}))
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+	if code := runTaskCreate(w, globals{yes: true}, ctx, []string{"a task"}); code != exitOK {
+		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+	}
+	got := so.String()
+	if strings.Contains(got, "lifecycle open") {
+		t.Fatalf("receipt %q claims a lifecycle the server never echoed", got)
+	}
+	if !strings.Contains(got, "unknown") || !strings.Contains(got, "unconfirmed") {
+		t.Fatalf("receipt %q does not say what it could not confirm", got)
+	}
+}
+
 func TestIsProdServer(t *testing.T) {
-	prod := []string{"https://api.barkpark.cloud", "https://prod.example.com"}
-	nonprod := []string{"http://localhost:4000", "https://guerrilla.barkpark.cloud", "http://127.0.0.1:4000"}
+	// Fail-closed (onb-backlog-isprod-custom-host-write-confirm): any non-local
+	// host is prod — including guerrilla.barkpark.cloud, which IS the live fleet
+	// and was previously (wrongly) asserted non-prod here.
+	prod := []string{"https://api.barkpark.cloud", "https://prod.example.com", "https://guerrilla.barkpark.cloud"}
+	nonprod := []string{"http://localhost:4000", "http://127.0.0.1:4000"}
 	for _, s := range prod {
 		if !isProdServer(s) {
 			t.Errorf("isProdServer(%q) = false, want true", s)
@@ -116,15 +301,24 @@ func TestEnsureTaskPortableBrief(t *testing.T) {
 		t.Fatalf("brief = %#v, want PortableDoc v1", body["brief"])
 	}
 	blocks, _ := brief["blocks"].([]any)
-	if len(blocks) != 6 {
-		t.Fatalf("blocks = %d, want purpose/state/definition-of-done pairs", len(blocks))
+	if len(blocks) != 4 {
+		t.Fatalf("blocks = %d, want criteria then purpose pairs", len(blocks))
 	}
-	purpose := blocks[1].(map[string]any)["content"].([]any)[0].(map[string]any)["value"]
+	if blocks[0].(map[string]any)["id"] != "criteria" || blocks[1].(map[string]any)["id"] != "criteria-list" {
+		t.Fatalf("criteria are not the first brief section: %#v", blocks)
+	}
+	if blocks[1].(map[string]any)["type"] != "list" {
+		t.Fatalf("criteria are not a TUI-supported list: %#v", blocks[1])
+	}
+	purpose := blocks[3].(map[string]any)["content"].([]any)[0].(map[string]any)["value"]
 	if strings.Contains(purpose.(string), "**") {
 		t.Fatalf("purpose retained Markdown markers: %q", purpose)
 	}
-	if blocks[5].(map[string]any)["type"] != "list" {
-		t.Fatalf("definition of done is not a TUI-supported list: %#v", blocks[5])
+	for _, block := range blocks {
+		id, _ := block.(map[string]any)["id"].(string)
+		if id == "state" || id == "state-callout" || id == "done" || id == "done-list" || id == "done-copy" {
+			t.Fatalf("brief retained deprecated generated block %q", id)
+		}
 	}
 }
 

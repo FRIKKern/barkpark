@@ -1,7 +1,9 @@
 'use client'
 
 import { useOptimisticDocument } from '@barkpark/nextjs/actions'
-import { PortableText } from '@barkpark/react'
+import type { Block } from '@barkpark/react'
+import { PortableDocSurface } from './portable-doc-surface'
+import { formatDate } from '../../../lib/format-date'
 
 interface Author {
   _id: string
@@ -20,7 +22,8 @@ interface Post {
   title: string
   excerpt?: string
   publishedAt?: string
-  content?: Parameters<typeof PortableText>[0]['value']
+  // Canonical, type-keyed PortableDocument blocks — rendered by `PortableDoc`.
+  content?: Block[]
 }
 
 /**
@@ -64,11 +67,11 @@ export function DraftModePreview({ initialPost, author, tags }: Props) {
         </button>
       </div>
 
-      <article className="prose max-w-none dark:prose-invert">
+      <article>
         <h1 className="text-4xl font-bold">{data.title}</h1>
-        {data.publishedAt ? (
+        {formatDate(data.publishedAt) ? (
           <p className="text-sm text-slate-500">
-            {new Date(data.publishedAt).toLocaleDateString()}
+            {formatDate(data.publishedAt)}
             {author ? ` · ${author.name}` : ''}
           </p>
         ) : null}
@@ -82,7 +85,8 @@ export function DraftModePreview({ initialPost, author, tags }: Props) {
           </p>
         ) : null}
         {data.excerpt ? <p className="text-lg">{data.excerpt}</p> : null}
-        {data.content ? <PortableText value={data.content} /> : null}
+        {/* Same canonical surface; media re-hydrates on each optimistic edit (idempotent). */}
+        {data.content ? <PortableDocSurface blocks={data.content} /> : null}
       </article>
     </div>
   )

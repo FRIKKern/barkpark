@@ -1,0 +1,89 @@
+name: paper-readers
+
+# Production can add or republish Papers without touching this repository, so
+# pull-request tests alone cannot protect the reader contract. This standing
+# gate inventories the public production corpus from a clean runner, proves
+# every GUI/email/source/CLI/TUI edge, and retains its JSON witness even when a
+# single Paper fails.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write # so a failed nightly run can surface itself to a human
+
+concurrency:
+  group: paper-readers-production
+  cancel-in-progress: false
+
+jobs:
+  full-corpus:
+    name: Full production Paper reader audit
+    runs-on: ubuntu-latest
+    # SIZED, NOT GUESSED. 14 consecutive scheduled runs were CANCELLED, which
+    # reads like a hang and is not one: the audit is linear in corpus size and
+    # the corpus outgrew a fixed cap. The 08-03 artifact audited 651 papers in
+    # 1627 s = 2.50 s/paper; the corpus is 774 papers today, so 774 x 2.50 s =
+    # 1935 s = 32.3 min — already past 30. Growth is ~8.8 papers/day, i.e.
+    # ~22 s/day of extra runtime, so 75 min buys headroom to roughly 1800
+    # papers (~2.5 years at that rate) instead of the ~3 weeks a 35-minute cap
+    # would have bought. Raise this again when the arithmetic says so; a cap
+    # that cancels the job converts a red into silence, and the failure-report
+    # step below routes a cancelled() run to a human too.
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build clean Barkpark CLI
+        run: go build -o "$RUNNER_TEMP/bp" ./cmd/barkpark
+
+      - name: Audit every published Paper
+        env:
+          BP_AUDIT_BIN: ${{ runner.temp }}/bp
+          BP_AUDIT_SERVER: https://guerrilla.barkpark.cloud
+          BP_AUDIT_BASE_URL: https://guerrilla.barkpark.cloud
+          BP_AUDIT_WORKSPACE: default
+          BP_AUDIT_PROJECT: default
+          BP_AUDIT_DATASET: production
+        run: |
+          set -o pipefail
+          scripts/audit-paper-readers.sh | tee "$RUNNER_TEMP/paper-reader-audit.json"
+
+      - name: Upload exact reader evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-reader-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/paper-reader-audit.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Retaining the JSON witness is not the same as telling anyone. This gate
+      # ran red for three consecutive nights against the live corpus — including
+      # the PDS crown-proof transcript — and nothing reached a human, because a
+      # cron job's red X is only visible to whoever thinks to open the Actions
+      # tab. GITHUB_TOKEN is built in, so this needs no secret at all.
+      # AND `cancelled()`, because `failure()` is FALSE on a cancelled run and
+      # the last SIX scheduled runs of this workflow (2026-08-04 .. 08-09) were
+      # all cancelled. The audit silently did not run for six days while #5658
+      # sat open looking like the current state of the corpus.
+      - name: Report failure to a human
+        if: failure() || cancelled()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: paper-readers
+          CI_FAILURE_DETAIL: |
+            The nightly production Paper reader audit failed: at least one
+            published Paper broke a reader edge (GUI / email / source / CLI /
+            TUI) or contains a block shape that strands authored content. The
+            exact per-Paper JSON witness is attached to the run as
+            the `paper-reader-audit-<run_id>` artifact — read `.failures[]`
+            for reader failures and `.structure` for block-shape failures.
+        run: bash scripts/file-ci-failure-issue.sh

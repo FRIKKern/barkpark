@@ -168,14 +168,19 @@ defmodule Barkpark.StudioChat.Titles do
   Fire-and-forget: generate a title for `session_id` off the request path (a
   supervised task under `Barkpark.TaskSupervisor`), hand it to the store's
   clobber guard (`maybe_set_ai_title/2` — a human rename is never overwritten),
-  and, only if the store accepted the write, message `notify_pid` with
-  `{:chat_title, session_id, title}` so the caller can refresh its UI. A refusal
-  or any error is silent — the default title simply stands. Returns the started
-  task's `{:ok, pid}` (or `{:error, reason}` if the supervisor rejects it).
+  and, only if the store accepted the write, broadcast
+  `{:chat_title, session_id, title}` on `Recorder.activity_topic/0` (charter
+  D69h). ONE broadcast serves every consumer — the on-screen LiveView (already
+  subscribed, refreshes its sidebar) AND the `FleetHub` (re-projects the title
+  onto the fleet SSE as an id-less frame, so a held `GET /v1/chat/events`
+  stream sees the title without reconnect); there is no parallel per-pid
+  delivery fork. A refusal or any error is silent — the default title simply
+  stands (`broadcast/3` cannot raise, so the fire-and-forget guard holds).
+  Returns the started task's `{:ok, pid}` (or `{:error, reason}` if the
+  supervisor rejects it).
   """
-  @spec kick_title(term(), String.t(), pid()) :: DynamicSupervisor.on_start_child()
-  def kick_title(session_id, first_message, notify_pid)
-      when is_binary(first_message) and is_pid(notify_pid) do
+  @spec kick_title(term(), String.t()) :: DynamicSupervisor.on_start_child()
+  def kick_title(session_id, first_message) when is_binary(first_message) do
     Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
       title = generate(first_message)
 
@@ -185,13 +190,13 @@ defmodule Barkpark.StudioChat.Titles do
         # from simpler stores. Anything else is a refusal — stay silent.
         case store().maybe_set_ai_title(session_id, title) do
           {:ok, %{title: applied}} when is_binary(applied) ->
-            send(notify_pid, {:chat_title, session_id, applied})
+            broadcast_title(session_id, applied)
 
           {:ok, applied} when is_binary(applied) ->
-            send(notify_pid, {:chat_title, session_id, applied})
+            broadcast_title(session_id, applied)
 
           :ok ->
-            send(notify_pid, {:chat_title, session_id, title})
+            broadcast_title(session_id, title)
 
           _refused ->
             :ok
@@ -210,7 +215,30 @@ defmodule Barkpark.StudioChat.Titles do
     end)
   end
 
+  @doc """
+  Call-site-stability head: delivery rides the activity topic now (D69h), so
+  the `notify_pid` is ignored — a caller that subscribes the topic (the chat
+  LiveView does, at mount) receives the same `{:chat_title, ...}` tuple it
+  always handled.
+  """
+  @spec kick_title(term(), String.t(), pid()) :: DynamicSupervisor.on_start_child()
+  def kick_title(session_id, first_message, notify_pid)
+      when is_binary(first_message) and is_pid(notify_pid),
+      do: kick_title(session_id, first_message)
+
   # ── Internals ────────────────────────────────────────────────────────────
+
+  # The accepted-write notify step (D69h): one PubSub broadcast on the activity
+  # topic, reaching the LiveView and the FleetHub alike. `broadcast/3` with no
+  # subscribers returns `:ok` and cannot raise — safe inside the fire-and-forget
+  # try/rescue above.
+  defp broadcast_title(session_id, title) do
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      Barkpark.StudioChat.Recorder.activity_topic(),
+      {:chat_title, session_id, title}
+    )
+  end
 
   # Returns a binary title on success, or :error to fall to the next layer.
   defp try_api(first_message) do
@@ -357,6 +385,10 @@ defmodule Barkpark.StudioChat.Titles do
     `System.cmd` blocks with no timeout. Swapped in tests.
     """
     @spec run(String.t(), [String.t()]) :: {:ok, String.t()} | {:error, term()}
+    # Reachability: `binary` is the operator-config name resolved through
+    # `System.find_executable/1`, and `args` is `cli_args/1`'s fixed argv list —
+    # `System.cmd/3` spawns without a shell, so no argument can inject a command.
+    # sobelow_skip ["CI.System"]
     def run(binary, args) do
       case System.find_executable(binary) do
         nil ->

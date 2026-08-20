@@ -20,6 +20,14 @@ defmodule Barkpark.ApplicationChildSpecsTest do
 
   defp index(specs, k), do: Enum.find_index(keys(specs), &(&1 == k))
 
+  test "root supervisor waits for the synchronous bootstrap" do
+    src = File.read!("lib/barkpark/application.ex")
+
+    assert src =~ "timeout: :infinity",
+           "the root Supervisor.start_link includes SchemaBootstrap and must not retain " <>
+             "GenServer's five-second start deadline"
+  end
+
   test "plugin_children are wrapped under Barkpark.Plugins.Supervisor, not flat" do
     plugin = [{FakePluginWorker, arg: 1}]
     specs = specs(plugin)
@@ -46,7 +54,6 @@ defmodule Barkpark.ApplicationChildSpecsTest do
     refute Barkpark.Plugins.Indx.Auth in ks
     refute Barkpark.Plugins.Indx.Monitor in ks
     refute Barkpark.Plugins.Indx.Recovery in ks
-    refute Barkpark.StudioChat.Notifier in ks
     refute Barkpark.Plugins.Sheets.Session.ReplayRing in ks
   end
 

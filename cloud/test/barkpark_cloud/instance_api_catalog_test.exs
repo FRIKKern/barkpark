@@ -9,7 +9,7 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalogTest do
       entries (D46: `webhook.delete` is `:mutate`, deletion is recreatable config
       and does NOT inherit the Hetzner catalog's `:destroy` ceremony)
     * capability ids are unique — exact-match lookup can never be ambiguous
-    * v1 is exactly the eight webhook capabilities
+    * v1 is exactly the nine webhook capabilities
     * `fetch/1` is exact-match only — no strings, no near-misses
     * `render_path/2` substitutes only declared placeholders, and refuses a
       missing / path-reshaping value
@@ -21,6 +21,7 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalogTest do
   @v1_capabilities ~w(
     webhook.list webhook.show webhook.create webhook.update
     webhook.delete webhook.rotate webhook.deliveries webhook.replay
+    webhook.test_send
   )a
 
   describe "catalog/0 integrity" do
@@ -82,23 +83,24 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalogTest do
       assert entry.method == :delete
     end
 
-    test "the five write capabilities are :mutate; the three reads are :read" do
+    test "the six write capabilities are :mutate; the three reads are :read" do
       mutates =
         Catalog.catalog() |> Enum.filter(&(&1.tier == :mutate)) |> Enum.map(& &1.capability)
 
       reads = Catalog.catalog() |> Enum.filter(&(&1.tier == :read)) |> Enum.map(& &1.capability)
 
       assert Enum.sort(mutates) ==
-               Enum.sort(
-                 ~w(webhook.create webhook.update webhook.delete webhook.rotate webhook.replay)a
-               )
+               Enum.sort(~w(
+                   webhook.create webhook.update webhook.delete webhook.rotate
+                   webhook.replay webhook.test_send
+                 )a)
 
       assert Enum.sort(reads) == Enum.sort(~w(webhook.list webhook.show webhook.deliveries)a)
     end
   end
 
   describe "v1 surface" do
-    test "exactly the eight webhook capabilities are declared, nothing more" do
+    test "exactly the nine webhook capabilities are declared, nothing more" do
       caps = Catalog.catalog() |> Enum.map(& &1.capability) |> Enum.sort()
       assert caps == Enum.sort(@v1_capabilities)
     end
@@ -112,7 +114,8 @@ defmodule BarkparkCloud.Registry.InstanceApiCatalogTest do
         "webhook.delete" => {:delete, "/v1/webhooks/{dataset}/{id}"},
         "webhook.rotate" => {:post, "/v1/webhooks/{dataset}/{id}/rotate"},
         "webhook.deliveries" => {:get, "/v1/webhooks/{dataset}/{id}/deliveries"},
-        "webhook.replay" => {:post, "/v1/webhooks/{dataset}/{id}/deliveries/{event_id}/replay"}
+        "webhook.replay" => {:post, "/v1/webhooks/{dataset}/{id}/deliveries/{event_id}/replay"},
+        "webhook.test_send" => {:post, "/v1/webhooks/{dataset}/{id}/test-send"}
       }
 
       for {cap, {method, path}} <- expected do

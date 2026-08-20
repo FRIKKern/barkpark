@@ -5,13 +5,19 @@ defmodule BarkparkWeb.PulsePublicSurfaceTest do
   unknown-channel 404, validated anonymous ingest with an atomic durable
   counter, per-IP rate caps, and the cursor feed.
 
-  Uses the `test-storm` channel fixture from `config/test.exs`
-  (rate_per_min 600 / burst 3 — the burst is what the 429 test exhausts).
+  Uses the `test-storm` channel fixture from `config/test.exs` (rate_per_min
+  600) for the ingest/feed/CORS paths. The per-IP burst-cap 429 test drives the
+  SLOW-refill `abuse-rate` channel instead (rate_per_min 6 = 0.1 tok/sec):
+  test-storm's 10 tok/sec refills a 4th token inside the ~100ms of real request
+  latency and flaked an exact `== 3` on the merge train (felix wave-8).
   """
 
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Pulse
+
+  # Mirror of the controller's hardcoded per-IP burst capacity.
+  @burst 3
 
   @valid %{"hue" => 200, "x" => 0.5, "y" => 0.25, "mega" => false}
 
@@ -21,6 +27,19 @@ defmodule BarkparkWeb.PulsePublicSurfaceTest do
     |> put_req_header("content-type", "application/json")
     |> post("/v1/plugins/pulse/test-storm/events", Jason.encode!(body))
   end
+
+  # Burst-cap probes drive the SLOW-refill `abuse-rate` channel (0.1 tok/sec),
+  # which declares only `hue` — so a rapid same-IP volley is bounded to the
+  # burst with no in-loop refill slop (latency-immune, unlike test-storm's
+  # 10 tok/sec). Mirrors pulse_abuse_drill_test.exs.
+  defp burst_conn(conn, ip) do
+    conn
+    |> Map.put(:remote_ip, ip)
+    |> put_req_header("content-type", "application/json")
+    |> post("/v1/plugins/pulse/abuse-rate/events", Jason.encode!(%{"hue" => 200}))
+  end
+
+  defp burst_post(conn, ip), do: burst_conn(conn, ip).status
 
   describe "CORS (:public_api bucket)" do
     test "REAL browser preflight (origin + request-method headers) returns 204 + ACAO", %{
@@ -116,13 +135,21 @@ defmodule BarkparkWeb.PulsePublicSurfaceTest do
     end
 
     test "per-IP burst cap yields 429 with Retry-After", %{conn: conn} do
+      # Drives the SLOW-refill abuse-rate channel from ONE IP: the burst (3) is
+      # exhausted and the excess is 429. Asserted as a latency-immune BOUND
+      # (`<= @burst` + `429 in statuses`), mirroring pulse_abuse_drill_test.exs
+      # — NOT an exact `== 3` on the fast-refill test-storm, whose 10 tok/sec
+      # over-refilled a 4th token inside real request latency and flaked.
       ip = {198, 51, 100, 42}
-      # burst capacity is 3; the 4th immediate hit must be limited
-      statuses = for _ <- 1..4, do: post_event(conn, @valid, ip).status
-      assert Enum.count(statuses, &(&1 == 200)) == 3
+      statuses = for _ <- 1..4, do: burst_post(conn, ip)
+
+      two_hundreds = Enum.count(statuses, &(&1 == 200))
+      assert two_hundreds >= 1
+      assert two_hundreds <= @burst
       assert 429 in statuses
 
-      limited = post_event(conn, @valid, ip)
+      limited = burst_conn(conn, ip)
+      assert limited.status == 429
       assert [retry] = get_resp_header(limited, "retry-after")
       assert String.to_integer(retry) >= 1
     end

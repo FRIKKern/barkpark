@@ -20,11 +20,50 @@ type TaskDetail struct {
 	BlockedReason  string
 	CloseReason    string
 	ResolutionNote string
-	CodeRefs       []string
-	Assignee       string
-	PreviousWorker string    // claim.previous_worker ("" when absent)
-	ClaimExpiredAt time.Time // claim.expired_at (zero when absent)
-	LastWorkedAt   time.Time // content.last_worked_at (zero when absent)
+	// The durable backlog adjudication, all three parts of it: the term
+	// (content.disposition — "open"/"parked"/"closed", lowercase-canonical
+	// because Tasks.Stage trims and downcases as the one writer), the reason
+	// recorded with it, and — for a park — what would make the row worth
+	// reconsidering. All "" when the row was never adjudicated.
+	//
+	// A park is REFUSED server-side without a trigger, so rendering the reason
+	// without the trigger would show half of a thing the server treats as
+	// indivisible.
+	Disposition       string
+	DispositionReason string
+	ReopenTrigger     string
+	CodeRefs          []string
+	Assignee          string
+	PreviousWorker    string    // claim.previous_worker ("" when absent)
+	ClaimExpiredAt    time.Time // claim.expired_at (zero when absent)
+	LastWorkedAt      time.Time // content.last_worked_at (zero when absent)
+	Purpose           TaskPurpose
+}
+
+type PurposeScore struct {
+	Score  int
+	Reason string
+	Set    bool
+}
+
+type PurposeProof struct {
+	Claim    string
+	Evidence string
+	Source   string
+}
+
+// TaskPurpose is the authored explanation for why a task exists. Readers may
+// derive a labeled fallback from ordinary task facts, but never present that
+// fallback as authored truth.
+type TaskPurpose struct {
+	PartOf     string
+	Impact     string
+	Statement  string
+	Why        string
+	Endgame    string
+	Importance PurposeScore
+	Relevance  PurposeScore
+	Proof      []PurposeProof
 }
 
 // DetailIndex maps doc_id -> TaskDetail for every task in the snapshot.

@@ -211,10 +211,25 @@ func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg, f
 		dbg("would re-claim %s for the live epoch, then close as %s", task, worker)
 		return
 	}
-	epoch, _, err := c.TaskClaimN(task, worker)
+	epoch, notices, help, err := c.TaskClaimN(task, worker)
 	if err != nil {
 		fail("Stop: re-claim for epoch failed (%v) — not closing (no theft)", err)
 		return
+	}
+	// The re-claim carries the same advisory rail-awareness notices + help[] every
+	// other claim surface now renders (charter D18). The hook's CARDINAL contract
+	// forbids stdout and gates diagnostics behind debug, so surface them through
+	// dbg — a blocker that landed on this task (or the next-step templates) is a
+	// breadcrumb for `BP_CMUX_DEBUG`, never a line on the agent's turn.
+	for _, n := range notices {
+		if n.Type != "" {
+			dbg("notice: %s", n.Type)
+		}
+	}
+	for _, h := range help {
+		if h != "" {
+			dbg("help: %s", h)
+		}
 	}
 	// The agent marking its own acceptance criteria met is a LEGITIMATE
 	// post-claim change, but it trips the server's work-digest fence

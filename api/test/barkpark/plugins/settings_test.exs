@@ -1,5 +1,5 @@
 defmodule Barkpark.Plugins.SettingsTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Plugins.{Settings, SettingsAudit}
 

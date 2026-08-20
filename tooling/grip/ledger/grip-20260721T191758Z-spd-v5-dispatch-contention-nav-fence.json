@@ -1,0 +1,46 @@
+{
+  "run_id": "grip-20260721T191758Z",
+  "subject_epic": "studio-space-priority-desk",
+  "slice": "spd-inspector-shape-harden-wave-14-verify",
+  "verifier": "v5-dispatch-contention-and-nav-fence-closure",
+  "recipes": [
+    {
+      "subject": "zero of 24 open PRs touch root.html.heex or shared/paper.ex at dispatch time (re-run of the survey-time contention check, now at wave-15 dispatch)",
+      "quantity": "open-pr-file-touch-count",
+      "rerun": "gh pr list --state open --json number,files -L 100 | python3 -c \"import json,sys; d=json.load(sys.stdin); print([p['number'] for p in d if any('root.html.heex' in f['path'] or 'shared/paper.ex' in f['path'] for f in p['files'])])\"",
+      "expect": "[] — empty list, 0 of 24 open PRs touch either file",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-21T19:17:58Z"
+    },
+    {
+      "subject": "the FIX-1 fence (shared.ex rebuild_panes/1 case statement, lines 779-815) routes every editor_view branch (:paper, :sheet, :graph, :media_explorer, default/form) through either setup_paper_view/2 or clear_paper_view/1, and those two functions are the ONLY callers of setup_paper_view/clear_paper_view repo-wide outside their own defs — confirmed against origin/main (worktree diff empty)",
+      "quantity": "fence-branch-coverage-and-caller-uniqueness",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git diff origin/main -- api/lib/barkpark_web/live/studio/studio_live/shared.ex api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex api/lib/barkpark_web/live/studio/studio_live/handlers/secondary.ex; git show origin/main:api/lib/barkpark_web/live/studio/studio_live/shared.ex | sed -n '779,815p'; grep -rn 'setup_paper_view(\\|clear_paper_view(' api/lib/barkpark_web/live/studio/studio_live/ | grep -v 'def setup_paper_view\\|def clear_paper_view'",
+      "expect": "diff is empty (worktree == origin/main for all 3 files); the case statement shows all 5 branches (:paper -> setup_paper_view, :sheet/:graph/:media_explorer/_ -> clear_paper_view); the grep for external callers returns ONLY the 6 lines inside shared.ex:784-810 (the case statement itself) plus the two defdelegate lines at shared.ex:925/931 -- no caller outside this dispatcher",
+      "derived_level": "L1",
+      "deps": [
+        ".git"
+      ],
+      "observed_at": "2026-07-21T19:17:58Z"
+    },
+    {
+      "subject": "neither clear_paper_view/1 nor setup_paper_view/2 currently touches secondary_doc; it is set only by handlers/secondary.ex:select_secondary (user action) and cleared only by handlers/secondary.ex:close_secondary (explicit close), seeded nil once in mount.ex -- confirming the FIX-1 seam is genuinely empty on origin/main",
+      "quantity": "secondary_doc-touch-site-count",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git grep -n 'secondary_doc' -- api/lib/barkpark_web/live/studio/",
+      "expect": "4 hits: components.ex:1296 (render-only pass-through), mount.ex:186 (seed nil), handlers/secondary.ex:82 (set) and :92 (clear-on-close-button) -- zero hits in shared.ex, shared/paper.ex, or any handle_params/nav path",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-21T19:17:58Z"
+    },
+    {
+      "subject": "the one apparent bypass of the case-statement fence -- Shared.reset_nav_for_switch/1 (used by rescope_dataset_for_project/2 on workspace/project switch) assigns editor_view: :form directly without routing through clear_paper_view -- is not a true bypass: every call site pipes it immediately into either rebuild_panes/1 (same pipeline, same reduction) or push_patch/2 (which re-enters via handle_params -> Lifecycle.finish_handle_params/6 -> Shared.rebuild_panes/1), so secondary_doc-clearing landed in setup/clear_paper_view still fires on this nav leg, just possibly one LiveView round-trip later on the push_patch branches",
+      "quantity": "reset_nav_for_switch-followup-call-count",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'rebuild_panes\\|push_patch' api/lib/barkpark_web/live/studio/studio_live/shared.ex | sed -n '1,40p' | grep -A2 -B2 '52[0-9]\\|53[0-9]\\|54[0-9]\\|55[0-9]\\|56[0-9]'; grep -n 'rebuild_panes' api/lib/barkpark_web/live/studio/studio_live/handlers/lifecycle.ex",
+      "expect": "rescope_dataset_for_project/2's 4 exit branches (shared.ex ~524-562) each end in either rebuild_panes() or push_patch(); lifecycle.ex:33 shows finish_handle_params/6 (the handle_params leg) also ends in Shared.rebuild_panes() -- so both nav legs (direct pipe and push_patch round-trip) terminate in the same fenced dispatcher",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-21T19:17:58Z"
+    }
+  ]
+}

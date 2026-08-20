@@ -1,0 +1,6 @@
+{
+  "assignment_id": "E08",
+  "attack_wall_nanoseconds": 55809958,
+  "measurement_policy": "frozen observed local wall time; ordinary replay does not rewrite",
+  "schema_version": "legendary-e08-timing/v1"
+}

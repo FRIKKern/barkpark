@@ -12,7 +12,7 @@ defmodule Barkpark.Tasks.MoveTest do
     5. `not_found` for an unknown task uuid.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query
 

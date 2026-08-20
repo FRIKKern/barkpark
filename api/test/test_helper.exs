@@ -44,6 +44,13 @@
 #
 #     mix test --only plugin_routes test/barkpark_web/plugin_routes_test.exs
 #
+# wbqs-api-vacuous-tests — the generated-thumb-rendition test needs a real
+# `vips` binary on PATH to produce a rendition. Tagged `:requires_vips` so a
+# box without libvips gets a visible ExUnit skip instead of the test quietly
+# passing. Run explicitly on a machine that has vips installed:
+#
+#     mix test --include requires_vips
+#
 ExUnit.start(
   exclude: [
     :bokbasen_integration,
@@ -53,6 +60,7 @@ ExUnit.start(
     :flaky,
     :boot_test,
     :plugin_routes,
+    :requires_vips,
     # Live IdP interop (needs the Keycloak container) — scripts/idp-interop.sh
     :idp_interop,
     # Real-binary Studio-chat E2E (spawns the actual `claude` CLI: ~$0.43 +
@@ -62,5 +70,57 @@ ExUnit.start(
     :real_binary
   ]
 )
+
+# ── chat_bridge fixture (Connectors D54) ───────────────────────────────────
+#
+# WHY THIS IS HERE AND NOT IN A MIGRATION.
+#
+# `chat_bridge.connector_installs` is owned by the CONNECTORS BRIDGE — a
+# standalone Node service (`connectors/`) that creates its own schema and DDL at
+# boot. Charter D28 forbids an Ecto migration for it: two owners of one table is
+# how you get a silent drift. So the Elixir test DB has never had the table, and
+# `Barkpark.Connectors.Install` (`@schema_prefix "chat_bridge"`) would raise
+# `ERROR 42P01 (undefined_table)` on the first read. That — not any GRANT — is
+# the actual blocker (D54: prod's Repo role OWNS chat_bridge, and CI's Postgres
+# is a superuser).
+#
+# THROUGH `Repo`, NOT A RAW POSTGREX CONN. Whoever executes the CREATE becomes
+# the schema's OWNER. Running it through the Repo makes the TEST role the owner,
+# so no GRANT is ever needed here. A raw Postgrex connection with hardcoded
+# superuser credentials would re-introduce exactly the creator≠reader split this
+# avoids. It also must run BEFORE `Sandbox.mode(:manual)` — after that, DDL would
+# be trapped inside a per-test transaction and rolled back. The sandbox rolls
+# back across a non-`public` prefix fine, so tests stay isolated.
+#
+# ⚠️ DDL CROSS-REFERENCE — this is a SECOND source of truth.
+# The statement below TRANSCRIBES `connectors/src/db/schema.ts`
+# (`CREATE_CONNECTOR_INSTALLS_SQL` + `ADD_CHAT_TOKEN_REF_SQL`), which carries a
+# comment pointing back at this block. That file HAS ALREADY DRIFTED once —
+# `ADD_CHAT_TOKEN_REF_SQL` exists precisely because `CREATE TABLE IF NOT EXISTS`
+# was a no-op against the older four-column table. If you change one, change the
+# other. `test/barkpark/connectors/install_schema_test.exs` pins the exact column
+# set the catalog reads, so a drift reds the Elixir suite instead of 500ing
+# Studio in production.
+Barkpark.Repo.query!("CREATE SCHEMA IF NOT EXISTS chat_bridge")
+
+Barkpark.Repo.query!("""
+CREATE TABLE IF NOT EXISTS chat_bridge.connector_installs (
+  provider       text NOT NULL,
+  install_key    text NOT NULL,
+  workspace_id   text NOT NULL,
+  credential_ref text,
+  chat_token_ref text,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (provider, install_key)
+)
+""")
+
+# Idempotent forward path for a test DB created before chat_token_ref existed —
+# `CREATE TABLE IF NOT EXISTS` is a NO-OP against an existing table, so the new
+# column would otherwise never appear. Mirrors the bridge's ADD_CHAT_TOKEN_REF_SQL.
+Barkpark.Repo.query!("""
+ALTER TABLE chat_bridge.connector_installs
+  ADD COLUMN IF NOT EXISTS chat_token_ref text
+""")
 
 Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)

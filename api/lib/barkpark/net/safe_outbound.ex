@@ -12,12 +12,29 @@ defmodule Barkpark.Net.SafeOutbound do
   and drives every request with `redirect: false` so a 302-to-internal cannot
   smuggle the destination past the check.
 
+  ## DNS-rebinding TOCTOU (why `post/2` pins the checked IP)
+
+  NAMED FAILURE MODE: check-then-connect gap. Resolving + classifying the host
+  and then handing the raw URL to the HTTP client re-resolves DNS at connect
+  time — a rebinding attacker with low-TTL DNS answers PUBLIC to the check and
+  `169.254.169.254`/loopback/RFC1918 to the connect, and the guard is bypassed.
+  `post/2` therefore connects to the literal IP that passed classification
+  (`pin_request/3`): the URL host is rewritten to that IP while the original
+  hostname is preserved for the `Host` header and — via the Mint `:hostname`
+  connect option — for TLS SNI and HTTPS certificate hostname verification.
+  When the checked host resolves to several addresses, every address must
+  classify as public and the first one is pinned.
+
   `check_url/1` is pure (`:ok | {:error, reason}`); `ip_allowed?/1` classifies a
   single `:inet.ip_address` tuple with no DNS so the ruleset is unit-testable.
 
   A config escape hatch `:allow_private_outbound` (default `false`) is set `true`
   in dev/test so Bypass-at-127.0.0.1 fixtures keep working; prod/runtime leaves
-  it false.
+  it false (no resolution happens then, so no pin either). A second test-only
+  seam, `:safe_outbound_resolver` (a `host -> {:ok, addrs} | {:error, reason}`
+  fun), substitutes the DNS lookup so the rebinding fixture can answer public at
+  check time while the OS resolver answers loopback at connect time; unset in
+  every real environment.
   """
 
   import Bitwise
@@ -33,28 +50,68 @@ defmodule Barkpark.Net.SafeOutbound do
   `:allow_private_outbound` is enabled; the scheme/host/userinfo checks always run.
   """
   @spec check_url(term()) :: :ok | {:error, term()}
-  def check_url(url) when is_binary(url) do
-    with {:ok, uri} <- parse(url),
-         :ok <- validate_scheme(uri),
-         :ok <- validate_host(uri),
-         :ok <- validate_userinfo(uri) do
-      validate_destination(uri.host)
+  def check_url(url) do
+    case checked_target(url) do
+      {:ok, _uri, _pin} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  def check_url(_), do: {:error, :invalid_url}
-
   @doc """
-  Runs `check_url/1`, then `Req.post/2` with `redirect: false` forced on.
-  Returns `{:error, {:ssrf_blocked, reason}}` with NO network call when the
-  URL is refused; otherwise returns whatever `Req.post/2` returns.
+  Validates `url` (see `check_url/1`), then `Req.post/2` with `redirect: false`
+  forced on. Returns `{:error, {:ssrf_blocked, reason}}` with NO network call
+  when the URL is refused.
+
+  When the guard is active (`:allow_private_outbound` false) the request is
+  PINNED to the IP that passed classification — see `pin_request/3` — so a
+  DNS answer that changes between check and connect cannot redirect the request
+  to an internal address. With the escape hatch on, no resolution happened and
+  the raw URL goes to `Req.post/2` unchanged (Bypass fixtures keep working).
   """
   @spec post(String.t(), keyword()) :: {:ok, Req.Response.t()} | {:error, term()}
   def post(url, opts \\ []) do
-    case check_url(url) do
-      :ok -> Req.post(url, Keyword.put(opts, :redirect, false))
-      {:error, reason} -> {:error, {:ssrf_blocked, reason}}
+    case checked_target(url) do
+      {:ok, _uri, nil} ->
+        Req.post(url, Keyword.put(opts, :redirect, false))
+
+      {:ok, uri, pin} ->
+        {pinned_url, pinned_opts} = pin_request(uri, pin, opts)
+        Req.post(pinned_url, pinned_opts)
+
+      {:error, reason} ->
+        {:error, {:ssrf_blocked, reason}}
     end
+  end
+
+  @doc """
+  Builds the pinned request for a validated target: `{url, opts}` where the URL
+  host is the literal checked IP (`pin` — IPv6 bracketed) and `opts` carry the
+  original identity of the host so the wire behavior is unchanged apart from
+  skipping the second DNS lookup:
+
+    * a `Host` header with the original hostname (and non-default port) —
+      added only when the caller did not set one;
+    * `connect_options: [hostname: <original host>]` — Mint uses it for TLS
+      SNI and certificate hostname verification when connecting to an address
+      literal (merged, caller's other connect options survive);
+    * `redirect: false`, as for every request from this module.
+
+  Public for unit tests; runtime callers go through `post/2`.
+  """
+  @spec pin_request(URI.t(), :inet.ip_address(), keyword()) :: {String.t(), keyword()}
+  def pin_request(%URI{host: host} = uri, pin, opts) do
+    # URI.to_string/1 brackets a host containing ":" itself, so the IPv6
+    # literal goes in bare.
+    ip_literal = pin |> :inet.ntoa() |> List.to_string()
+    pinned_url = URI.to_string(%{uri | host: ip_literal})
+
+    pinned_opts =
+      opts
+      |> Keyword.put(:redirect, false)
+      |> put_new_host_header(host_header(uri))
+      |> Keyword.update(:connect_options, [hostname: host], &Keyword.put(&1, :hostname, host))
+
+    {pinned_url, pinned_opts}
   end
 
   @doc """
@@ -84,6 +141,20 @@ defmodule Barkpark.Net.SafeOutbound do
 
   # --- internals ---
 
+  # Full validation pipeline. Returns `{:ok, uri, pin}` where `pin` is the
+  # classified `:inet.ip_address` to connect to, or `nil` when the escape hatch
+  # skipped resolution (nothing to pin); `{:error, reason}` otherwise.
+  defp checked_target(url) when is_binary(url) do
+    with {:ok, uri} <- parse(url),
+         :ok <- validate_scheme(uri),
+         :ok <- validate_host(uri),
+         :ok <- validate_userinfo(uri) do
+      validate_destination(uri)
+    end
+  end
+
+  defp checked_target(_), do: {:error, :invalid_url}
+
   defp parse(url) do
     case URI.new(url) do
       {:ok, uri} -> {:ok, uri}
@@ -100,17 +171,25 @@ defmodule Barkpark.Net.SafeOutbound do
   defp validate_userinfo(%URI{userinfo: nil}), do: :ok
   defp validate_userinfo(_), do: {:error, :userinfo_not_allowed}
 
-  defp validate_destination(host) do
+  defp validate_destination(%URI{host: host} = uri) do
     if allow_private_outbound?() do
-      :ok
+      {:ok, uri, nil}
     else
-      with {:ok, addrs} <- resolve(host) do
-        check_addrs(addrs)
+      with {:ok, addrs} <- resolve(host),
+           :ok <- check_addrs(addrs) do
+        {:ok, uri, hd(addrs)}
       end
     end
   end
 
   defp resolve(host) do
+    case Application.get_env(:barkpark, :safe_outbound_resolver) do
+      nil -> default_resolve(host)
+      fun when is_function(fun, 1) -> fun.(host)
+    end
+  end
+
+  defp default_resolve(host) do
     charlist = String.to_charlist(host)
 
     addrs =
@@ -124,6 +203,26 @@ defmodule Barkpark.Net.SafeOutbound do
     case addrs do
       [] -> {:error, :unresolvable}
       _ -> {:ok, addrs}
+    end
+  end
+
+  defp host_header(%URI{host: host, port: port, scheme: scheme}) do
+    host = if String.contains?(host, ":"), do: "[" <> host <> "]", else: host
+
+    if port in [nil, URI.default_port(scheme)] do
+      host
+    else
+      "#{host}:#{port}"
+    end
+  end
+
+  defp put_new_host_header(opts, value) do
+    headers = Keyword.get(opts, :headers, [])
+
+    cond do
+      Enum.any?(headers, fn {k, _} -> String.downcase(to_string(k)) == "host" end) -> opts
+      is_map(headers) -> Keyword.put(opts, :headers, Map.put(headers, "host", value))
+      true -> Keyword.put(opts, :headers, [{"host", value} | headers])
     end
   end
 

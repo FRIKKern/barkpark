@@ -14,6 +14,9 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
 
   @admin_token "pulse-dashboard-admin-test-token"
 
+  # Default Ecto telemetry event for a repo with `otp_app: :barkpark`.
+  @repo_query_event [:barkpark, :repo, :query]
+
   setup do
     {:ok, _} =
       Auth.create_token(@admin_token, "pulse dashboard admin", "production", [
@@ -102,5 +105,91 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
 
   defp flatten_nodes(items) do
     Enum.flat_map(items || [], fn n -> [n | flatten_nodes(n.items)] end)
+  end
+
+  # PROTECTIVE TEST (task-felix-w13-pulse-dashboard-mount-gate): mount/3 used to
+  # run load_rows/load_vitals/safe_storage UNCONDITIONALLY — so the DISCARDED
+  # disconnected render fired the pulse DB projections, doubling the queries per
+  # open (the #2402 connected?-mount scar f27623fdf swept everywhere but here).
+  # The loaders are now gated behind `connected?/1`. These tests count the
+  # `pulse_counters` query — the unique signature of `load_rows -> Pulse.total`
+  # (nothing else on this mount reads pulse_counters) — to prove 2× -> 1×: zero
+  # projection queries on the dead render, exactly one per channel on connect.
+  describe "disconnected mount elides the pulse projection queries" do
+    test "the disconnected (dead) render runs ZERO pulse-projection queries and paints a loading skeleton",
+         %{conn: conn} do
+      for _ <- 1..3,
+          do:
+            Pulse.record_event("test-storm", %{
+              "hue" => 1,
+              "x" => 0.1,
+              "y" => 0.1,
+              "mega" => false
+            })
+
+      {conn, counter_reads} = count_pulse_counter_queries(fn -> get(conn, "/admin/pulse") end)
+
+      body = html_response(conn, 200)
+      # The dead render shows the loading skeleton, NOT the projected counters.
+      assert body =~ ~s(data-test-id="pulse-loading")
+      refute body =~ "strikes ever"
+
+      # load_rows -> Pulse.total never ran on the discarded mount.
+      assert counter_reads == 0,
+             "the disconnected mount must issue zero pulse-projection (pulse_counters) queries, " <>
+               "got #{counter_reads}"
+    end
+
+    test "the connected mount runs load_rows exactly once per channel (2x -> 1x)", %{conn: conn} do
+      for _ <- 1..3,
+          do:
+            Pulse.record_event("test-storm", %{
+              "hue" => 1,
+              "x" => 0.1,
+              "y" => 0.1,
+              "mega" => false
+            })
+
+      # `live/2` does the disconnected render THEN connects. The disconnected leg
+      # now contributes 0 pulse_counters queries (the fix), so the reads across
+      # the whole flow equal exactly one per configured channel — load_rows ran
+      # a single time, on connect.
+      expected = map_size(Pulse.channels())
+
+      {{:ok, _view, html}, counter_reads} =
+        count_pulse_counter_queries(fn -> live(conn, "/admin/pulse") end)
+
+      # Behavior parity: the connected view shows the same data as before.
+      assert html =~ "strikes ever"
+
+      assert counter_reads == expected,
+             "load_rows must run exactly once per channel on connect, expected #{expected} " <>
+               "pulse_counters queries, got #{counter_reads}"
+    end
+  end
+
+  # The connected mount runs in a spawned LiveView process, so the counter must
+  # see queries from ANY process during the block (safe — this module is
+  # async: false, so nothing else runs concurrently).
+  defp count_pulse_counter_queries(fun) do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    handler_id = {__MODULE__, make_ref()}
+
+    :telemetry.attach(
+      handler_id,
+      @repo_query_event,
+      fn _event, _measurements, %{source: source}, _config ->
+        if source == "pulse_counters", do: Agent.update(counter, &(&1 + 1))
+      end,
+      nil
+    )
+
+    try do
+      result = fun.()
+      {result, Agent.get(counter, & &1)}
+    after
+      :telemetry.detach(handler_id)
+      Agent.stop(counter)
+    end
   end
 end

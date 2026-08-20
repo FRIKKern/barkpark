@@ -185,11 +185,84 @@ defmodule BarkparkCloud.Web.RouterProvidersCatalogTest do
       assert conn.status == 200
       body = json_body(conn)
 
-      assert body["provider"] == %{"kind" => "azure", "label" => "az"}
+      assert %{"kind" => "azure", "label" => "az", "identity" => _} = body["provider"]
       assert is_list(body["regions"])
       assert Enum.all?(body["server_types"], &(Enum.sort(Map.keys(&1)) == @server_type_keys))
     end
+
+    # cch wave 13 — the header names WHICH cloud account the connection points
+    # at, so a person reads it BEFORE committing a credential rotation.
+    test "azure header echoes the STORED subscription id, marked as stored (never 'verified')" do
+      {user, team} = user_with_team()
+      {:ok, _} = connect_azure(team)
+
+      body = json_body(call(:get, "/v1/providers/azure/overview", nil, session_token(user)))
+
+      assert body["provider"]["identity"] == %{
+               "label" => "Subscription",
+               "value" => azure_blob()["subscription_id"],
+               "source" => "stored",
+               "reason" => nil
+             }
+
+      # Provenance, not a verdict: nothing here may read as a server-confirmed
+      # account. Azure.verify/1 echoes back the id it was handed.
+      refute conn_body_contains?(body, "verified")
+    end
+
+    test "hetzner header states the absence out loud — an unknown identity is NEVER a blank" do
+      {user, team} = user_with_team()
+      {:ok, _} = connect_hetzner(team)
+      program_hetzner_catalog()
+
+      body = json_body(call(:get, "/v1/providers/hetzner/overview", nil, session_token(user)))
+
+      # The key is always present, the value is explicitly nil, and the reason
+      # is the honest one: hetzner_token_ok?/1 matches on status class alone and
+      # nothing in the tree fetches a Hetzner account/project identifier.
+      assert body["provider"]["identity"] == %{
+               "label" => "Project",
+               "value" => nil,
+               "source" => "unavailable",
+               "reason" => "Hetzner doesn't report which project this token belongs to."
+             }
+    end
+
+    test "a plain MEMBER (no admin, no operator) reads the identity — Auth.require_user only" do
+      {_owner, team} = user_with_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+      {:ok, _} = connect_azure(team)
+
+      conn = call(:get, "/v1/providers/azure/overview", nil, session_token(member))
+      assert conn.status == 200
+      assert json_body(conn)["provider"]["identity"]["value"] == azure_blob()["subscription_id"]
+    end
+
+    test "the plain catalog route is UNCHANGED — identity rides the overview header only" do
+      {user, team} = user_with_team()
+      {:ok, _} = connect_azure(team)
+
+      body = json_body(call(:get, "/v1/providers/azure/catalog", nil, session_token(user)))
+      assert Enum.sort(Map.keys(body)) == ["currency", "regions", "server_types"]
+    end
   end
+
+  # Does any string anywhere in the decoded body carry `needle`? Used to pin the
+  # copy NEGATIVE (the identity must never read as a verification).
+  defp conn_body_contains?(value, needle) when is_map(value),
+    do:
+      Enum.any?(value, fn {k, v} ->
+        conn_body_contains?(k, needle) or conn_body_contains?(v, needle)
+      end)
+
+  defp conn_body_contains?(value, needle) when is_list(value),
+    do: Enum.any?(value, &conn_body_contains?(&1, needle))
+
+  defp conn_body_contains?(value, needle) when is_binary(value),
+    do: String.contains?(String.downcase(value), needle)
+
+  defp conn_body_contains?(_value, _needle), do: false
 
   describe "the existing /v1/hetzner/* routes still work (different concern)" do
     test "/v1/hetzner/catalog still serves the action catalog (resource/verb/tier/params)" do
@@ -273,6 +346,124 @@ defmodule BarkparkCloud.Web.RouterProvidersCatalogTest do
       conn = call(:post, "/v1/providers", body, session_token(user))
       assert conn.status == 422
       assert Registry.list_providers(team) == []
+    end
+  end
+
+  describe "POST /v1/providers — cloudflare connect (@connectable_kinds gate, D53)" do
+    test "a Fake-active cloudflare token is saved (201), credential never echoed" do
+      {user, team} = user_with_team()
+
+      body = %{kind: "cloudflare", token: "cf-live-token", label: "edge"}
+      conn = call(:post, "/v1/providers", body, session_token(user))
+
+      assert conn.status == 201
+      assert json_body(conn)["provider"]["kind"] == "cloudflare"
+      # The plaintext token is encrypted at rest — never round-tripped.
+      refute conn.resp_body =~ "cf-live-token"
+      assert [%{kind: "cloudflare"}] = Registry.list_providers(team)
+    end
+
+    test "a `fail-` sentinel token is rejected at preflight (422 provider_unverified), nothing saved" do
+      {user, team} = user_with_team()
+
+      body = %{kind: "cloudflare", token: "fail-bad-token"}
+      conn = call(:post, "/v1/providers", body, session_token(user))
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "provider_unverified"
+      assert json_body(conn)["remediation"] == FailureCopy.connect_remediation("cloudflare")
+      # The dead credential never lands.
+      assert Registry.list_providers(team) == []
+    end
+
+    test "a {api_token, account_id, zone_id} JSON blob is accepted, verified via api_token" do
+      {user, team} = user_with_team()
+
+      body = %{
+        kind: "cloudflare",
+        credentials: %{
+          "api_token" => "cf-blob-token",
+          "account_id" => "acct_1",
+          "zone_id" => "zone_1"
+        }
+      }
+
+      conn = call(:post, "/v1/providers", body, session_token(user))
+
+      assert conn.status == 201
+      refute conn.resp_body =~ "cf-blob-token"
+      assert [%{kind: "cloudflare"}] = Registry.list_providers(team)
+    end
+
+    test "a blob whose api_token is a `fail-` sentinel is rejected at preflight" do
+      {user, team} = user_with_team()
+
+      body = %{kind: "cloudflare", credentials: %{"api_token" => "fail-blob-token"}}
+      conn = call(:post, "/v1/providers", body, session_token(user))
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "provider_unverified"
+      assert Registry.list_providers(team) == []
+    end
+
+    test "connect uses @connectable_kinds SEPARATELY: cloudflare connects, but its catalog is NOT exposed" do
+      {user, team} = user_with_team()
+      # cloudflare IS connectable…
+      {:ok, _} = Registry.connect_provider(team, "cloudflare", "cf-token", label: "edge")
+
+      # …yet GET /v1/providers/cloudflare/catalog stays 404 unknown_kind — proving
+      # cloudflare is NOT in @neutral_kinds (the catalog gate) even though it is in
+      # @connectable_kinds (the connect gate). No backing-less menu route leaks.
+      conn = call(:get, "/v1/providers/cloudflare/catalog", nil, session_token(user))
+      assert conn.status == 404
+      assert json_body(conn) == %{"error" => "unknown_kind"}
+    end
+  end
+
+  describe "DELETE /v1/providers/:kind — disconnect (degrade to standalone, D54)" do
+    test "disconnects a connected cloudflare provider (200 ok), row dropped, audited kind+label only" do
+      {user, team} = user_with_team()
+      {:ok, _} = Registry.connect_provider(team, "cloudflare", "cf-secret-token", label: "edge")
+
+      conn = call(:delete, "/v1/providers/cloudflare", nil, session_token(user))
+
+      assert conn.status == 200
+      assert json_body(conn) == %{"ok" => true}
+      # The connection (and its encrypted credential) is gone → standalone.
+      assert Registry.list_providers(team) == []
+
+      # An audit event was recorded carrying ONLY {kind, label} — never the token.
+      assert [event] = Accounts.list_audit_events(team, target_type: "provider")
+      assert event.action == "provider.disconnected"
+      assert event.metadata["kind"] == "cloudflare"
+      assert event.metadata["label"] == "edge"
+      refute Jason.encode!(event.metadata) =~ "cf-secret-token"
+    end
+
+    test "404 not_found when no provider of that kind is connected (no existence leak)" do
+      {user, team} = user_with_team()
+
+      conn = call(:delete, "/v1/providers/cloudflare", nil, session_token(user))
+
+      assert conn.status == 404
+      assert json_body(conn) == %{"error" => "not_found"}
+      # Nothing was audited for a no-op disconnect.
+      assert Accounts.list_audit_events(team, target_type: "provider") == []
+    end
+
+    test "disconnect is kind-scoped: removing cloudflare leaves a connected hetzner intact" do
+      {user, team} = user_with_team()
+      {:ok, _} = connect_hetzner(team)
+      {:ok, _} = Registry.connect_provider(team, "cloudflare", "cf-token", label: "edge")
+
+      conn = call(:delete, "/v1/providers/cloudflare", nil, session_token(user))
+      assert conn.status == 200
+      assert [%{kind: "hetzner"}] = Registry.list_providers(team)
+    end
+
+    test "no auth → 401" do
+      conn = call(:delete, "/v1/providers/cloudflare")
+      assert conn.status == 401
     end
   end
 end

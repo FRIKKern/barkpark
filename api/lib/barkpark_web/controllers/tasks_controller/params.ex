@@ -11,9 +11,9 @@ defmodule BarkparkWeb.TasksController.Params do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Repo
-  alias Barkpark.Content.Document
+  alias Barkpark.Content.{CallerContext, Document, Envelope}
   alias Barkpark.Content.Scope
-  alias Barkpark.Tasks.Criteria
+  alias Barkpark.Tasks.{Criteria, QueueGate}
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Query, as: TaskQuery
 
@@ -132,13 +132,70 @@ defmodule BarkparkWeb.TasksController.Params do
   def papers_of(%{"papers" => papers}) when is_list(papers), do: papers
   def papers_of(_), do: []
 
+  # Task 5 (session-handoff): content.sessions is a session-doc-id array,
+  # written via /v1/tasks/:id/sessions. Mirrors papers_of/1 byte-for-byte.
+  def sessions_of(%{"sessions" => sessions}) when is_list(sessions), do: sessions
+  def sessions_of(_), do: []
+
   # ─── Render / shape ─────────────────────────────────────────────────────
+
+  # axi-s1 (R1): parse the optional `?view=` request param into a render view.
+  # ONLY the exact string "brief" opts in; absent, unknown, or non-string
+  # values (Phoenix array/map params) all fall back to :full — the server
+  # default STAYS full so SDK/Studio/taskboard consumers are untouched.
+  def parse_view("brief"), do: :brief
+  def parse_view(_), do: :full
 
   # Render a Document into the bd-compatible shape the `bp task` CLI consumes.
   # Keep the field set tight enough that it still maps cleanly onto the
   # bd-compatible `show` JSON shape, broad enough that list callers don't
   # lose information (priority, assignee, content.kind for filtering).
-  def render_doc(%Document{} = doc) do
+  #
+  # axi-s1 (R1/R2): grows a `view` argument.
+  #
+  #   * `:full` (default) — the historical shape, with ONE de-dup: the
+  #     `content` echo drops its `"claim"` key. The top-level `claim` is the
+  #     single wire copy (every Go consumer + `TaskResolver.worker_of/1` read
+  #     top-level; `content.claim` had zero HTTP-envelope readers). DB storage
+  #     `content["claim"]` is untouched — it stays the write-path source of
+  #     truth; only the response echo is de-duplicated.
+  #   * `:brief` — the AXI brief card v2 (charter decisions 3 + 15/16): no
+  #     content echo, no work digests, claim cut to {worker, epoch, now}, and
+  #     the nine measured diet cuts below. `child_count` is NOT set here —
+  #     list callers add it via `render_brief/2` from one batched query.
+  # ─── field-visibility seal (fail-closed) ────────────────────────────────
+  #
+  # Redact a task document's `content` through the canonical Envelope
+  # field-visibility chokepoint under the request's caller BEFORE it is rendered
+  # into any wire shape. A `private` / `owner_only` / `readable_by` field the
+  # caller may not see — and any encrypted-ciphertext field — is DROPPED from
+  # `content`, so it can never reach the `content` echo NOR any top-level key
+  # `render_doc` / `render_brief` / `render_doc_with_counts` / `child_summary`
+  # promote off it (they all read `doc.content`).
+  #
+  # This is the missing sibling of the already-sealed Tasks read surfaces
+  # (`Barkpark.Tasks.Query`'s measure/agg branch → `Envelope.field_readable?`,
+  # and the board peek panel). This JSON echo never adopted the same seal.
+  # LATENT today — a full schema scan found no task field declaring visibility,
+  # so `redact/4` returns `content` unchanged and every response is
+  # byte-identical for the already-readable case. It fails CLOSED the instant a
+  # task field declares visibility: the field is redacted, never leaked.
+  #
+  # `caller` is the request principal (`CallerContext.from_conn/1`): an admin
+  # token sees all (no redaction); a non-admin token / anonymous caller is
+  # subject to the field's declared visibility. `schema` is the resolved "task"
+  # `%SchemaDefinition{}` (nil ⇒ only encrypted ciphertext is dropped; declared
+  # visibility needs the schema present). `Envelope.redact/4` is the same
+  # `redact_by_field_visibility` chokepoint as `Envelope.render/3`.
+  @spec seal(Document.t(), CallerContext.t(), term()) :: Document.t()
+  def seal(%Document{} = doc, %CallerContext{} = caller, schema) do
+    redacted = Envelope.redact(doc.content || %{}, schema, caller, Map.get(doc, :owner_id))
+    %{doc | content: redacted}
+  end
+
+  def render_doc(doc, view \\ :full)
+
+  def render_doc(%Document{} = doc, :full) do
     content = doc.content || %{}
 
     %{
@@ -154,6 +211,9 @@ defmodule BarkparkWeb.TasksController.Params do
       priority: Map.get(content, "priority"),
       assignee: Map.get(content, "assignee"),
       parent_id: Map.get(content, "parent_id"),
+      execution_policy: Map.get(content, "execution_policy"),
+      queue_gate: Map.get(content, "queue_gate"),
+      execution_class: QueueGate.execution_class(content),
       claim: Map.get(content, "claim"),
       # tt5: surface content.labels at the top level so a client's `.labels[]`
       # (e.g. `bp task show`'s label view + the `label=` list filter) works
@@ -162,7 +222,10 @@ defmodule BarkparkWeb.TasksController.Params do
       # Phase A: surface content.papers at the top level the same way labels
       # are, so callers can read `doc.papers[]` without digging into content.
       papers: papers_of(content),
-      content: content,
+      # Task 5 (session-handoff): surface content.sessions the same way papers
+      # are, so callers can read `doc.sessions[]` without digging into content.
+      sessions: sessions_of(content),
+      content: Map.delete(content, "claim"),
       inserted_at: doc.inserted_at,
       updated_at: doc.updated_at
     }
@@ -171,6 +234,210 @@ defmodule BarkparkWeb.TasksController.Params do
     # criteria are absent/empty (wire §4: omit the segment, never "0/0").
     |> put_criteria_progress(content)
   end
+
+  # axi-w2-s2 (charter decisions 15+16): brief card v2 — the nine measured
+  # cuts, ENTIRELY inside the brief path (:full untouched):
+  #
+  #   (a) nil/absent keys are omitted wire-wide (see `prune_nils/1`);
+  #   (b) the internal uuid `id` is dropped — `doc_id` is the only address any
+  #       `bp` verb takes;
+  #   (c) `claim` is emitted only when it carries SIGNAL (worker != nil OR a
+  #       now-line) — no Go consumer reads claim.epoch pre-claim;
+  #   (d) `claim.now.text` capped at #{@brief_now_text_limit} graphemes with a
+  #       bare … marker (grapheme-safe — never splits a cluster);
+  #   (e) `title` capped at #{@brief_title_limit} graphemes, same marker;
+  #   (f) seconds-precision timestamps (`updated_at`, `claim.now.ts`);
+  #   (g) `lifecycle_status` omitted when "open" — NEVER unconditionally:
+  #       queue.ex admits open|blocked and blocked must survive on the card as
+  #       the actionable exception;
+  #   (h) `status` omitted when "published" (the task-contract steady state);
+  #   (i) the criteria_met/criteria_total pair omitted when there are no
+  #       criteria — adopting full view's own put_criteria_progress omission
+  #       law (wire §4: omit the segment, never "0/0").
+  #
+  # Truncation honesty (charter law 2): the bare … is legal because doc_id is
+  # on every card AND list responses append ONE top-level help[] line when any
+  # truncation fired — see `maybe_put_brief_truncation_help/3`.
+  @brief_title_limit 96
+  @brief_now_text_limit 160
+  @brief_truncation_help "truncated fields end with …; full record via bp task get <doc_id>"
+
+  def render_doc(%Document{} = doc, :brief) do
+    content = doc.content || %{}
+
+    %{
+      doc_id: doc.doc_id,
+      title: truncate_graphemes(doc.title, @brief_title_limit),
+      priority: Map.get(content, "priority"),
+      assignee: Map.get(content, "assignee"),
+      parent_id: Map.get(content, "parent_id"),
+      updated_at: brief_timestamp(doc.updated_at)
+    }
+    |> put_unless(:status, doc.status, "published")
+    |> put_unless(:lifecycle_status, Map.get(content, "lifecycle_status"), "open")
+    |> put_brief_criteria(content)
+    |> put_brief_engagement(content)
+    |> put_brief_disposition(content)
+    |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
+    |> prune_nils()
+  end
+
+  # Brief claim v2 = {worker, epoch, now} only — the identity + fencing +
+  # now-line a board or resuming agent needs. work_digest / work_field_digests /
+  # ts_iso / execution_policy are full-view (and `task get`) detail. A claim
+  # with NEITHER a worker NOR a now-line carries no signal a list reader acts
+  # on (cut c) → nil, which prune_nils/1 then omits from the card.
+  defp brief_claim(%{} = claim) do
+    worker = Map.get(claim, "worker")
+    now = Map.get(claim, "now")
+
+    if is_nil(worker) and is_nil(now) do
+      nil
+    else
+      %{"worker" => worker, "epoch" => Map.get(claim, "epoch"), "now" => brief_now(now)}
+      |> prune_nils()
+    end
+  end
+
+  defp brief_claim(_), do: nil
+
+  # The now-line rides the card with its text capped (cut d) and its timestamp
+  # trimmed to seconds (cut f); `criterion` (a small int) survives untouched.
+  defp brief_now(%{} = now) do
+    now
+    |> Map.take(["text", "ts", "criterion"])
+    |> Map.update("text", nil, &truncate_graphemes(&1, @brief_now_text_limit))
+    |> Map.update("ts", nil, &brief_timestamp/1)
+    |> prune_nils()
+  end
+
+  defp brief_now(_), do: nil
+
+  # Cut (i): same omission law as full view's put_criteria_progress —
+  # Criteria.progress/1 is nil for absent/empty criteria, so a 0/0 pair never
+  # reaches the wire.
+  defp put_brief_criteria(map, content) do
+    case Criteria.progress(content) do
+      %{met: met, total: total} when total > 0 ->
+        map |> Map.put(:criteria_met, met) |> Map.put(:criteria_total, total)
+
+      _ ->
+        map
+    end
+  end
+
+  # tlv-s6 (TLV charter D15): the engagement companion — the thought-state
+  # object map {object, holder, ts, note} that considering/researching rows
+  # carry — rides the brief card as an ADDITIVE 14th key, present only when
+  # the doc carries a non-empty map (same omission law as criteria_progress:
+  # omit the segment, never an empty object). The 13 frozen brief fields are
+  # untouched; lifecycle_status (already on the card) carries the thought
+  # states for free via put_unless/4 above.
+  defp put_brief_engagement(map, content) do
+    case Map.get(content, "engagement") do
+      %{} = engagement when map_size(engagement) > 0 -> Map.put(map, :engagement, engagement)
+      _ -> map
+    end
+  end
+
+  # pds-w27: the ADJUDICATION TERM rides the brief card, same additive law as
+  # put_brief_engagement/2 above — present only when the row carries a term,
+  # omitted (never "" and never null) when it does not, so the exact-key-set
+  # contract on a minimal open row is untouched.
+  #
+  # THE TERM ONLY, and that is MEASURED, not taste. The hostile 50-card
+  # tripwire below params' own tests had 2080 B of headroom under its 30,720 B
+  # ceiling. Marginal cost over 50 cards:
+  #
+  #   * `,"disposition":"parked"`   = 23 B × 50 = 1150 B — fits, ~930 B spare.
+  #   * `,"reopen_trigger":""`      = 20 B × 50 = 1000 B MORE, with a
+  #     ZERO-LENGTH value: 1150 + 1000 = 2150 B > 2080 B. The trigger overflows
+  #     the ceiling before a single character of content — no grapheme cap can
+  #     rescue it, the cap would have to be negative.
+  #   * `disposition_reason` averages 753 B (max 1612 B) per row — the worst-50
+  #     full triple is 72,232 B, 34.7× the headroom.
+  #
+  # Both omitted companions already ride the FULL view (render_doc(_, :full) is
+  # a whole-content passthrough): `bp task get <doc_id>` is the escape hatch
+  # AXI charter law 2 asks for.
+  #
+  # NOTE for whoever caps a future brief field: brief_truncated?/1 below
+  # inspects ONLY `title` and `claim.now.text`, and Tasks.Stage caps NEITHER
+  # `reopen_trigger` NOR `disposition_reason`. A capped field shipped without a
+  # third clause there truncates SILENTLY — charter law 2 violated by omission.
+  # (Free reach: internal/cli/mcp_tasks.go forces view=brief on both its list
+  # and prime reads, so the MCP agent surface gains this term with no change.)
+  defp put_brief_disposition(map, content) do
+    case Map.get(content, "disposition") do
+      term when is_binary(term) and term != "" -> Map.put(map, :disposition, term)
+      _ -> map
+    end
+  end
+
+  # Cut (g)/(h): keep the key only when the value differs from the steady
+  # state the reader already assumes; nil stays nil for prune_nils/1.
+  defp put_unless(map, _key, steady, steady), do: map
+  defp put_unless(map, key, value, _steady), do: Map.put(map, key, value)
+
+  # Cut (a): a nil value IS absence — drop the key instead of shipping
+  # `"assignee":null` fifty times per page.
+  defp prune_nils(map), do: Map.reject(map, fn {_k, v} -> is_nil(v) end)
+
+  # Cut (d)/(e): grapheme-safe cap with a bare … marker. The truncated value
+  # NEVER exceeds `limit` graphemes (limit - 1 content + the marker), and a
+  # multi-byte cluster (emoji, combining accents) is never split.
+  defp truncate_graphemes(s, limit) when is_binary(s) do
+    if String.length(s) > limit do
+      s |> String.graphemes() |> Enum.take(limit - 1) |> Enum.join() |> Kernel.<>("…")
+    else
+      s
+    end
+  end
+
+  defp truncate_graphemes(other, _limit), do: other
+
+  # Cut (f): seconds precision. Structs are truncated (Jason renders them
+  # ISO8601 without the fractional part); the now-line's ts is a stored
+  # ISO8601 STRING, so its fractional seconds are trimmed textually.
+  defp brief_timestamp(%DateTime{} = dt), do: DateTime.truncate(dt, :second)
+  defp brief_timestamp(%NaiveDateTime{} = dt), do: NaiveDateTime.truncate(dt, :second)
+
+  defp brief_timestamp(ts) when is_binary(ts),
+    do: String.replace(ts, ~r/\.\d+(?=Z$|[+-]\d\d:?\d\d$)/, "")
+
+  defp brief_timestamp(other), do: other
+
+  # axi-s1: the brief LIST card = brief render_doc + `child_count` from
+  # one batched grouped query (`batch_child_counts/2`) — never per-row.
+  def render_brief(%Document{} = doc, child_counts) do
+    doc
+    |> render_doc(:brief)
+    |> Map.put(:child_count, Map.get(child_counts, strip_draft_prefix(doc.doc_id), 0))
+  end
+
+  # ─── Brief truncation honesty (axi-w2-s2, charter law 2) ─────────────────
+  #
+  # When any card on a brief LIST response lost bytes to the … caps above, the
+  # response carries ONE top-level help[] line naming the escape hatch. No
+  # truncation → no line (an always-on banner would train readers to ignore
+  # it). Checked against the RAW docs — the same inputs the render saw — so
+  # the predicate can never drift from what actually got cut. Full view never
+  # truncates, so it never carries the line.
+  def maybe_put_brief_truncation_help(base, _docs, :full), do: base
+
+  def maybe_put_brief_truncation_help(base, docs, :brief) do
+    if Enum.any?(docs, &brief_truncated?/1),
+      do: Map.put(base, :help, [@brief_truncation_help]),
+      else: base
+  end
+
+  defp brief_truncated?(%Document{} = doc) do
+    over_limit?(doc.title, @brief_title_limit) or
+      over_limit?(get_in(doc.content || %{}, ["claim", "now", "text"]), @brief_now_text_limit)
+  end
+
+  defp over_limit?(s, limit) when is_binary(s), do: String.length(s) > limit
+  defp over_limit?(_, _), do: false
 
   defp put_criteria_progress(map, content) do
     case Criteria.progress(content) do
@@ -218,6 +485,68 @@ defmodule BarkparkWeb.TasksController.Params do
     end)
   end
 
+  # axi-s1 (R1): batch child-count map for brief list cards, mirroring
+  # batch_edge_counts/1 — ONE grouped query over `type:"task"` rows keyed by
+  # the drafts-stripped `content->>'parent_id'` (the SAME prefix-agnostic
+  # match `maybe_filter_parent_id/2` / show's child rail use), so a list
+  # response never N+1s the children lookup.
+  #
+  # Tenancy: the CHILD rows are filtered by the caller's workspace/project
+  # scope — the same filters `show`'s child_tasks/2 applies. An unscoped copy
+  # would count another tenant's children under a shared parent slug: a
+  # cross-tenant existence-count leak.
+  #
+  # Returns %{drafts-stripped parent doc_id => child_count}; parents with no
+  # children are simply absent (callers default to 0).
+  #
+  # dr-w34-s4 (review): TWIN COLLAPSE APPLIES HERE TOO, and this is the FIFTH
+  # producer of a child count — the one the slice's brief called the "only
+  # producer" list and missed. It groups on the SAME drafts-stripped
+  # `parent_id` key that `maybe_filter_parent_id/2` matches on, so a
+  # `drafts.<id>` shadow child is guaranteed to fall in its published parent's
+  # bucket and count +2 exactly as `child_tasks/2` did. Without the collapse
+  # here, `bp task get <epic>` and `bp task ls --view=brief` report DIFFERENT
+  # child counts for the same epic — one number with two meanings, which is the
+  # defect this wave exists to remove rather than relocate.
+  def batch_child_counts(docs, scope \\ [])
+  def batch_child_counts([], _scope), do: %{}
+
+  def batch_child_counts(docs, scope) do
+    parent_keys =
+      docs
+      |> Enum.map(&strip_draft_prefix(&1.doc_id))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    case parent_keys do
+      [] ->
+        %{}
+
+      keys ->
+        from(d in Document,
+          where: d.type == "task",
+          where:
+            fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) in ^keys,
+          group_by: fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
+          select:
+            {fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
+             count(d.id)}
+        )
+        |> TaskQuery.collapse_twins()
+        |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
+        |> maybe_filter_project(Keyword.get(scope, :project_id))
+        |> Repo.all()
+        |> Map.new()
+    end
+  end
+
+  # The prefix-agnostic doc_id key the parent-edge queries group on — the
+  # Elixir-side twin of the SQL `regexp_replace(…, '^drafts\.', '')`.
+  def strip_draft_prefix(nil), do: nil
+
+  def strip_draft_prefix(doc_id) when is_binary(doc_id),
+    do: String.replace_prefix(doc_id, "drafts.", "")
+
   # Augment the base render_doc map with the three count fields the
   # `bp task` list/ready shapes carry (dependency_count + dependent_count
   # from batch_edge_counts; comment_count fixed at 0 until the comment
@@ -241,6 +570,7 @@ defmodule BarkparkWeb.TasksController.Params do
       doc_id: doc.doc_id,
       title: doc.title,
       lifecycle_status: Map.get(content, "lifecycle_status"),
+      execution_class: QueueGate.execution_class(content),
       inserted_at: doc.inserted_at
     }
     # Same omit-when-absent contract as render_doc — a parent's rail shows
@@ -252,6 +582,19 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def put_opt(opts, _key, nil), do: opts
   def put_opt(opts, key, value), do: Keyword.put(opts, key, value)
+
+  def parse_ready_order(nil), do: {:ok, nil}
+  def parse_ready_order(""), do: {:ok, nil}
+  def parse_ready_order("closure_nearest"), do: {:ok, :closure_nearest}
+  def parse_ready_order(_), do: {:error, :invalid_ready_order}
+
+  # Public claim requests may supply only the highest-precedence explicit
+  # override. Session/user/provider defaults are trusted server-side Claim opts,
+  # not client-asserted provenance.
+  def execution_policy_opts(params) do
+    []
+    |> put_opt(:execution_policy_override, Map.get(params, "execution_policy_override"))
+  end
 
   def fetch_string(params, key) do
     case Map.get(params, key) do
@@ -303,12 +646,148 @@ defmodule BarkparkWeb.TasksController.Params do
     end
   end
 
+  # Clamp an offset param into [0, 100_000] — the ONE floor convention every
+  # /v1/tasks pagination path shares (ready/2 and index/2). Floor 0 so a raw
+  # `?offset=-10` can never reach `OFFSET` as a negative (Postgres 500); ceiling
+  # 100_000 so `?offset=99999999` can't drive an unbounded deep scan. Mirrors the
+  # 3-site precedent (query_controller / search_controller / content/query) and
+  # the tlv-bl-tasks-ls-offset-broken (D19) index clamp — previously ready/2 was
+  # the sole offset in the codebase with a floor but no ceiling.
+  def parse_offset(raw), do: raw |> parse_int(0) |> max(0) |> min(100_000)
+
   def reason_to_string(reason) when is_atom(reason), do: Atom.to_string(reason)
   def reason_to_string({:invalid_lifecycle, s}), do: "invalid_lifecycle:#{s}"
   # Stamp (and any future holder-gated verb) on a task with no live claim —
   # mirror the invalid_lifecycle wire shape instead of leaking inspect() output.
   def reason_to_string({:not_in_progress, s}), do: "not_in_progress:#{s}"
+  # Close honesty gates (PDS-D288/D289/D290). Each gets a STABLE wire token —
+  # `inspect/1` on the tuple would leak Elixir syntax (`{:not_holder, "w"}`) into
+  # a JSON `reason` field that the bp CLI and the pr-task gate both string-match.
+  def reason_to_string({:not_holder, held}), do: "not_holder:#{held || "?"}"
+
+  def reason_to_string({:criteria_unmet, indices}) when is_list(indices),
+    do: "criteria_unmet:#{Enum.join(indices, ",")}"
+
+  def reason_to_string({:sentinel_worker_id, worker}), do: "sentinel_worker_id:#{worker}"
   def reason_to_string(other), do: inspect(other)
+
+  # ─── Criteria-conflict hints (D56 — the guard must TEACH, not just refuse) ──
+  #
+  # A guard is only worth shipping if the caller it blocks knows exactly what to
+  # type next. These strings ride the 409 as a top-level `message`, which the bp
+  # CLI prints in place of the bare reason token (internal/cli/errors.go
+  # `bodyMessage`). Surface-specific because the fix differs: `--criterion-text`
+  # on a stamp, a `"criterion"` key per entry on a close's `--set criteria:=…`.
+  # Any other reason returns nil → the response keeps its historical shape.
+  def criteria_hint(reason, surface)
+
+  def criteria_hint(:criterion_text_required, :stamp),
+    do:
+      ~s|--met requires --criterion-text "<the criterion's exact stored wording>". | <>
+        ~s|--criterion N is a 0-BASED index — the FIRST criterion is 0 — and is unverifiable on its own: | <>
+        ~s|an unguarded index silently flips whatever row it lands on. Read the wording from | <>
+        ~s|`bp task get <id>` at acceptance_criteria[N].criterion and pass it verbatim. --miss needs no text.|
+
+  def criteria_hint(:criterion_text_required, :close),
+    do:
+      ~s|every criteria entry with met=true must carry its "criterion" — the exact stored wording — e.g. | <>
+        ~s|--set 'criteria:=[{"index":0,"met":true,"evidence":"…","criterion":"<acceptance_criteria[0].criterion, verbatim>"}]'. | <>
+        ~s|The 0-BASED index alone is unverifiable and can flip a neighbouring criterion. An entry with met=false needs no text.|
+
+  def criteria_hint(:criteria_mismatch, _surface),
+    do:
+      ~s|the criterion text you passed is NOT the wording stored at that index. Either the index is off by one | <>
+        ~s|— it is 0-BASED, the FIRST criterion is 0 — or the list changed since you read it. Nothing was written. | <>
+        ~s|Re-read `bp task get <id>` and pass the index and the wording of the SAME row.|
+
+  def criteria_hint(:criteria_index_out_of_range, _surface),
+    do:
+      ~s|that criterion index is past the end of acceptance_criteria. The index is 0-BASED: the FIRST criterion is 0. Nothing was written.|
+
+  # Close honesty gates (PDS-D288/D289/D290). Same law as the D56 hints above:
+  # a refusal that does not teach the escape hatch is just a wall. Each names the
+  # exact body field to add — both overrides are plain close-body params, so on
+  # the CLI they ride `--set <field>="<reason>"`.
+  def criteria_hint({:not_holder, held}, :close),
+    do:
+      ~s|this task's claim is held by "#{held || "someone else"}", not by the worker you named, so closing it | <>
+        ~s|would record THEM as having finished the work. If that is deliberate (a lead sealing a merge-gated | <>
+        ~s|task is the normal case), say so and it lands, recorded: | <>
+        ~s|--set holder_override="<why you are closing someone else's claim>". | <>
+        ~s|This is an HONESTY gate, not authorization — it stops accidents and makes deliberate foreign closes auditable.|
+
+  def criteria_hint({:criteria_unmet, indices}, :close) when is_list(indices),
+    do:
+      ~s|acceptance criteria #{Enum.join(indices, ", ")} (0-BASED) are not met on the task AS STORED, and criteria | <>
+        ~s|flipped in this very close command do not count — that would be the closer grading its own homework. | <>
+        ~s|Stamp them as you prove them (`bp task stamp <id> <worker> <epoch> --criterion N --criterion-text "…" | <>
+        ~s|--met --evidence "…"`), or close over them on the record: --set criteria_override="<why it is done anyway>".|
+
+  def criteria_hint({:sentinel_worker_id, worker}, _surface),
+    do:
+      ~s|"#{worker}" is not a worker id — it is a missing value wearing a worker's clothes (empty, "None", | <>
+        ~s|"null", "nil" or "-"). A close attributed to it reads as a real close to every downstream gate. | <>
+        ~s|Pass the worker that actually holds the claim.|
+
+  def criteria_hint(_reason, _surface), do: nil
+
+  # ─── Success help[] (axi-s4 R5 — a success TEACHES the next command) ──────
+  #
+  # Every mutation SUCCESS envelope carries a top-level `help` list: 1–3
+  # concrete `bp` command templates with the REAL doc_id / worker / epoch the
+  # server knows at mutation time. Placeholder convention (AXI): angle
+  # brackets mark ONLY values the agent must fill, `"..."` marks free text;
+  # fixed flags ride verbatim. The bp CLI prints these on stderr in every
+  # output mode (internal/cli/run.go emitHelpHints); MCP surfaces them for
+  # free via raw body passthrough. Vocabulary must stay consistent with the
+  # static tool descriptions in internal/cli/mcp_tasks.go (same epoch rules,
+  # same worker-must-match rule).
+  #
+  # CRITICAL: pulse BUMPS the claim epoch (Tasks.Pulse) — its templates carry
+  # the FRESH epoch read from the RESPONSE doc, never the epoch the caller
+  # sent. Stamp does NOT bump, so its templates reuse the same epoch. The
+  # epoch is always read from the fresh post-write doc, which makes both
+  # rules one code path.
+  #
+  # help[] is ADDITIVE — a sibling of the existing envelope fields (the
+  # `warnings:` precedent on close_response/1), never a rename or removal.
+  def mutation_help(verb, %Document{} = doc, worker) do
+    id = strip_draft_prefix(doc.doc_id)
+    epoch = get_in(doc.content || %{}, ["claim", "epoch"])
+    help_templates(verb, id, worker, epoch)
+  end
+
+  # After a claim the loop is: pulse (heartbeat), stamp-as-you-go, close.
+  defp help_templates(verb, id, worker, epoch) when verb in [:claim, :claim_by_id] do
+    [
+      ~s|bp task pulse #{id} #{worker} --now "<one line: what you are doing right now>"|,
+      stamp_template(id, worker, epoch, "0"),
+      close_template(id, worker, epoch)
+    ]
+  end
+
+  # After a stamp (epoch unchanged) or a pulse (epoch BUMPED — `epoch` here is
+  # already the fresh one): stamp the next criterion, or seal with close.
+  defp help_templates(verb, id, worker, epoch) when verb in [:stamp, :pulse] do
+    [
+      stamp_template(id, worker, epoch, "<N>"),
+      close_template(id, worker, epoch)
+    ]
+  end
+
+  # The claim is gone — the next command is the next task.
+  defp help_templates(verb, _id, worker, _epoch) when verb in [:close, :release] do
+    [~s|bp task next #{worker}|]
+  end
+
+  defp stamp_template(id, worker, epoch, index) do
+    ~s|bp task stamp #{id} #{worker} #{epoch} --criterion #{index} --met --evidence "..." | <>
+      ~s|--criterion-text "<acceptance_criteria[#{index}].criterion, verbatim>"|
+  end
+
+  defp close_template(id, worker, epoch) do
+    ~s|bp task close #{id} #{worker} #{epoch} done "<summary of what shipped>"|
+  end
 
   # ─── Acceptance-criteria close-out (living-values §8/§9) ─────────────────
 
@@ -370,14 +849,21 @@ defmodule BarkparkWeb.TasksController.Params do
   # ─── Mid-claim criterion stamp (expressive-agent-loops D8) ───────────────
 
   # Parses the stamp body/query into `{:ok, index, {:met, evidence} | {:miss,
-  # note}}`. The bp CLI sends flags as query strings ("true", "0"); curl sends
-  # typed JSON — both shapes are accepted. Exactly one of met/miss; --met
-  # REQUIRES non-empty evidence (evidence or nothing, D3); --miss REQUIRES a
-  # non-empty note (an honest attempt has words). SHAPE-only validation (→
-  # 400); state conflicts are the stamp transaction's to detect under its lock.
+  # note}, criterion_text}`. The bp CLI sends flags as query strings ("true",
+  # "0"); curl sends typed JSON — both shapes are accepted. Exactly one of
+  # met/miss; --met REQUIRES non-empty evidence (evidence or nothing, D3);
+  # --miss REQUIRES a non-empty note (an honest attempt has words).
+  # `criterion_text` is the OPTIONAL 0-based/off-by-one guard: the criterion's
+  # expected stored text, threaded into the stamp's criteria-grain CAS so a
+  # wrong (in-range) index is rejected (`:criteria_mismatch`) instead of
+  # flipping a neighbour. Read from BOTH `criterion_text` (JSON body) and
+  # `criterion-text` (the kebab manifest flag → query key). SHAPE-only
+  # validation (→ 400); state conflicts are the stamp transaction's to detect
+  # under its lock.
   def parse_stamp(params) do
     met = stamp_flag?(Map.get(params, "met"))
     miss = stamp_flag?(Map.get(params, "miss"))
+    criterion_text = stamp_criterion_text(params)
 
     with {:ok, index} <- parse_stamp_index(Map.get(params, "criterion")) do
       cond do
@@ -386,13 +872,13 @@ defmodule BarkparkWeb.TasksController.Params do
 
         met ->
           case Map.get(params, "evidence") do
-            e when is_binary(e) and e != "" -> {:ok, index, {:met, e}}
+            e when is_binary(e) and e != "" -> {:ok, index, {:met, e}, criterion_text}
             _ -> {:error, :invalid_stamp, "--met requires non-empty --evidence"}
           end
 
         miss ->
           case Map.get(params, "note") do
-            n when is_binary(n) and n != "" -> {:ok, index, {:miss, n}}
+            n when is_binary(n) and n != "" -> {:ok, index, {:miss, n}, criterion_text}
             _ -> {:error, :invalid_stamp, "--miss requires non-empty --note"}
           end
 
@@ -403,6 +889,15 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   defp stamp_flag?(v), do: v in [true, "true", "1"]
+
+  # The optional criterion-text guard, from either wire shape. A non-string /
+  # blank value is treated as absent (nil) — the permissive index-only path.
+  defp stamp_criterion_text(params) do
+    case Map.get(params, "criterion_text") || Map.get(params, "criterion-text") do
+      s when is_binary(s) and s != "" -> s
+      _ -> nil
+    end
+  end
 
   defp parse_stamp_index(n) when is_integer(n) and n >= 0, do: {:ok, n}
 

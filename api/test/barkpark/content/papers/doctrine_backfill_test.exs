@@ -15,7 +15,7 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       CONFORMING paper is left BYTE-IDENTICAL (the D3 contract, asserted by
       serializing content before/after); the scan is tenancy-complete.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Document

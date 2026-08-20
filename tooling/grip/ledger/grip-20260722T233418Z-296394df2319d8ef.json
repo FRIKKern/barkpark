@@ -1,0 +1,43 @@
+{
+  "run_id": "grip-20260722T233418Z",
+  "recipes": [
+    {
+      "subject": "scaffy/commands/add-site-template.scaffy",
+      "quantity": "grep:-icE:node|pnpm|npx|npm",
+      "rerun": "grep -n 'ASSERT CMD' scaffy/commands/add-site-template.scaffy | grep -icE 'node|pnpm|npx|npm'",
+      "derived_level": "L3",
+      "deps": [
+        "scaffy/commands/add-site-template.scaffy"
+      ],
+      "observed_at": "2026-07-22T23:34:18Z"
+    },
+    {
+      "subject": "scaffy/commands/add-sdk-method.scaffy",
+      "quantity": "grep:-n:ASSERT CMD",
+      "rerun": "grep -n 'ASSERT CMD' scaffy/commands/add-sdk-method.scaffy",
+      "derived_level": "L3",
+      "deps": [
+        "scaffy/commands/add-sdk-method.scaffy"
+      ],
+      "observed_at": "2026-07-22T23:34:18Z"
+    },
+    {
+      "subject": "cmd:grep",
+      "quantity": "grep:-iE:node|pnpm|vitest|npx|npm",
+      "rerun": "grep -rn 'ASSERT CMD' scaffy/commands/*.scaffy | grep -iE 'node|pnpm|vitest|npx|npm'",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-22T23:34:18Z"
+    },
+    {
+      "subject": "package.json",
+      "quantity": "find:cloud",
+      "rerun": "find cloud -maxdepth 2 -iname 'package.json' -o -iname 'node_modules'",
+      "derived_level": "L3",
+      "deps": [
+        "package.json"
+      ],
+      "observed_at": "2026-07-22T23:34:18Z"
+    }
+  ]
+}

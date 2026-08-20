@@ -1,0 +1,1039 @@
+COMMAND "Add a Deployable Cloud Site Template" DESCRIPTION "Birth a complete deployable cloud site template in one run: a full Astro static starter tree under templates/<slug>/ (manifest + schema + seed + app skeleton, 13 files) PLUS every catalog-family and deploy-axis wiring point — the Elixir launch allowlist, the /new display catalog, the Site closed set, the DeployRequest enum + message, the Provisioner registry row, the runtime.exs env override, the Go exact-set lock, both cloud lock-test literals, the bp CLI usage line and the MANIFEST.md entry — 13 injections across 12 files, closed by the repo's own drift gates. The historical add-a-starter path (1eec860ac, the self-described worn 9-file lockstep) left runtime.exs and the CLI usage drifted; this command carries ALL the touch points or none." LAST_UPDATED "18-07-2026-08-00-00" DOMAIN "barkpark" TAGS "templates", "cloud", "scaffold" CONCEPT "site-template" VARIANT "astro" DIRECTION "add" VARIABLES
+  VARIABLE 1 "TemplateName" TITLE "Template slug" DESCRIPTION "The template's slug — lowercase kebab, conventionally ending in -starter. Drives the templates/{{.template-name}}/ tree, every allowlist entry, the Astro base path /sites/{{.template-name}}/, and the Provisioner atom + config key in its snake spelling {{.template_name}}. Pick it like an API name: it is a filesystem path on every deploy box and a closed-enum member on three surfaces." EXAMPLES "field-notes-starter", "docs-starter"
+  VARIABLE 2 "TemplateTitle" OPAQUE TITLE "Human title" DESCRIPTION "The display title the /new catalog and the template manifest carry. OPAQUE: emitted verbatim (spaces + capitals preserved), spelled {{.TemplateTitle}} everywhere. No double quotes." EXAMPLES "Field Notes Starter", "Docs Starter"
+  VARIABLE 3 "Description" OPAQUE TITLE "One-line description" DESCRIPTION "One sentence for the manifest, the /new display catalog, the package.json and the MANIFEST.md entry. OPAQUE verbatim prose — no double quotes, no braces, no newlines (it lands inside JSON and Elixir string literals)." EXAMPLES "A minimal static field-notes site: dated entries rendered as a list plus detail pages, pre-built by Astro at deploy time."
+  VARIABLE 4 "DocType" TITLE "Content document type" DESCRIPTION "The document type this site builds from — the schema name, the seed _type, the manifest publishType and the BARKPARK_DOC_TYPE literal. Lowercase; prefer a single word (the Pascal spelling {{.DocType}} becomes the schema title). The persisted _type discriminator documents queries forever." EXAMPLES "note", "article"
+  VARIABLE 5 "Theme" OPAQUE ONEOF "charple", "ember", "evergreen", "fjord" TITLE "Default palette" DESCRIPTION "The shipped palette this template defaults to — the manifest theme field and the baked data-bp-theme attribute. Must be one of the four shipped palettes (design/themes/<name>.json, mirrored by the manifest schema enum and Site.@known_site_themes); ONEOF refuses anything else at substitution time." EXAMPLES "evergreen"
+  VARIABLE 6 "EnvKey" OPAQUE TITLE "Template-dir env override key" DESCRIPTION "The per-starter template-dir override env var for api/config/runtime.exs. Convention: BARKPARK_<SLUG_AS_UPPER_SNAKE>_TEMPLATE_DIR (scaffy has no upper-snake transform, so the key crosses as a declared OPAQUE literal — the add-migration timestamp precedent). Uppercase ASCII + underscores only." EXAMPLES "BARKPARK_FIELD_NOTES_STARTER_TEMPLATE_DIR", "BARKPARK_DOCS_STARTER_TEMPLATE_DIR"
+
+# =============================================================================
+# add-site-template — one command, the WHOLE worn add-a-starter path.
+#
+# WHAT A "SITE TEMPLATE" IS. templates/<slug>/ carrying barkpark.template.json
+# is BOTH:
+#   * a CATALOG template (dwb-4): the manifest + schemas/ + seed are mirrored
+#     into the Go provisioner's go:embed catalog and drive the /new?template=
+#     new-instance bootstrap — allowlisted in cloud Registry.@known_templates,
+#     displayed by cloud Templates.@catalog, exact-set-locked by
+#     TestCatalogCarriesTheShippedTemplates and BOTH directions of
+#     TestEmbeddedCatalogMatchesRepoRoot;
+#   * a DEPLOYABLE STARTER (search-template D7): the whole dir is the app tree
+#     the box Provisioner materializes into <sites_dir>/<slug>/src — closed-enum
+#     on api DeployRequest.validate_template/1, registered in the Provisioner
+#     @templates map, env-overridable via runtime.exs, mirrored by cloud
+#     Site.@known_site_templates and enumerated in the bp CLI usage line.
+#
+# ALL-OR-NOTHING, BY DESIGN. A barkpark.template.json that exists WITHOUT the
+# full family reds the reverse-drift half of TestEmbeddedCatalogMatchesRepoRoot
+# ("repo template not in the embedded catalog") and desyncs the three Elixir
+# allowlists from the Go lock. That is exactly why this is one command: every
+# touch point lands in one run, and the closing ASSERT CMD gates prove the
+# family is complete before the run reports green. The engine's transactional
+# refusal (any anchor miss ⇒ exit 5, nothing written) is the other half of the
+# same guarantee.
+#
+# THE FAMILY, file by file (● create, ○ inject):
+#
+#   ● templates/{{.template-name}}/…                              13 files
+#   ○ cloud/lib/barkpark_cloud/registry.ex                        launch allowlist
+#   ○ cloud/lib/barkpark_cloud/templates.ex                       /new display catalog
+#   ○ cloud/lib/barkpark_cloud/registry/site.ex                   site-create closed set
+#   ○ cloud/test/barkpark_cloud/bootstrap_template_test.exs       ×2 lock literals
+#   ○ cloud/test/barkpark_cloud/sites_deploy_test.exs             message literal
+#   ○ api/lib/barkpark/sites/deploy_request.ex                    ×2 enum clause + message
+#   ○ api/lib/barkpark/sites/provisioner.ex                       template registry row
+#   ○ api/config/runtime.exs                                      env override
+#   ○ internal/provisioner/catalog/catalog_test.go                Go exact-set lock
+#   ○ internal/cli/cloud_site_cmd.go                              usage enumeration
+#   ○ templates/MANIFEST.md                                       manifest index entry
+#
+# The go:embed mirror (internal/provisioner/catalog/templates/) is NOT created
+# here — `make provisioner-catalog-sync` below derives it from the repo-root
+# tree (one truth; the Makefile loop is glob-driven, so it needs no edit).
+#
+# HONEST SCOPE — where the line falls:
+#   * FRAMEWORK IS FIXED: astro, static engine. The app skeleton is a real
+#     Astro tree (modeled on templates/astro-starter, the live static-engine
+#     exemplar); a Next.js/node or Phoenix column of the theme×framework matrix
+#     needs its own skeleton variant (site-template/nextjs) — the injection
+#     block below is framework-agnostic and transplants verbatim.
+#   * NO package-lock.json. The static deploy engine builds with `npm ci`,
+#     which requires a lockfile scaffy cannot honestly synthesize (resolved
+#     dependency hashes). MANUAL COMPLETION STEP, after the run:
+#         cd templates/{{.template-name}} && npm install --package-lock-only
+#     and commit the lockfile. Until then the template is catalog-complete and
+#     bootstrap-complete but a box deploy fails at BUILD.
+#   * SIBLING ACCRETION: the ten mark-planting inserts accrete cleanly (each
+#     anchors a stable head/comment line). The three string-literal REPLACEs
+#     (DeployRequest message, sites_deploy_test message, CLI usage) consume
+#     their structural anchor, so a SECOND template run refuses loud (exit 5)
+#     at those ops on a tree that already carries a first — re-run them by hand
+#     against the grown literal, or re-anchor. Documented, not hidden.
+#   * REMOVE: `bp scaffy remove` reverses the 13 creates + 13 injections
+#     byte-clean, then run `make provisioner-catalog-sync` once more — the
+#     sync is a true mirror (rm -rf + re-copy), so it prunes the embedded
+#     copies the apply-time sync materialized.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1/13 ● Template manifest — the file whose PRESENCE binds the whole family
+#     (the reverse-drift lock keys on it). Shape mirrors astro-search-starter:
+#     framework astro, a shipped-palette theme, one schema, a mutations seed
+#     published as {{.doc_type}}, and the starter env contract.
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/barkpark.template.json"
+WITH
+::: {{.template-name}} manifest :::
+{
+  "$schema": "../barkpark.template.schema.json",
+  "manifestVersion": "1",
+  "name": "{{.template-name}}",
+  "title": "{{.TemplateTitle}}",
+  "description": "{{.Description}}",
+  "framework": "astro",
+  "dataset": "production",
+  "demoContent": true,
+  "theme": "{{.Theme}}",
+  "schemas": ["schemas/{{.doc_type}}.json"],
+  "seed": {
+    "path": "seed.json",
+    "format": "mutations",
+    "publish": true,
+    "publishType": "{{.doc_type}}"
+  },
+  "env": [
+    { "key": "BARKPARK_API_URL", "role": "server", "source": "api_url", "description": "Barkpark API base the BUILD reads from (the deployed site carries no token)." },
+    { "key": "BARKPARK_TOKEN", "role": "server", "source": "read_token", "description": "Read-only token used at build time only." },
+    { "key": "BARKPARK_DATASET", "role": "server", "source": "dataset", "description": "Dataset the build reads." },
+    { "key": "BARKPARK_WORKSPACE", "role": "server", "source": "workspace", "description": "Workspace slug for scoped reads." },
+    { "key": "BARKPARK_PROJECT", "role": "server", "source": "project", "description": "Project slug for scoped reads." },
+    { "key": "BARKPARK_DOC_TYPE", "role": "server", "source": "literal", "value": "{{.doc_type}}", "description": "The content type the site builds from — the seeded {{.doc_type}} corpus." }
+  ]
+}
+::: {{.template-name}} manifest :::
+
+# -----------------------------------------------------------------------------
+# 2/13 ● Schema — the {{.doc_type}} document type (blog-starter post shape:
+#     slug/excerpt/body/date), applied in order by the bootstrap.
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/schemas/{{.doc_type}}.json"
+WITH
+::: {{.doc_type}} schema :::
+{
+  "name": "{{.doc_type}}",
+  "title": "{{.DocType}}",
+  "icon": "file-text",
+  "visibility": "public",
+  "fields": [
+    { "name": "slug", "title": "Slug", "type": "string" },
+    { "name": "excerpt", "title": "Excerpt", "type": "text" },
+    { "name": "body", "title": "Body", "type": "text" },
+    { "name": "published_at", "title": "Published at", "type": "string" }
+  ]
+}
+::: {{.doc_type}} schema :::
+
+# -----------------------------------------------------------------------------
+# 3/13 ● Seed — three published {{.doc_type}} documents (mutations format;
+#     createOrReplace writes DRAFTS, so the manifest's publish+publishType do
+#     the separate publish mutation — the MANIFEST.md §seed.format contract).
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/seed.json"
+WITH
+::: {{.template-name}} seed :::
+{
+  "mutations": [
+    { "createOrReplace": { "_id": "{{.doc_type}}-welcome", "_type": "{{.doc_type}}", "title": "Welcome", "status": "published",
+      "slug": "welcome",
+      "excerpt": "Your new Barkpark-backed site is live.",
+      "body": "This document is seeded content. Edit it in Studio, publish, and redeploy - the site rebuilds against fresh content at every deploy.",
+      "published_at": "2026-01-01" } },
+
+    { "createOrReplace": { "_id": "{{.doc_type}}-writing-in-studio", "_type": "{{.doc_type}}", "title": "Writing in Studio", "status": "published",
+      "slug": "writing-in-studio",
+      "excerpt": "How content flows from Studio to this site.",
+      "body": "Create a {{.doc_type}}, fill in the fields the schema defines, and publish. The build reads only published documents, so drafts never leak.",
+      "published_at": "2026-01-02" } },
+
+    { "createOrReplace": { "_id": "{{.doc_type}}-how-deploys-work", "_type": "{{.doc_type}}", "title": "How deploys work", "status": "published",
+      "slug": "how-deploys-work",
+      "excerpt": "Static builds, health-gated, atomically switched.",
+      "body": "Every deploy builds the whole site from the dataset, bakes deploy markers into the HTML, health-gates the output, and switches a symlink. Rollback is the same switch, backwards.",
+      "published_at": "2026-01-03" } }
+  ]
+}
+::: {{.template-name}} seed :::
+
+# -----------------------------------------------------------------------------
+# 4/13 ● README — quick start + the env contract pointer.
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/README.md"
+WITH
+::: {{.template-name}} readme :::
+# {{.TemplateTitle}}
+
+{{.Description}}
+
+A [Barkpark](https://barkpark.cloud) site template: an [Astro](https://astro.build)
+site that reads its `{{.doc_type}}` documents from a Barkpark dataset **at build
+time** and produces plain static HTML — built and served next to Phoenix on the
+static symlink-swap deploy engine, health-gated before it goes live.
+
+`@barkpark/core` is framework-free; the whole content link is one small module,
+`src/lib/barkpark.ts`.
+
+## Pages
+
+- `/` — every published `{{.doc_type}}`, newest first
+- `/d/<slug>/` — one document, pre-rendered at build
+
+A broken content link (unreachable API, bad token) **fails the build** — it
+never reaches visitors. A reachable-but-empty dataset renders an honest empty
+state and still builds.
+
+## Quick start
+
+```sh
+npm install
+cp .env.example .env      # fill in BARKPARK_API_URL + BARKPARK_DATASET (+ token)
+npm run dev
+```
+
+The env contract (`BARKPARK_API_URL` / `BARKPARK_TOKEN` / `BARKPARK_DATASET` /
+`BARKPARK_DOC_TYPE`, plus the `BARKPARK_SITE_BASE` path and the deploy markers)
+is the same cross-framework contract documented in `templates/DEPLOYING.md`;
+see `.env.example` for every variable, including the ambient-env shadow gotcha.
+
+## Deploying
+
+Generate and commit the lockfile once (`npm install --package-lock-only`) — the
+deploy engine builds with `npm ci`. Then:
+
+```sh
+bp cloud site create --name {{.template-name}} --dataset <ws/proj/ds> \
+  --instance <id|name> --template {{.template-name}} --deploy
+```
+
+Default palette: `{{.Theme}}` (baked as `data-bp-theme`; override per site with
+`--theme`).
+::: {{.template-name}} readme :::
+
+# -----------------------------------------------------------------------------
+# 5/13 ● Env contract — astro-starter's proven .env.example, retargeted.
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/.env.example"
+WITH
+::: {{.template-name}} env example :::
+# ─────────────────────────────────────────────────────────────────────────────
+# {{.TemplateTitle}} — build-time content link
+#
+# Copy to `.env` and fill in. Read ONLY at build time (Astro static output)
+# inside Node — the token never reaches the browser. Same cross-framework
+# contract as templates/DEPLOYING.md. Keep the names identical across adapters.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# REQUIRED — the SCOPED API base: <origin>/w/:workspace/p/:project
+#   e.g. https://guerrilla.barkpark.cloud/w/acme/p/default
+BARKPARK_API_URL=
+
+# REQUIRED — the dataset to read from.
+BARKPARK_DATASET=production
+
+# Server-only read token. A fully public dataset can read anonymously (leave
+# blank). NEVER name this with a public prefix (no PUBLIC_… / NEXT_PUBLIC_…) —
+# a public-prefixed var is inlined into client JS and leaks the token.
+BARKPARK_TOKEN=
+
+# Optional — only consulted when BARKPARK_API_URL is a bare (unscoped) origin.
+BARKPARK_WORKSPACE=
+BARKPARK_PROJECT=
+
+# The document type this site lists + renders.
+BARKPARK_DOC_TYPE={{.doc_type}}
+
+# The path this site is served under, behind the shared Caddy front (Astro's
+# `base`). The deploy engine sets this per slug.
+BARKPARK_SITE_BASE=/sites/{{.template-name}}/
+# Optional public origin, only used for absolute canonical/OG URLs.
+BARKPARK_SITE_ORIGIN=
+
+# Deploy markers — injected by the deploy engine, baked into the output HTML
+# for its HEALTH stage. Leave blank locally (defaults to dev/unknown).
+BARKPARK_BUILD_ID=
+BARKPARK_CONTENT_REV=
+
+# ⚠️  Ambient-env shadow gotcha (live-proven): Vite gives `process.env`
+# PRECEDENCE over this file, so a BARKPARK_* var exported by your shell SHADOWS
+# what you put here. `unset` the ambient vars or pass values inline when
+# building by hand; the deploy engine scrubs its build env for you.
+::: {{.template-name}} env example :::
+
+# -----------------------------------------------------------------------------
+# 6/13 ● .gitignore — build output, deps, local env.
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/.gitignore"
+WITH
+::: {{.template-name}} gitignore :::
+# build output
+dist/
+# astro type generation
+.astro/
+# deps
+node_modules/
+# local env — NEVER commit real tokens
+.env
+.env.local
+.env.*.local
+# os / editor
+.DS_Store
+::: {{.template-name}} gitignore :::
+
+# -----------------------------------------------------------------------------
+# 7/13 ● package.json — published @barkpark/core (no vendor tarballs), astro 7.
+#     NO lockfile here — see the HONEST SCOPE note in the header.
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/package.json"
+WITH
+::: {{.template-name}} package json :::
+{
+  "name": "@barkpark/{{.template-name}}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "{{.Description}}",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@barkpark/core": "1.0.0-preview.3",
+    "astro": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+::: {{.template-name}} package json :::
+
+# -----------------------------------------------------------------------------
+# 8/13 ● astro.config.mjs — static output + the PATH-under-FQDN base contract
+#     (BARKPARK_SITE_BASE, normalized), astro-starter's proven resolver.
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/astro.config.mjs"
+WITH
+::: {{.template-name}} astro config :::
+// @ts-check
+import { defineConfig } from 'astro/config'
+
+/**
+ * The path this site is served under, behind the shared Caddy front. The
+ * deploy engine serves every spawned site at a PATH under the content FQDN,
+ * so built asset URLs must be prefixed with `/sites/<slug>/`.
+ *
+ * Parameterized via `BARKPARK_SITE_BASE` so the same template, unchanged,
+ * ships under any slug. Astro requires a leading AND trailing slash on `base`;
+ * we normalize whatever the env carries.
+ */
+function resolveBase() {
+  const raw = (process.env.BARKPARK_SITE_BASE || '/sites/{{.template-name}}/').trim()
+  const withLead = raw.startsWith('/') ? raw : `/${raw}`
+  return withLead.endsWith('/') ? withLead : `${withLead}/`
+}
+
+// https://astro.build/config
+export default defineConfig({
+  // Static output — reproducible, isolated builds producing plain HTML the
+  // deploy engine can health-gate and atomically switch.
+  output: 'static',
+  base: resolveBase(),
+  site: process.env.BARKPARK_SITE_ORIGIN || 'http://localhost:4321',
+  build: {
+    assetsPrefix: undefined,
+  },
+})
+::: {{.template-name}} astro config :::
+
+# -----------------------------------------------------------------------------
+# 9/13 ● tsconfig — Astro strict preset.
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/tsconfig.json"
+WITH
+::: {{.template-name}} tsconfig :::
+{
+  "extends": "astro/tsconfigs/strict",
+  "include": [".astro/types.d.ts", "**/*"],
+  "exclude": ["dist"]
+}
+::: {{.template-name}} tsconfig :::
+
+# -----------------------------------------------------------------------------
+# 10/13 ● The content link — build-time only, list + single fetch, honest
+#     field access (top-level OR content{}-nested, both live shapes).
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/src/lib/barkpark.ts"
+WITH
+::: {{.template-name}} content link :::
+// Build-time Barkpark content link. Runs ONLY at build (Astro static output)
+// inside Node — never in the browser. Env contract: see .env.example and
+// templates/DEPLOYING.md (the same names across every framework adapter).
+
+import {
+  createClient,
+  type BarkparkClient,
+  type BarkparkDocument,
+} from '@barkpark/core'
+
+/** Barkpark API version this template pins its reads to. */
+const API_VERSION = '2026-04-01'
+
+export interface BpEnv {
+  /** Scoped API base — `<origin>/w/:ws/p/:proj`. */
+  apiUrl: string
+  /** Server-only read token, or undefined for anonymous public reads. */
+  token: string | undefined
+  dataset: string
+  workspace: string | undefined
+  project: string | undefined
+  docType: string
+  buildId: string
+  contentRev: string
+}
+
+class BpConfigError extends Error {}
+
+function required(env: NodeJS.ProcessEnv, name: string): string {
+  const v = env[name]
+  if (typeof v !== 'string' || v.trim().length === 0) {
+    throw new BpConfigError(
+      `Missing required env var ${name}. See .env.example for the full contract.`,
+    )
+  }
+  return v.trim()
+}
+
+/**
+ * Resolve the build-time env contract. Throws when a required var is absent so
+ * a misconfigured deploy fails LOUD at build — never silently shipping an
+ * empty or anonymous site by accident.
+ */
+export function resolveEnv(env: NodeJS.ProcessEnv = process.env): BpEnv {
+  return {
+    apiUrl: required(env, 'BARKPARK_API_URL'),
+    dataset: required(env, 'BARKPARK_DATASET'),
+    token: env.BARKPARK_TOKEN?.trim() || undefined,
+    workspace: env.BARKPARK_WORKSPACE?.trim() || undefined,
+    project: env.BARKPARK_PROJECT?.trim() || undefined,
+    docType: env.BARKPARK_DOC_TYPE?.trim() || '{{.doc_type}}',
+    buildId: env.BARKPARK_BUILD_ID?.trim() || 'dev',
+    contentRev: env.BARKPARK_CONTENT_REV?.trim() || 'unknown',
+  }
+}
+
+/** True when `url`'s path already carries a `/w/:ws/p/:proj` scope. */
+function isScopedUrl(url: string): boolean {
+  try {
+    return /\/w\/[^/]+\/p\/[^/]+\/?$/.test(new URL(url).pathname)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * A FRESH `@barkpark/core` client for this build. Deliberately NOT memoized
+ * and NOT `createPreloader` (Next.js-specific; bleeds request state across
+ * module scope).
+ */
+export function createBarkparkClient(env: BpEnv): BarkparkClient {
+  const scoped = isScopedUrl(env.apiUrl)
+  return createClient({
+    projectUrl: env.apiUrl,
+    dataset: env.dataset,
+    apiVersion: API_VERSION,
+    perspective: 'published',
+    ...(env.token ? { token: env.token } : {}),
+    ...(!scoped && env.workspace ? { workspace: env.workspace } : {}),
+    ...(!scoped && env.project ? { project: env.project } : {}),
+  })
+}
+
+export interface SiteDoc {
+  id: string
+  slug: string
+  title: string
+  excerpt: string
+  body: string
+  publishedAt: string
+}
+
+/** Read a field from either live document shape: top-level or content{}. */
+function field(doc: BarkparkDocument, name: string): string {
+  const flat = (doc as Record<string, unknown>)[name]
+  if (typeof flat === 'string' && flat.length > 0) return flat
+  const content = (doc as Record<string, unknown>).content
+  if (content && typeof content === 'object') {
+    const nested = (content as Record<string, unknown>)[name]
+    if (typeof nested === 'string' && nested.length > 0) return nested
+  }
+  return ''
+}
+
+function toSiteDoc(doc: BarkparkDocument): SiteDoc | null {
+  if (typeof doc._id !== 'string' || doc._id.length === 0) return null
+  const title = field(doc, 'title') || doc._id
+  return {
+    id: doc._id,
+    slug: field(doc, 'slug') || doc._id,
+    title,
+    excerpt: field(doc, 'excerpt'),
+    body: field(doc, 'body'),
+    publishedAt: field(doc, 'published_at'),
+  }
+}
+
+/**
+ * Every published document of the site's type, newest first. A network / auth
+ * failure THROWS (the build fails — a broken content link must never reach
+ * visitors; that is the health-gate premise). An empty dataset returns [] so
+ * the site still builds an honest empty state.
+ */
+export async function fetchSiteDocs(
+  bp: BarkparkClient,
+  env: BpEnv,
+): Promise<SiteDoc[]> {
+  const rows = await bp
+    .docs(env.docType)
+    .order('_updatedAt:desc')
+    .limit(200)
+    .find()
+  return rows
+    .map(toSiteDoc)
+    .filter((d): d is SiteDoc => d !== null)
+}
+::: {{.template-name}} content link :::
+
+# -----------------------------------------------------------------------------
+# 11/13 ● Base layout — bakes the deploy markers the engine's HEALTH stage
+#     greps for, plus the {{.Theme}} palette hook (data-bp-theme).
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/src/layouts/Base.astro"
+WITH
+::: {{.template-name}} base layout :::
+---
+/**
+ * Base HTML shell. Bakes the deploy markers the deploy engine greps for in its
+ * HEALTH stage (bp-build-id / bp-content-rev / bp-doc-id / bp-doc-title), so a
+ * build that lost its content link never passes health and never goes live.
+ */
+export interface Props {
+  title: string
+  buildId: string
+  contentRev: string
+  docId: string
+  docTitle: string
+}
+
+const { title, buildId, contentRev, docId, docTitle } = Astro.props
+const siteBase = import.meta.env.BASE_URL
+---
+
+<!doctype html>
+<html lang="en" data-bp-theme="{{.Theme}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="bp-build-id" content={buildId} />
+    <meta name="bp-content-rev" content={contentRev} />
+    <meta name="bp-doc-id" content={docId} />
+    <meta name="bp-doc-title" content={docTitle} />
+    <meta name="bp-site-base" content={siteBase} />
+    <title>{title}</title>
+    <style is:global>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #16181d;
+        --muted: #5b6472;
+        --card: #f6f7f9;
+        --border: #e4e7ec;
+        --accent: #3b5bdb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0e1117;
+          --fg: #e6e9ef;
+          --muted: #99a2b2;
+          --card: #171b23;
+          --border: #262c37;
+          --accent: #7c93f5;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      main {
+        max-width: 42rem;
+        margin: 0 auto;
+        padding: 4rem 1.5rem;
+      }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>
+::: {{.template-name}} base layout :::
+
+# -----------------------------------------------------------------------------
+# 12/13 ● Index page — every published {{.doc_type}}, newest first, linking
+#     into the pre-rendered detail pages under the site base.
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/src/pages/index.astro"
+WITH
+::: {{.template-name}} index page :::
+---
+import Base from '../layouts/Base.astro'
+import { resolveEnv, createBarkparkClient, fetchSiteDocs } from '../lib/barkpark'
+
+// Build time only. A missing required env var or a broken content link throws
+// here and fails the build loudly — it never reaches visitors.
+const env = resolveEnv()
+const bp = createBarkparkClient(env)
+const docs = await fetchSiteDocs(bp, env)
+const newest = docs[0]
+
+const base = import.meta.env.BASE_URL
+---
+
+<Base
+  title="{{.TemplateTitle}}"
+  buildId={env.buildId}
+  contentRev={env.contentRev}
+  docId={newest?.id ?? ''}
+  docTitle={newest?.title ?? ''}
+>
+  <header>
+    <p style="margin:0 0 .25rem;color:var(--muted);font-size:.85rem;letter-spacing:.04em;text-transform:uppercase;">
+      Barkpark Cloud · Astro
+    </p>
+    <h1 style="margin:0 0 1.5rem;font-size:2rem;line-height:1.2;">{{.TemplateTitle}}</h1>
+  </header>
+
+  {
+    docs.length > 0 ? (
+      <ul style="list-style:none;margin:0;padding:0;display:grid;gap:1rem;">
+        {docs.map((doc) => (
+          <li style="border:1px solid var(--border);background:var(--card);border-radius:12px;padding:1.25rem;">
+            <h2 style="margin:0 0 .35rem;font-size:1.2rem;">
+              <a href={`${base}d/${doc.slug}/`} style="text-decoration:none;color:inherit;">
+                {doc.title}
+              </a>
+            </h2>
+            {doc.excerpt && (
+              <p style="margin:0 0 .5rem;color:var(--muted);">{doc.excerpt}</p>
+            )}
+            <p style="margin:0;color:var(--muted);font-size:.8rem;">
+              {doc.publishedAt && <span>{doc.publishedAt} · </span>}
+              <code>{doc.id}</code>
+            </p>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <article style="border:1px dashed var(--border);border-radius:12px;padding:1.5rem;color:var(--muted);">
+        <h2 style="margin:0 0 .5rem;font-size:1.15rem;color:var(--fg);">
+          No <code>{env.docType}</code> documents yet
+        </h2>
+        <p style="margin:0;">
+          The content link is live, but this dataset has no published
+          <code>{env.docType}</code> documents. Publish one in Barkpark and
+          redeploy — the site rebuilds against fresh content.
+        </p>
+      </article>
+    )
+  }
+
+  <footer style="margin-top:2.5rem;color:var(--muted);font-size:.8rem;">
+    <p style="margin:0;">
+      build <code>{env.buildId}</code> · content rev <code>{env.contentRev}</code>
+    </p>
+  </footer>
+</Base>
+::: {{.template-name}} index page :::
+
+# -----------------------------------------------------------------------------
+# 13/13 ● Detail page — one static route per published {{.doc_type}}
+#     (getStaticPaths params must be plain strings).
+# -----------------------------------------------------------------------------
+CREATE FILE IF ABSENT "templates/{{.template-name}}/src/pages/d/[slug].astro"
+WITH
+::: {{.template-name}} detail page :::
+---
+import Base from '../../layouts/Base.astro'
+import {
+  resolveEnv,
+  createBarkparkClient,
+  fetchSiteDocs,
+  type SiteDoc,
+} from '../../lib/barkpark'
+
+export async function getStaticPaths() {
+  const env = resolveEnv()
+  const bp = createBarkparkClient(env)
+  const docs = await fetchSiteDocs(bp, env)
+  // Slug values must be plain strings; each doc becomes one pre-rendered page.
+  return docs.map((doc) => ({ params: { slug: doc.slug }, props: { doc } }))
+}
+
+interface Props {
+  doc: SiteDoc
+}
+
+const { doc } = Astro.props
+const env = resolveEnv()
+const paragraphs = doc.body
+  .split(/\n\s*\n/)
+  .map((p) => p.trim())
+  .filter((p) => p.length > 0)
+
+const base = import.meta.env.BASE_URL
+---
+
+<Base
+  title={doc.title}
+  buildId={env.buildId}
+  contentRev={env.contentRev}
+  docId={doc.id}
+  docTitle={doc.title}
+>
+  <nav style="margin:0 0 1.5rem;">
+    <a href={base} style="font-size:.9rem;">← All entries</a>
+  </nav>
+
+  <article>
+    <h1 style="margin:0 0 .5rem;font-size:2rem;line-height:1.2;">{doc.title}</h1>
+    <p style="margin:0 0 1.5rem;color:var(--muted);font-size:.85rem;">
+      {doc.publishedAt && <span>{doc.publishedAt} · </span>}
+      <code>{doc.id}</code>
+    </p>
+    {paragraphs.map((p) => (
+      <p style="margin:0 0 1rem;">{p}</p>
+    ))}
+  </article>
+</Base>
+::: {{.template-name}} detail page :::
+
+# =============================================================================
+# INJECTIONS — the catalog family + the deploy axis, one guarded mark each.
+# Mark shape: st--<slug>--<site> (variable part FIRST, static tail LAST — the
+# tier-<name>--<tier> prefix-safety pattern: st--docs--known is never a
+# substring of st--docs-starter--known, so the engine's substring re-run guard
+# cannot false-skip a sibling).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# ○ cloud launch allowlist — Registry.@known_templates (head of list; the Go
+#   exact-set lock compares as a set, cloud lock literals ride below).
+# -----------------------------------------------------------------------------
+IN "cloud/lib/barkpark_cloud/registry.ex"
+### Allowlist the slug for /v1/launch template validation
+INSERT AFTER FIRST
+::: known-templates head :::
+    # new content-template slugs land here (head of list)
+::: known-templates head :::
+WITH
+::: {{.template-name}} known entry :::
+    # scaffy:add-site-template {{.TemplateName}} MARK:st--{{.template-name}}--known
+    "{{.template-name}}",
+::: {{.template-name}} known entry :::
+MARK "st--{{.template-name}}--known"
+
+# -----------------------------------------------------------------------------
+# ○ cloud /new display catalog — Templates.@catalog (head of list; slugs/0
+#   must stay list-equal to Registry.known_templates/0, and both ops insert at
+#   the head, so the lock holds by construction). The description is emitted in
+#   mix format's canonical broken form — canonical for descriptions ≥ ~77
+#   chars; a very short one joins under the advisory Format gate (cosmetic).
+# -----------------------------------------------------------------------------
+IN "cloud/lib/barkpark_cloud/templates.ex"
+### Display card for the /new?template= launch flow
+INSERT AFTER FIRST
+::: catalog opener :::
+  @catalog [
+::: catalog opener :::
+WITH
+::: {{.template-name}} catalog card :::
+    # scaffy:add-site-template {{.TemplateName}} MARK:st--{{.template-name}}--catalog
+    %{
+      slug: "{{.template-name}}",
+      title: "{{.TemplateTitle}}",
+      description:
+        "{{.Description}}",
+      framework: "astro",
+      demo_content: true,
+      what_you_get: [
+        "An `{{.doc_type}}` content type — slug, excerpt, body, date",
+        "A static Astro site: index list + per-document detail pages, pre-rendered at build",
+        "Demo {{.doc_type}} documents seeded so it renders on first deploy",
+        "Symlink-swap deploys: immutable releases, health-gated, instant rollback"
+      ],
+      env_keys: @env_common ++ ~w(BARKPARK_DOC_TYPE),
+      repo: @repo,
+      docs: @docs
+    },
+::: {{.template-name}} catalog card :::
+MARK "st--{{.template-name}}--catalog"
+
+# -----------------------------------------------------------------------------
+# ○ cloud site-create closed set — Site.@known_site_templates (head of list;
+#   the validation message enumerates in declaration order, so the test
+#   literal REPLACE below matches head-first).
+# -----------------------------------------------------------------------------
+IN "cloud/lib/barkpark_cloud/registry/site.ex"
+### Allow the slug on POST /v1/sites (bp cloud site create --template)
+INSERT AFTER FIRST
+::: site-templates head :::
+    # new deployable site-template slugs land here (head of list)
+::: site-templates head :::
+WITH
+::: {{.template-name}} site entry :::
+    # scaffy:add-site-template {{.TemplateName}} MARK:st--{{.template-name}}--site
+    "{{.template-name}}",
+::: {{.template-name}} site entry :::
+MARK "st--{{.template-name}}--site"
+
+# -----------------------------------------------------------------------------
+# ○ cloud lock literal #1 — the 422 unknown-template body (order = the
+#   registry's declaration order, so the new slug lands at the head).
+# -----------------------------------------------------------------------------
+IN "cloud/test/barkpark_cloud/bootstrap_template_test.exs"
+### Extend the unknown-template 422 body literal
+INSERT AFTER FIRST
+::: unknown-template body opener :::
+      assert body["known_templates"] == [
+::: unknown-template body opener :::
+WITH
+::: {{.template-name}} bootstrap body entry :::
+               # scaffy:add-site-template {{.TemplateName}} MARK:st--{{.template-name}}--bootstrap-known
+               "{{.template-name}}",
+::: {{.template-name}} bootstrap body entry :::
+MARK "st--{{.template-name}}--bootstrap-known"
+
+# -----------------------------------------------------------------------------
+# ○ cloud lock literal #2 — the known_templates/0 mirror test ("change BOTH
+#   together" — this IS the both).
+# -----------------------------------------------------------------------------
+IN "cloud/test/barkpark_cloud/bootstrap_template_test.exs"
+### Extend the catalog-mirror lock literal
+INSERT AFTER FIRST
+::: mirror lock opener :::
+    assert Registry.known_templates() == [
+::: mirror lock opener :::
+WITH
+::: {{.template-name}} mirror entry :::
+             # scaffy:add-site-template {{.TemplateName}} MARK:st--{{.template-name}}--bootstrap-mirror
+             "{{.template-name}}",
+::: {{.template-name}} mirror entry :::
+MARK "st--{{.template-name}}--bootstrap-mirror"
+
+# -----------------------------------------------------------------------------
+# ○ cloud site-create message literal — sites_deploy_test pins the exact
+#   validation message; the new slug enumerates first (declaration order).
+#   MARK VIRTUAL: a string literal admits no comment. Sibling accretion: a
+#   second template consumes this anchor — see HONEST SCOPE.
+# -----------------------------------------------------------------------------
+IN "cloud/test/barkpark_cloud/sites_deploy_test.exs"
+### Extend the pinned site-template validation message
+REPLACE
+::: site message anchor :::
+      assert {"must be one of: astro-search-starter, astro-starter, next-starter, search-starter",
+::: site message anchor :::
+WITH
+::: {{.template-name}} site message :::
+      assert {"must be one of: {{.template-name}}, astro-search-starter, astro-starter, next-starter, search-starter",
+::: {{.template-name}} site message :::
+MARK VIRTUAL "st--{{.template-name}}--deploy-test-msg"
+ASLONG FILE DONT CONTAIN "must be one of: {{.template-name}},"
+
+# -----------------------------------------------------------------------------
+# ○ api deploy enum — DeployRequest.validate_template/1: one clause before the
+#   catch-all (closed set: the value indexes a filesystem path, never
+#   String.to_atom on request data).
+# -----------------------------------------------------------------------------
+IN "api/lib/barkpark/sites/deploy_request.ex"
+### Accept the slug on POST /v1/admin/site-deploy
+INSERT BEFORE FIRST
+::: validate-template catch-all :::
+  defp validate_template(_template),
+::: validate-template catch-all :::
+WITH
+::: {{.template-name}} deploy clause :::
+  # scaffy:add-site-template {{.TemplateName}} MARK:st--{{.template-name}}--deploy-request
+  defp validate_template("{{.template-name}}"), do: {:ok, :{{.template_name}}}
+
+::: {{.template-name}} deploy clause :::
+MARK "st--{{.template-name}}--deploy-request"
+
+# -----------------------------------------------------------------------------
+# ○ api deploy enum message — the invalid_template hint enumerates every legal
+#   slug. MARK VIRTUAL (string literal); sibling accretion consumes the anchor.
+# -----------------------------------------------------------------------------
+IN "api/lib/barkpark/sites/deploy_request.ex"
+### Extend the invalid_template message enumeration
+REPLACE
+::: deploy message anchor :::
+       ~s(template must be one of "astro-starter", "next-starter", "search-starter", "astro-search-starter")}
+::: deploy message anchor :::
+WITH
+::: {{.template-name}} deploy message :::
+       ~s(template must be one of "astro-starter", "next-starter", "search-starter", "astro-search-starter", "{{.template-name}}")}
+::: {{.template-name}} deploy message :::
+MARK VIRTUAL "st--{{.template-name}}--deploy-request-msg"
+ASLONG FILE DONT CONTAIN ", \"{{.template-name}}\")"
+
+# -----------------------------------------------------------------------------
+# ○ api provisioner registry — @templates row: the atom the enum clause mints
+#   maps to its config-override key + repo-relative source dir.
+# -----------------------------------------------------------------------------
+IN "api/lib/barkpark/sites/provisioner.ex"
+### Register the template dir in the Provisioner registry
+INSERT AFTER FIRST
+::: templates map opener :::
+  @templates %{
+::: templates map opener :::
+WITH
+::: {{.template-name}} provisioner row :::
+    # scaffy:add-site-template {{.TemplateName}} MARK:st--{{.template-name}}--provisioner
+    {{.template_name}}: {:{{.template_name}}_template_dir, "templates/{{.template-name}}"},
+::: {{.template-name}} provisioner row :::
+MARK "st--{{.template-name}}--provisioner"
+
+# -----------------------------------------------------------------------------
+# ○ api runtime config — the per-starter template-dir env override (the touch
+#   point the historical astro-search-starter addition MISSED — live drift,
+#   benign only via the module default fallback). Emitted single-line, the
+#   house shape; a slug ≥ ~18 chars pushes the line past mix format's 98-col
+#   wrap and advisory-reds the Format job — cosmetic, `mix format
+#   config/runtime.exs` re-wraps it (deploy_request.ex:62 carries the same
+#   pre-existing debt on main).
+# -----------------------------------------------------------------------------
+IN "api/config/runtime.exs"
+### Wire the env override into the Provisioner runtime config
+INSERT AFTER FIRST
+::: provisioner env opener :::
+      sites_dir: System.get_env("BARKPARK_SITES_DIR"),
+::: provisioner env opener :::
+WITH
+::: {{.template-name}} runtime override :::
+      # scaffy:add-site-template {{.TemplateName}} MARK:st--{{.template-name}}--runtime
+      {{.template_name}}_template_dir: System.get_env("{{.EnvKey}}"),
+::: {{.template-name}} runtime override :::
+MARK "st--{{.template-name}}--runtime"
+
+# -----------------------------------------------------------------------------
+# ○ Go exact-set lock — catalog_test.go `want` (append-friendly: sorted before
+#   compare, so head insertion is order-safe).
+# -----------------------------------------------------------------------------
+IN "internal/provisioner/catalog/catalog_test.go"
+### Extend the Go embedded-catalog exact-set lock
+INSERT AFTER FIRST
+::: want opener :::
+	want := []string{
+::: want opener :::
+WITH
+::: {{.template-name}} want entry :::
+		// scaffy:add-site-template {{.TemplateName}} MARK:st--{{.template-name}}--catalog-test
+		"{{.template-name}}",
+::: {{.template-name}} want entry :::
+MARK "st--{{.template-name}}--catalog-test"
+
+# -----------------------------------------------------------------------------
+# ○ bp CLI usage — the --template enumeration in `bp cloud site create`.
+#   MARK VIRTUAL (string literal); sibling accretion consumes the anchor.
+# -----------------------------------------------------------------------------
+IN "internal/cli/cloud_site_cmd.go"
+### Enumerate the slug in the CLI usage line
+REPLACE
+::: cli usage anchor :::
+	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--template astro-starter|next-starter|search-starter|astro-search-starter] [--deploy]"
+::: cli usage anchor :::
+WITH
+::: {{.template-name}} cli usage :::
+	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--template astro-starter|next-starter|search-starter|astro-search-starter|{{.template-name}}] [--deploy]"
+::: {{.template-name}} cli usage :::
+MARK VIRTUAL "st--{{.template-name}}--cli-usage"
+ASLONG FILE DONT CONTAIN "|{{.template-name}}]"
+
+# -----------------------------------------------------------------------------
+# ○ MANIFEST.md — the human index of retrofitted manifests.
+# -----------------------------------------------------------------------------
+IN "templates/MANIFEST.md"
+### Index the template in MANIFEST.md
+INSERT AFTER FIRST
+::: manifest index anchor :::
+  the static symlink-swap engine.
+::: manifest index anchor :::
+WITH
+::: {{.template-name}} manifest entry :::
+- `templates/{{.template-name}}/` — {{.Description}} (scaffy
+  `add-site-template` instance: Astro static, `{{.doc_type}}` type,
+  `{{.Theme}}` default palette.)
+  <!-- scaffy:add-site-template {{.TemplateName}} MARK:st--{{.template-name}}--manifest-md -->
+::: {{.template-name}} manifest entry :::
+MARK "st--{{.template-name}}--manifest-md"
+
+# =============================================================================
+# Post-conditions — every family member present, then the repo's OWN drift
+# gates as the close: the completeness of the family IS the correctness.
+# =============================================================================
+ASSERT FILE "templates/{{.template-name}}/barkpark.template.json" CONTAINS "\"name\": \"{{.template-name}}\""
+ASSERT FILE "templates/{{.template-name}}/barkpark.template.json" CONTAINS "\"publishType\": \"{{.doc_type}}\""
+ASSERT FILE "templates/{{.template-name}}/schemas/{{.doc_type}}.json" CONTAINS "\"name\": \"{{.doc_type}}\""
+ASSERT FILE "templates/{{.template-name}}/seed.json" CONTAINS "\"_id\": \"{{.doc_type}}-welcome\""
+ASSERT FILE "templates/{{.template-name}}/README.md" CONTAINS "# {{.TemplateTitle}}"
+ASSERT FILE "templates/{{.template-name}}/.env.example" CONTAINS "BARKPARK_SITE_BASE=/sites/{{.template-name}}/"
+ASSERT FILE "templates/{{.template-name}}/.gitignore" EXISTS
+ASSERT FILE "templates/{{.template-name}}/package.json" CONTAINS "\"name\": \"@barkpark/{{.template-name}}\""
+ASSERT FILE "templates/{{.template-name}}/astro.config.mjs" CONTAINS "/sites/{{.template-name}}/"
+ASSERT FILE "templates/{{.template-name}}/tsconfig.json" CONTAINS "astro/tsconfigs/strict"
+ASSERT FILE "templates/{{.template-name}}/src/lib/barkpark.ts" CONTAINS "fetchSiteDocs"
+ASSERT FILE "templates/{{.template-name}}/src/layouts/Base.astro" CONTAINS "data-bp-theme=\"{{.Theme}}\""
+ASSERT FILE "templates/{{.template-name}}/src/pages/index.astro" CONTAINS "fetchSiteDocs"
+ASSERT FILE "templates/{{.template-name}}/src/pages/d/[slug].astro" CONTAINS "getStaticPaths"
+ASSERT FILE "cloud/lib/barkpark_cloud/registry.ex" CONTAINS "MARK:st--{{.template-name}}--known"
+ASSERT FILE "cloud/lib/barkpark_cloud/templates.ex" CONTAINS "MARK:st--{{.template-name}}--catalog"
+ASSERT FILE "cloud/lib/barkpark_cloud/registry/site.ex" CONTAINS "MARK:st--{{.template-name}}--site"
+ASSERT FILE "cloud/test/barkpark_cloud/bootstrap_template_test.exs" CONTAINS "MARK:st--{{.template-name}}--bootstrap-known"
+ASSERT FILE "cloud/test/barkpark_cloud/bootstrap_template_test.exs" CONTAINS "MARK:st--{{.template-name}}--bootstrap-mirror"
+ASSERT FILE "cloud/test/barkpark_cloud/sites_deploy_test.exs" CONTAINS "must be one of: {{.template-name}},"
+ASSERT FILE "api/lib/barkpark/sites/deploy_request.ex" CONTAINS "MARK:st--{{.template-name}}--deploy-request"
+ASSERT FILE "api/lib/barkpark/sites/deploy_request.ex" CONTAINS ", \"{{.template-name}}\")"
+ASSERT FILE "api/lib/barkpark/sites/provisioner.ex" CONTAINS "MARK:st--{{.template-name}}--provisioner"
+ASSERT FILE "api/config/runtime.exs" CONTAINS "System.get_env(\"{{.EnvKey}}\")"
+ASSERT FILE "internal/provisioner/catalog/catalog_test.go" CONTAINS "MARK:st--{{.template-name}}--catalog-test"
+ASSERT FILE "internal/cli/cloud_site_cmd.go" CONTAINS "|{{.template-name}}]"
+ASSERT FILE "templates/MANIFEST.md" CONTAINS "MARK:st--{{.template-name}}--manifest-md"
+
+# The repo's own gates close the run. LOCAL: the go:embed mirror sync (a fast
+# rm-and-copy; glob-driven, so it needs no Makefile edit) + the Go catalog
+# lock (BOTH drift directions + manifest Load/Validate of the new template) +
+# a vet over the CLI edit. TIER ci: the Elixir gates — the api suite compiles
+# the world (A2), and the cloud lock tests need a local Postgres; both run on
+# every PR. (Proven warm-locally 2026-07-18: cloud scoped mix test, 52 tests
+# in ~6s with CC=/usr/bin/clang — run it yourself when you carry a warm
+# cloud/_build and a test DB.)
+ASSERT CMD "make provisioner-catalog-sync"
+ASSERT CMD "CC=/usr/bin/clang go test ./internal/provisioner/catalog/ -count=1"
+ASSERT CMD "CC=/usr/bin/clang go vet ./internal/cli/"
+ASSERT CMD "cd cloud && CC=/usr/bin/clang mix test test/barkpark_cloud/bootstrap_template_test.exs test/barkpark_cloud/web/router_templates_test.exs test/barkpark_cloud/sites_deploy_test.exs" TIER ci
+ASSERT CMD "cd api && CC=/usr/bin/clang mix test test/barkpark/sites/deploy_runner_test.exs" TIER ci

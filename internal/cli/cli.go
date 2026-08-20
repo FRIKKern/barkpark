@@ -39,6 +39,16 @@ const (
 	exitServer     = 8 // server-side 5xx / internal_error
 )
 
+// taskVerbAliases maps the two common muscle-memory `bp task` verbs the manifest
+// does not declare to their canonical spellings. Applied at the top of
+// `case "task"` in Execute, before any verb-specific intercept or manifest
+// dispatch. Task-noun-only by design (charter decision 12) — the census named
+// `task show`/`task list` specifically; no other noun gets these aliases.
+var taskVerbAliases = map[string]string{
+	"show": "get",
+	"list": "ls",
+}
+
 // Execute is the CLI entry point. args is os.Args[1:]. It returns the process
 // exit code; main() passes it straight to os.Exit. Execute never calls os.Exit
 // itself so it stays unit-testable.
@@ -84,7 +94,16 @@ func Execute(args []string) int {
 	pendingUpdate := startUpdateCheck(noun)
 	defer finishUpdateNotice(os.Stderr, pendingUpdate)
 
-	// Resolve the target context (flags > env > active > defaults).
+	// A broken repo context file (.barkpark.json) fails LOUDLY before any
+	// dispatch — above all one carrying a "token" field, which is a credential
+	// committed into a repo, never something to skip over quietly. `bp --version`
+	// stays reachable (it returns above, before context resolution).
+	if _, err := loadRepoFile(); err != nil {
+		out.userErr("%v", err)
+		return exitUsage
+	}
+
+	// Resolve the target context (flags > env > repo file > active > defaults).
 	ctx := resolveContext(g)
 
 	// Built-ins are CLI-native and do not consult the manifest tree for
@@ -150,6 +169,19 @@ func Execute(args []string) int {
 		// JSON verb.
 		return runChat(out, g, ctx, rest[1:])
 	case "task":
+		// Task-noun verb aliases (charter decision 12; census: 2,428 `task show`
+		// + 329 `task list` typed errors — 1.19 MB of pure context waste). The
+		// manifest declares `get`/`ls`, not the `show`/`list` spellings muscle
+		// memory reaches for; `show` is not even Levenshtein-reachable from `get`,
+		// so a bare did-you-mean cannot cover it. Rewrite the local verb IN PLACE,
+		// note the rewrite on stderr ONLY (proven invisible to `-o json` stdout,
+		// so machine output stays byte-identical to the canonical verb), and FALL
+		// THROUGH to the normal manifest dispatch — the same shape as the `server
+		// ls`→`servers` and `task tui` precedents. Task-noun-only by design.
+		if alias, ok := taskVerbAliases[verb]; ok {
+			out.errf("note: `task %s` is not a verb — running `barkpark task %s`", verb, alias)
+			verb = alias
+		}
 		// `bp task tui` is the discoverable singular-noun spelling of the same
 		// full-screen reader as `bp tasks`. Keep one implementation and one
 		// renderer; this alias exists so a user already navigating `bp task …`
@@ -207,6 +239,21 @@ func Execute(args []string) int {
 		if verb == "ready" && !g.help && !out.machineOut() {
 			printReadyFrontierHeader(out, ctx)
 		}
+		// `bp task` bare (a noun with no verb) — prepend ONE live counts line above
+		// the verb list so the incomplete-usage view still answers "what's the state
+		// of the board?" instead of only listing verbs (AXI R7). Sourced from GET
+		// /v1/tasks/prime `counts`; best-effort and human-only: an offline server or
+		// any fetch error simply drops the line, the usage block still prints, and the
+		// exit stays exitUsage. Machine output (-o json|yaml) is left byte-identical.
+		// Then FALL THROUGH (no return) to the manifest usage path below.
+		if verb == "" && !g.help && !out.machineOut() {
+			if counts, err := fetchTaskCounts(ctx); err == nil {
+				if line := formatTaskCountsLine(counts); line != "" {
+					out.errf("%s", line)
+					out.errf("")
+				}
+			}
+		}
 	case "cmux":
 		// `bp cmux <hook|dispatch|install|status>` — the CMUX × Barkpark bridge
 		// (task-TUI epic, wave 14). A client-side builtin like `bp tasks` / `bp
@@ -241,12 +288,44 @@ func Execute(args []string) int {
 		// file. --server/--token are global flags already folded into g; the
 		// target and any trailing tokens ride in rest[1:].
 		return runOnramp(out, g, rest[1:])
+	case "context":
+		// `bp context pack <file…>` — pack files into an optical context bundle
+		// (paginated PNG pages + a verbatim text sidecar) an agent reads at a
+		// fraction of the text-token price. A client-side builtin like cmux/mcp/
+		// onramp: `context` is not a manifest noun, so this intercept shadows
+		// nothing and needs no server change. Local file I/O only — no network.
+		// Research trail: /papers/optical-compression-research-report.
+		if verb == "pack" {
+			return runContextPack(out, g, tail)
+		}
+		if g.help || verb == "" {
+			printContextPackHelp(out)
+			return exitOK
+		}
+		return usageErrf(out, func() { printContextPackHelp(out) }, "unknown command %q %q", noun, verb)
 	case "use":
 		// `bp use <name|url>` — flip the active server locally (no network).
 		return runUse(out, rest[1:])
 	case "servers":
 		// `bp servers` — list saved servers.
 		return runServers(out, rest[1:])
+	case "teams":
+		// `bp teams` — list the Cloud team memberships (GET /v1/me), starring the
+		// active team. The switcher's read half; the write half is `bp team use`.
+		// Requires `bp login`.
+		if g.help {
+			printTeamsHelp(out)
+			return exitOK
+		}
+		return runTeams(out, rest[1:])
+	case "team":
+		// `bp team use <slug|id>` — switch the active Cloud team (persists
+		// cfg.CloudTeam). The switcher's write half. Requires `bp login`.
+		if g.help {
+			printTeamHelp(out)
+			return exitOK
+		}
+		return runTeam(out, rest[1:])
 	case "barkparks":
 		// `bp barkparks` — the fleet view. AUTHORITATIVE control-plane registry
 		// (cloud-12) when a Cloud token is present; the local KnownServers view
@@ -348,6 +427,14 @@ func Execute(args []string) int {
 		// gate against the active/named server and report each check (cloud-13).
 		// Exits non-zero if any check fails. Its own flags are not globals, so they
 		// arrive in rest.
+		// `bp doctor --onboarding` is the D3 client-readiness receipt (a
+		// disjoint mode, doctor_onboarding.go); plain `bp doctor` stays the
+		// remote-server health gate. Check the mode BEFORE the shared --help so
+		// the onboarding receipt gets its OWN help text (it still honours -h via
+		// its own arg scan).
+		if doctorOnboardingRequested(rest[1:]) {
+			return runDoctorOnboarding(out, g, ctx, rest[1:])
+		}
 		if g.help {
 			printDoctorHelp(out)
 			return exitOK
@@ -413,6 +500,13 @@ func Execute(args []string) int {
 		// tokens through internal/semrole + taskboard so the sheet can never drift
 		// from what the CLI/TUI actually paints. Honours NO_COLOR / a pipe.
 		return runStyle(out, g, rest[1:])
+	case "scaffy":
+		// `bp scaffy validate|fmt <path>...` — validate/format .scaffy command
+		// files against the pinned Scaffy v2 grammar (internal/scaffy). A purely-
+		// local built-in like make/style (no network, no manifest): `scaffy` is
+		// not a manifest noun, so this intercept shadows nothing. Everything
+		// after the noun (verb, --check, paths) rides in rest.
+		return runScaffy(out, g, rest[1:])
 	case "help":
 		// `barkpark help [noun]` — surface usage; manifest-driven below if loaded.
 	}
@@ -433,7 +527,7 @@ func Execute(args []string) int {
 				usageNoun(out, tree, verb)
 				return exitOK
 			}
-			return usageErrf(out, func() { usageSuggestNouns(out, tree, verb) }, "unknown command %q", verb)
+			return suggestUnknownNoun(out, tree, m.AuthTier, verb)
 		}
 		usageTreeTop(out, m, tree)
 		return exitOK
@@ -442,7 +536,7 @@ func Execute(args []string) int {
 	if verb == "" || g.help {
 		// `barkpark <noun>` or `barkpark <noun> -h` → list the noun's verbs.
 		if _, ok := lookupNoun(tree, noun); !ok {
-			return usageErrf(out, func() { usageSuggestNouns(out, tree, noun) }, "unknown command %q", noun)
+			return suggestUnknownNoun(out, tree, m.AuthTier, noun)
 		}
 		// `barkpark <noun> <verb> -h` → that command's own arg/flag help
 		// (like git/gh/stripe), not the whole noun overview.
@@ -450,6 +544,21 @@ func Execute(args []string) int {
 			if cmd, ok := tree.Lookup(noun, verb); ok {
 				usageCommand(out, *cmd)
 				return exitOK
+			}
+		}
+		// Bare `bp <noun>` (AXI R7 / charter decision 19): prepend ONE best-effort
+		// counts line from GET /v1/data/counts/:dataset so the incomplete-usage view
+		// still answers "how much of this content type is there?" instead of only
+		// listing verbs. `task` is excluded — it prints its own richer lifecycle line
+		// above (the `case "task"` bare branch). Human output only and silent-degrade:
+		// a pre-counts / offline server, or a command noun that is not a stored type,
+		// drops the line and the verb list prints exactly as before. Skipped for the
+		// `-h` help request (g.help) — that is documentation, not a board glance.
+		// Then FALL THROUGH to usageNoun (no return) so usage renders as before.
+		if verb == "" && !g.help {
+			if line := nounCountsLine(noun, out.machineOut(), ctx); line != "" {
+				out.errf("%s", line)
+				out.errf("")
 			}
 		}
 		usageNoun(out, tree, noun)
@@ -461,13 +570,49 @@ func Execute(args []string) int {
 
 	cmd, ok := tree.Lookup(noun, verb)
 	if !ok {
-		return usageErrf(out, func() {
-			if _, nounOK := lookupNoun(tree, noun); nounOK {
-				usageSuggestVerb(out, tree, noun, verb)
-			} else {
-				usageSuggestNouns(out, tree, noun)
+		// A REAL noun followed by something that is not one of its verbs used to
+		// report `unknown command "search" "PDS crown proof"` — which reads as
+		// "the noun `search` is unknown" and sent six independent agents in one
+		// wave off to grep instead of searching Barkpark. The manifest tree can
+		// tell the two cases apart, so it must: an unknown NOUN keeps its
+		// noun-typo suggestion; a known noun gets a message that says the noun is
+		// fine and names the exact fix.
+		//
+		// THE INFERENCE RULE (deliberately narrow — `soleReadVerb`):
+		//   FIRES only when ALL of these hold:
+		//     - the noun is real and declares EXACTLY ONE verb (no guessing which
+		//       of several the user meant — one obvious answer or nothing);
+		//     - that verb does not write (manifest `writes:false`) — a destructive
+		//       verb is NEVER inferred, only suggested;
+		//     - the typed token is not itself a near-typo of that verb (then it is
+		//       a mistyped verb, not an argument: `search quer x` still corrects);
+		//     - the token does not look like a flag (`-`/`--`).
+		//   When it fires, the token and everything after it are re-dispatched as
+		//   the verb's ARGUMENTS (`bp search "text"` → `bp search query "text"`),
+		//   with one stderr note so the rewrite is never silent.
+		//   DOES NOT FIRE for a multi-verb noun (`bp doc "text"`), for a writing
+		//   sole verb, or for an unknown noun — each of those falls through to the
+		//   precise error below, which names the corrected command when it can.
+		if n, nounOK := lookupNoun(tree, noun); nounOK {
+			if sole, inferable := soleReadVerb(n, verb); inferable {
+				out.errf("note: `%s` has one verb — running `barkpark %s %s`", noun, noun, sole.Verb)
+				return runCommand(out, g, ctx, m, *sole, append([]string{verb}, tail...))
 			}
-		}, "unknown command %q %q", noun, verb)
+			return usageErrHintf(out, func() {
+				usageSuggestVerb(out, tree, noun, verb)
+			}, verbHint(tree, noun, verb), "%s", noVerbMsg(n, noun, verb))
+		}
+		return suggestUnknownNoun(out, tree, m.AuthTier, noun)
+	}
+
+	// `bp task stamp` — client-side ergonomic wrapper: echo the 0-based
+	// --criterion index TRANSLATED to the 1-based position boards show, and
+	// refuse a --met on a MERGE-GATED row without an explicit --merge-gated
+	// override (the one mis-index that corrupts a lead's merge decision). The
+	// actual POST still runs through runCommand — the wrapper only adds the two
+	// CLI-only guards, then strips the CLI-only flag before delegating.
+	if noun == "task" && verb == "stamp" {
+		return runTaskStamp(out, g, ctx, m, *cmd, tail)
 	}
 
 	return runCommand(out, g, ctx, m, *cmd, tail)
@@ -475,7 +620,7 @@ func Execute(args []string) int {
 
 // resolveContext composes the manifest.Context by precedence:
 //
-//	flags > env(actually-set) > active(persisted config) > baked defaults
+//	flags > env(actually-set) > repo file (.barkpark.json) > active(persisted config) > baked defaults
 //
 // The crucial subtlety: apiclient.ConfigFromEnv() bakes a non-empty
 // localhost/dev-token/default floor even when no BARKPARK_* var is set, which
@@ -494,6 +639,16 @@ func resolveContext(g globals) manifest.Context {
 	if c, err := LoadConfig(); err == nil {
 		cfg = c
 		active = c.ToActiveContext()
+	}
+
+	// The repo-scoped context (.barkpark.json, discovered by walking up from
+	// cwd) folds over the active layer per-field, which slots it between env and
+	// the global config: flags > env > repo file > active > defaults. An
+	// unloadable file is treated as ABSENT here — Execute has already refused to
+	// dispatch on one (the loud token/parse gate), so this lenient read can
+	// never silently honour a rejected file.
+	if repo, err := loadRepoFile(); err == nil {
+		active = repo.overlayActive(cfg, active)
 	}
 
 	flags := map[string]string{}

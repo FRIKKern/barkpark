@@ -1,0 +1,542 @@
+
+added 53 packages in 35s
+npm warn allow-scripts 1 package has install scripts not yet covered by allowScripts:
+npm warn allow-scripts   sharp@0.34.5 (install: node install/check.js || npm run build)
+npm warn allow-scripts
+npm warn allow-scripts Run `npm approve-scripts --allow-scripts-pending` to review, or `npm approve-scripts <pkg>` to allow.
+
+> search-starter@0.1.0 build
+> next build
+
+▲ Next.js 16.2.4 (Turbopack)
+
+  Creating an optimized production build ...
+
+> Build error occurred
+Error: Turbopack build failed with 29 errors:
+./sites/search-capstone/src/app/(finder)/page.tsx:1:1
+Module not found: Can't resolve '@/components/desktop-only'
+[31m[1m>[0m [90m1 |[0m [36mimport[0m { [33mDesktopOnly[0m } [36mfrom[0m [32m"@/components/desktop-only"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m2 |[0m [36mimport[0m { [33mGraphLanding[0m } [36mfrom[0m [32m"@/components/graph-landing"[0m;
+  [90m3 |[0m [36mimport[0m { [33mMapLanding[0m } [36mfrom[0m [32m"@/components/map-landing"[0m;
+  [90m4 |[0m [36mimport[0m { corpusStatusMarker, fetchCorpusGraph } [36mfrom[0m [32m"@/lib/graph"[0m;
+
+Import map: aliased to relative './components/desktop-only' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/d/[type]/[slug]/page.tsx:7:1
+Module not found: Can't resolve '@/components/document-detail'
+  [90m 5 |[0m [36mimport[0m { [33mDOC_TYPES[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+  [90m 6 |[0m [36mimport[0m { metadataFromPreview } [36mfrom[0m [32m"@/lib/preview-metadata"[0m;
+[31m[1m>[0m [90m 7 |[0m [36mimport[0m { [33mDocumentDetail[0m } [36mfrom[0m [32m"@/components/document-detail"[0m;
+  [90m   |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m 8 |[0m
+  [90m 9 |[0m [90m// ISR: getDocument wraps its fetch in unstable_cache (5-min revalidate, busted[0m
+  [90m10 |[0m [90m// on-demand via revalidateTag("doc:<type>")), so the per-request work here is a[0m
+
+Import map: aliased to relative './components/document-detail' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/layout.tsx:2:1
+Module not found: Can't resolve '@/components/document-nav'
+  [90m1 |[0m [36mimport[0m { [33mFinder[0m } [36mfrom[0m [32m"@/components/finder"[0m;
+[31m[1m>[0m [90m2 |[0m [36mimport[0m { [33mDocumentNav[0m } [36mfrom[0m [32m"@/components/document-nav"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m3 |[0m [36mimport[0m { runSearch } [36mfrom[0m [32m"@/lib/find-search"[0m;
+  [90m4 |[0m [36mimport[0m { [33mDEFAULT_ENGINE[0m, [36mtype[0m [33mFindResponse[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+  [90m5 |[0m [36mimport[0m { buildPrefixSeed, [36mtype[0m [33mPrefixSeed[0m, [36mtype[0m [33mSeedDoc[0m } [36mfrom[0m [32m"@/lib/prefix-seed"[0m;
+
+Import map: aliased to relative './components/document-nav' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/layout.tsx:1:1
+Module not found: Can't resolve '@/components/finder'
+[31m[1m>[0m [90m1 |[0m [36mimport[0m { [33mFinder[0m } [36mfrom[0m [32m"@/components/finder"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m2 |[0m [36mimport[0m { [33mDocumentNav[0m } [36mfrom[0m [32m"@/components/document-nav"[0m;
+  [90m3 |[0m [36mimport[0m { runSearch } [36mfrom[0m [32m"@/lib/find-search"[0m;
+  [90m4 |[0m [36mimport[0m { [33mDEFAULT_ENGINE[0m, [36mtype[0m [33mFindResponse[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+
+Import map: aliased to relative './components/finder' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/page.tsx:2:1
+Module not found: Can't resolve '@/components/graph-landing'
+  [90m1 |[0m [36mimport[0m { [33mDesktopOnly[0m } [36mfrom[0m [32m"@/components/desktop-only"[0m;
+[31m[1m>[0m [90m2 |[0m [36mimport[0m { [33mGraphLanding[0m } [36mfrom[0m [32m"@/components/graph-landing"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m3 |[0m [36mimport[0m { [33mMapLanding[0m } [36mfrom[0m [32m"@/components/map-landing"[0m;
+  [90m4 |[0m [36mimport[0m { corpusStatusMarker, fetchCorpusGraph } [36mfrom[0m [32m"@/lib/graph"[0m;
+  [90m5 |[0m [36mimport[0m { fetchListings } [36mfrom[0m [32m"@/lib/listings"[0m;
+
+Import map: aliased to relative './components/graph-landing' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/page.tsx:3:1
+Module not found: Can't resolve '@/components/map-landing'
+  [90m1 |[0m [36mimport[0m { [33mDesktopOnly[0m } [36mfrom[0m [32m"@/components/desktop-only"[0m;
+  [90m2 |[0m [36mimport[0m { [33mGraphLanding[0m } [36mfrom[0m [32m"@/components/graph-landing"[0m;
+[31m[1m>[0m [90m3 |[0m [36mimport[0m { [33mMapLanding[0m } [36mfrom[0m [32m"@/components/map-landing"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m4 |[0m [36mimport[0m { corpusStatusMarker, fetchCorpusGraph } [36mfrom[0m [32m"@/lib/graph"[0m;
+  [90m5 |[0m [36mimport[0m { fetchListings } [36mfrom[0m [32m"@/lib/listings"[0m;
+  [90m6 |[0m
+
+Import map: aliased to relative './components/map-landing' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/d/[type]/[slug]/page.tsx:4:1
+Module not found: Can't resolve '@/lib/bp-env'
+  [90m2 |[0m [36mimport[0m { notFound } [36mfrom[0m [32m"next/navigation"[0m;
+  [90m3 |[0m [36mimport[0m { getDocument } [36mfrom[0m [32m"@/lib/get-document"[0m;
+[31m[1m>[0m [90m4 |[0m [36mimport[0m { [33mPUBLIC_API_URL[0m } [36mfrom[0m [32m"@/lib/bp-env"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m5 |[0m [36mimport[0m { [33mDOC_TYPES[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+  [90m6 |[0m [36mimport[0m { metadataFromPreview } [36mfrom[0m [32m"@/lib/preview-metadata"[0m;
+  [90m7 |[0m [36mimport[0m { [33mDocumentDetail[0m } [36mfrom[0m [32m"@/components/document-detail"[0m;
+
+Import map: aliased to relative './lib/bp-env' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/api/admin/reindex/route.ts:12:1
+Module not found: Can't resolve '@/lib/bp-env'
+  [90m10 |[0m } [36mfrom[0m [32m"@/lib/bp-fetch"[0m;
+  [90m11 |[0m [36mimport[0m { [33mDATASET[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+[31m[1m>[0m [90m12 |[0m [36mimport[0m { [33mREAD_TOKEN[0m } [36mfrom[0m [32m"@/lib/bp-env"[0m;
+  [90m   |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m13 |[0m
+  [90m14 |[0m [90m// Trigger an Indx blue/green rebuild via the token-gated Barkpark endpoint[0m
+  [90m15 |[0m [90m// (uses the server-only read token — never bundled). The rebuild runs async on[0m
+
+Import map: aliased to relative './lib/bp-env' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/api/find-event/route.ts:3:1
+Module not found: Can't resolve '@/lib/bp-env'
+  [90m1 |[0m [36mimport[0m { [33mNextResponse[0m } [36mfrom[0m [32m"next/server"[0m;
+  [90m2 |[0m [36mimport[0m { [33mDATASET[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+[31m[1m>[0m [90m3 |[0m [36mimport[0m { [33mPUBLIC_API_URL[0m, [33mREAD_TOKEN[0m } [36mfrom[0m [32m"@/lib/bp-env"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m4 |[0m
+  [90m5 |[0m [90m// Node runtime: reads the server-only BARKPARK_TOKEN (never bundled to the[0m
+  [90m6 |[0m [90m// browser) and proxies same-origin so the client never sees the API host/token.[0m
+
+Import map: aliased to relative './lib/bp-env' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/api/admin/reindex/route.ts:4:1
+Module not found: Can't resolve '@/lib/bp-fetch'
+  [90m 2 |[0m [36mimport[0m { revalidateTag } [36mfrom[0m [32m"next/cache"[0m;
+  [90m 3 |[0m [36mimport[0m { [33mFIND_TAG[0m } [36mfrom[0m [32m"@/lib/find-search"[0m;
+[31m[1m>[0m [90m 4 |[0m [36mimport[0m {
+  [90m   |[0m [31m[1m^^^^^^^[0m
+[31m[1m>[0m [90m 5 |[0m   [33mAPI_URL[0m,
+  [90m   |[0m [31m[1m^^^^^^^^^^[0m
+[31m[1m>[0m [90m 6 |[0m   bpFetchJson,
+  [90m   |[0m [31m[1m^^^^^^^^^^^^^^[0m
+[31m[1m>[0m [90m 7 |[0m   [33mBpUpstreamError[0m,
+  [90m   |[0m [31m[1m^^^^^^^^^^^^^^^^^^[0m
+[31m[1m>[0m [90m 8 |[0m   humanUpstreamMessage,
+  [90m   |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^[0m
+[31m[1m>[0m [90m 9 |[0m   isTransient,
+  [90m   |[0m [31m[1m^^^^^^^^^^^^^^[0m
+[31m[1m>[0m [90m10 |[0m } [36mfrom[0m [32m"@/lib/bp-fetch"[0m;
+  [90m   |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m11 |[0m [36mimport[0m { [33mDATASET[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+  [90m12 |[0m [36mimport[0m { [33mREAD_TOKEN[0m } [36mfrom[0m [32m"@/lib/bp-env"[0m;
+  [90m13 |[0m
+
+Import map: aliased to relative './lib/bp-fetch' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/api/find/route.ts:4:1
+Module not found: Can't resolve '@/lib/bp-fetch'
+  [90m2 |[0m [36mimport[0m { [33mDEFAULT_ENGINE[0m, [36mtype[0m [33mPopularQuery[0m, [36mtype[0m [33mSearchEngine[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+  [90m3 |[0m [36mimport[0m { emptyResponse, runSearch } [36mfrom[0m [32m"@/lib/find-search"[0m;
+[31m[1m>[0m [90m4 |[0m [36mimport[0m { [33mAPI_URL[0m, bpFetchJson } [36mfrom[0m [32m"@/lib/bp-fetch"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m5 |[0m [36mimport[0m { [33mDATASET[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+  [90m6 |[0m
+  [90m7 |[0m [90m// Node runtime: reads the server-only BARKPARK_TOKEN (never bundled to the[0m
+
+Import map: aliased to relative './lib/bp-fetch' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/api/admin/reindex/route.ts:11:1
+Module not found: Can't resolve '@/lib/config'
+  [90m 9 |[0m   isTransient,
+  [90m10 |[0m } [36mfrom[0m [32m"@/lib/bp-fetch"[0m;
+[31m[1m>[0m [90m11 |[0m [36mimport[0m { [33mDATASET[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+  [90m   |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m12 |[0m [36mimport[0m { [33mREAD_TOKEN[0m } [36mfrom[0m [32m"@/lib/bp-env"[0m;
+  [90m13 |[0m
+  [90m14 |[0m [90m// Trigger an Indx blue/green rebuild via the token-gated Barkpark endpoint[0m
+
+Import map: aliased to relative './lib/config' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/api/find-event/route.ts:2:1
+Module not found: Can't resolve '@/lib/config'
+  [90m1 |[0m [36mimport[0m { [33mNextResponse[0m } [36mfrom[0m [32m"next/server"[0m;
+[31m[1m>[0m [90m2 |[0m [36mimport[0m { [33mDATASET[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m3 |[0m [36mimport[0m { [33mPUBLIC_API_URL[0m, [33mREAD_TOKEN[0m } [36mfrom[0m [32m"@/lib/bp-env"[0m;
+  [90m4 |[0m
+  [90m5 |[0m [90m// Node runtime: reads the server-only BARKPARK_TOKEN (never bundled to the[0m
+
+Import map: aliased to relative './lib/config' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/api/find/route.ts:5:1
+Module not found: Can't resolve '@/lib/config'
+  [90m3 |[0m [36mimport[0m { emptyResponse, runSearch } [36mfrom[0m [32m"@/lib/find-search"[0m;
+  [90m4 |[0m [36mimport[0m { [33mAPI_URL[0m, bpFetchJson } [36mfrom[0m [32m"@/lib/bp-fetch"[0m;
+[31m[1m>[0m [90m5 |[0m [36mimport[0m { [33mDATASET[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m6 |[0m
+  [90m7 |[0m [90m// Node runtime: reads the server-only BARKPARK_TOKEN (never bundled to the[0m
+  [90m8 |[0m [90m// browser) and proxies same-origin so the client never sees the API host/token.[0m
+
+Import map: aliased to relative './lib/config' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/layout.tsx:4:1
+Module not found: Can't resolve '@/lib/config'
+  [90m2 |[0m [36mimport[0m [32m"./globals.css"[0m;
+  [90m3 |[0m [36mimport[0m { siteMarkers } [36mfrom[0m [32m"@/lib/markers"[0m;
+[31m[1m>[0m [90m4 |[0m [36mimport[0m { [33mSITE_TAGLINE[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m5 |[0m
+  [90m6 |[0m [90m// The description is the SAME string the hero renders (`lib/config`), not a[0m
+  [90m7 |[0m [90m// second hand-written pitch — a search result and the page it opens must not[0m
+
+Import map: aliased to relative './lib/config' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/d/[type]/[slug]/page.tsx:5:1
+Module not found: Can't resolve '@/lib/find'
+  [90m3 |[0m [36mimport[0m { getDocument } [36mfrom[0m [32m"@/lib/get-document"[0m;
+  [90m4 |[0m [36mimport[0m { [33mPUBLIC_API_URL[0m } [36mfrom[0m [32m"@/lib/bp-env"[0m;
+[31m[1m>[0m [90m5 |[0m [36mimport[0m { [33mDOC_TYPES[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m6 |[0m [36mimport[0m { metadataFromPreview } [36mfrom[0m [32m"@/lib/preview-metadata"[0m;
+  [90m7 |[0m [36mimport[0m { [33mDocumentDetail[0m } [36mfrom[0m [32m"@/components/document-detail"[0m;
+  [90m8 |[0m
+
+Import map: aliased to relative './lib/find' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/layout.tsx:4:1
+Module not found: Can't resolve '@/lib/find'
+  [90m2 |[0m [36mimport[0m { [33mDocumentNav[0m } [36mfrom[0m [32m"@/components/document-nav"[0m;
+  [90m3 |[0m [36mimport[0m { runSearch } [36mfrom[0m [32m"@/lib/find-search"[0m;
+[31m[1m>[0m [90m4 |[0m [36mimport[0m { [33mDEFAULT_ENGINE[0m, [36mtype[0m [33mFindResponse[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m5 |[0m [36mimport[0m { buildPrefixSeed, [36mtype[0m [33mPrefixSeed[0m, [36mtype[0m [33mSeedDoc[0m } [36mfrom[0m [32m"@/lib/prefix-seed"[0m;
+  [90m6 |[0m [36mimport[0m { [33mHoveredDocProvider[0m } [36mfrom[0m [32m"@/lib/hovered-doc-context"[0m;
+  [90m7 |[0m [36mimport[0m { [33mFinderNavProvider[0m } [36mfrom[0m [32m"@/lib/finder-nav-context"[0m;
+
+Import map: aliased to relative './lib/find' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/api/find/route.ts:2:1
+Module not found: Can't resolve '@/lib/find'
+  [90m1 |[0m [36mimport[0m { [33mNextResponse[0m } [36mfrom[0m [32m"next/server"[0m;
+[31m[1m>[0m [90m2 |[0m [36mimport[0m { [33mDEFAULT_ENGINE[0m, [36mtype[0m [33mPopularQuery[0m, [36mtype[0m [33mSearchEngine[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m3 |[0m [36mimport[0m { emptyResponse, runSearch } [36mfrom[0m [32m"@/lib/find-search"[0m;
+  [90m4 |[0m [36mimport[0m { [33mAPI_URL[0m, bpFetchJson } [36mfrom[0m [32m"@/lib/bp-fetch"[0m;
+  [90m5 |[0m [36mimport[0m { [33mDATASET[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+
+Import map: aliased to relative './lib/find' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/layout.tsx:3:1
+Module not found: Can't resolve '@/lib/find-search'
+  [90m1 |[0m [36mimport[0m { [33mFinder[0m } [36mfrom[0m [32m"@/components/finder"[0m;
+  [90m2 |[0m [36mimport[0m { [33mDocumentNav[0m } [36mfrom[0m [32m"@/components/document-nav"[0m;
+[31m[1m>[0m [90m3 |[0m [36mimport[0m { runSearch } [36mfrom[0m [32m"@/lib/find-search"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m4 |[0m [36mimport[0m { [33mDEFAULT_ENGINE[0m, [36mtype[0m [33mFindResponse[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+  [90m5 |[0m [36mimport[0m { buildPrefixSeed, [36mtype[0m [33mPrefixSeed[0m, [36mtype[0m [33mSeedDoc[0m } [36mfrom[0m [32m"@/lib/prefix-seed"[0m;
+  [90m6 |[0m [36mimport[0m { [33mHoveredDocProvider[0m } [36mfrom[0m [32m"@/lib/hovered-doc-context"[0m;
+
+Import map: aliased to relative './lib/find-search' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/api/admin/reindex/route.ts:3:1
+Module not found: Can't resolve '@/lib/find-search'
+  [90m1 |[0m [36mimport[0m { [33mNextResponse[0m } [36mfrom[0m [32m"next/server"[0m;
+  [90m2 |[0m [36mimport[0m { revalidateTag } [36mfrom[0m [32m"next/cache"[0m;
+[31m[1m>[0m [90m3 |[0m [36mimport[0m { [33mFIND_TAG[0m } [36mfrom[0m [32m"@/lib/find-search"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m4 |[0m [36mimport[0m {
+  [90m5 |[0m   [33mAPI_URL[0m,
+  [90m6 |[0m   bpFetchJson,
+
+Import map: aliased to relative './lib/find-search' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/api/find/route.ts:3:1
+Module not found: Can't resolve '@/lib/find-search'
+  [90m1 |[0m [36mimport[0m { [33mNextResponse[0m } [36mfrom[0m [32m"next/server"[0m;
+  [90m2 |[0m [36mimport[0m { [33mDEFAULT_ENGINE[0m, [36mtype[0m [33mPopularQuery[0m, [36mtype[0m [33mSearchEngine[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+[31m[1m>[0m [90m3 |[0m [36mimport[0m { emptyResponse, runSearch } [36mfrom[0m [32m"@/lib/find-search"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m4 |[0m [36mimport[0m { [33mAPI_URL[0m, bpFetchJson } [36mfrom[0m [32m"@/lib/bp-fetch"[0m;
+  [90m5 |[0m [36mimport[0m { [33mDATASET[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+  [90m6 |[0m
+
+Import map: aliased to relative './lib/find-search' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/layout.tsx:7:1
+Module not found: Can't resolve '@/lib/finder-nav-context'
+  [90m 5 |[0m [36mimport[0m { buildPrefixSeed, [36mtype[0m [33mPrefixSeed[0m, [36mtype[0m [33mSeedDoc[0m } [36mfrom[0m [32m"@/lib/prefix-seed"[0m;
+  [90m 6 |[0m [36mimport[0m { [33mHoveredDocProvider[0m } [36mfrom[0m [32m"@/lib/hovered-doc-context"[0m;
+[31m[1m>[0m [90m 7 |[0m [36mimport[0m { [33mFinderNavProvider[0m } [36mfrom[0m [32m"@/lib/finder-nav-context"[0m;
+  [90m   |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m 8 |[0m
+  [90m 9 |[0m [90m// Force-dynamic so the Finder's server-seeded browse renders straight into the[0m
+  [90m10 |[0m [90m// HTML — no `useSearchParams` CSR-bailout skeleton, so the master column keeps[0m
+
+Import map: aliased to relative './lib/finder-nav-context' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/d/[type]/[slug]/page.tsx:3:1
+Module not found: Can't resolve '@/lib/get-document'
+  [90m1 |[0m [36mimport[0m [36mtype[0m { [33mMetadata[0m } [36mfrom[0m [32m"next"[0m;
+  [90m2 |[0m [36mimport[0m { notFound } [36mfrom[0m [32m"next/navigation"[0m;
+[31m[1m>[0m [90m3 |[0m [36mimport[0m { getDocument } [36mfrom[0m [32m"@/lib/get-document"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m4 |[0m [36mimport[0m { [33mPUBLIC_API_URL[0m } [36mfrom[0m [32m"@/lib/bp-env"[0m;
+  [90m5 |[0m [36mimport[0m { [33mDOC_TYPES[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+  [90m6 |[0m [36mimport[0m { metadataFromPreview } [36mfrom[0m [32m"@/lib/preview-metadata"[0m;
+
+Import map: aliased to relative './lib/get-document' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/page.tsx:4:1
+Module not found: Can't resolve '@/lib/graph'
+  [90m2 |[0m [36mimport[0m { [33mGraphLanding[0m } [36mfrom[0m [32m"@/components/graph-landing"[0m;
+  [90m3 |[0m [36mimport[0m { [33mMapLanding[0m } [36mfrom[0m [32m"@/components/map-landing"[0m;
+[31m[1m>[0m [90m4 |[0m [36mimport[0m { corpusStatusMarker, fetchCorpusGraph } [36mfrom[0m [32m"@/lib/graph"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m5 |[0m [36mimport[0m { fetchListings } [36mfrom[0m [32m"@/lib/listings"[0m;
+  [90m6 |[0m
+  [90m7 |[0m /**
+
+Import map: aliased to relative './lib/graph' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/layout.tsx:6:1
+Module not found: Can't resolve '@/lib/hovered-doc-context'
+  [90m4 |[0m [36mimport[0m { [33mDEFAULT_ENGINE[0m, [36mtype[0m [33mFindResponse[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+  [90m5 |[0m [36mimport[0m { buildPrefixSeed, [36mtype[0m [33mPrefixSeed[0m, [36mtype[0m [33mSeedDoc[0m } [36mfrom[0m [32m"@/lib/prefix-seed"[0m;
+[31m[1m>[0m [90m6 |[0m [36mimport[0m { [33mHoveredDocProvider[0m } [36mfrom[0m [32m"@/lib/hovered-doc-context"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m7 |[0m [36mimport[0m { [33mFinderNavProvider[0m } [36mfrom[0m [32m"@/lib/finder-nav-context"[0m;
+  [90m8 |[0m
+  [90m9 |[0m [90m// Force-dynamic so the Finder's server-seeded browse renders straight into the[0m
+
+Import map: aliased to relative './lib/hovered-doc-context' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/page.tsx:5:1
+Module not found: Can't resolve '@/lib/listings'
+  [90m3 |[0m [36mimport[0m { [33mMapLanding[0m } [36mfrom[0m [32m"@/components/map-landing"[0m;
+  [90m4 |[0m [36mimport[0m { corpusStatusMarker, fetchCorpusGraph } [36mfrom[0m [32m"@/lib/graph"[0m;
+[31m[1m>[0m [90m5 |[0m [36mimport[0m { fetchListings } [36mfrom[0m [32m"@/lib/listings"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m6 |[0m
+  [90m7 |[0m /**
+  [90m8 |[0m  * [33mThe[0m [32m"/"[0m right pane — the landing shown before any document is opened. [33mIt[0m is
+
+Import map: aliased to relative './lib/listings' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/layout.tsx:3:1
+Module not found: Can't resolve '@/lib/markers'
+  [90m1 |[0m [36mimport[0m [36mtype[0m { [33mMetadata[0m } [36mfrom[0m [32m"next"[0m;
+  [90m2 |[0m [36mimport[0m [32m"./globals.css"[0m;
+[31m[1m>[0m [90m3 |[0m [36mimport[0m { siteMarkers } [36mfrom[0m [32m"@/lib/markers"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m4 |[0m [36mimport[0m { [33mSITE_TAGLINE[0m } [36mfrom[0m [32m"@/lib/config"[0m;
+  [90m5 |[0m
+  [90m6 |[0m [90m// The description is the SAME string the hero renders (`lib/config`), not a[0m
+
+Import map: aliased to relative './lib/markers' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/layout.tsx:5:1
+Module not found: Can't resolve '@/lib/prefix-seed'
+  [90m3 |[0m [36mimport[0m { runSearch } [36mfrom[0m [32m"@/lib/find-search"[0m;
+  [90m4 |[0m [36mimport[0m { [33mDEFAULT_ENGINE[0m, [36mtype[0m [33mFindResponse[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+[31m[1m>[0m [90m5 |[0m [36mimport[0m { buildPrefixSeed, [36mtype[0m [33mPrefixSeed[0m, [36mtype[0m [33mSeedDoc[0m } [36mfrom[0m [32m"@/lib/prefix-seed"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m6 |[0m [36mimport[0m { [33mHoveredDocProvider[0m } [36mfrom[0m [32m"@/lib/hovered-doc-context"[0m;
+  [90m7 |[0m [36mimport[0m { [33mFinderNavProvider[0m } [36mfrom[0m [32m"@/lib/finder-nav-context"[0m;
+  [90m8 |[0m
+
+Import map: aliased to relative './lib/prefix-seed' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./sites/search-capstone/src/app/(finder)/d/[type]/[slug]/page.tsx:6:1
+Module not found: Can't resolve '@/lib/preview-metadata'
+  [90m4 |[0m [36mimport[0m { [33mPUBLIC_API_URL[0m } [36mfrom[0m [32m"@/lib/bp-env"[0m;
+  [90m5 |[0m [36mimport[0m { [33mDOC_TYPES[0m } [36mfrom[0m [32m"@/lib/find"[0m;
+[31m[1m>[0m [90m6 |[0m [36mimport[0m { metadataFromPreview } [36mfrom[0m [32m"@/lib/preview-metadata"[0m;
+  [90m  |[0m [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m7 |[0m [36mimport[0m { [33mDocumentDetail[0m } [36mfrom[0m [32m"@/components/document-detail"[0m;
+  [90m8 |[0m
+  [90m9 |[0m [90m// ISR: getDocument wraps its fetch in unstable_cache (5-min revalidate, busted[0m
+
+Import map: aliased to relative './lib/preview-metadata' inside of [project]/sites/search-capstone/src
+
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+    at <unknown> (./sites/search-capstone/src/app/(finder)/page.tsx:1:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/d/[type]/[slug]/page.tsx:7:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/layout.tsx:2:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/layout.tsx:1:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/page.tsx:2:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/page.tsx:3:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/d/[type]/[slug]/page.tsx:4:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/api/admin/reindex/route.ts:12:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/api/find-event/route.ts:3:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/api/admin/reindex/route.ts:4:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/api/find/route.ts:4:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/api/admin/reindex/route.ts:11:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/api/find-event/route.ts:2:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/api/find/route.ts:5:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/layout.tsx:4:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/d/[type]/[slug]/page.tsx:5:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/layout.tsx:4:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/api/find/route.ts:2:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/layout.tsx:3:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/api/admin/reindex/route.ts:3:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/api/find/route.ts:3:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/layout.tsx:7:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/d/[type]/[slug]/page.tsx:3:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/page.tsx:4:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/layout.tsx:6:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/page.tsx:5:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/layout.tsx:3:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/layout.tsx:5:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./sites/search-capstone/src/app/(finder)/d/[type]/[slug]/page.tsx:6:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)

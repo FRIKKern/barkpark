@@ -16,6 +16,18 @@ defmodule Barkpark.Content.SchemaDefinition do
     # all), and writes stamp the acting user's id into `documents.owner_id`.
     # Defaults to `false` → byte-identical to today for every existing schema.
     field :owner_scoped, :boolean, default: false
+
+    # Desk-placement opt-in (issue #8463). A PRIVATE, non-plugin-owned schema
+    # is, by default, generic consumer content — `Barkpark.Structure` gives it
+    # a browsable `:document_type_list` node (same pane the curated host
+    # groups use) so any of a project's own registered types can be opened and
+    # edited in Studio. `singleton: true` opts a schema OUT of that generic
+    # bucket and into the old siteSettings-style behavior instead: a single
+    # `:document` node whose id equals the type name (the config-object shape
+    # — one canonical row, no list to browse). Defaults to `false` → a schema
+    # that never sets this is treated as ordinary content, never silently
+    # buried as a dead singleton. See `Barkpark.Structure.build_settings_group/2`.
+    field :singleton, :boolean, default: false
     field :fields, {:array, :map}, default: []
     field :dataset, :string, default: "production"
     field :cors_origins, {:array, :string}, default: []
@@ -63,6 +75,7 @@ defmodule Barkpark.Content.SchemaDefinition do
       :icon,
       :visibility,
       :owner_scoped,
+      :singleton,
       :fields,
       :dataset,
       :cors_origins,
@@ -95,6 +108,16 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> unique_constraint([:name, :dataset],
       name: :schema_definitions_name_dataset_null_dataset_id_index
     )
+    # FK-abort containment (Felix W16). `workspace_id/project_id/dataset_id` are
+    # real Postgres FKs (schema_definitions_<col>_fkey, migration
+    # 20260527160000_cascade_content_on_scope_delete). `Content.upsert_schema/3`
+    # writes this changeset raw via Repo.insert()/update() — without these, an
+    # insert referencing a scope row deleted concurrently RAISES Ecto.ConstraintError
+    # (a 500) instead of returning {:error, changeset}. Bare calls → Ecto-default
+    # constraint names.
+    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:dataset_id)
   end
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -294,9 +317,6 @@ defmodule Barkpark.Content.SchemaDefinition do
   # ─────────────────────────────────────────────────────────────────────────────
 
   @default_region_name "body"
-
-  @doc "The trailing free-content region name appended by `default_layout/1`."
-  def default_region_name, do: @default_region_name
 
   @doc """
   Synthesize a default `layout` from a schema's field order.

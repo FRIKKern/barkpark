@@ -1,0 +1,85 @@
+{
+  "run_id": "grip-20260723T063522Z",
+  "recipes": [
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:run",
+      "rerun": "gh run list --branch main --workflow elixir --limit 3 --json headSha,status,conclusion,createdAt,updatedAt,url",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T06:35:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get connectors-studio-webhook-url-display -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T06:35:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get connectors-vitest-v4-major-bump -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T06:35:22Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:pr",
+      "rerun": "gh pr list --state open --json number,title,headRefName",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T06:35:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/live/studio/connectors_live.ex",
+      "quantity": "git:log",
+      "rerun": "git log origin/main --since='2 days ago' --oneline -- connectors api/lib/barkpark_web/live/studio/connectors_live.ex .github/workflows/connectors.yml",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/live/studio/connectors_live.ex",
+        ".github/workflows/connectors.yml"
+      ],
+      "observed_at": "2026-07-23T06:35:22Z"
+    },
+    {
+      "subject": "cmd:git",
+      "quantity": "git:branch",
+      "rerun": "git branch -r --contains 1edcd1c3641859338de1257ffe1a5bf8f895c39a",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-23T06:35:22Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task --help && bp doc --help",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T06:35:22Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/live/studio/connectors_live.ex",
+      "quantity": "wc:-l",
+      "rerun": "wc -l api/lib/barkpark_web/live/studio/connectors_live.ex && sed -n '780,820p' api/lib/barkpark_web/live/studio/connectors_live.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/live/studio/connectors_live.ex"
+      ],
+      "observed_at": "2026-07-23T06:35:22Z"
+    },
+    {
+      "subject": "api/config/runtime.exs",
+      "quantity": "grep:-n:^if config_env",
+      "rerun": "grep -n '^if config_env' api/config/runtime.exs && grep -n 'capabilities_base_url' api/config/runtime.exs api/config/test.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/config/runtime.exs",
+        "api/config/test.exs"
+      ],
+      "observed_at": "2026-07-23T06:35:22Z"
+    }
+  ]
+}

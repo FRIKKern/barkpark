@@ -3,6 +3,7 @@ package apiclient
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 )
@@ -120,7 +121,8 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch schemas: status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return nil, fmt.Errorf("fetch schemas: %w", humanAPIError(resp.StatusCode, body))
 	}
 
 	var result struct {
@@ -134,13 +136,18 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 			// parseListPreview below.
 			ListPreview map[string]json.RawMessage `json:"listPreview"`
 			Fields      []struct {
-				Name    string   `json:"name"`
-				Title   string   `json:"title"`
-				Type    string   `json:"type"`
-				Options []string `json:"options,omitempty"`
-				RefType string   `json:"refType,omitempty"`
-				Rows    int      `json:"rows,omitempty"`
-				Group   string   `json:"group,omitempty"`
+				Name  string `json:"name"`
+				Title string `json:"title"`
+				Type  string `json:"type"`
+				// Options ships two live shapes — a flat ["a","b"] list and
+				// the tickets plugin's {"list":["a","b"]} object. Kept raw
+				// here; parseOptions accepts either (or degrades to nil) so a
+				// single misdeclared field can never fail the whole fetch
+				// (same philosophy as Validation below).
+				Options json.RawMessage `json:"options,omitempty"`
+				RefType string          `json:"refType,omitempty"`
+				Rows    int             `json:"rows,omitempty"`
+				Group   string          `json:"group,omitempty"`
 				// Validation values are mixed types ({"required": bool},
 				// {"pattern": string} both ship in live schemas) — decode
 				// raw and pick fields tolerantly so an unknown shape can
@@ -168,7 +175,7 @@ func (c *Client) LoadSchemasFor(workspace, project, dataset string) ([]Schema, e
 				Name:     af.Name,
 				Title:    af.Title,
 				Type:     parseFieldType(af.Type),
-				Options:  af.Options,
+				Options:  parseOptions(af.Options),
 				RefType:  af.RefType,
 				Required: rawBool(af.Validation["required"]),
 				Pattern:  rawString(af.Validation["pattern"]),
@@ -251,7 +258,8 @@ func (c *Client) LoadStructure() (*DeskNode, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("structure endpoint: status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return nil, fmt.Errorf("structure endpoint: %w", humanAPIError(resp.StatusCode, body))
 	}
 
 	var out struct {
@@ -291,6 +299,31 @@ func parsePreviewSpec(raw json.RawMessage) *PreviewSpec {
 	}
 	if err := json.Unmarshal(raw, &spec); err == nil && spec.Field != "" {
 		return &PreviewSpec{Field: spec.Field, Prefix: spec.Prefix}
+	}
+	return nil
+}
+
+// parseOptions decodes a select field's option list from either live shape —
+// a flat ["a","b"] array or the tickets plugin's {"list":["a","b"]} object —
+// and returns nil for anything else (absent, null, or an unrecognized shape).
+// A single misdeclared options value degrades to "no options", never an error
+// that fails the whole LoadSchemas fetch: before this, one object-shaped
+// options field aborted the entire schema decode, taking down TUI boot, the
+// scope switcher, and paper resolution. Mirrors parsePreviewSpec / rawBool
+// tolerance.
+func parseOptions(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var list []string
+	if json.Unmarshal(raw, &list) == nil {
+		return list
+	}
+	var obj struct {
+		List []string `json:"list"`
+	}
+	if json.Unmarshal(raw, &obj) == nil && obj.List != nil {
+		return obj.List
 	}
 	return nil
 }

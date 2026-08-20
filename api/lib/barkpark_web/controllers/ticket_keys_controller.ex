@@ -66,7 +66,7 @@ defmodule BarkparkWeb.TicketKeysController do
   with the rotated key + the new raw shown ONCE.
   """
   def rotate(conn, %{"id" => id}) do
-    case Keys.rotate(id) do
+    case Keys.rotate(id, current_workspace_id(conn)) do
       {:ok, %{key: key, raw: raw}} -> json(conn, %{key: key_json(key), raw: raw})
       {:error, :not_found} -> not_found(conn, "ticket key not found")
       {:error, _} -> unprocessable(conn, "could not rotate ticket key")
@@ -74,14 +74,16 @@ defmodule BarkparkWeb.TicketKeysController do
   end
 
   @doc "`POST /v1/plugins/tickets/keys/:id/pause` — mute a key (→ 403 on use)."
-  def pause(conn, %{"id" => id}), do: stamp_response(conn, Keys.pause(id))
+  def pause(conn, %{"id" => id}),
+    do: stamp_response(conn, Keys.pause(id, current_workspace_id(conn)))
 
   @doc "`POST /v1/plugins/tickets/keys/:id/unpause` — un-mute a paused key."
-  def unpause(conn, %{"id" => id}), do: stamp_response(conn, Keys.unpause(id))
+  def unpause(conn, %{"id" => id}),
+    do: stamp_response(conn, Keys.unpause(id, current_workspace_id(conn)))
 
   @doc "`DELETE /v1/plugins/tickets/keys/:id` — permanently revoke a key."
   def delete(conn, %{"id" => id}) do
-    case Keys.revoke(id) do
+    case Keys.revoke(id, current_workspace_id(conn)) do
       {:ok, key} -> json(conn, %{revoked: true, key: key_json(key)})
       {:error, :not_found} -> not_found(conn, "ticket key not found")
       {:error, _} -> unprocessable(conn, "could not revoke ticket key")

@@ -136,6 +136,49 @@ defmodule BarkparkWeb.ShareMetaTest do
     end
   end
 
+  describe "weighted-tag manifest self-defense (D18)" do
+    # A blockless paper whose caller-supplied content["preview"] is persisted
+    # verbatim can carry raw weighted-tag objects `%{"tag"=>_, "strength"=>_}`
+    # in `tags`. Before this guard, `head/1` interpolated the Map into the
+    # `content={tag}` attr and raised Protocol.UndefinedError, crashing
+    # /papers/:slug. ShareMeta now flattens the object to its tag name itself.
+    test "renders a raw weighted-tag manifest as flat article:tag, no crash" do
+      manifest = %{
+        "title" => "Weighted",
+        "type" => "paper",
+        "url" => "/papers/weighted",
+        "tags" => [%{"tag" => "elixir", "strength" => 90}, "flat"]
+      }
+
+      html = head(preview: manifest)
+
+      # The weighted object flattens to its tag name; the flat string is kept.
+      assert html =~ ~s(<meta property="article:tag" content="elixir")
+      assert html =~ ~s(<meta property="article:tag" content="flat")
+      assert count(html, ~s(property="article:tag")) == 2
+      # The numeric strength never leaks into the emitted head.
+      refute html =~ "strength"
+      refute html =~ ~s(content="90")
+    end
+
+    test "drops a malformed tag map (no string tag), leaving no empty article:tag" do
+      manifest = %{
+        "title" => "Malformed",
+        "type" => "paper",
+        "url" => "/papers/malformed",
+        "tags" => [%{"strength" => 50}, %{"tag" => "kept", "strength" => 40}]
+      }
+
+      html = head(preview: manifest)
+
+      # Only the well-formed weighted object survives; the tag-less map is
+      # dropped (nil → rejected) rather than rendered as an empty content="".
+      assert html =~ ~s(<meta property="article:tag" content="kept")
+      assert count(html, ~s(property="article:tag")) == 1
+      refute html =~ ~s(<meta property="article:tag" content=""/>)
+    end
+  end
+
   describe "type mapping (D8) — non-article" do
     test "a sheet maps to og:type=website, no JSON-LD, no article:* tags" do
       manifest = %{"title" => "Q3 Budget", "type" => "sheet", "url" => "/sheets/q3-budget"}
@@ -203,6 +246,20 @@ defmodule BarkparkWeb.ShareMetaTest do
     test "prefers the write-time content[\"preview\"] manifest" do
       content = %{"preview" => %{"title" => "Stamped", "type" => "paper", "url" => "/papers/x"}}
       assert %{"title" => "Stamped"} = ShareMeta.manifest(content, "/papers/x", "paper")
+    end
+
+    test "ignores a legacy scalar preview instead of crashing the Paper reader" do
+      content = %{
+        "title" => "Survey wave",
+        "description" => "Reader-visible evidence",
+        "preview" => "legacy preview prose"
+      }
+
+      manifest = ShareMeta.manifest(content, "/papers/survey-wave", "paper")
+
+      assert is_map(manifest)
+      assert manifest["title"] == "Survey wave"
+      assert manifest["url"] == "/papers/survey-wave"
     end
 
     test "falls back to a degraded core manifest when no preview + no projector" do

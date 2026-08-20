@@ -63,9 +63,6 @@ defmodule Barkpark.Content.Papers.Proposals do
   # block is accepted, so a proposal cannot mutate prose even in the DRAFT.
   @insert_op_kinds ~w(append-block insert-after)
 
-  @doc "The edge kind a proposal's provenance edge carries."
-  def proposal_edge_kind, do: @edge_kind
-
   @doc """
   Apply INSERT-ONLY block `ops` to the `drafts.` twin of the paper at `slug`,
   recording provenance from `source` (`%{"doc_id" => …, "agent" => …,
@@ -139,17 +136,19 @@ defmodule Barkpark.Content.Papers.Proposals do
   # becomes visible through the drafts perspective + the publish gate.
   defp write_proposed_blocks(draft, blocks, fresh_ops, applied_ids, source, dataset) do
     with {:ok, folded} <- fold_ops(blocks, fresh_ops),
-         normalized = folded |> BlockOps.ensure_block_ids() |> BlockOps.normalize_list_items(),
-         {:ok, new_blocks} <- encrypt_blocks(normalized, dataset) do
+         normalized = folded |> BlockOps.ensure_block_ids() |> BlockOps.normalize_render_shapes(),
+         {:ok, new_blocks} <- encrypt_blocks(normalized, dataset, draft.workspace_id) do
       rev = current_rev(draft) + 1
       style = get_in(draft.content || %{}, ["style"])
-      render_opts = Labels.paper_render_opts(dataset, style)
+      scope = [workspace_id: draft.workspace_id, project_id: draft.project_id]
+      render_opts = Labels.paper_render_opts(dataset, style, scope)
       body_html = Render.render_blocks(new_blocks, render_opts)
 
       content =
         (draft.content || %{})
         |> Map.put("blocks", new_blocks)
         |> Map.put("body_html", body_html)
+        |> Map.put("body_html_sv", Render.body_html_render_version())
         |> Map.put("rev", rev)
         |> Projection.project(blocks, new_blocks, render_opts)
         |> record_provenance(applied_ids, source)
@@ -332,8 +331,10 @@ defmodule Barkpark.Content.Papers.Proposals do
     end)
   end
 
-  defp encrypt_blocks(blocks, dataset) do
-    case Encryption.encrypt_marked(%{"blocks" => blocks}, @paper_type, dataset) do
+  # `workspace_id` attributes the DEK to the draft's workspace (charter
+  # D51-D54) so a later reveal resolves the same (workspace_id, scope) DEK.
+  defp encrypt_blocks(blocks, dataset, workspace_id) do
+    case Encryption.encrypt_marked(%{"blocks" => blocks}, @paper_type, dataset, workspace_id) do
       {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
       {:ok, _} -> {:ok, blocks}
       {:error, _} = err -> err

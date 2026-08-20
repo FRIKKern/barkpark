@@ -110,7 +110,7 @@ defmodule BarkparkWeb.Studio.GraphView do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="editor-panel graph-editor" data-test-id="studio-graph-panel">
+    <div class="editor-panel graph-editor" data-role="content" data-test-id="studio-graph-panel">
       <%!-- STABLE id (NOT doc_id-derived) so navigation re-ingests via the
             data-* attrs rather than remounting the renderer and losing layout.
             data-root carries the gravitational-sun node id (string) the client

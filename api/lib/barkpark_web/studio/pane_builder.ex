@@ -21,6 +21,22 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   `{panes, editor}` where `panes` is a list of pane maps and `editor`
   is either `nil` or a map describing the open document editor.
 
+  Every pane map carries the ANATOMY keys (pane anatomy model, spd-s3):
+
+    * `role:` — `:nav` for the root desk pane, `:list` for every drilled
+      pane (`:list`, `:document_type_list`, `:plugin_document_list`).
+      Content/inspector are NOT panes — the editor renders from its own
+      map and never enters this list.
+    * `priority:` — `0` on the root, its pane index on intermediates, and
+      `:active` on the pane the nav path terminates in (the drilled-to
+      leaf — a document list, or a `:list` group opened as the last
+      segment). The responsive desk protects `:active` first when space
+      starves.
+
+  Both are DERIVED display metadata: never stored on `Structure.Node`,
+  never serialized on the `/v1/structure` wire (the Go TUI drops unknown
+  subtrees; the wire contract is pinned by structure_controller_test).
+
   Optional `opts`:
 
     * `:desk` — name of the active desk-group filter on a
@@ -64,6 +80,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
     root_pane = %{
       title: gated.title,
+      role: :nav,
+      priority: 0,
       items: list_items(gated, scope_prefix(opts)),
       selected: Enum.at(segments, 0)
     }
@@ -181,19 +199,22 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # row-click would. rebuild_panes then dispatches on editor[:view].
   def walk_path(["open", type, id | _], _depth, _current, panes, _editor, dataset, opts) do
     editor =
-      if type == "paper" do
-        case Content.get_paper(id, dataset, scope(opts)) do
-          nil ->
+      if Content.blocks_type?(type) do
+        # Same draft-first fix as `build_editor`'s blocks branch (spd-w17 D220).
+        # A backlink to a never-published paper is the SAME silent blank screen,
+        # reached by a different door — fixing only one leaves the other.
+        case Content.fetch_doc_with_draft(type, id, dataset, scope(opts)) do
+          {nil, _is_draft, _has_pub} ->
             nil
 
-          paper_doc ->
+          {paper_doc, is_draft, has_pub} ->
             %{
               view: :paper,
               doc: paper_doc,
               schema: nil,
               type: type,
-              is_draft: false,
-              has_published: false,
+              is_draft: is_draft,
+              has_published: has_pub,
               form: %{}
             }
         end
@@ -236,6 +257,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       %{type: :list} = node ->
         list_pane = %{
           title: node.title,
+          role: :list,
+          priority: if(rest == [], do: :active, else: depth + 1),
           items: list_items(node, scope_prefix(opts)),
           selected: Enum.at(rest, 0)
         }
@@ -261,6 +284,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
+          role: :list,
+          priority: :active,
           desk_groups: [],
           active_desk: nil,
           items: doc_items(docs, schema),
@@ -313,6 +338,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
+          role: :list,
+          priority: :active,
           desk_groups: desk_groups,
           active_desk: active_group && Map.get(active_group, "name"),
           items: doc_items(docs, schema),
@@ -387,23 +414,34 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           kind_filter: desk_kind_filter(active_group)
         }
 
-      # `Content.paper_type/0` is the canonical accessor for the paper type
-      # name; "sheet"/"graph" are fixed plugin schema names with no accessor.
-      type_name == Content.paper_type() ->
+      # Blocks-doc whitelist (`Content.blocks_type?/1` — `["paper", "session"]`,
+      # session-handoff Task 3): a session opens in the SAME paper pane by
+      # design (`view: :paper`), fetched by its actual type rather than the
+      # hardcoded "paper" equality this replaced. "sheet"/"graph" are fixed
+      # plugin schema names with no accessor.
+      Content.blocks_type?(type_name) ->
         case rest do
           [slug | _] ->
-            case Content.get_paper(slug, dataset, scope_kw) do
-              nil ->
+            # DRAFT-FIRST, like every other editor branch. `create_document`
+            # ALWAYS writes `drafts.<id>` (writer.ex) and the desk navigates to
+            # the PUBLISHED id, so a published-only lookup here resolved to
+            # nothing for every never-published paper — a brand-new one most of
+            # all. That is the owner's blank screen (spd-w17): a doc was
+            # created, the URL moved, and the pane still read "Select a document
+            # to edit". The flags were hardcoded `false`, so a draft paper that
+            # did open claimed to be published; thread the real ones.
+            case Content.fetch_doc_with_draft(type_name, slug, dataset, scope_kw) do
+              {nil, _is_draft, _has_pub} ->
                 nil
 
-              paper_doc ->
+              {paper_doc, is_draft, has_pub} ->
                 %{
                   view: :paper,
                   doc: paper_doc,
                   schema: schema,
                   type: type_name,
-                  is_draft: false,
-                  has_published: false,
+                  is_draft: is_draft,
+                  has_published: has_pub,
                   form: %{}
                 }
             end
@@ -728,6 +766,172 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   end
 
   @doc """
+  Pane display state for a viewport bucket — the ONE table the responsive
+  desk reads (pane anatomy model, spd-s3). Pure: `(idx, num_panes,
+  has_editor?, bucket)` → `:full | :strip | :hidden`.
+
+  Buckets (matching the CSS breakpoint vocabulary):
+
+    * `"wide"` / `"standard"` — exactly today's behaviour: `:strip` iff
+      `collapse?/3`, else `:full`. `collapse?/3` survives VERBATIM as the
+      wide-bucket reducer, so every existing nav transition is
+      bit-identical (the wide sweep test pins this).
+    * `"narrow"`   — depends on whether the document is open:
+      * editor OPEN → every pane is `:hidden` except the LAST, which is a
+        44px `:strip`. This is the rule that actually closes the 640–1023
+        overflow band (charter D35). The briefed "last pane stays `:full`"
+        rule was measured bit-identical to `collapse?/3` whenever an
+        editor is open (`collapse?/3` already sets `keep_full_nav_count =
+        1`, the same predicate as `idx == num_panes - 1`), so it removed
+        ZERO pixels: one 140px list column + the 560px content floor still
+        overflowed every viewport below ~744px. Hiding the list columns
+        and keeping ONE strip leaves 44px of chrome beside the protected
+        content pane — the twin of what `"phone"` already does, with a
+        back affordance that survives.
+      * editor CLOSED → the LAST pane stays `:full` and every earlier pane
+        drops to `:strip`. Unchanged: without an editor there is no 560px
+        floor in the row, so it never overflowed.
+    * `"phone"`    — with an editor open EVERY pane is `:hidden` (the
+      document owns the viewport); without an editor the last pane is
+      `:full` and the rest `:hidden` (single-column drill navigation).
+
+  Derived display state only — never stored on `Structure.Node`, never
+  serialized on the `/v1/structure` wire.
+  """
+  @spec display_state(non_neg_integer(), pos_integer(), boolean(), String.t()) ::
+          :full | :strip | :hidden
+  def display_state(idx, num_panes, has_editor?, bucket) when bucket in ["wide", "standard"] do
+    if collapse?(idx, num_panes, has_editor?), do: :strip, else: :full
+  end
+
+  # Narrow WITH a document open (charter D35): the content pane is the
+  # protected winner, so the whole nav row yields to a single 44px back
+  # strip. Anything less was measured to close zero pixels of overflow.
+  def display_state(idx, num_panes, true, "narrow") do
+    if idx == num_panes - 1, do: :strip, else: :hidden
+  end
+
+  # Narrow with NO document open: pure drill navigation, last pane full.
+  def display_state(idx, num_panes, false, "narrow") do
+    if idx == num_panes - 1, do: :full, else: :strip
+  end
+
+  def display_state(_idx, _num_panes, true, "phone"), do: :hidden
+
+  def display_state(idx, num_panes, false, "phone") do
+    if idx == num_panes - 1, do: :full, else: :hidden
+  end
+
+  @doc """
+  The Tier-2 ladder (charter D148/D151): the same table, plus the one input
+  the desk was missing — whether the user SUMMONED the Document inspector.
+
+  Additive by arity, not by edit. Elixir dispatches `/5` separately from
+  `/4`, so the five clauses above are unreachable from here except through
+  the explicit delegation in the fall-through clause. That is the whole
+  design: `inspector_open? == false` is `/4` VERBATIM in every one of the
+  40 cells, and exactly one cell family moves when it is true.
+
+  The moving cell — `"standard"` with a document open and the inspector
+  summoned — runs the ladder step the epic's Vision declared and never
+  shipped: the nav rail yields so the inspector can dock IN FLOW instead of
+  overlaying the prose. The rule is the `"narrow"`-with-editor rule reused
+  verbatim: every pane `:hidden` except the LAST, which survives as a 44px
+  `:strip` back affordance. Measured at viewport 1024, this takes
+  `panes.visible_pane_widths_px` from `[44, 260]` to `[44]`
+  (`scripts/measurements/spd-visible-table-2026-07-20.json`), so panel goes
+  720 -> 980px, surface border-box 680, gutter 80, content 600. Divided by
+  each face's OWN probe-derived advance at 18px: 60.00ch resolved Iowan Old
+  Style (10.0000 px/ch), 54.31ch forced Georgia (11.0469 px/ch), 65.42ch
+  forced Source Serif 4 (9.1719 px/ch). The cell that ships today is
+  378.958px = 37.90 / 34.30 / 41.32ch on those same three faces, so the
+  honest headline is +220px against today's user-opened cell.
+
+  Forced Georgia's 54.31ch is an INHERITED shortfall — the default (not
+  user-opened) cell is already 54.22ch and this ladder adds 0.09ch. It is
+  owned by `spd-b42-georgia-default-shortfall-inflow-width`, not by this
+  clause, and D149 refuses the 292px and 260px dock trims that would chase
+  it here.
+
+  Every OTHER bucket delegates, and each refusal is a decision:
+
+    * `"wide"` — Tier 1 moves ZERO cells. At 1280/1440 the inspector
+      already docks with room to spare; yielding the rail there would spend
+      navigation to buy width nobody is short of.
+    * `"narrow"` with an editor — already the terminal state of this same
+      ladder (D35). There is nothing left to yield.
+    * `"narrow"` / `"standard"` with NO editor — no document means no
+      Document inspector, so `inspector_open?` cannot be true in a way that
+      renders. Delegation keeps the desk honest if it ever is.
+    * `"phone"` — the document already owns the viewport.
+
+  Needs no CSS. The overlay and its 55%-black scrim live entirely inside
+  `@container panel (max-width: 860px)` in root.html.heex; at panel 980 that
+  block stops matching, `.bp-doc-sidebar.is-open`'s `flex: 0 0 300px`
+  returns, and the scrim `::after` structurally cannot render.
+  """
+  @spec display_state(non_neg_integer(), pos_integer(), boolean(), String.t(), boolean()) ::
+          :full | :strip | :hidden
+
+  # ── D180 — WHAT THE SURVIVING STRIP ACTUALLY DOES ────────────────────────
+  #
+  # The 44px strip this clause leaves behind carries `phx-click="expand-pane"`,
+  # and spd-b47 was filed on the belief that the ladder and `expand-pane`
+  # collide: "the ladder is not a pane state — it is driven by
+  # `sidebar_user_opened`, which `expand-pane` does not touch." THAT MECHANISM
+  # IS FALSE, and so are both outcomes the task predicted from it (a dead
+  # control; or the inspector squeezed back under the reading bar). Both are
+  # refuted by execution, not by argument.
+  #
+  # `expand-pane` DOES reach `sidebar_user_opened` — TRANSITIVELY:
+  #
+  #   Handlers.Scope.expand_pane/2 (scope.ex:170-178) `push_patch`
+  #     -> handle_params -> rebuild_panes/1
+  #     -> the fall-through clause (shared.ex:806-811)
+  #     -> clear_paper_view/1
+  #     -> `assign(sidebar_assigns(nil))` (shared/paper.ex:755)
+  #
+  # and `sidebar_assigns(nil)` re-seeds `sidebar_user_opened: false`. Read off
+  # the live socket after the click: `assigns.sidebar_user_opened = false`.
+  #
+  # So the measured outcome is a THIRD one, which neither option named. At
+  # `standard` with this ladder engaged the sole surviving pane is
+  # `{idx: 1, "Papers"}`, and clicking it CLOSES THE WHOLE DOCUMENT:
+  #
+  #   panes AFTER strip click:  ["pane-structure", "pane-papers"]
+  #   editor open AFTER:        false
+  #   strips AFTER:             []
+  #
+  # The rail reverts to ordinary full display because there is no longer an
+  # editor for it to yield to. The strip is a DOCUMENT-CLOSE, not an
+  # inspector-dismiss, and it needs no suppression: expand-pane already
+  # implies dismiss.
+  #
+  # AND THERE IS NO AFFORDANCE LIE. `expand_pane/2` truncates with
+  # `Enum.take(nav_path, idx)`; pane 0 IS the root pane and each ordinary
+  # segment contributes exactly one pane, so the strip's label names its own
+  # destination in every topology measured — ["paper", slug] -> {1, "Papers"}
+  # -> the Papers list; ["open", "paper", slug] -> {0, "Structure"} -> the desk
+  # root. No off-by-one to fix.
+  #
+  # SCOPE, STATED HONESTLY RATHER THAN GENERALISED: every figure above comes
+  # from a 2-SEGMENT paper path (panes = [Structure, Papers]). A deeper nav
+  # path would make the surviving strip an INTERMEDIATE pane, where `take/2`
+  # lands on a list instead of closing the document. That case is NOT measured
+  # here — it is filed as `b47-strip-behaviour-unmeasured-beyond-two-panes`.
+  # This ruling claims the 2-segment topology only.
+  #
+  # Locked by `studio_live_navigational_truth_test.exs`, which pins the pane
+  # ids AND editor-open false AND `sidebar_user_opened == false` — pane ids
+  # alone would stay green if the reset chain above were refactored away.
+  def display_state(idx, num_panes, true, "standard", true) do
+    if idx == num_panes - 1, do: :strip, else: :hidden
+  end
+
+  def display_state(idx, num_panes, has_editor?, bucket, _inspector_open?),
+    do: display_state(idx, num_panes, has_editor?, bucket)
+
+  @doc """
   Convert a Structure node's children into pane items. Dividers stay as
   `:divider`; plugin-contributed `:plugin_link` items render as
   `:plugin_link` rows the LV turns into outbound navigation (NOT
@@ -774,7 +978,17 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
               type: :item,
               id: child.id,
               title: child.title,
-              icon: child.icon,
+              # `|| "file"` closes the asymmetry that WAS the bug
+              # (spd-w18-nil-icon-500): the placed-node paths above already
+              # fall back (`node.icon || (schema && schema.icon)`), this
+              # forwarding did not, and its render site draws the icon
+              # UNCONDITIONALLY — so a nil here 500'd the whole desk column.
+              # No schema is in hand at this depth, hence the neutral glyph
+              # rather than a schema icon. (`:plugin_link` above stays
+              # nil-tolerant on purpose: its render site is wrapped in
+              # `if item.icon`, so nil means "draw no glyph" there, a real
+              # design state rather than a crash.)
+              icon: child.icon || "file",
               drillable: drillable
             }
           ]

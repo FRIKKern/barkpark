@@ -113,7 +113,7 @@
 
   <p class="bp-auth-pagefoot">Barkpark — the self-hosted content studio</p>
 
-  <script>
+  <script nonce={assigns[:csp_nonce]}>
     // Password show/hide — same affordance as the Cloud dashboard login.
     document.querySelectorAll(".bp-auth-eye").forEach(function (btn) {
       btn.addEventListener("click", function () {

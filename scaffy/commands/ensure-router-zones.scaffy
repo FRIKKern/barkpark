@@ -1,0 +1,231 @@
+COMMAND "Ensure router marker zones" DESCRIPTION "Idempotently plant the three named scaffy:zone marker comments in api/lib/barkpark_web/router.ex -- the catalog's #1 unserved accretion file (175 commits / 1283 co-change partners in 12 months per bp scaffy discover), twice ruled unservable (W1: ordering-hostile, anchors are positional text; W5: add-api-route-parity retired as scoped). This command IS the anchor repair the root-heex playbook proved: a one-time, reversible plant of a head-anchor comment at each of the router's three genuinely append-shaped AND ordering-safe neighborhoods (new pipeline definitions at the pipeline run's tail; new plugin auth-bucket wrappers ahead of the root-mounted bucket run; new workspace-scoped mirror scopes at the mirror run's tail). Each zone comment states IN WORDS the ordering contract it guards -- the same prose-pin idiom the router already uses ('mounted AFTER the :token_root block so operator statics win') -- so a future insert-at-zone is correct by construction instead of re-derived from 2400 lines. No variables: the zones are fixed artifacts, planted once, guarded by their own declaration text." LAST_UPDATED "17-07-2026-16-00-00" DOMAIN "barkpark" TAGS "scaffy", "scaffold" CONCEPT "ensure-router-zones" VARIANT "elixir" DIRECTION "add" VARIABLES
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THIS COMMAND EXISTS — the measured append streams of router.ex
+# ─────────────────────────────────────────────────────────────────────────────
+# Loop-tick mining (2026-07-17): 177 commits since 2026-04 split 121 PURE_ADD
+# (68%) + 22 MOSTLY_ADD (12%) vs 34 MIXED — 81% additive, the most append-
+# shaped hot file in the repo. The adds decompose into FIVE streams, and the
+# survey verdict differs per stream:
+#
+#   1. PIPELINE definitions — `pipeline :name do ... end` blocks. ~10 new
+#      pipelines since April (:cycle_api, :api_grant_read #3071, :ticket_key +
+#      :session_token_root (tickets), :github_webhook #1234, :public_api
+#      #1171, :search_settings_admin #3168, :require_chat_access #2958,
+#      :registered_chat_host, :media_processing_callback). → ZONE (op 1).
+#
+#   2. PLUGIN AUTH-BUCKET wrappers — `scope ... plugin_routes(scope: :x)`.
+#      Five bucket adds since April (:public_api #1171, :github_webhook
+#      #1234, :session_token_root + :ticket_key (tickets), the scoped :token
+#      mirror #1994). Per-route plugin adds auto-fold via register_routes/1
+#      (the runtime collector) and never touch this file — it is the BUCKETS
+#      (new auth tiers) that accrete here. → ZONE (op 2).
+#
+#   3. WORKSPACE-SCOPED MIRROR scopes — `scope "/w/:workspace_slug/..."`
+#      blocks mirroring a flat surface into the hard tenant boundary (scoped
+#      secrets #3933/D199, scoped chat-token mint D36, scoped cycles
+#      b465e591f, export/import #3012). → ZONE (op 3).
+#
+#   4. FLAT CORE `/v1` scopes and routes. CUT. The evidence shows flat adds
+#      land NEXT TO their semantic family, not at any tail: site-deploy
+#      #3223 added routes INSIDE the existing `scope "/v1/admin"` block; the
+#      chat-host scopes (43c023ab0) landed flush against the `/v1/chat`
+#      scope; the search-settings scopes #3168 sit directly above their
+#      `[:api, :require_admin]` siblings with prose that says "the sibling
+#      insights/synonyms routes stay on [:api, :require_admin] below"; the
+#      restore split (2d22cbf9d) reads "mirroring the flat restore split
+#      above". Contextual proximity + cross-referencing prose IS the flat
+#      region's organization, and its real ordering pins are NOUN-LOCAL
+#      (static /graph/orphans before dynamic /graph/:id; /access/mine before
+#      /access/:id) — facts a single generic zone cannot encode. A "flat
+#      scopes append here" zone would collect unrelated scopes and orphan
+#      the neighbor-binding prose. This re-affirms W1's cut for the flat
+#      region specifically, now with the stream isolated.
+#
+#   5. Routes INSIDE existing scope blocks (the site-deploy case). CUT —
+#      a zone marks ONE landing site; per-scope interiors are many, and each
+#      already has its owning block + local pins as the anchor.
+#
+# So: THREE zones, not five — planted exactly where the append stream is
+# genuinely head-stable and ordering-neutral, cut with evidence where the
+# file's real organization is contextual.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE ENSURE CONTRACT, ZONE SPELLING — same law as ensure-root-layout-zones
+# ─────────────────────────────────────────────────────────────────────────────
+# Like every ensure-* command this guarantees an END STATE and keys each guard
+# on payload text a hand edit would also produce — the zone declaration
+# `scaffy:zone <name>` itself, NOT the trailing `MARK:` token. The D57
+# consequences bind: a hand-planted identical zone wins (the run skips, writes
+# NO receipt), and `bp scaffy remove` after such a skip exits 4 — correct,
+# scaffy never owned that line. In the common case scaffy plants the zone,
+# owns it, and remove retracts it byte-clean.
+#
+# ZONE MECHANICS — head anchor, append-below. All three ops use the proven
+# idiom: anchor at a byte-unique, never-consumed block that CLOSES the
+# neighborhood, plant the zone comment directly after it, and direct all
+# future appends DIRECTLY BELOW the zone comment. What makes the router
+# different from root.html.heex is that route ORDER is semantics here
+# (Phoenix matches in declaration order), so each zone's position is chosen
+# so that an append below it is ordering-safe BY CONSTRUCTION — and the
+# zone comment states the contract in words, exactly like the file's
+# existing prose pins. The payloads are Elixir `#` comments — stripped at
+# compile, zero runtime bytes. Because the marks sit on their own comment
+# lines, MIXED sweep-refactors carry or leave them whole.
+#
+# THE PAYOFF: a future add-plugin-bucket / add-scoped-mirror command anchors
+# at these marks with plain INSERT AFTER FIRST — the mark mechanic's
+# first-contact behavior done once, so every later command against this file
+# starts anchored instead of surveying 2400 lines of positional text (the
+# exact reason W1 and W5 had to cut it).
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 1 — plant the pipelines zone at the tail of the contiguous pipeline run
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the `:require_write` pipeline — the LAST block of the router's
+# contiguous pipeline run (before the first `scope`), byte-unique (the plug
+# module recurs in other pipelines, but this three-line block exists once),
+# consumed by nothing. Ordering law stated in the payload: pipeline
+# DEFINITIONS are position-free — each compiles to a named private plug that
+# `pipe_through` references by NAME, so definition placement can never
+# change route matching (the tree itself proves it: `:media_processing_
+# callback` is defined ~1200 lines below its siblings, mid-scopes, and
+# works). A zone here is therefore the zero-risk default landing; thematic
+# adjacency to a sibling pipeline (as :api_grant_read chose, right after
+# :api) stays equally legal — the zone exists so an author never has to
+# prove that freedom first.
+IN "api/lib/barkpark_web/router.ex"
+### Plant the pipelines zone after the last pipeline of the contiguous run
+INSERT AFTER FIRST
+::: pipeline run tail :::
+  pipeline :require_write do
+    plug(BarkparkWeb.Plugs.RequireWritePermission)
+  end
+::: pipeline run tail :::
+WITH
+::: router-pipelines zone :::
+
+  # scaffy:zone router-pipelines (ensure-router-zones) -- stable head anchor
+  # for NEW pipeline definitions: add your `pipeline :name do ... end` block
+  # DIRECTLY BELOW this comment. Pipeline definitions are POSITION-FREE --
+  # each compiles to a named private plug referenced by name from
+  # `pipe_through`, so a block landing here can never change route matching
+  # (proof in-tree: :media_processing_callback is defined mid-scopes far
+  # below and works). Ordering INSIDE a pipeline (plug order) is that
+  # pipeline's own documented contract -- read its comments. Sweeps: move
+  # this comment only whole, on its own lines. MARK:zone-router-pipelines
+::: router-pipelines zone :::
+MARK "zone-router-pipelines"
+ASLONG FILE DONT CONTAIN "scaffy:zone router-pipelines"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 2 — plant the plugin-buckets zone ahead of the root-mounted bucket run
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the `:github_webhook` wrapper — the last `/v1/plugins`-mounted
+# bucket before the root-mounted (`scope "/v1"`) run begins, byte-unique
+# (`pipe_through(:github_webhook)` occurs once). The position IS the
+# ordering contract: `/v1/plugins`-mounted wrappers are order-free among
+# themselves (every plugin route path carries its own slug, so cross-bucket
+# paths are disjoint), and a ROOT-mounted wrapper planted below this zone
+# necessarily lands BEFORE the `:token_root` → `:session_token_root` →
+# `:ticket_key` run — so it can never land after `:ticket_key`, whose
+# submitter dynamic `/tickets/:id` must remain the LAST root-mounted match
+# (the static-before-dynamic pin those blocks' own comments state: operator
+# statics like `/tickets/inbox` must match first). An append here preserves
+# that pin by construction.
+IN "api/lib/barkpark_web/router.ex"
+### Plant the plugin-buckets zone after the github-webhook wrapper
+INSERT AFTER FIRST
+::: github-webhook wrapper :::
+  scope "/v1/plugins" do
+    pipe_through(:github_webhook)
+
+    plugin_routes(scope: :github_webhook)
+  end
+::: github-webhook wrapper :::
+WITH
+::: plugin-buckets zone :::
+
+  # scaffy:zone plugin-buckets (ensure-router-zones) -- stable head anchor
+  # for NEW plugin auth-bucket wrappers (`scope ... plugin_routes(scope:
+  # :x)`; the matching `pipeline` goes in the router-pipelines zone above):
+  # add the wrapper DIRECTLY BELOW this comment. Ordering contract this
+  # position guards: /v1/plugins-mounted wrappers are order-free among
+  # themselves (plugin paths are slug-disjoint), and a ROOT-mounted
+  # (`scope "/v1"`) wrapper landing here sits BEFORE the :token_root /
+  # :session_token_root / :ticket_key run below, so :ticket_key's submitter
+  # dynamic `/tickets/:id` stays the LAST root-mounted match and operator
+  # statics keep winning (the static-before-dynamic pin in those blocks'
+  # comments). NEVER declare a bucket after :ticket_key. Per-route plugin
+  # adds do NOT belong here -- they auto-fold via register_routes/1. Sweeps:
+  # move this comment only whole, on its own lines. MARK:zone-plugin-buckets
+::: plugin-buckets zone :::
+MARK "zone-plugin-buckets"
+ASLONG FILE DONT CONTAIN "scaffy:zone plugin-buckets"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 3 — plant the scoped-mirrors zone at the tail of the /w/ mirror run
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the `:scoped_media_mutate` scope — the last block of the
+# workspace-scoped mirror run (before the `/api` workspace switcher),
+# byte-unique (`pipe_through(:scoped_media_mutate)` occurs once). Ordering
+# law stated in the payload: every scope in the mirror run owns a disjoint
+# `/v1/<noun>` suffix under the shared `/w/:workspace_slug/p/:project_slug`
+# prefix, so a NEW mirror with a NOVEL noun is order-neutral at the tail —
+# nothing earlier can swallow it, and it can swallow nothing. The two ways
+# an insert could break ordering are named in the zone text so they are
+# refused at the point of temptation: reusing an EXISTING noun (the owning
+# block's dynamics could shadow the new static — e.g. an earlier
+# `/v1/media/:dataset` read would swallow `/v1/media/<literal>`; such a
+# route belongs INSIDE its owning block, statics before dynamics), and a
+# `/studio`-suffixed scope (the `/w/:ws/p/:proj/studio/:dataset` back-compat
+# wildcard far above swallows those; they must be declared before it, with
+# the scoped plugin scopes).
+IN "api/lib/barkpark_web/router.ex"
+### Plant the scoped-mirrors zone after the scoped media mutate block
+INSERT AFTER FIRST
+::: scoped media mutate tail :::
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:scoped_media_mutate)
+
+    post("/v1/media/:dataset/upload", V1.MediaController, :upload)
+    patch("/v1/media/:dataset/:id", V1.MediaController, :update)
+    delete("/v1/media/:dataset/:id", V1.MediaController, :delete)
+  end
+::: scoped media mutate tail :::
+WITH
+::: scoped-mirrors zone :::
+
+  # scaffy:zone scoped-mirrors (ensure-router-zones) -- stable tail anchor
+  # for NEW workspace-scoped mirror scopes: add your
+  # `scope "/w/:workspace_slug/p/:project_slug" ...` block DIRECTLY BELOW
+  # this comment. Ordering contract this position guards: every mirror above
+  # owns a disjoint `/v1/<noun>` suffix, so a new mirror is order-neutral
+  # here PROVIDED (a) its suffix starts `/v1/` with a NOVEL noun -- a route
+  # under a noun an existing block already serves belongs INSIDE that owning
+  # block, statics before dynamic `:param` segments (the /graph and
+  # /access/mine idiom), because an earlier dynamic like `/v1/media/:dataset`
+  # swallows a later literal -- and (b) it is NEVER a `/studio`-suffixed
+  # scope: the `/w/:ws/p/:proj/studio/:dataset` back-compat wildcard far
+  # above swallows those, so studio scopes are declared BEFORE that wildcard,
+  # beside the scoped plugin scopes. Sweeps: move this comment only whole,
+  # on its own lines. MARK:zone-scoped-mirrors
+::: scoped-mirrors zone :::
+MARK "zone-scoped-mirrors"
+ASLONG FILE DONT CONTAIN "scaffy:zone scoped-mirrors"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# All three zone declarations present (each a verbatim substring of its op's
+# payload). Holds whether this run planted them or a prior run / hand edit
+# already had them — the ensure contract guarantees the END STATE. There is
+# no cheap LOCAL runtime gate for the router (every mix gate compiles the
+# world, A2), so the LOCAL close is grep-shaped and the compile proof is
+# TIER ci: comment-only payloads in valid `#` syntax cannot change routing
+# (comments are stripped before the router macros expand), and `mix compile`
+# in CI reds if a plant ever landed inside a syntactic construct.
+ASSERT FILE "api/lib/barkpark_web/router.ex" CONTAINS "scaffy:zone router-pipelines"
+ASSERT FILE "api/lib/barkpark_web/router.ex" CONTAINS "scaffy:zone plugin-buckets"
+ASSERT FILE "api/lib/barkpark_web/router.ex" CONTAINS "scaffy:zone scoped-mirrors"
+ASSERT CMD "cd api && mix compile" TIER ci

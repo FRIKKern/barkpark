@@ -1,0 +1,73 @@
+# barkpark-connectors — the Connectors bridge (connectors charter D4/D27/D32,
+# deploy decisions D34/D46). A PERSISTENT Node/TypeScript process (Vercel Chat
+# SDK) that turns an inbound Slack/Telegram/Discord/Teams/WhatsApp event into a
+# turn on Barkpark's /v1/chat HTTP+SSE API. The BEAM stays the engine; this is
+# a client of it.
+#
+# Listens on a LOOPBACK port (127.0.0.1:4020) and is exposed by the host Caddy
+# path-based as https://<host>/connectors (route armed by
+# deploy/instance-deploy.sh arm_caddy_connectors_route). :4020 sits deliberately
+# OUTSIDE the blue/green slot ports {4000,4001} — the deploy's port-flip sed and
+# ACTIVE_PORT greps match slot ports exactly, so they pass over it. There is NO
+# wildcard DNS on barkpark.cloud, so a subdomain would re-arm the Hetzner
+# DNS-token human gate for nothing: the PATH route is the whole point.
+#
+# PLAIN unit on purpose — NEVER the barkpark-slot@ template (that one is
+# Elixir-build-root specific). Modeled on barkpark-mcp.service: box-local knobs
+# live in an EnvironmentFile written by instance-deploy.sh, NOT baked into
+# ExecStart, so the SAME committed unit re-installs on every self-update:
+#   /etc/barkpark/connectors.env (0600 — it holds real secrets, unlike mcp.env's
+#       deliberate no-secret 0644 exception):
+#         DATABASE_URL              — sourced from /opt/barkpark/.env; the bridge
+#                                     owns the `chat_bridge` schema (D28), never
+#                                     a Barkpark/Ecto table
+#         BARKPARK_API_URL          — ALWAYS the stable public front
+#                                     (https://guerrilla.barkpark.cloud), never a
+#                                     raw slot port: blue/green flips 4000/4001
+#         CONNECTORS_HTTP_ADDR      — the loopback listen address, 127.0.0.1:4020
+#         CONNECTORS_PATH_PREFIX    — /connectors (must match the Caddy route)
+#         CONNECTORS_CREDENTIAL_KEY — the per-install credential cipher key
+#
+# NO GLOBAL OPERATOR TOKEN. There is deliberately no BARKPARK_CHAT_TOKEN here or
+# in connectors.env: one ambient `chat` token would serve EVERY tenant, which is
+# precisely the multi-tenant hole this wave closes. Each install authenticates
+# with its OWN workspace-bound `chat` ApiToken, decrypted from the bridge's
+# connector_installs rows with CONNECTORS_CREDENTIAL_KEY. Do not add a token
+# line; that ships the hole into production infrastructure.
+#
+# ExecStart's node is /usr/local/bin/barkpark-node — a symlink the deploy points
+# at the asdf-managed node (`asdf where nodejs`). systemd does not expand
+# variables in the executable position, and the box has NO `node` on PATH (bare
+# `node -v` => command not found), so the deploy resolves it and the unit stays
+# free of a hardcoded version. Same trick as barkpark-mcp's
+# /usr/local/bin/barkpark-mcp.
+#
+# Installed + enabled by deploy/instance-deploy.sh, GUARDED and NON-FATAL: only
+# when node resolves, `npm ci` succeeds, DATABASE_URL exists, and the tsx runner
+# is present — and it is DISABLED again if it does not stay active, so a
+# half-configured bridge never crash-loops the box. Until it is up, /connectors
+# lands on Caddy's branded maintenance 503 (never a raw 502) — see
+# docs/ops/connectors-deploy.md for the ordering hazard that follows from that.
+[Unit]
+Description=Barkpark Connectors bridge (chat channels -> /v1/chat)
+Documentation=file:///opt/barkpark/docs/ops/connectors-deploy.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/barkpark/connectors
+# Fail cleanly (not restart-looping) if the deploy has not written this yet.
+EnvironmentFile=/etc/barkpark/connectors.env
+Environment=NODE_ENV=production
+ExecStart=/usr/local/bin/barkpark-node /opt/barkpark/connectors/node_modules/tsx/dist/cli.mjs /opt/barkpark/connectors/src/index.ts
+Restart=on-failure
+RestartSec=10
+# The box is 3.8GB and also runs the BEAM (two build roots + the live slot).
+# The bridge is a thin SSE client; if it ever balloons past this, the OOM killer
+# takes the bridge, not the app.
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

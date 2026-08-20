@@ -196,6 +196,7 @@ import {
   type RoadmapProjection,
   type ColumnsProjection,
   type TerminalProjection,
+  type SectionProjection,
 } from "../lib/component-projections.ts";
 
 /** Load a `<type>.golden.json` fixture (input + expected projection). */
@@ -240,32 +241,27 @@ for (const { type, project } of S2_CASES) {
 /* ══ S2 (LOAD-BEARING): the REAL RENDER realizes the projection ═══════════════
  *
  * The deepEqual loop above proves projector == golden — a valid SECOND layer.
- * THIS layer is the load-bearing one: it drives the ACTUAL reader render
- * (`renderBlock` from portable-doc.tsx) to static HTML exactly as the app lowers
- * it, then asserts the shared projection's fields (container role, labels, card
- * titles, glyph-role, container NESTING) appear in that rendered DOM. A JSX
- * regression — a dropped field, a mis-wired projector→DOM, a container that
- * re-derives its own structure (columns/terminal never import the projector) —
- * reds HERE even while the projector still matches the golden. Proven non-
+ * THIS layer is the load-bearing one: it drives the ACTUAL canonical reader
+ * render (`renderPortableDocument([block])` from `@barkpark/react`) to its `bp-*`
+ * HTML string, then asserts the shared projection's fields (container role,
+ * labels, card titles, glyph-role, container NESTING) appear in that rendered DOM.
+ * A render regression — a dropped field, a mis-wired projector→DOM, a container
+ * that re-derives its own structure (columns/terminal never import the projector)
+ * — reds HERE even while the projector still matches the golden. Proven non-
  * vacuous: three render tampers (status-legend role, card title-drop, columns
  * nesting) each red this suite; each passed green under the projector-only leg.
  *
- * renderBlock is JSX + `@/` aliases behind a `next/script`/sheets import graph
- * node can't load bare, so support/tsx-loader.mjs transpiles the REAL source
- * with the app's `jsx: react-jsx` and stubs ONLY the two off-render-path client
- * components. No render logic under test is stubbed — every one of the 12
- * component cases runs for real. */
+ * The render is the CANONICAL `@barkpark/react` surface now (W5 fork-retirement):
+ * `renderPortableDocument([block])` emits the same `bp-*` article markup the
+ * Phoenix reader and Go TUI produce, so the assertions below key off the `bp-*`
+ * DOM (container class + the projection's label/title/text/glyph fields), NOT the
+ * retired web fork's Tailwind classes. Pure string emitter — no browser, no JSX
+ * transpile, no loader. Every one of the 12 component cases runs for real. */
 
-import { register } from "node:module";
-import { renderToStaticMarkup } from "react-dom/server";
-import type { Block } from "../lib/papers.ts";
-import { paperCallout } from "../lib/tokens.gen.ts";
-
-register("./support/tsx-loader.mjs", import.meta.url);
-const { renderBlock } = await import("../components/portable-doc.tsx");
+import { renderPortableDocument, type Block } from "@barkpark/react";
 
 function renderHtml(input: Record<string, unknown>): string {
-  return renderToStaticMarkup(renderBlock(input as Block, "k"));
+  return renderPortableDocument([input as Block]);
 }
 
 function present(html: string, needle: string, label: string): void {
@@ -290,21 +286,6 @@ function leafText(node: unknown): string {
 /* ── per-type render assertions: the projection's fields MUST appear in the
  * rendered DOM. Field strings are exact (a rename/drop reds). ── */
 
-const CARD_TONE_STRIPE: Record<string, string> = {
-  info: "border-l-blue-400",
-  ok: "border-l-emerald-400",
-  warn: "border-l-amber-400",
-  danger: "border-l-red-400",
-};
-const ROADMAP_ROLE_BAR: Record<string, string> = {
-  open: "bg-zinc-400",
-  ready: "bg-zinc-500",
-  progress: "bg-blue-500",
-  blocked: "bg-amber-500",
-  done: "bg-teal-500",
-  cancel: "bg-zinc-300",
-};
-
 test("web status-legend RENDER realizes the legend projection (label + glyph)", () => {
   const html = renderHtml({ type: "status-legend" });
   const exp = loadFixture("status-legend").expected as LegendProjection;
@@ -312,8 +293,15 @@ test("web status-legend RENDER realizes the legend projection (label + glyph)", 
     // GRADUATED (au-w5-status-prose-parity): the RENDER realizes the canonical
     // LABEL text (progress→"in progress", cancel→"cancelled"), not the raw role
     // slug — a wrong label render reds this leg (S2 render-assert discipline).
-    present(html, `>${r.label}</dt>`, `legend label ${r.label}`);
-    present(html, `>${r.spinner ? "⠋" : r.glyph}</span>`, `legend glyph ${r.role}`);
+    present(html, `>${r.label}</span>`, `legend label ${r.label}`);
+    // The spinner role emits an EMPTY CSS-animated glyph span (aria-labelled),
+    // never a braille char; every other role prints its literal glyph.
+    if (r.spinner) {
+      present(html, `bp-g--${r.role}`, `legend spinner glyph role ${r.role}`);
+      present(html, `aria-label="${r.label}"`, `legend spinner aria-label ${r.role}`);
+    } else {
+      present(html, `>${r.glyph}</span>`, `legend glyph ${r.role}`);
+    }
   }
 });
 
@@ -337,27 +325,18 @@ test("web note RENDER realizes the single row (label · lead · text)", () => {
   present(html, exp.text, "note text");
 });
 
-test("web cards RENDER realizes every card (title · text · tone stripe)", () => {
+test("web cards RENDER realizes every card (title · text · tone class)", () => {
   const input = loadFixture("cards").input;
   const html = renderHtml(input);
   const exp = loadFixture("cards").expected as CardsProjection;
   for (const c of exp.cards) {
-    present(html, `>${c.title}</p>`, `cards title ${c.title}`);
-    present(html, `>${c.text}</p>`, `cards text ${c.text}`);
-    if (c.tone) present(html, CARD_TONE_STRIPE[c.tone], `cards tone ${c.tone}`);
+    present(html, `>${c.title}</div>`, `cards title ${c.title}`);
+    present(html, `>${c.text}</div>`, `cards text ${c.text}`);
+    // Canonical tone rides a `bp-card--<tone>` class (skinned by paper-surface.css),
+    // not an inlined Tailwind stripe — a dropped tone loses the class and reds.
+    if (c.tone) present(html, `bp-card--${c.tone}`, `cards tone ${c.tone}`);
   }
 });
-
-/** The card tone accent → its distinctive paperCallout token bg (au-w3: the
- * tint rides in as CSS custom properties from web/lib/tokens.gen.ts, mirroring
- * portable-doc.tsx `resolveCalloutTone` — `ok` folds to success, `warn` to
- * warning). A tone drop in the render loses the style vars and reds. */
-const CARD_TONE_TINT: Record<string, string> = {
-  info: paperCallout.info.light.bg,
-  ok: paperCallout.success.light.bg,
-  warn: paperCallout.warning.light.bg,
-  danger: paperCallout.danger.light.bg,
-};
 
 /** The authored render marker for one card slot, DERIVED from the fixture input
  * (never hand-typed): the media image alt attr, the title heading text, the body
@@ -405,8 +384,8 @@ test("web card RENDER realizes the MODEL-B projection (ordered slots · tone tin
     prev = idx;
   }
 
-  // tone accent tints the card container; media fast-path renders a real <img>.
-  if (exp.tone) present(html, CARD_TONE_TINT[exp.tone], `card tone tint ${exp.tone}`);
+  // tone rides the canonical `bp-card--<tone>` class; media fast-path renders <img>.
+  if (exp.tone) present(html, `bp-card--${exp.tone}`, `card tone class ${exp.tone}`);
   if (exp.media_fastpath) present(html, "<img", "card media image fast-path");
 });
 
@@ -422,14 +401,15 @@ test("web pipeline RENDER realizes every node (kind · title · detail · source
     'fixture lost its source:"text" (provenance) node',
   );
   for (const n of exp.nodes) {
-    present(html, `>${n.kind}</p>`, `pipeline kind ${n.kind}`);
-    present(html, `>${n.title}</p>`, `pipeline title ${n.title}`);
-    present(html, `>${n.detail}</p>`, `pipeline detail ${n.detail}`);
-    // source_role realizes: origin → the accent border; provenance → the text line.
+    present(html, `>${n.kind}</div>`, `pipeline kind ${n.kind}`);
+    present(html, `>${n.title}</div>`, `pipeline title ${n.title}`);
+    present(html, `>${n.detail}</div>`, `pipeline detail ${n.detail}`);
+    // source_role realizes: origin → the `bp-pnode--src` accent; provenance → the
+    // `bp-pnode__src` text line.
     if (n.source_role === "origin") {
-      present(html, "border-sky-400", "pipeline origin accent border");
+      present(html, "bp-pnode--src", "pipeline origin accent");
     } else if (n.source_role === "provenance") {
-      present(html, `>${n.source_text}</p>`, `pipeline provenance ${n.source_text}`);
+      present(html, `>${n.source_text}</div>`, `pipeline provenance ${n.source_text}`);
     }
   }
 });
@@ -438,13 +418,13 @@ test("web stage RENDER realizes kind · title · detail · source_role", () => {
   const input = loadFixture("stage").input;
   const html = renderHtml(input);
   const exp = loadFixture("stage").expected as StageProjection;
-  present(html, `>${exp.kind}</p>`, "stage kind");
-  present(html, `>${exp.title}</p>`, "stage title");
-  present(html, `>${exp.detail}</p>`, "stage detail");
+  present(html, `>${exp.kind}</div>`, "stage kind");
+  present(html, `>${exp.title}</div>`, "stage title");
+  present(html, `>${exp.detail}</div>`, "stage detail");
   if (exp.source_role === "origin") {
-    present(html, "border-sky-400", "stage origin accent border");
+    present(html, "bp-pnode--src", "stage origin accent");
   } else if (exp.source_role === "provenance") {
-    present(html, `>${exp.source_text}</p>`, "stage provenance line");
+    present(html, `>${exp.source_text}</div>`, "stage provenance line");
   }
 });
 
@@ -453,13 +433,13 @@ test("web stage RENDER realizes kind · title · detail · source_role", () => {
 // These pin the ratified coercion RENDERS a signal; each reds if reverted to the drop.
 test("web stage source:true → origin accent renders (was dropped)", () => {
   const html = renderHtml({ type: "stage", title: "Ingest", source: true });
-  present(html, "border-sky-400", "stage source:true accent");
+  present(html, "bp-pnode--src", "stage source:true accent");
 });
 
 test('web stage source:"text" → provenance line renders the text (was dropped)', () => {
   const html = renderHtml({ type: "stage", title: "Ingest", source: "queue.ex:42" });
-  present(html, ">queue.ex:42</p>", "stage source:string provenance");
-  assert.ok(!html.includes("border-sky-400"), "a string must not flip the origin accent");
+  present(html, ">queue.ex:42</div>", "stage source:string provenance");
+  assert.ok(!html.includes("bp-pnode--src"), "a string must not flip the origin accent");
 });
 
 test("web stage source:false / absent → NO signal", () => {
@@ -468,8 +448,8 @@ test("web stage source:false / absent → NO signal", () => {
     { type: "stage", title: "Ingest" },
   ]) {
     const html = renderHtml(block);
-    assert.ok(!html.includes("border-sky-400"), "source:false/absent must not accent");
-    assert.ok(!html.includes(">queue.ex</p>"), "no provenance line for false/absent");
+    assert.ok(!html.includes("bp-pnode--src"), "source:false/absent must not accent");
+    assert.ok(!html.includes(">queue.ex</div>"), "no provenance line for false/absent");
   }
 });
 
@@ -477,7 +457,7 @@ test("web task-detail RENDER realizes title + timeline + criteria tally", () => 
   const input = loadFixture("task-detail").input;
   const html = renderHtml(input);
   const exp = loadFixture("task-detail").expected as TaskDetailProjection;
-  present(html, `>${exp.title}</p>`, "task-detail title");
+  present(html, `>${exp.title}</div>`, "task-detail title");
   // Timeline is now COVERED: every ordered cell's label realizes in the render
   // (a dropped/renamed timeline cell reds here even while the projector matches).
   if (exp.sections.includes("timeline")) {
@@ -502,7 +482,7 @@ test("web roadmap RENDER realizes scale + every lane (title · role bar)", () =>
   for (const cell of exp.scale) present(html, `>${cell}</span>`, `roadmap scale ${cell}`);
   for (const lane of exp.lanes) {
     present(html, `>${lane.title}</span>`, `roadmap lane ${lane.title}`);
-    present(html, ROADMAP_ROLE_BAR[lane.role], `roadmap role bar ${lane.role}`);
+    present(html, `bp-rm__bar--${lane.role}`, `roadmap role bar ${lane.role}`);
   }
 });
 
@@ -510,14 +490,50 @@ test("web columns RENDER nests each column's children (count + content)", () => 
   const input = loadFixture("columns").input;
   const html = renderHtml(input);
   const exp = loadFixture("columns").expected as ColumnsProjection;
-  // Column count is expressed in the grid template — a flatten/mis-nest reds.
-  present(html, `repeat(${exp.columns.length}, `, "columns grid count");
+  // Column count is expressed via the `--bp-cols` custom prop — a flatten/mis-nest reds.
+  present(html, `--bp-cols:${exp.columns.length}`, "columns grid count");
   const cols = Array.isArray(input.columns) ? (input.columns as unknown[][]) : [];
   exp.columns.forEach((children, ci) => {
     children.forEach((_type, cj) => {
       const text = leafText(cols[ci]?.[cj]);
       if (text) present(html, text, `columns[${ci}] child ${cj}`);
     });
+  });
+});
+
+test("web section RENDER realizes the grid + nests authored cells in order", () => {
+  const input = loadFixture("section").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("section").expected as SectionProjection;
+
+  present(html, 'class="bp-section__grid"', "section grid");
+  // The `repeat()` grid-template ships in paper-surface.css (not the DOM); the
+  // canonical renderer emits only the `--bp-tracks` custom prop the rule reads.
+  present(html, `--bp-tracks:${exp.tracks}`, "section track count");
+
+  const authored = Array.isArray(input.blocks)
+    ? (input.blocks as Array<{ slots?: { title?: unknown[] } }>)
+    : [];
+  const renderedCells = html.split('<div class="bp-section__cell"').slice(1);
+  assert.equal(renderedCells.length, exp.cells.length, "section cell count");
+
+  exp.cells.forEach((cell, i) => {
+    const segment = renderedCells[i] ?? "";
+    const title = (authored[i]?.slots?.title ?? []).map(leafText).join("");
+    assert.ok(title, `section authored cell ${i} has no title text`);
+    present(segment, title, `section cell ${i} authored content`);
+
+    if (cell.span == null) {
+      assert.doesNotMatch(segment, /grid-column:span /, `section cell ${i} span`);
+    } else {
+      present(segment, `grid-column:span ${cell.span}`, `section cell ${i} span`);
+    }
+
+    if (cell.order == null) {
+      assert.doesNotMatch(segment, /order:-?\d+/, `section cell ${i} order`);
+    } else {
+      present(segment, `order:${cell.order}`, `section cell ${i} order`);
+    }
   });
 });
 
@@ -544,7 +560,7 @@ test("web task-board RENDER realizes every projection column (label · card titl
   for (const col of fixture.expected.columns) {
     present(html, `${col.label}</span>`, `board label ${col.label}`);
     for (const card of col.cards) {
-      present(html, `>${card.title}</p>`, `board card ${card.title}`);
+      present(html, `>${card.title}</span>`, `board card ${card.title}`);
     }
   }
 });

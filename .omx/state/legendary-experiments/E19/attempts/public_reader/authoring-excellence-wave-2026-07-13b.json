@@ -1,0 +1,22 @@
+{
+  "accepted_capture": false,
+  "attempt_sha256": "29314899b0df06052069d622ebe9c8305a18a65ce49d142f0fcfaee19298c3b4",
+  "attempt_status": "BLOCKED",
+  "candidate_capsule_sha256": "44f2023098891333c84ecb6a953b692fe8498ca3d84ec469a7bfd21cac2df0df",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_source_sha256": "44be7b7b5198c5768294dcbeba10403a2150f62c2a0b70f9f9399b3359b34b17",
+  "capture_sha256": null,
+  "capture_timestamp": null,
+  "deployment_id": null,
+  "evidence_boundary": "RECONCILED_REAL_CELL_ATTEMPT_RECORD_NOT_A_CAPTURE",
+  "explicit_error": "NO_ISOLATED_DEPLOYED_RECORD_WITH_E16_PROVENANCE; URL_REFLECTION_IS_NOT_ACCEPTED",
+  "fixture_id": "authoring-excellence-wave-2026-07-13b",
+  "fixture_kind": "paper",
+  "invocation_session": "PREDEPLOYMENT_STOP_NO_REAL_SESSION",
+  "production_contacted": false,
+  "proxy_derived": false,
+  "schema_version": "legendary-e19-attempt/v1",
+  "silent_blank": false,
+  "surface": "public_reader"
+}

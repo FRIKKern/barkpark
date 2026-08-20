@@ -20,7 +20,7 @@ defmodule BarkparkCloud.Workers.StaleDeploymentReaper do
   `Registry.max_deploy_claims/0` budget throughout.
 
   Idempotent: a sweep that finds nothing returns
-  `{:ok, %{failed: 0, requeued: 0, released: 0, pushing_failed: 0, no_source_failed: 0}}`
+  `{:ok, %{failed: 0, requeued: 0, released: 0, pushing_failed: 0, no_source_failed: 0, resumed: 0}}`
   and never raises. The `unique`
   window (60s) collapses a slow sweep plus the next cron tick to one in-flight
   job instead of stacking, and each status-guarded pass no-ops on a row a
@@ -38,6 +38,17 @@ defmodule BarkparkCloud.Workers.StaleDeploymentReaper do
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
-    {:ok, BarkparkCloud.Registry.reap_stale_deployments()}
+    sweep = BarkparkCloud.Registry.reap_stale_deployments()
+
+    # site-spawner D22: the sweep RECOVERS an orphaned row (requeues it), but for
+    # a STATIC row that is only half a rescue — nothing in the fleet claims static
+    # deployments (the off-box builder is kind-scoped to container), so a requeued
+    # static row would sit `queued` forever: the eternal spinner this worker
+    # exists to kill, wearing the reaper's own uniform. Re-drive them here, right
+    # after the sweep that freed them. Best-effort and idempotent — a row someone
+    # else already claimed simply fails its claim and is skipped.
+    resumed = BarkparkCloud.Sites.Deploy.resume_orphaned()
+
+    {:ok, Map.put(sweep, :resumed, resumed)}
   end
 end

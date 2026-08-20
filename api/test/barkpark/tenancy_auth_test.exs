@@ -1,5 +1,5 @@
 defmodule Barkpark.TenancyAuthTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy

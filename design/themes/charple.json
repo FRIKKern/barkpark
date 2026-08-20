@@ -1,16 +1,16 @@
 {
   "name": "charple",
-  "_note": "Charmtone purple — a violet-indigo skin seeded from the Charm charmtone palette (MIT). Accent rides ~H241–249 (a deep indigo light, a bright charple violet dark); the neutral ladder and paper ground re-hue cool-violet off the accent, so paper/ink carry a faint amethyst tint, never neutral grey. The seeds derive cleanly — 0 accent/reading pins, the formula lands every slot natively; only surface.dark needs a designed pin (the OKLCH near-black collapse the whole family shares).",
+  "_note": "Charmtone purple — a violet-indigo skin seeded from the Charm charmtone palette (MIT). Accent rides ~H282 (designer plum #7b3a96 light, bright orchid #c78ae0 dark — console-remake accepted ramp); the neutral ladder and paper ground re-hue cool-violet off the accent, so paper/ink carry a faint amethyst tint, never neutral grey. The seeds derive cleanly — 0 accent/reading pins, the formula lands every slot natively; only surface.dark needs a designed pin (the OKLCH near-black collapse the whole family shares).",
   "modes": {
     "light": {
       "bg": "250 42% 98%",
       "ink": "249 10% 14%",
-      "accent": "241 57% 45%"
+      "accent": "282.39 44.23% 40.78%"
     },
     "dark": {
       "bg": "249 10% 14%",
       "ink": "249 15% 93%",
-      "accent": "249 100% 66%"
+      "accent": "282.56 58.11% 70.98%"
     }
   },
   "overrides": {

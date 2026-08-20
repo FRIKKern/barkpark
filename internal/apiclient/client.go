@@ -227,6 +227,16 @@ func (c *Client) scopedURL(suffix string) string {
 	return ScopedURL(c.baseURL, c.Workspace, c.Project, suffix)
 }
 
+// flatURL builds a NOT-scoped endpoint (no /w/<ws>/p/<proj> prefix) of the
+// form <base><path>, normalizing a trailing slash on the base the same way
+// ScopedURL does — a bare c.baseURL+path splice would otherwise produce
+// "//v1/..." when BARKPARK_API_URL/-s carries a trailing slash, which Phoenix
+// 404s. path is already-built (its dynamic segments PathEscaped at the call
+// site) and is passed through untouched.
+func (c *Client) flatURL(path string) string {
+	return strings.TrimRight(c.baseURL, "/") + path
+}
+
 // authGet issues a GET to url with the Client's bearer token attached.
 // Scoped /v1/ reads run ResolveWorkspace, which fails closed (403) for an
 // anonymous caller — so every read must carry the token, exactly like
@@ -253,9 +263,30 @@ type ConditionalGetResult struct {
 // GetConditional issues an authenticated GET to an ABSOLUTE url, attaching
 // If-None-Match when ifNoneMatch is non-empty so the server can answer 304 Not
 // Modified. It returns the status, the body (read fully, nil on 304), and the
-// response ETag. This is an additive, behaviour-preserving helper used by the
-// manifest fetcher — it does not alter any existing method.
+// response ETag. The body read is bounded at maxManifestBytes — the right cap
+// for the manifest/capabilities-sized payloads this helper was written for.
+// Callers whose responses legitimately grow past that (the task board's corpus
+// fetch crossed it at 9.1 MB) use GetConditionalBounded with their own cap.
 func (c *Client) GetConditional(url, ifNoneMatch string) (*ConditionalGetResult, error) {
+	return c.getConditionalBounded(url, ifNoneMatch, maxManifestBytes, "capabilities manifest response")
+}
+
+// GetConditionalBounded is GetConditional with a caller-owned body cap. It
+// exists for authenticated APIs whose valid payloads are larger than the
+// capabilities manifest while still requiring a hard memory-safety ceiling. A
+// response larger than maxBytes errors instead of being silently truncated — a
+// truncated JSON body would parse as garbage or, worse, as a plausible prefix.
+// The cap is a refusal, never a trim; callers must choose a positive,
+// contract-specific maxBytes, and the manifest's established 8 MiB limit is
+// unchanged.
+func (c *Client) GetConditionalBounded(url, ifNoneMatch string, maxBytes int64) (*ConditionalGetResult, error) {
+	return c.getConditionalBounded(url, ifNoneMatch, maxBytes, "response")
+}
+
+func (c *Client) getConditionalBounded(url, ifNoneMatch string, maxBytes int64, subject string) (*ConditionalGetResult, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("%s limit must be positive", subject)
+	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -278,12 +309,12 @@ func (c *Client) GetConditional(url, ifNoneMatch string) (*ConditionalGetResult,
 		ETag:       resp.Header.Get("ETag"),
 	}
 	if resp.StatusCode != http.StatusNotModified {
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 		if err != nil {
 			return nil, err
 		}
-		if int64(len(body)) > maxManifestBytes {
-			return nil, fmt.Errorf("capabilities manifest response exceeds %d bytes — refusing to parse a truncated body", maxManifestBytes)
+		if int64(len(body)) > maxBytes {
+			return nil, fmt.Errorf("%s exceeds %d bytes — refusing to parse a truncated body", subject, maxBytes)
 		}
 		res.Body = body
 	}
@@ -524,6 +555,7 @@ func (c *Client) Query(typeName, filter string) []Doc {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return nil
 	}
 
@@ -728,9 +760,11 @@ func (c *Client) GetPerspectiveResult(typeName, id, perspective string) (Doc, Do
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
+		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return Doc{}, DocReadNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return Doc{}, DocReadUnreachable
 	}
 
@@ -769,11 +803,12 @@ func (c *Client) GetPerspectiveResult(typeName, id, perspective string) (Doc, Do
 // GET /v1/data/doc/:dataset/paper/:slug
 func (c *Client) PaperDoc(dataset, slug, perspective string) ([]byte, error) {
 	endpoint := c.scopedURL("/v1/data/doc/" + url.PathEscape(dataset) + "/paper/" + url.PathEscape(slug))
+	params := url.Values{}
+	params.Set("resolve", "tasks")
 	if perspective != "" {
-		params := url.Values{}
 		params.Set("perspective", perspective)
-		endpoint += "?" + params.Encode()
 	}
+	endpoint += "?" + params.Encode()
 
 	resp, err := c.authGet(endpoint)
 	if err != nil {
@@ -804,6 +839,121 @@ func (c *Client) PaperDoc(dataset, slug, perspective string) ([]byte, error) {
 	}
 	// No "result" wrapper (a flat/legacy document body) — hand it back verbatim.
 	return body, nil
+}
+
+// PaperSource is the fail-closed reader projection returned by the canonical
+// Paper source endpoint. Exactly one source arm is populated: Blocks for
+// kind=blocks or HTML for kind=html. Broad document fields and derived caches
+// never cross this boundary.
+type PaperSource struct {
+	ID     string
+	Title  string
+	Rev    string
+	Kind   string
+	Blocks json.RawMessage
+	HTML   string
+}
+
+// PaperSource fetches the canonical reader projection for one Paper. The
+// dataset is part of the path so a staging reader cannot silently fall back to
+// production. Authenticated/non-default callers use the membership-gated
+// workspace/project route; a tokenless Default-scope caller uses the public
+// flat route, preserving `bp paper view` for ordinary published Papers.
+//
+// GET /w/:workspace/p/:project/d/:dataset/papers/:slug/source
+// GET /d/:dataset/papers/:slug/source (public Default scope)
+func (c *Client) PaperSource(dataset, slug, perspective string) (PaperSource, error) {
+	path := "/d/" + url.PathEscape(dataset) + "/papers/" + url.PathEscape(slug) + "/source"
+	endpoint := c.scopedURL(path)
+	if c.token == "" && c.Workspace == "default" && c.Project == "default" {
+		endpoint = c.flatURL(path)
+	}
+	if perspective != "" {
+		params := url.Values{}
+		params.Set("perspective", perspective)
+		endpoint += "?" + params.Encode()
+	}
+
+	resp, err := c.authGet(endpoint)
+	if err != nil {
+		return PaperSource{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return PaperSource{}, fmt.Errorf("paper %s source: status %d: %s", slug, resp.StatusCode, bodyPreview(body))
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDocBytes+1))
+	if err != nil {
+		return PaperSource{}, fmt.Errorf("paper %s source: read body: %w", slug, err)
+	}
+	if int64(len(body)) > maxDocBytes {
+		return PaperSource{}, fmt.Errorf("paper %s source: body exceeds %d bytes", slug, maxDocBytes)
+	}
+
+	var payload struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Rev    string `json:"_rev"`
+		Source struct {
+			Kind   string          `json:"kind"`
+			Blocks json.RawMessage `json:"blocks"`
+			HTML   string          `json:"html"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return PaperSource{}, fmt.Errorf("paper %s source: decode: %w", slug, err)
+	}
+
+	source := PaperSource{
+		ID: payload.ID, Title: payload.Title, Rev: payload.Rev,
+		Kind: payload.Source.Kind, Blocks: payload.Source.Blocks, HTML: payload.Source.HTML,
+	}
+	switch source.Kind {
+	case "blocks":
+		if len(bytes.TrimSpace(source.Blocks)) == 0 || !json.Valid(source.Blocks) {
+			return PaperSource{}, fmt.Errorf("paper %s source: invalid blocks", slug)
+		}
+	case "html":
+		// The server owns semantic-empty validation and sanitization. An empty
+		// string in a nominal html arm is nevertheless an invalid wire shape.
+		if strings.TrimSpace(source.HTML) == "" {
+			return PaperSource{}, fmt.Errorf("paper %s source: empty html", slug)
+		}
+	default:
+		return PaperSource{}, fmt.Errorf("paper %s source: unknown kind %q", slug, source.Kind)
+	}
+	return source, nil
+}
+
+// DocumentJSON adapts the narrow reader projection to the established minimal
+// Paper document shape consumed by pdrender and `bp paper view -o json`.
+func (s PaperSource) DocumentJSON(fallbackID string) ([]byte, error) {
+	id := s.ID
+	if id == "" {
+		id = fallbackID
+	}
+	doc := map[string]any{
+		"_id": id, "_type": "paper", "title": s.Title,
+	}
+	if s.Rev != "" {
+		doc["_rev"] = s.Rev
+	}
+	switch s.Kind {
+	case "blocks":
+		var blocks any
+		if err := json.Unmarshal(s.Blocks, &blocks); err != nil {
+			return nil, err
+		}
+		doc["blocks"] = blocks
+	case "html":
+		doc["body_html"] = s.HTML
+	default:
+		return nil, fmt.Errorf("unknown Paper source kind %q", s.Kind)
+	}
+	return json.Marshal(doc)
 }
 
 // bodyPreview trims an error-body to a short single-line preview so a non-2xx
@@ -872,6 +1022,14 @@ type taskEnvelope struct {
 	Reason  string          `json:"reason"`
 	Doc     json.RawMessage `json:"doc"`
 	Notices []TaskNotice    `json:"notices"`
+	// Help is the top-level {"help":[…]} array a claim/close (also stamp/pulse/
+	// release) 2xx envelope carries — 1–3 concrete next-command templates the
+	// server authors beside its mutation emitters (AXI R5, mutation_help/3) with
+	// REAL ids/epochs. Advisory only, omitted when empty. Every typed helper below
+	// surfaces it so the frontier/cmux/board/desk-TUI claim paths reach the same
+	// next-step parity `runCommand` gives the manifest path (charter D18) — it was
+	// silently dropped before, decoded nowhere.
+	Help []string `json:"help"`
 	// Conflicts rides a 409 resource_conflict envelope: the tasks/workers that
 	// already hold one or more of the file resources this claim declared. The
 	// server's check_resources_free fence populates it; a frontier claimer names
@@ -896,11 +1054,15 @@ type TaskConflict struct {
 // fires when the parent rail you observed moved. Advisory only: they never fail
 // the request, and a consumer that ignores them loses nothing but the heads-up.
 type TaskNotice struct {
+	// omitempty matters on the MARSHAL side: the frontier claim's machine JSON
+	// re-serializes notices (axi-b1), and a rail_changed notice must not ship
+	// `"task_id":"","blockers":null` noise — the AXI nil-key-omission law.
+	// Decoding is unaffected.
 	Type     string   `json:"type"`
-	TaskID   string   `json:"task_id"`
-	Blockers []string `json:"blockers"`
-	ParentID string   `json:"parent_id"`
-	RailRev  string   `json:"rail_rev"`
+	TaskID   string   `json:"task_id,omitempty"`
+	Blockers []string `json:"blockers,omitempty"`
+	ParentID string   `json:"parent_id,omitempty"`
+	RailRev  string   `json:"rail_rev,omitempty"`
 }
 
 // taskPost POSTs a JSON payload to a FLAT /v1/tasks path. The task routes are
@@ -936,7 +1098,7 @@ func (c *Client) taskPostRaw(path string, payload map[string]interface{}) (*task
 		return nil, 0, err
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+path, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", c.flatURL(path), bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -965,19 +1127,21 @@ func (c *Client) taskPostRaw(path string, payload map[string]interface{}) (*task
 // claim's fencing epoch (content.claim.epoch on the returned doc) — the token
 // TaskClose must echo back as observed_epoch.
 func (c *Client) TaskClaim(docID, workerID string) (int, error) {
-	epoch, _, err := c.TaskClaimN(docID, workerID)
+	epoch, _, _, err := c.TaskClaimN(docID, workerID)
 	return epoch, err
 }
 
 // TaskClaimN is TaskClaim plus the envelope's advisory rail-awareness notices
-// (blocked_while_claimed / rail_changed, nil when the server sent none). Callers
-// that want to surface the heads-up (the task board's status strip) use this;
-// TaskClaim stays the epoch-only convenience for callers that don't.
-func (c *Client) TaskClaimN(docID, workerID string) (int, []TaskNotice, error) {
+// (blocked_while_claimed / rail_changed, nil when the server sent none) AND the
+// server's help[] next-command templates (charter D18, nil when the server sent
+// none). Callers that want to surface the heads-up (the task board's status
+// strip, the desk TUI, the cmux hook) use this; TaskClaim stays the epoch-only
+// convenience for callers that don't.
+func (c *Client) TaskClaimN(docID, workerID string) (int, []TaskNotice, []string, error) {
 	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/claim",
 		map[string]interface{}{"worker_id": workerID})
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	var doc struct {
 		Claim struct {
@@ -985,9 +1149,9 @@ func (c *Client) TaskClaimN(docID, workerID string) (int, []TaskNotice, error) {
 		} `json:"claim"`
 	}
 	if err := json.Unmarshal(env.Doc, &doc); err != nil || doc.Claim.Epoch <= 0 {
-		return 0, nil, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
+		return 0, nil, nil, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
 	}
-	return doc.Claim.Epoch, env.Notices, nil
+	return doc.Claim.Epoch, env.Notices, env.Help, nil
 }
 
 // TaskClaimOutcome is the full result of a resources-declaring claim: on a
@@ -1001,6 +1165,7 @@ type TaskClaimOutcome struct {
 	Reason    string
 	Epoch     int
 	Notices   []TaskNotice
+	Help      []string
 	Conflicts []TaskConflict
 }
 
@@ -1030,7 +1195,7 @@ func (c *Client) TaskClaimResources(docID, workerID string, resources []string) 
 		if reason == "" {
 			reason = "claim_rejected"
 		}
-		return TaskClaimOutcome{OK: false, Reason: reason, Conflicts: env.Conflicts, Notices: env.Notices}, nil
+		return TaskClaimOutcome{OK: false, Reason: reason, Conflicts: env.Conflicts, Notices: env.Notices, Help: env.Help}, nil
 	}
 	var doc struct {
 		Claim struct {
@@ -1040,7 +1205,7 @@ func (c *Client) TaskClaimResources(docID, workerID string, resources []string) 
 	if err := json.Unmarshal(env.Doc, &doc); err != nil || doc.Claim.Epoch <= 0 {
 		return TaskClaimOutcome{}, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
 	}
-	return TaskClaimOutcome{OK: true, Epoch: doc.Claim.Epoch, Notices: env.Notices}, nil
+	return TaskClaimOutcome{OK: true, Epoch: doc.Claim.Epoch, Notices: env.Notices, Help: env.Help}, nil
 }
 
 // TaskClose closes a claimed task via POST /v1/tasks/:doc_id/close. The server
@@ -1048,22 +1213,23 @@ func (c *Client) TaskClaimResources(docID, workerID string, resources []string) 
 // mismatch returns reason "fenced_off"); lifecycle lands on "done" (the server
 // default, sent explicitly).
 func (c *Client) TaskClose(docID, workerID string, observedEpoch int) error {
-	_, err := c.TaskCloseN(docID, workerID, observedEpoch)
+	_, _, err := c.TaskCloseN(docID, workerID, observedEpoch)
 	return err
 }
 
 // TaskCloseN is TaskClose plus the envelope's advisory rail-awareness notices
-// (nil when the server sent none) — the notice-aware twin the board uses so a
-// clean close can still flag a blocker that landed on a sibling. On a fenced
-// 409 the reason rides the error (fenced_off / doc_changed_since_claim); notices
-// only accompany a 2xx.
+// AND the server's help[] next-command templates (both nil when the server sent
+// none) — the advisory-aware twin the board/desk-TUI use so a clean close can
+// still flag a blocker that landed on a sibling and point at the next task. On a
+// fenced 409 the reason rides the error (fenced_off / doc_changed_since_claim);
+// notices and help only accompany a 2xx.
 // TaskCloseRevN is TaskCloseN plus an observed_rev strict-CAS guard. When a
 // task's brief legitimately changed since claim — e.g. the worker marked its
 // own acceptance criteria met — the server's work-digest fence
 // (doc_changed_since_claim) rejects a plain close; passing the freshly-observed
 // rev is the sanctioned bypass (Tasks.close/3 :observed_rev). The worker match
 // still prevents theft.
-func (c *Client) TaskCloseRevN(docID, workerID string, observedEpoch int, observedRev string) ([]TaskNotice, error) {
+func (c *Client) TaskCloseRevN(docID, workerID string, observedEpoch int, observedRev string) ([]TaskNotice, []string, error) {
 	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
 		map[string]interface{}{
 			"worker_id":        workerID,
@@ -1072,12 +1238,12 @@ func (c *Client) TaskCloseRevN(docID, workerID string, observedEpoch int, observ
 			"lifecycle_status": "done",
 		})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return env.Notices, nil
+	return env.Notices, env.Help, nil
 }
 
-func (c *Client) TaskCloseN(docID, workerID string, observedEpoch int) ([]TaskNotice, error) {
+func (c *Client) TaskCloseN(docID, workerID string, observedEpoch int) ([]TaskNotice, []string, error) {
 	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
 		map[string]interface{}{
 			"worker_id":        workerID,
@@ -1085,9 +1251,9 @@ func (c *Client) TaskCloseN(docID, workerID string, observedEpoch int) ([]TaskNo
 			"lifecycle_status": "done",
 		})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return env.Notices, nil
+	return env.Notices, env.Help, nil
 }
 
 // TaskRelabel adds and/or removes content.labels on a task via
@@ -1105,6 +1271,58 @@ func (c *Client) TaskRelabel(docID string, add, remove []string) error {
 			"remove": remove,
 		})
 	return err
+}
+
+// TaskGetContent RE-READS one task via GET /v1/tasks/:doc_id and returns its
+// `doc.content` object verbatim (the flat, token-scoped task route — tenancy
+// rides the bearer token, exactly like the claim/close/stamp POSTs above).
+//
+// It exists for the PDS success-claim law (charter PDS-D359/D361): a ledger
+// writer may not report a write it never read back. `bp task stamp` POSTs and
+// then calls this to ask the STORE what it now holds, so a write dropped by a
+// transport ceiling, a second door, or a bad minute on the box cannot be
+// reported as a success. The content is returned RAW rather than decoded here
+// because the criteria decode (with the server's exact tolerance contract)
+// belongs to internal/taskboard, which owns that shape.
+//
+// An ok:false envelope surfaces the server's reason string VERBATIM as the
+// error; a non-200 carries the status. Both are honest read failures — the
+// caller must NOT read them as "the write landed".
+func (c *Client) TaskGetContent(docID string) (json.RawMessage, error) {
+	resp, err := c.authGet(c.flatURL("/v1/tasks/" + url.PathEscape(docID)))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, fmt.Errorf("task read-back %s: %w", docID, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("task read-back %s: status %d", docID, resp.StatusCode)
+	}
+	var env struct {
+		OK     bool   `json:"ok"`
+		Reason string `json:"reason"`
+		Doc    struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"doc"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("task read-back %s: %w", docID, err)
+	}
+	if !env.OK {
+		reason := env.Reason
+		if reason == "" {
+			reason = "task read-back returned ok:false with no reason"
+		}
+		return nil, fmt.Errorf("%s", reason)
+	}
+	if len(bytes.TrimSpace(env.Doc.Content)) == 0 {
+		return nil, fmt.Errorf("task read-back %s: envelope carried no doc.content", docID)
+	}
+	return env.Doc.Content, nil
 }
 
 // GraphNode is one node of a GET /v1/graph/:id response — the id ↔ doc_id join
@@ -1142,11 +1360,12 @@ type GraphResult struct {
 // REAL cross-root block edges (df-graph-crossdep) — the fetch happens here,
 // OUTSIDE the pure taskboard.Frontier model.
 func (c *Client) GraphShow(id string) (*GraphResult, error) {
-	u := c.baseURL + "/v1/graph/" + url.PathEscape(id) +
+	path := "/v1/graph/" + url.PathEscape(id) +
 		"?drafts=true&direction=both&kinds=blocks"
 	if c.Dataset != "" {
-		u += "&dataset=" + url.QueryEscape(c.Dataset)
+		path += "&dataset=" + url.QueryEscape(c.Dataset)
 	}
+	u := c.flatURL(path)
 	resp, err := c.authGet(u)
 	if err != nil {
 		return nil, err
@@ -1177,7 +1396,7 @@ func (c *Client) tenancyPost(path, name string, out interface{}) error {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+path, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", c.flatURL(path), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -1220,20 +1439,24 @@ func (c *Client) CreateProject(workspaceSlug, name string) (ProjectInfo, error) 
 }
 
 func (c *Client) ListWorkspaces() ([]WorkspaceInfo, error) {
-	resp, err := c.authGet(c.baseURL + "/api/workspaces")
+	resp, err := c.authGet(c.flatURL("/api/workspaces"))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("list workspaces: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list workspaces: status %d", resp.StatusCode)
+		return nil, humanAPIError(resp.StatusCode, body)
 	}
 
 	var result struct {
 		Workspaces []WorkspaceInfo `json:"workspaces"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("parse workspaces: %w", err)
 	}
 	return result.Workspaces, nil
@@ -1243,21 +1466,25 @@ func (c *Client) ListWorkspaces() ([]WorkspaceInfo, error) {
 // GET /api/workspaces/:workspace_slug/projects. A non-member (or unknown slug)
 // returns 404, which surfaces here as an error.
 func (c *Client) ListProjects(workspaceSlug string) ([]ProjectInfo, error) {
-	resp, err := c.authGet(c.baseURL + "/api/workspaces/" + url.PathEscape(workspaceSlug) + "/projects")
+	resp, err := c.authGet(c.flatURL("/api/workspaces/" + url.PathEscape(workspaceSlug) + "/projects"))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list projects: status %d", resp.StatusCode)
+		return nil, humanAPIError(resp.StatusCode, body)
 	}
 
 	var result struct {
 		Workspace WorkspaceInfo `json:"workspace"`
 		Projects  []ProjectInfo `json:"projects"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("parse projects: %w", err)
 	}
 	return result.Projects, nil

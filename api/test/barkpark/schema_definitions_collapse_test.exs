@@ -11,7 +11,7 @@ defmodule Barkpark.SchemaDefinitionsCollapseTest do
   not `project_id`. Also asserts the production `paper` schema still resolves
   (the dataset papers actually live in after the convergence move).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query
 

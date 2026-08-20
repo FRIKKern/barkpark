@@ -1,0 +1,377 @@
+════ FULL RUN — bash scripts/pdf-efficiency-proof.sh ════
+──────────────────────────────────────────────────────────────────────────────
+PDF EFFICIENCY PROOF — run — run 20260722T224254Z-95778
+──────────────────────────────────────────────────────────────────────────────
+tree:        /Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_3c6759c7-517-24
+worktree:    6a7ead0a7379338f8d53e8bad131965defb67059 (worktree-wf_3c6759c7-517-24)
+scratch:     /tmp/pdf.Jcmb (13 bytes)
+pointer:     /tmp/pdf.Jcmb/pointer (pinned — never the global default)
+fleet home:  /tmp/pdf.Jcmb/fh · ledger /tmp/pdf.Jcmb/fh/orchestrator/spend.jsonl
+orders:      pdfp95778-export (heavy) + pdfp95778-lint (light)
+harness PGID 95774 · host :4000 listeners before: 31714
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 0 — PRECONDITION — fleet routes live, capacity round-trips, cap-gate ledger path+dialect verified
+──────────────────────────────────────────────────────────────────────────────
+  booting the scratch target from this tree (log: /tmp/pdf.Jcmb/pdf-boot.log; cold budget
+  15 min — PDF-D29 measured 311.7s cold, ~13-33s warm)…
+      scratch root   /private/tmp/pdf.Jcmb  (21 bytes, limit 85)
+      http port      39117
+      postgres port  21738
+      media dir      /private/tmp/pdf.Jcmb/media
+      boot took 301s
+      target http://localhost:39117 (token from scratch.env — never printed)
+      GET /v1/fleet/roster -> HTTP 200, documents-envelope: yes
+      probe beat (pdf-parked-ghost, capacity {"size_class":"standard","slots_total":1,"slots_free":1}, ttl_s=1) -> last_seen=2026-07-22T22:47:55.573089Z
+      beat receipt carries NO capacity key (D54 pin 2) — asserting the round-trip via GET roster
+      roster carries the structured capacity INTACT: {"size_class": "standard", "slots_free": 1, "slots_total": 1}
+      static pin: dispatch.sh names orchestrator/spend.jsonl and cost_usd
+      ledger /tmp/pdf.Jcmb/fh/orchestrator/spend.jsonl (179 bytes):
+        {"ts":"2026-07-23T00:00:00Z","order_id":"seed-r0","agent":"pdf-proof","cost_usd":1.25}
+        {"ts":"2026-07-23T00:00:00Z","order_id":"seed-r0-null","agent":"pdf-proof","cost_usd":null}
+      | cap gate: spent $1.2500 of cap $100 — dispatch allowed
+      | pdfp95778-r0check → r0-stub (light): best-fit: cheapest sufficient online box for light
+      functional pin: the cap gate read the seeded ledger at the pinned path, summed the cost_usd dialect (1.25) and skipped the canonical null row
+  PASS   0   target serves the fleet routes; structured capacity round-trips beat -> roster intact (receipt echo-free); cap-gate ledger path + cost_usd dialect verified (static + functional)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 1 — SETUP — two stub listeners beating genuinely different measured profiles
+──────────────────────────────────────────────────────────────────────────────
+      pdf-big-box  beats {"size_class":"xl","slots_total":1,"slots_free":1,"budget":100}
+      pdf-lean-laptop beats {"size_class":"light","slots_total":1,"slots_free":1,"budget":3}
+      pdf-big-box  pid=26089 pgid=26089
+      pdf-lean-laptop pid=26091 pgid=26091
+      harness            pgid=95774
+      first beats landed: pdf-big-box last_seen=2026-07-22T22:47:56.262038Z · pdf-lean-laptop last_seen=2026-07-22T22:47:56.262637Z
+
+      RAW ROSTER GET (PDF-D53 AC1 evidence — live rows, capacities, one offline row):
+      GET http://localhost:39117/v1/fleet/roster
+        {
+            "ok": true,
+            "documents": [
+                {
+                    "agent": null,
+                    "capacity": {
+                        "budget": 100,
+                        "size_class": "xl",
+                        "slots_free": 1,
+                        "slots_total": 1
+                    },
+                    "last_seen": "2026-07-22T22:47:58.387348Z",
+                    "scope": null,
+                    "status": "idle",
+                    "task": null,
+                    "ttl_s": 30,
+                    "worker": "pdf-big-box"
+                },
+                {
+                    "agent": null,
+                    "capacity": {
+                        "budget": 3,
+                        "size_class": "light",
+                        "slots_free": 1,
+                        "slots_total": 1
+                    },
+                    "last_seen": "2026-07-22T22:47:58.387348Z",
+                    "scope": null,
+                    "status": "idle",
+                    "task": null,
+                    "ttl_s": 30,
+                    "worker": "pdf-lean-laptop"
+                },
+                {
+                    "agent": null,
+                    "capacity": {
+                        "size_class": "standard",
+                        "slots_free": 1,
+                        "slots_total": 1
+                    },
+                    "last_seen": "2026-07-22T22:47:55.573089Z",
+                    "scope": null,
+                    "status": "offline",
+                    "task": null,
+                    "ttl_s": 1,
+                    "worker": "pdf-parked-ghost"
+                }
+            ]
+        }
+      stub filer written to /tmp/pdf.Jcmb/pdf-filer.sh (draft-only createOrReplace, always exit 0)
+      orders: [{"id":"pdfp95778-export","klass":"heavy"},{"id":"pdfp95778-lint","klass":"light"}]
+  PASS   1   two stub listeners up in distinct PGIDs, profiles live on the roster, ghost row offline, RAW roster quoted (D53 AC1)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 2 — POSITIVE — mixed batch: heavy-on-big + light-on-lean from a LIVE pull
+──────────────────────────────────────────────────────────────────────────────
+      live roster pulled -> /var/folders/hb/18wmml0n5495w28s_1z_8flh0000gn/T//pdf-eff.sxxtAw/roster-r2.json (651 bytes)
+      | cap gate: no FLEET_SPEND_CAP set — batch cap gate off (route.py per-listener budgets still apply)
+      | pdf-parked-ghost excluded: offline/stale (server status=offline)
+      | pdfp95778-export → pdf-big-box (heavy): best-fit: cheapest sufficient online box for heavy
+      | pdfp95778-lint → pdf-lean-laptop (light): best-fit: cheapest sufficient online box for light
+      raw census (perspective=raw, bearer): 0 -> 2
+      cleanup: deleted pdfp95778-export + pdfp95778-lint — raw census now 0
+  PASS   2   heavy -> pdf-big-box and light -> pdf-lean-laptop from the LIVE roster; ghost exclusion printed (PDF-D38); 2 drafts filed then cleaned (census 0)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 3 — SWAP CONTROL — capacities EXCHANGED, worker names CONSTANT: the assignment must FLIP
+──────────────────────────────────────────────────────────────────────────────
+      profiles exchanged on disk — same loops, same names, next beats carry the swap
+      roster reflects the swap: pdf-big-box now {"budget": 3, "size_class": "light", "slots_free": 1, "slots_total": 1} · pdf-lean-laptop now {"budget": 100, "size_class": "xl", "slots_free": 1, "slots_total": 1}
+      | cap gate: no FLEET_SPEND_CAP set — batch cap gate off (route.py per-listener budgets still apply)
+      | pdf-parked-ghost excluded: offline/stale (server status=offline)
+      | pdfp95778-export → pdf-lean-laptop (heavy): best-fit: cheapest sufficient online box for heavy
+      | pdfp95778-lint → pdf-big-box (light): best-fit: cheapest sufficient online box for light
+      cleanup: deleted pdfp95778-export + pdfp95778-lint — raw census now 0
+      profiles restored — roster back to the R2 shape
+  PASS   3   capacities exchanged (names constant) FLIPPED the assignment: heavy -> pdf-lean-laptop, light -> pdf-big-box — routing follows measured content, not identity
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 4 — CAP POSITIVE — ledger sums to EXACTLY the cap: freeze, zero filed
+──────────────────────────────────────────────────────────────────────────────
+      ledger /tmp/pdf.Jcmb/fh/orchestrator/spend.jsonl (172 bytes):
+        {"ts":"2026-07-23T00:00:01Z","order_id":"seed-a","agent":"pdf-proof","cost_usd":2.50}
+        {"ts":"2026-07-23T00:00:02Z","order_id":"seed-b","agent":"pdf-proof","cost_usd":2.50}
+      FLEET_SPEND_CAP=$5.00 · 2.50 + 2.50 = 5.0000 >= 5.00 (the compare is >=, D54 pin 4)
+      | pdf-parked-ghost excluded: offline/stale (server status=offline)
+      | SPEND CAP REACHED ($5.0000 >= $5.00) — dispatch halted, 0/2 orders placed
+      |   pdfp95778-export spend_cap
+      |   pdfp95778-lint spend_cap
+      stub filer log: 0 bytes (the filer was never invoked — dispatch layer frozen, not just the route layer)
+      raw census delta: 0 -> 0 (zero orders filed)
+  PASS   4   cap tripped at the exact boundary: ONE loud freeze line, every order spend_cap, filer log 0 bytes, raw census delta 0
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 5 — UNTRIPPED CONTROL — fresh ledger UNDER the cap: dispatch proceeds, R2 mapping
+──────────────────────────────────────────────────────────────────────────────
+      ledger /tmp/pdf.Jcmb/fh/orchestrator/spend.jsonl (86 bytes):
+        {"ts":"2026-07-23T00:00:03Z","order_id":"seed-c","agent":"pdf-proof","cost_usd":2.50}
+      | cap gate: spent $2.5000 of cap $5.00 — dispatch allowed
+      | pdf-parked-ghost excluded: offline/stale (server status=offline)
+      | pdfp95778-export → pdf-big-box (heavy): best-fit: cheapest sufficient online box for heavy
+      | pdfp95778-lint → pdf-lean-laptop (light): best-fit: cheapest sufficient online box for light
+      cleanup: deleted pdfp95778-export + pdfp95778-lint — raw census now 0
+  PASS   5   under the cap the SAME batch proceeds and matches the R2 mapping — the freeze is the cap's doing, nothing else's
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 6 — LEDGER-ZERO LIVE-READ — truncate the tripped ledger in place; NO restart; freeze must lift
+──────────────────────────────────────────────────────────────────────────────
+      ledger /tmp/pdf.Jcmb/fh/orchestrator/spend.jsonl (172 bytes):
+        {"ts":"2026-07-23T00:00:01Z","order_id":"seed-a","agent":"pdf-proof","cost_usd":2.50}
+        {"ts":"2026-07-23T00:00:02Z","order_id":"seed-b","agent":"pdf-proof","cost_usd":2.50}
+      | pdf-parked-ghost excluded: offline/stale (server status=offline)
+      | SPEND CAP REACHED ($5.0000 >= $5.00) — dispatch halted, 0/2 orders placed
+      |   pdfp95778-export spend_cap
+      |   pdfp95778-lint spend_cap
+      tripped state re-confirmed (freeze fired)
+      ledger truncated IN PLACE (inode 358756802 unchanged); scratch server + shell untouched — no process restarted
+      ledger /tmp/pdf.Jcmb/fh/orchestrator/spend.jsonl: (empty or absent)
+      | cap gate: spent $0.0000 of cap $5.00 — dispatch allowed
+      | pdf-parked-ghost excluded: offline/stale (server status=offline)
+      | pdfp95778-export → pdf-big-box (heavy): best-fit: cheapest sufficient online box for heavy
+      | pdfp95778-lint → pdf-lean-laptop (light): best-fit: cheapest sufficient online box for light
+      cleanup: deleted pdfp95778-export + pdfp95778-lint — raw census now 0
+  PASS   6   the in-place ledger zero LIFTED the freeze with no restart — the cap read is live-per-batch, never cached
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 7 — MALFORMED LEDGER — non-numeric cost_usd, NO cap set: named abort exit 12
+──────────────────────────────────────────────────────────────────────────────
+      ledger /tmp/pdf.Jcmb/fh/orchestrator/spend.jsonl (90 bytes):
+        {"ts":"2026-07-23T00:00:04Z","order_id":"seed-m","agent":"pdf-proof","cost_usd":"twelve"}
+      FLEET_SPEND_CAP deliberately UNSET — the ledger read is unconditional when the file exists (D54 pin 6)
+      | ABORT: MALFORMED_SPEND_LEDGER_ROW line 1: missing/non-numeric 'cost_usd': {"ts":"2026-07-23T00:00:04Z","order_id":"seed-m","agent":"pdf-proof","cost_usd":"twelve"}
+      | ABORT: MALFORMED_SPEND_LEDGER at /tmp/pdf.Jcmb/fh/orchestrator/spend.jsonl — refusing to coerce a brake input (PDF-D37)
+      no spend=0, no spend=inf, nothing routed, nothing filed — the brake refuses garbage by name
+  PASS   7   a malformed ledger row is a NAMED abort (exit 12, MALFORMED_SPEND_LEDGER line 1, non-numeric cost_usd) even with no cap set
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG T — TEARDOWN — reap both stub groups, tear the target down clean
+──────────────────────────────────────────────────────────────────────────────
+scripts/pdf-efficiency-proof.sh: line 902: 26089 Terminated: 15          run_stub_loop "$BIG" "$PROFILE_BIG" "$W1_LOG"
+scripts/pdf-efficiency-proof.sh: line 902: 26091 Terminated: 15          run_stub_loop "$LEAN" "$PROFILE_LEAN" "$W2_LOG"
+      stub groups 26089 + 26091 reaped
+      pds-scratch: stopping server + postgres under /private/tmp/pdf.Jcmb (PORT=39117, PG=21738)
+      barkpark: stopping server (pid 25078)
+      barkpark-pg: stopping Postgres
+      waiting for server to shut down.... done
+      server stopped
+      pds-scratch: port 39117 released
+      pds-scratch: port 21738 released
+      pds-scratch: zero orphan postgres for this scratch root
+      pds-scratch: removed /private/tmp/pdf.Jcmb
+      ---- teardown: PASS
+      host :4000 listeners — before: '31714' · after: '31714'
+  PASS   T   teardown PASS (ports released, zero orphan postgres for this root, scratch root removed); host :4000 untouched
+
+──────────────────────────────────────────────────────────────────────────────
+VERDICT — run: PASS=9 ABORT=0 FAIL=0
+The efficiency loop is LIVE: measured capacity heartbeats round-tripped
+beat -> roster -> dispatch -> route; the mixed batch landed heavy-on-big +
+light-on-lean from the live roster; exchanging the capacities (names
+constant) flipped the assignment; the tripped cap froze dispatch at the
+exact >= boundary with zero filed; an in-place ledger zero lifted the
+freeze with no restart; a malformed ledger row aborted BY NAME (exit 12).
+Four verbs, no new concepts (PDF-D23).
+──────────────────────────────────────────────────────────────────────────────
+FULL-RUN-RC=0
+
+════ NEGCTL RUN — bash scripts/pdf-efficiency-proof.sh --negctl ════
+──────────────────────────────────────────────────────────────────────────────
+PDF EFFICIENCY PROOF — negctl — run 20260722T224853Z-31432
+──────────────────────────────────────────────────────────────────────────────
+tree:        /Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_3c6759c7-517-24
+worktree:    6a7ead0a7379338f8d53e8bad131965defb67059 (worktree-wf_3c6759c7-517-24)
+scratch:     /tmp/pdf.7lq7 (13 bytes)
+pointer:     /tmp/pdf.7lq7/pointer (pinned — never the global default)
+fleet home:  /tmp/pdf.7lq7/fh · ledger /tmp/pdf.7lq7/fh/orchestrator/spend.jsonl
+orders:      pdfp31432-export (heavy) + pdfp31432-lint (light)
+harness PGID 31428 · host :4000 listeners before: 31714
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 0 — PRECONDITION — fleet routes live, capacity round-trips, cap-gate ledger path+dialect verified
+──────────────────────────────────────────────────────────────────────────────
+  booting the scratch target from this tree (log: /tmp/pdf.7lq7/pdf-boot.log; cold budget
+  15 min — PDF-D29 measured 311.7s cold, ~13-33s warm)…
+      scratch root   /private/tmp/pdf.7lq7  (21 bytes, limit 85)
+      http port      23904
+      postgres port  32874
+      media dir      /private/tmp/pdf.7lq7/media
+      boot took 46s
+      target http://localhost:23904 (token from scratch.env — never printed)
+      GET /v1/fleet/roster -> HTTP 200, documents-envelope: yes
+      probe beat (pdf-parked-ghost, capacity {"size_class":"standard","slots_total":1,"slots_free":1}, ttl_s=1) -> last_seen=2026-07-22T22:49:39.985649Z
+      beat receipt carries NO capacity key (D54 pin 2) — asserting the round-trip via GET roster
+      roster carries the structured capacity INTACT: {"size_class": "standard", "slots_free": 1, "slots_total": 1}
+      static pin: dispatch.sh names orchestrator/spend.jsonl and cost_usd
+      ledger /tmp/pdf.7lq7/fh/orchestrator/spend.jsonl (179 bytes):
+        {"ts":"2026-07-23T00:00:00Z","order_id":"seed-r0","agent":"pdf-proof","cost_usd":1.25}
+        {"ts":"2026-07-23T00:00:00Z","order_id":"seed-r0-null","agent":"pdf-proof","cost_usd":null}
+      | cap gate: spent $1.2500 of cap $100 — dispatch allowed
+      | pdfp31432-r0check → r0-stub (light): best-fit: cheapest sufficient online box for light
+      functional pin: the cap gate read the seeded ledger at the pinned path, summed the cost_usd dialect (1.25) and skipped the canonical null row
+  PASS   0   target serves the fleet routes; structured capacity round-trips beat -> roster intact (receipt echo-free); cap-gate ledger path + cost_usd dialect verified (static + functional)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 1 — SETUP (negctl) — two stub listeners with IDENTICAL capacities
+──────────────────────────────────────────────────────────────────────────────
+      both pdf-big-box and pdf-lean-laptop beat the SAME profile: {"size_class":"xl","slots_total":1,"slots_free":1,"budget":100}
+      identical content -> the R3 swap-flip assert MUST fire as a failure (PDS-D20)
+      pdf-big-box  pid=35563 pgid=35563
+      pdf-lean-laptop pid=35564 pgid=35564
+      harness            pgid=31428
+      first beats landed: pdf-big-box last_seen=2026-07-22T22:49:40.976168Z · pdf-lean-laptop last_seen=2026-07-22T22:49:40.965864Z
+
+      RAW ROSTER GET (PDF-D53 AC1 evidence — live rows, capacities, one offline row):
+      GET http://localhost:23904/v1/fleet/roster
+        {
+            "ok": true,
+            "documents": [
+                {
+                    "agent": null,
+                    "capacity": {
+                        "budget": 100,
+                        "size_class": "xl",
+                        "slots_free": 1,
+                        "slots_total": 1
+                    },
+                    "last_seen": "2026-07-22T22:49:40.976168Z",
+                    "scope": null,
+                    "status": "idle",
+                    "task": null,
+                    "ttl_s": 30,
+                    "worker": "pdf-big-box"
+                },
+                {
+                    "agent": null,
+                    "capacity": {
+                        "budget": 100,
+                        "size_class": "xl",
+                        "slots_free": 1,
+                        "slots_total": 1
+                    },
+                    "last_seen": "2026-07-22T22:49:40.965864Z",
+                    "scope": null,
+                    "status": "idle",
+                    "task": null,
+                    "ttl_s": 30,
+                    "worker": "pdf-lean-laptop"
+                },
+                {
+                    "agent": null,
+                    "capacity": {
+                        "size_class": "standard",
+                        "slots_free": 1,
+                        "slots_total": 1
+                    },
+                    "last_seen": "2026-07-22T22:49:39.985649Z",
+                    "scope": null,
+                    "status": "offline",
+                    "task": null,
+                    "ttl_s": 1,
+                    "worker": "pdf-parked-ghost"
+                }
+            ]
+        }
+      stub filer written to /tmp/pdf.7lq7/pdf-filer.sh (draft-only createOrReplace, always exit 0)
+      orders: [{"id":"pdfp31432-export","klass":"heavy"},{"id":"pdfp31432-lint","klass":"light"}]
+  PASS   1   two stub listeners up in distinct PGIDs, profiles live on the roster, ghost row offline, RAW roster quoted (D53 AC1)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 2 — POSITIVE — mixed batch: heavy-on-big + light-on-lean from a LIVE pull
+──────────────────────────────────────────────────────────────────────────────
+      live roster pulled -> /var/folders/hb/18wmml0n5495w28s_1z_8flh0000gn/T//pdf-eff.Jcdrsl/roster-r2.json (650 bytes)
+      | cap gate: no FLEET_SPEND_CAP set — batch cap gate off (route.py per-listener budgets still apply)
+      | pdf-parked-ghost excluded: offline/stale (server status=offline)
+      | pdfp31432-export → pdf-big-box (heavy): best-fit: cheapest sufficient online box for heavy
+      | pdfp31432-lint → pdf-lean-laptop (light): best-fit: cheapest sufficient online box for light
+      baseline assignment recorded for the R3 inversion:
+        pdfp31432-export → pdf-big-box (heavy): best-fit: cheapest sufficient online box for heavy
+        pdfp31432-lint → pdf-lean-laptop (light): best-fit: cheapest sufficient online box for light
+      cleanup: deleted pdfp31432-export + pdfp31432-lint — raw census now 0
+  PASS   2   baseline batch dispatched under IDENTICAL capacities (mapping is a tiebreak, recorded for R3)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 3 — NEGCTL SWAP — capacities IDENTICAL: the flip assert must FIRE AS A FAILURE
+──────────────────────────────────────────────────────────────────────────────
+      | cap gate: no FLEET_SPEND_CAP set — batch cap gate off (route.py per-listener budgets still apply)
+      | pdf-parked-ghost excluded: offline/stale (server status=offline)
+      | pdfp31432-export → pdf-big-box (heavy): best-fit: cheapest sufficient online box for heavy
+      | pdfp31432-lint → pdf-lean-laptop (light): best-fit: cheapest sufficient online box for light
+      post-'swap' assignment:
+        pdfp31432-export → pdf-big-box (heavy): best-fit: cheapest sufficient online box for heavy
+        pdfp31432-lint → pdf-lean-laptop (light): best-fit: cheapest sufficient online box for light
+      the swap-flip assert (heavy -> pdf-lean-laptop AND light -> pdf-big-box) FIRED AS A FAILURE:
+      with identical capacities the assignment does NOT flip. The R3 check CAN
+      fail, so the main run's flip is not vacuous (PDS-D20).
+      cleanup: deleted pdfp31432-export + pdfp31432-lint — raw census now 0
+  PASS   3   NEGCTL OK — the swap-flip assert demonstrably fires as a failure under identical capacities; assignment byte-stable across the no-op swap
+
+  NOTE   R4-R7 (cap rungs) are OUT OF NEGCTL SCOPE BY DESIGN — this control
+         inverts exactly the swap-flip assert (the brief's negctl contract);
+         the cap instrument has its own controls inside the main run (R5
+         untripped, R6 live-read, R7 malformed). Printed, never silent.
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG T — TEARDOWN — reap both stub groups, tear the target down clean
+──────────────────────────────────────────────────────────────────────────────
+scripts/pdf-efficiency-proof.sh: line 902: 35563 Terminated: 15          run_stub_loop "$BIG" "$PROFILE_BIG" "$W1_LOG"
+scripts/pdf-efficiency-proof.sh: line 902: 35564 Terminated: 15          run_stub_loop "$LEAN" "$PROFILE_LEAN" "$W2_LOG"
+      stub groups 35563 + 35564 reaped
+      pds-scratch: stopping server + postgres under /private/tmp/pdf.7lq7 (PORT=23904, PG=32874)
+      barkpark: stopping server (pid 33259)
+      barkpark-pg: stopping Postgres
+      waiting for server to shut down.... done
+      server stopped
+      pds-scratch: port 23904 released
+      pds-scratch: port 32874 released
+      pds-scratch: zero orphan postgres for this scratch root
+      pds-scratch: removed /private/tmp/pdf.7lq7
+      ---- teardown: PASS
+      host :4000 listeners — before: '31714' · after: '31714'
+  PASS   T   teardown PASS (ports released, zero orphan postgres for this root, scratch root removed); host :4000 untouched
+
+──────────────────────────────────────────────────────────────────────────────
+VERDICT — negctl: PASS=5 ABORT=0 FAIL=0
+NEGCTL OK — the swap-flip check is a real instrument: under byte-identical
+capacities it fired as a failure (the assignment refused to flip), so the
+main run's flip is content-keyed routing, not coincidence.
+──────────────────────────────────────────────────────────────────────────────
+NEGCTL-RC=0

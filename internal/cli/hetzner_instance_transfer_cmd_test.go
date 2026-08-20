@@ -8,6 +8,7 @@ package cli
 // and what the import feeds the box is exactly the file's content.
 
 import (
+	"crypto/sha256"
 	"io"
 	"net/http"
 	"os"
@@ -91,6 +92,54 @@ func TestInstanceExportFailureRemovesTruncatedFile(t *testing.T) {
 	}
 	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
 		t.Error("a truncated export file was left behind, looking valid")
+	}
+}
+
+// TestInstanceExportFailureLeavesAPreExistingOutUntouched is the OTHER half of
+// the same sin: os.Create(outPath) truncated yesterday's good archive before the
+// SSH stream even opened, and the failure path's os.Remove then deleted a file
+// this verb never created — the operator lost it twice on one failed run. The
+// export now streams into a temp beside the destination and promotes on success,
+// so a failure destroys nothing but its own half-write.
+func TestInstanceExportFailureLeavesAPreExistingOutUntouched(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("name") != "" {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		hzWriteJSON(w, 200, `{"servers":[`+instServerJSON(23, "bp-gy-1", "192.0.2.23", "gyldendal.barkpark.cloud")+`]}`)
+	})
+	oldStream := instSSHStream
+	instSSHStream = func(host, command string, w io.Writer) error {
+		_, _ = w.Write([]byte("HALF-A-TAR"))
+		return io.ErrUnexpectedEOF
+	}
+	t.Cleanup(func() { instSSHStream = oldStream })
+
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "yesterdays-good-export.tar.gz")
+	good := []byte("YESTERDAY'S PERFECTLY GOOD EXPORT")
+	if err := os.WriteFile(outPath, good, 0o644); err != nil {
+		t.Fatalf("seed pre-existing export: %v", err)
+	}
+	before := sha256.Sum256(good) // e9b0717c5749b0058a571cd8838e0de74d1993f898b4dd8185c4a6956a003b54
+
+	_, _, code := runHzCLI(t, "json", "hetzner", "instance", "export", "gyldendal.barkpark.cloud", "--out", outPath)
+	if code == exitOK {
+		t.Fatal("a failed export exited 0")
+	}
+	after, rerr := os.ReadFile(outPath)
+	if rerr != nil {
+		t.Fatalf("the failed export DELETED a file it never created: %v", rerr)
+	}
+	if sha256.Sum256(after) != before {
+		t.Fatalf("the pre-existing export was overwritten: %q", after)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("temp litter left behind: %v", entries)
 	}
 }
 
@@ -203,7 +252,7 @@ func TestInstanceAuditExternalAllowlist(t *testing.T) {
 	if !strings.Contains(stdout, "rogue") {
 		t.Errorf("the real orphan was swallowed by the allowlist: %s", stdout)
 	}
-	if !strings.Contains(stdout, `"external_dns": 2`) {
+	if !strings.Contains(stdout, `"external_dns":2`) {
 		t.Errorf("external count missing from the summary: %s", stdout)
 	}
 }

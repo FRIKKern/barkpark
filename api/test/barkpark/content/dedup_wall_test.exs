@@ -8,9 +8,10 @@ defmodule Barkpark.Content.DedupWallTest do
       trgm candidate query, exercised end-to-end against real published rows,
       including the fail-open guarantee.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
-  alias Barkpark.Content.{DedupWall, Document}
+  alias Barkpark.Content.{AuthoringWall, DedupWall, Document}
+  alias Barkpark.LabelFixtures
   alias Barkpark.Repo
 
   @dataset "production"
@@ -215,18 +216,87 @@ defmodule Barkpark.Content.DedupWallTest do
     assert :ok = DedupWall.check(incoming, "paper", @dataset)
   end
 
-  test "fail-open: a candidate-fetch error never blocks publish" do
-    # A bogus dataset filter type would raise in the query; the rescue turns any
-    # fetch failure into an empty candidate set → :ok. Force the failure by
-    # passing a non-binary dataset that the trgm fragment cannot bind.
-    incoming = %{
-      doc_id: "drafts.fo",
+  # ── fail-LOUD: the gate says so when it could not run ────────────────────────
+
+  defp degraded_doc(id) do
+    %{
+      doc_id: id,
       title: "Rate limiting the mutate controller",
       content: %{"tags" => [%{"tag" => "rate-limiting"}, %{"tag" => "mutate"}]}
     }
+  end
 
+  test "fail-LOUD: a raising candidate fetch is dedup_unavailable, never a silent pass" do
     # An integer dataset makes `d.dataset == ^dataset` (string column) raise at
-    # query build/exec; the fail-open rescue must swallow it and return :ok.
-    assert :ok = DedupWall.check(incoming, "paper", 12_345)
+    # query build/exec — the pool-saturation failure's exception shape. The old
+    # rescue swallowed it into an empty candidate set and answered :ok, i.e. a
+    # publish reporting "not a duplicate" on a check that never ran.
+    assert {:error, {:dedup_unavailable, message}} =
+             DedupWall.check(degraded_doc("drafts.fo"), "paper", 12_345)
+
+    assert message =~ "REFUSED"
+    assert message =~ "dedup_bypass"
+  end
+
+  test "fail-LOUD: guard/4 forwards dedup_unavailable to the caller" do
+    assert {:error, {:dedup_unavailable, _}} =
+             DedupWall.guard(degraded_doc("drafts.fo-guard"), "paper", 12_345)
+  end
+
+  test "fail-LOUD: a blown query budget refuses the publish and names the scan" do
+    # The scan's own budget, not Ecto's inherited 15s default. A 0ms budget is
+    # the pool-saturation shape in a test that costs no wall-clock seconds.
+    assert {:error, {:dedup_unavailable, message}} =
+             DedupWall.check(degraded_doc("drafts.budget"), "paper", @dataset,
+               dedup_timeout_ms: 0
+             )
+
+    # A blown budget lands as a raised connection error, a rolled-back
+    # transaction or a driver error depending on where in the checkout the clock
+    # runs out — so the message SHAPE is what is pinned, not one wording. Every
+    # shape names the scan and the consequence; none says "no duplicates found".
+    assert message =~ "the duplicate scan"
+    assert message =~ "REFUSED rather than passed unchecked"
+    assert message =~ "no duplicate check ran"
+  end
+
+  test "fail-LOUD: AuthoringWall forwards dedup_unavailable instead of swallowing it" do
+    # The E4 mount is where the old silence would come back: a case clause that
+    # does not match {:dedup_unavailable, _} either crashes (500) or, if written
+    # loosely, passes the publish. It must arrive at the caller intact.
+    content = LabelFixtures.with_registered_labels(%{}, @dataset, 3)
+
+    ref = %Document{
+      doc_id: "drafts.aw-deg",
+      type: "paper",
+      dataset: @dataset,
+      title: "Rate limiting the mutate controller",
+      status: "draft",
+      content: content
+    }
+
+    assert {:error, {:dedup_unavailable, message}} =
+             AuthoringWall.enforce(ref, "paper", "aw-deg", @dataset, dedup_timeout_ms: 0)
+
+    assert message =~ "publish dedup wall could not complete"
+  end
+
+  test "content.dedup_bypass publishes unchecked, deliberately" do
+    publish_paper!("live-bypass", "Rate limiting the mutate controller", [
+      "rate-limiting",
+      "mutate"
+    ])
+
+    incoming = %{
+      doc_id: "drafts.bypassed",
+      title: "Rate limiting the mutate controller",
+      content: %{
+        "tags" => [%{"tag" => "rate-limiting"}, %{"tag" => "mutate"}],
+        "dedup_bypass" => true
+      }
+    }
+
+    # Without the flag this is a hard refuse (see the first check/4 test).
+    assert :ok = DedupWall.check(incoming, "paper", @dataset)
   end
 end

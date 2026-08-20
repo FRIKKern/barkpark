@@ -228,39 +228,59 @@ defmodule Barkpark.StudioChat.TitlesTest do
 
   # ── Fire-and-forget kick + clobber guard ─────────────────────────────────
 
-  describe "kick_title/3" do
+  describe "kick_title/2" do
     setup do
-      # Deterministic: no key, CLI returns a known title.
+      # Deterministic: no key, CLI returns a known title. The accepted-write
+      # notification is a PubSub broadcast on the activity topic (charter D69h)
+      # — subscribe like the chat LiveView does at mount.
       Application.put_env(:barkpark, :studio_chat_title_cli, FakeCli)
       Application.put_env(:barkpark, :test_title_cli, {:ok, ~s({"title":"Generated title"})})
       Application.put_env(:barkpark, :studio_chat_store, FakeStore)
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Barkpark.StudioChat.Recorder.activity_topic()
+      )
+
       :ok
     end
 
-    test "runs under the TaskSupervisor and messages the title back" do
+    test "runs under the TaskSupervisor and broadcasts the title on the activity topic" do
       start_supervised!({FakeStore, %{title: "New chat", source: "default"}})
 
-      {:ok, pid} = Titles.kick_title("sess-1", "make a title", self())
+      {:ok, pid} = Titles.kick_title("sess-1", "make a title")
       assert is_pid(pid)
 
       assert_receive {:chat_title, "sess-1", "Generated title"}, 2_000
       assert FakeStore.current() == "Generated title"
     end
 
+    test "the /3 compat head delivers via the broadcast ONLY — no parallel raw send (D69h)" do
+      start_supervised!({FakeStore, %{title: "New chat", source: "default"}})
+
+      # self() is both the (ignored) notify_pid AND an activity-topic
+      # subscriber: exactly ONE {:chat_title} may arrive. A reintroduced raw
+      # send would double-deliver and fail the refute below.
+      {:ok, _pid} = Titles.kick_title("sess-compat", "make a title", self())
+
+      assert_receive {:chat_title, "sess-compat", "Generated title"}, 2_000
+      refute_receive {:chat_title, "sess-compat", _}, 300
+    end
+
     test "clobber guard: a human rename before the async title is never overwritten" do
       # The human already named this session — store refuses the AI write.
       start_supervised!({FakeStore, %{title: "My hand-named chat", source: "human"}})
 
-      {:ok, _pid} = Titles.kick_title("sess-2", "make a title", self())
+      {:ok, _pid} = Titles.kick_title("sess-2", "make a title")
 
       refute_receive {:chat_title, "sess-2", _}, 500
       assert FakeStore.current() == "My hand-named chat"
     end
 
-    test "a store crash never leaks — no message, no raise into the caller" do
+    test "a store crash never leaks — no broadcast, no raise into the caller" do
       # No FakeStore process started → the Agent-name call raises inside the
       # supervised task; kick_title swallows it.
-      {:ok, _pid} = Titles.kick_title("sess-3", "make a title", self())
+      {:ok, _pid} = Titles.kick_title("sess-3", "make a title")
       refute_receive {:chat_title, "sess-3", _}, 300
     end
 
@@ -273,7 +293,7 @@ defmodule Barkpark.StudioChat.TitlesTest do
 
       Application.put_env(:barkpark, :studio_chat_store, CanonicalStore)
 
-      {:ok, _pid} = Titles.kick_title("sess-4", "make a title", self())
+      {:ok, _pid} = Titles.kick_title("sess-4", "make a title")
       assert_receive {:chat_title, "sess-4", "Generated title!"}, 2_000
     end
   end

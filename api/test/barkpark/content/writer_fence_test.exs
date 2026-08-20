@@ -93,7 +93,10 @@ defmodule Barkpark.Content.WriterFenceTest do
   end
 
   defp patch(id, body, extra) do
-    op = %{"patch" => Map.merge(%{"id" => id, "type" => @type_name, "set" => %{"body" => body}}, extra)}
+    op = %{
+      "patch" => Map.merge(%{"id" => id, "type" => @type_name, "set" => %{"body" => body}}, extra)
+    }
+
     Content.apply_mutations([op], @dataset)
   end
 
@@ -170,7 +173,15 @@ defmodule Barkpark.Content.WriterFenceTest do
     # number could have landed this as an UPDATE of an unrelated same-type doc.
     assert {:ok, {_tx, [%{id: new_id, operation: "create"}]}} =
              Content.apply_mutations(
-               [%{"create" => %{"_type" => @type_name, "title" => "New", "content" => %{"body" => "fresh"}}}],
+               [
+                 %{
+                   "create" => %{
+                     "_type" => @type_name,
+                     "title" => "New",
+                     "content" => %{"body" => "fresh"}
+                   }
+                 }
+               ],
                @dataset
              )
 

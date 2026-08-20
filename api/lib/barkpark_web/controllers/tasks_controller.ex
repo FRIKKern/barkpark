@@ -3,7 +3,7 @@ defmodule BarkparkWeb.TasksController do
   W7b step 1 (paper-rx0 / w7-07a) — HTTP surface for the `bp task` CLI
   (historically the bd-compatible shim `bin/bd-shim`, retired 2026-06-22).
 
-  Fourteen endpoints, all bearer-token gated via the existing `:api` +
+  Sixteen endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
 
     * `GET    /v1/tasks`                    — `Tasks` index (filters: kind/lifecycle_status/phase_id/parent/label)
@@ -13,6 +13,7 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/claim`              — `Tasks.claim/2` (queue-based)
     * `POST   /v1/tasks/:doc_id/claim`      — `Tasks.claim_by_id/3` (targeted, w7-08)
     * `POST   /v1/tasks/:doc_id/close`      — `Tasks.close/3`
+    * `POST   /v1/tasks/:doc_id/release`    — `Tasks.release/3` (voluntary unclaim)
     * `POST   /v1/tasks/:doc_id/stamp`      — `Tasks.stamp/3` (criterion-level mid-claim evidence)
     * `POST   /v1/tasks/:doc_id/pulse`      — `Tasks.pulse_by_id/3` (now-line + lease renewal)
     * `GET    /v1/tasks/:doc_id/edges`      — `Tasks.dependencies/2` + `dependents/2`
@@ -20,6 +21,7 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/:doc_id/labels`     — `Tasks.relabel_by_id/3`
     * `POST   /v1/tasks/:doc_id/papers`     — `Tasks.update_paper_refs_by_id/3`
     * `POST   /v1/tasks/:doc_id/move`       — `Tasks.move_by_id/2` (rail-l3 re-parent)
+    * `POST   /v1/tasks/:doc_id/stage`      — `Tasks.stage/3` (sanctioned thought-state transition)
 
   ## Shape contract
 
@@ -43,9 +45,12 @@ defmodule BarkparkWeb.TasksController do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.{Content, Repo, Tasks}
+  alias Barkpark.Tasks.Fleet
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Document
   alias Barkpark.Content.Graph
   alias Barkpark.Tasks.Edge
+  alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.TasksController.Params
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -53,15 +58,59 @@ defmodule BarkparkWeb.TasksController do
   # ─── GET /v1/tasks/ready ────────────────────────────────────────────────
 
   def ready(conn, params) do
-    opts =
-      []
-      |> Params.put_opt(:phase_id, params["phase_id"])
-      |> Params.put_opt(:limit, Params.parse_limit(params["limit"], nil, 1000))
-      |> Keyword.merge(scope_opts(conn))
+    with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+      opts =
+        []
+        |> Params.put_opt(:phase_id, params["phase_id"])
+        |> Params.put_opt(:limit, Params.parse_limit(params["limit"], nil, 1000))
+        |> Params.put_opt(:offset, Params.parse_offset(params["offset"]))
+        |> Params.put_opt(:order, order)
+        |> Keyword.merge(scope_opts(conn))
 
-    docs = Tasks.ready(opts)
-    counts = Params.batch_edge_counts(docs)
-    json(conn, %{ok: true, docs: Enum.map(docs, &Params.render_doc_with_counts(&1, counts))})
+      docs = Tasks.ready(opts)
+
+      json(conn, task_list_response(docs, conn, params))
+    else
+      {:error, :invalid_ready_order} ->
+        bad_request(conn, "order must be closure_nearest when set")
+    end
+  end
+
+  # axi-w2-s2: the shared list envelope — cards in the requested view, plus
+  # the ONE top-level truncation-honesty help[] line whenever a brief card
+  # lost bytes to the …-caps (charter law 2; full view never truncates, never
+  # carries the line).
+  # PDS-D502: the help[] line is computed from the SEALED docs the caller
+  # actually received — the seal is hoisted here (out of render_task_list/3,
+  # which has exactly ONE caller) so the claim about the payload and the
+  # payload are derived from the SAME list. Sealing first is safe: Params.seal/3
+  # rewrites only `content`, and the count helpers read only id/doc_id.
+  defp task_list_response(docs, conn, params) do
+    docs = seal_docs(docs, conn)
+
+    %{ok: true, docs: render_task_list(docs, conn, params)}
+    |> Params.maybe_put_brief_truncation_help(docs, Params.parse_view(params["view"]))
+  end
+
+  # axi-s1 (R1/R2): render a list of already-tenancy-scoped task docs in the
+  # caller's requested view. `?view=brief` → the brief v2 cards
+  # (child_count via ONE batched grouped query, no content echo, no work
+  # digests, the nine diet cuts); absent/unknown view → the full bd-compatible
+  # shape with edge counts (the server default STAYS full — SDK/Studio/
+  # taskboard untouched).
+  # The docs arrive ALREADY sealed (field-visibility seal, fail-closed) — the
+  # seal lives in task_list_response/3, this function's only caller, so the
+  # truncation-honesty help[] line sees exactly what is rendered here.
+  defp render_task_list(docs, conn, params) do
+    case Params.parse_view(params["view"]) do
+      :brief ->
+        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        Enum.map(docs, &Params.render_brief(&1, child_counts))
+
+      :full ->
+        counts = Params.batch_edge_counts(docs)
+        Enum.map(docs, &Params.render_doc_with_counts(&1, counts))
+    end
   end
 
   # ─── GET /v1/tasks/prime ────────────────────────────────────────────────
@@ -79,31 +128,69 @@ defmodule BarkparkWeb.TasksController do
   #   * `counts` — open/in_progress/blocked/done/cancelled totals for the
   #     scope, so "how big is the board?" needs no extra list call.
   def prime(conn, params) do
-    scope = scope_opts(conn)
-    worker = params["worker"]
-    limit = params["limit"] |> Params.parse_int(10) |> min(100) |> max(1)
+    with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+      scope = scope_opts(conn)
+      worker = params["worker"]
+      limit = params["limit"] |> Params.parse_int(10) |> min(100) |> max(1)
+      view = Params.parse_view(params["view"])
 
-    %{in_progress: in_progress, recent_events: events, counts: lifecycle_counts} =
-      Tasks.prime([worker: worker, limit: limit] ++ scope)
+      %{in_progress: in_progress, recent_events: events, counts: lifecycle_counts} =
+        Tasks.prime([worker: worker, limit: limit] ++ scope)
 
-    ready = Tasks.ready([limit: limit] ++ scope)
-    counts = Params.batch_edge_counts(in_progress ++ ready)
+      ready = Tasks.ready([limit: limit] |> Params.put_opt(:order, order) |> Kernel.++(scope))
 
-    # rail-l1: rehydrate the worker's rail-awareness — a rails map keyed by each
-    # distinct parent of its in-progress claims (rail_rev per rail, so a burst
-    # agent can diff after compaction) + blocked_while_claimed notices for any
-    # claim a second actor has since blocked.
-    base = %{
-      ok: true,
-      worker: worker,
-      in_progress: Enum.map(in_progress, &Params.render_doc_with_counts(&1, counts)),
-      ready: Enum.map(ready, &Params.render_doc_with_counts(&1, counts)),
-      recent_events: events,
-      counts: lifecycle_counts,
-      rails: prime_rails(in_progress, conn)
-    }
+      # axi-s1: card render in the requested view — brief cards batch ONE
+      # child-count query over the union; full keeps the historical edge-count
+      # shape. Brief prime also trims recent_events to 5 rows (full keeps the
+      # limit default of 10) — orientation, not replay; required for the ≤5 KB
+      # brief-prime target (charter decision 12).
+      # Field-visibility seal (fail-closed): render the CARDS off content-redacted
+      # docs. The raw `in_progress` is kept for rails/notices below (they read
+      # only parent_id/claim — never carriers of per-field visibility).
+      sealed_in_progress = seal_docs(in_progress, conn)
+      sealed_ready = seal_docs(ready, conn)
 
-    json(conn, maybe_put_notices(base, prime_notices(in_progress)))
+      {in_progress_cards, ready_cards} =
+        case view do
+          :brief ->
+            child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
+
+            {Enum.map(sealed_in_progress, &Params.render_brief(&1, child_counts)),
+             Enum.map(sealed_ready, &Params.render_brief(&1, child_counts))}
+
+          :full ->
+            counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
+
+            {Enum.map(sealed_in_progress, &Params.render_doc_with_counts(&1, counts)),
+             Enum.map(sealed_ready, &Params.render_doc_with_counts(&1, counts))}
+        end
+
+      events = if view == :brief, do: Enum.take(events, 5), else: events
+
+      # rail-l1: rehydrate the worker's rail-awareness — a rails map keyed by each
+      # distinct parent of its in-progress claims (rail_rev per rail, so a burst
+      # agent can diff after compaction) + blocked_while_claimed notices for any
+      # claim a second actor has since blocked.
+      base =
+        %{
+          ok: true,
+          worker: worker,
+          in_progress: in_progress_cards,
+          ready: ready_cards,
+          recent_events: events,
+          counts: lifecycle_counts,
+          rails: prime_rails(in_progress, conn)
+        }
+        # axi-w2-s2: prime inherits the brief truncation-honesty help[] line —
+        # checked over BOTH card slices (charter law 2). PDS-D502: the SEALED
+        # lists, so the line describes what the caller received.
+        |> Params.maybe_put_brief_truncation_help(sealed_in_progress ++ sealed_ready, view)
+
+      json(conn, maybe_put_notices(base, prime_notices(in_progress)))
+    else
+      {:error, :invalid_ready_order} ->
+        bad_request(conn, "order must be closure_nearest when set")
+    end
   end
 
   # ─── GET /v1/tasks/events ───────────────────────────────────────────────
@@ -167,6 +254,14 @@ defmodule BarkparkWeb.TasksController do
     # and `?limit=100000000` would fan the whole task corpus out in one Repo.all.
     limit = Params.parse_limit(params["limit"], 1000, 1000)
 
+    # tlv-bl-tasks-ls-offset-broken (D19): offset used to be silently ignored —
+    # every page repeated page 0 and `bp task ls --all` self-aborted with
+    # pagination_stalled. Params.parse_offset applies the ONE shared floor
+    # convention (floor 0, cap 100k) — same clamp ready/2 uses — so a raw value
+    # can never reach `OFFSET` as a negative (Postgres 500) or as an unbounded
+    # deep scan.
+    offset = Params.parse_offset(params["offset"])
+
     # C1 (task as universal node): when `parent` is given, the result reads as
     # that task's timeline/rail — its chronological child tasks (a "rail is the
     # chronological child tasks of a task"). Order by inserted_at ASC (oldest
@@ -174,11 +269,22 @@ defmodule BarkparkWeb.TasksController do
     # touched first" ordering for the un-parent-filtered list.
     parent = params["parent"]
 
+    # dr-w34-s4: twin collapse (published-wins) — a `drafts.<id>` shadow whose
+    # published twin exists in the same scope is suppressed, so a twinned task
+    # is ONE row here exactly as it is one row in `child_tasks/2` and in the
+    # ready queue. An UNPAIRED `drafts.<id>` row (the whole mutate-created
+    # population) has no distinct twin and survives — see
+    # `Tasks.Query.collapse_twins/1` for why this is NOT a blanket `drafts.`
+    # exclusion. NOTE the pagination consequence: `limit`/`offset` live in this
+    # BASE, so removing shadow rows shifts which rows land on which page and
+    # moves `bp task ls --all` totals.
     base =
       from(d in Document,
         where: d.type == "task",
-        limit: ^limit
+        limit: ^limit,
+        offset: ^offset
       )
+      |> Tasks.Query.collapse_twins()
 
     query =
       base
@@ -193,8 +299,7 @@ defmodule BarkparkWeb.TasksController do
       |> Params.apply_index_order(parent)
 
     docs = Repo.all(query)
-    counts = Params.batch_edge_counts(docs)
-    json(conn, %{ok: true, docs: Enum.map(docs, &Params.render_doc_with_counts(&1, counts))})
+    json(conn, task_list_response(docs, conn, params))
   end
 
   # ─── POST /v1/tasks/claim ───────────────────────────────────────────────
@@ -202,31 +307,51 @@ defmodule BarkparkWeb.TasksController do
   def claim(conn, params) do
     case params["worker_id"] do
       worker_id when is_binary(worker_id) and byte_size(worker_id) > 0 ->
-        opts =
-          []
-          |> Params.put_opt(:phase_id, params["phase_id"])
-          |> Params.put_opt(:caller_token_id, caller_token_id(conn))
-          |> Keyword.merge(scope_opts(conn))
+        with {:ok, order} <- Params.parse_ready_order(params["order"]) do
+          opts =
+            []
+            |> Params.put_opt(:phase_id, params["phase_id"])
+            |> Params.put_opt(:order, order)
+            |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+            |> Keyword.merge(Params.execution_policy_opts(params))
+            |> Keyword.merge(scope_opts(conn))
 
-        case Tasks.claim(worker_id, opts) do
-          {:ok, nil} ->
-            conn
-            |> put_status(:ok)
-            |> json(%{ok: false, reason: "no_ready"})
+          case Tasks.claim(worker_id, opts) do
+            {:ok, nil} ->
+              conn
+              |> put_status(:ok)
+              |> json(%{ok: false, reason: "no_ready"})
 
-          {:ok, %Document{} = doc} ->
-            # Queue-claim: the subject is unknown pre-write, so no pre-write
-            # baseline — rail_changed (if observed_rail_rev is passed) compares
-            # against the post-write rev.
-            json(
-              conn,
-              with_rail_extras(%{ok: true, doc: Params.render_doc(doc)}, doc, nil, conn, params)
-            )
+            {:ok, %Document{} = doc} ->
+              # Queue-claim: the subject is unknown pre-write, so no pre-write
+              # baseline — rail_changed (if observed_rail_rev is passed) compares
+              # against the post-write rev.
+              json(
+                conn,
+                with_rail_extras(
+                  %{
+                    ok: true,
+                    doc: Params.render_doc(seal_doc(doc, conn)),
+                    help: Params.mutation_help(:claim, doc, worker_id)
+                  },
+                  doc,
+                  nil,
+                  conn,
+                  params
+                )
+              )
 
-          {:error, reason} ->
-            conn
-            |> put_status(:conflict)
-            |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+            {:error, {:invalid_execution_policy, errors}} ->
+              bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
+
+            {:error, reason} ->
+              conn
+              |> put_status(:conflict)
+              |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+          end
+        else
+          {:error, :invalid_ready_order} ->
+            bad_request(conn, "order must be closure_nearest when set")
         end
 
       _ ->
@@ -257,10 +382,12 @@ defmodule BarkparkWeb.TasksController do
         # render_doc) to keep the payload lean and avoid deep recursion.
         children = child_tasks(doc.doc_id, conn)
 
+        # Field-visibility seal (fail-closed): the doc AND its child summaries
+        # are rendered off content-redacted docs under the request's caller.
         json(conn, %{
           ok: true,
-          doc: Params.render_doc_with_counts(doc, counts),
-          children: Enum.map(children, &Params.child_summary/1),
+          doc: Params.render_doc_with_counts(seal_doc(doc, conn), counts),
+          children: Enum.map(seal_docs(children, conn), &Params.child_summary/1),
           child_count: length(children)
         })
 
@@ -285,6 +412,14 @@ defmodule BarkparkWeb.TasksController do
       where: d.type == "task",
       order_by: [asc: d.inserted_at]
     )
+    # dr-w34-s4: child_count = length(children), and this is its ONLY producer.
+    # `maybe_filter_parent_id/2` strips `drafts.` from BOTH sides, so a shadow
+    # child is GUARANTEED to match its published parent and used to contribute
+    # +2. Twin collapse counts it once — while an unpaired `drafts.<id>` child
+    # (no published twin) still counts, so the epic's live number cannot drop
+    # by deleting real tasks. SAME predicate the index applies, so
+    # `bp task get <epic>` and `bp task ls --parent <epic>` agree.
+    |> Tasks.Query.collapse_twins()
     |> Params.maybe_filter_workspace(workspace_id)
     |> Params.maybe_filter_project(project_id)
     |> Params.maybe_filter_parent_id(doc_id)
@@ -304,6 +439,7 @@ defmodule BarkparkWeb.TasksController do
         opts =
           [resources: params["resources"] || []]
           |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+          |> Keyword.merge(Params.execution_policy_opts(params))
           |> Keyword.merge(scope_opts(conn))
 
         # Snapshot the rail BEFORE the claim so rail_changed compares
@@ -320,7 +456,11 @@ defmodule BarkparkWeb.TasksController do
             json(
               conn,
               with_rail_extras(
-                %{ok: true, doc: Params.render_doc(doc)},
+                %{
+                  ok: true,
+                  doc: Params.render_doc(seal_doc(doc, conn)),
+                  help: Params.mutation_help(:claim_by_id, doc, worker_id)
+                },
                 doc,
                 baseline_rev,
                 conn,
@@ -338,6 +478,9 @@ defmodule BarkparkWeb.TasksController do
             conn
             |> put_status(:conflict)
             |> json(%{ok: false, reason: "resource_conflict", conflicts: conflicts})
+
+          {:error, {:invalid_execution_policy, errors}} ->
+            bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
 
           {:error, reason} ->
             conn
@@ -364,6 +507,15 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:criteria, if(criteria == [], do: nil, else: criteria))
         |> Params.put_opt(:landed, params["landed"])
+        # The two LOUD overrides (PDS-D288/D289). Without these two lines the
+        # honesty gates are refuse-only over HTTP — a lead could not seal a
+        # foreign task and nobody could close over an honest unmet criterion
+        # through the API or the bp CLI at all. `bp task close … --set
+        # holder_override="<reason>"` is the wire form; a blank/absent reason is
+        # NOT an override (Tasks.Close.override_reason/1), so an empty string
+        # cannot be used to launder the gate.
+        |> Params.put_opt(:holder_override, params["holder_override"])
+        |> Params.put_opt(:criteria_override, params["criteria_override"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       # Snapshot the rail BEFORE the close (from the already-fetched pre-close
@@ -378,7 +530,16 @@ defmodule BarkparkWeb.TasksController do
           # rail-l1: rail_rev + notices ride the same 2xx envelope — advisory,
           # the close has ALREADY committed even when blocked_while_claimed
           # fires (L1 notices are informational; refusal is the L4 task).
-          json(conn, with_rail_extras(close_response(doc), doc, baseline_rev, conn, params))
+          json(
+            conn,
+            with_rail_extras(
+              close_response(doc, worker_id, conn),
+              doc,
+              baseline_rev,
+              conn,
+              params
+            )
+          )
 
         {:error, {:doc_changed_since_claim, current_rev, changed_fields}} ->
           # Edited-under-you fence (rail-awareness L2): the task's work-defining
@@ -396,9 +557,7 @@ defmodule BarkparkWeb.TasksController do
           })
 
         {:error, reason} ->
-          conn
-          |> put_status(:conflict)
-          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+          conflict(conn, reason, :close)
       end
     else
       {:error, :missing, field} ->
@@ -412,14 +571,51 @@ defmodule BarkparkWeb.TasksController do
     end
   end
 
+  # ─── POST /v1/tasks/:doc_id/release ─────────────────────────────────────
+
+  def release(conn, %{"doc_id" => doc_id} = params) do
+    with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
+         {:ok, observed_epoch} <- Params.fetch_int(params, "observed_epoch"),
+         {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
+      case Tasks.release(task.id, worker_id, observed_epoch: observed_epoch) do
+        {:ok, %Document{} = doc} ->
+          json(conn, %{
+            ok: true,
+            doc: Params.render_doc(seal_doc(doc, conn)),
+            help: Params.mutation_help(:release, doc, worker_id)
+          })
+
+        {:error, reason} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+      end
+    else
+      {:error, :missing, field} ->
+        bad_request(conn, "#{field} is required")
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
   # lvw-t6 warn-on-close: a task closed `done` with unmet acceptance_criteria
   # carries a top-level `warnings` list on the (still 2xx, still ok:true)
   # response — ADVISORY ONLY, the close has already committed; there is no
   # gate. `cancelled`/`blocked` closes skip the warning (abandoning criteria
   # is the point of cancelling). Absent/empty criteria → no warning
   # (Criteria.progress/1 returns nil — omit, never "0/0").
-  defp close_response(%Document{} = doc) do
-    base = %{ok: true, doc: Params.render_doc(doc)}
+  # axi-s4 R5: the envelope also carries `help` (next-command templates —
+  # after a close that is `bp task next <worker>`), a sibling of `warnings`.
+  defp close_response(%Document{} = doc, worker_id, conn) do
+    base = %{
+      ok: true,
+      # Field-visibility seal (fail-closed) on the echoed doc; the warning
+      # computation below stays on the RAW doc (it is about the actor's own
+      # close, never a visibility decision).
+      doc: Params.render_doc(seal_doc(doc, conn)),
+      help: Params.mutation_help(:close, doc, worker_id)
+    }
 
     with "done" <- Map.get(doc.content || %{}, "lifecycle_status"),
          %{met: met, total: total} when met < total <- Tasks.criteria_progress(doc.content) do
@@ -429,6 +625,162 @@ defmodule BarkparkWeb.TasksController do
       ])
     else
       _ -> base
+    end
+  end
+
+  # ─── POST /v1/tasks/:doc_id/stage ───────────────────────────────────────
+  # The sanctioned lifecycle-transition verb for the thought/backlog states
+  # (charter D8): `bp task stage <id> <state> [--object …] [--note …]
+  #   [--disposition open|parked|closed] [--reopen-trigger …]`. Body:
+  #   { "worker_id": "cycle-42", "state": "researching",
+  #     "object": "research", "note": "surveying candidate",
+  #     "disposition": "parked", "reopen-trigger": "when the ARM runner exists" }
+  # PDS wave 24: disposition + reopen_trigger are forwarded because this verb is
+  # the ONLY sanctioned writer of content.disposition — the raw door refuses and
+  # names this route, so a route that dropped the params would make that refusal
+  # unfixable. `reopen_trigger` is accepted in both spellings: the manifest flag
+  # is hyphenated (`--reopen-trigger`, matching `criterion-text`) and the CLI
+  # sends the flag name verbatim, while a hand-written JSON body naturally uses
+  # the content key's underscore.
+  # `state` is the target (considering | researching | open — kills go through
+  # close, claims through claim) OR the row's own current state, the PDS-wave-25
+  # same-state no-op that lets a FINISHED row record its adjudication without
+  # being resurrected. `Tasks.stage/3` enforces the shared Transitions legality
+  # table, writes/clears content.engagement, and emits task.staged. An illegal
+  # transition (e.g. open → done) is a 422 naming from/to
+  # and the sanctioned verb — never a silent no-op. Mirrors close/2's shape
+  # (find_task_by_doc_id → primitive → minimal receipt) MINUS the epoch fence
+  # (thought is not contended work).
+  def stage(conn, %{"doc_id" => doc_id} = params) do
+    with {:ok, state} <- Params.fetch_string(params, "state"),
+         {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
+      opts =
+        []
+        |> Params.put_opt(:object, params["object"])
+        |> Params.put_opt(:holder, params["worker"] || params["worker_id"])
+        |> Params.put_opt(:note, params["note"])
+        # The adjudication triple (PDS wave 24). Without these two forwards the
+        # 422 that `Mutations.ensure_disposition_via_verb/4` raises names a
+        # retry instruction no operator can execute — a refusal that lies about
+        # its own remedy, which is the exact class this wave exists to close.
+        |> Params.put_opt(:disposition, params["disposition"])
+        |> Params.put_opt(:reopen_trigger, params["reopen_trigger"] || params["reopen-trigger"])
+        # PDS wave 28: the fourth durable key — the command that could prove the
+        # reason wrong. Forwarded for the same reason the triple is: this verb is
+        # the only sanctioned writer, so a route that dropped the param would
+        # make the raw door's refusal unfixable. Optional by design.
+        |> Params.put_opt(:rerun, params["rerun"] || params["disposition_rerun"])
+        |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+
+      case Tasks.stage(task.id, state, opts) do
+        {:ok, %Document{} = doc} ->
+          json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
+
+        {:error, {:illegal_transition, from, to}} ->
+          # A refused transition (bad target OR an illegal table pair) is a 422
+          # naming both ends and the sanctioned verb — the guard TEACHES.
+          #
+          # PDS-D349: the old text said stage "moves only between
+          # considering|researching|open", which the wave-25 widening made
+          # FALSE — a row can also be staged to its OWN current state to carry
+          # an adjudication in place (`done → done`). In an epic about verbs
+          # that lie, a refusal that misstates its own rule is the same defect
+          # one layer down, so the message now names BOTH doors: what stage
+          # MOVES between, and the no-op it adjudicates on.
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            ok: false,
+            reason: "illegal_transition",
+            from: from,
+            to: to,
+            message:
+              "cannot stage #{from} → #{to}: stage MOVES a task only between " <>
+                "considering|researching|open (plus the sanctioned reopen edges " <>
+                "→ open), and otherwise only accepts a same-state no-op " <>
+                "(state == the row's current #{inspect(from)}) to record an " <>
+                "adjudication in place — use `bp task close` (→ cancelled) or " <>
+                "`bp task claim` (→ in_progress); `done` is REACHED only via close, " <>
+                "though a done row can be adjudicated with " <>
+                "`bp task stage <id> done --disposition …`"
+          })
+
+        {:error, {:invalid_object, object}} ->
+          bad_request(
+            conn,
+            "object must be \"research\" or \"build\", got #{inspect(object)}"
+          )
+
+        {:error, {:invalid_disposition, value}} ->
+          bad_request(
+            conn,
+            "disposition must be one of " <>
+              Enum.map_join(Tasks.Stage.dispositions(), ", ", &inspect/1) <>
+              " (trimmed and downcased), got #{inspect(value)}"
+          )
+
+        # A park that cannot say what would reopen it has decided nothing. The
+        # refusal is a 422 naming the flag that fixes it — and NOTHING was
+        # written, so a retry with the flag is the whole remedy.
+        {:error, {:missing_reopen_trigger, disposition}} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            ok: false,
+            reason: "missing_reopen_trigger",
+            disposition: disposition,
+            message:
+              "cannot stage a #{inspect(disposition)} disposition with no reopen trigger: " <>
+                "pass --reopen-trigger \"<what would make this worth reconsidering>\" " <>
+                "(or leave the row's existing trigger in place). Nothing was written."
+          })
+
+        # A rerun that cannot fail is not evidence. The refusal is a 422 naming
+        # the FIELD, the shape that was refused, WHY that shape cannot fail, and
+        # a legal substitute — and nothing was written, so the retry is the
+        # whole remedy. Absence is never refused: a reason is allowed to say it
+        # cannot be checked.
+        {:error, {:unfalsifiable_rerun, code, value}} ->
+          why =
+            Tasks.Stage.forbidden_rerun_shapes()
+            |> Enum.find_value(fn {c, why} -> if c == code, do: why end)
+            |> Kernel.||(
+              "a pipeline reports its LAST stage's exit code, so a formatting tail " <>
+                "(head/tail/wc/jq/…) reports ITS success as the check's — " <>
+                "`git show origin/main:<deleted-path> | head -1` exits 0 where the bare " <>
+                "`git show` exits 128"
+            )
+
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            ok: false,
+            reason: "unfalsifiable_rerun",
+            field: Tasks.Stage.disposition_rerun_key(),
+            shape: to_string(code),
+            value: value,
+            message:
+              "disposition_rerun #{inspect(value)} cannot fail, so it cannot prove the " <>
+                "reason wrong: #{why}. Write one of these instead — " <>
+                Enum.map_join(Tasks.Stage.legal_rerun_substitutes(), " · ", &"`#{&1}`") <>
+                " — or omit --rerun entirely, which is an honest \"this reason cannot be " <>
+                "checked\" and is accepted. Nothing was written."
+          })
+
+        {:error, :not_found} ->
+          not_found(conn, "task not found")
+
+        {:error, reason} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+      end
+    else
+      {:error, :missing, field} ->
+        bad_request(conn, "#{field} is required")
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
     end
   end
 
@@ -445,23 +797,32 @@ defmodule BarkparkWeb.TasksController do
   def stamp(conn, %{"doc_id" => doc_id} = params) do
     with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
          {:ok, observed_epoch} <- Params.fetch_int(params, "observed_epoch"),
-         {:ok, index, outcome} <- Params.parse_stamp(params),
+         {:ok, index, outcome, criterion_text} <- Params.parse_stamp(params),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
       opts =
         [observed_epoch: observed_epoch, criterion: index, outcome: outcome]
+        |> Params.put_opt(:criterion_text, criterion_text)
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       case Tasks.stamp(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
-          json(conn, %{ok: true, doc: Params.render_doc(doc)})
+          # Stamp does NOT bump the epoch — help[] reuses the claim epoch the
+          # caller already holds (read from the fresh doc, same code path as
+          # pulse's bumped one).
+          json(conn, %{
+            ok: true,
+            doc: Params.render_doc(seal_doc(doc, conn)),
+            help: Params.mutation_help(:stamp, doc, worker_id)
+          })
 
         {:error, reason} ->
           # Every failure here is a state conflict (not_holder / fenced_off /
-          # stale_claim / index out of range / not in_progress) — shape
-          # errors were already 400'd by parse_stamp above.
-          conn
-          |> put_status(:conflict)
-          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+          # stale_claim / index out of range / criterion-text guard / not
+          # in_progress) — shape errors were already 400'd by parse_stamp above.
+          # The criteria-grain conflicts ride an actionable `message` (D56): a
+          # guard that refuses without saying what to type is a guard agents
+          # route around.
+          conflict(conn, reason, :stamp)
       end
     else
       {:error, :missing, field} ->
@@ -473,6 +834,23 @@ defmodule BarkparkWeb.TasksController do
       {:error, :not_found} ->
         not_found(conn, "task not found")
     end
+  end
+
+  # 409 envelope: the reason token stays the machine-readable contract; a
+  # criteria-grain reason ALSO carries a top-level `message` telling the caller
+  # exactly what to pass next (the bp CLI prints it in place of the token).
+  defp conflict(conn, reason, surface) do
+    body = %{ok: false, reason: Params.reason_to_string(reason)}
+
+    body =
+      case Params.criteria_hint(reason, surface) do
+        nil -> body
+        message -> Map.put(body, :message, message)
+      end
+
+    conn
+    |> put_status(:conflict)
+    |> json(body)
   end
 
   # ─── POST /v1/tasks/:doc_id/pulse ───────────────────────────────────────
@@ -501,7 +879,14 @@ defmodule BarkparkWeb.TasksController do
 
       case Tasks.pulse_by_id(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
-          json(conn, %{ok: true, doc: Params.render_doc(doc)})
+          # Pulse BUMPS the claim epoch — mutation_help reads the FRESH epoch
+          # off this post-write doc, so help[] never echoes the (now-stale)
+          # epoch the caller last saw.
+          json(conn, %{
+            ok: true,
+            doc: Params.render_doc(seal_doc(doc, conn)),
+            help: Params.mutation_help(:pulse, doc, worker_id)
+          })
 
         {:error, reason} ->
           conn
@@ -544,22 +929,39 @@ defmodule BarkparkWeb.TasksController do
   # ─── GET /v1/tasks/:doc_id/edges ────────────────────────────────────────
 
   def edges(conn, %{"doc_id" => doc_id} = params) do
-    kind_opt =
-      case params["kind"] do
-        nil -> :blocks
-        "all" -> :all
-        other when is_binary(other) -> other
-      end
+    # `kind` is a FILTER, so a shape we cannot filter on is refused LOUDLY —
+    # `?kind[]=blocks` decodes to a list and used to fall off this case as a
+    # CaseClauseError-500 (before find_task_by_doc_id/2, so even a nonexistent
+    # doc_id 500'd instead of 404ing). Silently ignoring an unusable filter
+    # would return an unfiltered graph the caller believes is filtered — the
+    # same dishonesty query_controller's invalid_filter_op guard refuses.
+    # Contrast request_dataset/1, a SCOPE SELECTOR with a documented default,
+    # which fails SOFT.
+    with {:ok, kind_opt} <- parse_edge_kind(params["kind"]) do
+      edges_for_kind(conn, doc_id, kind_opt)
+    else
+      {:error, :invalid_kind} ->
+        bad_request(conn, "kind must be a string")
+    end
+  end
 
+  defp parse_edge_kind(nil), do: {:ok, :blocks}
+  defp parse_edge_kind("all"), do: {:ok, :all}
+  defp parse_edge_kind(other) when is_binary(other), do: {:ok, other}
+  defp parse_edge_kind(_), do: {:error, :invalid_kind}
+
+  defp edges_for_kind(conn, doc_id, kind_opt) do
     case find_task_by_doc_id(doc_id, conn) do
       {:ok, task} ->
         deps = Tasks.dependencies(task.id, kind: kind_opt)
         dependents = Tasks.dependents(task.id, kind: kind_opt)
 
+        # Field-visibility seal (fail-closed): the deps/next graph is rendered
+        # off content-redacted docs under the request's caller.
         json(conn, %{
           ok: true,
-          dependencies: Enum.map(deps, &Params.render_doc/1),
-          dependents: Enum.map(dependents, &Params.render_doc/1)
+          dependencies: Enum.map(seal_docs(deps, conn), &Params.render_doc/1),
+          dependents: Enum.map(seal_docs(dependents, conn), &Params.render_doc/1)
         })
 
       {:error, :not_found} ->
@@ -663,66 +1065,383 @@ defmodule BarkparkWeb.TasksController do
   # Obsidian's showOrphans. A node budget guards a pathological corpus; the
   # tenancy + dataset scope ride scope_opts/request_dataset exactly like the
   # sibling graph actions.
+  #
+  # TWO ceilings, BOTH reported honestly (stw9-backlog-graph-server-honesty):
+  #   - per_type_cap  — the per-type page ceiling (the list_documents hard cap).
+  #     Deliberately NOT lifted: one derivation already costs ~9.6k queries and
+  #     lifting the cap multiplies the dominant per-document term (the N+1 is
+  #     filed separately as stw10-backlog-graph-n-plus-one). When a type's list
+  #     comes back at the cap, one COUNT confirms whether more exist.
+  #   - node_budget   — the whole-graph node ceiling. When it fires, edges are
+  #     re-filtered to the SURVIVING node set so no edge endpoint dangles
+  #     (previously the take dropped the phantom tail while every edge kept
+  #     pointing at it).
+  # `truncated` goes true whenever EITHER ceiling fired — clients (graph.ts:193)
+  # discard `truncation_reason` unless `truncated` is true, so the flag is
+  # load-bearing. Both values are config-overridable for tests only.
   @graph_corpus_node_budget 2000
+  @graph_corpus_per_type_limit 1000
 
-  def graph_corpus(conn, _params) do
+  # THIRD ceiling, and the only one that protects the BOX rather than the
+  # payload: a CONCURRENT-DERIVATION CAP.
+  #
+  # One corpus derivation is cheap in statements and expensive in wall time (it
+  # holds a pool connection across every type's document page). During the
+  # 2026-07-28 storm `graph_corpus/2` was the top application crash frame in
+  # guerrilla's journal — 9,566 frames that day — because concurrent static-site
+  # builds each asked for the whole corpus at once, exhausted `POOL_SIZE=10`
+  # (config/runtime.exs) and 500-ed UNRELATED requests ("Sent 500 in 32003ms").
+  # Denying the route to public-read tokens accidentally shed that load; this
+  # slice re-admits the route, so the shedding has to become deliberate.
+  #
+  # Beyond the cap the request is REFUSED FAST (503 + Retry-After) instead of
+  # queueing on the DB pool: a shed request costs one ETS lookup, a queued one
+  # costs a connection every other route also needs. Slots are ETS rows keyed by
+  # a ref and carrying {owner_pid, deadline}; every acquire first sweeps rows
+  # whose OWNER DIED, so a slot cannot leak even if a request process is killed
+  # mid-derivation (`after` covers every ordinary exit AND every raise).
+  #
+  # The ACQUIRE path's saturation races resolve toward REFUSAL, never toward
+  # over-admission: the row is inserted BEFORE `:ets.info(:size)` is read, so the
+  # latest admitter necessarily counts itself and every racer, sees cap+1 and
+  # backs out. Two racers can both back out; at saturation shedding is the
+  # intended behaviour, so a spurious 503 is the safe error.
+  #
+  # THAT CLAIM HELD FOR ACQUIRE AND DID NOT HOLD FOR THE TTL SWEEP. The sweep
+  # also reaped rows whose `deadline` had passed, and a deadline is a wall-time
+  # GUESS about whether a derivation has finished, not a fact about it. A
+  # derivation outliving @graph_corpus_slot_ttl_ms had its row deleted while its
+  # owner was still alive and still holding the pool connection this cap exists
+  # to protect — and because every acquire sweeps first, an ARRIVING request
+  # performed that reap on the live holders' behalf and was then admitted over
+  # the cap. It refilled without limit (effective concurrency ~
+  # ceil(duration / TTL) x cap) and it was self-amplifying: extra admissions
+  # lengthen every derivation, which crosses the TTL more often. Fail-open in
+  # the only regime where the cap matters. The deadline arm is now GONE; the
+  # deadline itself stays on the row as diagnostic data.
+  @graph_corpus_slots :barkpark_graph_corpus_slots
+  @graph_corpus_max_concurrency 4
+  @graph_corpus_slot_ttl_ms 60_000
+
+  def graph_corpus(conn, params) do
+    case acquire_graph_corpus_slot() do
+      {:ok, slot} ->
+        try do
+          derive_graph_corpus(conn, params)
+        after
+          release_graph_corpus_slot(slot)
+        end
+
+      :busy ->
+        conn
+        |> put_resp_header("retry-after", "1")
+        |> put_status(:service_unavailable)
+        |> json(%{
+          ok: false,
+          reason: "graph_corpus_busy",
+          message:
+            "too many concurrent /v1/graph derivations (limit #{graph_corpus_max_concurrency()}); retry shortly"
+        })
+    end
+  end
+
+  defp derive_graph_corpus(conn, params) do
     dataset = request_dataset(conn)
-    # limit 1000 (the list_documents hard cap) so the corpus isn't silently
-    # truncated at the default page size of 100 — BOTH the node list and
-    # corpus_edges read through this opts, so a large dataset still yields a
-    # complete graph (the node budget below is the real ceiling).
-    opts = scope_opts(conn) |> Keyword.put(:dataset, dataset) |> Keyword.put(:limit, 1000)
+    per_type_limit = graph_corpus_per_type_limit()
+
+    # per-type limit (default: the list_documents hard cap) so the corpus isn't
+    # silently truncated at the default page size of 100 — BOTH the node list
+    # and corpus_edges read through this opts.
+    opts =
+      scope_opts(conn) |> Keyword.put(:dataset, dataset) |> Keyword.put(:limit, per_type_limit)
+
     list_opts = Keyword.put(opts, :perspective, :published)
 
-    types = dataset |> Content.list_schemas(opts) |> Enum.map(& &1.name)
+    # Keep the schema STRUCTS, not just their names: they are threaded into the
+    # edge fold below as a prefetch. `extract_edges/2` used to re-read this same
+    # invariant list once PER DOCUMENT — 4096 identical queries on the live
+    # corpus, the dominant cost behind a measured 34s first paint.
+    schemas = Content.list_schemas(dataset, opts) |> visible_schemas(conn)
+    all_types = Enum.map(schemas, & &1.name)
 
-    real_nodes =
-      types
-      |> Enum.flat_map(fn type -> Content.list_documents(type, dataset, list_opts) end)
-      |> Enum.map(fn d ->
-        pid = Content.published_id(d.doc_id)
-        %{id: pid, doc_id: pid, type: d.type, title: d.title || pid, phantom: false}
-      end)
-      |> Enum.uniq_by(& &1.id)
+    case parse_graph_types(params["types"], all_types) do
+      {:error, message} ->
+        bad_request(conn, message)
 
-    node_ids = MapSet.new(real_nodes, & &1.id)
+      {:ok, types} ->
+        # Node-listing phase, carrying the per-type-cap signal out instead of
+        # discarding it: a type whose page comes back at the cap gets ONE count
+        # query to confirm the ceiling actually fired (vs exactly-at-cap).
+        {doc_lists, per_type_capped} =
+          Enum.map_reduce(types, false, fn type, capped ->
+            docs = Content.list_documents(type, dataset, list_opts)
 
-    raw_edges =
-      types
-      |> Enum.flat_map(fn type -> Content.corpus_edges(type, dataset, opts) end)
-      |> Enum.uniq_by(fn e -> {e.from_id, e.to_id, e.field} end)
+            capped =
+              capped or
+                (length(docs) >= per_type_limit and
+                   Content.count_documents(type, dataset, list_opts) > per_type_limit)
 
-    edges =
-      Enum.map(raw_edges, fn e ->
-        %{
-          from_id: e.from_id,
-          to_id: e.to_id,
-          kind: e.kind || "references",
-          weight: nil,
-          plugin_source: nil
-        }
-      end)
+            {docs, capped}
+          end)
 
-    phantom_nodes =
-      raw_edges
-      |> Enum.reject(fn e -> MapSet.member?(node_ids, e.to_id) end)
-      |> Enum.map(& &1.to_id)
-      |> Enum.uniq()
-      |> Enum.map(fn tid -> %{id: tid, doc_id: tid, type: nil, title: tid, phantom: true} end)
+        real_nodes =
+          doc_lists
+          |> List.flatten()
+          |> Enum.map(fn d ->
+            pid = Content.published_id(d.doc_id)
+            %{id: pid, doc_id: pid, type: d.type, title: d.title || pid, phantom: false}
+          end)
+          |> Enum.uniq_by(& &1.id)
 
-    all_nodes = real_nodes ++ phantom_nodes
-    truncated = length(all_nodes) > @graph_corpus_node_budget
-    nodes = if truncated, do: Enum.take(all_nodes, @graph_corpus_node_budget), else: all_nodes
+        node_ids = MapSet.new(real_nodes, & &1.id)
 
-    json(conn, %{
-      ok: true,
-      dataset: dataset,
-      nodes: nodes,
-      edges: edges,
-      truncated: truncated,
-      truncation_reason: if(truncated, do: "node_budget", else: nil)
-    })
+        # Fold over the documents the node phase ALREADY read (doc_lists is in
+        # `types` order), instead of `corpus_edges/3` re-listing every type a
+        # second time, and hand the fold its schema prefetch.
+        #
+        # `dangling: :skip` is the OPT-IN escape from `extract_edges/2`'s
+        # per-target existence query — ONE un-batched round-trip per reference
+        # value per document (~1,300 serial queries on the live corpus), held
+        # against a single checked-out pool connection long enough to hit the
+        # 15s DBConnection checkout ceiling and return a 500. This path NEVER
+        # reads the boolean: the `edges` mapping below keeps only
+        # from_id/to_id/kind/weight/plugin_source, and the phantom-node pass
+        # answers the same "does the target exist?" question in memory off
+        # `node_ids`. The flag is local to THIS call site — /v1/graph/dangling
+        # (Graph.dangling/1), EdgeProjector and corpus_edges/3 read through the
+        # unchanged `:resolve` default and keep resolving.
+        edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
+
+        raw_edges =
+          types
+          |> Enum.zip(doc_lists)
+          |> Enum.flat_map(fn {_type, docs} ->
+            Content.corpus_edges_for_docs(docs, dataset, edge_opts)
+          end)
+          |> Enum.uniq_by(fn e -> {e.from_id, e.to_id, e.field} end)
+
+        edges =
+          Enum.map(raw_edges, fn e ->
+            %{
+              from_id: e.from_id,
+              to_id: e.to_id,
+              kind: e.kind || "references",
+              weight: nil,
+              plugin_source: nil
+            }
+          end)
+
+        phantom_nodes =
+          raw_edges
+          |> Enum.reject(fn e -> MapSet.member?(node_ids, e.to_id) end)
+          |> Enum.map(& &1.to_id)
+          |> Enum.uniq()
+          |> Enum.map(fn tid -> %{id: tid, doc_id: tid, type: nil, title: tid, phantom: true} end)
+
+        all_nodes = real_nodes ++ phantom_nodes
+        node_budget = graph_corpus_node_budget()
+        over_budget = length(all_nodes) > node_budget
+        nodes = if over_budget, do: Enum.take(all_nodes, node_budget), else: all_nodes
+
+        # Edge honesty: only edges whose BOTH endpoints survived the budget.
+        # Under budget this is a no-op (every to_id has a real or phantom node);
+        # over budget it kills the orphaned-edge class the old code shipped.
+        kept_ids = MapSet.new(nodes, & &1.id)
+
+        edges =
+          Enum.filter(edges, fn e ->
+            MapSet.member?(kept_ids, e.from_id) and MapSet.member?(kept_ids, e.to_id)
+          end)
+
+        json(conn, %{
+          ok: true,
+          dataset: dataset,
+          nodes: nodes,
+          edges: edges,
+          truncated: per_type_capped or over_budget,
+          truncation_reason: graph_truncation_reason(per_type_capped, over_budget)
+        })
+    end
   end
+
+  # types= validation: nil/blank → all schemas; otherwise a comma-separated
+  # list validated against the schema-name set. An unknown type is a hard 400 —
+  # silently ignoring it would ship a graph that quietly ignores the caller's
+  # narrowing (the exact dishonesty class this endpoint's truncation fix kills).
+  defp parse_graph_types(raw, all_types) when raw in [nil, ""], do: {:ok, all_types}
+
+  defp parse_graph_types(raw, all_types) when is_binary(raw) do
+    requested =
+      raw
+      |> String.split(",")
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    case {requested, requested -- all_types} do
+      {[], _} -> {:ok, all_types}
+      {_, []} -> {:ok, Enum.filter(all_types, &(&1 in requested))}
+      {_, unknown} -> {:error, "unknown types: #{Enum.join(unknown, ", ")}"}
+    end
+  end
+
+  defp parse_graph_types(_raw, _all_types),
+    do: {:error, "types must be a comma-separated string of schema names"}
+
+  defp graph_truncation_reason(true, true), do: "per_type_cap+node_budget"
+  defp graph_truncation_reason(true, false), do: "per_type_cap"
+  defp graph_truncation_reason(false, true), do: "node_budget"
+  defp graph_truncation_reason(false, false), do: nil
+
+  # ─── corpus visibility, keyed on the CALLER ──────────────────────────────
+  #
+  # The corpus read already pins `perspective: :published` (drafts never leak);
+  # what it did NOT do was honour schema VISIBILITY, so a public-read token got
+  # the titles of every private type in the dataset — 33 of 39 on the live
+  # instance, and a freshly published private-type document showed up within
+  # seconds. Site-spawner D6 clamps that tier to "published perspective + public
+  # -visibility schemas"; this is the second half.
+  #
+  # KEYED, not unconditional: every other principal (Studio session, read/write/
+  # admin token, and `FinderLive`, which derives its own payload off this same
+  # shape) keeps seeing every type. The tier test is
+  # `PublicRead.public_read_token?/1` — the plug's own definition, not a copy.
+  #
+  # Derived at READ TIME from `Content.Schema.public_type_names/1` over the
+  # schema rows this request already loaded (no extra query, no hardcoded type
+  # list): flip a schema to private and the very next corpus read drops it.
+  #
+  # Phantom nodes are deliberately NOT filtered. A phantom is a referenced-but-
+  # absent id with `title == id`, and a public document's reference field already
+  # exposes that same id through the allowed `GET /v1/data/doc` route — so
+  # dropping them would cost the dangling-edge signal without closing anything.
+  defp visible_schemas(schemas, conn) do
+    if BarkparkWeb.Plugs.PublicRead.public_read_token?(conn) do
+      allowed = MapSet.new(Barkpark.Content.Schema.public_type_names(schemas))
+      Enum.filter(schemas, &MapSet.member?(allowed, &1.name))
+    else
+      schemas
+    end
+  end
+
+  # ─── corpus admission cap (see the @graph_corpus_max_concurrency comment) ──
+
+  defp acquire_graph_corpus_slot do
+    # NO lazy `:ets.new` here. The table is created once from
+    # `Barkpark.Application.start/2`; a request-path create would hand ownership
+    # of the bound to a transient request process, and the bound would die (and
+    # silently RESET) with it. If the table is somehow absent the `rescue` below
+    # sheds rather than 500s.
+    sweep_graph_corpus_slots()
+
+    ref = make_ref()
+    deadline = System.monotonic_time(:millisecond) + @graph_corpus_slot_ttl_ms
+    :ets.insert(@graph_corpus_slots, {ref, self(), deadline})
+
+    if :ets.info(@graph_corpus_slots, :size) > graph_corpus_max_concurrency() do
+      :ets.delete(@graph_corpus_slots, ref)
+      :busy
+    else
+      {:ok, ref}
+    end
+  rescue
+    # The table is created at application boot and never deleted, so this arm is
+    # unreachable in a running system. It exists so that a bookkeeping accident
+    # can never become a 500 on a read route: with no table there is no bound,
+    # and an UNBOUNDED corpus derivation is the failure this cap was built to
+    # prevent — so the safe answer is to shed, exactly as saturation races do.
+    ArgumentError -> :busy
+  end
+
+  defp release_graph_corpus_slot(ref) do
+    :ets.delete(@graph_corpus_slots, ref)
+  rescue
+    # Runs from an `after` clause, i.e. AFTER the response was sent. Raising
+    # here would crash the request process for a slot that no longer exists.
+    ArgumentError -> :ok
+  end
+
+  # Reap slots whose owner DIED, and only those. Liveness is a fact about the
+  # holder; the row's deadline is not, so it is diagnostic data here and nothing
+  # more (see the @graph_corpus_max_concurrency comment for the over-admission
+  # the deadline arm caused).
+  #
+  # WHY DEAD-ONLY LOSES NOTHING. `graph_corpus/2` wraps the derivation in a
+  # lexical `try/after`, and `after` runs on an ordinary return, on a raise, on
+  # a throw and on an in-process `exit/1` — so a 15s DBConnection timeout
+  # releases its own slot without any sweep. What `after` does NOT cover is an
+  # exit signal delivered from ANOTHER process to this untrapping one — `:kill`
+  # is the un-trappable case, but `Process.exit(pid, :shutdown)` skips `after`
+  # just the same. Every one of those leaves the owner DEAD, which is exactly
+  # what this arm reclaims: it is load-bearing and must survive.
+  #
+  # THE TRADE, stated rather than discovered under review: an alive-but-wedged
+  # holder now keeps its slot until it finishes, so a permanently stuck
+  # derivation costs one slot of capacity for its lifetime. That is fail-CLOSED
+  # capacity loss — the cap sheds a little more than strictly necessary — and it
+  # matches this cap's own doctrine that at saturation a spurious 503 is the
+  # safe error. Nothing in api/config bounds handler wall time, so the previous
+  # behaviour was not "reclaiming stuck work": it was cancelling the bound on
+  # HEALTHY long derivations. Killing a wedged owner is a different mechanism
+  # with real blast radius (a broken connection instead of a clean 503) and is
+  # deliberately NOT done here (filed: acpc-bl-graph-slot-wedged-live-holder).
+  defp sweep_graph_corpus_slots do
+    for {ref, pid, _deadline} <- :ets.tab2list(@graph_corpus_slots),
+        not Process.alive?(pid) do
+      :ets.delete(@graph_corpus_slots, ref)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Create the `/v1/graph` admission-cap slot table, owned by the caller.
+
+  Called ONCE from `Barkpark.Application.start/2` so the table's owner is the
+  application process rather than whichever request happened to arrive first —
+  a bound whose bookkeeping dies with a request is not a bound. Idempotent: a
+  second call (a re-boot in the test VM) is a no-op, and the rows are slots, so
+  nothing is lost by NOT clearing them.
+  """
+  def init_graph_corpus_slots, do: ensure_graph_corpus_slots()
+
+  defp ensure_graph_corpus_slots do
+    case :ets.whereis(@graph_corpus_slots) do
+      :undefined ->
+        try do
+          :ets.new(@graph_corpus_slots, [:named_table, :public, :set, read_concurrency: true])
+        rescue
+          # Lost the create race to a concurrent boot (the test VM re-starts the
+          # supervision tree) — the table exists, which is all this needs.
+          ArgumentError -> :ok
+        end
+
+      _ref ->
+        :ok
+    end
+  end
+
+  defp graph_corpus_max_concurrency,
+    do:
+      Application.get_env(
+        :barkpark,
+        :graph_corpus_max_concurrency,
+        @graph_corpus_max_concurrency
+      )
+
+  @doc false
+  # Test seam: hold a real slot from the test process so the admission cap can be
+  # driven deterministically (no sleeping, no spawned load).
+  def __acquire_graph_corpus_slot_for_test__, do: acquire_graph_corpus_slot()
+
+  @doc false
+  def __release_graph_corpus_slot_for_test__(ref), do: release_graph_corpus_slot(ref)
+
+  defp graph_corpus_node_budget,
+    do: Application.get_env(:barkpark, :graph_corpus_node_budget, @graph_corpus_node_budget)
+
+  defp graph_corpus_per_type_limit,
+    do: Application.get_env(:barkpark, :graph_corpus_per_type_limit, @graph_corpus_per_type_limit)
 
   # GRAPH ROOT RESOLUTION (gap #4 BOUND DECISION). Roots on ANY content doc, so
   # we DELIBERATELY do NOT call find_task_by_doc_id/2 (which hard-filters
@@ -732,6 +1451,17 @@ defmodule BarkparkWeb.TasksController do
   # published-before-draft ordering, but WITHOUT the type filter. When a doc_id
   # collides across types in one scope, the published-preferred first row wins
   # (v1 graph roots on the published-preferred row — documented contract).
+  #
+  # PERSPECTIVE GATE (task-d223068f55efbf47, SECURITY): resolution honours the
+  # REQUESTED perspective. The old unconditional `pub OR draft` match meant a
+  # draft-only id (no published twin) fell back to its `drafts.<id>` row at the
+  # DEFAULT (published) perspective — any plain read token got a 200 confirming
+  # the draft's existence and echoing its real title through the traversal
+  # (live-proven). Now a default/published-perspective request resolves ONLY a
+  # published root (draft-only id -> not_found); the draft fallback survives
+  # solely for an explicit drafts/raw perspective from a non-anon-pinned tier.
+  # Both callers (graph_show, graph_tasks) route through here, so both are
+  # covered. Mutation proof: graph_draft_leak_test.exs.
   defp resolve_graph_root(id, conn) do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
@@ -739,13 +1469,20 @@ defmodule BarkparkWeb.TasksController do
     dataset = conn.params["dataset"]
 
     pub_id = Content.published_id(id)
-    draft = Content.draft_id(pub_id)
 
     query =
-      from(d in Document,
-        where: d.doc_id == ^pub_id or d.doc_id == ^draft,
-        order_by: [asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id)]
-      )
+      case graph_perspective(conn, conn.params) do
+        :published ->
+          from(d in Document, where: d.doc_id == ^pub_id)
+
+        _drafts_or_raw ->
+          draft = Content.draft_id(pub_id)
+
+          from(d in Document,
+            where: d.doc_id == ^pub_id or d.doc_id == ^draft,
+            order_by: [asc: fragment("CASE WHEN ? LIKE 'drafts.%' THEN 1 ELSE 0 END", d.doc_id)]
+          )
+      end
       |> Params.maybe_filter_workspace(workspace_id)
       |> Params.maybe_filter_project(project_id)
       |> Params.maybe_filter_dataset(dataset)
@@ -756,10 +1493,26 @@ defmodule BarkparkWeb.TasksController do
     end
   end
 
+  # The graph read perspective, clamped through the AnonPerspective chokepoint.
+  # Params.parse_perspective keeps this surface's `?drafts=true` alias, but an
+  # anon-pinned caller (tokenless, or the browser-shipped public-read
+  # credential — charter D60/D61) is pinned to :published regardless of the
+  # param. DEFENSE-IN-DEPTH ONLY on this route today: public-read is already
+  # 403 at /v1/graph/* (route-level), so this clamp's observable delta is ~zero
+  # — the LOAD-BEARING gate is resolve_graph_root honouring the perspective.
+  defp graph_perspective(conn, params) do
+    if AnonPerspective.anon_pinned?(conn) do
+      :published
+    else
+      Params.parse_perspective(params)
+    end
+  end
+
   # Build the keyword opts for Content.Graph.traverse/2 from query params + the
-  # resolved root (for dataset/scope). perspective=drafts (alias ?drafts=true)
-  # is token-gated — this whole controller is already behind :require_token, so
-  # honouring the param here IS the gate.
+  # resolved root (for dataset/scope). perspective rides graph_perspective/2 —
+  # the AnonPerspective-clamped resolver — NOT the conn-blind param parse alone
+  # (the old comment's ":require_token IS the gate" assumption was invalidated
+  # by the browser-shipped public-read token, #6270 / SR-2).
   defp graph_traverse_opts(%Document{} = root, params, conn) do
     scope_opts(conn)
     |> Keyword.put(:dataset, root.dataset)
@@ -770,14 +1523,58 @@ defmodule BarkparkWeb.TasksController do
     |> Keyword.put(:direction, Params.parse_direction(params["direction"]))
     |> Keyword.put(:kinds, Params.csv_list(params["kinds"]))
     |> Keyword.put(:sources, Params.csv_list(params["sources"]))
-    |> Keyword.put(:perspective, Params.parse_perspective(params))
+    |> Keyword.put(:perspective, graph_perspective(conn, params))
   end
 
   # The dataset string a graph read scopes to. The graph endpoints have no
   # :doc_id segment to derive a dataset from, so we read the optional `dataset`
   # query param (defaulting to "production", the canonical content dataset).
+  # Fails SOFT on purpose: a non-binary `dataset` (e.g. `?dataset[]=production`,
+  # which Plug decodes to a list) used to flow straight into is_binary-guarded
+  # callees with no fallback clause — Tasks.Events.replay_since/3 and
+  # Tasks.Fleet.roster/2 among seven call sites — raising FunctionClauseError
+  # (500) before any Repo call. A scope selector with a documented default
+  # falls back to that default rather than 400ing six live routes; the `kind`
+  # FILTER in edges/2 is the deliberate opposite and returns 400.
   defp request_dataset(conn) do
-    conn.params["dataset"] || "production"
+    case conn.params["dataset"] do
+      dataset when is_binary(dataset) -> dataset
+      _ -> "production"
+    end
+  end
+
+  # ─── field-visibility seal (fail-closed) ────────────────────────────────
+  # Redact each task doc's `content` under the request's caller through the
+  # canonical Envelope chokepoint (`Params.seal/3` → `Envelope.redact/4`) before
+  # it is serialized. ONE caller + "task"-schema resolve per request, applied to
+  # every doc the response echoes — the list, single-doc, edges/next, and
+  # mutation-ack paths all pass their docs through here so NO `render_doc`
+  # emission is fail-open. Latent hardening: with no task field declaring
+  # visibility today the wire is byte-identical; it fails closed the moment one
+  # does. Siblings already sealed: `Barkpark.Tasks.Query`'s measure/agg branch
+  # and the board peek panel — this closes the JSON echo they left behind.
+  defp seal_docs(docs, conn) when is_list(docs) do
+    {caller, schema} = seal_ctx(conn)
+    Enum.map(docs, &Params.seal(&1, caller, schema))
+  end
+
+  defp seal_doc(%Document{} = doc, conn) do
+    {caller, schema} = seal_ctx(conn)
+    Params.seal(doc, caller, schema)
+  end
+
+  # The request principal + the resolved "task" schema — resolved ONCE and
+  # reused across a list. A missing schema (`{:error, :not_found}`) yields nil:
+  # `Envelope.redact/4` then still drops encrypted ciphertext, and declared
+  # visibility (which needs the schema) simply has nothing to act on.
+  defp seal_ctx(conn) do
+    schema =
+      case Content.get_schema("task", request_dataset(conn), scope_opts(conn)) do
+        {:ok, s} -> s
+        _ -> nil
+      end
+
+    {CallerContext.from_conn(conn), schema}
   end
 
   # ─── POST /v1/tasks/edges ───────────────────────────────────────────────
@@ -830,7 +1627,7 @@ defmodule BarkparkWeb.TasksController do
       {:ok, task} ->
         case Tasks.relabel_by_id(task.id, add, remove, caller_token_id(conn)) do
           {:ok, %Document{} = doc} ->
-            json(conn, %{ok: true, doc: Params.render_doc(doc)})
+            json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
 
           {:error, reason} ->
             conn
@@ -855,7 +1652,34 @@ defmodule BarkparkWeb.TasksController do
       {:ok, task} ->
         case Tasks.update_paper_refs_by_id(task.id, add, remove, caller_token_id(conn)) do
           {:ok, %Document{} = doc} ->
-            json(conn, %{ok: true, doc: Params.render_doc(doc)})
+            json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
+
+          {:error, reason} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+        end
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  # Task 5 (session-handoff): POST /v1/tasks/:doc_id/sessions. Clone of
+  # papers/2 — reads add/remove session doc-ids from params, finds the task
+  # scoped by workspace+project, then delegates to
+  # Tasks.update_session_refs_by_id/4 (advisory-lock + CAS-on-rev +
+  # task.referenced mutation_event). Returns { ok, doc }. Sessions are
+  # referenced by slug string only; no FK.
+  def sessions(conn, %{"doc_id" => doc_id} = params) do
+    add = Params.string_list(params["add"])
+    remove = Params.string_list(params["remove"])
+
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, task} ->
+        case Tasks.update_session_refs_by_id(task.id, add, remove, caller_token_id(conn)) do
+          {:ok, %Document{} = doc} ->
+            json(conn, %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))})
 
           {:error, reason} ->
             conn
@@ -898,7 +1722,7 @@ defmodule BarkparkWeb.TasksController do
 
                 json(
                   conn,
-                  %{ok: true, doc: Params.render_doc(doc)}
+                  %{ok: true, doc: Params.render_doc(seal_doc(doc, conn))}
                   |> maybe_put(:rail_rev, Tasks.rail_rev(new_parent_doc_id, scope))
                   |> maybe_put(:from_rail_rev, Tasks.rail_rev(old_parent, scope))
                 )
@@ -1029,6 +1853,7 @@ defmodule BarkparkWeb.TasksController do
 
     notices =
       []
+      |> add_execution_policy_notices(task)
       |> add_blocked_notice(task)
       |> add_rail_changed_notice(parent_id, compare_rev, rail_rev, params["observed_rail_rev"])
 
@@ -1083,6 +1908,13 @@ defmodule BarkparkWeb.TasksController do
     end
   end
 
+  defp add_execution_policy_notices(notices, %Document{content: content}) do
+    case get_in(content || %{}, ["claim", "execution_policy", "notices"]) do
+      policy_notices when is_list(policy_notices) -> notices ++ policy_notices
+      _ -> notices
+    end
+  end
+
   # Fires when the caller supplied observed_rail_rev and it differs from the
   # PRE-write baseline (a concurrent actor moved the rail). Reports the current
   # (post-write) rail_rev so the worker can refresh its baseline.
@@ -1108,6 +1940,69 @@ defmodule BarkparkWeb.TasksController do
       %{id: id} -> id
       _ -> nil
     end
+  end
+
+  # ─── POST /v1/fleet/beat ────────────────────────────────────────────────
+  # Personal Dev Fleet presence heartbeat (Barkpark.Tasks.Fleet). Registration
+  # rides the plain Content path; every later beat is the zero-row atomic
+  # write (PDF-D17). `dataset` query param defaults "production", the same
+  # request_dataset/1 the graph reads use; scope opts feed ONLY the
+  # registration create.
+
+  def fleet_beat(conn, params) do
+    dataset = request_dataset(conn)
+
+    case Fleet.beat(params, dataset, scope_opts(conn)) do
+      {:ok, receipt} ->
+        json(conn, %{
+          ok: true,
+          registered: receipt.registered,
+          doc: receipt.doc
+        })
+
+      {:error, :missing_worker} ->
+        bad_request(conn, "worker is required")
+
+      {:error, :invalid_status} ->
+        unprocessable(
+          conn,
+          "invalid_status",
+          "status must be one of: " <> Enum.join(Fleet.statuses(), " | ")
+        )
+
+      {:error, :invalid_ttl} ->
+        unprocessable(conn, "invalid_ttl", "ttl must be a positive integer (seconds)")
+
+      {:error, :invalid_capacity} ->
+        unprocessable(
+          conn,
+          "invalid_capacity",
+          "capacity must be a free-form string or an object with size_class (light | standard | heavy | xl), non-negative slots_total/slots_free (slots_free <= slots_total), and an optional non-negative budget"
+        )
+
+      {:error, :stale_beat} ->
+        conflict(conn, :stale_beat, nil)
+
+      {:error, other} ->
+        unprocessable(conn, "beat_failed", "beat failed: #{inspect(other)}")
+    end
+  end
+
+  # ─── GET /v1/fleet/roster ───────────────────────────────────────────────
+  # The fleet roster — global-per-dataset (PDF-D19, no workspace clause) with
+  # online/offline computed at read time, fail closed. The envelope key is
+  # `documents` (PDF-D21): the one key every installed bp binary renders as a
+  # real table; a bespoke key would degrade to one crammed KV cell.
+
+  def fleet_roster(conn, _params) do
+    dataset = request_dataset(conn)
+    json(conn, %{ok: true, documents: Fleet.roster(dataset)})
+  end
+
+  defp unprocessable(conn, reason, message) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{ok: false, reason: reason, message: message})
   end
 
   defp maybe_put_notices(map, []), do: map

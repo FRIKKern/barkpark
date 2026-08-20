@@ -24,7 +24,7 @@ defmodule Barkpark.Content.ValueWritebackTest do
        with nothing written; and the attributed `"valueref-writeback"`
        provenance revision rides on top.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
   import Ecto.Query

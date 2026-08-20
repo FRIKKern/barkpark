@@ -128,6 +128,22 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       # highlights itself (a page must tell you where you are).
       active: "Settings"
     },
+    # Connectors (connectors D49) — the same shape as settings: scoped-in-substance
+    # (an install belongs to ONE workspace), so the canonical route is scoped and
+    # the flat `/studio/connectors` is a 302 that reflects out of this table. It
+    # has its own top-menu tab, so it highlights itself.
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/connectors",
+      disposition: :mount,
+      url: {:scoped, "/studio/connectors"},
+      active: "Connectors"
+    },
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/chat-hosts",
+      disposition: :mount,
+      url: {:scoped, "/studio/chat-hosts"},
+      active: :none
+    },
     %{route: "/studio/org-admin", disposition: :mount, url: "/studio/org-admin", active: :none},
     %{
       route: "/studio/styleguide",
@@ -158,6 +174,16 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
     %{route: "/studio/tmux", disposition: :skip_env_gated, gated: :tmux},
     %{route: "/studio/chat", disposition: :skip_env_gated, gated: :chat},
     %{route: "/studio/chat/:session_id", disposition: :skip_env_gated, gated: :chat},
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/chat",
+      disposition: :skip_env_gated,
+      gated: :chat
+    },
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/chat/:session_id",
+      disposition: :skip_env_gated,
+      gated: :chat
+    },
 
     # ── representative plugin routes (mounted behind :plugin_routes tag) ──
     %{
@@ -166,6 +192,13 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       plugin: "tasks",
       url: "/admin/projects",
       active: "Projects"
+    },
+    %{
+      route: "/admin/fleet",
+      disposition: :plugin,
+      plugin: "tasks",
+      url: "/admin/fleet",
+      active: "Fleet"
     },
     %{
       route: "/admin/onixedit/bokbasen",
@@ -200,6 +233,7 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       disposition: :reflect_only
     },
     %{route: "/w/:workspace_slug/p/:project_slug/admin/projects", disposition: :reflect_only},
+    %{route: "/w/:workspace_slug/p/:project_slug/admin/fleet", disposition: :reflect_only},
     %{route: "/w/:workspace_slug/p/:project_slug/admin/pulse", disposition: :reflect_only},
     %{
       route: "/w/:workspace_slug/p/:project_slug/admin/onixedit/bokbasen",

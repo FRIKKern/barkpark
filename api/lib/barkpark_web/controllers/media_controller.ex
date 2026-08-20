@@ -3,7 +3,7 @@ defmodule BarkparkWeb.MediaController do
 
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Delivery, Renditions}
+  alias Barkpark.Media.{Blobstore, Delivery, Renditions}
   alias Barkpark.Media.Storage.{Access, MediaFile}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -48,14 +48,29 @@ defmodule BarkparkWeb.MediaController do
     })
   end
 
-  @doc "Get a single media file metadata."
+  @doc """
+  Get a single media file metadata.
+
+  Gated by `Access.allowed?/4` at `:view`, mirroring `serve/2` (`:original`)
+  and `serve_rendition/2` (`:preview`) — without it an anonymous caller could
+  read a private asset's filename/path/size here while being refused the bytes
+  (the felix W14 field-visibility leak). Fails CLOSED: private + anonymous → 403.
+  """
   def show(conn, %{"id" => id}) do
-    with {:ok, file} <- Media.get_file(id, scope_opts(conn)) do
+    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+         doc <- Media.asset_doc_for_file(file, file.dataset),
+         true <- Access.allowed?(conn, file, doc, :view) do
       json(conn, render_file(file, conn))
+    else
+      {:error, :not_found} ->
+        not_found(conn, "file not found")
+
+      false ->
+        forbidden(conn)
     end
   end
 
-  @doc "Serve a file from disk."
+  @doc "Serve a file — from disk, or via redirect to the object-storage backend."
   def serve(conn, %{"path" => path_parts}) do
     relative_path = Enum.join(path_parts, "/")
 
@@ -63,17 +78,38 @@ defmodule BarkparkWeb.MediaController do
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :original) do
       # Serve the path off the RESOLVED record, not the raw URL segment. The
-      # lookup already matched on `path == relative_path`, but deriving the disk
-      # path from `file.path` (a server-generated `uploads/YYYY/MM/slug-rand.ext`
+      # lookup already matched on `path == relative_path`, but deriving the blob
+      # key from `file.path` (a server-generated `uploads/YYYY/MM/slug-rand.ext`
       # — `Media.unique_filename/1` strips directory parts and non-`[a-z0-9-]`) —
       # instead of the attacker-typed segment removes any raw-input flow into
-      # `send_file`. A `../…` URL never matches a stored row → {:error,:not_found}.
-      full_path = Media.file_path(file.path)
-      mime = MIME.from_path(full_path)
+      # `send_file` / the presigned key. A `../…` URL never matches a stored row
+      # → {:error, :not_found}.
+      mime = MIME.from_path(file.path)
 
-      conn
-      |> Delivery.put_file_cache_headers(full_path)
-      |> maybe_send_file(full_path, mime)
+      # The stored-XSS defense travels with the strategy: the LOCAL branch sets
+      # collapse/nosniff/disposition headers itself (maybe_send_file), and the
+      # REDIRECT branch bakes the SAME collapsed type + disposition into the
+      # presigned query (response-content-*) so the bucket echoes them.
+      case Blobstore.serve_strategy(file.path,
+             response_content_type: MediaFile.serve_content_type(mime),
+             response_content_disposition: disposition(mime)
+           ) do
+        {:file, full_path} ->
+          conn
+          |> Delivery.put_file_cache_headers(full_path, Access.visibility(doc))
+          |> maybe_send_file(full_path, mime)
+
+        {:redirect, url} ->
+          redirect_to_blob(conn, url)
+
+        # HONEST missing-blob 404: a media_files ROW can outlive its blob — most
+        # notably right after a workspace bundle import copies the DB rows but the
+        # blobs have not been re-pointed/pushed yet (pds W1 G2). Without this guard
+        # send_file's internal `{:ok, %File.Stat{}} = File.stat(path)` raises a
+        # MatchError on :enoent → a bare 500. Answer a truthful 404 instead.
+        {:error, :not_found} ->
+          not_found(conn, "media blob missing")
+      end
     else
       {:error, :not_found} ->
         not_found(conn, "file not found")
@@ -103,7 +139,7 @@ defmodule BarkparkWeb.MediaController do
       mime = MIME.from_path(full_path)
 
       conn
-      |> Delivery.put_file_cache_headers(full_path)
+      |> Delivery.put_file_cache_headers(full_path, Access.visibility(doc))
       |> maybe_send_file(full_path, mime)
     else
       {:error, :not_found} ->
@@ -156,6 +192,16 @@ defmodule BarkparkWeb.MediaController do
     if MediaFile.dangerous_mime?(mime), do: "attachment", else: "inline"
   end
 
+  # 302 to a presigned object-storage URL. `cache-control: private` — the
+  # redirect embeds a time-limited signature and may be access-gated, so a
+  # shared cache must never serve it to another principal; the blob response
+  # itself carries the bucket/CDN cache policy.
+  defp redirect_to_blob(conn, url) do
+    conn
+    |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
+    |> redirect(external: url)
+  end
+
   defp not_found(conn, message) do
     env =
       {:error, :not_found}
@@ -178,10 +224,149 @@ defmodule BarkparkWeb.MediaController do
     |> json(%{error: Map.delete(env, :status)})
   end
 
+  @doc """
+  Push a raw blob to this instance at a validated relative path (pds W1 G2).
+
+  Admin-gated (the `:require_admin` pipeline). The cross-instance blob-transfer
+  primitive: a workspace bundle import on a TARGET instance copies the source's
+  DB rows, then pushes each source blob here by its server-generated relative
+  path so `serve/2` (which derives the disk path from the row's `path`) finds
+  the bytes. The body is written VERBATIM — no re-encode, no MIME inspection.
+
+  Path safety is enforced by `Media.put_blob/2`'s strict allowlist (each
+  `/`-segment must match the server-blob shape; `.`/`..`/absolute/empty
+  rejected), so a traversal or malformed path is refused with 422 BEFORE any
+  byte touches disk. This is a bare infra route — deliberately NOT in the
+  capabilities manifest.
+  """
+  def put_blob(conn, %{"path" => path_parts}) do
+    relative_path = Enum.join(path_parts, "/")
+
+    case read_full_body(conn) do
+      {:ok, body, conn} ->
+        case Media.put_blob(relative_path, body) do
+          {:ok, written, receipt} ->
+            conn
+            |> put_status(:ok)
+            |> json(
+              %{
+                # `written` is the legacy key and carries the PATH, not a count
+                # — `path` is its honest name; both are emitted so the existing
+                # CLI keeps working.
+                written: written,
+                path: written,
+                # RECEIVED. The CLI compares its sent size against this key, so
+                # it keeps meaning exactly what it always meant.
+                bytes: byte_size(body)
+              }
+              |> Map.merge(receipt_json(receipt))
+            )
+
+          {:error, :not_stored} ->
+            readback_failure(
+              conn,
+              "blob_not_stored",
+              "the store accepted the write and a read-back then found no object at that path"
+            )
+
+          {:error, {:storage_mismatch, received, stored}} ->
+            readback_failure(
+              conn,
+              "blob_storage_mismatch",
+              "received #{received} bytes but the store holds #{stored}"
+            )
+
+          {:error, :invalid_path} ->
+            unprocessable(conn, "invalid_path", "invalid blob path")
+
+          {:error, :empty_body} ->
+            # A zero-byte blob is never legitimate media. The common cause is a
+            # mislabeled content-type (e.g. application/json) letting
+            # Plug.Parsers consume the body before this controller reads it —
+            # refuse loudly instead of writing an empty file serve/2 would
+            # then happily stream.
+            unprocessable(
+              conn,
+              "empty_body",
+              "empty blob body — send the raw bytes as application/octet-stream"
+            )
+
+          {:error, :storage_unavailable} ->
+            {:error, :storage_unavailable}
+        end
+
+      {:error, :too_large, conn} ->
+        env =
+          {:error, :payload_too_large}
+          |> Errors.to_envelope(conn)
+          |> Map.put(:message, "blob exceeds the maximum allowed size")
+
+        conn
+        |> put_status(:request_entity_too_large)
+        |> json(%{error: Map.delete(env, :status)})
+    end
+  end
+
+  # Read the whole request body in one call (the endpoint caps the body at 100 MB
+  # via Plug.Parsers `length:`, and the blob-push content-type is a pass-through
+  # `application/octet-stream` the parsers leave unread). A body that still spills
+  # past `:read_length` returns `{:more, ...}` → an honest 413 rather than a
+  # silently truncated blob.
+  defp read_full_body(conn) do
+    case Plug.Conn.read_body(conn, length: 100_000_000, read_length: 100_000_000) do
+      {:ok, body, conn} -> {:ok, body, conn}
+      {:more, _partial, conn} -> {:error, :too_large, conn}
+    end
+  end
+
+  # The storage claim, rendered so the two numbers can never be read as one:
+  # `bytes` (above) is what this instance RECEIVED; `stored` is what a
+  # post-condition read of the store found. `stored` degrades to the string
+  # "unverified" with a NAMED reason — never to a copy of the received count.
+  defp receipt_json(%{stored: :unverified, unverified_reason: reason}) do
+    %{stored: "unverified", verified_by: nil, unverified_reason: format_reason(reason)}
+  end
+
+  defp receipt_json(%{stored: stored, verified_by: verified_by}) do
+    %{stored: stored, verified_by: to_string(verified_by), unverified_reason: nil}
+  end
+
+  defp format_reason(reason) when is_atom(reason), do: to_string(reason)
+  defp format_reason(reason), do: inspect(reason)
+
+  # A read-back that proves the bytes are absent (or disagrees about their
+  # size) is a FAILED transfer at the storage edge, not a 200 carrying a
+  # discrepancy field. 502: this instance is honest about a store below it that
+  # was not.
+  defp readback_failure(conn, code, message) do
+    env = Errors.stamp(%{code: code, message: message, status: 502}, conn)
+
+    conn
+    |> put_status(:bad_gateway)
+    |> json(%{error: Map.delete(env, :status)})
+  end
+
+  defp unprocessable(conn, code, message) do
+    # No canonical `:unprocessable` atom exists in Errors; build the 422 envelope
+    # directly and stamp it so it still carries hint + request_id like every
+    # other error on this surface.
+    env =
+      %{code: code, message: message, status: 422}
+      |> Errors.stamp(conn)
+
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: Map.delete(env, :status)})
+  end
+
   @doc "Delete a media file."
   def delete(conn, %{"id" => id}) do
-    with {:ok, _} <- Media.delete_file(id, scope_opts(conn)) do
-      json(conn, %{deleted: id})
+    # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row `Repo.delete/2`
+    # removed (media.ex:425-452). This used to discard it and echo the `:id` path
+    # param; `filename` is stored state the request never carries, so reverting
+    # to the echo reds the differential.
+    with {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
+      json(conn, %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset})
     end
   end
 

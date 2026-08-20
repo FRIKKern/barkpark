@@ -1,0 +1,191 @@
+COMMAND "Ensure console hook zones" DESCRIPTION "Idempotently plant the three named scaffy:zone marker comments across the Cloud console SPA pair -- cloud/priv/static/app.js (#7 discover hotspot: 81 commits / 60 MOSTLY_ADD in 12 months) and its co-accreting node harness cloud/priv/static/__app.test.mjs (#14: 56 commits, 55 of the 82 app.js commits touch it) -- the cloud subsystem's ONLY mechanically append-shaped seams. The console vein is vertical (a cloud feature = router route + Registry fn + SPA edits: 54/70 registry commits co-touch the router, 46/82 app.js commits co-touch app.css), but router/registry/css adds are all contextual-bespoke; what EVERY SPA feature repeats mechanically is this trio: a pure helper in the IIFE, its entry in the __bpTestHook export map, and its test group in the harness. One zone per seam: new-helper declarations (position-free -- the hook call runs at eval tail), new hook-map entries (order-free object keys, house trailing-comma style), new test groups (registration order is NOT semantics-free under node:test -- a test() registered above a top-level await is drained before the later top-level consts initialise and TDZ-crashes, so the tests zone is planted at the file TAIL, below every top-level await). Each zone comment states IN WORDS the contract that makes an append below it safe by construction -- the ensure-router-zones idiom, JS spelling. No variables: fixed artifacts, planted once, guarded by their own declaration text." LAST_UPDATED "17-07-2026-21-00-00" DOMAIN "barkpark" TAGS "cloud-console", "scaffold" CONCEPT "console-hook-zones" VARIANT "js" DIRECTION "add" VARIABLES
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THIS COMMAND EXISTS — the measured anatomy of the cloud console pair
+# ─────────────────────────────────────────────────────────────────────────────
+# Loop-tick mining (2026-07-17): the CLOUD subsystem holds four discover
+# hotspots, and the co-change matrix proves one vertical vein — "add a cloud
+# console feature" — not four independent files:
+#
+#   cloud/lib/barkpark_cloud/web/router.ex   #5   106 commits, 106 recent
+#   cloud/priv/static/app.js                 #7    81 commits, 60 MOSTLY_ADD
+#   cloud/lib/barkpark_cloud/registry.ex     #9    70 commits, 70 recent
+#   cloud/priv/static/app.css                #13   39 PURE_ADD
+#   cloud/priv/static/__app.test.mjs         #14   56 commits
+#
+#   54/70 registry commits co-touch the router; 37/82 app.js commits co-touch
+#   the router; 46/82 co-touch app.css; 55/82 co-touch __app.test.mjs.
+#
+# Per-seam verdicts (each judged against the playbooks):
+#
+#   1. router.ex — CUT. A 9968-line Plug.Router (NOT Phoenix: no pipeline/
+#      scope macros to zone) with 166 inline `get/post ... do` handlers whose
+#      BODIES are the feature (20-100 bespoke lines each; sampled adds land
+#      noun-locally: freshness embed inside `get "/v1/sites"`, verify near its
+#      barkparks siblings). The flat-core ruling from ensure-router-zones
+#      re-affirms verbatim: adds are neighbor-bound, ordering pins are
+#      noun-local (static before dynamic within a family), and no generic zone
+#      can encode them. The moduledoc route table has ALREADY drifted (routes
+#      exist unlisted — /v1/onboarding, /v1/archives, /v1/admin/*), so it is
+#      not a maintained seam either; syncing it is tripwire work, not scaffy.
+#
+#   2. registry.ex — CUT. The name misleads: it is the Barkpark-instances
+#      Ecto CONTEXT (register/adopt/suspend/health), not a code registry. It
+#      accretes bespoke `@doc + def` business functions (sampled:
+#      latest_deployment_status_map/1, record_verify_result/2,
+#      update_site_settings/2) — the language IS the template, no separator
+#      seam, no fork/decoy problem, nothing closed to scaffold.
+#
+#   3. app.css — CUT, the W1 CSS-leg ruling re-affirmed with this file's own
+#      evidence. Lines 18-225 are a GENERATED region (design/tokens.json via
+#      `node design/emit.mjs --write` — emitter-owned, hands off, the
+#      generated-surface playbook). The hand region organizes by feature
+#      section and the sampled adds land mid-file next to their section
+#      (hunks at 108, 520, 871, 1270+2143+2957, 1326, 3012 in a ~3200-line
+#      file) — placement is contextual by design.
+#
+#   4. app.js + __app.test.mjs — THE SERVED SEAMS (this command + its
+#      consumer add-console-helper). The house law is stamped on dozens of
+#      hook-map comment groups: "pure helpers node-pinned via __bpTestHook;
+#      DOM mounts browser-verified". Every feature repeats the same
+#      three-site mechanical chore by hand. The three sites are genuinely
+#      append-shaped AND semantics-free — but two of them sit at moving,
+#      feature-named neighborhoods (the newest palette entries; the newest
+#      test group), so without zones every command anchor would rot as the
+#      files grow. Zones repair that once.
+#
+# CI note: __app.test.mjs is a REAL enforced gate — console-harness.yml runs
+# `node --test cloud/priv/static/__app.test.mjs` (438 tests, ~250ms, zero
+# deps) on every PR, and cloud/** auto-deploys on merge. The zone payloads
+# are pure JS comments: zero production bytes served differently, and the
+# closing LOCAL assert proves the SPA still evaluates.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE ENSURE CONTRACT, ZONE SPELLING — same law as ensure-router-zones
+# ─────────────────────────────────────────────────────────────────────────────
+# Guards key on the zone declaration text a hand edit would also produce
+# (`scaffy:zone <name>`), never the trailing MARK: token (D57). A hand-planted
+# identical zone wins: the run skips, writes NO receipt, and a later remove
+# exits 4 — correct, scaffy never owned the line. In the common case scaffy
+# plants, owns, and remove retracts byte-clean.
+#
+# THE PAYOFF: add-console-helper anchors at these three mark lines with plain
+# INSERT AFTER FIRST — never-consumed anchors, no REANCHOR families — so every
+# later helper starts anchored instead of surveying a 12k-line IIFE.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 1 — plant the helpers zone above the test-only escape hatch (app.js)
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the escape-hatch comment — the three-line prose block introducing
+# the __bpTestHook tail, byte-unique, consumed by nothing, and OUTSIDE the
+# `<<< END coherence-helpers <<<` mirrored region directly above it (that
+# block is drift-pinned against a verbatim copy in the coherence preview page;
+# nothing may land inside it). INSERT BEFORE keeps the anchor intact, so the
+# zone becomes the last thing before the hatch. Position is semantics-free by
+# construction: a `function` declaration here is scoped to the enclosing IIFE
+# and the hook call below runs at eval tail, so a helper landing at the zone
+# is visible to the hook AND to every earlier call site (hoisting).
+IN "cloud/priv/static/app.js"
+### Plant the console-helpers zone above the test-only escape hatch
+INSERT BEFORE FIRST
+::: test-only escape hatch comment :::
+  // Test-only escape hatch (same pattern as the sheet-grid hook): a node:vm
+  // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
+  // in a real browser, so this is a no-op in production.
+::: test-only escape hatch comment :::
+WITH
+::: console-helpers zone :::
+  // scaffy:zone console-helpers (ensure-console-hook-zones) -- stable head
+  // anchor for NEW node-pinned pure helpers: declare your `function name(...)`
+  // DIRECTLY BELOW this comment. Position is semantics-free by construction:
+  // declarations are scoped to the enclosing IIFE and the __bpTestHook call
+  // below runs at eval tail, so a helper landing here is visible to the hook
+  // and to every earlier call site (hoisting). Keep helpers PURE (no DOM, no
+  // fetch, no EventSource) -- the house law stamped on every hook group: pure
+  // helpers node-pinned, DOM mounts browser-verified. Sweeps: move this
+  // comment only whole, on its own lines. MARK:zone-console-helpers
+
+::: console-helpers zone :::
+MARK "zone-console-helpers"
+ASLONG FILE DONT CONTAIN "scaffy:zone console-helpers"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 2 — plant the hook-map zone at the tail of the __bpTestHook object
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the file's closing three lines — `});` + `}` + `})();` — the only
+# place those bytes stack (verified byte-unique), consumed by nothing. INSERT
+# BEFORE lands the zone as the LAST line inside the object literal, after the
+# final entry. Safe by construction: house style keeps a trailing comma on
+# every entry (the current tail `paletteRegistry: paletteRegistry,` included),
+# object keys are order-free, and a `//` comment line is legal inside an
+# object literal — so an entry appended directly below the zone is always
+# legal JS and always exported.
+IN "cloud/priv/static/app.js"
+### Plant the console-hook-map zone as the last line of the export object
+INSERT BEFORE FIRST
+::: iife tail :::
+    });
+  }
+})();
+::: iife tail :::
+WITH
+::: console-hook-map zone :::
+      // scaffy:zone console-hook-map (ensure-console-hook-zones) -- stable
+      // tail anchor for NEW hook entries: add `name: name,` DIRECTLY BELOW
+      // this comment (trailing comma -- house style keeps one on every entry,
+      // so the append is separator-safe; object keys are order-free; a comment
+      // line is legal inside an object literal). Only reference helpers
+      // declared above -- this object is built once, at eval tail. Sweeps:
+      // move this comment only whole, on its own lines. MARK:zone-console-hook-map
+::: console-hook-map zone :::
+MARK "zone-console-hook-map"
+ASLONG FILE DONT CONTAIN "scaffy:zone console-hook-map"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 3 — plant the tests zone at the harness TAIL (__app.test.mjs)
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the file's LAST top-level statement terminator. INSERT AFTER LAST
+# lands the zone at end-of-file, which is the only position that is safe by
+# construction — and the position is NOT free. Registration order is NOT
+# semantics-free under node:test: a test() registered ABOVE a top-level
+# `await` is drained while that await settles, BEFORE the later top-level
+# `const`s initialise, so its callback throws ReferenceError (TDZ) on any
+# fixture declared further down. Measured cch-w61-s1: this zone used to sit
+# after the vm eval at the file HEAD, above the harness's first top-level
+# `await import(...)`, and a group planted there red 5/1028 on node 20 —
+# node 22 crashed the same probe too, so this is a drain race, not a runtime
+# semantic difference. Below the last top-level await there is no remaining
+# drain point, so a tail group always sees a fully-initialised module.
+IN "cloud/priv/static/__app.test.mjs"
+### Plant the console-tests zone at the tail of the harness, below every top-level await
+INSERT AFTER LAST
+::: last top-level statement of the harness :::
+});
+::: last top-level statement of the harness :::
+WITH
+::: console-tests zone :::
+
+// scaffy:zone console-tests (ensure-console-hook-zones) -- stable TAIL anchor
+// for NEW test groups: add your `// ── name ──` header + test() blocks
+// DIRECTLY BELOW this comment. Registration order is NOT semantics-free: a
+// test() registered ABOVE a top-level `await` is drained while that await
+// settles — BEFORE the later top-level `const`s initialise — so its callback
+// throws ReferenceError (TDZ) on any fixture declared further down. Keep this
+// anchor BELOW the file's LAST top-level `await` (measured cch-w61-s1: node 20
+// and node 22 both crash a group planted above it).
+// Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
+::: console-tests zone :::
+MARK "zone-console-tests"
+ASLONG FILE DONT CONTAIN "scaffy:zone console-tests"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# All three zones present, and the pair still passes its OWN enforced gate —
+# the same `node --test` console-harness.yml runs in CI, here LOCAL (zero
+# deps, ~250ms): green proves the planted comments broke neither the SPA's
+# vm evaluation nor the harness module.
+ASSERT FILE "cloud/priv/static/app.js" CONTAINS "MARK:zone-console-helpers"
+ASSERT FILE "cloud/priv/static/app.js" CONTAINS "MARK:zone-console-hook-map"
+ASSERT FILE "cloud/priv/static/__app.test.mjs" CONTAINS "MARK:zone-console-tests"
+ASSERT CMD "node --test cloud/priv/static/__app.test.mjs"

@@ -1,5 +1,11 @@
 defmodule Barkpark.Search.IntelligenceTest do
-  use Barkpark.DataCase, async: true
+  # async: false — this module swaps node-global env
+  # (`:barkpark, :search_intel_record_async`) to exercise the off-request INSERT
+  # path. Application env is ONE value for the whole node — the SQL sandbox
+  # isolates the DB connection, never the VM-global env (see
+  # api/test/barkpark/application_env_isolation_test.exs, which proves the leak
+  # channel). Ratchet: scripts/async_env_seam_scan.exs.
+  use Barkpark.DataCase, async: false
 
   import Ecto.Query
 
@@ -230,5 +236,39 @@ defmodule Barkpark.Search.IntelligenceTest do
       inserted_at: at
     })
     |> Repo.insert!()
+  end
+
+  describe "async record (prod path — pre-generated id, background insert)" do
+    # Prod runs the record INSERT off-request (search_intel_record_async: true);
+    # tests default it OFF for determinism. This is the async path's own proof:
+    # the returned searchEventId must be the row's id once the background task
+    # lands (Task.* propagates $callers, so the sandbox owns the connection).
+    test "returns the pre-generated id immediately and the row lands with that id" do
+      prev = Application.get_env(:barkpark, :search_intel_record_async)
+      Application.put_env(:barkpark, :search_intel_record_async, true)
+
+      on_exit(fn -> Application.put_env(:barkpark, :search_intel_record_async, prev) end)
+
+      assert {:ok, id} =
+               Intelligence.record("documents", "async-ds", %{query: "asyncprobe"}, 3, 12)
+
+      # The insert rides a supervised task — poll briefly for the row.
+      event =
+        Enum.reduce_while(1..50, nil, fn _, _ ->
+          case Repo.get(Event, id) do
+            nil ->
+              Process.sleep(20)
+              {:cont, nil}
+
+            row ->
+              {:halt, row}
+          end
+        end)
+
+      assert %Event{} = event, "background insert never landed"
+      assert event.id == id
+      assert event.query == "asyncprobe"
+      assert event.quality == "accepted"
+    end
   end
 end

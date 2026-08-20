@@ -87,12 +87,35 @@ export const STATUS_LADDER: LadderRow[] = [
   { role: "blocked", glyph_role: "blocked", glyph: "!", spinner: false, label: "blocked" },
   { role: "done", glyph_role: "done", glyph: "✓", spinner: false, label: "done" },
   { role: "cancel", glyph_role: "cancel", glyph: "✕", spinner: false, label: "cancelled" },
+  // ── thought states (task-lifecycle-visibility): contemplated before ready.
+  // Dim, glyph-only, trailing the ladder. considering ◌ (U+25CC), researching ◎
+  // (U+25CE). A manifest edit re-derives the Elixir fixture; this twin moves in
+  // lockstep with design/status-manifest.json.
+  { role: "considering", glyph_role: "considering", glyph: "◌", spinner: false, label: "considering" },
+  { role: "researching", glyph_role: "researching", glyph: "◎", spinner: false, label: "researching" },
 ];
 
 /** role → canonical lowercase label (unknown role → the slug itself). */
 const LABEL_BY_ROLE: Record<string, string> = Object.fromEntries(
   STATUS_LADDER.map((r) => [r.role, r.label]),
 );
+
+/** The EIGHT canonical manifest roles (design/status-manifest.json). The
+ * status-legend projection is the cross-surface parity KEY and must stay byte-
+ * frozen to what Render.StatusVocab emits. The manifest has now ADOPTED the two
+ * thought states (task-lifecycle-visibility substrate slice), so the regenerated
+ * golden carries them and this set gains them in lockstep. The JS-only fail-open
+ * `unknown` sentinel stays excluded permanently — it is never a lifecycle state. */
+const MANIFEST_LADDER = new Set([
+  "open",
+  "ready",
+  "progress",
+  "blocked",
+  "done",
+  "cancel",
+  "considering",
+  "researching",
+]);
 
 export function labelForRole(role: string): string {
   return LABEL_BY_ROLE[role] ?? role;
@@ -105,8 +128,9 @@ export function boardLabel(role: string): string {
   return l.length === 0 ? l : l[0].toUpperCase() + l.slice(1);
 }
 
-/** Stored lifecycle status → ladder role (mirrors the manifest `statuses` map;
- * unknown/absent → the `open` default). */
+/** Stored lifecycle status → ladder role (mirrors the manifest `statuses` map).
+ * ABSENT/empty → the `open` default; an unrecognized NON-EMPTY status fails OPEN
+ * to the dim-neutral `unknown` role (D11) — never masquerading as bright `open`. */
 const STATUS_TO_ROLE: Record<string, string> = {
   open: "open",
   ready: "ready",
@@ -115,10 +139,13 @@ const STATUS_TO_ROLE: Record<string, string> = {
   done: "done",
   closed: "done",
   cancelled: "cancel",
+  considering: "considering",
+  researching: "researching",
 };
 
 export function roleForStatus(status: string): string {
-  return STATUS_TO_ROLE[status] ?? "open";
+  if (status === "") return "open";
+  return STATUS_TO_ROLE[status] ?? "unknown";
 }
 
 /* ── projection shapes (byte-mirror the golden `expected`) ──────────────────── */
@@ -239,7 +266,13 @@ function noteRow(item: Block): NoteRow {
 }
 
 export function statusLegendProjection(): LegendProjection {
-  return { container_role: "legend", rows: STATUS_LADDER };
+  // Manifest-scoped (see MANIFEST_LADDER): the legend key stays byte-frozen to
+  // the Elixir golden; the appended thought states power resolution but are not
+  // legend rows until the manifest adopts them.
+  return {
+    container_role: "legend",
+    rows: STATUS_LADDER.filter((r) => MANIFEST_LADDER.has(r.role)),
+  };
 }
 
 export function notesProjection(block: Block): NotesProjection {

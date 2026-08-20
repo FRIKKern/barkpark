@@ -1,0 +1,29 @@
+{
+  "run_id": "grip-20260723T052833Z",
+  "recipes": [
+    {
+      "subject": "cmd:ls",
+      "quantity": "wc:-l",
+      "rerun": "ls tooling/scaffy-duels/results/*.agent.json | wc -l",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-23T05:28:33Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "grep:-n:non-Barkpark token logs",
+      "rerun": "bp paper view felix-pristine-wave-19-2026-07-23 | grep -n 'non-Barkpark token logs'",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T05:28:33Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get grb-append-e4-e6-scoreboard-rows -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-23T05:28:33Z"
+    }
+  ]
+}

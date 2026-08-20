@@ -4,14 +4,89 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 )
+
+// TestReleaseCacheRoundTrip: a written cache reads back FRESH with the same
+// version, via an atomic 0600 file in the config dir.
+func TestReleaseCacheRoundTrip(t *testing.T) {
+	withTempConfigHome(t)
+
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("a never-written cache must read as cold")
+	}
+	if err := writeReleaseCache("1.15.0"); err != nil {
+		t.Fatalf("writeReleaseCache: %v", err)
+	}
+	rc, fresh := readReleaseCache()
+	if !fresh || rc.Latest != "1.15.0" {
+		t.Fatalf("cache = %+v fresh=%v, want fresh latest 1.15.0", rc, fresh)
+	}
+
+	// 0600 — it lives beside the token-bearing config.json.
+	path, err := releaseCachePath()
+	if err != nil {
+		t.Fatalf("releaseCachePath: %v", err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat cache: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("cache mode = %v, want 0600", fi.Mode().Perm())
+	}
+}
+
+// TestReleaseCacheStaleIsCold: a reading older than the TTL, a future reading
+// (clock skew), an empty version, and malformed bytes all read as cold — the
+// cache never hands whoami a verdict it cannot stand behind.
+func TestReleaseCacheStaleIsCold(t *testing.T) {
+	withTempConfigHome(t)
+	path, err := releaseCachePath()
+	if err != nil {
+		t.Fatalf("releaseCachePath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	writeRaw := func(rc releaseCache) {
+		b, _ := json.Marshal(rc)
+		if err := os.WriteFile(path, b, 0o600); err != nil {
+			t.Fatalf("write cache: %v", err)
+		}
+	}
+
+	writeRaw(releaseCache{Latest: "1.15.0", CheckedAt: time.Now().Add(-releaseCacheTTL - time.Minute)})
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("a cache older than the TTL must read as cold")
+	}
+	writeRaw(releaseCache{Latest: "1.15.0", CheckedAt: time.Now().Add(time.Hour)})
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("a future-dated cache (clock skew) must read as cold, never fresh")
+	}
+	writeRaw(releaseCache{Latest: "", CheckedAt: time.Now()})
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("an empty-version cache must read as cold")
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("write malformed: %v", err)
+	}
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("a malformed cache must read as cold, not crash")
+	}
+}
 
 func TestCompareVersions(t *testing.T) {
 	cases := []struct {
@@ -70,6 +145,205 @@ func TestLatestReleaseVersionRedirect(t *testing.T) {
 	}
 	if got != "1.2.3" {
 		t.Errorf("latestReleaseVersion = %q, want %q", got, "1.2.3")
+	}
+}
+
+// TestLatestReleaseVersionAPIWinsOverDecoyLatest proves the API path is
+// preferred over releases/latest: the API lists a build-<sha> server-artifact
+// release at the top and the real cli-v1.5.0 below, while releases/latest
+// points at the decoy build release (which would 404 bp assets). Resolution
+// must return the highest cli-v* (1.5.0), skipping the newer prerelease.
+func TestLatestReleaseVersionAPIWinsOverDecoyLatest(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/releases", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `[
+			{"tag_name":"build-deadbeef","draft":false,"prerelease":false},
+			{"tag_name":"cli-v1.7.0","draft":true,"prerelease":false},
+			{"tag_name":"cli-v1.6.0-rc.1","draft":false,"prerelease":true},
+			{"tag_name":"cli-v1.5.0","draft":false,"prerelease":false},
+			{"tag_name":"cli-v1.4.0","draft":false,"prerelease":false}
+		]`)
+	})
+	// releases/latest points at the decoy build release the API path must beat.
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/releases/tag/build-deadbeef", http.StatusFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	got, err := latestReleaseVersion(srv.URL)
+	if err != nil {
+		t.Fatalf("latestReleaseVersion: %v", err)
+	}
+	if got != "1.5.0" {
+		t.Errorf("latestReleaseVersion = %q, want %q (API cli-v* must win over decoy latest; prerelease skipped)", got, "1.5.0")
+	}
+}
+
+func TestLatestReleaseVersionAPIIgnoresMalformedStableTags(t *testing.T) {
+	cases := []struct {
+		name string
+		tag  string
+	}{
+		{"nonnumeric component", "cli-v2.x"},
+		{"empty component", "cli-v2..0"},
+		{"integer overflow", "cli-v999999999999999999999999999999999999"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/releases", func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `[
+					{"tag_name":%q,"draft":false,"prerelease":false},
+					{"tag_name":"cli-v1.5.0","draft":false,"prerelease":false}
+				]`, tc.tag)
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+
+			got, err := latestReleaseVersionAPI(srv.URL)
+			if err != nil {
+				t.Fatalf("latestReleaseVersionAPI: %v", err)
+			}
+			if got != "1.5.0" {
+				t.Fatalf("latestReleaseVersionAPI = %q, want %q; malformed %q masked the valid stable release", got, "1.5.0", tc.tag)
+			}
+		})
+	}
+}
+
+func TestLatestReleaseVersionRedirectRejectsMalformedStableTags(t *testing.T) {
+	for _, tag := range []string{
+		"cli-v2.x",
+		"cli-v2..0",
+		"cli-v2.0-rc.1",
+		"cli-v999999999999999999999999999999999999",
+	} {
+		t.Run(tag, func(t *testing.T) {
+			srv := fakeReleaseTree(t, tag, nil)
+			if _, err := latestReleaseVersionRedirect(srv.URL); err == nil {
+				t.Fatalf("latestReleaseVersionRedirect accepted malformed stable tag %q", tag)
+			}
+		})
+	}
+}
+
+// TestDoctorReleaseCadenceUsesPublishedStableRelease proves the shell doctor
+// ignores newer local unpublished/prerelease tags and newer API draft/
+// prerelease/non-CLI releases. The published stable 1.5.0 must remain the
+// cadence anchor, matching latestReleaseVersionAPI.
+func TestDoctorReleaseCadenceUsesPublishedStableRelease(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	doctor, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "doctor.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doctorPath := filepath.Join(root, "scripts", "doctor.sh")
+	if err := os.WriteFile(doctorPath, doctor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitLog := filepath.Join(root, "git.log")
+	fakeGit := `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_GIT_LOG"
+case "$1 $2" in
+  "fetch --quiet") exit 0 ;;
+  "rev-list --count")
+    case "$3" in
+      HEAD..origin/main|origin/main..HEAD) echo 0 ;;
+      cli-v1.5.0..origin/main) echo 300 ;;
+      *) echo 0 ;;
+    esac
+    ;;
+  "rev-parse --verify") exit 0 ;;
+  "log -1") echo 1 ;;
+  "tag -l") printf 'cli-v1.6.0\ncli-v1.6.0-rc.1\ncli-v1.5.0\n' ;;
+  "status --porcelain") exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(fakeGit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeCurl := `#!/bin/sh
+cat <<'JSON'
+[
+  {"tag_name":"build-deadbeef","draft":false,"prerelease":false},
+  {"tag_name":"cli-v1.7.0","draft":true,"prerelease":false},
+  {"tag_name":"cli-v1.6.0-rc.1","draft":false,"prerelease":true},
+  {"tag_name":"cli-v2.x","draft":false,"prerelease":false},
+  {"tag_name":"cli-v999999999999999999999999999999999999","draft":false,"prerelease":false},
+  {"tag_name":"cli-v1.5.0","draft":false,"prerelease":false}
+]
+JSON
+`
+	if err := os.WriteFile(filepath.Join(bin, "curl"), []byte(fakeCurl), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("/bin/bash", doctorPath)
+	cmd.Env = append(os.Environ(),
+		"PATH="+bin+":/usr/bin:/bin",
+		"FAKE_GIT_LOG="+gitLog,
+		"BARKPARK_RELEASES_API_URL=https://example.invalid/releases",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("doctor failed: %v\n%s", err, out)
+	}
+	text := string(out)
+	if !strings.Contains(text, "release cli-v1.5.0 is 300 commit(s)") {
+		t.Fatalf("doctor did not anchor cadence to published stable 1.5.0:\n%s", text)
+	}
+	if strings.Contains(text, "release cli-v1.6.0") || strings.Contains(text, "release cli-v1.7.0") {
+		t.Fatalf("draft/prerelease/unpublished release masked stable cadence:\n%s", text)
+	}
+	invocations, err := os.ReadFile(gitLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(invocations), "tag -l") {
+		t.Fatalf("doctor consulted local tags instead of published releases:\n%s", invocations)
+	}
+}
+
+// TestLatestReleaseVersionFallsBackToRedirect proves that when the API path
+// yields nothing (no /releases endpoint), resolution falls back to the
+// /releases/latest redirect.
+func TestLatestReleaseVersionFallsBackToRedirect(t *testing.T) {
+	srv := fakeReleaseTree(t, "cli-v1.2.3", nil) // serves only /releases/latest
+	got, err := latestReleaseVersion(srv.URL)
+	if err != nil {
+		t.Fatalf("latestReleaseVersion: %v", err)
+	}
+	if got != "1.2.3" {
+		t.Errorf("latestReleaseVersion = %q, want %q (redirect fallback)", got, "1.2.3")
+	}
+}
+
+func TestReleaseAPIURL(t *testing.T) {
+	cases := []struct{ base, want string }{
+		{"https://github.com/FRIKKern/barkpark", "https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30"},
+		{"https://github.com/FRIKKern/barkpark/", "https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30"},
+		{"http://127.0.0.1:8080", "http://127.0.0.1:8080/releases?per_page=30"},
+	}
+	for _, c := range cases {
+		if got := releaseAPIURL(c.base); got != c.want {
+			t.Errorf("releaseAPIURL(%q) = %q, want %q", c.base, got, c.want)
+		}
 	}
 }
 
@@ -189,6 +463,65 @@ func TestRunUpgradeDevRefusal(t *testing.T) {
 	}
 }
 
+// TestRunUpgradeCheckDevIsUnreportedNotAnError: `--check` ASKS a question
+// ("how fresh am I?"), it does not request a mutation. On a dev build the honest
+// answer is "no reading can be taken" — which `bp doctor --onboarding` treats as
+// a non-failure — so --check reports UNREPORTED and exits 0 instead of exiting 2
+// while the doctor next door says everything is fine. Fail-before on
+// origin/main, which returns exitUsage here.
+func TestRunUpgradeCheckDevIsUnreportedNotAnError(t *testing.T) {
+	withCLIVersion(t, "dev")
+	out, stdout, stderr := newTestWriter()
+	out.output = "table" // the human render
+
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitOK {
+		t.Fatalf("upgrade --check on a dev build = %d, want exitOK (an unknown is not a failure)\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("UNREPORTED")) {
+		t.Errorf("--check on a dev build must say its freshness is UNREPORTED; stdout: %s", stdout)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("make cli-install")) {
+		t.Errorf("--check on a dev build must name the literal remedy; stdout: %s", stdout)
+	}
+	// No network was touched: a dev build has nothing to resolve against.
+	if bytes.Contains(stdout.Bytes(), []byte("up to date")) {
+		t.Errorf("--check on a dev build must never claim \"up to date\"; stdout: %s", stdout)
+	}
+}
+
+// TestRunUpgradeCheckDevJSONCarriesNullBehind pins the machine shape: status
+// "unreported" and a NULL behind — never a fabricated boolean.
+func TestRunUpgradeCheckDevJSONCarriesNullBehind(t *testing.T) {
+	withCLIVersion(t, "dev")
+	out, stdout, _ := newTestWriter()
+	out.output = "json"
+
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitOK {
+		t.Fatalf("upgrade --check -o json on a dev build = %d, want exitOK; stdout: %s", code, stdout)
+	}
+	got := stdout.String()
+	if !strings.Contains(got, `"status": "unreported"`) && !strings.Contains(got, `"status":"unreported"`) {
+		t.Errorf("--check json must carry status \"unreported\"; stdout: %s", got)
+	}
+	if !strings.Contains(got, `"behind": null`) && !strings.Contains(got, `"behind":null`) {
+		t.Errorf("--check json must carry a null behind (no reading taken); stdout: %s", got)
+	}
+}
+
+// TestRunUpgradeDevMutationStillRefuses: the MUTATING path is a different
+// question ("replace this binary"), it genuinely cannot be honoured on a dev
+// build, and its refusal text is the right instruction — both stay put.
+func TestRunUpgradeDevMutationStillRefuses(t *testing.T) {
+	withCLIVersion(t, "dev")
+	out, _, stderr := newTestWriter()
+	if code := runUpgrade(out, globals{}, nil); code != exitUsage {
+		t.Errorf("bare upgrade on a dev build = %d, want exitUsage", code)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte(upgradeDevBuildRefusal)) {
+		t.Errorf("the dev refusal text must be preserved verbatim; stderr: %s", stderr)
+	}
+}
+
 func TestRunUpgradeUnknownFlag(t *testing.T) {
 	withCLIVersion(t, "0.0.1")
 	out, _, _ := newTestWriter()
@@ -229,6 +562,7 @@ func TestRunUpgradeCheckYAML(t *testing.T) {
 }
 
 func TestRunUpgradeCheckBehind(t *testing.T) {
+	withTempConfigHome(t)
 	withCLIVersion(t, "0.0.1")
 	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
 	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
@@ -239,6 +573,7 @@ func TestRunUpgradeCheckBehind(t *testing.T) {
 }
 
 func TestRunUpgradeCheckUpToDate(t *testing.T) {
+	withTempConfigHome(t)
 	withCLIVersion(t, "0.0.2")
 	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
 	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
@@ -248,7 +583,50 @@ func TestRunUpgradeCheckUpToDate(t *testing.T) {
 	}
 }
 
+// TestRunUpgradeCheckWritesReleaseCache: `bp upgrade --check` runs a
+// network-bearing resolve, so it must warm the release cache a later
+// network-free whoami reads its freshness verdict from — landing the resolved
+// version with a fresh CheckedAt.
+func TestRunUpgradeCheckWritesReleaseCache(t *testing.T) {
+	withTempConfigHome(t)
+	withCLIVersion(t, "0.0.1")
+	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
+	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
+
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("release cache must start cold")
+	}
+	out, _, _ := newTestWriter()
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitGeneric {
+		t.Fatalf("--check behind = %d, want %d", code, exitGeneric)
+	}
+	rc, fresh := readReleaseCache()
+	if !fresh || rc.Latest != "0.0.2" {
+		t.Fatalf("release cache = %+v fresh=%v, want fresh latest 0.0.2 from the --check resolve", rc, fresh)
+	}
+}
+
+// TestRunUpgradeFailedResolveWritesNoReleaseCache: when the release resolve
+// fails, runUpgrade returns before the cache write, so nothing is cached — a
+// verdict is never fabricated from a resolve that never landed.
+func TestRunUpgradeFailedResolveWritesNoReleaseCache(t *testing.T) {
+	withTempConfigHome(t)
+	withCLIVersion(t, "0.0.1")
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close() // connection refused → latestReleaseVersion errors
+	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
+
+	out, _, _ := newTestWriter()
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitGeneric {
+		t.Fatalf("--check with a dead base = %d, want %d", code, exitGeneric)
+	}
+	if _, fresh := readReleaseCache(); fresh {
+		t.Errorf("a failed resolve must write no release cache")
+	}
+}
+
 func TestRunUpgradeEndToEnd(t *testing.T) {
+	withTempConfigHome(t)
 	withCLIVersion(t, "0.0.1")
 	exe, srv := upgradeFixture(t, "0.0.2", []byte("new-binary"), "")
 	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)

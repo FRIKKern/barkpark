@@ -19,6 +19,11 @@ func TestPaperBlocksResolvesEveryShape(t *testing.T) {
 		wantHead string // substring the returned blocks JSON must contain
 	}{
 		{
+			name:     "canonical empty blocks stay authoritative",
+			doc:      `{"_id":"p","blocks":[],"body":{"blocks":[{"type":"heading","text":"stale"}]},"body_html":"<h1>stale</h1>"}`,
+			wantHead: `[]`,
+		},
+		{
 			name:     "top-level blocks",
 			doc:      `{"_id":"p","blocks":[{"type":"heading","text":"Top"}]}`,
 			wantHead: `"Top"`,
@@ -44,9 +49,9 @@ func TestPaperBlocksResolvesEveryShape(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			name:    "empty body envelope",
-			doc:     `{"_id":"p","body":{"blocks":[]}}`,
-			wantNil: true,
+			name:     "empty body envelope is an intentional empty source",
+			doc:      `{"_id":"p","body":{"blocks":[]}}`,
+			wantHead: `[]`,
 		},
 	}
 	for _, tc := range cases {

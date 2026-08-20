@@ -1,0 +1,126 @@
+// PROBE (verifier, not for merge): the ABSENCE-AS-ANSWER census.
+//
+// PREDICATE: a renderer that derives a DETERMINATE state from a field's ABSENCE.
+// Mechanical form in app.js: a response envelope's `.ok` is folded INTO a
+// value-coalescing default (`(r.ok && r.data && r.data.X) || []`), so transport
+// failure and a genuinely-empty payload become the SAME value — and the
+// function then renders a determinate empty/complete state from that value's
+// emptiness, with no separate arm for "I never received an answer".
+//
+// A site is FLAGGED iff, inside one named function:
+//   (1) FOLD      : `(<id>.ok && ... ) || []` / `|| {}`
+//   (2) NO ARM    : no `!<id>.ok` guard and no `<id>.ok ?` ternary for that id
+//   (3) DETERMINATE: the function renders an empty/complete state
+//                    (`empty-state`, `!<v>.length`, `.length === 0`)
+// Controls listed in CONTROLS must never be flagged.
+
+import fs from "node:fs";
+
+const FILE = process.argv[2] || "cloud/priv/static/app.js";
+const src = fs.readFileSync(FILE, "utf8");
+
+const CONTROLS = [
+  "presenceChip",
+  "lifecyclePill",
+  "catalogViewState",
+  "metricsAgeText",
+  "domainStatusChip",
+  "freshnessModel",
+];
+
+// ---- function index: name -> [start,end) by brace matching -----------------
+function indexFunctions(s) {
+  const out = [];
+  const re = /\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+  let m;
+  while ((m = re.exec(s))) {
+    const open = s.indexOf("{", re.lastIndex);
+    if (open < 0) continue;
+    let depth = 0, i = open, inS = null, esc = false;
+    for (; i < s.length; i++) {
+      const c = s[i];
+      if (inS) {
+        if (esc) { esc = false; continue; }
+        if (c === "\\") { esc = true; continue; }
+        if (c === inS) inS = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") { inS = c; continue; }
+      if (c === "/" && s[i + 1] === "/") { i = s.indexOf("\n", i); if (i < 0) break; continue; }
+      if (c === "/" && s[i + 1] === "*") { i = s.indexOf("*/", i) + 1; continue; }
+      if (c === "{") depth++;
+      else if (c === "}") { depth--; if (depth === 0) { i++; break; } }
+    }
+    out.push({ name: m[1], start: m.index, end: i });
+  }
+  return out;
+}
+
+const fns = indexFunctions(src);
+const lineOf = (off) => src.slice(0, off).split("\n").length;
+
+function enclosing(off) {
+  let best = null;
+  for (const f of fns) {
+    if (f.start <= off && off < f.end) {
+      if (!best || f.start > best.start) best = f;
+    }
+  }
+  return best;
+}
+
+// ---- (1) folds -------------------------------------------------------------
+const FOLD = /\(\s*([A-Za-z_$][A-Za-z0-9_$.\[\]]*)\.ok\s*&&[^;\n]*?\)\s*\|\|\s*(\[\]|\{\})/g;
+
+const findings = [];
+let m;
+while ((m = FOLD.exec(src))) {
+  const id = m[1];
+  const fn = enclosing(m.index);
+  const body = fn ? src.slice(fn.start, fn.end) : "";
+  const idRe = id.replace(/[.[\]]/g, "\\$&");
+  // (2) is there a distinct not-ok arm for THIS identifier?
+  const hasArm =
+    new RegExp("!\\s*" + idRe + "\\.ok").test(body) ||
+    new RegExp(idRe + "\\.ok\\s*\\?").test(body);
+  // (3) does the function render a determinate empty/complete state?
+  //     ONE HOP: the render frequently lives in a directly-called named
+  //     renderer (loadTokens -> renderTokenList). Scoping clause (3) to the
+  //     fold's own body makes the census FAIL GREEN on that whole shape, so
+  //     inline the bodies of named functions this one calls.
+  const renders = (b) =>
+    /empty-state/.test(b) || /!\s*[A-Za-z_$][A-Za-z0-9_$]*\.length/.test(b) ||
+    /\.length\s*===?\s*0/.test(b);
+  let scope = body;
+  const callRe = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+  let c;
+  while ((c = callRe.exec(body))) {
+    const callee = fns.find((f) => f.name === c[1] && f.name !== (fn && fn.name));
+    if (callee) scope += "\n" + src.slice(callee.start, callee.end);
+  }
+  const determinate = renders(scope);
+  if (!hasArm && determinate) {
+    findings.push({
+      line: lineOf(m.index),
+      fn: fn ? fn.name : "<anonymous>",
+      id,
+      snippet: src.slice(m.index, src.indexOf("\n", m.index)).trim(),
+    });
+  }
+}
+
+// ---- controls --------------------------------------------------------------
+const flaggedFns = new Set(findings.map((f) => f.fn));
+const controlBreaches = CONTROLS.filter((c) => flaggedFns.has(c));
+const controlsPresent = CONTROLS.filter((c) => fns.some((f) => f.name === c));
+
+console.log("controls present :", controlsPresent.join(" ") || "(none)");
+console.log("controls flagged :", controlBreaches.join(" ") || "(none)");
+console.log("absence-as-answer sites:", findings.length);
+for (const f of findings) console.log(`  ${FILE}:${f.line}  ${f.fn}  ${f.snippet}`);
+
+if (controlBreaches.length) {
+  console.error("FAIL: census flagged a known-correct control renderer");
+  process.exit(2);
+}
+process.exit(findings.length ? 1 : 0);

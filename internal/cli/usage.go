@@ -1,11 +1,66 @@
 package cli
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
+
+// usageBuiltins is the noun list behind the top-level "built-ins:" usage line —
+// the third copy of the CLI-native noun set (dispatch in cli.go, completion in
+// builtins.go, this line). It was a hand-maintained prose string until
+// 2026-07-17 and drifted 27 nouns behind the dispatch switch (stuck at 19 since
+// ba95b12e5, 2026-07-03); now it is a slice so (a) the drift gate
+// TestUsageBuiltinsCoverAllDispatchedBuiltins (usage_test.go) reds when a
+// dispatched noun is missing here, and (b) scaffy's ensure-cli-noun command can
+// append an entry mechanically (comma-safe INSERT after the opening line, same
+// shape as completionNouns). Order inside the slice never matters — rendering
+// sorts — so entries may accrete at the head.
+var usageBuiltins = []string{
+	"agent", "attach", "barkparks", "capabilities", "chat", "cloud", "cmux", "completion", "context", "deploy",
+	"doctor", "export", "go-live", "help", "instance", "launch", "listen", "login", "logout",
+	"make", "mcp", "migrate", "onramp", "paper", "provider", "register", "scaffy", "seed", "server",
+	"servers", "setup", "signup", "sites", "style", "subscribe", "task", "tasks", "team", "teams",
+	"tinker", "uninstall", "upgrade", "use", "vercel", "version", "whoami",
+}
+
+// usageBuiltinLines renders the "built-ins:" block for usageTop: the noun set
+// sorted, greedy-wrapped so no emitted line runs past ~100 columns (46 nouns on
+// one line would wrap raggedly in any terminal).
+func usageBuiltinLines() []string {
+	nouns := append([]string(nil), usageBuiltins...)
+	sort.Strings(nouns)
+	const prefix = "built-ins: "
+	const indent = "  "
+	const width = 100
+	var lines []string
+	cur := ""
+	for _, n := range nouns {
+		if cur == "" {
+			cur = n
+			continue
+		}
+		if len(prefix)+len(cur)+len(" · ")+len(n) > width {
+			lines = append(lines, cur)
+			cur = n
+			continue
+		}
+		cur += " · " + n
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	for i := range lines {
+		if i == 0 {
+			lines[i] = prefix + lines[i]
+		} else {
+			lines[i] = indent + lines[i]
+		}
+	}
+	return lines
+}
 
 // usageTop prints the top-level usage without a manifest (the earliest error
 // path, before the tree is loaded).
@@ -33,7 +88,9 @@ func usageTop(out *writer) {
 	out.errf("      --limit/--offset/--all   pagination")
 	out.errf("      --manifest <path>  load the manifest from a file (offline)")
 	out.errf("")
-	out.errf("built-ins: use · servers · migrate · export · paper · tasks · vercel · tinker · seed · make · capabilities · whoami · version · upgrade · uninstall · signup · login · logout · completion")
+	for _, line := range usageBuiltinLines() {
+		out.errf("%s", line)
+	}
 	out.errf("")
 	out.errf("tasks:")
 	out.errf("  bp tasks               open the live portrait task board (glanceable pane;")
@@ -53,6 +110,9 @@ func usageTop(out *writer) {
 	out.errf("papers:")
 	out.errf("  bp paper view <slug>   render a Bulldocs paper to the terminal (the CLI")
 	out.errf("                         counterpart to opening it in the browser)")
+	out.errf("  bp bulldocs publish <slug> --file payload.json")
+	out.errf("                         WRITE a paper — a blocks payload, never hand-rolled")
+	out.errf("                         HTML. Guide: /papers/paper-authoring-excellence")
 	out.errf("")
 	out.errf("new-site deploy:")
 	out.errf("  bp vercel quick-setup --site <slug> --app-dir <path>")
@@ -141,13 +201,18 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		}
 	}
 
-	// A manifest write command takes its body from --set/--file/-f, but that is
-	// carried by the generic flag machinery, not the per-command Flags list — so
-	// without this line `bp doc create -h` shows a signature with no hint of HOW
-	// to supply the document. Surface it right under the summary, before flags.
+	// A manifest write command takes its body from --set/--file/-f, but those
+	// are PER-COMMAND manifest flags, not universal machinery — `doc patch`
+	// declares only [set] and its parser rightly rejects --file. Compose the
+	// hint from the flags this command actually declares, so `bp doc create -h`
+	// still says HOW to supply the document while help never advertises a flag
+	// the parser will refuse. A write with neither flag (body from positional
+	// args, e.g. task claim) gets no body line at all.
 	if cmd.Writes {
-		out.errf("")
-		out.errf("body: --set key=value (repeatable) | --file <path>|-  (JSON from a file or stdin)")
+		if hint := writeBodyHint(cmd); hint != "" {
+			out.errf("")
+			out.errf("body: %s", hint)
+		}
 	}
 
 	if len(cmd.Flags) > 0 {
@@ -177,6 +242,27 @@ func usageCommand(out *writer, cmd manifest.Command) {
 	}
 }
 
+// writeBodyHint composes the body-source hint for a write command from the
+// flags its manifest declares. Empty when the command declares neither --set
+// nor --file (its body comes from positional args).
+func writeBodyHint(cmd manifest.Command) string {
+	hasSet := false
+	for _, f := range cmd.Flags {
+		if f.Name == "set" {
+			hasSet = true
+			break
+		}
+	}
+	var parts []string
+	if hasSet {
+		parts = append(parts, "--set key=value (repeatable)")
+	}
+	if commandHasFileFlag(cmd) {
+		parts = append(parts, "--file <path>|-  (JSON from a file or stdin)")
+	}
+	return strings.Join(parts, " | ")
+}
+
 func anyArgSummary(args []manifest.Arg) bool {
 	for _, a := range args {
 		if a.Summary != "" {
@@ -197,6 +283,73 @@ func usageSuggestNouns(out *writer, tree *manifest.Tree, typed string) {
 	out.errf("run `barkpark capabilities` for the full command list.")
 }
 
+// authHiddenNoun reports whether `typed` names a REAL command that the server
+// filtered out of this caller's tier-scoped manifest — the noun exists in the
+// product but is invisible to this caller because their AuthTier is too low — as
+// opposed to a genuine typo or an unsupported command.
+//
+// It is true only when ALL hold:
+//   - the caller is NOT admin: an admin's manifest is the whole tree, so a noun
+//     missing for them is genuinely unknown, never merely hidden (this is what
+//     keeps admin callers from ever receiving a false auth-hidden diagnosis);
+//   - `typed` is in the baked, non-secret noun catalog (completionNouns, owned by
+//     builtins.go) — the client's static knowledge of every command that CAN
+//     exist, independent of any one caller's tier;
+//   - `typed` is absent from the tier-filtered tree the server actually returned.
+//
+// This leaks nothing the server hides: it reports only that the non-secret noun
+// NAME exists (the baked catalog already ships that list in cleartext) — never a
+// hidden verb, arg, or route. The server's existence-hiding of the verbs stays
+// intact; the CLI only turns a misleading "unknown command" into "authenticate".
+func authHiddenNoun(tree *manifest.Tree, tier, typed string) bool {
+	if tier == "admin" {
+		return false
+	}
+	if _, visible := lookupNoun(tree, typed); visible {
+		return false
+	}
+	for _, n := range completionNouns {
+		if n == typed {
+			return true
+		}
+	}
+	return false
+}
+
+// authTierLabel renders an auth tier for a user-facing message, mapping the empty
+// tier (no credential presented) to the explicit word "none" so the diagnosis
+// never prints a bare "tier=".
+func authTierLabel(tier string) string {
+	if tier == "" {
+		return "none"
+	}
+	return tier
+}
+
+// suggestUnknownNoun renders the diagnosis for an unrecognised TOP-LEVEL noun,
+// distinguishing a tier-HIDDEN real command from a genuine typo. When `typed`
+// names a baked-catalog noun the server filtered out of this caller's tier tree
+// (authHiddenNoun), it reports the command as existing-but-hidden and points at
+// `bp login` / --token instead of emitting a misleading "did you mean?" — so a
+// hidden noun is also never offered as a typo target, and (because a hidden noun
+// is by definition absent from the tree) soleReadVerb up in the dispatch switch
+// never sees it to auto-infer its verb. Otherwise it falls back to the ordinary
+// noun typo suggestion (usageSuggestNouns / nounHint). Always returns exitUsage.
+//
+// This is the single classification point wired into every unknown-noun site in
+// cli.go's dispatch (help <noun>, bare noun, and noun+token), so the three paths
+// can never drift on how they treat a tier-hidden command.
+func suggestUnknownNoun(out *writer, tree *manifest.Tree, tier, typed string) int {
+	if authHiddenNoun(tree, tier, typed) {
+		label := authTierLabel(tier)
+		return usageErrHintf(out, func() {
+			out.errf("`barkpark %s` is a real command, but it is not available at your current auth tier (tier=%s).", typed, label)
+			out.errf("run `barkpark login` — or pass `--token <tok>` — with a credential that grants it, then retry.")
+		}, "barkpark login", "command %q exists but is hidden at your auth tier (tier=%s); run `barkpark login` (or pass --token <tok>) with a credential that grants it", typed, label)
+	}
+	return usageErrHintf(out, func() { usageSuggestNouns(out, tree, typed) }, nounHint(tree, typed), "unknown command %q", typed)
+}
+
 // usageSuggestVerb prints a "did you mean?" hint for the closest verb under a
 // known noun (when the typed verb looks like a typo), then the noun's full verb
 // list. It is usageSuggestNouns one level down the tree.
@@ -211,6 +364,85 @@ func usageSuggestVerb(out *writer, tree *manifest.Tree, noun, typedVerb string) 
 		}
 	}
 	usageNoun(out, tree, noun)
+}
+
+// soleReadVerb reports the ONE verb a verbless invocation of n can safely be
+// re-dispatched to, and whether that inference may fire at all. See the rule
+// documented at the dispatch site (cli.go): exactly one verb, non-writing, and
+// the typed token must not be a near-typo of that verb (a mistyped verb is a
+// typo to correct, not an argument to forward) nor look like a flag.
+func soleReadVerb(n *manifest.TreeNoun, typed string) (*manifest.Command, bool) {
+	if len(n.Verbs) != 1 {
+		return nil, false
+	}
+	sole := n.Verbs[0]
+	if sole.Writes || strings.HasPrefix(typed, "-") || typed == "" {
+		return nil, false
+	}
+	if _, isTypo := nearestVerb(typed, []string{sole.Verb}); isTypo {
+		return nil, false
+	}
+	return sole, true
+}
+
+// noVerbMsg is the error line for a REAL noun followed by no valid verb. It
+// never says the noun is unknown (that was the bug), and it carries the fix in
+// the message itself — which matters because `-o json` renders only this string
+// in the error envelope and skips the usage help block entirely.
+func noVerbMsg(n *manifest.TreeNoun, noun, typed string) string {
+	verbs := make([]string, 0, len(n.Verbs))
+	for _, c := range n.Verbs {
+		verbs = append(verbs, c.Verb)
+	}
+	base := fmt.Sprintf("no verb %q under `barkpark %s` — `%s` is a known noun", typed, noun, noun)
+	if len(n.Verbs) == 1 {
+		// One obvious answer, but not auto-run (a writing verb, or the token
+		// looked like a typo/flag) — name the literal corrected command. When the
+		// token is a near-typo of that verb it IS the mistyped verb, so it must be
+		// replaced rather than appended as an argument (`search quer` →
+		// `search query`, never `search query quer`).
+		sole := n.Verbs[0].Verb
+		fixed := fmt.Sprintf("barkpark %s %s", noun, sole)
+		if _, isTypo := nearestVerb(typed, []string{sole}); !isTypo && typed != "" && !strings.HasPrefix(typed, "-") {
+			fixed += " " + typed
+		}
+		return fmt.Sprintf("%s; did you mean `%s`?", base, fixed)
+	}
+	if len(verbs) == 0 {
+		return base + "; it declares no verbs"
+	}
+	return fmt.Sprintf("%s with verbs: %s", base, strings.Join(verbs, ", "))
+}
+
+// nounHint returns the machine-mode did-you-mean suggestion for a mistyped noun
+// — the ready-to-run "barkpark <noun>" for the nearest known noun, or "" when
+// nothing is close enough to be a likely typo. It replays nearestNoun (the same
+// matcher usageSuggestNouns prints to human stderr) so the `-o json` error
+// envelope's `hint` field carries the identical suggestion an agent can execute.
+func nounHint(tree *manifest.Tree, typed string) string {
+	if best, ok := nearestNoun(typed, tree.NounNames()); ok {
+		return "barkpark " + best
+	}
+	return ""
+}
+
+// verbHint returns the machine-mode did-you-mean suggestion for a mistyped verb
+// under a KNOWN noun — "barkpark <noun> <verb>" for the nearest verb, or "" when
+// nothing is close. The verb-level sibling of nounHint (replays nearestVerb,
+// mirroring usageSuggestVerb's human stderr line).
+func verbHint(tree *manifest.Tree, noun, typed string) string {
+	n, ok := lookupNoun(tree, noun)
+	if !ok {
+		return ""
+	}
+	verbs := make([]string, 0, len(n.Verbs))
+	for _, c := range n.Verbs {
+		verbs = append(verbs, c.Verb)
+	}
+	if best, ok := nearestVerb(typed, verbs); ok {
+		return "barkpark " + noun + " " + best
+	}
+	return ""
 }
 
 // nearestNoun returns the known noun closest to typed by Levenshtein distance,

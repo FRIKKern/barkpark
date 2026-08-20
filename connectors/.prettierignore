@@ -1,0 +1,7 @@
+node_modules/
+package-lock.json
+# Recorded stream-json from the Elixir suite — must stay BYTE-IDENTICAL to
+# api/test/fixtures/claude_chat/. Reformatting them would break the wire proof.
+test/fixtures/claude_chat/
+# Hand-formatted prose (doc-tier headers, tables, walkthroughs).
+*.md

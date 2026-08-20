@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/FRIKKern/barkpark/internal/cli/setup"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
@@ -550,6 +554,233 @@ func TestResolveThemeID(t *testing.T) {
 	}
 }
 
+// utf8BOM is the byte sequence a Windows editor (Notepad, PowerShell `>`) prepends
+// to a UTF-8 file. encoding/json rejects it, so LoadConfig must strip it.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// TestBOMBricksLoadConfig is the failing-first proof for BP-ONB-12: a config.json
+// saved by a Windows editor carries a leading UTF-8 BOM, which encoding/json will
+// not accept — pre-fix this errored and bricked EVERY bp command. Post-fix
+// LoadConfig strips the BOM and the config loads cleanly.
+func TestBOMBricksLoadConfig(t *testing.T) {
+	root := withTempConfigHome(t)
+	dir := filepath.Join(root, "barkpark")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := []byte(`{"server":"https://api.barkpark.cloud","token":"tok","dataset":"production"}`)
+	withBOM := append(append([]byte(nil), utf8BOM...), body...)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), withBOM, 0o600); err != nil {
+		t.Fatalf("write BOM config: %v", err)
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("BOM-prefixed config must load (Windows Notepad/PowerShell save), got error: %v", err)
+	}
+	if got.Server != "https://api.barkpark.cloud" || got.Token != "tok" || got.Dataset != "production" {
+		t.Fatalf("BOM-stripped config fields wrong: %+v", *got)
+	}
+}
+
+// TestSaveConfigSelfHeals proves the BOM is a one-time hazard: after loading a
+// BOM-poisoned file, a normal SaveConfig rewrites BOM-free bytes, so the next
+// LoadConfig succeeds even without the strip. The on-disk file must not begin
+// with a BOM.
+func TestSaveConfigSelfHeals(t *testing.T) {
+	root := withTempConfigHome(t)
+	dir := filepath.Join(root, "barkpark")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, "config.json")
+	withBOM := append(append([]byte(nil), utf8BOM...), []byte(`{"server":"http://localhost:4000"}`)...)
+	if err := os.WriteFile(path, withBOM, 0o600); err != nil {
+		t.Fatalf("write BOM config: %v", err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("load BOM config: %v", err)
+	}
+	cfg.Server = "https://api.barkpark.cloud"
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if bytes.HasPrefix(raw, utf8BOM) {
+		t.Fatalf("SaveConfig must emit BOM-free JSON, got a leading BOM: %q", raw[:min(6, len(raw))])
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("reload after self-heal: %v", err)
+	}
+	if got.Server != "https://api.barkpark.cloud" {
+		t.Fatalf("self-healed server = %q, want https://api.barkpark.cloud", got.Server)
+	}
+}
+
+// TestRememberServerAliasCollapsesOneInstance is the headline proof for D4 / the
+// gyldendal-2 kill: reaching ONE instance via two hostnames — canonical then a
+// custom domain — that share an InstanceID must collapse to a SINGLE known-server
+// entry, fold the prior hostname into aliases, and mint NO "-2" phantom. Both
+// hostnames (and the InstanceID) must resolve back to the one entry, and the
+// alias hostname must read as active.
+func TestRememberServerAliasCollapsesOneInstance(t *testing.T) {
+	const canonical = "https://gyldendal.barkpark.cloud"
+	const custom = "https://cms.gyldendal.no"
+
+	c := &Config{}
+	c.RememberServer(ServerEntry{Server: canonical, InstanceID: "inst-gyld", Token: "t1", Dataset: "production", LastConnected: "2026-07-01T00:00:00Z"})
+	// Reconnect via a DIFFERENT hostname that resolves to the SAME instance.
+	c.RememberServer(ServerEntry{Server: custom, InstanceID: "inst-gyld", Token: "t2", Dataset: "production", LastConnected: "2026-07-02T00:00:00Z"})
+
+	list := c.KnownServerList()
+	if len(list) != 1 {
+		t.Fatalf("two hostnames of ONE instance must collapse to a single entry (no gyldendal-2), got %d: %+v", len(list), list)
+	}
+	front := list[0]
+	if front.Server != custom {
+		t.Fatalf("primary should be the latest hostname %q, got %q", custom, front.Server)
+	}
+	if front.Token != "t2" {
+		t.Fatalf("front entry should reflect latest connect token, got %q", front.Token)
+	}
+	if len(front.Aliases) != 1 || normalizeServerURL(front.Aliases[0]) != normalizeServerURL(canonical) {
+		t.Fatalf("prior hostname should fold into aliases, got %+v", front.Aliases)
+	}
+	// No phantom -2 handle.
+	if got := c.DisplayName(front); strings.HasSuffix(got, "-2") {
+		t.Fatalf("collapsed instance must not carry a phantom -2 name, got %q", got)
+	}
+	// Both hostnames + the InstanceID resolve to the ONE entry.
+	if e, ok := c.FindServer(canonical); !ok || e.Server != custom {
+		t.Fatalf("alias hostname should resolve to the one entry: %+v ok=%v", e, ok)
+	}
+	if e, ok := c.FindServer(custom); !ok || e.Server != custom {
+		t.Fatalf("primary hostname should resolve: %+v ok=%v", e, ok)
+	}
+	if e, ok := c.FindServer("inst-gyld"); !ok || e.Server != custom {
+		t.Fatalf("InstanceID should resolve to the one entry: %+v ok=%v", e, ok)
+	}
+	// The active flat server is the custom URL; the alias hostname must still read
+	// as active (same instance).
+	if !c.IsActiveServer(canonical) {
+		t.Fatalf("alias hostname should read as active (same instance)")
+	}
+	if !c.IsActiveServer(custom) {
+		t.Fatalf("primary hostname should read as active")
+	}
+}
+
+// TestRememberServerAdoptsInstanceIDForKnownURL proves the ID-less→ID upgrade: a
+// server first saved with no InstanceID (bare local/dev, or a legacy entry) is
+// ADOPTED — not duplicated — when re-connected to the same URL once its ID is
+// known. Falls back to URL equality because one side lacks an ID.
+func TestRememberServerAdoptsInstanceIDForKnownURL(t *testing.T) {
+	const url = "https://api.example.com"
+	c := &Config{}
+	c.RememberServer(ServerEntry{Server: url, Token: "t1", LastConnected: "2026-07-01T00:00:00Z"})
+	c.RememberServer(ServerEntry{Server: url, InstanceID: "inst-x", Token: "t2", LastConnected: "2026-07-02T00:00:00Z"})
+
+	list := c.KnownServerList()
+	if len(list) != 1 {
+		t.Fatalf("same URL must stay one entry, got %d: %+v", len(list), list)
+	}
+	if list[0].InstanceID != "inst-x" {
+		t.Fatalf("re-connect should adopt the learned InstanceID, got %q", list[0].InstanceID)
+	}
+	if len(list[0].Aliases) != 0 {
+		t.Fatalf("same-URL re-connect must not manufacture aliases, got %+v", list[0].Aliases)
+	}
+}
+
+// TestServerEntryInstanceFieldsRoundTrip proves the new InstanceID + Aliases
+// fields persist through save/load and an old config without them loads cleanly.
+func TestServerEntryInstanceFieldsRoundTrip(t *testing.T) {
+	withTempConfigHome(t)
+	want := &Config{
+		Server: "https://cms.gyldendal.no",
+		KnownServers: []ServerEntry{
+			{Server: "https://cms.gyldendal.no", InstanceID: "inst-gyld", Aliases: []string{"https://gyldendal.barkpark.cloud"}, Tier: "admin"},
+		},
+	}
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("instance-field round-trip mismatch:\n got=%+v\nwant=%+v", *got, *want)
+	}
+}
+
+// TestConnectSeamStampsInstanceIDAndCollapsesAliases is the D9 ACTIVATION proof:
+// it drives the REAL connect persistence seam (configStoreAdapter.Save — the exact
+// path connectToBarkpark writes through), NOT RememberServer directly, with one
+// InstanceID reached via two hostnames. It proves the wave-1 plumbing is no longer
+// INERT: a SavedConfig carrying a fleet-row InstanceID+Team now stamps them onto a
+// single ServerEntry, folds the prior hostname into aliases, and mints NO phantom
+// "-2" — the whole point of D9 (the gyldendal-2 kill only lands once a real ID is
+// stamped by a caller).
+func TestConnectSeamStampsInstanceIDAndCollapsesAliases(t *testing.T) {
+	withTempConfigHome(t)
+	const canonical = "https://gyldendal.barkpark.cloud"
+	const custom = "https://cms.gyldendal.no"
+	store := configStoreAdapter{}
+
+	// First connect: canonical hostname, ID + team learned from the fleet row.
+	if err := store.Save(setup.SavedConfig{Server: canonical, InstanceID: "inst-gyld", Team: "Gyldendal", Token: "t1", Dataset: "production", LastConnected: "2026-07-01T00:00:00Z"}); err != nil {
+		t.Fatalf("first connect save: %v", err)
+	}
+	// Second connect: a DIFFERENT hostname that resolves to the SAME instance ID.
+	if err := store.Save(setup.SavedConfig{Server: custom, InstanceID: "inst-gyld", Team: "Gyldendal", Token: "t2", Dataset: "production", LastConnected: "2026-07-02T00:00:00Z"}); err != nil {
+		t.Fatalf("second connect save: %v", err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("load after connects: %v", err)
+	}
+	list := cfg.KnownServerList()
+	if len(list) != 1 {
+		t.Fatalf("two hostnames of one instance via the connect seam must collapse to ONE entry (no gyldendal-2), got %d: %+v", len(list), list)
+	}
+	e := list[0]
+	if e.InstanceID != "inst-gyld" {
+		t.Fatalf("connect seam must stamp the fleet-row InstanceID onto the entry (activation), got %q", e.InstanceID)
+	}
+	if e.Team != "Gyldendal" {
+		t.Fatalf("connect seam must stamp the owning team, got %q", e.Team)
+	}
+	if e.Server != custom {
+		t.Fatalf("primary should be the latest hostname %q, got %q", custom, e.Server)
+	}
+	if e.Token != "t2" {
+		t.Fatalf("entry should reflect the latest connect token, got %q", e.Token)
+	}
+	if len(e.Aliases) != 1 || normalizeServerURL(e.Aliases[0]) != normalizeServerURL(canonical) {
+		t.Fatalf("prior hostname should fold into aliases, got %+v", e.Aliases)
+	}
+	if got := cfg.DisplayName(e); strings.HasSuffix(got, "-2") {
+		t.Fatalf("collapsed instance must not carry a phantom -2 name, got %q", got)
+	}
+	// The persisted active server is the latest URL; the alias hostname must still
+	// resolve to the one entry and read as active (same instance).
+	if _, ok := cfg.FindServer(canonical); !ok {
+		t.Fatalf("alias hostname must resolve to the one entry through the persisted config")
+	}
+	if !cfg.IsActiveServer(canonical) {
+		t.Fatalf("alias hostname should read as active (same instance)")
+	}
+}
+
 // TestConfigThemeRoundTrips proves the theme key persists through save/load and an
 // old config without it loads cleanly (empty → default via ResolveThemeID).
 func TestConfigThemeRoundTrips(t *testing.T) {
@@ -567,5 +798,276 @@ func TestConfigThemeRoundTrips(t *testing.T) {
 	}
 	if id := ResolveThemeID(got); id != "midnight" {
 		t.Errorf("ResolveThemeID after load = %q, want midnight", id)
+	}
+}
+
+// testCloudPAT is a Cloud PERSONAL ACCESS TOKEN shape: the "bpc_pat_" prefix plus
+// 43 base64url chars (32 random bytes) = 51 chars, exactly what the control plane
+// mints. The Bearer is OPAQUE to the client — require_user_or_pat accepts a
+// session token (43 chars, no prefix) or a PAT on the same Authorization header —
+// so bp neither parses nor validates the shape; a PAT drives the identical path.
+// The value below is fixed, non-secret filler, never a live credential.
+const testCloudPAT = "bpc_pat_AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKK"
+
+// TestConfigCloudTokenEnvReadWhenNoFile is the FAIL-BEFORE pin: with NO config
+// file at all and only BARKPARK_CLOUD_TOKEN set, the persisted field is empty
+// (which is all bp read before this slice — a CI job could not authenticate at
+// all) while resolution now yields the env value and the authed gate opens.
+func TestConfigCloudTokenEnvReadWhenNoFile(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv(CloudTokenEnv, testCloudPAT)
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	// The pre-change read path: the config-file field. Still empty — this is the
+	// exact state in which `bp cloud site deploy --prebuilt` used to refuse.
+	if cfg.CloudToken != "" {
+		t.Fatalf("CloudToken field should stay empty (env is not folded into it), got %q", cfg.CloudToken)
+	}
+	if !cfg.HasCloudToken() {
+		t.Fatal("HasCloudToken should be true from the env alone — CI has no config.json")
+	}
+	tok, src := cfg.ResolveCloudToken()
+	if tok != testCloudPAT {
+		t.Errorf("ResolveCloudToken token = %q, want the env PAT", tok)
+	}
+	if src != CloudTokenSourceEnv {
+		t.Errorf("source = %q, want %q", src, CloudTokenSourceEnv)
+	}
+	// And it reaches the Bearer: CloudClient is the only seam to cloudclient.
+	if got := cfg.CloudClient().Token; got != testCloudPAT {
+		t.Errorf("CloudClient().Token = %q, want the env PAT", got)
+	}
+}
+
+// TestConfigCloudTokenEnvWinsOverFile pins the precedence in the first direction:
+// env beats a persisted cloud_token.
+func TestConfigCloudTokenEnvWinsOverFile(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv(CloudTokenEnv, testCloudPAT)
+
+	if err := SaveConfig(&Config{CloudURL: "https://api.barkpark.cloud", CloudToken: "file-session-token"}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	tok, src := cfg.ResolveCloudToken()
+	if tok != testCloudPAT || src != CloudTokenSourceEnv {
+		t.Fatalf("env must win: got (%q, %q)", tok, src)
+	}
+	if got := cfg.CloudClient().Token; got != testCloudPAT {
+		t.Errorf("CloudClient().Token = %q, want the env PAT", got)
+	}
+	// The persisted value is untouched — an env override never rewrites the file.
+	if cfg.CloudToken != "file-session-token" {
+		t.Errorf("persisted CloudToken mutated: %q", cfg.CloudToken)
+	}
+}
+
+// TestConfigCloudTokenEmptyEnvKeepsFileValue pins the OTHER direction — the
+// no-regression half. Unset, empty and whitespace-only env all leave an
+// interactive user on the token `bp login` wrote.
+func TestConfigCloudTokenEmptyEnvKeepsFileValue(t *testing.T) {
+	for _, tc := range []struct{ name, env string }{
+		{"unset", ""},
+		{"empty", ""},
+		{"whitespace", "   \t\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withTempConfigHome(t)
+			if tc.name == "unset" {
+				t.Setenv(CloudTokenEnv, "sentinel") // restored by t.Setenv on cleanup
+				os.Unsetenv(CloudTokenEnv)
+			} else {
+				t.Setenv(CloudTokenEnv, tc.env)
+			}
+			cfg := &Config{CloudToken: "file-session-token"}
+			tok, src := cfg.ResolveCloudToken()
+			if tok != "file-session-token" || src != CloudTokenSourceConfig {
+				t.Fatalf("config tier must be used: got (%q, %q)", tok, src)
+			}
+			if !cfg.HasCloudToken() {
+				t.Error("HasCloudToken should stay true for a logged-in user")
+			}
+			if got := cfg.CloudClient().Token; got != "file-session-token" {
+				t.Errorf("CloudClient().Token = %q, want the config value", got)
+			}
+			// And with NEITHER tier set, "not logged in" still reads as before.
+			empty := &Config{}
+			if empty.HasCloudToken() || empty.CloudTokenSource() != CloudTokenSourceNone {
+				t.Errorf("empty config should be not-logged-in, source=%q", empty.CloudTokenSource())
+			}
+			if (*Config)(nil).HasCloudToken() {
+				t.Error("nil config must not report a token")
+			}
+		})
+	}
+}
+
+// TestConfigCloudTokenSourceNeverLeaksValue proves the credential is attributable
+// but never exposed: the source label carries no substring of the token, and a
+// load → mutate → SaveConfig cycle (what login/logout/setup do) cannot persist an
+// env credential into config.json.
+func TestConfigCloudTokenSourceNeverLeaksValue(t *testing.T) {
+	root := withTempConfigHome(t)
+	t.Setenv(CloudTokenEnv, testCloudPAT)
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	src := cfg.CloudTokenSource()
+	if src != CloudTokenSourceEnv {
+		t.Fatalf("source = %q, want %q", src, CloudTokenSourceEnv)
+	}
+	if strings.Contains(src, testCloudPAT) || strings.Contains(src, strings.TrimPrefix(testCloudPAT, "bpc_pat_")) {
+		t.Fatalf("source label leaks the credential: %q", src)
+	}
+
+	// A save while the env is set must not write the env token to disk.
+	cfg.Server = "https://api.barkpark.cloud"
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "barkpark", "config.json"))
+	if err != nil {
+		t.Fatalf("read config.json: %v", err)
+	}
+	if bytes.Contains(raw, []byte(testCloudPAT)) {
+		t.Fatalf("config.json embedded the env credential:\n%s", raw)
+	}
+}
+
+// TestConfigCloudTokenPATShapeIsOpaque records the credential shapes and that bp
+// treats the Bearer as opaque: a 51-char bpc_pat_ PAT and a 43-char session token
+// resolve identically, with no prefix parsing or length validation client-side.
+func TestConfigCloudTokenPATShapeIsOpaque(t *testing.T) {
+	withTempConfigHome(t)
+	if len(testCloudPAT) != 51 {
+		t.Fatalf("PAT fixture should be 51 chars (bpc_pat_ + 43), got %d", len(testCloudPAT))
+	}
+	session := strings.TrimPrefix(testCloudPAT, "bpc_pat_") // 43 chars, the session shape
+	if len(session) != 43 {
+		t.Fatalf("session fixture should be 43 chars, got %d", len(session))
+	}
+	for _, tok := range []string{testCloudPAT, session, "anything-the-server-understands"} {
+		t.Setenv(CloudTokenEnv, tok)
+		got, src := (&Config{}).ResolveCloudToken()
+		if got != tok || src != CloudTokenSourceEnv {
+			t.Errorf("opaque Bearer %q resolved as (%q, %q)", tok, got, src)
+		}
+	}
+}
+
+// TestConfigCloudTokenReachesTheDoctorProbe closes the seam the env tier opened
+// in a NEIGHBOURING file. doctorGateOpts arms its cloud-sites probe behind
+// HasCloudToken(), which now answers true for an env-only credential — but the
+// Bearer it attached came from cfg.CloudToken, the PERSISTED tier, which is empty
+// in exactly that case. So CI got a probe pointed at /v1/sites with NO
+// Authorization value and reported the 401 as a failed doctor check: a false red
+// produced by the credential that works for every other Cloud command.
+func TestConfigCloudTokenReachesTheDoctorProbe(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv(CloudTokenEnv, testCloudPAT)
+
+	g := doctorGateOpts("", "")
+	if g.CloudSitesURL == "" {
+		t.Fatalf("an env-only credential must still arm the cloud-sites probe; got %+v", g)
+	}
+	if g.CloudSitesToken != testCloudPAT {
+		t.Fatalf("the probe must carry the RESOLVED token, not the empty persisted field; got %q", g.CloudSitesToken)
+	}
+
+	// And the persisted tier still works on its own, unchanged.
+	t.Setenv(CloudTokenEnv, "")
+	if err := SaveConfig(&Config{CloudToken: "from-the-file"}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	if g := doctorGateOpts("", ""); g.CloudSitesToken != "from-the-file" {
+		t.Fatalf("the persisted tier regressed; got %q", g.CloudSitesToken)
+	}
+}
+
+// TestConfigMarshalRedactsAllFiveTokensButPersistRoundTrips proves BOTH
+// directions of the config-token marshal guard (bp-secgo-config-token-marshal-guard):
+//
+//	(a) SaveConfig -> LoadConfig round-trips all FIVE token-bearing fields,
+//	    including a DISTINCT nested KnownServers[].Token sentinel, so persistence
+//	    is unbroken; and
+//	(b) a PUBLIC json.Marshal(Config) contains NONE of the five sentinels — the
+//	    value-receiver Config.MarshalJSON redacts every credential.
+//
+// The FLAT-TOKEN-SENTINEL (Config.Token) and NESTED-ENTRY-TOKEN-SENTINEL
+// (ServerEntry.Token) are the mutation tripwires: neuter the redaction of
+// either field in config.go and assertion (b) reds on that sentinel.
+func TestConfigMarshalRedactsAllFiveTokensButPersistRoundTrips(t *testing.T) {
+	withTempConfigHome(t)
+
+	const (
+		flatSentinel   = "FLAT-TOKEN-SENTINEL"
+		adminSentinel  = "ADMIN-TOKEN-SENTINEL"
+		ingestSentinel = "INGEST-TOKEN-SENTINEL"
+		cloudSentinel  = "CLOUD-TOKEN-SENTINEL"
+		nestedSentinel = "NESTED-ENTRY-TOKEN-SENTINEL"
+	)
+	sentinels := []string{flatSentinel, adminSentinel, ingestSentinel, cloudSentinel, nestedSentinel}
+
+	want := &Config{
+		Server:      "https://api.barkpark.cloud",
+		Token:       flatSentinel,
+		AdminToken:  adminSentinel,
+		IngestToken: ingestSentinel,
+		CloudToken:  cloudSentinel,
+		KnownServers: []ServerEntry{
+			{Server: "https://api.barkpark.cloud", Token: nestedSentinel},
+		},
+	}
+
+	// (a) Persistence round-trips every token, incl the nested entry token.
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.Token != flatSentinel || got.AdminToken != adminSentinel ||
+		got.IngestToken != ingestSentinel || got.CloudToken != cloudSentinel {
+		t.Fatalf("flat tokens did not round-trip: got=%+v", *got)
+	}
+	if len(got.KnownServers) != 1 || got.KnownServers[0].Token != nestedSentinel {
+		t.Fatalf("nested ServerEntry.Token did not round-trip: got=%+v", got.KnownServers)
+	}
+
+	// (b) A public marshal of the Config leaks NONE of the five sentinels.
+	pub, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("json.Marshal(Config): %v", err)
+	}
+	for _, s := range sentinels {
+		if bytes.Contains(pub, []byte(s)) {
+			t.Fatalf("public marshal leaked token sentinel %q: %s", s, pub)
+		}
+	}
+	// A *Config nested in another struct redacts identically (value receiver
+	// covers both value and pointer).
+	pubPtr, err := json.Marshal(struct{ C *Config }{want})
+	if err != nil {
+		t.Fatalf("json.Marshal(*Config): %v", err)
+	}
+	for _, s := range sentinels {
+		if bytes.Contains(pubPtr, []byte(s)) {
+			t.Fatalf("public *Config marshal leaked token sentinel %q: %s", s, pubPtr)
+		}
+	}
+
+	// Redaction must not MUTATE the caller's live Config — the nested slice is
+	// deep-copied before blanking, so the in-memory token survives the marshal.
+	if want.Token != flatSentinel || want.KnownServers[0].Token != nestedSentinel {
+		t.Fatalf("public marshal mutated the caller's live tokens: %+v / %+v", *want, want.KnownServers)
 	}
 }

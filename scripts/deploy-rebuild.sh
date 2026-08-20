@@ -12,7 +12,8 @@
 # Sequence: repo-local flock (ONE builder; all callers share api/_build_next)
 # → full from-scratch build ASIDE (Golden Rules 1-2 hold: fresh HEEx, forced
 # deps.compile — we nuke and rebuild the entire aside root, just not the live
-# one) → swap into api/_build/prod → non-fatal Go TUI build → restart LAST.
+# one) → swap into api/_build/prod → non-fatal Go TUI build → non-fatal
+# barkpark-agent rebuild+restart → restart LAST.
 #
 # Restart-last is deliberate: in the endpoint flow this script is a child of
 # barkpark.service, and systemd SIGTERMs the whole cgroup on stop — including
@@ -95,6 +96,39 @@ if command -v go > /dev/null 2>&1; then
   fi
 else
   echo "[deploy-rebuild] go not found — skipping pdrender wasm build."
+fi
+
+# On-box monitoring agent — rebuilt from the just-deployed code, NON-FATAL, and
+# BEFORE the restart for the same cgroup-kill reason as the two builds above.
+# Lifted from deploy/instance-deploy.sh:806-830, which is the ONLY lane that has
+# ever built barkpark-agent — so on every box that self-updates instead of being
+# re-provisioned, the agent binary is frozen at warm-pool arm time and any new
+# vital it learns to report stays dark forever (measured: `cpu_cores` present in
+# 1 of 6 fleet binaries, with `load1` present in 6 of 6 as the non-vacuous
+# control). Blessing a fresher release tag cannot fix that: no self-update path
+# builds the agent at all.
+#
+# Only touches boxes the provisioner ARMED with the agent (its token file
+# exists); a plain/legacy box is left alone. The control/health URLs live in
+# /etc/barkpark/agent.env from provision time, so this needs no knowledge of
+# them. The whole sequence is an `if` condition, so under `set -e` a monitoring
+# hiccup still cannot fail the deploy.
+if [ -f /etc/barkpark/agent.token ]; then
+  echo "[deploy-rebuild] Refreshing barkpark-agent (monitoring beat, non-fatal)..."
+  # RESTART, never `enable --now`: `--now` is `start`, a NO-OP on an already-
+  # active unit, so systemd never re-execs and the running agent keeps serving
+  # the DELETED inode of the binary we just replaced (measured 29h stale on
+  # guerrilla — the bug #9823 fixed for the slot path).
+  if command -v go > /dev/null 2>&1 &&
+    go build -o /usr/local/bin/barkpark-agent ./cmd/barkpark-agent &&
+    install -m 0644 deploy/systemd/barkpark-agent.service /etc/systemd/system/barkpark-agent.service &&
+    systemctl daemon-reload &&
+    systemctl enable barkpark-agent > /dev/null 2>&1 &&
+    systemctl restart barkpark-agent; then
+    echo "[deploy-rebuild] barkpark-agent rebuilt, enabled + restarted."
+  else
+    echo "[deploy-rebuild] WARN: barkpark-agent refresh failed — the old agent keeps beating until the next deploy."
+  fi
 fi
 
 # Restart LAST — see the header comment. Nothing may follow this block.

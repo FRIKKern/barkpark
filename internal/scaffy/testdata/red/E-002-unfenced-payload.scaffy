@@ -1,0 +1,10 @@
+# expect: E-002 9
+DIRECTION "add"
+IN "internal/widgets/registry.go"
+INSERT AFTER FIRST
+::: registry head anchor :::
+	registry["heading"] = headingWidget{}
+::: registry head anchor :::
+WITH
+	registry["timeline"] = timelineWidget{}
+	registry["timeline-two"] = timelineWidget{}

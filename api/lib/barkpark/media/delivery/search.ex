@@ -27,7 +27,13 @@ defmodule Barkpark.Media.Delivery.Search do
   """
   @spec search(String.t(), keyword()) :: {[MediaFile.t()], non_neg_integer(), map(), map()}
   def search(dataset, opts \\ []) when is_binary(dataset) do
-    config = SurfaceConfigs.get("media", dataset)
+    # Thread the resolved workspace_id (rides in opts via scope_opts(conn) on the
+    # scoped media search route) into the surface-config read so per-workspace
+    # media tuning (typo_policy.similarity_threshold et al.) actually reaches
+    # media RESULTS — not just the settings echo (charter D59/D63). A nil
+    # workspace_id (flat/anonymous path) reads the documented global-legacy
+    # default row, matching the SurfaceConfigs.get/3 contract.
+    config = SurfaceConfigs.get("media", dataset, Keyword.get(opts, :workspace_id))
 
     # Resolve the dataset STRING → dataset_id ONCE per request and thread it
     # through opts. The dataset_id is INVARIANT within a search — without this,
@@ -622,52 +628,21 @@ defmodule Barkpark.Media.Delivery.Search do
   defp apply_sort(query, opts) do
     case Keyword.get(opts, :sort, "created-desc") do
       "relevance" ->
-        case Keyword.get(opts, :parsed) || Keyword.get(opts, :q) do
-          %{} = parsed when map_size(parsed) > 0 ->
-            terms = parsed.terms ++ parsed.phrases
-            # BUG 1 guard: `hd([])` raises ArgumentError, 500ing the whole
-            # search on the zero-term media-recovery path. `List.first/1`
-            # returns nil on [], so we fall through to :raw / "" cleanly.
-            primary = List.first(terms) || Map.get(parsed, :raw, "")
-            pattern = if primary != "", do: "%#{escape_like(primary)}%", else: "%"
-
-            order_by(query, [m, d],
-              desc:
-                fragment(
-                  "CASE WHEN ? ILIKE ? OR ? ILIKE ? OR ? ILIKE ? OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(?->'tags', '[]'::jsonb)) elem WHERE elem ILIKE ?) THEN 1 ELSE 0 END",
-                  d.title,
-                  ^pattern,
-                  m.original_name,
-                  ^pattern,
-                  m.filename,
-                  ^pattern,
-                  d.content,
-                  ^pattern
-                ),
-              desc: m.inserted_at
-            )
-
-          q when is_binary(q) and q != "" ->
-            pattern = "%#{escape_like(q)}%"
-
-            order_by(query, [m, d],
-              desc:
-                fragment(
-                  "CASE WHEN ? ILIKE ? OR ? ILIKE ? OR ? ILIKE ? OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(?->'tags', '[]'::jsonb)) elem WHERE elem ILIKE ?) THEN 1 ELSE 0 END",
-                  d.title,
-                  ^pattern,
-                  m.original_name,
-                  ^pattern,
-                  m.filename,
-                  ^pattern,
-                  d.content,
-                  ^pattern
-                ),
-              desc: m.inserted_at
-            )
-
-          _ ->
+        # The relevance sort now folds the admin-configured `searchable_fields`
+        # per-field weights into the ordering (charter W7 /
+        # bpb-searchable-fields-dead-config) — previously a hardcoded boolean
+        # CASE (matched=1/0) that ignored the knob echoed in admin settings.
+        # Each field contributes weight·similarity(field, query); the
+        # max-weight-normalized sum reorders results when a weight changes.
+        case relevance_query_text(opts) do
+          "" ->
+            # Zero-term relevance path (prefix-only / empty). `List.first/1`
+            # returns nil on [], so we degrade to recency instead of 500ing on
+            # `hd([])` (BUG 1, barkpark-4r7q).
             order_by(query, [m], desc: m.inserted_at)
+
+          q_text ->
+            relevance_order(query, q_text, Keyword.get(opts, :pipeline_config))
         end
 
       "created-asc" ->
@@ -681,9 +656,149 @@ defmodule Barkpark.Media.Delivery.Search do
     end
   end
 
+  # Primary query text for the relevance similarity signal — the first term/phrase
+  # of a parsed query, else the raw `:q`. "" means no usable text (prefix-only or
+  # empty), which the caller degrades to recency.
+  defp relevance_query_text(opts) do
+    case Keyword.get(opts, :parsed) || Keyword.get(opts, :q) do
+      %{} = parsed when map_size(parsed) > 0 ->
+        terms = Map.get(parsed, :terms, []) ++ Map.get(parsed, :phrases, [])
+        List.first(terms) || Map.get(parsed, :raw, "") || ""
+
+      q when is_binary(q) ->
+        q
+
+      _ ->
+        ""
+    end
+  end
+
+  # Weighted per-field relevance ORDER BY:
+  #   Σ(weight_i · similarity(field_i, query)) / max(weight_i), desc
+  # then inserted_at desc. Max-weight normalization keeps the highest-weighted
+  # field on the raw similarity scale. Unknown/unsupported paths are skipped;
+  # if none resolve, fall back to recency.
+  defp relevance_order(query, q_text, config) do
+    weighted_terms =
+      config
+      |> media_searchable_fields()
+      |> Enum.map(fn %{path: path, weight: weight} ->
+        {media_field_term(path, weight, q_text), weight}
+      end)
+      |> Enum.reject(fn {term, _weight} -> is_nil(term) end)
+
+    case weighted_terms do
+      [] ->
+        order_by(query, [m], desc: m.inserted_at)
+
+      terms ->
+        max_weight = terms |> Enum.map(fn {_term, weight} -> weight end) |> Enum.max()
+
+        sum =
+          Enum.reduce(terms, nil, fn {term, _weight}, acc ->
+            if acc, do: dynamic([m, d], fragment("? + ?", ^acc, ^term)), else: term
+          end)
+
+        relevance = dynamic([_m, _d], fragment("(?) / ?", ^sum, ^max_weight))
+
+        order_by(query, ^[{:desc, relevance}, {:desc, dynamic([m, _d], m.inserted_at)}])
+    end
+  end
+
+  # Per-field weighted trigram-similarity term over the media join bindings
+  # [m (media_files), d (linked mediaAsset document)]. Returns nil for a path
+  # this surface does not expose (skipped from the weighted sum).
+  defp media_field_term("title", weight, q_text) do
+    dynamic(
+      [_m, d],
+      fragment("? * similarity(coalesce(?, ''), ?)", ^(weight * 1.0), d.title, ^q_text)
+    )
+  end
+
+  defp media_field_term("original_name", weight, q_text) do
+    dynamic(
+      [m, _d],
+      fragment("? * similarity(coalesce(?, ''), ?)", ^(weight * 1.0), m.original_name, ^q_text)
+    )
+  end
+
+  defp media_field_term("filename", weight, q_text) do
+    dynamic(
+      [m, _d],
+      fragment("? * similarity(coalesce(?, ''), ?)", ^(weight * 1.0), m.filename, ^q_text)
+    )
+  end
+
+  defp media_field_term("tags", weight, q_text) do
+    dynamic(
+      [_m, d],
+      fragment(
+        "? * COALESCE((SELECT max(similarity(elem, ?)) FROM jsonb_array_elements_text(COALESCE(?->'tags', '[]'::jsonb)) elem), 0)",
+        ^(weight * 1.0),
+        ^q_text,
+        d.content
+      )
+    )
+  end
+
+  defp media_field_term(_unknown, _weight, _q_text), do: nil
+
+  # Normalize the media `searchable_fields` config → [%{path, weight}]. Falls
+  # back to the media default field set when nothing usable is configured.
+  defp media_searchable_fields(config) do
+    (config || %{})
+    |> Map.get("searchable_fields", [])
+    |> List.wrap()
+    |> Enum.map(&normalize_media_field/1)
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] ->
+        SurfaceConfigs.default_for("media")
+        |> Map.get("searchable_fields", [])
+        |> Enum.map(&normalize_media_field/1)
+        |> Enum.reject(&is_nil/1)
+
+      fields ->
+        fields
+    end
+  end
+
+  defp normalize_media_field(%{"path" => path} = field)
+       when is_binary(path) and path != "" do
+    case media_field_weight(Map.get(field, "weight")) do
+      weight when weight > 0 -> %{path: path, weight: weight}
+      _ -> nil
+    end
+  end
+
+  defp normalize_media_field(_), do: nil
+
+  defp media_field_weight(weight) when is_number(weight), do: weight * 1.0
+
+  defp media_field_weight(weight) when is_binary(weight) do
+    case Float.parse(weight) do
+      {parsed, _} -> parsed
+      :error -> 0.0
+    end
+  end
+
+  defp media_field_weight(nil), do: 1.0
+  defp media_field_weight(_), do: 0.0
+
   defp maybe_filter_text(query, dataset, opts) do
     parsed = Keyword.get(opts, :parsed)
-    config = Keyword.get(opts, :pipeline_config, SurfaceConfigs.get("media", dataset))
+    # Default-arg trap: compute_facets re-fetches the config per facet field
+    # because the facet opts never carry :pipeline_config (only search/2's inner
+    # pass threads it). Thread workspace_id here too (charter D63) — else the
+    # facet path stays workspace-blind while the primary results path (line 30)
+    # is per-workspace, and the two diverge on a shared dataset slug.
+    config =
+      Keyword.get(
+        opts,
+        :pipeline_config,
+        SurfaceConfigs.get("media", dataset, Keyword.get(opts, :workspace_id))
+      )
+
     relaxed = Keyword.get(opts, :relaxed, false)
 
     # Thread the tenancy scope into the text-match retriever. Its inner

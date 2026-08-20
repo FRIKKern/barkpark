@@ -370,7 +370,12 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
     @tag :validator
     test "a complete book WITHOUT any marketPublishingDetail is unchanged and still XSD-valid" do
       if System.find_executable("xmllint") do
-        book = full_book() |> update_in(["productSupplies", Access.at(0)], &Map.delete(&1, "marketPublishingDetail"))
+        book =
+          full_book()
+          |> update_in(
+            ["productSupplies", Access.at(0)],
+            &Map.delete(&1, "marketPublishingDetail")
+          )
 
         assert {:ok, iodata} = Export.to_iodata(book)
         refute IO.iodata_to_binary(iodata) =~ ~s|<MarketPublishingDetail>|
@@ -473,7 +478,10 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
     # <ContentAudience> → invalid XML → export 500. It must now default to "00".
     defp book_missing_content_audience do
       full_book()
-      |> update_in(["collateralDetail", "textContents", Access.at(0)], &Map.delete(&1, "contentAudience"))
+      |> update_in(
+        ["collateralDetail", "textContents", Access.at(0)],
+        &Map.delete(&1, "contentAudience")
+      )
       |> update_in(
         ["collateralDetail", "supportingResources", Access.at(0)],
         &Map.delete(&1, "contentAudience")
@@ -570,7 +578,11 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
         ],
         "collateralDetail" => %{
           "textContents" => [
-            %{"textType" => "03", "contentAudience" => "00", "text" => %{"nob" => "Norsk beskrivelse."}}
+            %{
+              "textType" => "03",
+              "contentAudience" => "00",
+              "text" => %{"nob" => "Norsk beskrivelse."}
+            }
           ],
           "supportingResources" => [
             %{

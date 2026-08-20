@@ -1,6 +1,7 @@
 package taskboard
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -45,6 +46,16 @@ func fixtureServer(t *testing.T, listStatus, primeStatus int) *httptest.Server {
 		}
 		switch r.URL.Path {
 		case "/v1/tasks":
+			// Serves BOTH list legs — the window fetch and the D120 in-flight
+			// fetch (?lifecycle_status=in_progress) — with the SAME full body,
+			// deliberately simulating an older server that ignores the filter:
+			// the union dedup must keep the composed snapshot identical (the
+			// fixture's prime in_progress count matches its corpus, so the
+			// collapsed recount is invariant here). The filter-honoring path is
+			// exercised by now_truth_test.go's own server.
+			if got := r.URL.Query().Get("limit"); got != "1000" {
+				t.Errorf("%s request limit = %q, want \"1000\"", r.URL.RawQuery, got)
+			}
 			w.WriteHeader(listStatus)
 			if listStatus == http.StatusOK {
 				_, _ = w.Write(listBody)
@@ -160,6 +171,36 @@ func TestFetchSnapshot_ListError(t *testing.T) {
 	}
 }
 
+// TestFetchSnapshot_CorpusPastManifestCap — the 2026-07-24 incident: the
+// guerrilla corpus crossed apiclient's 8 MiB manifest cap and the board went
+// dark. The board's fetch now carries its own maxBoardFetchBytes bound, so a
+// list body past 8 MiB (padded with trailing whitespace, which json.Unmarshal
+// tolerates) must decode fine.
+func TestFetchSnapshot_CorpusPastManifestCap(t *testing.T) {
+	listBody, primeBody := fixtureParts(t)
+	pad := bytes.Repeat([]byte(" "), (9<<20)-len(listBody)) // total > 8 MiB
+	bigList := append(append([]byte{}, listBody...), pad...)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/tasks":
+			_, _ = w.Write(bigList)
+		case "/v1/tasks/prime":
+			_, _ = w.Write(primeBody)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	snap, err := FetchSnapshot(newClient(srv.URL))
+	if err != nil {
+		t.Fatalf("a corpus past the 8 MiB manifest cap must fetch under the board's own bound, got: %v", err)
+	}
+	if len(snap.Tasks) == 0 {
+		t.Fatal("padded corpus decoded to zero tasks")
+	}
+}
+
 func TestFetchSnapshot_PrimeError(t *testing.T) {
 	srv := fixtureServer(t, http.StatusOK, http.StatusInternalServerError)
 	defer srv.Close()
@@ -171,6 +212,27 @@ func TestFetchSnapshot_PrimeError(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("prime error %q should contain %q", err, want)
 		}
+	}
+}
+
+// The live corpus crossed the capabilities manifest's unrelated 8 MiB ceiling
+// in July 2026. Pin the taskboard seam itself so it cannot silently drift back
+// to Client.GetConditional and reproduce the permanent offline state.
+func TestGetJSONAcceptsTaskSnapshotAboveManifestLimit(t *testing.T) {
+	const payloadBytes = (8 << 20) + 1
+	body := strings.Repeat(" ", payloadBytes)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	got, err := getJSON(newClient(srv.URL), "/v1/tasks?limit=1000")
+	if err != nil {
+		t.Fatalf("task snapshot above 8 MiB was rejected: %v", err)
+	}
+	if len(got) != payloadBytes {
+		t.Fatalf("task snapshot bytes = %d, want %d", len(got), payloadBytes)
 	}
 }
 
@@ -474,5 +536,132 @@ func TestCoercePriority(t *testing.T) {
 		if got := coercePriority([]byte(tc.in)); got != tc.want {
 			t.Errorf("coercePriority(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// TestDecodeEnvelopeFence — the board must not render a plausible EMPTY BOARD
+// for a 200 that said nothing. A well-formed JSON object WITHOUT the envelope
+// key (or with `ok:false`) used to decode to zero rows with a nil error, which
+// is indistinguishable from a genuinely empty board; it must now be a named
+// decode error. The legitimate-empty cases are pinned in the SAME table so the
+// fence can never be tightened into refusing a real empty board.
+//
+// This is envelope-scoped and does NOT cross detail_data.go's field-scoped
+// 'Tolerance contract (frozen wave-5)' — see TestDecodeAcceptanceCriteria_
+// AbsentAndMalformed above, which still proves per-doc tolerance is intact.
+//
+// ORDERING HAZARD: this table is also the guard on nil-check-before-deref. If
+// the deref is hoisted above the nil check, every poison row panics here
+// instead of returning an error, so a reorder fails the suite.
+//
+// POISON PARITY WITH THE CLI (measured, not assumed). The CLI's reader-honesty
+// lock — TestRunPaginatedAll_RefusesUnreadablePage, internal/cli/
+// paginate_all_test.go:94-104 — carries NINE poison bodies. Dropping all nine
+// into this package and calling decodeTaskListFull and decodePrime directly
+// splits them FIVE / FOUR, identically on both decoders:
+//
+//   - FENCE-class (5, pinned as rows below): `null`, `{}`, `{"result":null}`,
+//     `{"widgets":[…]}` and the ok:false error envelope. Each is valid JSON
+//     that decodes cleanly into the envelope struct and leaves the envelope
+//     key nil, so ONLY the pointer nil-check refuses them. These are exactly
+//     the bodies the fence exists for, and reverting the fence reds them.
+//   - UNMARSHAL-class (4, DECLARED here, deliberately NOT pinned as rows): the
+//     proxy-502 HTML page, zero bytes, the bare array `[{"a":1}]` and the
+//     plaintext body. All four fail json.Unmarshal BEFORE any fence runs, so a
+//     row asserting they error would be green both before and after the fix —
+//     a vacuous row, the exact failure this table exists to kill.
+//
+// PARITY MEANS "EVERY CLI POISON THAT CAN TRANSFER IS HERE", NOT "THE TWO TABLES
+// ARE EQUAL". These tables are a SUPERSET: `bare error envelope` is a body the
+// board carries and the CLI's nine do not. So the counts below describe the
+// CLI's nine as they land here, not the size of these tables.
+//
+// The four-way split is a property of the CURRENT envelope structs, measured at
+// origin/main 885ace84a (re-confirmed at review: that sha is an ancestor of
+// origin/main b77a7486f, and reverting the pointer fence reds exactly the seven
+// poison rows per decoder while every legitimate control stays green). It is not
+// a law: widening either envelope field to
+// json.RawMessage would make the bare array and the plaintext body decode, at
+// which point they become fence-class and belong in the tables below. Re-measure
+// before trusting this comment after any change to the structs in fetch.go.
+//
+// The board's refusal channel is snapshotErrorLabel → ui.ConnProblem, NOT the
+// CLI's `unreadable_list_page` code: that token is a contract on the CLI's JSON
+// error envelope (renderErrorEnvelope), and a tea TUI has no such transport.
+// Every poison row therefore asserts the LABEL, so the classification is pinned
+// rather than incidental.
+func TestDecodeEnvelopeFence(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{"null body", `null`, true},
+		{"empty object", `{}`, true},
+		{"bare error envelope", `{"error":"barkpark_not_found","detail":"no such dataset"}`, true},
+		{"ok false error envelope", `{"ok":false,"error":{"code":"forbidden"}}`, true},
+		{"docs null", `{"ok":true,"docs":null}`, true},
+		// Verbatim from the CLI's poison table (paginate_all_test.go:94-104).
+		{"unknown envelope key", `{"widgets":[{"a":1},{"b":2}]}`, true},
+		{"result null", `{"result":null}`, true},
+		{"legitimate empty board", `{"docs":[]}`, false},
+		{"legitimate populated board", `{"ok":true,"docs":[{"doc_id":"x"}]}`, false},
+	}
+	for _, tc := range cases {
+		t.Run("list/"+tc.name, func(t *testing.T) {
+			tasks, details, err := decodeTaskListFull([]byte(tc.body))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("decodeTaskListFull(%s) = %d rows, nil error — a silent empty board", tc.body, len(tasks))
+				}
+				if got := snapshotErrorLabel(err); got != "invalid snapshot" {
+					t.Errorf("snapshotErrorLabel(%v) = %q, want %q — the refusal must ride the existing ConnProblem channel", err, got, "invalid snapshot")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodeTaskListFull(%s) errored on a legitimate body: %v", tc.body, err)
+			}
+			if tasks == nil || details == nil {
+				t.Fatalf("decodeTaskListFull(%s) = (%v, %v), want non-nil empties", tc.body, tasks, details)
+			}
+		})
+	}
+
+	primeCases := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{"null body", `null`, true},
+		{"empty object", `{}`, true},
+		{"bare error envelope", `{"error":"barkpark_not_found"}`, true},
+		{"ok false error envelope", `{"ok":false,"error":{"code":"forbidden"}}`, true},
+		{"counts null and no ok", `{"counts":null}`, true},
+		// Verbatim from the CLI's poison table (paginate_all_test.go:94-104).
+		{"unknown envelope key", `{"widgets":[{"a":1},{"b":2}]}`, true},
+		{"result null", `{"result":null}`, true},
+		// A brief view may legitimately omit counts; an affirmative ok is
+		// enough of an envelope to trust.
+		{"ok true without counts", `{"ok":true,"recent_events":[]}`, false},
+		{"counts present empty", `{"counts":{}}`, false},
+		{"counts populated", `{"ok":true,"counts":{"open":2}}`, false},
+	}
+	for _, tc := range primeCases {
+		t.Run("prime/"+tc.name, func(t *testing.T) {
+			extras, err := decodePrime([]byte(tc.body))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("decodePrime(%s) = %+v, nil error — a silent empty prime", tc.body, extras)
+				}
+				if got := snapshotErrorLabel(err); got != "invalid snapshot" {
+					t.Errorf("snapshotErrorLabel(%v) = %q, want %q", err, got, "invalid snapshot")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodePrime(%s) errored on a legitimate body: %v", tc.body, err)
+			}
+		})
 	}
 }

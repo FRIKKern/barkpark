@@ -10,7 +10,7 @@ import (
 )
 
 // renderM5Fixture renders the M5 grid/ladder-block fixture (notes + pipeline +
-// cards + status-legend) with NoColor pinned so the goldens are byte-stable. No
+// cards + status-legend, the 8-rung ladder) with NoColor pinned so the goldens are byte-stable. No
 // RefResolver is needed — the fixture holds only self-contained grid widgets
 // whose items/nodes are flat scalars.
 func renderM5Fixture(t *testing.T, name string, width int) string {
@@ -35,7 +35,8 @@ func renderM5Fixture(t *testing.T, name string, width int) string {
 
 // TestGoldenM5 renders the M5 grid/ladder-block fixture (notes stacked as
 // definition rows, pipeline nodes joined by a dim ↓ connector, cards as
-// tone-bordered rounded boxes, and the fixed 6-rung status ladder) at every
+// tone-bordered rounded boxes, and the 8-rung status ladder — six lifecycle
+// states + the two thought states considering/researching) at every
 // golden width and diffs it against the checked-in golden (regenerate with
 // -update).
 func TestGoldenM5(t *testing.T) {

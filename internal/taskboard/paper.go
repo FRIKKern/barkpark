@@ -14,7 +14,7 @@ import (
 )
 
 // paper.go — the FramePaper reading surface (charter wave-5 slice 16, D17/D20).
-// A paper is fetched through ONE direct scoped read (apiclient.PaperDoc, D13e),
+// A paper is fetched through ONE direct scoped canonical-source read,
 // decoded into a PaperState, then rendered WHOLESALE through pdrender — the same
 // Decode → DefaultRegistry(theme).RenderDoc pipeline the `bp paper view` CLI
 // uses — with NO theme bridge: pdrender.Theme's fields are unexported and only
@@ -56,40 +56,35 @@ func paperMeasure(width int) int {
 	return m
 }
 
-// FetchPaper is the frame's single IO edge: one direct scoped read of the paper
-// by slug (apiclient.PaperDoc at the client's configured perspective), decoded
-// into the render/fetch state. A doc that carries body_html but ZERO portable
-// blocks (exists live) sets HTMLOnly so the frame can honestly hand the reader
-// off to a browser instead of rendering a blank. Every failure lands as a
+// FetchPaper is the frame's single IO edge: one scoped read of the paper's
+// fail-closed source projection. An HTML source sets HTMLOnly so the frame can
+// honestly hand the reader off to a browser instead of rendering a blank.
+// Every failure lands as a
 // one-line Err on a still-usable PaperState (never a panic, never a bare error
 // screen) AND is returned so the shell can log it. Loading is left false — the
 // shell sets it true on the placeholder state while this call is in flight.
 func FetchPaper(c *apiclient.Client, dataset, slug string) (PaperState, error) {
 	ps := PaperState{Slug: slug}
-	raw, err := c.PaperDoc(dataset, slug, c.Perspective)
+	var source apiclient.PaperSource
+	releaseRef, releaseRead, err := apiclient.ParseReleasePaperRef(slug)
+	if err == nil && releaseRead {
+		var pinned apiclient.ReleasePaperSource
+		pinned, err = c.PaperReleaseSource(releaseRef)
+		source = pinned.PaperSource
+	} else if err == nil {
+		source, err = c.PaperSource(dataset, slug, c.Perspective)
+	}
 	if err != nil {
 		ps.Err = err.Error()
 		return ps, err
 	}
 
-	var env struct {
-		Title    string          `json:"title"`
-		Rev      string          `json:"_rev"`
-		Blocks   json.RawMessage `json:"blocks"`
-		BodyHTML string          `json:"body_html"`
-	}
-	if jerr := json.Unmarshal(raw, &env); jerr != nil {
-		ps.Err = "decode paper: " + jerr.Error()
-		return ps, jerr
-	}
-
-	ps.Title = strings.TrimSpace(env.Title)
-	ps.Rev = strings.TrimSpace(env.Rev)
-	switch {
-	case blocksNonEmpty(env.Blocks):
-		ps.BlocksRaw = env.Blocks
-	case strings.TrimSpace(env.BodyHTML) != "":
-		// A block-less paper with rendered HTML → honest browser-handoff.
+	ps.Title = strings.TrimSpace(source.Title)
+	ps.Rev = strings.TrimSpace(source.Rev)
+	switch source.Kind {
+	case "blocks":
+		ps.BlocksRaw = source.Blocks
+	case "html":
 		ps.HTMLOnly = true
 	}
 	return ps, nil

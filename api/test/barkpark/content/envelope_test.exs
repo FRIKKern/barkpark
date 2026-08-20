@@ -52,6 +52,66 @@ defmodule Barkpark.Content.EnvelopeTest do
     refute env["_id"] == "HIJACK"
   end
 
+  test "Paper envelopes promote every legacy body shape to canonical blocks", %{doc: doc} do
+    nested = [%{"type" => "heading", "text" => "Nested"}]
+    bare = [%{"type" => "divider"}]
+
+    assert Envelope.render(%{doc | type: "paper", content: %{"body" => %{"blocks" => nested}}})[
+             "blocks"
+           ] == nested
+
+    assert Envelope.render(%{doc | type: "paper", content: %{"body" => bare}})["blocks"] == bare
+
+    assert [%{"type" => "heading", "text" => "Markdown"} | _] =
+             Envelope.render(%{doc | type: "paper", content: %{"body" => "# Markdown"}})[
+               "blocks"
+             ]
+  end
+
+  test "Paper top-level blocks stay authoritative and non-Papers are not promoted", %{doc: doc} do
+    nested = [%{"type" => "divider"}]
+    content = %{"blocks" => [], "body" => %{"blocks" => nested}}
+
+    assert Envelope.render(%{doc | type: "paper", content: content})["blocks"] == []
+
+    refute Map.has_key?(
+             Envelope.render(%{doc | type: "post", content: %{"body" => nested}}),
+             "blocks"
+           )
+  end
+
+  test "Paper promotion cannot resurrect a redacted private body", %{doc: doc} do
+    schema = schema_with([%{"name" => "body", "type" => "string", "private" => true}])
+    paper = %{doc | type: "paper", content: %{"body" => "# Secret"}}
+
+    rendered = Envelope.render(paper, schema, CallerContext.anonymous())
+    refute Map.has_key?(rendered, "body")
+    refute Map.has_key?(rendered, "blocks")
+  end
+
+  test "Paper promotion cannot resurrect redacted canonical blocks from body", %{doc: doc} do
+    schema = schema_with([%{"name" => "blocks", "type" => "array", "private" => true}])
+    blocks = [%{"type" => "heading", "text" => "Secret"}]
+
+    paper = %{
+      doc
+      | type: "paper",
+        content: %{"blocks" => blocks, "body" => %{"blocks" => blocks}}
+    }
+
+    rendered = Envelope.render(paper, schema, CallerContext.anonymous())
+    refute Map.has_key?(rendered, "blocks")
+  end
+
+  test "body-only Paper promotion obeys private destination visibility", %{doc: doc} do
+    schema = schema_with([%{"name" => "blocks", "type" => "array", "private" => true}])
+    blocks = [%{"type" => "heading", "text" => "Legacy secret"}]
+    paper = %{doc | type: "paper", content: %{"body" => %{"blocks" => blocks}}}
+
+    rendered = Envelope.render(paper, schema, CallerContext.anonymous())
+    refute Map.has_key?(rendered, "blocks")
+  end
+
   # ── Phase 3: field-visibility redaction ─────────────────────────────────────
 
   defp schema_with(fields), do: %SchemaDefinition{name: "post", fields: fields}
@@ -191,10 +251,17 @@ defmodule Barkpark.Content.EnvelopeTest do
     refute Envelope.field_readable?(schema, "content.meta.seo", ctx)
   end
 
-  test "field_readable? treats nil/:internal callers as unrestricted" do
+  test "field_readable? fails closed for a nil or unexpected caller; :internal stays unrestricted" do
     schema = schema_with([%{"name" => "salary", "private" => true}])
-    assert Envelope.field_readable?(schema, "salary", nil)
+    # nil caller ⇒ FAIL CLOSED (the most restrictive anonymous principal). The
+    # WS-B-class fail-open (nil ⇒ true) is gone: a caller-less call can no longer
+    # slip a private field into a WHERE/ORDER clause.
+    refute Envelope.field_readable?(schema, "salary", nil)
+    # Explicit internal/full-content sentinel ⇒ unrestricted.
     assert Envelope.field_readable?(schema, "salary", :internal)
+    # Catch-all: ANY unexpected caller shape fails closed too (first-ever pin —
+    # this clause had zero coverage before the ctx-s3 flip).
+    refute Envelope.field_readable?(schema, "salary", :unexpected_atom)
   end
 
   # ── render_many_by_type: multi-type search surfaces (Phase 3 leak fix) ───────
@@ -255,5 +322,47 @@ defmodule Barkpark.Content.EnvelopeTest do
     Envelope.render_many_by_type([post, post2], resolver, CallerContext.anonymous())
     # Two "post" docs => the resolver is invoked once, not twice.
     assert Agent.get(agent, & &1) == ["post"]
+  end
+
+  describe "project/2 — the ?fields= allowlist (finder-latency fix)" do
+    @rendered %{
+      "_id" => "p1",
+      "_type" => "paper",
+      "_draft" => false,
+      "_publishedId" => "p1",
+      "_rev" => "r1",
+      "_createdAt" => "2026-01-01T00:00:00Z",
+      "_updatedAt" => "2026-01-02T00:00:00Z",
+      "title" => "T",
+      "description" => "D",
+      "body_html" => String.duplicate("x", 40_000),
+      "tags" => [%{"tag" => "a"}]
+    }
+
+    test "keeps only the requested fields plus the system identity keys" do
+      [doc] = Envelope.project([@rendered], "title,description")
+
+      assert doc["title"] == "T"
+      assert doc["description"] == "D"
+      # The 37KB nobody asked for is GONE — the whole point.
+      refute Map.has_key?(doc, "body_html")
+      refute Map.has_key?(doc, "tags")
+      # System keys always ride along (addressable + cache-comparable hits).
+      for k <- ~w(_id _type _draft _publishedId _rev _createdAt _updatedAt) do
+        assert Map.has_key?(doc, k), "system key #{k} must survive projection"
+      end
+    end
+
+    test "nil / empty / whitespace-only field lists are a byte-identical no-op" do
+      assert Envelope.project([@rendered], nil) == [@rendered]
+      assert Envelope.project([@rendered], "") == [@rendered]
+      assert Envelope.project([@rendered], " , ,") == [@rendered]
+    end
+
+    test "unknown requested fields are simply absent — never an error" do
+      [doc] = Envelope.project([@rendered], "title,not_a_field")
+      assert doc["title"] == "T"
+      refute Map.has_key?(doc, "not_a_field")
+    end
   end
 end

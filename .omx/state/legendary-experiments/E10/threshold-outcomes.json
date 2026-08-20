@@ -1,0 +1,67 @@
+{
+  "assignment_id": "E10",
+  "frozen_rubric_sha256": "3805ed5afb1ed76c22ba2144aefaf2d5c5e73508fb8f4170d9441e3400d952d4",
+  "frozen_thresholds_sha256": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b",
+  "hard_gate_policy": "Every threshold must PASS; BLOCKED, FAIL, PARTIAL, or NOT_APPLICABLE cannot select a winner.",
+  "outcomes": {
+    "accessibility": {
+      "requirement": "Zero critical/high accessibility defects; deterministic semantic reading order; headings, lists, links, tables, and status cues retain non-visual meaning.",
+      "status": "BLOCKED_FAIL_CLOSED"
+    },
+    "authored_content_preservation": {
+      "requirement": "100% preservation unless a field is explicitly quarantined with before/after evidence and rollback metadata.",
+      "status": "FAIL_E08_ADV_LONG_CONTENT_7500_TO_7499"
+    },
+    "build_formula": {
+      "requirement": "For each homogeneous unit family: max(15, ceil(unit_count / proven_batch_capacity)).",
+      "status": "BLOCKED_NO_PROVEN_CAPACITY"
+    },
+    "capacity_rule": {
+      "requirement": "For each homogeneous unit family, proven_batch_capacity is the largest disjoint pilot batch completing the full gate within 60 minutes with zero hard-gate failures. Do not combine Paper and Task capacity.",
+      "status": "BLOCKED_NO_ACCEPTED_PILOT"
+    },
+    "idempotence": {
+      "requirement": "Two consecutive reruns produce identical canonical semantic hashes and no additional mutations.",
+      "status": "PASS_E09_TWO_RUN_STABILITY"
+    },
+    "pilot_failure_rate": {
+      "requirement": "Zero critical failures and at most 1% non-critical unit failures; any hard reader, preservation, schema, accessibility, idempotence, or rollback failure rejects the batch.",
+      "status": "BLOCKED_NO_ACCEPTED_PILOT"
+    },
+    "reader_visibility": {
+      "requirement": "100% of non-excluded fixtures render non-blank content or an explicit supported error on every target reader; zero silent blanks.",
+      "status": "BLOCKED_STUDIO_EMAIL_AND_CANDIDATE_SURFACE_CAPTURE"
+    },
+    "render_test_gate": {
+      "requirement": "100% of the declared candidate gate commands pass on every accepted pilot batch.",
+      "status": "FAIL_NOT_ALL_DECLARED_REAL_SURFACE_GATES_PASS"
+    },
+    "rollback": {
+      "requirement": "100% restoration from the recorded pre-image for every mutated scratch fixture; quarantine path tested for every rejected unit.",
+      "status": "PASS_E09_36_OF_36_RESTORED"
+    },
+    "schema_validity": {
+      "requirement": "100% of candidate outputs pass the applicable PortableDoc/schema validators; zero malformed nodes introduced.",
+      "status": "PASS_E05_LOCAL_VALIDATION_ONLY"
+    },
+    "structural_completeness": {
+      "requirement": "100% of required authored semantic nodes and required Task contract fields survive the candidate transformation.",
+      "status": "FAIL_E08_NESTED_LIST_TABLE_COLLAPSE"
+    },
+    "surface_exercise": {
+      "requirement": "100% of declared target surfaces must have real evidence; inaccessible Studio or email is BLOCKED, not N/A or PASS.",
+      "status": "BLOCKED_AUTHENTICATED_STUDIO_AND_REAL_EMAIL"
+    },
+    "width_overflow": {
+      "requirement": "No content loss or horizontal clipping at the narrowest supported TUI and email widths; long unbroken tokens degrade explicitly.",
+      "status": "BLOCKED_REAL_TUI_EMAIL_AND_ASSISTIVE_TECH_PROOF"
+    }
+  },
+  "schema_version": "legendary-e10-threshold-outcomes/v1",
+  "summary": {
+    "blocked_or_failed": 10,
+    "passed": 3,
+    "total": 13
+  },
+  "winner_gate": "FAIL"
+}

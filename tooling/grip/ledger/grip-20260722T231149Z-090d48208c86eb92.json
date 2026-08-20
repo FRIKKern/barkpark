@@ -1,0 +1,63 @@
+{
+  "run_id": "grip-20260722T231149Z",
+  "recipes": [
+    {
+      "subject": "api/lib/barkpark/tasks/claim_fence.ex",
+      "quantity": "git:log",
+      "rerun": "git log --oneline origin/main -- api/lib/barkpark/tasks/claim_fence.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/tasks/claim_fence.ex"
+      ],
+      "observed_at": "2026-07-22T23:11:49Z"
+    },
+    {
+      "subject": "api/lib/barkpark/tasks/claim_fence.ex",
+      "quantity": "sed:-n",
+      "rerun": "git show origin/main:api/lib/barkpark/tasks/claim_fence.ex | sed -n '20,42p'",
+      "derived_level": "L2",
+      "deps": [
+        "api/lib/barkpark/tasks/claim_fence.ex"
+      ],
+      "observed_at": "2026-07-22T23:11:49Z"
+    },
+    {
+      "subject": "test/barkpark/tasks/claim_fence_test.exs",
+      "quantity": "mix:test",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && CC=clang mix test test/barkpark/tasks/claim_fence_test.exs 2>&1 | tail -10",
+      "derived_level": "L3",
+      "deps": [
+        "test/barkpark/tasks/claim_fence_test.exs"
+      ],
+      "observed_at": "2026-07-22T23:11:49Z"
+    },
+    {
+      "subject": "api/.sobelow-skips",
+      "quantity": "uniq:-c",
+      "rerun": "git show origin/main:api/.sobelow-skips | grep -c '^[A-Za-z]' && git show origin/main:api/.sobelow-skips | grep -oE '^[A-Za-z]+\\.[A-Za-z]+' | sort | uniq -c | sort -rn",
+      "derived_level": "L2",
+      "deps": [
+        "api/.sobelow-skips"
+      ],
+      "observed_at": "2026-07-22T23:11:49Z"
+    },
+    {
+      "subject": ".github/workflows/security.yml",
+      "quantity": "grep:-n:continue-on-error",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'continue-on-error' .github/workflows/security.yml",
+      "derived_level": "L3",
+      "deps": [
+        ".github/workflows/security.yml"
+      ],
+      "observed_at": "2026-07-22T23:11:49Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get task-felix-sobelow-gate-blocking-eval -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-22T23:11:49Z"
+    }
+  ]
+}

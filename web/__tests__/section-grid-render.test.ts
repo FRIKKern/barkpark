@@ -1,39 +1,31 @@
 /**
- * Render test for the web `section` grid leg (composition-doctrine cd-11).
+ * Render test for the `section` grid leg (composition-doctrine cd-11), now on
+ * the CANONICAL renderer (`@barkpark/react`, W5 fork-retirement).
  *
- * Before cd-11, `portable-doc.tsx` `case "section"` ALWAYS rendered a flex-col
- * stack in source order and never read `block.layout` — a grid section
- * (`layout.mode === "grid"`, per-child span/order) silently collapsed to a
- * single-column stack on the web demo, while the Elixir reader and Go TUI both
- * render a real adaptive grid. This suite drives the REAL `renderBlock` through
- * `renderToStaticMarkup` (via the shared tsx-loader — no browser, no bundler)
- * and asserts the grid HTML the reader's `.bp-section__grid` class expects.
- *
- * FAIL-BEFORE: every grid assert below reds on current main (the stack path emits
- * no `bp-section__grid`, no `--bp-tracks`, no per-cell `grid-column`/`order`).
+ * A grid section (`layout.mode === "grid"`, per-child span/order) must render a
+ * real adaptive grid — the same `.bp-section__grid` DOM the Elixir reader and Go
+ * TUI produce, never a single-column stack. This suite drives the REAL canonical
+ * `renderPortableDocument([block])` string emitter (no browser, no bundler, no
+ * JSX transpile) and asserts the `bp-*` grid markup the reader's stylesheet skins.
  *
  * Cross-surface faithfulness (charter D-W3-2/3/4): span is UNCLAMPED to match the
  * Elixir reader; order honors negatives (the fixture carries an `order:-1` child);
- * the grid-template declaration lives ONLY in the injected CSS rule, never inline,
- * so the 720px collapse MQ can override for free.
+ * the grid-template declaration lives ONLY in `paper-surface.css`, never inline,
+ * so the 720px collapse MQ can override for free (the two removed asserts below
+ * used to check that inlined rule — it now ships in the stylesheet, not the DOM).
  *
- * Run: `npm test` (or `node --test __tests__/section-grid-render.test.ts`).
+ * Run: `pnpm test` (or `node --test __tests__/section-grid-render.test.ts`).
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { register } from "node:module";
-import { renderToStaticMarkup } from "react-dom/server";
-import type { Block } from "../lib/papers.ts";
+import { renderPortableDocument, type Block } from "@barkpark/react";
 
-// Transpile the REAL portable-doc.tsx (JSX + `@/` aliases) under node:test; the
-// loader stubs only the two off-render-path client components (same as the
-// golden-parity web leg). renderBlock's section logic runs unchanged.
-register("./support/tsx-loader.mjs", import.meta.url);
-const { renderBlock } = await import("../components/portable-doc.tsx");
-
+// The single canonical PortableDoc surface that now serves web + starters. Its
+// `renderPortableDocument([block])` emits the same `bp-*` article markup Phoenix
+// and the Go TUI render, so the section grid legs assert that DOM directly.
 function renderHtml(input: Record<string, unknown>): string {
-  return renderToStaticMarkup(renderBlock(input as Block, "k"));
+  return renderPortableDocument([input as Block]);
 }
 
 function present(html: string, needle: string, label: string): void {
@@ -84,12 +76,12 @@ test("each child rides a .bp-section__cell wrapper carrying present-only span/or
   present(html, 'class="bp-section__cell"', "cell wrapper class");
 });
 
-test("the grid-template declaration is injected as a rule, never inline (so 720px collapse is free)", () => {
+test("the grid-template declaration is never inline (so the 720px collapse is free)", () => {
   const html = renderHtml(gridSection());
-  // The class rule + the collapse MQ are injected once via the hoisted <style>.
-  present(html, "repeat(var(--bp-tracks,2),minmax(0,1fr))", "grid-template rule");
-  present(html, "@media(max-width:720px){.bp-section__grid{grid-template-columns:1fr}}", "720px collapse MQ");
-  // The section's inline style must NOT carry grid-template-columns — an inline
+  // The `repeat()` grid-template + the 720px collapse MQ ship in paper-surface.css
+  // now (the canonical renderer emits no hoisted <style>), so they are asserted by
+  // the stylesheet's own tests — NOT here. What this leg still guarantees: the
+  // section's inline style must NOT carry grid-template-columns, or an inline
   // declaration would out-specify the MQ and defeat the mobile collapse.
   absent(html, 'style="grid-template-columns', "no inline grid-template on the grid div");
   present(html, "wide-first", "child prose nested");

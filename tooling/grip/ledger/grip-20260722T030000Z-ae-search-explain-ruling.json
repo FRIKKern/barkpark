@@ -1,0 +1,62 @@
+{
+  "run_id": "grip-20260722T030000Z",
+  "subject_epic": "authoring-excellence",
+  "slice": "ae-search-explain-ruling",
+  "verifier": "ae-search-explain-ruling",
+  "recipes": [
+    {
+      "subject": "LEAD 1 documents include-OR AS-IS (retriever-faithful: dataset+perspective scope + 4-way OR incl. slug_text ILIKE + opaque similarity()) plans a plain Seq Scan on prod at current scale — no index used for the OR",
+      "quantity": "explain-analyze-buffers",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 \"sudo -u postgres psql -d barkpark_prod -c \\\"SET pg_trgm.similarity_threshold=0.3; EXPLAIN (ANALYZE,BUFFERS) SELECT id FROM documents WHERE dataset='production' AND doc_id NOT LIKE 'drafts.%' AND (search_vector @@ plainto_tsquery('english','guide') OR title ILIKE '%guide%' OR slug_text ILIKE '%guide%' OR similarity(title,'guide')>0.3);\\\"\"",
+      "expect": "Seq Scan on documents, ~85ms, Buffers shared hit=16340, Rows Removed by Filter 3539",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/search/documents_retriever.ex:346-394", "prod:barkpark_prod.documents"],
+      "observed_at": "2026-07-22T03:00:00Z"
+    },
+    {
+      "subject": "Dropping ONLY the slug_text arm does NOT restore a BitmapOr in the realistic query — still a Seq Scan — because the similarity()>threshold arm is ALSO index-opaque (refutes the task's LEAD 1 claim 'dropping ONLY the slug arm restores a 3-way BitmapOr')",
+      "quantity": "explain-analyze-buffers",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 \"sudo -u postgres psql -d barkpark_prod -c \\\"EXPLAIN (ANALYZE,BUFFERS) SELECT id FROM documents WHERE status='published' AND (search_vector @@ plainto_tsquery('english','guide') OR title ILIKE '%guide%' OR similarity(title,'guide')>0.3);\\\"\"",
+      "expect": "Seq Scan on documents, ~60ms, Buffers shared hit=16315 (no BitmapOr; similarity arm keeps it a per-row filter)",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/search/documents_retriever.ex:379-384"],
+      "observed_at": "2026-07-22T03:00:00Z"
+    },
+    {
+      "subject": "Even a FULLY-indexable OR (slug removed AND similarity rewritten to trgm %) still Seq-Scans with seqscan ON, and under enable_seqscan=off falls to documents_status_index bitmap + per-row Filter (NOT a trgm BitmapOr) at 3409 published docs — so a slug_text trgm index would be planner-UNUSED for the realistic scoped query",
+      "quantity": "explain-analyze-buffers",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 \"sudo -u postgres psql -d barkpark_prod -c \\\"SET pg_trgm.similarity_threshold=0.3; SET enable_seqscan=off; EXPLAIN (ANALYZE,BUFFERS) SELECT id FROM documents WHERE status='published' AND (search_vector @@ plainto_tsquery('english','guide') OR title ILIKE '%guide%' OR title::text % 'guide');\\\"\"",
+      "expect": "Bitmap Heap Scan whose only Bitmap Index Scan is documents_status_index (3678 rows) + Filter on the OR arms; NO documents_title_trgm_idx / documents_search_vector_idx branch",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/search/documents_retriever.ex:346-394"],
+      "observed_at": "2026-07-22T03:00:00Z"
+    },
+    {
+      "subject": "A trgm BitmapOr over documents_title_trgm_idx + documents_search_vector_idx IS structurally reachable but ONLY when scoping is stripped AND enable_seqscan=off; when it forms it is 5x FASTER than the seq scan the planner actually picks (14ms/2925 buffers vs 76ms/16832) — the latent lever is a planner cost mis-estimate, NOT the slug index LEAD 1 prescribes",
+      "quantity": "explain-analyze-buffers",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 \"sudo -u postgres psql -d barkpark_prod -c \\\"SET pg_trgm.similarity_threshold=0.3; SET enable_seqscan=off; EXPLAIN (ANALYZE,BUFFERS) SELECT id FROM documents WHERE search_vector @@ plainto_tsquery('english','guide') OR title ILIKE '%guide%' OR title::text % 'guide';\\\"\"",
+      "expect": "Bitmap Heap Scan -> BitmapOr of documents_search_vector_idx + documents_title_trgm_idx (x2), ~14ms, Buffers ~2925; contrast seqscan-ON variant = Seq Scan ~76ms/16832 buffers",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/search/documents_retriever.ex:346-394"],
+      "observed_at": "2026-07-22T03:00:00Z"
+    },
+    {
+      "subject": "LEAD 2 media cross-table include-OR (media_files m LEFT JOIN mediaAsset docs, 6-arm OR incl. 2 similarity() + tags EXISTS) executes in 1.1ms / 36 buffers on prod — 34 media_files, 34 mediaAsset docs; no cost worth a pre-join EXISTS/UNION restructure at this scale",
+      "quantity": "explain-analyze-buffers",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 \"sudo -u postgres psql -d barkpark_prod -c \\\"SET pg_trgm.similarity_threshold=0.3; EXPLAIN (ANALYZE,BUFFERS) SELECT m.id FROM media_files m LEFT JOIN documents d ON (d.content->>'mediaFileId')::uuid=m.id AND d.type='mediaAsset' WHERE m.original_name ILIKE '%logo%' OR m.filename ILIKE '%logo%' OR d.title ILIKE '%logo%' OR similarity(m.original_name,'logo')>0.3 OR similarity(m.filename,'logo')>0.3 OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(d.content->'tags','[]'::jsonb)) e WHERE e ILIKE '%logo%');\\\"\"",
+      "expect": "Hash Right Join with the OR as Filter, Execution Time ~1.1ms, Buffers shared hit=36; media_files=34, mediaAsset docs=34",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/media/delivery/retriever.ex:128-165", "prod:barkpark_prod.media_files"],
+      "observed_at": "2026-07-22T03:00:00Z"
+    },
+    {
+      "subject": "The task's LEAD 1 acceptance criterion is doubly stale: it prescribes a trgm expression index on (content->>'slug'), but the slug arm was migrated to the generated STORED slug_text column (migration 20260718090000) — the prescribed index target no longer exists in the query",
+      "quantity": "grep-migration-and-code",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt && grep -n 'slug_text' api/lib/barkpark/search/documents_retriever.ex && grep -n 'slug_text' api/priv/repo/migrations/20260718090000_add_documents_facet_generated_columns.exs",
+      "expect": "documents_retriever.ex uses ilike(d.slug_text, ^pattern) (:356/:432); migration 20260718090000 ADD COLUMN slug_text text GENERATED = coalesce(content->>'slug','') — criterion's content->>'slug' target retired",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/search/documents_retriever.ex:356", "api/priv/repo/migrations/20260718090000_add_documents_facet_generated_columns.exs"],
+      "observed_at": "2026-07-22T03:00:00Z"
+    }
+  ]
+}

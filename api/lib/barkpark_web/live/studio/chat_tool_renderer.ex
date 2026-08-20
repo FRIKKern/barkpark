@@ -29,9 +29,11 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   ## Honest truncation is a RENDER concern only
 
-  A diff over `@collapsed_budget` lines collapses behind a `<details>` (exactly
-  like the existing `⎿` output block): the first ~20 lines stay in the summary
-  with an accurate `+N more lines`, the remainder reveals on expand. Persistence
+  A diff over `@collapsed_budget` DRAWABLE lines (gap separators never spend
+  budget — charter D40) collapses behind a `<details>` (exactly like the
+  existing `⎿` output block): the first 20 drawable lines stay in the summary
+  with an accurate `+N more lines` (drawable rows only), the rest reveals on
+  expand. Persistence
   (recorder.ex) keeps the FULL input verbatim, so a reopened session replays the
   identical diff — truncation never touches the store.
 
@@ -54,6 +56,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   """
   use Phoenix.Component
 
+  alias Barkpark.Chat.ToolRows
   alias Barkpark.Papers.TextDiff
 
   # Lines shown before a diff collapses behind a details/summary. The terminal
@@ -61,33 +64,16 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   @collapsed_budget 20
 
   @doc """
-  Classify a tool-call input map by SHAPE. Returns
-  `:edit | :write | :multi_edit | :generic`. Order matters: the `edits` list is
-  checked before the scalar shapes so a MultiEdit is never mistaken for a Write.
+  Classify a tool-call input map by SHAPE — thin delegation to the core
+  `Barkpark.Chat.ToolRows.classify/1` (the pure derivation lives in core so this
+  web module no longer owns it; every caller stays unchanged).
   """
   @spec classify(map() | any()) :: :edit | :write | :multi_edit | :generic
-  def classify(input) when is_map(input) do
-    cond do
-      is_binary(input["file_path"]) and is_list(input["edits"]) and input["edits"] != [] ->
-        :multi_edit
+  defdelegate classify(input), to: ToolRows
 
-      is_binary(input["file_path"]) and is_binary(input["old_string"]) and
-          is_binary(input["new_string"]) ->
-        :edit
-
-      is_binary(input["file_path"]) and is_binary(input["content"]) ->
-        :write
-
-      true ->
-        :generic
-    end
-  end
-
-  def classify(_), do: :generic
-
-  @doc "True when the input is a file-mutation shape we render as a diff."
+  @doc "True when the input is a file-mutation shape we render as a diff (core delegation)."
   @spec diff?(map() | any()) :: boolean()
-  def diff?(input), do: classify(input) != :generic
+  defdelegate diff?(input), to: ToolRows
 
   @doc """
   Render the diff for a diff-shaped tool input. A non-diff shape (or an input
@@ -98,8 +84,8 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   def tool_diff(assigns) do
     lines = build_lines(assigns.input)
-    total = length(lines)
-    {head, rest} = Enum.split(lines, @collapsed_budget)
+    drawable = Enum.count(lines, &(&1.op != "gap"))
+    {head, rest} = budget_split(lines)
 
     assigns =
       assign(assigns,
@@ -107,9 +93,9 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
         rest: rest,
         added: Enum.count(lines, &(&1.op == "+")),
         removed: Enum.count(lines, &(&1.op == "-")),
-        overflow: max(total - @collapsed_budget, 0),
-        over?: total > @collapsed_budget,
-        empty?: total == 0
+        overflow: max(drawable - @collapsed_budget, 0),
+        over?: drawable > @collapsed_budget,
+        empty?: lines == []
       )
 
     ~H"""
@@ -153,6 +139,25 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   end
 
   # ── internals ──────────────────────────────────────────────────────────────
+
+  # Split the diff after the budget-th DRAWABLE row (charter D40): a `gap` hunk
+  # separator never spends budget — it rides free in the head — and never stays
+  # in the summary once the budget is spent (a gap at or past the fold belongs
+  # to the `<details>` tail it separates). The overflow footnote counts
+  # undisplayed DRAWABLE rows only. Mirrors Components.chat_diff_budget_split/1
+  # (string-keyed twin) plus chat_blocks.go and mobile chat.tsx.
+  defp budget_split(lines) do
+    {head, rest, _drawn} =
+      Enum.reduce(lines, {[], [], 0}, fn line, {head, rest, drawn} ->
+        if drawn < @collapsed_budget do
+          {[line | head], rest, drawn + if(line.op == "gap", do: 0, else: 1)}
+        else
+          {head, [line | rest], drawn}
+        end
+      end)
+
+    {Enum.reverse(head), Enum.reverse(rest)}
+  end
 
   # Build the flat diff-line list from the input shape, reusing TextDiff — the
   # ONE line-diff engine. `diff_lines/2` tolerates nil, so a defensively-missing
@@ -211,35 +216,13 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   @doc """
   Normalize a TodoWrite-shaped `input` into a display list of
-  `%{content, status, active_form}` — `status` is one of
-  `:pending | :in_progress | :completed`. Anything non-list yields `[]` so a
-  malformed frame degrades to an empty (but honest) card rather than raising.
+  `%{content, status, active_form}` — thin delegation to
+  `Barkpark.Chat.ToolRows.parse_todos/1` (the pure derivation lives in core).
   """
   @spec parse_todos(any()) :: [
           %{content: String.t(), status: atom(), active_form: String.t() | nil}
         ]
-  def parse_todos(%{"todos" => todos}) when is_list(todos) do
-    todos
-    |> Enum.filter(&is_map/1)
-    |> Enum.map(fn t ->
-      %{
-        content: to_string(t["content"] || ""),
-        status: normalize_status(t["status"]),
-        active_form: active_form(t)
-      }
-    end)
-  end
-
-  def parse_todos(_), do: []
-
-  defp normalize_status("in_progress"), do: :in_progress
-  defp normalize_status("completed"), do: :completed
-  defp normalize_status(_), do: :pending
-
-  # The modern shape carries a present-tense `activeForm` ("Running the tests")
-  # shown as the live line under an in-progress item; the legacy shape has none.
-  defp active_form(%{"activeForm" => af}) when is_binary(af) and af != "", do: af
-  defp active_form(_), do: nil
+  defdelegate parse_todos(input), to: ToolRows
 
   @doc """
   The living checklist card (charter D39). `@todos` is a `parse_todos/1` list;
@@ -285,11 +268,9 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   # ── glyphs + styling (the terminal's checklist marks) ──────────────────────
 
-  @doc "The checklist glyph for a todo status: ☐ todo · ◐ doing · ☒ done."
+  @doc "The checklist glyph for a todo status (core delegation): ☐ todo · ◐ doing · ☒ done."
   @spec todo_glyph(atom()) :: String.t()
-  def todo_glyph(:completed), do: "☒"
-  def todo_glyph(:in_progress), do: "◐"
-  def todo_glyph(_), do: "☐"
+  defdelegate todo_glyph(status), to: ToolRows
 
   defp todo_glyph_style(:completed), do: "flex: none; color: var(--ok);"
   defp todo_glyph_style(:in_progress), do: "flex: none; color: var(--primary);"

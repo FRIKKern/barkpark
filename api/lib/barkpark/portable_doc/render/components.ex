@@ -23,6 +23,8 @@ defmodule Barkpark.PortableDoc.Render.Components do
   """
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
+  alias Barkpark.Chat.ToolRows
+  alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render.StatusVocab
   alias Barkpark.PortableDoc.Slots
 
@@ -413,6 +415,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
             t_html = if t == "", do: "", else: ~s|<div class="bp-pnode__t">#{t}</div>|
             d_html = if d == "", do: "", else: ~s|<div class="bp-pnode__d">#{d}</div>|
             f_html = if f == "", do: "", else: ~s|<div class="bp-pnode__f">#{f}</div>|
+
             ~s|<div class="bp-pnode#{src_class}">#{k_html}#{t_html}#{d_html}#{f_html}#{src_html}</div>|
           end)
           |> Enum.join(~s|<span class="bp-pipe__arr">→</span>|)
@@ -541,7 +544,9 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
         cols =
           board_roles()
-          |> Enum.map(fn role -> board_col(role, board_label(role), Map.get(by_role, role, [])) end)
+          |> Enum.map(fn role ->
+            board_col(role, board_label(role), Map.get(by_role, role, []))
+          end)
           |> Enum.reject(&(&1 == ""))
           |> Enum.join("")
 
@@ -553,8 +558,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   # The board's column roles, in white-ladder order (cancel folds to a tally, so
   # it is NOT a column). One place defines the order; labels are DERIVED, never a
-  # second hardcoded copy.
-  defp board_roles, do: ~w(open ready progress blocked done)
+  # second hardcoded copy. The two thought states are dim columns at the ladder
+  # BOTTOM (charter D12 — thought states ARE visible board columns); empty columns
+  # are dropped, so a board with no considering/researching rows is byte-stable.
+  defp board_roles, do: ~w(open ready progress blocked done considering researching)
 
   # A board column header: the canonical lowercase label sentence-cased at render
   # (the fold — "in progress" → "In progress"), NOT a hand-typed board label.
@@ -631,6 +638,784 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   def roadmap_html(_), do: ""
+
+  # ═══ Chat tool / todo / thinking rows (charter D25 — dual-surface Law 1) ══════
+  #
+  # The three highest-frequency non-text chat rows become FIRST-CLASS PortableDoc
+  # block types — `chat-tool-diff`, `chat-todo`, `chat-thinking` — so they render
+  # through the SAME compose_block path the assistant reply body already uses (D8)
+  # on BOTH surfaces. The GUI/reader leg is these `_raw` emitters (`compose_block`
+  # :article delegates here); the Go TUI leg (`internal/chat`) decodes the IDENTICAL
+  # typed block map. This closes the Law-1 parallel-render fork: no more bespoke
+  # inline `ChatToolRenderer.tool_diff/todo_card` HEEx in `chat_live.ex`.
+  #
+  # The pure derivations are REUSED verbatim — NO new diff/parse engine is invented:
+  # `Barkpark.Papers.TextDiff.diff_lines/2` (the ONE line diff), `ChatToolRenderer.
+  # classify/1` (shape dispatch), `ChatToolRenderer.parse_todos/1` +
+  # `ChatToolRenderer.todo_glyph/1` (the living checklist), and the "thought for ~N
+  # tokens" count label. Output stays byte-faithful to today's `chat_tool_renderer.ex`.
+  #
+  # Each block carries its DERIVED, surface-neutral render data (diff `lines`,
+  # `todos`, `tokens`) so the Go half renders the same rows WITHOUT re-running the
+  # diff (the "one diff engine" law holds across surfaces); the block-build/render
+  # split mirrors the reply body's markdown→blocks derivation (D8).
+
+  # Lines shown before a chat diff collapses behind a details/summary — matches
+  # `ChatToolRenderer`'s @collapsed_budget so the two surfaces fold at the same row.
+  @chat_diff_budget 20
+
+  @doc """
+  Build a `chat-tool-diff` block from a raw tool-call `input` map. The derived
+  `lines` (string-keyed `%{"op","text"}`) come from `TextDiff.diff_lines/2` via
+  the shared shape dispatch — the SAME derivation the GUI renderer re-runs, so
+  the fixture freshness lock (`lines == derive(input)`) keeps both surfaces true.
+  Returns `nil` for a non-diff shape (the generic tool row stands on its own).
+  """
+  @spec chat_tool_diff_block(map() | any()) :: map() | nil
+  def chat_tool_diff_block(input) do
+    case chat_diff_line_maps(input) do
+      [] ->
+        nil
+
+      lines ->
+        %{
+          "type" => "chat-tool-diff",
+          "input" => input,
+          "lines" => lines,
+          "added" => Enum.count(lines, &(&1["op"] == "+")),
+          "removed" => Enum.count(lines, &(&1["op"] == "-"))
+        }
+    end
+  end
+
+  @doc """
+  Build a `chat-todo` block from an ALREADY-parsed todo list
+  (`ChatToolRenderer.parse_todos/1` output — `%{content, status, active_form}`).
+  The `chat_live` path already parses; the controller/generator parse first via
+  `chat_todo_block_from_input/1`.
+  """
+  @spec chat_todo_block([map()]) :: map()
+  def chat_todo_block(todos) when is_list(todos) do
+    %{"type" => "chat-todo", "todos" => Enum.map(todos, &todo_to_json/1)}
+  end
+
+  def chat_todo_block(_), do: %{"type" => "chat-todo", "todos" => []}
+
+  @doc "Build a `chat-todo` block straight from a raw TodoWrite `input` map."
+  @spec chat_todo_block_from_input(map() | any()) :: map()
+  def chat_todo_block_from_input(input), do: chat_todo_block(ToolRows.parse_todos(input))
+
+  @doc """
+  Build a `chat-thinking` block from a cumulative thinking-token count (charter
+  D41). The wire never carries thinking TEXT — only the count — so the block is a
+  single integer both surfaces render as "thought for ~N tokens".
+  """
+  @spec chat_thinking_block(integer() | any()) :: map()
+  def chat_thinking_block(tokens) when is_integer(tokens) and tokens >= 0 do
+    %{"type" => "chat-thinking", "tokens" => tokens}
+  end
+
+  def chat_thinking_block(_), do: %{"type" => "chat-thinking", "tokens" => 0}
+
+  # ═══ Chat approval / question / plan cards (charter D35 — the INTERACTIVE rows) ═
+  #
+  # approval/question/plan are the three INTERACTIVE chat rows. Unlike the inert
+  # tool/todo/thinking blocks above, their ANSWERABILITY (the Studio answer forms,
+  # the TUI focus ring + ctrl+a/ctrl+r) is driven by the message ENVELOPE
+  # (role + request_id + approval_status), NEVER by the block. The block carries
+  # only the read-time VISUAL, synthesized from the SAME metadata the Recorder
+  # persists (`persist_approval_ask`: request_id, tool_name, input, approval_status)
+  # — NO persist change, NO migration. `message_json` emits BOTH the envelope and
+  # this block, so a naive inert copy that answered off the block would render a
+  # DEAD card; the answer path stays on the message (D35).
+
+  @doc """
+  Build a `chat-approval` block from a persisted approval row's metadata
+  (`%{"tool_name","input","approval_status"}`). Read-time synthesis: the card
+  names the tool, previews the ask in one line (the Recorder's `tool_line`
+  vocabulary), and carries the terminal status so a read-only replay is honest.
+  """
+  @spec chat_approval_block(map() | any()) :: map()
+  def chat_approval_block(meta) when is_map(meta) do
+    %{
+      "type" => "chat-approval",
+      "tool_name" => chat_tool_name(Map.get(meta, "tool_name")),
+      "summary" => chat_ask_summary(Map.get(meta, "tool_name"), Map.get(meta, "input")),
+      "approval_status" => chat_approval_status(Map.get(meta, "approval_status"))
+    }
+  end
+
+  def chat_approval_block(_), do: chat_approval_block(%{})
+
+  @doc """
+  Build a `chat-question` block from an AskUserQuestion row's metadata. Each
+  question carries its prompt + option labels — the read-time visual of the
+  question card. The answer FORM stays envelope-driven (D35).
+  """
+  @spec chat_question_block(map() | any()) :: map()
+  def chat_question_block(meta) when is_map(meta) do
+    %{
+      "type" => "chat-question",
+      "questions" => chat_questions(Map.get(meta, "input")),
+      "approval_status" => chat_approval_status(Map.get(meta, "approval_status"))
+    }
+  end
+
+  def chat_question_block(_), do: chat_question_block(%{})
+
+  @doc """
+  Build a `chat-plan` block from an ExitPlanMode row's metadata. The title is the
+  plan's first heading (charter D34), the preview a clamped plain-text lede — the
+  read-only visual of the proposed plan. Approve / Keep planning stays on the
+  envelope (D35); the full plan replays in the interactive card / published Paper.
+  """
+  @spec chat_plan_block(map() | any()) :: map()
+  def chat_plan_block(meta) when is_map(meta) do
+    plan = chat_plan_markdown(Map.get(meta, "input"))
+
+    %{
+      "type" => "chat-plan",
+      "title" => chat_plan_title(plan),
+      "preview" => chat_plan_preview(plan),
+      "approval_status" => chat_approval_status(Map.get(meta, "approval_status"))
+    }
+  end
+
+  def chat_plan_block(_), do: chat_plan_block(%{})
+
+  @doc """
+  Render a `chat-tool-diff` block: the terminal-style `+`/`−` line diff beneath a
+  tool call (dispatch on input SHAPE, never tool name — `ChatToolRenderer`). A
+  diff over `@chat_diff_budget` DRAWABLE lines (gaps never spend budget — D40)
+  folds behind a `<details>` with an honest `+N more lines` counting drawable
+  rows only. Re-derives from `block["input"]` via the ONE `TextDiff` engine,
+  so it is byte-faithful to `ChatToolRenderer.tool_diff/1`. Evergreen tokens only.
+  """
+  def chat_tool_diff_html(block) when is_map(block) do
+    case chat_diff_line_maps(Map.get(block, "input")) do
+      [] ->
+        ""
+
+      lines ->
+        added = Enum.count(lines, &(&1["op"] == "+"))
+        removed = Enum.count(lines, &(&1["op"] == "-"))
+        drawable = Enum.count(lines, &(&1["op"] != "gap"))
+        {head, rest} = chat_diff_budget_split(lines)
+
+        counts =
+          ~s|<div class="text-dim" style="font-size: 11px; margin-bottom: 4px;">| <>
+            ~s|<span style="color: var(--ok);">+#{added}</span> | <>
+            ~s|<span style="color: var(--danger);">−#{removed}</span></div>|
+
+        body =
+          if drawable > @chat_diff_budget do
+            overflow = drawable - @chat_diff_budget
+
+            ~s|<details><summary style="cursor: pointer; list-style: none;">| <>
+              chat_diff_rows_html(head) <>
+              ~s|<div class="text-dim" style="font-size: 11px; padding: 1px 0;">… +#{overflow} more lines</div>| <>
+              ~s|</summary>#{chat_diff_rows_html(rest)}</details>|
+          else
+            chat_diff_rows_html(head)
+          end
+
+        ~s|<div class="bp-chat-tool-diff text-xs" style="font-family: var(--font-mono); margin: 4px 0 0 16px; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
+          counts <> body <> ~s|</div>|
+    end
+  end
+
+  def chat_tool_diff_html(_), do: ""
+
+  # ═══ Code-story blocks — `diff` + `filetree` (charter W7, D75–D78/D85) ════════
+  #
+  # The two authored code-story blocks born in W7. Unlike chat-tool-diff (which
+  # DERIVES lines from a tool-call input via TextDiff), `diff` carries ONE
+  # verbatim unified-diff text field parsed at render time on every surface
+  # (D75) — the front-end differs, the ROW back-end is SHARED (D76): the rows
+  # render through the same private chat_diff_rows_html/chat_row_style/
+  # chat_prefix vocabulary and fold at the same @chat_diff_budget. Style-invariant
+  # single clauses like chat-tool-diff — the inline-token mono rendering reads
+  # identically in email.
+
+  @doc """
+  Render a `diff` block: a verbatim unified diff (`diff` attr) parsed into the
+  shared chat diff-row vocabulary (D76). Per D77: `@@` hunk headers render as dim
+  context rows VERBATIM (their `-l,s +l,s` numbers are load-bearing); `diff
+  --git`/`index`/`---` header lines never count as +/- rows; each `+++`
+  transition emits a bold path sub-header (multi-file diffs get one per file
+  section). Optional `file`/`lang` metadata lead the +N −M tally row. Over
+  `@chat_diff_budget` rows the tail folds behind a `<details>` (same fold as
+  chat-tool-diff).
+  """
+  def diff_html(block) when is_map(block) do
+    rows = block |> Map.get("diff", "") |> stringish() |> diff_rows()
+    added = Enum.count(rows, &(&1["op"] == "+"))
+    removed = Enum.count(rows, &(&1["op"] == "-"))
+    {head, rest} = Enum.split(rows, @chat_diff_budget)
+
+    file = stringish(Map.get(block, "file", ""))
+    lang = stringish(Map.get(block, "lang", ""))
+
+    lead =
+      [
+        if(file == "",
+          do: "",
+          else: ~s|<span style="font-weight: 600;">#{escape_html(file)}</span>|
+        ),
+        if(lang == "", do: "", else: escape_html(lang))
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join(" · ")
+
+    lead_html = if lead == "", do: "", else: lead <> " · "
+
+    counts =
+      ~s|<div class="text-dim" style="font-size: 11px; margin-bottom: 4px;">| <>
+        lead_html <>
+        ~s|<span style="color: var(--ok);">+#{added}</span> | <>
+        ~s|<span style="color: var(--danger);">−#{removed}</span></div>|
+
+    body =
+      if length(rows) > @chat_diff_budget do
+        overflow = length(rows) - @chat_diff_budget
+
+        ~s|<details><summary style="cursor: pointer; list-style: none;">| <>
+          diff_section_rows_html(head) <>
+          ~s|<div class="text-dim" style="font-size: 11px; padding: 1px 0;">… +#{overflow} more lines</div>| <>
+          ~s|</summary>#{diff_section_rows_html(rest)}</details>|
+      else
+        diff_section_rows_html(head)
+      end
+
+    ~s|<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
+      counts <> body <> ~s|</div>|
+  end
+
+  def diff_html(_), do: ""
+
+  @doc """
+  Render a `filetree` block: verbatim tree lines (`text` attr — box glyphs +
+  indentation preserved via `white-space: pre`), each line's trailing annotation
+  split on the first ` ● `/` ○ `/` ✕ ` marker into a colored annotation span
+  (D78). An optional `legend` string attr renders a dim legend row beneath the
+  tree — the block self-describes its glyphs. Degrades to plain preformatted
+  text when no marker matches.
+  """
+  def filetree_html(block) when is_map(block) do
+    rows =
+      block
+      |> Map.get("text", "")
+      |> stringish()
+      |> split_verbatim_lines()
+      |> Enum.map_join("", &filetree_row_html/1)
+
+    legend = stringish(Map.get(block, "legend", ""))
+
+    legend_html =
+      if legend == "",
+        do: "",
+        else:
+          ~s|<div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">#{escape_html(legend)}</div>|
+
+    ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
+      rows <> legend_html <> ~s|</div>|
+  end
+
+  def filetree_html(_), do: ""
+
+  # ── diff/filetree private parse helpers (the verbatim-text front-end, D76) ────
+
+  # Verbatim text → display rows. Row maps share the chat vocabulary
+  # (%{"op","text"} with op in "+"/"-"/""), plus the diff-only "file" op the
+  # bold path sub-header renders (D77). Never a second diff engine — this is a
+  # line CLASSIFIER over author-provided text, not a diff derivation.
+  defp diff_rows(text) do
+    text
+    |> split_verbatim_lines()
+    |> Enum.flat_map(&diff_line_row/1)
+  end
+
+  # Order matters: "+++ "/"--- " match before the bare "+"/"-" ops.
+  defp diff_line_row("+++ " <> path), do: [%{"op" => "file", "text" => strip_b_prefix(path)}]
+  defp diff_line_row("--- " <> _), do: []
+  defp diff_line_row("diff --git " <> _), do: []
+  defp diff_line_row("index " <> _), do: []
+  defp diff_line_row("@@" <> _ = line), do: [%{"op" => "", "text" => line}]
+  defp diff_line_row("+" <> rest), do: [%{"op" => "+", "text" => rest}]
+  defp diff_line_row("-" <> rest), do: [%{"op" => "-", "text" => rest}]
+  defp diff_line_row(" " <> rest), do: [%{"op" => "", "text" => rest}]
+  defp diff_line_row(line), do: [%{"op" => "", "text" => line}]
+
+  defp strip_b_prefix("b/" <> rest), do: rest
+  defp strip_b_prefix(path), do: path
+
+  # Rows render through the SHARED chat row back-end (D76); only the diff-only
+  # bold path sub-header is emitted here.
+  defp diff_section_rows_html(rows) do
+    Enum.map_join(rows, "", fn
+      %{"op" => "file", "text" => path} ->
+        ~s|<div style="font-weight: 600; margin: 4px 0 1px; white-space: pre-wrap; overflow-wrap: anywhere;">#{escape_html(path)}</div>|
+
+      row ->
+        chat_diff_rows_html([row])
+    end)
+  end
+
+  # split on "\n", drop a single trailing empty line; "" → [] — the same
+  # semantics as chat.ts splitLines, so both surfaces see identical line lists.
+  defp split_verbatim_lines(""), do: []
+
+  defp split_verbatim_lines(text) do
+    lines = String.split(text, "\n")
+    if List.last(lines) == "", do: Enum.drop(lines, -1), else: lines
+  end
+
+  # The D78 annotation markers with their evergreen token colors. The glyph is
+  # the semantic carrier; color is never load-bearing (the legend row
+  # disambiguates locally).
+  @filetree_markers [{" ● ", "var(--ok)"}, {" ○ ", "var(--fg-dim)"}, {" ✕ ", "var(--danger)"}]
+
+  defp filetree_row_html(line) do
+    case split_filetree_note(line) do
+      {path, nil} ->
+        ~s|<div style="white-space: pre;">#{escape_html(path)}</div>|
+
+      {path, {glyph, note, color}} ->
+        ~s|<div style="white-space: pre;">#{escape_html(path)}| <>
+          ~s|<span class="bp-filetree-note" style="color: #{color};">#{escape_html(glyph <> note)}</span></div>|
+    end
+  end
+
+  # First marker occurrence (scanning left-to-right across all three) splits the
+  # line into the verbatim path part and the annotation (glyph + trailing text).
+  defp split_filetree_note(line) do
+    @filetree_markers
+    |> Enum.flat_map(fn {glyph, color} ->
+      case :binary.match(line, glyph) do
+        :nomatch -> []
+        {idx, _len} -> [{idx, glyph, color}]
+      end
+    end)
+    |> Enum.sort()
+    |> case do
+      [] ->
+        {line, nil}
+
+      [{idx, glyph, color} | _] ->
+        path = binary_part(line, 0, idx)
+        rest_start = idx + byte_size(glyph)
+        rest = binary_part(line, rest_start, byte_size(line) - rest_start)
+        {path, {glyph, rest, color}}
+    end
+  end
+
+  @doc """
+  Render a `chat-todo` block: the living checklist card (charter D39) — one
+  ☐/◐/☒ row per item with an honest `N/M done` progress read. An empty list
+  still renders the header + a "no items" line, never a blank box. Reuses
+  `ChatToolRenderer.todo_glyph/1`.
+  """
+  def chat_todo_html(block) when is_map(block) do
+    todos = block |> Map.get("todos") |> as_list()
+
+    progress =
+      if todos == [],
+        do: "",
+        else: ~s| <span style="opacity: 0.6;"> · #{todo_progress(todos)}</span>|
+
+    header =
+      ~s|<div class="text-xs" style="overflow-wrap: anywhere;">| <>
+        ~s|<span style="color: var(--primary);">●</span> <span>Update todos</span>#{progress}</div>|
+
+    items =
+      if todos == [] do
+        ~s|<div class="text-xs text-dim" style="padding-left: 16px;">⎿ no items</div>|
+      else
+        rows = todos |> Enum.map(&chat_todo_item_html/1) |> Enum.join("")
+
+        ~s|<ul style="list-style: none; margin: 4px 0 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 2px;">#{rows}</ul>|
+      end
+
+    ~s|<div class="bp-chat-todo" style="font-family: var(--font-mono);">#{header}#{items}</div>|
+  end
+
+  def chat_todo_html(_), do: ""
+
+  @doc """
+  Render a `chat-thinking` block: the dim mono `✻ thought for ~N tokens` row
+  (charter D41) — no thinking text ever, identical live and on replay.
+  """
+  def chat_thinking_html(block) when is_map(block) do
+    tokens = Map.get(block, "tokens")
+
+    label =
+      if is_integer(tokens), do: "thought for ~#{tokens} tokens", else: "thought"
+
+    ~s|<div class="bp-chat-thinking text-xs text-dim" style="font-family: var(--font-mono);">| <>
+      ~s|<span aria-hidden="true">✻</span> #{escape_html(label)}</div>|
+  end
+
+  def chat_thinking_html(_), do: ""
+
+  @doc """
+  Render a `chat-approval` block: the read-only VISUAL of a permission ask — the
+  tool name, a one-line preview, and the status badge. The ANSWER affordance is
+  NEVER here (envelope-driven, D35); this is what a replay / reader shows and the
+  body the TUI card wraps with its interactive shell.
+  """
+  def chat_approval_html(block) when is_map(block) do
+    tool = Map.get(block, "tool_name", "tool")
+    summary = Map.get(block, "summary", "")
+    status = Map.get(block, "approval_status", "pending")
+    title = if status == "pending", do: "Allow #{tool}?", else: tool
+
+    ~s|<div class="bp-chat-approval text-xs" style="font-family: var(--font-mono);">| <>
+      chat_card_header(title, status) <>
+      chat_card_body(summary) <>
+      ~s|</div>|
+  end
+
+  def chat_approval_html(_), do: ""
+
+  @doc """
+  Render a `chat-question` block: the read-only VISUAL of an AskUserQuestion —
+  each prompt with its option chips. The answer FORM is envelope-driven (D35).
+  An empty question set still renders an honest "no question" line, never blank.
+  """
+  def chat_question_html(block) when is_map(block) do
+    questions = block |> Map.get("questions") |> as_list()
+    status = Map.get(block, "approval_status", "pending")
+
+    body =
+      if questions == [] do
+        ~s|<div class="text-dim" style="padding-left: 12px;">⎿ no question</div>|
+      else
+        questions |> Enum.map(&chat_question_item_html/1) |> Enum.join("")
+      end
+
+    ~s|<div class="bp-chat-question text-xs" style="font-family: var(--font-mono);">| <>
+      chat_card_header("Question", status) <>
+      body <>
+      ~s|</div>|
+  end
+
+  def chat_question_html(_), do: ""
+
+  @doc """
+  Render a `chat-plan` block: the read-only VISUAL of a proposed plan — the first
+  heading as a title and a clamped lede. Approve / Keep planning is envelope-driven
+  (D35); the full plan replays in the interactive card / the published Paper.
+  """
+  def chat_plan_html(block) when is_map(block) do
+    title = Map.get(block, "title", "Proposed plan")
+    preview = Map.get(block, "preview", "")
+    status = Map.get(block, "approval_status", "pending")
+
+    ~s|<div class="bp-chat-plan text-xs" style="font-family: var(--font-mono);">| <>
+      chat_card_header(title, status) <>
+      chat_card_body(preview) <>
+      ~s|</div>|
+  end
+
+  def chat_plan_html(_), do: ""
+
+  # ── chat card internals (approval / question / plan visual — D35) ────────────
+
+  # The shared header row: a bold title and a right-aligned status word. The
+  # status is the honest read-only state a replay shows (the interactive answer
+  # layer lives on the envelope, not here).
+  defp chat_card_header(title, status) do
+    ~s|<div style="display: flex; gap: 6px; align-items: baseline;">| <>
+      ~s|<span style="font-weight: 600;">#{escape_html(title)}</span>| <>
+      ~s|<span class="text-dim" style="margin-left: auto; white-space: nowrap;">| <>
+      ~s|#{escape_html(chat_status_label(status))}</span></div>|
+  end
+
+  # The one-line ask/plan preview beneath the header; blank text renders nothing
+  # (the header alone stands) rather than an empty box.
+  defp chat_card_body(text) do
+    case String.trim(to_string(text)) do
+      "" ->
+        ""
+
+      trimmed ->
+        ~s|<div style="opacity: 0.85; overflow-wrap: anywhere; margin-top: 2px;">| <>
+          ~s|#{escape_html(trimmed)}</div>|
+    end
+  end
+
+  # One question row: the prompt over its option chips (labels only — the visual,
+  # not the interactive form).
+  defp chat_question_item_html(q) do
+    question = Map.get(q, "question", "")
+    options = q |> Map.get("options") |> as_list()
+
+    chips =
+      if options == [] do
+        ""
+      else
+        rendered =
+          Enum.map_join(options, "", fn opt ->
+            ~s|<span style="display: inline-block; padding: 0 6px; margin: 2px 4px 0 0; | <>
+              ~s|border: 1px solid var(--border-muted); border-radius: 4px;">| <>
+              ~s|#{escape_html(to_string(opt))}</span>|
+          end)
+
+        ~s|<div style="margin: 2px 0 0 12px;">#{rendered}</div>|
+      end
+
+    ~s|<div style="margin-top: 4px;"><div style="overflow-wrap: anywhere;">| <>
+      ~s|#{escape_html(to_string(question))}</div>#{chips}</div>|
+  end
+
+  # The card status words — pending, or a terminal decision glyph. Reused by all
+  # three interactive cards (the block's own read-only badge; the TUI footer's
+  # interactive badge is a SEPARATE envelope-driven layer in internal/chat).
+  defp chat_status_label("pending"), do: "pending"
+  defp chat_status_label("allowed"), do: "✓ allowed"
+  defp chat_status_label("denied"), do: "⊘ denied"
+  defp chat_status_label("canceled"), do: "— canceled"
+  defp chat_status_label(other), do: to_string(other)
+
+  # The tool name for an ask, defaulting to a generic "tool" when the row carries
+  # none (a legacy/malformed frame) so the card header never reads "Allow ?".
+  defp chat_tool_name(name) when is_binary(name) and name != "", do: name
+  defp chat_tool_name(_), do: "tool"
+
+  # The approval lifecycle, folded to the known vocabulary — pending until a
+  # terminal decision (allowed | denied | canceled). Anything unrecognized reads
+  # pending (fail-open to "still awaiting you", never a fake resolution).
+  defp chat_approval_status(s) when s in ["pending", "allowed", "denied", "canceled"], do: s
+  defp chat_approval_status(_), do: "pending"
+
+  # A one-line preview of an approval ask — the tool plus a diff-shaped file path
+  # or a compact k:v preview, mirroring the Recorder's `tool_line`. Keys are
+  # sorted so the preview is deterministic across a regenerate (the fixture lock).
+  defp chat_ask_summary(name, input) when is_map(input) do
+    tool = chat_tool_name(name)
+
+    if is_binary(input["file_path"]) do
+      "#{tool} — #{input["file_path"]}"
+    else
+      preview =
+        input
+        |> Enum.filter(fn {_k, v} -> is_binary(v) end)
+        |> Enum.sort_by(fn {k, _v} -> to_string(k) end)
+        |> Enum.take(2)
+        |> Enum.map_join(" · ", fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
+
+      if preview == "", do: tool, else: "#{tool} — #{preview}"
+    end
+  end
+
+  defp chat_ask_summary(name, _), do: chat_tool_name(name)
+
+  # Normalize the AskUserQuestion input into render-ready questions (prompt +
+  # option labels). Mirrors chat_live's `parse_questions`, string-keyed for JSON.
+  defp chat_questions(%{"questions" => qs}) when is_list(qs) do
+    Enum.map(qs, fn q ->
+      %{
+        "question" => to_string(Map.get(q, "question", "")),
+        "options" => chat_question_options(Map.get(q, "options"))
+      }
+    end)
+  end
+
+  defp chat_questions(_), do: []
+
+  defp chat_question_options(opts) when is_list(opts) do
+    opts
+    |> Enum.map(fn
+      %{"label" => label} -> to_string(label)
+      label when is_binary(label) -> label
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp chat_question_options(_), do: []
+
+  # The ExitPlanMode plan markdown (`%{"plan" => md}`), or "" when absent.
+  defp chat_plan_markdown(%{"plan" => plan}) when is_binary(plan), do: plan
+  defp chat_plan_markdown(_), do: ""
+
+  # The plan title: the first markdown heading's text, else "Proposed plan"
+  # (mirrors chat_live's `plan_title` without booting the paper engine).
+  defp chat_plan_title(plan) when is_binary(plan) do
+    plan
+    |> String.split("\n")
+    |> Enum.find_value("Proposed plan", fn line ->
+      case Regex.run(~r/^\s*#+\s+(\S.*?)\s*$/, line) do
+        [_, heading] -> heading
+        _ -> nil
+      end
+    end)
+  end
+
+  defp chat_plan_title(_), do: "Proposed plan"
+
+  # A clamped plain-text lede: the plan's non-heading prose, joined and clipped so
+  # the card reads compact. The clip is stored on the block so the fixture's
+  # projection text and the render agree exactly (word-safe: a hard char clip).
+  defp chat_plan_preview(plan) when is_binary(plan) do
+    plan
+    |> String.split("\n")
+    |> Enum.reject(&(String.match?(&1, ~r/^\s*#/) or String.trim(&1) == ""))
+    |> Enum.join(" ")
+    |> String.trim()
+    |> chat_clip(200)
+  end
+
+  defp chat_plan_preview(_), do: ""
+
+  defp chat_clip(text, max) do
+    if String.length(text) <= max, do: text, else: String.slice(text, 0, max) <> "…"
+  end
+
+  # ── chat toolrow internals (derivations REUSED, never reinvented) ───────────
+
+  # The flat diff-line list for a tool input, keyed the SAME way as
+  # `ChatToolRenderer` but string-keyed for JSON. `TextDiff.diff_lines/2` is the
+  # ONE line engine; `ChatToolRenderer.classify/1` is the ONE shape dispatch.
+  defp chat_diff_line_maps(input) do
+    case ToolRows.classify(input) do
+      :edit ->
+        input |> Map.get("old_string") |> chat_diff(Map.get(input, "new_string"))
+
+      :write ->
+        chat_diff("", Map.get(input, "content"))
+
+      :multi_edit ->
+        chat_multi_edit_lines(Map.get(input, "edits"))
+
+      :generic ->
+        []
+    end
+  end
+
+  defp chat_diff(old_text, new_text) do
+    old_text
+    |> TextDiff.diff_lines(new_text)
+    |> Enum.map(fn %{op: op, text: text} -> %{"op" => op, "text" => text} end)
+  end
+
+  # Stack each edit's hunk, separated by a faint gap row — mirrors
+  # `ChatToolRenderer.multi_edit_lines/1`. Defensive: a malformed edit yields no
+  # hunk rather than raising.
+  defp chat_multi_edit_lines(edits) when is_list(edits) do
+    edits
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(fn e -> chat_diff(Map.get(e, "old_string"), Map.get(e, "new_string")) end)
+    |> Enum.reject(&(&1 == []))
+    |> Enum.intersperse([%{"op" => "gap", "text" => ""}])
+    |> List.flatten()
+  end
+
+  defp chat_multi_edit_lines(_), do: []
+
+  # Split the diff after the budget-th DRAWABLE row (charter D40): a `gap` hunk
+  # separator never spends budget — it rides free in the head — and never stays
+  # in the summary once the budget is spent (a gap at or past the fold belongs to
+  # the `<details>` tail it separates). The overflow footnote counts undisplayed
+  # DRAWABLE rows only; the web surface keeps the folded tail behind `<details>`
+  # — parity with the terminal/mobile discard is the budget arithmetic, never
+  # the DOM. Mirrors chat_blocks.go / mobile chat.tsx / react chat.ts.
+  defp chat_diff_budget_split(lines) do
+    {head, rest, _drawn} =
+      Enum.reduce(lines, {[], [], 0}, fn line, {head, rest, drawn} ->
+        if drawn < @chat_diff_budget do
+          {[line | head], rest, drawn + if(line["op"] == "gap", do: 0, else: 1)}
+        else
+          {head, [line | rest], drawn}
+        end
+      end)
+
+    {Enum.reverse(head), Enum.reverse(rest)}
+  end
+
+  defp chat_diff_rows_html(lines) do
+    Enum.map_join(lines, "", fn %{"op" => op, "text" => text} ->
+      ~s|<div style="#{chat_row_style(op)}">#{chat_prefix(op)}#{escape_html(text)}</div>|
+    end)
+  end
+
+  defp chat_row_style("+"),
+    do:
+      "color: var(--ok); background: var(--ok-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;"
+
+  defp chat_row_style("-"),
+    do:
+      "color: var(--danger); background: var(--danger-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;"
+
+  defp chat_row_style("gap"),
+    do: "border-top: 1px solid var(--border-muted); margin: 4px 0; height: 0;"
+
+  defp chat_row_style(_),
+    do: "color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;"
+
+  defp chat_prefix("+"), do: "+ "
+  defp chat_prefix("-"), do: "- "
+  defp chat_prefix("gap"), do: ""
+  defp chat_prefix(_), do: "&nbsp;&nbsp;"
+
+  # A parsed todo (atom-keyed) → JSON-safe string-keyed map. `status` is one of
+  # "pending" | "in_progress" | "completed"; `active_form` is null when absent.
+  defp todo_to_json(%{content: content, status: status} = todo) do
+    %{
+      "content" => to_string(content),
+      "status" => Atom.to_string(status),
+      "active_form" => Map.get(todo, :active_form)
+    }
+  end
+
+  defp todo_to_json(todo) when is_map(todo) do
+    %{
+      "content" => to_string(Map.get(todo, "content", "")),
+      "status" => to_string(Map.get(todo, "status", "pending")),
+      "active_form" => Map.get(todo, "active_form")
+    }
+  end
+
+  defp chat_todo_item_html(todo) do
+    status = Map.get(todo, "status", "pending")
+    content = Map.get(todo, "content", "")
+    active_form = Map.get(todo, "active_form")
+
+    glyph = ToolRows.todo_glyph(chat_todo_status_atom(status))
+
+    active_html =
+      if status == "in_progress" and is_binary(active_form) and active_form != "" do
+        ~s|<div class="text-dim" style="padding-left: 20px; opacity: 0.75;">→ #{escape_html(active_form)}</div>|
+      else
+        ""
+      end
+
+    ~s|<li class="text-xs"><div style="display: flex; gap: 6px; align-items: baseline;">| <>
+      ~s|<span aria-hidden="true" style="#{chat_todo_glyph_style(status)}">#{glyph}</span>| <>
+      ~s|<span style="#{chat_todo_text_style(status)}">#{escape_html(content)}</span></div>#{active_html}</li>|
+  end
+
+  defp chat_todo_status_atom("completed"), do: :completed
+  defp chat_todo_status_atom("in_progress"), do: :in_progress
+  defp chat_todo_status_atom(_), do: :pending
+
+  defp chat_todo_glyph_style("completed"), do: "flex: none; color: var(--ok);"
+  defp chat_todo_glyph_style("in_progress"), do: "flex: none; color: var(--primary);"
+  defp chat_todo_glyph_style(_), do: "flex: none; opacity: 0.6;"
+
+  defp chat_todo_text_style("completed"),
+    do: "overflow-wrap: anywhere; opacity: 0.6; text-decoration: line-through;"
+
+  defp chat_todo_text_style("in_progress"),
+    do: "overflow-wrap: anywhere; color: var(--primary); font-weight: 600;"
+
+  defp chat_todo_text_style(_), do: "overflow-wrap: anywhere;"
+
+  # "1/3 done" — the compact honest progress read; in-progress is not "done".
+  defp todo_progress(todos) do
+    done = Enum.count(todos, &(Map.get(&1, "status") == "completed"))
+    "#{done}/#{length(todos)} done"
+  end
 
   defp clampf(n) when is_number(n), do: n |> max(0) |> min(100)
   defp clampf(_), do: 0

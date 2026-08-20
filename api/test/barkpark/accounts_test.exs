@@ -1,6 +1,10 @@
 defmodule Barkpark.AccountsTest do
   @moduledoc "Phase 1 — user accounts, sessions, email tokens, TOTP MFA."
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
+
+  # TOTP codes come from the window-stable helper ONLY — a code minted inline
+  # can expire in the gap before the server validates it (honest-gates S1).
+  import Barkpark.TotpTestHelper
 
   alias Barkpark.Accounts
   alias Barkpark.Accounts.{User, UserSession}
@@ -60,8 +64,34 @@ defmodule Barkpark.AccountsTest do
       assert %User{id: id} = Accounts.verify_user_session_token(token)
       assert id == user.id
 
-      :ok = Accounts.revoke_user_session_token(token)
+      assert {:ok, 1} = Accounts.revoke_user_session_token(token)
       assert is_nil(Accounts.verify_user_session_token(token))
+    end
+
+    # PDS-D523: the revoke used to hardcode `:ok` over `Repo.update_all`, so the
+    # count died at the source and no caller could tell a live session's death
+    # from a no-op. The count now reaches the caller, and the stored row is what
+    # proves it — the assertion reads `revoked_at` back through Repo rather than
+    # trusting the return value it is checking.
+    test "revoke_user_session_token returns the rows it actually stamped, and 0 the second time" do
+      user = user_fixture()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      assert {:ok, 1} = Accounts.revoke_user_session_token(token)
+
+      row = Repo.one(from s in UserSession, where: s.user_id == ^user.id)
+      refute is_nil(row.revoked_at)
+
+      # Idempotent, not an error: nothing left to revoke answers 0, and the
+      # already-stamped row is not re-stamped.
+      first_revoked_at = row.revoked_at
+      assert {:ok, 0} = Accounts.revoke_user_session_token(token)
+
+      assert Repo.one(from s in UserSession, where: s.user_id == ^user.id).revoked_at ==
+               first_revoked_at
+
+      # An unknown token was never a live session: 0, never a raise.
+      assert {:ok, 0} = Accounts.revoke_user_session_token("no-such-session-token")
     end
 
     test "only the SHA-256 hash is stored, never the plaintext" do
@@ -76,7 +106,7 @@ defmodule Barkpark.AccountsTest do
       user = user_fixture()
       {:ok, t1} = Accounts.create_user_session_token(user)
       {:ok, t2} = Accounts.create_user_session_token(user)
-      :ok = Accounts.revoke_all_user_sessions(user)
+      assert {:ok, 2} = Accounts.revoke_all_user_sessions(user)
       assert is_nil(Accounts.verify_user_session_token(t1))
       assert is_nil(Accounts.verify_user_session_token(t2))
     end
@@ -150,6 +180,43 @@ defmodule Barkpark.AccountsTest do
       refute UserSession.active?(%UserSession{expires_at: future, revoked_at: now}, now)
       refute UserSession.active?(%UserSession{expires_at: past, revoked_at: nil}, now)
     end
+
+    # clk-w4-mfa-recency-floor. `mfa_verified_at` is a RECENCY anchor stamped in
+    # the past by the issuer, unlike the DEADLINE predicates above, whose anchor
+    # is SUPPOSED to be in the future. Under a backward wall-clock step the
+    # unfloored predicate reads a future anchor as fresh and keeps the step-up
+    # window open forever — `RequireRecentMfa` (plugs/require_recent_mfa.ex:35)
+    # is the only enforcement reader, so this predicate covers every path.
+    test "mfa_fresh?/3 rejects a mfa_verified_at in the FUTURE" do
+      now = DateTime.utc_now()
+      future = DateTime.add(now, 100_000, :second)
+
+      # On the unfloored predicate this returns TRUE (a future anchor is
+      # trivially inside `now < at + window`).
+      refute UserSession.mfa_fresh?(%UserSession{mfa_verified_at: future}, 600, now)
+    end
+
+    test "mfa_fresh?/3 still accepts an in-window anchor and rejects a stale one" do
+      now = DateTime.utc_now()
+
+      assert UserSession.mfa_fresh?(
+               %UserSession{mfa_verified_at: DateTime.add(now, -10, :second)},
+               600,
+               now
+             )
+
+      # The floor is inclusive at the anchor itself.
+      assert UserSession.mfa_fresh?(%UserSession{mfa_verified_at: now}, 600, now)
+
+      refute UserSession.mfa_fresh?(
+               %UserSession{mfa_verified_at: DateTime.add(now, -1000, :second)},
+               600,
+               now
+             )
+
+      # Never stepped up ⇒ never fresh.
+      refute UserSession.mfa_fresh?(%UserSession{mfa_verified_at: nil}, 600, now)
+    end
   end
 
   describe "email verification + password reset" do
@@ -203,12 +270,12 @@ defmodule Barkpark.AccountsTest do
       user = user_fixture()
       secret = Accounts.totp_secret()
       assert Accounts.totp_uri(user, secret) =~ "otpauth://"
-      code = NimbleTOTP.verification_code(secret)
+      code = totp_code_stable!(secret)
 
       assert {:ok, user, codes} = Accounts.enable_totp(user, secret, code)
       assert user.totp_enabled
       assert length(codes) == 10
-      assert Accounts.valid_totp?(user, NimbleTOTP.verification_code(secret))
+      assert Accounts.valid_totp?(user, totp_code_stable!(secret))
     end
 
     test "enable fails on a bad code" do
@@ -221,7 +288,7 @@ defmodule Barkpark.AccountsTest do
       secret = Accounts.totp_secret()
 
       {:ok, user, [code | _]} =
-        Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+        Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
       assert {:ok, user} = Accounts.consume_recovery_code(user, code)
       assert :error = Accounts.consume_recovery_code(user, code)
@@ -232,7 +299,7 @@ defmodule Barkpark.AccountsTest do
       secret = Accounts.totp_secret()
 
       {:ok, user, [code | _]} =
-        Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+        Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
       # Two racers hold the SAME stale `user` struct — both pass the in-memory
       # membership check; only the atomic array_remove UPDATE that lands first
@@ -247,7 +314,7 @@ defmodule Barkpark.AccountsTest do
           end)
         end
 
-      results = Enum.map(tasks, &Task.await/1)
+      results = Enum.map(tasks, &Task.await(&1, :infinity))
 
       assert Enum.count(results, &match?({:ok, _}, &1)) == 1
       assert Enum.count(results, &(&1 == :error)) == 1
@@ -262,9 +329,9 @@ defmodule Barkpark.AccountsTest do
     test "MEDIUM-6: verify_totp consumes the step — a code cannot be replayed" do
       user = user_fixture()
       secret = Accounts.totp_secret()
-      {:ok, user, _} = Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+      {:ok, user, _} = Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
-      code = NimbleTOTP.verification_code(secret)
+      code = totp_code_stable!(secret)
       # First use succeeds and stamps last_totp_at …
       assert {:ok, consumed} = Accounts.verify_totp(user, code)
       assert consumed.last_totp_at
@@ -278,9 +345,9 @@ defmodule Barkpark.AccountsTest do
     test "LOW TOCTOU: a stale-read replay loses the compare-and-swap" do
       user = user_fixture()
       secret = Accounts.totp_secret()
-      {:ok, user, _} = Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+      {:ok, user, _} = Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
-      code = NimbleTOTP.verification_code(secret)
+      code = totp_code_stable!(secret)
 
       # Two racers both hold the SAME stale `user` (the last_totp_at they read
       # before either stamped). Both pass NimbleTOTP.valid? against that stale
@@ -295,7 +362,7 @@ defmodule Barkpark.AccountsTest do
       secret = Accounts.totp_secret()
 
       {:ok, user, _codes} =
-        Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+        Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
       assert user.totp_enabled
 
@@ -313,7 +380,7 @@ defmodule Barkpark.AccountsTest do
     test "an authenticated password change keeps MFA intact (no surprise disable)" do
       user = user_fixture(%{email: "keepmfa@example.com"})
       secret = Accounts.totp_secret()
-      {:ok, user, _} = Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+      {:ok, user, _} = Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
       assert {:ok, changed} =
                Accounts.update_user_password(user, @password, %{password: "another-strong-pass"})
@@ -325,13 +392,113 @@ defmodule Barkpark.AccountsTest do
     test "the TOTP secret is encrypted at rest (no plaintext in the row)" do
       user = user_fixture()
       secret = Accounts.totp_secret()
-      {:ok, _user, _} = Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+      {:ok, _user, _} = Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
       %{rows: [[raw]]} =
         Repo.query!("SELECT totp_secret FROM users WHERE id = $1", [Ecto.UUID.dump!(user.id)])
 
       refute raw == secret
       assert is_binary(raw)
+    end
+  end
+
+  # ── The TOTP fences (honest-gates charter, D4) ─────────────────────────────
+  #
+  # These two tests exist because the TOTP code in `accounts.ex` looks wrong in
+  # two specific, tempting ways and is right in both. A verifier applied each
+  # "obvious fix", RAN the suite, and it stayed 61 tests / 0 failures — the
+  # existing tests were structurally incapable of noticing. A comment saying
+  # "don't do this" is not a gate. These are.
+  #
+  # Both fences use the window-stable helper: a protective test that is itself
+  # wall-clock flaky teaches readers to dismiss it, which is the disease this
+  # epic exists to remove.
+  describe "TOTP MFA — protective fences" do
+    # FENCE A — `enable_totp/3` deliberately calls the BARE
+    # `NimbleTOTP.valid?(secret, code)` with no `since:` option, unlike
+    # `valid_totp?/2` and `verify_totp/2` which both pass `totp_opts(user)`.
+    # That asymmetry reads like an oversight. It is not.
+    #
+    # `disable_totp/1` clears `totp_secret`/`totp_enabled`/`recovery_codes_hashed`
+    # but NOT `last_totp_at` (`do_reset_password/2` does clear it — the two
+    # MFA-wipe paths disagree, which is filed separately as wave-2 work). So
+    # after a disable, the row still carries the stamp from the OLD secret. If
+    # `enable_totp/3` passed `totp_opts(user)`, that stale stamp would arrive as
+    # `since:` and reject a perfectly valid code minted from a BRAND NEW secret —
+    # a permanent enrolment lockout for any user who ever used MFA before.
+    test "FENCE A: re-enrolling a NEW secret after disable_totp accepts a valid code" do
+      user = user_fixture(%{email: "re-enrol@example.com"})
+      first_secret = Accounts.totp_secret()
+
+      {:ok, user, _codes} =
+        Accounts.enable_totp(user, first_secret, totp_code_stable!(first_secret))
+
+      # Consume a step so `last_totp_at` is stamped — this is the state that
+      # turns the tempting fix into a lockout. Without it the row's stamp is
+      # nil, `totp_opts/1` returns `[]`, and the mutation looks harmless.
+      assert {:ok, user} = Accounts.verify_totp(user, totp_code_stable!(first_secret))
+      refute is_nil(user.last_totp_at)
+
+      {:ok, user} = Accounts.disable_totp(user)
+      refute user.totp_enabled
+      # The disable left the old stamp behind. That is the hazard.
+      refute is_nil(user.last_totp_at)
+
+      # A brand new secret and a freshly minted, valid code for it. This MUST
+      # enrol. It goes RED the moment `enable_totp/3` starts honouring the
+      # stale `since:` stamp from the secret that no longer exists.
+      new_secret = Accounts.totp_secret()
+      refute new_secret == first_secret
+
+      assert {:ok, re_enrolled, codes} =
+               Accounts.enable_totp(user, new_secret, totp_code_stable!(new_secret))
+
+      assert re_enrolled.totp_enabled
+      assert length(codes) == 10
+    end
+
+    # FENCE B — NimbleTOTP's own moduledoc PRESCRIBES a grace-period recipe
+    # (`valid?(secret, otp, time: t) or valid?(secret, otp, time: t - 30)`),
+    # which makes adding one to `valid_totp?/2` and `verify_totp/2` look like
+    # following the library's guidance. It is not free: it DOUBLES the live
+    # acceptance window on two internet-facing endpoints (`mfa_factor_ok?/3`
+    # and `login_with_mfa/4`).
+    #
+    # The careless copy of that recipe drops `since:` and is already caught by
+    # the MEDIUM-6 replay test above. The CAREFUL variant — which threads
+    # `since:` through both `valid?` calls — passes every other test in this
+    # tree silently, because `grep -rn 'verification_code(.*time:' api/test/`
+    # returned ZERO before this fence: the suite generated no off-period codes
+    # at all and could not observe window width. This is the eye that was
+    # missing.
+    test "FENCE B: a previous-period code is refused by BOTH valid_totp?/2 and verify_totp/2" do
+      user = user_fixture(%{email: "window-width@example.com"})
+      secret = Accounts.totp_secret()
+
+      {:ok, user, _codes} = Accounts.enable_totp(user, secret, totp_code_stable!(secret))
+      assert user.totp_enabled
+      # Enrolment does not stamp a step, so `totp_opts/1` is `[]` here: the
+      # ONLY thing that can reject the code below is the acceptance WINDOW, not
+      # replay protection. That isolation is what makes this fence honest.
+      assert is_nil(user.last_totp_at)
+
+      # Mint a code for the PREVIOUS period, boundary-guarded so the period does
+      # not roll between minting and checking. Without the guard a roll would
+      # make this a two-periods-old code, which even a grace window rejects —
+      # the fence would then pass for the wrong reason, which is worse than
+      # failing.
+      stale = code_for_period_offset!(secret, -1)
+      # Sanity: the previous period's code really is a different code. If the
+      # two collide (1 in 10^6) the assertions below would be vacuous.
+      assert stale != totp_code_stable!(secret)
+
+      refute Accounts.valid_totp?(user, stale)
+      assert :error = Accounts.verify_totp(user, stale)
+
+      # And the rejection above is not a blanket "nothing is ever valid": the
+      # CURRENT period's code still works. A fence that cannot be green is as
+      # dishonest as one that cannot be red.
+      assert Accounts.valid_totp?(user, totp_code_stable!(secret))
     end
   end
 

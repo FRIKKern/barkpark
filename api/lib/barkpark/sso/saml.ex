@@ -181,12 +181,18 @@ defmodule Barkpark.Sso.Saml do
   @doc """
   The auto-submit HTML that front-channels our signed-status `LogoutResponse`
   back to the IdP's SLO endpoint (POST binding), completing IdP-initiated SLO.
+
+  `nonce` is stamped onto esaml's auto-submit `<script>` (via
+  `encode_http_post/4`) so the page survives the `:sso_browser` `script-src`
+  set by `SamlController.slo/2`. Pass `<<>>` to omit the nonce (esaml then emits
+  a bare `<script>`, for callers with no CSP).
   """
-  @spec logout_response_html(SamlConnection.t(), String.t()) :: binary()
-  def logout_response_html(%SamlConnection{} = conn, slug) do
+  @spec logout_response_html(SamlConnection.t(), String.t(), binary()) :: binary()
+  def logout_response_html(%SamlConnection{} = conn, slug, nonce \\ <<>>) when is_binary(nonce) do
     sp = sp_for(conn, slug)
     resp = :esaml_sp.generate_logout_response(to_charlist(conn.idp_slo_url), :success, sp)
-    :esaml_binding.encode_http_post(to_charlist(conn.idp_slo_url), resp, <<>>)
+    # arity-4: RelayState = <<>> (unused for SLO), Nonce = the CSP nonce.
+    :esaml_binding.encode_http_post(to_charlist(conn.idp_slo_url), resp, <<>>, nonce)
   end
 
   # ── internals ──────────────────────────────────────────────────────────────

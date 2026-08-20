@@ -3,31 +3,38 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Barkpark Cloud — style guide</title>
-    <meta name="description" content="The living spec for the Barkpark Cloud console: tokens, scales and shared components, both themes side by side." />
+    <title>Barkpark Cloud — living styleguide</title>
+    <meta name="description" content="The ratified language of the Barkpark Cloud console: tokens, type, machine-checked contrast, and every shared component with its states — both themes side by side, all from the shipped app.css." />
     <link rel="stylesheet" href="app.css" />
     <style>
-      /* Page-local chrome only (--sg-* / .sg-*). Everything demonstrated below
-         comes straight from app.css — if a class or token is missing there,
-         the demo visibly breaks, which is the point. */
+      /* Page-local chrome ONLY (--sg-* tokens, .sg-* classes). Everything the page
+         DEMONSTRATES comes straight from app.css — if a class or token is missing
+         there, the demo visibly breaks and __css_check reds. The agency mockup
+         (design/handover/ui-review-9/Styleguide.dc.html) is re-authored here on
+         the shipped ladder: its scheme-dark/scheme-light hexes ARE the cloudChrome
+         passthrough family (--cc-*); its accent slot IS --primary; its fg4 meta
+         token IS --cc-fg4 (duty-capped ≥3:1, GR6). No dc-runtime, no Google Fonts
+         (offline law E7). */
       :root { --sg-gap: 16px; }
-      .sg-wrap { max-width: 1180px; margin: 0 auto; padding: 40px 24px 80px; }
-      .sg-head { margin-bottom: 8px; }
-      .sg-lede { color: var(--muted-text); max-width: 64ch; margin: 0 0 12px; }
+      .sg-wrap { max-width: 1180px; margin: 0 auto; padding: 48px 24px 96px; }
+      .sg-eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cc-fg4); }
+      .sg-head { margin: 10px 0 0; }
+      .sg-lede { color: var(--dim); max-width: 74ch; margin: 12px 0 0; line-height: 1.6; }
       .sg-ratify {
-        display: inline-block;
+        display: block;
         font-size: var(--text-sm);
         font-weight: 600;
         color: var(--warn-strong);
         background: var(--warn-soft);
         border: 1px solid hsl(var(--warn-hsl) / 0.3);
         border-radius: var(--radius-sm);
-        padding: 8px 12px;
-        margin: 0 0 32px;
+        padding: 10px 14px;
+        margin: 24px 0 40px;
+        max-width: 74ch;
       }
-      .sg-section { margin: 0 0 44px; }
-      .sg-section > h2 { margin-bottom: 4px; }
-      .sg-note { color: var(--muted-text); font-size: var(--text-sm); margin: 0 0 14px; max-width: 72ch; }
+      .sg-section { margin: 0 0 48px; }
+      .sg-section > h2 { margin: 0 0 4px; }
+      .sg-note { color: var(--dim); font-size: var(--text-sm); margin: 0 0 14px; max-width: 78ch; line-height: 1.6; }
       .sg-panes { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sg-gap); }
       @media (max-width: 860px) { .sg-panes { grid-template-columns: 1fr; } }
       .sg-pane {
@@ -35,183 +42,562 @@
         color: var(--text);
         border: 1px solid var(--border);
         border-radius: var(--radius-lg);
-        padding: 20px;
+        padding: 22px;
         overflow-x: auto;
       }
       .sg-pane-label {
+        font-family: var(--mono);
         font-size: var(--text-xs);
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--dim);
-        margin: 0 0 14px;
+        letter-spacing: 0.06em;
+        color: var(--cc-fg4);
+        margin: 0 0 16px;
       }
+      /* Full-width single panel — for the spec tables that are theme-agnostic
+         (contrast manifest, responsive + motion contracts). */
+      .sg-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 22px;
+        overflow-x: auto;
+      }
+      .sg-stack { display: flex; flex-direction: column; gap: 12px; }
       .sg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
       .sg-row:last-child { margin-bottom: 0; }
+
+      /* 01 Tokens — the swatch grid is EMITTER-OWNED (byte-spliced from
+         design/tokens.json between the GENERATED markers; hand edits red
+         design/check.mjs). The chip renders its --cc-* var live per pane theme; the
+         value line is the canonical tokens.json truth (light · dark). */
       .sg-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
       .sg-swatch { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
-      .sg-swatch-chip { height: 40px; }
+      .sg-swatch-chip { height: 44px; }
       .sg-swatch-meta { padding: 6px 8px; background: var(--surface); }
       .sg-swatch-name { font-family: var(--mono); font-size: 11px; color: var(--text); word-break: break-all; }
-      .sg-swatch-val { font-family: var(--mono); font-size: 10px; color: var(--muted-text); word-break: break-all; }
+      .sg-swatch-val { font-family: var(--mono); font-size: 10px; color: var(--dim); word-break: break-all; }
+      .sg-swatch-note { display: block; margin-top: 12px; font-size: var(--text-xs); color: var(--cc-fg4); }
+
+      /* 02 Type */
       .sg-type-row { display: flex; align-items: baseline; gap: 14px; margin-bottom: 10px; }
-      .sg-type-tag { font-family: var(--mono); font-size: 11px; color: var(--muted-text); flex: 0 0 150px; }
-      .sg-space-bar { height: 14px; background: var(--primary); border-radius: 3px; }
-      .sg-elev-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 20px; }
-      .sg-elev-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 18px 12px;
-        text-align: center;
-        font-family: var(--mono);
-        font-size: 11px;
-        color: var(--muted-text);
+      .sg-type-tag { font-family: var(--mono); font-size: 11px; color: var(--dim); flex: 0 0 200px; }
+      .sg-meta { font-size: 12px; color: var(--cc-fg4); }
+      .sg-mono { font-family: var(--mono); }
+
+      /* 03 Contrast table */
+      .sg-ctable { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+      .sg-ctable th {
+        text-align: left; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
+        text-transform: uppercase; color: var(--cc-fg4); font-weight: 600;
+        padding: 8px 12px; border-bottom: 1px solid var(--border);
       }
-      .sg-mark-demo { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
-      .sg-mark-big { width: 72px; height: 72px; color: var(--primary); }
-      .sg-kv { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted-text); margin: 2px 0; }
-      .sg-lc { font-family: var(--mono); font-size: 20px; line-height: 1; width: 24px; text-align: center; flex: 0 0 24px; }
-      .sg-toasts { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
-      .sg-modal-demo .modal-card { max-width: 420px; }
-      .sg-forms { max-width: 380px; }
-      /* Console-states demo chrome. The instanceLifecycle glyph tone rides the
-         GENERATED .bp-inst--<state> classes (colour = the state's status role);
-         provider chips consume the GENERATED --provider-<kind> tints as a border
-         + mark (identity only — never a pill background, DESIGN.md §5). */
-      .sg-inst-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+      .sg-ctable td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+      .sg-ctable td.sg-mono { color: var(--dim); }
+      .sg-need { color: var(--cc-fg4); }
+
+      /* 05 Pills / plan chip / provider marks */
+      .sg-plan-chip {
+        display: inline-flex; align-items: center; height: 20px; padding: 0 9px;
+        border-radius: var(--pill); font-size: 10.5px; font-weight: 600;
+        background: var(--ok-soft); color: var(--ok-strong);
+      }
+      .sg-prov-marks { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 4px; }
+      .sg-prov-mark { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dim); }
+      .sg-prov-dot { width: 8px; height: 8px; border-radius: 2px; border: 2px solid var(--provider-hetzner); }
+      .sg-prov-dot.azure { border-color: var(--provider-azure); }
+
+      /* Lifecycle glyphs (05) — the shipped .bp-inst--<state> tone classes. */
+      .sg-inst-list { display: flex; flex-direction: column; gap: 8px; }
       .sg-inst-row { display: flex; align-items: center; gap: 12px; }
       .sg-inst-glyph { font-family: var(--mono); font-size: 15px; line-height: 1; width: 20px; text-align: center; flex: 0 0 20px; }
-      .sg-prov-chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-      .sg-prov-chip {
-        display: inline-flex; align-items: center; gap: 8px;
-        height: 26px; padding: 0 12px;
-        border-radius: var(--pill);
-        border: 1px solid var(--border);
-        background: var(--surface);
-        font-size: 12px; font-weight: 600; color: var(--text);
+      .sg-kv { font-family: var(--mono); font-size: var(--text-xs); color: var(--dim); }
+
+      /* 06 Triage headline & metadata line */
+      .sg-triage-h { font-size: var(--text-xl); line-height: var(--leading-xl); font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+      .sg-triage-sub { font-size: var(--text-sm); color: var(--dim); margin: 8px 0 0; line-height: 1.55; }
+      .sg-metaline { font-family: var(--mono); font-size: 12px; color: var(--cc-fg4); margin: 12px 0 0; }
+
+      /* 07 Coalesced rows */
+      .sg-coalesce, .sg-logrow {
+        display: flex; align-items: center; gap: 12px;
+        padding: 11px 16px; border: 1px solid rgba(var(--cc-line-rgb), 0.1);
+        border-radius: 10px; background: var(--surface);
       }
-      .sg-prov-mark { width: 9px; height: 9px; border-radius: var(--pill); flex: 0 0 auto; }
+      .sg-logrow { font-family: var(--mono); }
+      .sg-evtag {
+        font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+        padding: 3px 8px; border-radius: 6px; background: var(--info-soft); color: var(--info);
+      }
+      .sg-grow { flex: 1; }
+      .sg-link { font-size: 12px; color: var(--info); }
+
+      /* 08 Stage ladder & domain rungs */
+      .sg-ladder, .sg-rungs { display: flex; gap: 8px; flex-wrap: wrap; }
+      .sg-stage {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 6px 12px; border-radius: 8px; font-family: var(--mono); font-size: 11px;
+        border: 1px solid rgba(var(--cc-line-rgb), 0.1); color: var(--cc-fg4);
+      }
+      .sg-stage.is-plan { border-color: hsl(var(--warn-hsl) / 0); color: var(--ok); }
+      .sg-stage.is-plan { border: 1px solid var(--ok); }
+      .sg-stage.is-fail { border: 1px solid var(--danger); color: var(--danger); }
+      .sg-stage-d { color: var(--cc-fg4); }
+      .sg-rung {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 3px 10px; border-radius: var(--pill); font-size: 11px; font-weight: 600;
+      }
+      .sg-rung.done { background: var(--ok-soft); color: var(--ok-strong); }
+      .sg-rung.pending { background: var(--muted-surface); color: var(--dim); }
+
+      /* 09 Banners (built on the shipped .notice component + inline tone) */
+      .sg-banner {
+        display: flex; align-items: center; gap: 12px;
+        padding: 12px 16px; border-radius: 10px; margin-bottom: 10px;
+      }
+      .sg-banner.hold { border: 1px solid hsl(var(--warn-hsl) / 0.35); background: var(--warn-soft); }
+      .sg-banner.stop { border: 1px solid var(--danger); background: var(--danger-soft); }
+      .sg-banner-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+      .sg-banner.hold .sg-banner-dot { background: var(--warn); }
+      .sg-banner.stop .sg-banner-dot { background: var(--danger); }
+      .sg-banner-copy { flex: 1; font-size: 12.5px; color: var(--text); }
+
+      /* 10 Empty states & skeletons */
+      .sg-empty {
+        display: flex; flex-direction: column; align-items: center; gap: 6px;
+        padding: 28px; text-align: center;
+        border: 1px dashed rgba(var(--cc-line-rgb), 0.16); border-radius: 12px;
+      }
+      .sg-empty-title { font-size: var(--text-sm); font-weight: 600; }
+      .sg-empty-why { font-size: 12px; color: var(--dim); }
+      .sg-skels { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+      .sg-skel { height: 13px; border-radius: 6px; background: var(--muted-surface); animation: sg-skel 1.4s ease-in-out infinite; }
+      @keyframes sg-skel { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.95; } }
+
+      /* 11 Responsive / 12 Motion contract tables */
+      .sg-crow { display: flex; gap: 16px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+      .sg-crow:last-child { border-bottom: 0; }
+      .sg-cbp { font-family: var(--mono); font-size: 12px; color: var(--info); flex: 0 0 150px; }
+      .sg-cwhat { font-size: 13px; font-weight: 600; flex: 0 0 190px; }
+      .sg-cspec { font-family: var(--mono); font-size: 12px; color: var(--info); flex: 0 0 190px; }
+      .sg-crule { font-size: 13px; color: var(--dim); line-height: 1.55; }
+
+      /* Shipped-component demos (04, 13-16) chrome */
+      .sg-toasts { display: flex; flex-direction: column; gap: 10px; max-width: 380px; }
+      .sg-modal-demo .modal-card { max-width: 420px; }
+      .sg-fam-label {
+        font-family: var(--mono);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: var(--cc-fg4);
+        margin: 0 0 8px;
+      }
+      .sg-fam { margin: 0 0 24px; }
+      .sg-fam:last-child { margin-bottom: 0; }
+      .sg-forms { max-width: 380px; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .sg-skel { animation: none; opacity: 0.75; }
+      }
     </style>
   </head>
   <body>
     <div class="sg-wrap">
-      <header class="sg-head">
-        <h1>Barkpark Cloud style guide</h1>
+      <header>
+        <span class="sg-eyebrow">Barkpark Cloud · living styleguide · P1-2</span>
+        <h1 class="sg-head">The ratified language</h1>
+        <p class="sg-lede">
+          Canonical spec of the console remake, ported from the agency handover
+          (<span class="sg-mono">ui-review-9/Styleguide.dc.html</span>) onto the shipped
+          <code>app.css</code>. Every component renders dark and light side by side from the
+          same markup and the same tokens. The contrast pairs are not asserted here — they are
+          machine-checked by <code>__css_check.mjs</code> (E5), which fails the build on any
+          unreadable pairing. Doctrine anchors: status told once per row · provider colour is
+          identity, never status · one primary action per screen · honest meters · failure
+          beats false green.
+        </p>
       </header>
-      <p class="sg-lede">
-        The living spec for the console. Everything on this page is rendered by the
-        shipped <code>app.css</code> — tokens, scales and shared components, light and
-        dark side by side. The same file the product loads, no copies.
-      </p>
+
       <p class="sg-ratify">
-        Sign-off surface: changes to the mark or the brand hues merge only after a
-        human says yes to this page (charter decision 27).
+        Human sign-off surface (charter GR decision 27): changes to the mark or the brand hues
+        merge only after a human says yes to this page. This file is a wholesale re-author of
+        the old styleguide onto the new system — landing it re-runs that ratification ritual.
       </p>
 
+      <!-- 01 Tokens ────────────────────────────────────────────────────────── -->
       <section class="sg-section">
-        <h2>The mark</h2>
+        <h2>01 · Tokens</h2>
         <p class="sg-note">
-          A park evergreen, drawn inline in currentColor so it follows the theme with
-          no extra assets. Shown at wordmark size (18px) and enlarged.
+          The cloudChrome passthrough family (<code>--cc-*</code>) plus the accent slot
+          (<code>--primary</code>). Chips render live per pane theme; the value line is the
+          canonical <code>design/tokens.json</code> truth (light · dark). The accent slot
+          restyles per identity — evergreen · iris · ember · fjord · charple — all five carry
+          dark and light ramps; the value shown is evergreen.
         </p>
-        <div class="sg-panes" data-sg-clone>
-          <div class="sg-mark-demo">
-            <a class="wordmark" href="#">
-              <svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
-              <span class="wordmark-text">Barkpark <b>Cloud</b></span>
-            </a>
-            <svg class="sg-mark-big" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
-          </div>
-        </div>
-      </section>
-
-      <section class="sg-section">
-        <h2>Color tokens</h2>
-        <p class="sg-note">
-          Every color the console may use. Resolved values are read live from the
-          loaded stylesheet, per theme. The contrast pairs over these tokens are
-          machine-checked by <code>__css_check.mjs</code> — a value that fails the
-          manifest cannot merge.
-        </p>
-        <div class="sg-panes" data-sg-clone>
-          <div class="sg-swatches" data-sg-swatches></div>
-        </div>
-      </section>
-
-      <section class="sg-section">
-        <h2>Type scale</h2>
-        <p class="sg-note">Six sizes with paired line-heights. Numbers use tabular figures where they tick.</p>
         <div class="sg-panes" data-sg-clone>
           <div>
-            <div class="sg-type-row"><span class="sg-type-tag">--text-2xl / --leading-2xl</span><span style="font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: 700;">Fleet at a glance</span></div>
-            <div class="sg-type-row"><span class="sg-type-tag">--text-xl / --leading-xl</span><span style="font-size: var(--text-xl); line-height: var(--leading-xl); font-weight: 700;">Fleet at a glance</span></div>
-            <div class="sg-type-row"><span class="sg-type-tag">--text-lg / --leading-lg</span><span style="font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: 600;">Fleet at a glance</span></div>
-            <div class="sg-type-row"><span class="sg-type-tag">--text-base / --leading-base</span><span style="font-size: var(--text-base); line-height: var(--leading-base);">Every instance registered to your team, attention first.</span></div>
-            <div class="sg-type-row"><span class="sg-type-tag">--text-sm / --leading-sm</span><span style="font-size: var(--text-sm); line-height: var(--leading-sm);">Every instance registered to your team, attention first.</span></div>
-            <div class="sg-type-row"><span class="sg-type-tag">--text-xs / --leading-xs</span><span style="font-size: var(--text-xs); line-height: var(--leading-xs);">Updated 2 minutes ago &middot; barkpark v1.42</span></div>
+            <div class="sg-swatches" data-sg-swatches>
+              <!-- BEGIN GENERATED: swatches (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) -->
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--cc-bg);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--cc-bg</div>
+                  <div class="sg-swatch-val">#f4f5f7 · #0b0e13</div>
+                </div>
+              </div>
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--cc-card);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--cc-card</div>
+                  <div class="sg-swatch-val">#ffffff · #10141b</div>
+                </div>
+              </div>
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--cc-card2);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--cc-card2</div>
+                  <div class="sg-swatch-val">#eceef2 · #161b24</div>
+                </div>
+              </div>
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--cc-fg);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--cc-fg</div>
+                  <div class="sg-swatch-val">#1a2330 · #e9edf3</div>
+                </div>
+              </div>
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--cc-fg2);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--cc-fg2</div>
+                  <div class="sg-swatch-val">#3d4859 · #c3cad5</div>
+                </div>
+              </div>
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--cc-fg3);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--cc-fg3</div>
+                  <div class="sg-swatch-val">#5f6a7b · #8d96a5</div>
+                </div>
+              </div>
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--cc-fg4);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--cc-fg4</div>
+                  <div class="sg-swatch-val">#76818f · #626c7c</div>
+                </div>
+              </div>
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--primary);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--primary</div>
+                  <div class="sg-swatch-val">#15804e · #3fcf8e</div>
+                </div>
+              </div>
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--cc-amber);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--cc-amber</div>
+                  <div class="sg-swatch-val">#96660f · #e8b45a</div>
+                </div>
+              </div>
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--cc-red);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--cc-red</div>
+                  <div class="sg-swatch-val">#bb4040 · #e57f7f</div>
+                </div>
+              </div>
+              <div class="sg-swatch">
+                <div class="sg-swatch-chip" style="background: var(--cc-blue);"></div>
+                <div class="sg-swatch-meta">
+                  <div class="sg-swatch-name">--cc-blue</div>
+                  <div class="sg-swatch-val">#2560bd · #7fb4ff</div>
+                </div>
+              </div>
+              <!-- END GENERATED: swatches -->
+            </div>
+            <span class="sg-swatch-note">
+              <code>--cc-fg4</code> is a meta-only token, duty-capped at ≥3:1 (never essential
+              copy). <code>--dim</code> maps to <code>--cc-fg3</code>, not fg4 (GR6).
+            </span>
           </div>
         </div>
       </section>
 
+      <!-- 02 Type ──────────────────────────────────────────────────────────── -->
       <section class="sg-section">
-        <h2>Space scale</h2>
-        <p class="sg-note">The 4px grid: --space-1 through --space-8.</p>
+        <h2>02 · Type</h2>
+        <p class="sg-note">Six chrome sizes with paired line-heights. Inter self-hosted per charter; IBM Plex Mono for machine strings only. Numerals always tabular.</p>
         <div class="sg-panes" data-sg-clone>
           <div>
-            <div class="sg-row"><span class="sg-type-tag">--space-1 (4px)</span><span class="sg-space-bar" style="width: var(--space-1);"></span></div>
-            <div class="sg-row"><span class="sg-type-tag">--space-2 (8px)</span><span class="sg-space-bar" style="width: var(--space-2);"></span></div>
-            <div class="sg-row"><span class="sg-type-tag">--space-3 (12px)</span><span class="sg-space-bar" style="width: var(--space-3);"></span></div>
-            <div class="sg-row"><span class="sg-type-tag">--space-4 (16px)</span><span class="sg-space-bar" style="width: var(--space-4);"></span></div>
-            <div class="sg-row"><span class="sg-type-tag">--space-5 (20px)</span><span class="sg-space-bar" style="width: var(--space-5);"></span></div>
-            <div class="sg-row"><span class="sg-type-tag">--space-6 (24px)</span><span class="sg-space-bar" style="width: var(--space-6);"></span></div>
-            <div class="sg-row"><span class="sg-type-tag">--space-7 (28px)</span><span class="sg-space-bar" style="width: var(--space-7);"></span></div>
-            <div class="sg-row"><span class="sg-type-tag">--space-8 (32px)</span><span class="sg-space-bar" style="width: var(--space-8);"></span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-2xl / --leading-2xl</span><span style="font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: 700; letter-spacing: -0.02em;">Good morning, Fjord — page title</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-xl / --leading-xl</span><span style="font-size: var(--text-xl); line-height: var(--leading-xl); font-weight: 700;">Section heading</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-lg / --leading-lg</span><span style="font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: 600;">Card heading</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-base / --leading-base</span><span style="font-size: var(--text-base); line-height: var(--leading-base); color: var(--muted-text);">Body and row text — fg2 on the reading scale.</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-sm / --leading-sm</span><span style="font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--dim);">Secondary copy — fg3.</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-xs / --leading-xs</span><span style="font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--cc-fg4);">Meta line — fg4 (≥3:1 target, never essential info)</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--mono</span><span class="sg-mono" style="font-size: 12px; color: var(--dim);">IBM Plex Mono — URLs, shas, IDs, commands, table headers</span></div>
           </div>
         </div>
       </section>
 
+      <!-- 03 Contrast — machine-checked ──────────────────────────────────────── -->
       <section class="sg-section">
-        <h2>Elevation, depth and motion</h2>
+        <h2>03 · Contrast — machine-checked</h2>
         <p class="sg-note">
-          Four shadow steps; z-order comes from the ladder tokens (tabnav 19, topbar 20,
-          menu 30, modal 50, toast 60) — never a bare number. Motion runs on --dur-1/2/3
-          with one easing; when a visitor asks for reduced motion, the durations collapse
-          to zero and only spinners keep moving.
+          The manifest <code>__css_check.mjs</code> (E5) computes at build time, per theme
+          state — WCAG relative-luminance from the resolved token values, not asserted here. A
+          pairing that dips below its threshold reds the gate. The rows below are the
+          cloudChrome text-and-UI pairs the console renders; <code>--cc-fg4</code> is capped at
+          meta duty (≥3:1) by rule, not by hope.
         </p>
-        <div class="sg-panes" data-sg-clone>
-          <div class="sg-elev-grid">
-            <div class="sg-elev-card" style="box-shadow: var(--elev-0);">--elev-0</div>
-            <div class="sg-elev-card" style="box-shadow: var(--elev-1);">--elev-1</div>
-            <div class="sg-elev-card" style="box-shadow: var(--elev-2);">--elev-2</div>
-            <div class="sg-elev-card" style="box-shadow: var(--elev-3);">--elev-3</div>
-          </div>
+        <div class="sg-panel">
+          <table class="sg-ctable">
+            <thead>
+              <tr><th>Pair</th><th>Need</th><th>Role</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="sg-mono">--cc-fg on --cc-bg</td><td class="sg-need">4.5:1</td><td>primary text</td></tr>
+              <tr><td class="sg-mono">--cc-fg2 on --cc-card</td><td class="sg-need">4.5:1</td><td>row text on cards</td></tr>
+              <tr><td class="sg-mono">--cc-fg3 on --cc-bg</td><td class="sg-need">4.5:1</td><td>secondary copy (--dim)</td></tr>
+              <tr><td class="sg-mono">--cc-fg4 on --cc-bg</td><td class="sg-need">3:1</td><td>meta only — never essential</td></tr>
+              <tr><td class="sg-mono">--cc-blue on --cc-bg</td><td class="sg-need">4.5:1</td><td>links (--info)</td></tr>
+              <tr><td class="sg-mono">--cc-amber on --cc-bg</td><td class="sg-need">4.5:1</td><td>warning text</td></tr>
+              <tr><td class="sg-mono">--cc-red on --cc-bg</td><td class="sg-need">4.5:1</td><td>danger text</td></tr>
+              <tr><td class="sg-mono">--primary on --cc-bg</td><td class="sg-need">3:1</td><td>accent badge / UI — all 5 identities × 2 modes</td></tr>
+              <tr><td class="sg-mono">--primary-fg on --primary</td><td class="sg-need">4.5:1</td><td>button label on the accent</td></tr>
+            </tbody>
+          </table>
+          <span class="sg-swatch-note">Fanned across base + 5 accent identities × light/dark; a new identity joins the fanout automatically (E5 discovers <code>html[data-bp-theme]</code> blocks from the CSS).</span>
         </div>
       </section>
 
+      <!-- 04 Buttons & states ────────────────────────────────────────────────── -->
       <section class="sg-section">
-        <h2>Buttons</h2>
-        <p class="sg-note">One primary action per screen; everything else is quiet. Tab through a pane to see the shared focus ring.</p>
+        <h2>04 · Buttons &amp; states</h2>
+        <p class="sg-note">One primary action per screen; everything else is quiet. Danger confirms are type-to-confirm (the button stays gated until the name matches). Tab through a pane to see the shared focus ring.</p>
         <div class="sg-panes" data-sg-clone>
           <div>
             <div class="sg-row">
-              <button class="btn btn-primary" type="button">Launch instance</button>
-              <button class="btn" type="button">Refresh</button>
-              <button class="btn btn-ghost" type="button">Cancel</button>
-              <button class="btn btn-danger" type="button">Remove instance</button>
+              <button class="btn btn-primary" type="button">Primary — one per screen</button>
+              <button class="btn btn-ghost" type="button">Ghost</button>
+              <button class="btn btn-danger" type="button">Remove instance…</button>
             </div>
             <div class="sg-row">
               <button class="btn btn-primary btn-sm" type="button">Launch</button>
-              <button class="btn btn-sm" type="button">Small</button>
-              <button class="btn btn-primary" type="button" disabled>Disabled</button>
+              <button class="btn btn-sm" type="button">Refresh</button>
+              <button class="btn btn-primary" type="button" disabled>Gated (type-to-confirm)</button>
               <button class="btn" type="button" disabled>Disabled</button>
+            </div>
+            <span class="sg-meta">Hover: primary lightens; ghost/danger brighten border only. Danger always ends in “…” — a confirm follows, never immediate.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 05 Status pills, plan chip, provider marks ─────────────────────────── -->
+      <section class="sg-section">
+        <h2>05 · Status pills, plan chip, provider marks</h2>
+        <p class="sg-note">
+          Pill grammar: glyph + colour + word — three redundant channels, told ONCE per row.
+          The status-pill is the single status voice; the deployment pill and dot-badge ship as
+          they are today (decision 24 folds them into statusMeta in the sweep wave). Provider
+          marks are hollow (identity, never status). The plan chip is the only place plan state
+          appears outside Billing. Lifecycle glyphs are tinted live through each state's status
+          role via <code>.bp-inst--&lt;state&gt;</code>.
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <div class="sg-row">
+              <span class="status-pill status-pill--ok"><span class="status-pill-dot"></span><span class="status-pill-label">Live</span><span class="status-pill-detail">v1.42</span></span>
+              <span class="status-pill status-pill--warn"><span class="status-pill-dot"></span><span class="status-pill-label">Degraded</span></span>
+              <span class="status-pill status-pill--info"><span class="status-pill-dot"></span><span class="status-pill-label">Provisioning</span><span class="status-pill-detail">2m 10s</span></span>
+              <span class="status-pill status-pill--danger"><span class="status-pill-dot"></span><span class="status-pill-label">Unreachable</span><span class="status-pill-detail">3 checks failed</span></span>
+              <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Archived</span></span>
+            </div>
+            <div class="sg-row">
+              <span class="dep-pill dep-live">Live</span>
+              <span class="dep-pill dep-building">Building</span>
+              <span class="dep-pill dep-pushing">Pushing</span>
+              <span class="dep-pill dep-queued">Queued</span>
+              <span class="dep-pill dep-failed">Failed</span>
+              <span class="sg-plan-chip">Supporter</span>
+            </div>
+            <div class="sg-row">
+              <span class="badge"><span class="dot up"></span>Online</span>
+              <span class="badge"><span class="dot warn"></span>Update</span>
+              <span class="badge"><span class="dot down"></span>Down</span>
+              <span class="badge"><span class="dot unknown"></span>Unknown</span>
+            </div>
+            <div class="sg-inst-list">
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--provisioning">◌</span><span class="sg-type-tag">provisioning</span><span class="sg-kv">role info</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--live">●</span><span class="sg-type-tag">live</span><span class="sg-kv">role ok</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--degraded">◐</span><span class="sg-type-tag">degraded</span><span class="sg-kv">role warn</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--stopped">○</span><span class="sg-type-tag">stopped</span><span class="sg-kv">neutral</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--archived">▢</span><span class="sg-type-tag">archived</span><span class="sg-kv">neutral</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--decommissioned">✕</span><span class="sg-type-tag">decommissioned</span><span class="sg-kv">role danger</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--adopted">◈</span><span class="sg-type-tag">adopted</span><span class="sg-kv">role info</span></div>
+            </div>
+            <div class="sg-prov-marks">
+              <span class="sg-prov-mark"><span class="sg-prov-dot"></span>Hetzner</span>
+              <span class="sg-prov-mark"><span class="sg-prov-dot azure"></span>Azure</span>
             </div>
           </div>
         </div>
       </section>
 
+      <!-- 06 Triage headline & metadata line ─────────────────────────────────── -->
       <section class="sg-section">
-        <h2>Cards and notices</h2>
+        <h2>06 · Triage headline &amp; metadata line</h2>
+        <p class="sg-note">
+          Headline grammar: time-of-day greeting + computed triage sentence (0 issues → “All N
+          running fine” · 1 → “One thing needs a look…” · N → count) + appended limit warnings.
+          The metadata line carries the three status axes (health × billing × update) as quiet
+          mono — region · size · IP · version · channel · update policy, in that order, always.
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <p class="sg-triage-h">Good morning, Fjord</p>
+            <p class="sg-triage-sub">One thing needs a look — everything else is running fine. And Guerrilla is nearing its disk limit.</p>
+            <p class="sg-metaline">fsn1 · cx22 · 5.75.169.183 · v0.2.25 · prod · autoupdate on</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 07 Coalesced rows — timeline & logs ────────────────────────────────── -->
+      <section class="sg-section">
+        <h2>07 · Coalesced rows — timeline &amp; logs</h2>
+        <p class="sg-note">Coalescing grammar: “&lt;thing&gt; × N · cadence · shared verdict” with an expand affordance. Repetition is summarised, never hidden — and the summary states the WORST verdict in the group.</p>
+        <div class="sg-panes" data-sg-clone>
+          <div class="sg-stack">
+            <div class="sg-coalesce">
+              <span class="sg-evtag">EVENT</span>
+              <span style="font-size: 13px; font-weight: 500;">Health report × 10</span>
+              <span class="sg-meta">every ~1m for the last 10m · all reporting health: down</span>
+              <span class="sg-grow"></span>
+              <span class="sg-link">Show all 10</span>
+            </div>
+            <div class="sg-logrow">
+              <span style="font-size: 11px; color: var(--cc-fg4);">09:13:41</span>
+              <span style="font-size: 10.5px; color: var(--dim);">caddy · gyldendal.no</span>
+              <span style="font-size: 11px; color: var(--warn);">404</span>
+              <span style="font-size: 12px; color: var(--muted-text);">GET /old-pricing — 2ms · repeated 14× today</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 08 Stage ladder & domain rungs ─────────────────────────────────────── -->
+      <section class="sg-section">
+        <h2>08 · Stage ladder &amp; domain rungs</h2>
+        <p class="sg-note">
+          Ladder: PLAN→BUILD→STAGE→HEALTH→SWITCH→RETIRE. A failed stage skips the rest visibly
+          (“—”) — production untouched is stated in the console, not implied. Rungs: DNS found →
+          Points here → TLS → Serving; pending rungs get a sentence saying what happens by
+          itself (“nothing to do”).
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div class="sg-stack">
+            <div class="sg-ladder">
+              <span class="sg-stage is-plan">● PLAN <span class="sg-stage-d">2s</span></span>
+              <span class="sg-stage is-fail">✕ BUILD <span class="sg-stage-d">17s</span></span>
+              <span class="sg-stage">— STAGE</span>
+              <span class="sg-stage">— HEALTH</span>
+              <span class="sg-stage">— SWITCH</span>
+              <span class="sg-stage">— RETIRE</span>
+            </div>
+            <div class="sg-rungs">
+              <span class="sg-rung done">● DNS found</span>
+              <span class="sg-rung done">● Points here</span>
+              <span class="sg-rung pending">◐ TLS</span>
+              <span class="sg-rung pending">◐ Serving</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 09 Banners — lock, unreachable, suspended ──────────────────────────── -->
+      <section class="sg-section">
+        <h2>09 · Banners — lock, unreachable, suspended</h2>
+        <p class="sg-note">
+          Banner rules: amber = held/degraded (reversible, reversal named in the banner) · red =
+          stopped/destructive · unreachable ≠ refused, and the copy must say which. Every banner
+          names its target state and the exact exit action. The shipped <code>.notice</code>
+          component carries the same grammar inline.
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <div class="sg-banner hold">
+              <span class="sg-banner-dot"></span>
+              <span class="sg-banner-copy">Production is locked to deploy #42 — both loops hold until you unlock.</span>
+              <button class="btn btn-sm" type="button">Unlock</button>
+            </div>
+            <div class="sg-banner stop">
+              <span class="sg-banner-dot"></span>
+              <span class="sg-banner-copy">Suspended since 21 July — stopped, not destroyed; back the moment payment succeeds.</span>
+            </div>
+            <div class="notice notice-error"><span>We could not reach the agent on summer-lake.</span><button class="btn btn-sm" type="button">Retry</button></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 10 Empty states & skeletons ────────────────────────────────────────── -->
+      <section class="sg-section">
+        <h2>10 · Empty states &amp; skeletons</h2>
+        <p class="sg-note">
+          Empty state = dashed border + what it is + why you'd want one + ONE affordance. Never a
+          bare card. Skeletons are shaped like the real rows (no spinner walls); loading text
+          only past 3s. Reduced motion holds the skeleton static.
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <div class="sg-empty">
+              <span class="sg-empty-title">No webhooks configured</span>
+              <span class="sg-empty-why">Get notified when deploys, health changes or checks happen.</span>
+              <button class="btn btn-sm" type="button">Add a webhook</button>
+            </div>
+            <div class="sg-skels">
+              <div class="sg-skel" style="width: 62%;"></div>
+              <div class="sg-skel" style="width: 84%;"></div>
+              <div class="sg-skel" style="width: 40%;"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 11 Responsive contract (P1-5) ──────────────────────────────────────── -->
+      <section class="sg-section">
+        <h2>11 · Responsive contract (P1-5)</h2>
+        <div class="sg-panel">
+          <div class="sg-crow"><span class="sg-cbp">≥1280px</span><span class="sg-crule">Reference layout. Content column max 1140px; two-column detail grids; sidebar 220px with labels.</span></div>
+          <div class="sg-crow"><span class="sg-cbp">1000–1279px</span><span class="sg-crule">Detail grids collapse to one column (auto-fit already does this); sidebar keeps labels; topbar project selector stays.</span></div>
+          <div class="sg-crow"><span class="sg-cbp">760–999px</span><span class="sg-crule">Sidebar collapses to an icon rail: icons + tooltips, section dividers instead of labels; context-morph keeps the ← exit as an icon row. Tables become two-line rows.</span></div>
+          <div class="sg-crow"><span class="sg-cbp">&lt;760px</span><span class="sg-crule">Sidebar becomes a sheet behind a menu button; ⌘K becomes a search icon opening the palette full-screen (touch: no shortcut hint); action rows wrap — the ONE primary stays visible, ghosts collapse into an overflow “…” menu.</span></div>
+          <div class="sg-crow"><span class="sg-cbp">Theater/phone</span><span class="sg-crule">Step rail stacks above the console; console max-height 40vh; the done-banner buttons go full-width. Never scale text below 13px.</span></div>
+          <div class="sg-crow"><span class="sg-cbp">Global</span><span class="sg-crule">Hit targets ≥44px on touch; meters and pills never truncate their word (drop the sub-label first); mono strings ellipsize middle-out where the tail matters (shas, URLs keep the tail).</span></div>
+        </div>
+      </section>
+
+      <!-- 12 Motion contract (P1-6) ──────────────────────────────────────────── -->
+      <section class="sg-section">
+        <h2>12 · Motion contract (P1-6)</h2>
+        <div class="sg-panel">
+          <div class="sg-crow"><span class="sg-cwhat">Theater step advance</span><span class="sg-cspec">450ms ease-out</span><span class="sg-crule">Rail glyph crossfades ○→◐→●; console lines append with 80ms stagger, no scroll jump.</span></div>
+          <div class="sg-crow"><span class="sg-cwhat">Live pulses</span><span class="sg-cspec">1.6–2.4s ease-in-out</span><span class="sg-crule">Only on genuinely-live dots. Never on static status.</span></div>
+          <div class="sg-crow"><span class="sg-cwhat">Lock / unlock</span><span class="sg-cspec">200ms ease</span><span class="sg-crule">Banner slides 6px + fades; the Deployments card does NOT move — layout-shift budget is 0.</span></div>
+          <div class="sg-crow"><span class="sg-cwhat">Toast</span><span class="sg-cspec">in 180 / hold 2.8s / out 240</span><span class="sg-crule">One at a time, replace not stack; translate 8px up on entry.</span></div>
+          <div class="sg-crow"><span class="sg-cwhat">Ladder stage advance</span><span class="sg-cspec">250ms ease</span><span class="sg-crule">Border + glyph tint transition; failed stages snap (0ms) — failure is never eased in.</span></div>
+          <div class="sg-crow"><span class="sg-cwhat">Hover states</span><span class="sg-cspec">150ms</span><span class="sg-crule">Border/translate only; translateY caps at 1px on cards.</span></div>
+          <div class="sg-crow"><span class="sg-cwhat">Modal / palette</span><span class="sg-cspec">in 160ms ease-out</span><span class="sg-crule">Scale 0.98→1 + fade; backdrop blur constant (no animated blur).</span></div>
+          <span class="sg-swatch-note">prefers-reduced-motion: pulses become static dots at full opacity, theater steps cut, toasts appear without translate, skeletons hold — nothing conveys information through motion alone.</span>
+        </div>
+      </section>
+
+      <!-- 13 Cards & notices (shipped components) ────────────────────────────── -->
+      <section class="sg-section">
+        <h2>13 · Cards &amp; notices</h2>
+        <p class="sg-note">The shipped <code>.card</code> container and the three <code>.notice</code> tones, straight from app.css.</p>
         <div class="sg-panes" data-sg-clone>
           <div>
             <div class="card" style="padding: 18px; margin-bottom: 14px;">
@@ -220,117 +606,14 @@
             </div>
             <div class="notice notice-ok"><span>Everything is healthy.</span></div>
             <div class="notice notice-warn"><span>An update is available for two instances.</span><button class="btn btn-sm" type="button">Review</button></div>
-            <div class="notice notice-error"><span>We could not reach the agent on summer-lake.</span><button class="btn btn-sm" type="button">Retry</button></div>
             <p class="form-error" role="presentation">That name is already taken on your team.</p>
           </div>
         </div>
       </section>
 
+      <!-- 14 Forms (shipped components) ──────────────────────────────────────── -->
       <section class="sg-section">
-        <h2>Status pills</h2>
-        <p class="sg-note">
-          The status-pill is the single status voice (one per row or header). The dot-badge
-          and the deployment pill are shown as they ship today; decision 24 folds them into
-          statusMeta in the sweep wave.
-        </p>
-        <div class="sg-panes" data-sg-clone>
-          <div>
-            <div class="sg-row">
-              <span class="status-pill status-pill--ok"><span class="status-pill-dot"></span><span class="status-pill-label">Running</span><span class="status-pill-detail">v1.42</span></span>
-              <span class="status-pill status-pill--info"><span class="status-pill-dot"></span><span class="status-pill-label">Provisioning</span><span class="status-pill-detail">2m 10s</span></span>
-              <span class="status-pill status-pill--warn"><span class="status-pill-dot"></span><span class="status-pill-label">Update available</span></span>
-            </div>
-            <div class="sg-row">
-              <span class="status-pill status-pill--danger"><span class="status-pill-dot"></span><span class="status-pill-label">Unreachable</span><span class="status-pill-detail">3 checks failed</span></span>
-              <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Archived</span></span>
-            </div>
-            <div class="sg-row">
-              <span class="badge"><span class="dot up"></span>Online</span>
-              <span class="badge"><span class="dot down"></span>Down</span>
-              <span class="badge"><span class="dot warn"></span>Update</span>
-              <span class="badge"><span class="dot unknown"></span>Unknown</span>
-            </div>
-            <div class="sg-row">
-              <span class="dep-pill dep-live">Live</span>
-              <span class="dep-pill dep-building">Building</span>
-              <span class="dep-pill dep-pushing">Pushing</span>
-              <span class="dep-pill dep-queued">Queued</span>
-              <span class="dep-pill dep-failed">Failed</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="sg-section">
-        <h2>Lifecycle vocabulary</h2>
-        <p class="sg-note">
-          The shared task-state vocabulary — the same seven states the Go TUI paints from
-          <code>internal/taskboard/tokens_gen.go</code> (<code>GenLifecycle</code> /
-          <code>GenLifecycleOrder</code>). The glyph and ordering are the design source; the
-          <em>hue</em> is a status role, so each state is colored live from
-          <code>--ok / --warn / --danger / --info</code> (plus <code>--text / --muted-text / --dim</code>
-          for the role-less states). Change a status hue in <code>tokens.json</code> and this row
-          re-tints in lock-step with the TUI.
-        </p>
-        <div class="sg-panes" data-sg-clone>
-          <div>
-            <div class="sg-row"><span class="sg-lc" style="color: var(--info);">⠋</span><span class="sg-type-tag">in_progress</span><span class="sg-kv">role info · --info</span></div>
-            <div class="sg-row"><span class="sg-lc" style="color: var(--warn);">!</span><span class="sg-type-tag">blocked</span><span class="sg-kv">role warn · --warn</span></div>
-            <div class="sg-row"><span class="sg-lc" style="color: var(--ok);">✓</span><span class="sg-type-tag">done</span><span class="sg-kv">role ok · --ok</span></div>
-            <div class="sg-row"><span class="sg-lc" style="color: var(--ok);">✓</span><span class="sg-type-tag">closed</span><span class="sg-kv">role ok · --ok</span></div>
-            <div class="sg-row"><span class="sg-lc" style="color: var(--dim);">✕</span><span class="sg-type-tag">cancelled</span><span class="sg-kv">neutral · --dim</span></div>
-            <div class="sg-row"><span class="sg-lc" style="color: var(--text);">○</span><span class="sg-type-tag">ready</span><span class="sg-kv">--text</span></div>
-            <div class="sg-row"><span class="sg-lc" style="color: var(--muted-text);">○</span><span class="sg-type-tag">open</span><span class="sg-kv">--muted-text</span></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="sg-section">
-        <h2>Console states</h2>
-        <p class="sg-note">
-          The cloud console's two orthogonal axes (charter azure-hetzner). <strong>Instance
-          lifecycle</strong> is STATUS — each of the seven states maps to one semantic status
-          role, so the pill is the single state voice (top rows) and the shared CLI/TUI glyph
-          (below) is tinted live from that role via the generated <code>.bp-inst--&lt;state&gt;</code>
-          classes — the same seven states the Go chrome paints from
-          <code>GenInstanceLifecycle</code> in <code>internal/semrole/chrome_gen.go</code>.
-          <strong>Provider</strong> is IDENTITY, never status: the chip tints its border and mark
-          from <code>--provider-hetzner</code> / <code>--provider-azure</code> but never a pill
-          background (DESIGN.md §5). Change a status hue or a provider tint in
-          <code>tokens.json</code> and every element here re-tints in lock-step with the CLI.
-        </p>
-        <div class="sg-panes" data-sg-clone>
-          <div>
-            <div class="sg-row">
-              <span class="status-pill status-pill--info"><span class="status-pill-dot"></span><span class="status-pill-label">Provisioning</span></span>
-              <span class="status-pill status-pill--ok"><span class="status-pill-dot"></span><span class="status-pill-label">Live</span></span>
-              <span class="status-pill status-pill--warn"><span class="status-pill-dot"></span><span class="status-pill-label">Degraded</span></span>
-              <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Stopped</span></span>
-            </div>
-            <div class="sg-row">
-              <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Archived</span></span>
-              <span class="status-pill status-pill--danger"><span class="status-pill-dot"></span><span class="status-pill-label">Decommissioned</span></span>
-              <span class="status-pill status-pill--info"><span class="status-pill-dot"></span><span class="status-pill-label">Adopted</span></span>
-            </div>
-            <div class="sg-inst-list">
-              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--provisioning">◌</span><span class="sg-type-tag">provisioning</span><span class="sg-kv">role info · --info</span></div>
-              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--live">●</span><span class="sg-type-tag">live</span><span class="sg-kv">role ok · --ok</span></div>
-              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--degraded">◐</span><span class="sg-type-tag">degraded</span><span class="sg-kv">role warn · --warn</span></div>
-              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--stopped">○</span><span class="sg-type-tag">stopped</span><span class="sg-kv">neutral · --muted-text</span></div>
-              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--archived">▢</span><span class="sg-type-tag">archived</span><span class="sg-kv">neutral · --muted-text</span></div>
-              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--decommissioned">✕</span><span class="sg-type-tag">decommissioned</span><span class="sg-kv">role danger · --danger</span></div>
-              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--adopted">◈</span><span class="sg-type-tag">adopted</span><span class="sg-kv">role info · --info</span></div>
-            </div>
-            <div class="sg-prov-chips">
-              <span class="sg-prov-chip" style="border-color: var(--provider-hetzner);"><span class="sg-prov-mark" style="background: var(--provider-hetzner);"></span>Hetzner</span>
-              <span class="sg-prov-chip" style="border-color: var(--provider-azure);"><span class="sg-prov-mark" style="background: var(--provider-azure);"></span>Azure</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="sg-section">
-        <h2>Forms</h2>
+        <h2>14 · Forms</h2>
         <div class="sg-panes" data-sg-clone>
           <div class="sg-forms">
             <div class="field">
@@ -359,8 +642,9 @@
         </div>
       </section>
 
+      <!-- 15 Toasts (shipped components) ─────────────────────────────────────── -->
       <section class="sg-section">
-        <h2>Toasts</h2>
+        <h2>15 · Toasts</h2>
         <div class="sg-panes" data-sg-clone>
           <div class="sg-toasts">
             <div class="toast toast-success"><span class="toast-ico">&#10003;</span><div class="toast-main"><div class="toast-title">Instance launched</div><div class="toast-body">summer-lake is provisioning.</div></div><button class="toast-close" type="button" aria-label="Dismiss">&times;</button></div>
@@ -370,40 +654,172 @@
         </div>
       </section>
 
+      <!-- 16 Modal — the six families (shipped components) ───────────────────── -->
       <section class="sg-section">
-        <h2>Modal</h2>
-        <p class="sg-note">Shown flat (no overlay). In the product it sits on the scrim at --z-modal with a focus trap.</p>
+        <h2>16 · Modal — the six families</h2>
+        <p class="sg-note">
+          Every dialog in the console is one of six families, all shown flat here (no overlay);
+          in the product each sits on the scrim at --z-modal with a focus trap, and Escape /
+          backdrop / Cancel dismissal stays available in every phase. The three <b>confirm</b>
+          families share one grammar (GR41): <b>mutate</b> ships a live primary button with a
+          single escaped consequence sentence; <b>danger&nbsp;(no&nbsp;echo)</b> carries
+          btn-danger weight and is armed from the start — for grave-but-reversible actions
+          (rollbacks) whose warning rides the trusted rich-body slot; <b>destroy</b> adds the
+          consequence list and the type-the-name echo, its button disabled until the name
+          matches. A failed confirm never dies into a toast: the sentence renders inline
+          (.cm-error) and the primary morphs into exactly one recovery — Try again for
+          transient refusals, Close for terminal ones (decision&nbsp;25).
+        </p>
         <div class="sg-panes sg-modal-demo" data-sg-clone>
-          <div class="modal-card card">
-            <button class="modal-x" type="button" aria-label="Close">&times;</button>
-            <h2 class="modal-title">Remove summer-lake?</h2>
-            <p class="modal-sub">This deletes the server and everything on it. Type the instance name to confirm.</p>
-            <div class="field">
-              <input class="form-input" type="text" placeholder="summer-lake" />
+          <div class="sg-stack">
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">form — create / edit, primary submit</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Invite a team member</h2>
+                <p class="modal-sub">They join this team the moment they accept.</p>
+                <div class="field">
+                  <label class="label">Email</label>
+                  <input class="form-input" type="email" placeholder="dev@example.com" />
+                </div>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Cancel</button>
+                  <button class="btn btn-primary" type="button">Send invitation</button>
+                </div>
+              </div>
             </div>
-            <div class="modal-actions">
-              <button class="btn" type="button">Cancel</button>
-              <button class="btn btn-danger" type="button">Remove instance</button>
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">account — identity, sessions, sign-out</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Account &amp; sessions</h2>
+                <p class="modal-sub">You are signed in to Barkpark Cloud.</p>
+                <div class="modal-row"><span class="k">Team</span><span class="v">team_9f2c</span></div>
+                <h3 class="modal-section">Active sessions</h3>
+                <div class="sessions-box">
+                  <div class="session-row">
+                    <div class="session-main">
+                      <div class="session-device">Chrome · macOS <span class="badge badge-current">This device</span></div>
+                      <div class="session-meta">203.0.113.7 · active just now</div>
+                    </div>
+                    <button class="btn btn-sm" type="button" disabled>Current</button>
+                  </div>
+                  <div class="session-row">
+                    <div class="session-main">
+                      <div class="session-device">Firefox · Linux</div>
+                      <div class="session-meta">198.51.100.4 · active 3d ago</div>
+                    </div>
+                    <button class="btn btn-sm" type="button">Revoke</button>
+                  </div>
+                </div>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Close</button>
+                  <button class="btn btn-primary" type="button">Log out</button>
+                </div>
+              </div>
             </div>
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">cmdk — command palette (⌘K), keyboard-first</p>
+              <div class="modal-card card">
+                <div class="cmdk">
+                  <div class="cmdk-search-wrap">
+                    <input class="cmdk-search" type="text" placeholder="Search instances, sites, and actions…" aria-label="Command palette search" />
+                  </div>
+                  <div class="cmdk-list">
+                    <div class="cmdk-row is-active"><span class="cmdk-row-label">summer-lake</span><span class="cmdk-row-meta"><span class="cmdk-row-hint">open</span><span class="cmdk-row-group">Instances</span></span></div>
+                    <div class="cmdk-row"><span class="cmdk-row-label">Launch a Barkpark</span><span class="cmdk-row-meta"><span class="cmdk-row-group">Actions</span></span></div>
+                  </div>
+                  <div class="cmdk-foot">
+                    <span class="cmdk-hint"><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+                    <span class="cmdk-hint"><kbd>↵</kbd> select</span>
+                    <span class="cmdk-hint"><kbd>esc</kbd> close</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">mutate confirm — live primary, one esc'd consequence</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Deploy shop.example.com?</h2>
+                <p class="modal-sub cm-consequence">Rebuilds from the connected repository and replaces the live release when it succeeds.</p>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Cancel</button>
+                  <button class="btn btn-primary" type="button">Deploy</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">danger (no echo) — btn-danger, armed from the start, rich body</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Roll back summer-lake?</h2>
+                <p class="modal-sub cm-body">App-level rollback to the previous slot. Schema stays forward &mdash; rolling back code does <b>not</b> undo migrations. The instance will be <b>pinned</b> at the rolled-back version so autoupdate won't re-apply the version you're leaving.</p>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Cancel</button>
+                  <button class="btn btn-danger" type="button">Roll back</button>
+                </div>
+              </div>
+              <p class="sg-fam-label" style="margin-top: 12px;">&hellip; failed confirm: inline sentence + one recovery, never a toast (decision 25)</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Roll back summer-lake?</h2>
+                <div class="cm-error" role="alert">
+                  <p class="cm-error-msg">Rollback is already running — one at a time. Wait for it to settle, then try again.</p>
+                </div>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Cancel</button>
+                  <button class="btn btn-danger" type="button">Try again</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="sg-fam">
+              <p class="sg-fam-label">destroy — consequence list + type-the-name echo, disabled until matched</p>
+              <div class="modal-card card">
+                <button class="modal-x" type="button" aria-label="Close">&times;</button>
+                <h2 class="modal-title">Remove summer-lake?</h2>
+                <ul class="cm-consequences">
+                  <li>Deletes the server and its volume.</li>
+                  <li>All sites on this instance go offline.</li>
+                </ul>
+                <div class="field cm-typed-field">
+                  <label class="label">Type <span class="cm-name">summer-lake</span> to confirm</label>
+                  <input class="form-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
+                </div>
+                <div class="modal-actions">
+                  <button class="btn" type="button">Cancel</button>
+                  <button class="btn btn-danger" type="button" disabled>Remove instance</button>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </section>
+
+      <p class="sg-swatch-note" style="margin-top: 40px;">
+        Companion artifacts: <code>design/tokens.json</code> (canonical values) ·
+        <code>design/handover/ui-review-9/</code> (agency handover). CI contract: the swatch
+        table above is emitter-owned and byte-checked by <code>design/check.mjs</code>; the
+        contrast pairs by <code>__css_check.mjs</code> (E5). Token edits land in tokens.json and
+        re-splice here in the same change.
+      </p>
     </div>
 
     <script>
       // Duplicate every [data-sg-clone] demo into a light pane and a dark pane.
       // app.css scopes its dark tokens with [data-theme="dark"], which cascades
-      // from any element — so a wrapper attribute is all a pane needs.
+      // from any element — so a wrapper attribute is all a pane needs. The swatch
+      // grid is STATIC (emitter-spliced); the clone just mirrors it into both
+      // themes so the chips resolve light and dark side by side. No runtime token
+      // reading — the values are the emitter's, not the browser's.
       (function () {
-        var TOKENS = [
-          "--bg", "--surface", "--muted-surface", "--text", "--muted-text", "--dim",
-          "--primary", "--primary-fg", "--btn-bg", "--btn-fg",
-          "--btn-danger-bg", "--btn-danger-fg", "--border", "--ring", "--accent",
-          "--ok", "--warn", "--warn-strong", "--danger", "--info",
-          "--ok-soft", "--warn-soft", "--danger-soft", "--info-soft",
-          "--console-bg", "--console-fg", "--console-dim"
-        ];
-
         document.querySelectorAll("[data-sg-clone]").forEach(function (host) {
           var demo = host.firstElementChild;
           host.removeChild(demo);
@@ -418,34 +834,6 @@
             pane.appendChild(demo.cloneNode(true));
             host.appendChild(pane);
           });
-        });
-
-        // Fill the swatch grids with live-resolved token values per pane.
-        document.querySelectorAll("[data-sg-swatches]").forEach(function (grid) {
-          var probe = document.createElement("span");
-          grid.appendChild(probe);
-          TOKENS.forEach(function (name) {
-            var val = getComputedStyle(probe).getPropertyValue(name).trim();
-            var cell = document.createElement("div");
-            cell.className = "sg-swatch";
-            var chip = document.createElement("div");
-            chip.className = "sg-swatch-chip";
-            chip.style.background = val || "transparent";
-            var meta = document.createElement("div");
-            meta.className = "sg-swatch-meta";
-            var n = document.createElement("div");
-            n.className = "sg-swatch-name";
-            n.textContent = name;
-            var v = document.createElement("div");
-            v.className = "sg-swatch-val";
-            v.textContent = val || "(unresolved)";
-            meta.appendChild(n);
-            meta.appendChild(v);
-            cell.appendChild(chip);
-            cell.appendChild(meta);
-            grid.appendChild(cell);
-          });
-          grid.removeChild(probe);
         });
       })();
     </script>

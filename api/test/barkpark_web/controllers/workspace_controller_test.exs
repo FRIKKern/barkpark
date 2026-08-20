@@ -15,6 +15,8 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
   alias Barkpark.{Auth, Repo, Tenancy, TenancyFixtures}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Tenancy.WorkspaceBundle
+  alias Barkpark.Tenancy.WorkspaceBundle.Archive
 
   setup do
     # create_token/4 with no explicit workspace_id binds to the seeded Default
@@ -437,6 +439,557 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
       assert orphans == [],
              "zero-orphan violated — rows survived the HTTP delete: #{inspect(orphans)}"
+    end
+  end
+
+  describe "GET /api/workspaces/:workspace_slug/export" do
+    test "200 for an admin — application/x-tar attachment with a non-empty bundle body",
+         %{conn: conn} do
+      raw_admin = "ws-export-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Export WS"}, admin_token(raw_admin))
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export")
+
+      assert resp.status == 200
+
+      # Binary tar carrier — NO charset (put_resp_content_type/3 nil charset).
+      assert Plug.Conn.get_resp_header(resp, "content-type") == ["application/x-tar"]
+
+      assert Plug.Conn.get_resp_header(resp, "content-disposition") ==
+               ["attachment; filename=#{target.slug}.tar"]
+
+      # The body is the real materialized bundle, not an empty 200.
+      assert byte_size(resp.resp_body) > 0
+
+      # …and it is a genuine bp-export-v1 bundle FOR THIS workspace — unpack the
+      # manifest straight off the response bytes (no DB write, so no dirty-target
+      # re-import conflict; the round-trip proof lives in the import test below).
+      {manifest, _dumps} = Archive.unpack(resp.resp_body)
+      assert manifest["format"] == Archive.format()
+      assert manifest["workspace_slug"] == target.slug
+    end
+
+    test "the profile / dataset / source_server query params REACH the engine (they were silently discarded before)",
+         %{conn: conn} do
+      raw_admin = "ws-export-scoped-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Scoped Export WS"}, admin_token(raw_admin))
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export?profile=dev&source_server=https://x.test")
+
+      assert resp.status == 200
+      {manifest, _dumps} = Archive.unpack(resp.resp_body)
+
+      # The whole point: on the pre-slice controller these are absent because the
+      # action matched only workspace_slug and called export/1.
+      assert manifest["profile"] == "dev"
+      assert manifest["source_server"] == "https://x.test"
+      assert manifest["format"] == Archive.format()
+
+      # Content type is set UNCONDITIONALLY — there is no Accept negotiation here.
+      assert Plug.Conn.get_resp_header(resp, "content-type") == ["application/x-tar"]
+
+      assert Plug.Conn.get_resp_header(resp, "content-disposition") ==
+               ["attachment; filename=#{target.slug}-dev.tar"]
+    end
+
+    test "422 with an honest reason when a scope option cannot be resolved — never a 500, never a silently wrong bundle",
+         %{conn: conn} do
+      raw_admin = "ws-export-422-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Refusing Export WS"}, admin_token(raw_admin))
+
+      for {query, reason} <- [
+            {"profile=staging", "invalid_profile"},
+            {"dataset=no-such-dataset", "dataset_not_found"}
+          ] do
+        resp =
+          conn
+          |> authed(raw_admin)
+          |> get("/api/workspaces/#{target.slug}/export?#{query}")
+
+        assert resp.status == 422
+        body = Jason.decode!(resp.resp_body)
+        assert body["error"]["code"] == "unprocessable"
+        assert body["error"]["reason"] == reason
+        assert body["error"]["message"] != ""
+      end
+    end
+
+    test "503 export_failed with a retry hint when the COPY dies of a transport failure — never a bare 500 internal_error",
+         %{conn: conn} do
+      raw_admin = "ws-export-503-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Dying Export WS"}, admin_token(raw_admin))
+
+      # The exact exception the live 500 carried, raised from the exact function
+      # it was raised in (run_copy_out/1), through the real route. A genuine
+      # pool timeout cannot be used here: under the SQL sandbox it arrives as an
+      # ownership-shutdown EXIT, not a rescuable raise.
+      Application.put_env(:barkpark, :export_copy_fault, "tcp recv: closed")
+      on_exit(fn -> Application.delete_env(:barkpark, :export_copy_fault) end)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export")
+
+      assert resp.status == 503
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "export_failed"
+      assert body["error"]["reason"] == "database_unavailable"
+      assert body["error"]["message"] != ""
+      assert body["error"]["hint"] =~ "Retry"
+    end
+
+    test "404 for an unknown workspace slug (admin)", %{conn: conn} do
+      raw_admin = "ws-export-404-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["admin"])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/no-such-ws/export")
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+    end
+
+    test "403 for a NON-admin token (permission denial before the action)",
+         %{conn: conn, raw_token: raw, member_ws: member_ws} do
+      # `raw` holds only ["read", "write"] — the :require_admin gate 403s it
+      # BEFORE export/2 runs, so no bundle is ever materialized.
+      resp =
+        conn
+        |> authed(raw)
+        |> get("/api/workspaces/#{member_ws.slug}/export")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+    end
+
+    test "unauthenticated → 401", %{conn: conn, member_ws: member_ws} do
+      resp = get(conn, "/api/workspaces/#{member_ws.slug}/export")
+
+      assert resp.status == 401
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
+    end
+  end
+
+  describe "POST /api/workspaces/:workspace_slug/import" do
+    test "200 for an admin — imports a bundle into a clean scope and returns {tables,total_rows}",
+         %{conn: conn} do
+      raw_admin = "ws-import-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      # Seed a real workspace with scoped content so the round-trip is NOT vacuous.
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Import RT WS"}, admin_token(raw_admin))
+
+      project = Tenancy.get_project(target.slug, "default")
+      {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, "test")
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+      ws_slug = target.slug
+
+      # CLEAN TARGET: delete the workspace (cascades every FK-scoped row) then clear
+      # the two FK-less audit tables so the copy-strategy members re-import without
+      # a primary-key collision (the copy path assumes a clean target; only the
+      # E3/allowlist members are ON CONFLICT idempotent). audit_events is
+      # append-only, so the purge runs under `session_replication_role = replica`
+      # (triggers off) — the same clean-target trick the engine round-trip uses.
+      {:ok, _} = Tenancy.delete_workspace(target)
+      {:ok, ws_bin} = Ecto.UUID.dump(target.id)
+      purge_fkless_audit!(ws_bin)
+      refute Tenancy.get_workspace_by_slug(ws_slug)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{ws_slug}/import", bundle)
+
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+      assert is_map(body["tables"])
+      assert body["total_rows"] > 0
+
+      # The import REALLY landed through the HTTP path: the workspace + its scoped
+      # document are back — not a vacuous 200.
+      assert Tenancy.get_workspace_by_slug(ws_slug)
+
+      assert scoped_row_count("documents", target.id) > 0
+    end
+
+    test "403 for a NON-admin token (permission denial before the action)",
+         %{conn: conn, raw_token: raw, member_ws: member_ws} do
+      resp =
+        conn
+        |> authed(raw)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{member_ws.slug}/import", "ignored")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+    end
+
+    # ── the bounded body (PDS wave 23, pds-bl-bounded-import-unpack) ───────────
+    #
+    # The ceiling that ships is DERIVED (2x the measured 2,605.5 MiB bundle =
+    # 5,464,203,264 B). No test posts 5.46 GB, so the refusal is exercised
+    # through the `:max_import_body_bytes` override — the mechanism, not the
+    # number, is what these prove.
+    test "413 import_body_too_large refuses an over-ceiling body in CLEAN mode — the mode " <>
+           "that had NO gate at all",
+         %{conn: conn} do
+      raw_admin = "ws-import-413-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      Application.put_env(:barkpark, :max_import_body_bytes, 1_024)
+
+      try do
+        resp =
+          conn
+          |> authed(raw_admin)
+          |> put_req_header("content-type", "application/x-tar")
+          |> post("/api/workspaces/whatever/import", String.duplicate("x", 4_096))
+
+        assert resp.status == 413
+        body = Jason.decode!(resp.resp_body)
+        assert body["error"]["code"] == "import_body_too_large"
+        # The limit is NAMED, not merely enforced.
+        assert body["error"]["details"]["limit_bytes"] == 1_024
+        assert body["error"]["message"] =~ "1024-byte ceiling"
+        assert body["error"]["message"] =~ "2,605.5 MiB"
+      after
+        Application.delete_env(:barkpark, :max_import_body_bytes)
+      end
+    end
+
+    test "the ceiling can be exercised BOTH ways: the same body under a high ceiling is " <>
+           "NOT refused (the 413 is not a constant)",
+         %{conn: conn} do
+      raw_admin = "ws-import-413b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      # Same 4 KB body, ceiling above it: it gets past the gate and dies on the
+      # engine's honest invalid_bundle instead (4 KB of "x" is not a tar).
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/whatever/import", String.duplicate("x", 4_096))
+
+      assert resp.status == 422
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_bundle"
+    end
+
+    test "413 also gates mode=merge", %{conn: conn} do
+      raw_admin = "ws-import-413m-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      Application.put_env(:barkpark, :max_import_body_bytes, 1_024)
+
+      try do
+        resp =
+          conn
+          |> authed(raw_admin)
+          |> put_req_header("content-type", "application/x-tar")
+          |> post("/api/workspaces/whatever/import?mode=merge", String.duplicate("x", 4_096))
+
+        assert resp.status == 413
+        assert Jason.decode!(resp.resp_body)["error"]["code"] == "import_body_too_large"
+      after
+        Application.delete_env(:barkpark, :max_import_body_bytes)
+        Application.delete_env(:barkpark, :allow_bundle_import)
+      end
+    end
+
+    test "the success receipt says whether the disk precondition actually RAN", %{conn: conn} do
+      raw_admin = "ws-import-disk-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Disk RX WS"}, admin_token(raw_admin))
+
+      project = Tenancy.get_project(target.slug, "default")
+      {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, "test")
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+      ws_slug = target.slug
+
+      {:ok, _} = Tenancy.delete_workspace(target)
+      {:ok, ws_bin} = Ecto.UUID.dump(target.id)
+      purge_fkless_audit!(ws_bin)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{ws_slug}/import", bundle)
+
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert body["body_bytes"] == byte_size(bundle),
+             "the receipt must report the bytes actually spilled"
+
+      # Checked or not, it SAYS which — never a checkmark for a check that did
+      # not run. Plug.Test sets content-length, so on a normal box this is a
+      # real, performed check carrying the free-space number it measured.
+      assert is_map(body["disk_precondition"])
+      assert is_boolean(body["disk_precondition"]["checked"])
+
+      if body["disk_precondition"]["checked"] do
+        assert body["disk_precondition"]["free_bytes"] > 0
+      else
+        assert is_binary(body["disk_precondition"]["reason"])
+      end
+    end
+
+    test "unauthenticated → 401", %{conn: conn, member_ws: member_ws} do
+      resp =
+        conn
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{member_ws.slug}/import", "ignored")
+
+      assert resp.status == 401
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
+    end
+  end
+
+  describe "POST /api/workspaces/:workspace_slug/import?mode=merge (PDS-D10 fail-closed guard)" do
+    test "REFUSED 403 bundle_import_disabled while :allow_bundle_import is unset (fail-closed default)",
+         %{conn: conn, member_ws: member_ws} do
+      # Stand-alone: the env plumb ships in a disjoint slice — make the absent
+      # (default-false) polarity explicit regardless of ambient test config.
+      Application.delete_env(:barkpark, :allow_bundle_import)
+
+      raw_admin = "ws-merge-off-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{member_ws.slug}/import?mode=merge", "never-imported")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "bundle_import_disabled"
+    end
+
+    test "explicit false refuses identically (the guard reads the value, not mere presence)",
+         %{conn: conn, member_ws: member_ws} do
+      Application.put_env(:barkpark, :allow_bundle_import, false)
+      on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+
+      raw_admin = "ws-merge-false-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{member_ws.slug}/import?mode=merge", "never-imported")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "bundle_import_disabled"
+    end
+
+    test "ALLOWED when :allow_bundle_import is true — merge converges a drifted, still-populated workspace over HTTP",
+         %{conn: conn} do
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+
+      raw_admin = "ws-merge-on-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Merge RT WS"}, admin_token(raw_admin))
+
+      project = Tenancy.get_project(target.slug, "default")
+      {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, "test")
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+
+      # Drift the STILL-POPULATED workspace — the clean path would PK-crash here;
+      # merge must converge it back without any pre-purge.
+      Repo.query!("UPDATE workspaces SET name = 'HTTP-DRIFT' WHERE slug = $1", [target.slug])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{target.slug}/import?mode=merge", bundle)
+
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+      assert body["mode"] == "merge"
+      assert is_map(body["tables"])
+      assert body["total_rows"] > 0
+
+      # The drift is converged back through the HTTP path — not a vacuous 200.
+      assert Tenancy.get_workspace_by_slug(target.slug).name == "Merge RT WS"
+      assert scoped_row_count("documents", target.id) > 0
+    end
+
+    test "409 import_constraint_violation names the constraint on a non-arbiter unique collision — never a blind 500 (task-63a199c0a0ce2a06)",
+         %{conn: conn} do
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+
+      raw_admin = "ws-merge-conflict-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      # SOURCE workspace carrying a NULL-dataset_id schema row — the slot the
+      # partial unique index (name, dataset) WHERE dataset_id IS NULL guards.
+      {:ok, source} =
+        Tenancy.create_workspace_with_owner(%{name: "Conflict Src WS"}, admin_token(raw_admin))
+
+      clash = "clash#{System.unique_integer([:positive])}"
+      insert_null_dsid_schema!(source.id, clash)
+
+      {:ok, bundle} = WorkspaceBundle.export(source.id)
+
+      # The source leaves (a different box); a SIBLING workspace on the target
+      # holds a different-id row in the SAME (name, dataset) NULL slot. The
+      # merge arbiter is the primary key only, so the bundle row must collide
+      # on the partial index — the exact raise class that used to escape as an
+      # opaque internal_error 500 (bp exit 8, body never captured).
+      {:ok, _} = Tenancy.delete_workspace(source)
+      {:ok, ws_bin} = Ecto.UUID.dump(source.id)
+      purge_fkless_audit!(ws_bin)
+
+      {:ok, sibling} =
+        Tenancy.create_workspace_with_owner(%{name: "Conflict Sib WS"}, admin_token(raw_admin))
+
+      insert_null_dsid_schema!(sibling.id, clash)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{source.slug}/import?mode=merge", bundle)
+
+      assert resp.status == 409
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "import_constraint_violation"
+      assert err["details"]["pg_code"] == "unique_violation"
+
+      assert err["details"]["constraint"] ==
+               "schema_definitions_name_dataset_null_dataset_id_index"
+
+      # The whole import rolled back: the source workspace did NOT land, and the
+      # sibling's resident row is untouched.
+      refute Tenancy.get_workspace_by_slug(source.slug)
+
+      assert Repo.query!(
+               "SELECT count(*) FROM schema_definitions WHERE workspace_id = $1::text::uuid AND name = $2",
+               [sibling.id, clash]
+             ).rows == [[1]]
+    end
+
+    test "unmatched engine {:error, term} → NAMED, LOGGED 500 import_failed — never the silent internal_error (task-96d8ab2b582818a4)",
+         %{conn: conn} do
+      # The round-3 live fire: 500 internal_error, zero log lines — an
+      # `{:error, term}` no controller clause matched fell through to the
+      # FallbackController's unlogged catch-all (Ecto's Repo.transaction can
+      # legitimately return {:error, :rollback} on a nested-rollback commit
+      # downgrade). The :import_fault seam forces exactly that term through the
+      # REAL unpack + HTTP path; the wire must answer a named import_failed
+      # carrying the term, and the log must name it BEFORE the response.
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      Application.put_env(:barkpark, :import_fault, {:error, :rollback})
+
+      on_exit(fn ->
+        Application.delete_env(:barkpark, :allow_bundle_import)
+        Application.delete_env(:barkpark, :import_fault)
+      end)
+
+      raw_admin = "ws-merge-fault-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Fault RT WS"}, admin_token(raw_admin))
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+
+      {resp, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          conn
+          |> authed(raw_admin)
+          |> put_req_header("content-type", "application/x-tar")
+          |> post("/api/workspaces/#{target.slug}/import?mode=merge", bundle)
+        end)
+
+      assert resp.status == 500
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "import_failed"
+      assert err["message"] =~ ":rollback"
+      # request_id stamped by the shared emitter — the operator can grep for it.
+      assert is_binary(err["request_id"])
+
+      # NEVER SILENT: the term is logged at error level before the response.
+      assert log =~ "unhandled error"
+      assert log =~ ":rollback"
+    end
+
+    test "unknown mode → 422 invalid_mode (never silently treated as clean)",
+         %{conn: conn, member_ws: member_ws} do
+      raw_admin = "ws-merge-bad-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{member_ws.slug}/import?mode=sideways", "never-imported")
+
+      assert resp.status == 422
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_mode"
+    end
+  end
+
+  # A schema row in the NULL-dataset_id slot (the flat-deployment shape the
+  # partial unique index `(name, dataset) WHERE dataset_id IS NULL` guards) —
+  # inserted directly so the write path cannot helpfully stamp a dataset_id.
+  defp insert_null_dsid_schema!(ws_id, name) do
+    Repo.query!(
+      "INSERT INTO schema_definitions (id, name, title, dataset, workspace_id, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), $1, $1, 'test', $2::text::uuid, now(), now())",
+      [name, ws_id]
+    )
+  end
+
+  # Clear the two FK-less audit tables for a workspace so a bundle re-import into
+  # the same DB has a clean copy-strategy target. audit_events enforces
+  # append-only via a trigger, so the DELETE runs under
+  # `session_replication_role = replica` (triggers off) and is reset to DEFAULT
+  # after — mirroring the engine round-trip's clean-target purge.
+  defp purge_fkless_audit!(ws_bin) do
+    Repo.query!("SET session_replication_role = replica", [])
+
+    try do
+      Repo.query!("DELETE FROM audit_events WHERE workspace_id = $1", [ws_bin])
+      Repo.query!("DELETE FROM audit_export_sinks WHERE workspace_id = $1", [ws_bin])
+    after
+      Repo.query!("SET session_replication_role = DEFAULT", [])
     end
   end
 

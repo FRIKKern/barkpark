@@ -77,9 +77,16 @@ api/.artifacts/
 .claude/scheduled_tasks.lock
 api/.claude/
 
+# Scaffy run receipts (bp scaffy run, D35) — machine-local fat records under
+# .scaffy/receipts/ that remove-replay inverts; never committed.
+.scaffy/
+
 # Host-side deploy state (written by deploy/instance-deploy.sh on the server)
 .instance-deploy-last
 .slots/
+# Site-deploy run-state (DeployRunner's per-run manifests/status/log + transient
+# 0600 build-env files, under the repo root so init/1 re-attaches across a restart)
+.bp-site-deploy-runs/
 
 # doc-truth generated artifacts (byproducts of the standing --code / --emit-refs runs)
 tooling/doc-truth/citation-truth-report.json
@@ -90,3 +97,20 @@ tooling/doc-truth/doc-refs.json
 # and in CI (.github/workflows/pdrender-wasm.yml). The bp-wasm-exec.js loader IS
 # committed (host-stable text) and stays tracked.
 api/priv/static/assets/bp-pdrender.wasm.gz
+
+# Claude Code harness RUNTIME state — machine-local, never cloned. These lived
+# only in one Mac's .git/info/exclude (which git never clones), so a fresh clone
+# showed them as untracked noise and could commit another machine's worktrees,
+# mailbox, or agent registry. Tracked here so every clone ignores them.
+# NOT ignored, deliberately: .claude/workflows/ and .claude/settings.json —
+# those ARE the distributed harness and must travel with the repo.
+# (.claude/scheduled_tasks.lock is already ignored above — not repeated.)
+**/.claude/scheduled_tasks.json
+**/.claude/routines/.state/
+**/.claude/worktrees/
+**/.claude/checkpoints/
+**/.claude/mailbox/
+**/.claude/agent-registry.json
+**/.claude/agent-memory-local
+**/.claude/first-run
+**/.claude/assistant-daemon-state.json

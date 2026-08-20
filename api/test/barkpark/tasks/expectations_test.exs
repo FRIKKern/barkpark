@@ -16,7 +16,7 @@ defmodule Barkpark.Tasks.ExpectationsTest do
        `reverse_referencers/2` posture.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
   use Oban.Testing, repo: Barkpark.Repo
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
@@ -151,9 +151,26 @@ defmodule Barkpark.Tasks.ExpectationsTest do
     assert {:ok, _closed} =
              Tasks.close(published.id, "fable-w8",
                observed_epoch: epoch,
+               # PDS-D289: both criteria are unmet on the doc AS READ and this
+               # close flips them in its own command, so it lands only with a
+               # recorded reason. The lvw-t9 single-write mechanism under test
+               # is unchanged — the override rides the same rev-CAS write.
+               criteria_override: "reverse-view close-out under test, not criteria proof",
+               # D56: a met-flip names its criterion — the 0-based index alone is
+               # unverifiable, so an unguarded flip is :criterion_text_required.
                criteria: [
-                 %{"index" => 0, "met" => true, "evidence" => "expectations_test.exs demo loop"},
-                 %{"index" => 1, "met" => true, "evidence" => "this very assertion"}
+                 %{
+                   "index" => 0,
+                   "met" => true,
+                   "evidence" => "expectations_test.exs demo loop",
+                   "criterion" => "the reverse view lists this task"
+                 },
+                 %{
+                   "index" => 1,
+                   "met" => true,
+                   "evidence" => "this very assertion",
+                   "criterion" => "closing with evidence flips satisfied"
+                 }
                ]
              )
 

@@ -1,0 +1,74 @@
+{
+  "child_count": 1,
+  "children": [
+    {
+      "doc_id": "drafts.probe-rail-move-p2",
+      "inserted_at": "2026-07-05T15:40:25.776125Z",
+      "lifecycle_status": "cancelled",
+      "title": "[probe] destination parent"
+    }
+  ],
+  "doc": {
+    "assignee": "probe-worker",
+    "claim": {
+      "closed_at": "2026-07-05T15:40:54.116036Z",
+      "closed_by": "probe-worker",
+      "epoch": 1,
+      "ts_iso": "2026-07-05T15:40:53.996279Z",
+      "work_digest": "d15db7ef9789c3cc",
+      "work_field_digests": {
+        "acceptance_criteria": "fc95eee81c37e480",
+        "description": "fc95eee81c37e480",
+        "title": "3ac0187879a92d30"
+      },
+      "worker": "probe-worker"
+    },
+    "comment_count": 0,
+    "content": {
+      "assignee": "probe-worker",
+      "claim": {
+        "closed_at": "2026-07-05T15:40:54.116036Z",
+        "closed_by": "probe-worker",
+        "epoch": 1,
+        "ts_iso": "2026-07-05T15:40:53.996279Z",
+        "work_digest": "d15db7ef9789c3cc",
+        "work_field_digests": {
+          "acceptance_criteria": "fc95eee81c37e480",
+          "description": "fc95eee81c37e480",
+          "title": "3ac0187879a92d30"
+        },
+        "worker": "probe-worker"
+      },
+      "close_reason": "probe complete",
+      "kind": "task",
+      "labels": [
+        "proj:rail-awareness",
+        "kind:probe"
+      ],
+      "lifecycle_status": "cancelled",
+      "priority": 4
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "drafts.probe-rail-move",
+    "execution_policy": null,
+    "id": "4affff11-40cf-4498-b2ea-214790781bdb",
+    "inserted_at": "2026-07-05T15:40:25.753398Z",
+    "kind": "task",
+    "labels": [
+      "proj:rail-awareness",
+      "kind:probe"
+    ],
+    "lifecycle_status": "cancelled",
+    "papers": [],
+    "parent_id": null,
+    "priority": 4,
+    "rev": "60081ec803c5818e56beee0e0b188a15",
+    "status": "draft",
+    "title": "[probe] rail-move live verification scratch",
+    "type": "task",
+    "updated_at": "2026-07-05T15:40:54.116053Z"
+  },
+  "ok": true
+}

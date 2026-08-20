@@ -1,0 +1,72 @@
+{
+  "assignment_id": "E10",
+  "candidate": {
+    "candidate_id": "candidate-preservation-envelope",
+    "candidate_version": "E05/legendary-e05-result/v1",
+    "content_sha256": "076a273805c39b98cfad66575fd1a1d9f1c974aef91aace1ddfb9faf9739a739",
+    "definition_sha256": "9cd9a837f38d2c0e836007b1a78722a2ff69848e5bdab3af63949c6df1377480",
+    "runnable_output_sha256": "7a97214f78f53a8c4c16d5d753990fa861e0475aac89e01573fe37b17a96ef5c",
+    "source_assignment": "E05",
+    "status": "PROVISIONAL_BLOCKED_REWORK"
+  },
+  "schema_version": "legendary-e10-candidate-provenance/v1",
+  "selection_boundary": {
+    "fact": "E09 names E05 the strongest non-rejected candidate on its evidence-truth/idempotence axes.",
+    "limitation": "E08 rejects E05 on frozen content, hierarchy, accessibility, alias, width, and real-surface evidence; strongest does not mean winner.",
+    "winner_selected": false
+  },
+  "source_evidence": {
+    "E03/candidate-rubric.json": {
+      "path": "../E03/candidate-rubric.json",
+      "sha256": "3805ed5afb1ed76c22ba2144aefaf2d5c5e73508fb8f4170d9441e3400d952d4"
+    },
+    "E03/result.json": {
+      "path": "../E03/result.json",
+      "sha256": "429ff1bd117299175ec44d8ad28d7ce0b5e7934a4e80d4d25aea01fff0a3aab5"
+    },
+    "E03/thresholds.json": {
+      "path": "../E03/thresholds.json",
+      "sha256": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b"
+    },
+    "E05/candidate.json": {
+      "path": "../E05/candidate.json",
+      "sha256": "9cd9a837f38d2c0e836007b1a78722a2ff69848e5bdab3af63949c6df1377480"
+    },
+    "E05/outputs/envelopes.jsonl": {
+      "path": "../E05/outputs/envelopes.jsonl",
+      "sha256": "7a97214f78f53a8c4c16d5d753990fa861e0475aac89e01573fe37b17a96ef5c"
+    },
+    "E05/result.json": {
+      "path": "../E05/result.json",
+      "sha256": "d634b92da183a80e71defee7a9cee00212ad701692eaf5ce1297aaf99519eb1f"
+    },
+    "E07/rejection-evidence.json": {
+      "path": "../E07/rejection-evidence.json",
+      "sha256": "a3dfd2beab05d7a842f22a0a5dbd6ccdb8907f3d403ce52053b57c86cd9ceb5e"
+    },
+    "E07/result.json": {
+      "path": "../E07/result.json",
+      "sha256": "0c17eec9a1931249b94c238a7f85d0134f84bdb880e39b9c50f3a20d366ec872"
+    },
+    "E08/rejection-evidence.json": {
+      "path": "../E08/rejection-evidence.json",
+      "sha256": "8e83f72732728b5d1a8daf835bf2b05704cb24b1eb6d8783817363a773b9c24f"
+    },
+    "E08/result.json": {
+      "path": "../E08/result.json",
+      "sha256": "ba7ca0ab2cd8f8622620e23d1c4e5e1d699ff9f4b768d37e03fd8674d04f6e1c"
+    },
+    "E09/outputs/attack-matrix.json": {
+      "path": "../E09/outputs/attack-matrix.json",
+      "sha256": "d34491e8556551d2d33011f7915d641b511371fd74c9862ffc1056761c129050"
+    },
+    "E09/outputs/rejection-evidence.json": {
+      "path": "../E09/outputs/rejection-evidence.json",
+      "sha256": "f003b573b5b52ca5b020eed00d1643a3594ac99104293986ca3a95d0326109d1"
+    },
+    "E09/result.json": {
+      "path": "../E09/result.json",
+      "sha256": "66355b6dde567391e1ed63b4f2ba5784b19803638c3c9930b36b0232d5baf1ec"
+    }
+  }
+}

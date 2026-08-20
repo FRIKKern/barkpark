@@ -276,22 +276,40 @@ func gaugeRows(gs []gaugeRow, ctx RenderCtx, w int) []string {
 
 	out := make([]string, 0, len(gs))
 	for _, g := range gs {
-		label := ctx.Theme.Body.Render(padOrTruncate(g.label, labelW))
+		labelLines := hardBoundDisplayLines([]string{g.label}, labelW)
+		if len(labelLines) == 0 {
+			labelLines = []string{""}
+		}
+		noteLines := []string(nil)
+		if noteW > 0 && g.note != "" {
+			noteLines = hardBoundDisplayLines([]string{g.note}, noteW)
+		}
 		bar := statBar(g.prop, barW, ctx)
 		pad := rightW - runeWidth(g.digit)
 		if pad < 0 {
 			pad = 0
 		}
 		digit := strings.Repeat(" ", pad) + ctx.Theme.Body.Render(g.digit)
-		line := label + "  " + bar + " " + digit
-		if noteW > 0 && g.note != "" {
-			note := g.note
-			if runeWidth(note) > noteW {
-				note = padOrTruncate(note, noteW) // truncate to the column
-			}
-			line += "  " + ctx.Theme.Dim.Render(note)
+		rowH := len(labelLines)
+		if len(noteLines) > rowH {
+			rowH = len(noteLines)
 		}
-		out = append(out, line)
+		for i := 0; i < rowH; i++ {
+			label := ""
+			if i < len(labelLines) {
+				label = labelLines[i]
+			}
+			line := ctx.Theme.Body.Render(padRight(label, labelW)) + "  "
+			if i == 0 {
+				line += bar + " " + digit
+			} else {
+				line += strings.Repeat(" ", barW+1+rightW)
+			}
+			if i < len(noteLines) {
+				line += "  " + ctx.Theme.Dim.Render(noteLines[i])
+			}
+			out = append(out, line)
+		}
 	}
 	return out
 }

@@ -1,5 +1,5 @@
 defmodule Barkpark.WebhooksTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Webhooks
   alias Barkpark.Webhooks.{Webhook, Dispatcher}
@@ -405,6 +405,33 @@ defmodule Barkpark.WebhooksTest do
       assert updated.status == "failed_giveup"
       assert updated.last_error_text == "http 500"
       assert updated.attempts == 3
+    end
+  end
+
+  describe "create_test_delivery/1 (GR45)" do
+    test "inserts a pending test row with NULL endpoint_id + event_id, snapshot preserved" do
+      {:ok, d} =
+        Webhooks.create_test_delivery(%{"url" => "http://ex.test/hook", "body" => "{}"})
+
+      assert d.source_kind == "test"
+      assert d.status == "pending"
+      assert d.attempts == 0
+      # A NULL endpoint_id is the safety crux — a failing test never counts
+      # toward the endpoint's auto-disable streak.
+      assert d.endpoint_id == nil
+      assert d.event_id == nil
+      assert d.payload_snapshot == %{"url" => "http://ex.test/hook", "body" => "{}"}
+    end
+
+    test "marking a test row delivered/giveup is a no-op on any endpoint's streak" do
+      {:ok, d} = Webhooks.create_test_delivery(%{"body" => "{}"})
+      # nil endpoint_id → mark_* short-circuit their streak accounting (no crash,
+      # no reset, no record). The row itself still records the verdict.
+      {:ok, ok_row} = Webhooks.mark_delivered(d, 200, 1)
+      assert ok_row.status == "ok"
+      {:ok, d2} = Webhooks.create_test_delivery(%{"body" => "{}"})
+      {:ok, fail_row} = Webhooks.mark_giveup(d2, 500, "http 500", 1)
+      assert fail_row.status == "failed_giveup"
     end
   end
 end

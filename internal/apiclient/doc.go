@@ -218,14 +218,15 @@ func (d Doc) ClaimEpoch() (int, bool) {
 // PaperBlocks returns the raw JSON for this document's portable-doc block tree,
 // preferring the top-level "blocks" the live API emits and falling back through
 // a nested "content":{"blocks":[…]} envelope and then a "body":{"blocks":[…]}
-// envelope (the two alternate paper shapes on guerrilla). It returns nil when
+// envelope (the two alternate paper shapes on guerrilla). A present canonical
+// empty array is authoritative and is returned as `[]`; it does not fall
+// through to stale legacy content. It returns nil when
 // the document carries no block tree (every non-paper doc, and body_html-only
 // papers — see Doc.BodyHTML for the last-resort render source), so callers can
 // branch on "is this a paper with renderable blocks?" off a single nil check.
 func (d Doc) PaperBlocks() json.RawMessage {
-	// Each candidate is checked for a NON-EMPTY block array so an empty "blocks":[]
-	// at one level falls through to the next source (and ultimately to body_html)
-	// rather than short-circuiting into a blank render.
+	// Presence, not length, defines authority: `blocks: []` intentionally means
+	// an empty Paper and must not resurrect a stale body/body_html fallback.
 	if blocks := blocksFromEnvelope(d.Blocks); blocks != nil {
 		return blocks
 	}
@@ -244,9 +245,7 @@ func (d Doc) PaperBlocks() json.RawMessage {
 
 // blocksFromEnvelope pulls a block tree out of a RawMessage, accepting either a
 // bare block array ([…]) or the object envelope form ({"blocks":[…]}). It
-// returns nil unless the resolved array carries at least one element, so an
-// empty array (whichever shape) is treated as "no blocks" and the caller can
-// fall through to the next source.
+// returns nil only when the value is absent or is not one of those shapes.
 func blocksFromEnvelope(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
 		return nil
@@ -255,10 +254,7 @@ func blocksFromEnvelope(raw json.RawMessage) json.RawMessage {
 	// itself the array).
 	var arr []json.RawMessage
 	if err := json.Unmarshal(raw, &arr); err == nil {
-		if len(arr) > 0 {
-			return raw
-		}
-		return nil
+		return raw
 	}
 	// The object envelope {"blocks":[…]}.
 	var env struct {
@@ -266,7 +262,7 @@ func blocksFromEnvelope(raw json.RawMessage) json.RawMessage {
 	}
 	if err := json.Unmarshal(raw, &env); err == nil && len(env.Blocks) > 0 {
 		var inner []json.RawMessage
-		if json.Unmarshal(env.Blocks, &inner) == nil && len(inner) > 0 {
+		if json.Unmarshal(env.Blocks, &inner) == nil {
 			return env.Blocks
 		}
 	}

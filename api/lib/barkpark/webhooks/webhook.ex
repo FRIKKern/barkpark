@@ -33,6 +33,17 @@ defmodule Barkpark.Webhooks.Webhook do
     field :audit_categories, {:array, :string}, default: []
     field :audit_actions, {:array, :string}, default: []
 
+    # Herd-layer chat_blocked subscription (charter D59h). A non-NULL
+    # `blocked_threshold_s` makes this a CHAT_BLOCKED webhook: a workspace-scoped
+    # session blocked on a pending ask for longer than this many seconds fires
+    # ONE debounced notification here. It DOUBLES as the subscription flag AND
+    # the per-workspace threshold — NULL (the default) = OFF, so enabling is a
+    # pure config insert (a workspace-scoped row with a threshold), zero code.
+    # Orthogonal to `audit_categories`: content fan-out excludes rows with a
+    # threshold, audit fan-out already excludes rows with empty categories, so
+    # the three channels never cross.
+    field :blocked_threshold_s, :integer
+
     belongs_to :organization, Barkpark.Tenancy.Organization, type: :binary_id
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
@@ -71,6 +82,7 @@ defmodule Barkpark.Webhooks.Webhook do
       :active,
       :audit_categories,
       :audit_actions,
+      :blocked_threshold_s,
       :organization_id,
       :workspace_id,
       :project_id
@@ -79,6 +91,9 @@ defmodule Barkpark.Webhooks.Webhook do
     |> validate_change(:url, &validate_outbound_url/2)
     |> validate_subset(:events, @valid_events)
     |> validate_subset(:audit_categories, @valid_audit_categories)
+    # A threshold must be a positive number of seconds — 0/negative would fire
+    # immediately (or never), which is never a meaningful debounce window.
+    |> validate_number(:blocked_threshold_s, greater_than: 0)
   end
 
   # Defense-in-depth shape check: require an http(s) URL with a host and no

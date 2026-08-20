@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // runUse is the `bp use <name|url>` built-in — the headline of the named-server
@@ -81,12 +82,7 @@ func runUse(out *writer, args []string) int {
 			"dataset":   cfg.Dataset,
 		},
 	}
-	switch out.output {
-	case "json":
-		out.renderJSON(payload)
-		return exitOK
-	case "yaml":
-		out.renderYAML(toGeneric(payload))
+	if out.emitStructured(payload) {
 		return exitOK
 	}
 	out.outf("✓ now using %s [%s] — %s  (scope w=%s p=%s d=%s)",
@@ -122,12 +118,7 @@ func runUseStatus(out *writer, cfg *Config) int {
 		"active": active,
 		"known":  names,
 	}
-	switch out.output {
-	case "json":
-		out.renderJSON(payload)
-		return exitOK
-	case "yaml":
-		out.renderYAML(toGeneric(payload))
+	if out.emitStructured(payload) {
 		return exitOK
 	}
 
@@ -160,12 +151,7 @@ func useUnknown(out *writer, cfg *Config, q string) int {
 			"known":   names,
 		},
 	}
-	switch out.output {
-	case "json":
-		out.renderJSON(m)
-		return exitUsage
-	case "yaml":
-		out.renderYAML(toGeneric(m))
+	if out.emitStructured(m) {
 		return exitUsage
 	}
 	out.userErr("no known server matches %q", q)
@@ -212,10 +198,16 @@ func runServers(out *writer, args []string) int {
 	case "json", "yaml":
 		rows := make([]map[string]any, 0, len(list))
 		for _, e := range list {
+			aliases := []string{}
+			if len(e.Aliases) > 0 {
+				aliases = append(aliases, e.Aliases...)
+			}
 			rows = append(rows, map[string]any{
 				"name":           cfg.DisplayName(e),
 				"server":         e.Server,
 				"kind":           cfg.KindOf(e),
+				"instance_id":    e.InstanceID,
+				"aliases":        aliases,
 				"active":         cfg.IsActiveServer(e.Server),
 				"last_connected": e.LastConnected,
 				"tier":           e.Tier,
@@ -225,12 +217,9 @@ func runServers(out *writer, args []string) int {
 			"servers": rows,
 			"active":  activeName,
 		}
-		if out.output == "yaml" {
-			out.renderYAML(toGeneric(payload))
-		} else {
-			out.renderJSON(payload)
+		if out.emitStructured(payload) {
+			return exitOK
 		}
-		return exitOK
 	}
 
 	if len(list) == 0 {
@@ -245,13 +234,16 @@ func runServers(out *writer, args []string) int {
 	// Human table: ★ NAME  [kind]  URL  (tier, last_connected)
 	// Two-pass render so a long DisplayName or [kind] never overruns its
 	// field and desyncs the URL column (mirrors renderRows in table.go).
-	// First pass: measure the widest name and kind cell (rune-counted).
+	// First pass: measure the widest name and kind cell in terminal display
+	// cells (runewidth.StringWidth, mirroring renderRows in table.go), NOT
+	// rune-count — a wide-CJK/emoji DisplayName is one rune but two cells, so
+	// rune-count under-measures it and shears the KIND/SERVER columns.
 	maxName, maxKind := 12, 8
 	for _, e := range list {
-		if n := utf8.RuneCountInString(cfg.DisplayName(e)); n > maxName {
+		if n := runewidth.StringWidth(cfg.DisplayName(e)); n > maxName {
 			maxName = n
 		}
-		if k := utf8.RuneCountInString("[" + cfg.KindOf(e) + "]"); k > maxKind {
+		if k := runewidth.StringWidth("[" + cfg.KindOf(e) + "]"); k > maxKind {
 			maxKind = k
 		}
 	}
@@ -259,10 +251,13 @@ func runServers(out *writer, args []string) int {
 	// gutter the "★ "/"  " mark occupies, so column labels sit over their values
 	// (this was the only headerless table in the CLI). Mirrors renderRows' header
 	// + "-" separator in table.go.
-	out.outf("  %-*s %-*s %s", maxName, "NAME", maxKind, "KIND", "SERVER")
-	out.outf("  %-*s %-*s %s",
-		maxName, strings.Repeat("-", maxName),
-		maxKind, strings.Repeat("-", maxKind),
+	out.outf("  %s %s %s",
+		runewidth.FillRight("NAME", maxName),
+		runewidth.FillRight("KIND", maxKind),
+		"SERVER")
+	out.outf("  %s %s %s",
+		strings.Repeat("-", maxName),
+		strings.Repeat("-", maxKind),
 		strings.Repeat("-", len("SERVER")))
 	// Second pass: print each row padded to the measured widths.
 	for _, e := range list {
@@ -281,7 +276,20 @@ func runServers(out *writer, args []string) int {
 		case e.LastConnected != "":
 			extra = "  (" + e.LastConnected + ")"
 		}
-		out.outf("%s%-*s %-*s %s%s", mark, maxName, name, maxKind, kind, e.Server, extra)
+		// FillRight pads to display-cell width (see renderRows in table.go) rather
+		// than fmt's %-*s, which pads to a rune COUNT and under-pads wide runes.
+		out.outf("%s%s %s %s%s", mark,
+			runewidth.FillRight(name, maxName),
+			runewidth.FillRight(kind, maxKind),
+			e.Server, extra)
+		// An instance reached via more than one hostname lists its other hostnames
+		// indented beneath the primary row, so the fold into ONE entry is visible.
+		if len(e.Aliases) > 0 {
+			out.outf("  %s %s also: %s",
+				runewidth.FillRight("", maxName),
+				runewidth.FillRight("", maxKind),
+				joinComma(e.Aliases))
+		}
 	}
 	return exitOK
 }

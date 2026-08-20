@@ -93,9 +93,72 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # persist, it rides `PaperCanvas.sidebar_meta_op/2`'s `{:doc_field, …}` shape,
   # NEVER the block pipeline.
 
-  @doc "Collapse / expand the whole metadata sidebar. Pure assign flip."
+  @doc """
+  Collapse / expand the whole metadata sidebar. Pure assign flip, plus the
+  explicit-open marker the bucket-aware first-paint default reads (charter D91).
+
+  Two assigns move together and mean different things. `sidebar_open` is what
+  the SERVER holds. `sidebar_user_opened` is whether the user asked for it —
+  the one input the server can supply without knowing the viewport, and the one
+  the `html:not([data-width-bucket="wide"]) … :not([data-user-opened])` rule in
+  root.html.heex yields to. Below `wide` the desk PAINTS the inspector closed
+  while `sidebar_open` still says true; that gap is deliberate and is precisely
+  what keeps D12's ~400ms flash from ever opening.
+
+  Which leaves one thing the flip has to get right: in that painted-closed
+  state the panel the user is looking at is CLOSED, so a click means OPEN, not
+  "toggle the assign". Resolving it reads `width_bucket` — the socket assign the
+  WidthBucket hook reconciles after connect. That is safe here and nowhere else
+  in this feature: a click happens long after connect, and it paints nothing
+  before the user acts, so consulting it costs no first-paint correctness. It
+  defaults to `wide` (mount's seed), which is also the conservative answer —
+  an unknown bucket behaves exactly as this handler always has.
+  """
+  # ── D179 — THE DISMISS IS NOT NAVIGATION, AND THAT IS RULED, NOT DEFAULTED ──
+  #
+  # At `narrow` and `phone` a user-summoned inspector paints as a FULL-SCREEN
+  # DESTINATION (the wave-10 geometry: `position:absolute; inset:0` over an
+  # opaque surface), and #5014 gave it the vocabulary of one — an arrow-left,
+  # a header that names the document, and a crumb trail whose last segment is
+  # the inspector itself. This handler is nonetheless a PURE ASSIGN: no
+  # `push_patch`, no `push_navigate`, no pushState anywhere in the chain. So
+  # browser Back from that destination does not close the inspector — it
+  # leaves the Studio entirely.
+  #
+  # The asymmetry is sharpest against the SIBLING control rendered beside it:
+  # a pane crumb fires `expand-pane`, which DOES `push_patch`
+  # (Handlers.Scope.expand_pane/2, scope.ex:175-178). Two adjacent controls in
+  # one trail, one history-bearing and one not.
+  #
+  # RULED (b) — keep the affordance, keep the click non-navigational, record
+  # why here, and lock it. The alternatives were refused with reasons, not
+  # forgotten:
+  #
+  #   (a) a URL-borne sidebar param. The URL grammar carries only
+  #       dataset / path / desk, and `append_desk_query/2`
+  #       (studio_live/paths.ex:86) is the ONLY query writer — so a sidebar
+  #       param has to be designed against `?desk=` preservation AND against
+  #       `expand-pane`'s own push_patch, which knows nothing about
+  #       `sidebar_user_opened` and would silently drop the param on every
+  #       crumb click. That is a design task, not a line change.
+  #   (c) drop the destination vocabulary. That unwinds #5014's merged, tested
+  #       Tier-3 exit; a full-screen state with no way out is the worse lie.
+  #
+  # Locked in `studio_live_navigational_truth_test.exs`: dismissing at Tier 3
+  # emits NO patch and NO navigate, with the `expand-pane` crumb standing as
+  # the contrast control that proves the refutation is able to fail.
+  #
+  # SCOPE: measured on a 2-segment paper path only (see the same caveat on
+  # `PaneBuilder.display_state/5`); deeper nav depth is filed separately.
   def sidebar_toggle_panel(socket) do
-    {:noreply, assign(socket, sidebar_open: !socket.assigns[:sidebar_open])}
+    open? = socket.assigns[:sidebar_open] == true
+    asked? = socket.assigns[:sidebar_user_opened] == true
+    wide? = socket.assigns[:width_bucket] in [nil, "wide"]
+
+    painted_closed? = open? and not asked? and not wide?
+    next_open? = if painted_closed?, do: true, else: not open?
+
+    {:noreply, assign(socket, sidebar_open: next_open?, sidebar_user_opened: next_open?)}
   end
 
   @doc """

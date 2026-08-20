@@ -34,6 +34,9 @@ func TestPaperDocRequestShapeAndUnwrap(t *testing.T) {
 	if seen.Query().Get("perspective") != "drafts" {
 		t.Errorf("perspective = %q, want drafts", seen.Query().Get("perspective"))
 	}
+	if seen.Query().Get("resolve") != "tasks" {
+		t.Errorf("resolve = %q, want tasks", seen.Query().Get("resolve"))
+	}
 	// The returned bytes must be the UNWRAPPED result object, not the envelope.
 	got := string(raw)
 	want := `{"_id":"drafts.p1","title":"Charter","_rev":"rev-9","blocks":[{"type":"heading"}]}`
@@ -62,6 +65,9 @@ func TestPaperDocEscapesSlugAndUsesArgDataset(t *testing.T) {
 	}
 	if seen.Query().Has("perspective") {
 		t.Errorf("perspective must be omitted when empty, got %q", seen.Query().Get("perspective"))
+	}
+	if seen.Query().Get("resolve") != "tasks" {
+		t.Errorf("resolve = %q, want tasks", seen.Query().Get("resolve"))
 	}
 }
 

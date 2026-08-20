@@ -131,6 +131,55 @@ func TestOpenDiffViewGuards(t *testing.T) {
 	}
 }
 
+// TestDiffTwinStatusMessageDistinguishesNotFoundFromUnreachable pins the
+// timeout-vs-not-found fix: a 5s timeout on the published-twin probe used to
+// render the SAME "never published" copy as a genuine 404, wrongly asserting
+// the twin is absent. NotFound and Unreachable must render distinct copy, and
+// NotFound must stay byte-identical to today's message.
+func TestDiffTwinStatusMessageDistinguishesNotFoundFromUnreachable(t *testing.T) {
+	notFound, notFoundErr := diffTwinStatusMessage(apiclient.DocReadNotFound)
+	unreachable, unreachableErr := diffTwinStatusMessage(apiclient.DocReadUnreachable)
+
+	if notFound == unreachable {
+		t.Fatalf("NotFound and Unreachable must render distinct copy, both got %q", notFound)
+	}
+	if notFound != "never published — every field is new" {
+		t.Errorf("NotFound copy must stay byte-identical to today's, got %q", notFound)
+	}
+	if notFoundErr {
+		t.Error("NotFound is a neutral info line, not an error")
+	}
+	if strings.Contains(unreachable, "never published") {
+		t.Errorf("Unreachable must not assert the twin is absent, got %q", unreachable)
+	}
+	if !unreachableErr {
+		t.Error("Unreachable is a real failure and should render as an error")
+	}
+}
+
+// TestOpenDiffViewUnreachableTwinDoesNotClaimNeverPublished is the fails-
+// before-fix case: an unreachable published-twin probe (transport error, not
+// a 404) must not open the modal AND must not say "never published" — that
+// copy is reserved for a genuine 404.
+func TestOpenDiffViewUnreachableTwinDoesNotClaimNeverPublished(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	srv.Close() // closed before use: any request now hits connection-refused
+
+	m := diffModel()
+	m.ds = apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "t"})
+	m.openDiffView()
+
+	if m.diffOpen {
+		t.Error("diff must not open when the twin probe is unreachable")
+	}
+	if strings.Contains(m.status, "never published") {
+		t.Errorf("unreachable probe must not claim never published, got %q", m.status)
+	}
+	if !m.statusErr {
+		t.Errorf("unreachable probe should render as an error status, got statusErr=%v msg=%q", m.statusErr, m.status)
+	}
+}
+
 func TestRenderDiffViewWindowsAndScrolls(t *testing.T) {
 	m := diffModel()
 	m.diffOpen = true

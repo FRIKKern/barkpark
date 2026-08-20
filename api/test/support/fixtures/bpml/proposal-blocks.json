@@ -1,0 +1,316 @@
+[
+ {
+  "id": "eyebrow",
+  "type": "eyebrow",
+  "text": "PROPOSAL · GO / NO-GO · EVERY CLAIM CARRIES ITS METER · 2026-08-13"
+ },
+ {
+  "id": "title",
+  "type": "heading",
+  "level": 1,
+  "text": "Open the keyhole"
+ },
+ {
+  "id": "byline",
+  "type": "byline",
+  "items": [
+   "decision requested",
+   "plan of record: gyl /papers/2026-08-13-portabledoc-source-masterplan",
+   "cost ~2 weeks · downside capped in days"
+  ]
+ },
+ {
+  "id": "ingress",
+  "type": "ingress",
+  "content": [
+   {
+    "type": "text",
+    "value": "Agents write most of our papers — through a keyhole: hand-built JSON, publish rules discovered one 409 at a time, a full republish per edit. We propose BPML, a readable strict markup, plus a local working copy: papers become files, edits become diffs. Two weeks, two endpoints. If the numbers don't move in a month, we retire it for the cost of days."
+   }
+  ]
+ },
+ {
+  "id": "ev-stats",
+  "type": "stats",
+  "items": [
+   {
+    "value": "2.1×",
+    "label": "payload density, measured",
+    "body": "The identical paper: 504 bytes in BPML, 1,034 as block JSON. Paid again on every read and every write, forever."
+   },
+   {
+    "value": "9–35×",
+    "label": "edit cost, measured",
+    "body": "Op batches of 0.7–3.1KB replaced full republishes of 13–51KB across a real authoring session."
+   },
+   {
+    "value": "3→1",
+    "label": "publish retries, observed",
+    "body": "Slug, description, tags — three sequential 409s that one validate-all reply teaches at once."
+   },
+   {
+    "value": "0",
+    "label": "editing tools today",
+    "body": "No pull, no diff, no push. An agent changing one block must resend the world or hand-compose op JSON."
+   }
+  ]
+ },
+ {
+  "id": "ev-quote",
+  "type": "pullquote",
+  "content": [
+   {
+    "type": "text",
+    "value": "Our platform is agent-first everywhere except the place agents spend their tokens: writing into it."
+   }
+  ]
+ },
+ {
+  "id": "s-fix",
+  "type": "section",
+  "title": "The fix — three small pieces",
+  "blocks": [
+   {
+    "id": "pr-diagram",
+    "type": "diagram",
+    "caption": "Below the API line, nothing changes.",
+    "source": "graph LR; A[agent or human] -->|bp paper pull| F[.barkpark/papers/x.bpml]; F -->|edit the file| F; F -->|bp paper push| D[id-keyed diff]; D -->|derived op batch, ifRev| API[/v1 ops + validate-all/]; API --> B[blocks — the only truth]; B --> S[reader · TUI · email · SSE]"
+   },
+   {
+    "id": "pr-example",
+    "type": "code",
+    "value": "<paper slug=\"deploy-status\" title=\"Deploy status\">\n  <eyebrow>OPS · LIVE</eyebrow>\n  <h1>Rollout</h1>\n  <stats>\n    <stat label=\"p95 latency\" value=\"182ms\">Across all API routes, last 24h.</stat>\n  </stats>\n  <callout tone=\"warning\" title=\"Attention\">3 failing checks — see below.</callout>\n  <section title=\"Detail\">\n    <p>Canary at <b>5%</b> — full plan in <a href=\"/papers/rollout-plan\">the rollout paper</a>.</p>\n  </section>\n</paper>"
+   },
+   {
+    "id": "pr-steps",
+    "type": "steps",
+    "steps": [
+     {
+      "title": "Contract — vocabulary + constraints on GET /v1/capabilities; validate-all on publish and patch. Two endpoints, valuable whatever else happens.",
+      "blocks": []
+     },
+     {
+      "title": "BPML — parser + printer beside the shipped FromMarkdown; strict grammar, teaching errors; blocks → BPML → blocks round-trips byte-equal, pinned by a CI property test. Freedom rides fenced <demo> islands: sandboxed HTML with honest fallbacks per surface.",
+      "blocks": []
+     },
+     {
+      "title": "Working copy — .barkpark/papers/*.bpml with bp paper pull / status / diff / push; push derives the op batch under ifRev. Nobody hand-writes an op again.",
+      "blocks": []
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "s-proofs",
+  "type": "section",
+  "title": "Proofs — every claim with its meter",
+  "blocks": [
+   {
+    "id": "proofs-table",
+    "type": "table",
+    "head": [
+     [
+      {
+       "type": "text",
+       "value": "Claim"
+      }
+     ],
+     [
+      {
+       "type": "text",
+       "value": "Meter"
+      }
+     ],
+     [
+      {
+       "type": "text",
+       "value": "Result"
+      }
+     ]
+    ],
+    "rows": [
+     [
+      [
+       {
+        "type": "text",
+        "value": "BPML halves payloads"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "The identical paper, both encodings, bytes"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "504B vs 1,034B — 2.1×"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "Derived ops beat republishing"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "A real session's edit history: 6 op batches vs the full payloads they replaced"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "0.7–3.1KB vs 13–51KB — 9× to 35×"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "One validate beats retry-discovery"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "Observed publish-wall session, violations surfaced one 409 at a time"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "3 round trips → 1"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "No new architecture needed"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "Shipped code: portable_doc/from_markdown.ex, html_sanitizer.ex, the atomic /ops endpoint"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "parser+printer is the same species; the write path exists"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "The round-trip is total"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "Construct map: tag↔type, attribute↔scalar, children↔content/blocks, CDATA↔opaque value"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "isomorphic by construction; CI keeps it that way"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "Ops machinery works today"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "6 atomic op batches applied under ifRev in one session — zero conflicts, zero losses"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "marks": [
+         "strong"
+        ],
+        "value": "proven in production use"
+       }
+      ]
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "id": "s-decision",
+  "type": "section",
+  "title": "The decision",
+  "blocks": [
+   {
+    "id": "dc-ask",
+    "type": "callout",
+    "tone": "info",
+    "title": "What we ask the team to approve",
+    "content": [
+     {
+      "type": "text",
+      "value": "The three pieces above. One owner, ~2 weeks, review at one month against: first-try publish ≥90% (from ~25% observed) and median edit ≤2KB (from 13–51KB republishes). Deliberately unbuilt: client runtimes, codegen toolchains, npm packages, custom file syntax — the discipline is the safety case."
+     }
+    ]
+   },
+   {
+    "id": "dc-kill",
+    "type": "callout",
+    "tone": "warning",
+    "title": "Kill criterion — signed into the proposal",
+    "content": [
+     {
+      "type": "text",
+      "value": "Miss both numbers at one month → retire BPML and the working copy, keep the two endpoints, write the debrief. Sunk cost: days. A trial with teeth, not a platform bet."
+     }
+    ]
+   },
+   {
+    "id": "dc-close",
+    "type": "paragraph",
+    "content": [
+     {
+      "type": "text",
+      "value": "Every paper this team will ever produce passes through the keyhole this removes. The machinery below the API line is built and good; what's missing is the last inch. Two weeks. Two endpoints. A measured exit. We recommend go."
+     }
+    ]
+   }
+  ]
+ }
+]

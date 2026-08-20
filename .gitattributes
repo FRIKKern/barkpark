@@ -1,0 +1,2 @@
+# Fixed-width terminal snapshots intentionally preserve right-padding cells.
+internal/pdrender/testdata/golden/*.txt whitespace=-blank-at-eol,blank-at-eof

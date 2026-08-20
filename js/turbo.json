@@ -13,7 +13,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "tests/**", "vitest.config.ts"],
+      "inputs": ["src/**", "tests/**", "vitest.config.ts", "vitest.browser.config.ts"],
       "outputs": ["coverage/**"]
     },
     "lint": {

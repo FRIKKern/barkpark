@@ -20,6 +20,39 @@
   // an old client can't bypass it. Overridable per-instance for the harness.
   const PASTE_CELL_CAP = 50000;
 
+  // ── READ-MODE ALLOWLIST (wave 43) ─────────────────────────────────────────
+  //
+  // This hook is now attached for EVERY Studio grid — the wrapper's phx-hook
+  // keys on `chrome == :studio`, not on `@editable` — because it is the SOLE
+  // PRODUCER of selection: cell-click / head-click / nav / nav-edge /
+  // nav-corner / select-all have no server-rendered phx-click anywhere. Without
+  // it a write-denied member (and a write-CAPABLE member in View mode: @editable
+  // is `mode == :edit and write_capable`) saw a selection highlight frozen on A1
+  // that nothing could move — and the clipboard copy, which reads td.sheet-sel,
+  // is downstream of that.
+  //
+  // Such a grid stamps no `data-fns`, so the hook self-derives `this._readOnly`
+  // (see mounted()) and every push routes through `_push`, which drops any event
+  // outside this set.
+  //
+  // THIS MAP IS UX AND HONESTY, NOT THE SECURITY BOUNDARY. Every mutation event
+  // terminates at `Ops.send_ops/2`, whose `write_capable: false` clause is the
+  // last wall and drops them server-side regardless of what a forged client
+  // sends. The map exists so a read-mode client never ASKS for a write it cannot
+  // have, and — the one case with real user-visible teeth — so `edit-start`, the
+  // ONE denied event with no send_ops terminus, can never broadcast "editing A1"
+  // to every peer while no editor renders.
+  const READ_MODE_EVENTS = [
+    "cell-click", "head-click", "nav", "nav-edge", "nav-corner",
+    "select-all", "find-open", "find-close", "menu-close", "presence-meta"
+  ];
+
+  // Payload keys that ride an ALLOWED event but carry a WRITE: the #813/#858
+  // click-away commit ride (`commit` = the open cell draft, `bar_commit` = the
+  // dirty formula bar). Stripped in read mode — the selection move survives, the
+  // commit does not.
+  const WRITE_RIDE_KEYS = ["commit", "bar_commit"];
+
   window.BarkparkSheetGrid = {
     mounted() {
       this.scrollEl = this.el.querySelector(".sheet-scroll");
@@ -119,7 +152,7 @@
             this._refocus = true;
             // Canonicalize at the commit push only (Decision 11): uppercase known
             // fns + refs and balance trailing parens. Server write paths untouched.
-            this.pushEventTo(this.el, "bar-commit", {
+            this._push("bar-commit", {
               value: this._normalize(bar.value),
               move: e.shiftKey ? "left" : "right",
             });
@@ -148,7 +181,7 @@
         if (find) {
           if (e.key === "Escape") {
             e.preventDefault();
-            this.pushEventTo(this.el, "find-close", {});
+            this._push("find-close", {});
             this.el.focus({ preventScroll: true });
           }
           return;
@@ -247,7 +280,7 @@
               this._refocus = true;
               this._fnClose(inp);
               this._endChrome();
-              this.pushEventTo(this.el, "edit-cancel", {});
+              this._push("edit-cancel", {});
             }
           }
           return;
@@ -293,7 +326,7 @@
         if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "f" || e.key === "F")) {
           e.preventDefault();
           this._focusFind = true;
-          this.pushEventTo(this.el, "find-open", {});
+          this._push("find-open", {});
           return;
         }
 
@@ -302,7 +335,7 @@
         // stack and the resulting delta re-renders every client.
         if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "z" || e.key === "Z")) {
           e.preventDefault();
-          this.pushEventTo(this.el, e.shiftKey ? "redo" : "undo", {});
+          this._push(e.shiftKey ? "redo" : "undo", {});
           return;
         }
 
@@ -312,7 +345,7 @@
         // early above, so native bold/italic in the editor is untouched.
         if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "b" || e.key === "B" || e.key === "i" || e.key === "I")) {
           e.preventDefault();
-          this.pushEventTo(this.el, "toggle-style", { k: (e.key === "b" || e.key === "B") ? "b" : "i" });
+          this._push("toggle-style", { k: (e.key === "b" || e.key === "B") ? "b" : "i" });
           return;
         }
 
@@ -321,7 +354,7 @@
         // formula rebase server-side.
         if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "d" || e.key === "r")) {
           e.preventDefault();
-          this.pushEventTo(this.el, "fill", { dir: e.key === "d" ? "down" : "right" });
+          this._push("fill", { dir: e.key === "d" ? "down" : "right" });
           return;
         }
 
@@ -331,7 +364,7 @@
         // (Excel's second press → whole sheet is deferred).
         if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "a" || e.key === "A")) {
           e.preventDefault();
-          this.pushEventTo(this.el, "select-all", {});
+          this._push("select-all", {});
           return;
         }
 
@@ -344,7 +377,7 @@
           const active = this.el.querySelector("td.sheet-active");
           if (!active) return;
           const kind = e.shiftKey ? "row" : "col";
-          this.pushEventTo(this.el, "head-click", {
+          this._push("head-click", {
             kind: kind,
             index: parseInt(kind === "row" ? active.dataset.r : active.dataset.c, 10),
             shift: false,
@@ -361,7 +394,7 @@
           const del = e.code === "Minus" || e.code === "NumpadSubtract";
           if (ins || del) {
             e.preventDefault();
-            this.pushEventTo(this.el, "rowcol-key", {
+            this._push("rowcol-key", {
               kind: e.shiftKey ? "col" : "row",
               action: ins ? "insert" : "delete",
             });
@@ -382,30 +415,30 @@
           }[e.key];
           if (dir) {
             e.preventDefault();
-            this.pushEventTo(this.el, "nav-edge", { dir: dir, shift: e.shiftKey });
+            this._push("nav-edge", { dir: dir, shift: e.shiftKey });
             return;
           }
           if (e.key === "Home" || e.key === "End") {
             e.preventDefault();
-            this.pushEventTo(this.el, "nav-corner", { corner: e.key.toLowerCase(), shift: e.shiftKey });
+            this._push("nav-corner", { corner: e.key.toLowerCase(), shift: e.shiftKey });
             return;
           }
         }
 
         if (NAV_KEYS.indexOf(e.key) >= 0) {
           e.preventDefault();
-          this.pushEventTo(this.el, "nav", { key: e.key, shift: e.shiftKey });
+          this._push("nav", { key: e.key, shift: e.shiftKey });
         } else if (e.key === "Tab") {
           // Tab/Shift+Tab walk the selection within the grid (Excel muscle
           // memory) rather than tabbing focus out — the nav handler clamps.
           e.preventDefault();
-          this.pushEventTo(this.el, "nav", { key: e.shiftKey ? "ArrowLeft" : "ArrowRight", shift: false });
+          this._push("nav", { key: e.shiftKey ? "ArrowLeft" : "ArrowRight", shift: false });
         } else if (e.key === "Enter" || e.key === "F2") {
           e.preventDefault();
-          this.pushEventTo(this.el, "edit-start", {});
+          this._push("edit-start", {});
         } else if (e.key === "Delete" || e.key === "Backspace") {
           e.preventDefault();
-          this.pushEventTo(this.el, "clear-selection", {});
+          this._push("clear-selection", {});
         } else if (e.key === " ") {
           // Space toggles a checkbox-fmt active cell (the td carries the
           // "sheet-checkbox" class); on any other cell it seeds an edit with a
@@ -413,14 +446,14 @@
           e.preventDefault();
           const active = this.el.querySelector("td.sheet-active");
           if (active && active.classList.contains("sheet-checkbox")) {
-            this.pushEventTo(this.el, "cell-toggle", { ref: active.dataset.ref });
+            this._push("cell-toggle", { ref: active.dataset.ref });
           } else {
-            this.pushEventTo(this.el, "edit-start", { seed: " " });
+            this._push("edit-start", { seed: " " });
           }
         } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
           // Typing replaces the cell content — the seed becomes the prefill.
           e.preventDefault();
-          this.pushEventTo(this.el, "edit-start", { seed: e.key });
+          this._push("edit-start", { seed: e.key });
         }
       };
 
@@ -462,7 +495,7 @@
         const active = this.el.querySelector("td.sheet-active");
         const ref = active && active.dataset ? active.dataset.ref : null;
         if (!ref) return;
-        this.pushEventTo(this.el, "cell-click", { ref: ref, shift: false, commit: draft.value });
+        this._push("cell-click", { ref: ref, shift: false, commit: draft.value });
       };
 
       this._onClick = (e) => {
@@ -479,7 +512,7 @@
           this.el.focus({ preventScroll: true });
           // A header click is a click-away: commit any open cell editor / dirty
           // bar to the still-active cell before the whole-row/col selection.
-          this.pushEventTo(this.el, "head-click", this._rideCommits({
+          this._push("head-click", this._rideCommits({
             kind: th.dataset.c != null ? "col" : "row",
             index: parseInt(th.dataset.c != null ? th.dataset.c : th.dataset.r, 10),
             shift: e.shiftKey,
@@ -489,7 +522,7 @@
         const td = e.target.closest && e.target.closest("td[data-ref]");
         if (!td) return;
         this.el.focus({ preventScroll: true });
-        this.pushEventTo(this.el, "cell-click", { ref: td.dataset.ref, shift: e.shiftKey });
+        this._push("cell-click", { ref: td.dataset.ref, shift: e.shiftKey });
       };
 
       // Mouse drag-to-select — Excel's core gesture. Mousedown anchors
@@ -525,13 +558,13 @@
         // dirty formula bar rides `bar_commit`; the server commits both to the
         // still-active cell before moving the cursor.
         const payload = this._rideCommits({ ref: td.dataset.ref, shift: e.shiftKey });
-        this.pushEventTo(this.el, "cell-click", payload);
+        this._push("cell-click", payload);
         let last = td.dataset.ref;
         const onOver = (ev) => {
           const t = ev.target.closest && ev.target.closest("td[data-ref]");
           if (!t || t.dataset.ref === last) return;
           last = t.dataset.ref;
-          this.pushEventTo(this.el, "cell-click", { ref: t.dataset.ref, shift: true });
+          this._push("cell-click", { ref: t.dataset.ref, shift: true });
         };
         const onUp = () => {
           this.el.removeEventListener("mouseover", onOver);
@@ -571,7 +604,7 @@
         this._suppressClick = true;
         const kind = th.dataset.c != null ? "col" : "row";
         let last = parseInt(kind === "col" ? th.dataset.c : th.dataset.r, 10);
-        this.pushEventTo(this.el, "head-click", this._rideCommits({
+        this._push("head-click", this._rideCommits({
           kind: kind,
           index: last,
           shift: e.shiftKey,
@@ -583,7 +616,7 @@
           const idx = parseInt(kind === "col" ? t.dataset.c : t.dataset.r, 10);
           if (idx === last) return;
           last = idx;
-          this.pushEventTo(this.el, "head-click", { kind: kind, index: idx, shift: true });
+          this._push("head-click", { kind: kind, index: idx, shift: true });
         };
         const onUp = () => {
           this.el.removeEventListener("mouseover", onOver);
@@ -616,7 +649,7 @@
         const onUp = () => {
           this.el.removeEventListener("mouseover", onOver);
           window.removeEventListener("mouseup", onUp);
-          if (last) this.pushEventTo(this.el, "fill-range", { to: last });
+          if (last) this._push("fill-range", { to: last });
         };
         this.el.addEventListener("mouseover", onOver);
         window.addEventListener("mouseup", onUp);
@@ -641,9 +674,9 @@
         this.el.focus({ preventScroll: true });
         const selected = !!(td.classList && td.classList.contains("sheet-sel"));
         if (!selected) {
-          this.pushEventTo(this.el, "cell-click", this._rideCommits({ ref: td.dataset.ref, shift: false }));
+          this._push("cell-click", this._rideCommits({ ref: td.dataset.ref, shift: false }));
         }
-        this.pushEventTo(this.el, "cell-menu-open", { x: e.clientX || 0, y: e.clientY || 0 });
+        this._push("cell-menu-open", { x: e.clientX || 0, y: e.clientY || 0 });
         // updated() focuses the first item + viewport-clamps once the server
         // has rendered the menu.
         this._ctxWantFocus = true;
@@ -664,15 +697,15 @@
             navigator.clipboard.writeText(tsv);
             this._captureFormulaClip(tsv);
           }
-          if (action === "cut") this.pushEventTo(this.el, "clear-selection", {});
-          this.pushEventTo(this.el, "menu-close", {});
+          if (action === "cut") this._push("clear-selection", {});
+          this._push("menu-close", {});
         } else if (action === "paste") {
           if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.readText) {
             navigator.clipboard.readText().then((text) => {
               if (text) this._ctxPaste(text);
             }).catch(() => {});
           }
-          this.pushEventTo(this.el, "menu-close", {});
+          this._push("menu-close", {});
         }
       };
 
@@ -699,7 +732,7 @@
           if (t && t.focus) t.focus();
         } else if (e.key === "Escape") {
           e.preventDefault();
-          this.pushEventTo(this.el, "menu-close", {});
+          this._push("menu-close", {});
           this.el.focus({ preventScroll: true });
         }
       };
@@ -709,7 +742,7 @@
         // Must branch BEFORE the td lookup — the nub nests inside the corner
         // td, which would otherwise open the editor.
         if (e.target.closest && e.target.closest(".sheet-fillnub")) {
-          this.pushEventTo(this.el, "fill-extent", {});
+          this._push("fill-extent", {});
           return;
         }
         // Autofit: double-click a header resize handle sizes the col/row to
@@ -717,7 +750,7 @@
         // a th, so closest("td") is null — the order still documents intent).
         const rsz = e.target.closest && e.target.closest(".sheet-rsz");
         if (rsz) {
-          this.pushEventTo(this.el, "autofit", {
+          this._push("autofit", {
             kind: rsz.dataset.kind,
             index: parseInt(rsz.dataset.index, 10),
           });
@@ -725,7 +758,7 @@
         }
         const td = e.target.closest && e.target.closest("td[data-ref]");
         if (!td) return;
-        this.pushEventTo(this.el, "edit-start", {});
+        this._push("edit-start", {});
       };
 
       // Cmd/Ctrl+C — selection as TSV of computed values, written
@@ -771,10 +804,10 @@
         let cells = 0;
         for (let i = 0; i < rows.length; i++) cells += rows[i].length;
         if (cells > this._pasteCellCap) {
-          this.pushEventTo(this.el, "paste-too-large", { cells: cells });
+          this._push("paste-too-large", { cells: cells });
           return;
         }
-        this.pushEventTo(this.el, "paste", { rows: rows });
+        this._push("paste", { rows: rows });
       };
 
       // Header resize drag -> ONE set_col_width / set_row_height op on release.
@@ -792,7 +825,7 @@
           window.removeEventListener("mouseup", onUp);
           const delta = (kind === "col" ? ev.pageX : ev.pageY) - start;
           const px = Math.max(kind === "col" ? 24 : 14, Math.round(base + delta));
-          this.pushEventTo(this.el, "resize", { kind: kind, index: parseInt(h.dataset.index, 10), px: px });
+          this._push("resize", { kind: kind, index: parseInt(h.dataset.index, 10), px: px });
         };
         window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);
@@ -864,6 +897,42 @@
       this.root.addEventListener("keydown", this._onCtxKeydown);
 
       this._presencePing();
+    },
+
+    // THE ONE PUSH SEAM. Every `pushEventTo` in this file goes through here, so
+    // the read-mode denylist is DERIVED (the complement of READ_MODE_EVENTS)
+    // rather than hand-enumerated per gesture — a new push site added later is
+    // denied in read mode by default, which is the only safe direction to fail.
+    // Returns true if the event was sent, false if it was dropped.
+    _push(name, payload) {
+      var body = payload || {};
+      if (this._readOnly) {
+        if (READ_MODE_EVENTS.indexOf(name) < 0) return false;
+        body = this._readPayload(name, body);
+      }
+      this.pushEventTo(this.el, name, body);
+      return true;
+    },
+
+    // Read-mode payload narrowing for the events that ARE allowed.
+    //   • presence-meta → active + selection ONLY. The `editing` flag is never
+    //     broadcast from a read-mode socket: edit-start is denied, so an
+    //     "editing" frame would name a cell editor that does not exist.
+    //   • everything else → the write-ride keys are stripped (see above).
+    _readPayload(name, payload) {
+      if (name === "presence-meta") {
+        return {
+          active: payload.active != null ? payload.active : null,
+          selection: payload.selection != null ? payload.selection : null,
+        };
+      }
+      var out = {};
+      for (var k in payload) {
+        if (!Object.prototype.hasOwnProperty.call(payload, k)) continue;
+        if (WRITE_RIDE_KEYS.indexOf(k) >= 0) continue;
+        out[k] = payload[k];
+      }
+      return out;
     },
 
     beforeUpdate() {
@@ -1360,7 +1429,7 @@
       }
       this._fnClose(inp);
       this._endChrome();
-      this.pushEventTo(this.el, "edit-commit", { value: this._normalize(value), move: move });
+      this._push("edit-commit", { value: this._normalize(value), move: move });
     },
 
     // ── ghost range predictor (render-only, never steals a keystroke) ────────
@@ -1655,7 +1724,7 @@
         const key = JSON.stringify(payload);
         if (key === this._presSent) return;
         this._presSent = key;
-        this.pushEventTo(this.el, "presence-meta", payload);
+        this._push("presence-meta", payload);
       }, wait);
     },
 
@@ -1701,10 +1770,10 @@
       let cells = 0;
       for (let i = 0; i < rows.length; i++) cells += rows[i].length;
       if (cells > this._pasteCellCap) {
-        this.pushEventTo(this.el, "paste-too-large", { cells: cells });
+        this._push("paste-too-large", { cells: cells });
         return;
       }
-      this.pushEventTo(this.el, "paste", { rows: rows });
+      this._push("paste", { rows: rows });
     },
 
     // Selection (server marks every selected td with .sheet-sel, the active

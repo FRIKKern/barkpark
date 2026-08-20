@@ -1,0 +1,60 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "mix barkpark.rehydrate_body_html has run on guerrilla + prod (all cached body_html at v3).",
+          "met": false
+        },
+        {
+          "criterion": "root.html.heex de-inline override hacks deleted; grep confirms zero inline THEME styles in :article emission.",
+          "met": false
+        },
+        {
+          "criterion": "adversarial parity audit proves View == Edit on the all-kinds fixture (no visual drift).",
+          "met": false
+        }
+      ],
+      "description": "Final parity arc after wave 2 (#1086). OPS-GATED: run `mix barkpark.rehydrate_body_html` on guerrilla + prod FIRST (a deploy-time migration — cannot run from a loop session), so all cached body_html is v3 (class-based). THEN: (1) delete the root.html.heex de-inline override hacks + grep-refute zero inline THEME styles remain in :article emission; (2) attempt the editor-body collapse; (3) adversarial parity close-out proving View output == Edit output on the all-kinds fixture. Blocked until the rehydrate runs (deleting the hacks before rehydrate un-themes old cached v1/v2 papers).",
+      "kind": "task",
+      "labels": [
+        "proj:papers",
+        "phase:work"
+      ],
+      "last_audited_at": "2026-07-04T15:50:00Z",
+      "lifecycle_status": "blocked",
+      "parent_id": "paper-editor-parity-goal"
+    },
+    "criteria_progress": {
+      "met": 0,
+      "total": 3
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "drafts.paper-editor-parity-wave3",
+    "execution_policy": null,
+    "id": "4b017843-c538-4298-ae34-96ce64855eab",
+    "inserted_at": "2026-07-04T05:50:24.899577Z",
+    "kind": "task",
+    "labels": [
+      "proj:papers",
+      "phase:work"
+    ],
+    "lifecycle_status": "blocked",
+    "papers": [],
+    "parent_id": "paper-editor-parity-goal",
+    "priority": null,
+    "rev": "8c2443e873f08a8434855f057d22b4a1",
+    "status": "draft",
+    "title": "Paper parity wave 3 — rehydrate + delete de-inline hacks + adversarial parity audit",
+    "type": "task",
+    "updated_at": "2026-07-04T15:13:47.151662Z"
+  },
+  "ok": true
+}

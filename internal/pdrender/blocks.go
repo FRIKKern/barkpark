@@ -1,6 +1,7 @@
 package pdrender
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -28,7 +29,10 @@ type headingRenderer struct{ ir InlineRenderer }
 
 func (h headingRenderer) Render(b Block, ctx RenderCtx) []string {
 	level := headingLevel(b.Attrs)
-	text := sanitizeText(attrStr(b.Attrs, "text"))
+	text := sanitizeDisplayText(attrStr(b.Attrs, "text"))
+	if text == "" {
+		text = h.ir.Inline(attrSlice(b.Attrs, "content"), ctx)
+	}
 	style := ctx.Theme.Heading[level-1]
 
 	display := text
@@ -71,7 +75,7 @@ type paragraphRenderer struct{ ir InlineRenderer }
 func (p paragraphRenderer) Render(b Block, ctx RenderCtx) []string {
 	inline := p.ir.Inline(attrSlice(b.Attrs, "content"), ctx)
 	if inline == "" {
-		return []string{""}
+		return nil
 	}
 	return wrapLines(inline, ctx.Width)
 }
@@ -112,18 +116,93 @@ func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
 	return out
 }
 
+// orderedListRenderer forces ordered:true, then defers to the list renderer.
+// It backs the `numbered_list` authoring-drift alias (mirrors compose.ex, which
+// maps numbered_list → list with ordered:true). The Attrs map is COPIED before
+// the flag is set so the caller's block is never mutated.
+type orderedListRenderer struct{ lr listRenderer }
+
+func (o orderedListRenderer) Render(b Block, ctx RenderCtx) []string {
+	attrs := make(map[string]any, len(b.Attrs)+1)
+	for k, v := range b.Attrs {
+		attrs[k] = v
+	}
+	attrs["ordered"] = true
+	b.Attrs = attrs
+	return o.lr.Render(b, ctx)
+}
+
+// headingAtLevel forces `level`, then defers to the heading renderer. It backs
+// the h1/h2/h3 authoring-drift aliases (mirrors compose.ex's @heading_aliases
+// clause and react's headingAtLevel): the level comes from the TYPE, not from
+// `level`, because SIX of the 18 drifted headings (1 h2 + all 5 h3s) carry no
+// `level` key and would otherwise render at headingLevel's default of 2. The
+// type wins outright; zero live blocks contradict it. The Attrs map is
+// COPIED before the level is set so the caller's block is never mutated (the
+// orderedListRenderer precedent directly above).
+type headingAtLevel struct {
+	hr    headingRenderer
+	level int
+}
+
+func (h headingAtLevel) Render(b Block, ctx RenderCtx) []string {
+	attrs := make(map[string]any, len(b.Attrs)+1)
+	for k, v := range b.Attrs {
+		attrs[k] = v
+	}
+	attrs["level"] = h.level
+	b.Attrs = attrs
+	return h.hr.Render(b, ctx)
+}
+
 // itemNodes normalizes a list item to a []any of inline nodes. The wire shape
 // for an item is an array of inline nodes; a bare string/number item is
-// tolerated and wrapped (mirrors compose_inline_children's scalar clauses).
+// tolerated and wrapped (mirrors compose_inline_children's scalar clauses). A
+// STRING item that parses as a JSON array of inline-node objects is decoded to
+// that array — the drifted list variants (bullet_list especially) persisted
+// their items as JSON-encoded strings, which would otherwise render as literal
+// JSON. Mirrors compose.ex's normalize_list_item/1.
 func itemNodes(item any) []any {
 	switch v := item.(type) {
 	case []any:
 		return v
 	case nil:
 		return nil
+	case string:
+		if nodes, ok := decodeInlineJSON(v); ok {
+			return nodes
+		}
+		return []any{v}
+	case map[string]any:
+		if content, ok := v["content"].([]any); ok {
+			return content
+		}
+		if text, ok := v["text"].(string); ok {
+			return []any{text}
+		}
+		return []any{v}
 	default:
 		return []any{v}
 	}
+}
+
+// decodeInlineJSON decodes a string that holds a JSON array whose first element
+// is an object (an inline-node array), returning (nodes, true). Any other
+// string — plain text, a JSON scalar, a non-object array — yields (nil, false)
+// so the caller keeps it verbatim.
+func decodeInlineJSON(s string) ([]any, bool) {
+	trimmed := strings.TrimSpace(s)
+	if !strings.HasPrefix(trimmed, "[") {
+		return nil, false
+	}
+	var arr []any
+	if err := json.Unmarshal([]byte(trimmed), &arr); err != nil || len(arr) == 0 {
+		return nil, false
+	}
+	if _, ok := arr[0].(map[string]any); !ok {
+		return nil, false
+	}
+	return arr, true
 }
 
 // ── callout ───────────────────────────────────────────────────────────────────
@@ -143,7 +222,13 @@ func (cr calloutRenderer) Render(b Block, ctx RenderCtx) []string {
 		head.WriteString(bodyStyle.Bold(true).Render(sanitizeText(title)))
 		head.WriteString(" ")
 	}
-	head.WriteString(cr.ir.Inline(attrSlice(b.Attrs, "content"), ctx))
+	content := attrSlice(b.Attrs, "content")
+	if len(content) == 0 {
+		if text := attrStr(b.Attrs, "text"); text != "" {
+			content = []any{text}
+		}
+	}
+	head.WriteString(cr.ir.Inline(content, ctx))
 	body := head.String()
 
 	const chrome = 4 // "▌ " bar (2) + breathing room (2)
@@ -198,10 +283,39 @@ func (dividerRenderer) Render(_ Block, ctx RenderCtx) []string {
 type sectionRenderer struct{ reg *Registry }
 
 func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
+	// FRAMED variant (charter D19 — the framed-finale device): a SQUARE
+	// lipgloss.NormalBorder frame in rule color REPLACES the two-rule band.
+	// Honest degrade below MinWidth (the boxLines discipline): too narrow for
+	// the border+padding chrome → fall through to the byte-identical band path
+	// rather than emit a crushed frame. Any other variant value falls through
+	// too (fail-soft, mirroring the web reader's unknown-variant bytes).
+	const frameChrome = 4 // border (2) + padding (2)
+	if attrStr(b.Attrs, "variant") == "framed" && ctx.Width-frameChrome >= MinWidth {
+		body := sr.body(b, ctx.WithWidth(ctx.Width-frameChrome))
+		frame := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(ruleColor(ctx.Theme)).
+			Padding(0, 1).
+			Width(clampWidth(ctx.Width - 2)) // 2 = the border's two columns
+		return strings.Split(frame.Render(strings.Join(body, "\n")), "\n")
+	}
+
 	w := clampWidth(ctx.Width)
 	rule := ctx.Theme.Rule.Render(strings.Repeat("─", w))
 
 	out := []string{rule}
+	out = append(out, sr.body(b, ctx)...)
+	out = append(out, rule)
+	return out
+}
+
+// body renders the section's interior — optional bold title + child blocks
+// (grid or stack) — WITHOUT the surrounding chrome (the two-rule band or the
+// framed border), so both chromes wrap the exact same lines. Extracted
+// verbatim from the pre-frame Render loop: the band path's output is
+// byte-identical to before.
+func (sr sectionRenderer) body(b Block, ctx RenderCtx) []string {
+	var out []string
 	if title := attrStr(b.Attrs, "title"); title != "" {
 		out = append(out, ctx.Theme.Heading[1].Render(sanitizeText(title)))
 		out = append(out, "")
@@ -224,23 +338,27 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 	// through to the byte-identical stack loop below.
 	if layout, ok := b.Attrs["layout"].(map[string]any); ok && attrStr(layout, "mode") == "grid" {
 		if grid := sr.gridBody(b, layout, childCtx, inner, pad); grid != nil {
-			out = append(out, grid...)
-			out = append(out, rule)
-			return out
+			return append(out, grid...)
 		}
 	}
 
-	// Stack path (verbatim — the sub-grid fallback and every non-grid section).
-	for i, child := range b.Children {
-		if i > 0 {
+	// Stack path. Empty paragraph scaffolds emit no rows and therefore cannot
+	// create phantom rhythm inside a section.
+	emitted := 0
+	for _, child := range b.Children {
+		lines := sr.reg.Render(child, childCtx)
+		if len(lines) == 0 {
+			continue
+		}
+		if emitted > 0 {
 			out = append(out, "")
 		}
-		for _, line := range sr.reg.Render(child, childCtx) {
+		for _, line := range lines {
 			out = append(out, pad+line)
 		}
+		emitted++
 	}
 
-	out = append(out, rule)
 	return out
 }
 
@@ -274,8 +392,15 @@ func (sr sectionRenderer) gridBody(b Block, layout map[string]any, childCtx Rend
 
 	// Stable CSS-order reorder: the reader emits `order:`, i.e. it DOES reorder,
 	// so a terminal stable-sort by order is parity-correct.
-	items := make([]Block, len(b.Children))
-	copy(items, b.Children)
+	items := make([]Block, 0, len(b.Children))
+	for _, child := range b.Children {
+		if len(sr.reg.Render(child, childCtx)) > 0 {
+			items = append(items, child)
+		}
+	}
+	if len(items) == 0 {
+		return []string{}
+	}
 	sort.SliceStable(items, func(i, j int) bool { return cellOrder(items[i]) < cellOrder(items[j]) })
 
 	nodes := make([]Node, len(items))

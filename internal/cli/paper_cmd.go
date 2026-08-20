@@ -3,16 +3,20 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-isatty"
 	"github.com/muesli/termenv"
+	"golang.org/x/net/html"
 	"golang.org/x/term"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -46,13 +50,19 @@ const paperWidthFallback = 80
 
 // parsedPaperArgs holds the resolved `paper view` flags + the positional slug.
 type parsedPaperArgs struct {
-	slug        string
-	theme       string // dark | light | auto   (default auto)
-	perspective string // published | drafts | raw (default published)
-	width       int    // 0 = auto-detect
-	widthSet    bool
-	profile     string // auto | none | ansi256 | truecolor (default auto)
-	server      string // -s/--server: a saved name or URL
+	slug          string
+	theme         string // dark | light | auto   (default auto)
+	perspective   string // published | drafts | raw (default published)
+	width         int    // 0 = auto-detect
+	widthSet      bool
+	profile       string // auto | none | ansi256 | truecolor (default auto)
+	server        string // -s/--server: a saved name or URL
+	epicID        string
+	waveID        string
+	releaseGateID string
+	revisionID    string
+	candidateID   string
+	paperRole     string
 }
 
 // runPaper is the `bp paper <verb> [args]` built-in entry. v1 ships exactly one
@@ -79,6 +89,34 @@ func runPaper(out *writer, g globals, args []string) int {
 			return exitOK
 		}
 		return runPaperView(out, g, args[1:])
+	case "capture":
+		if g.help && len(args) == 1 {
+			usagePaperCapture(out, true)
+			return exitOK
+		}
+		return runPaperCapture(out, g, args[1:])
+	// The BPML working copy (masterplan W3, paper_wc_cmd.go): read verbs above
+	// render papers; these edit them as files under .barkpark/papers/. They
+	// resolve the target context exactly like every other built-in.
+	//
+	// `new` (paper_new_cmd.go, charter D41) is the LOCAL scaffold half of the
+	// one authoring door — no server call, so it takes globals only; the server
+	// is met at push, whose sync endpoint creates an absent slug through the
+	// full publish wall.
+	case "new":
+		if g.help && len(args) == 1 {
+			usagePaperNew(out, true)
+			return exitOK
+		}
+		return runPaperNew(out, g, args[1:])
+	case "pull":
+		return runPaperPull(out, g, resolveContext(g), args[1:])
+	case "status":
+		return runPaperStatus(out, g, resolveContext(g), args[1:])
+	case "diff":
+		return runPaperWCDiff(out, g, args[1:])
+	case "push":
+		return runPaperPush(out, g, resolveContext(g), args[1:])
 	case "help":
 		usagePaper(out, true)
 		return exitOK
@@ -109,6 +147,27 @@ func runPaperView(out *writer, g globals, args []string) int {
 		usagePaperView(out, false)
 		return exitUsage
 	}
+	target := parsePaperRef(opt.slug)
+	opt.slug = target.id
+	suppressInheritedToken := false
+	// A pasted Paper URL is a complete location, not merely an id. Make its
+	// origin and tenant path authoritative so the CLI cannot silently read a
+	// same-named Paper from the currently active server/workspace/project.
+	if target.server != "" {
+		if g.token == "" && !paperServerTrusted(target.server, resolveContext(g).Server) {
+			suppressInheritedToken = true
+		}
+		g.server = target.server
+	}
+	if target.workspace != "" {
+		g.workspace = target.workspace
+	}
+	if target.project != "" {
+		g.project = target.project
+	}
+	if target.dataset != "" {
+		g.dataset = target.dataset
+	}
 
 	// -o resolution: an explicit global -o/--json wins (the global parser already
 	// reflected it into g/out.output); else ansi (this command's default — NOT the
@@ -134,6 +193,12 @@ func runPaperView(out *writer, g globals, args []string) int {
 		g.server = opt.server
 	}
 	ctx := resolveContext(g)
+	if suppressInheritedToken || target.share != "" {
+		// Never attach an active/environment credential to an arbitrary pasted
+		// origin or to a capability URL. Unknown origins require an explicit
+		// --token; item-share URLs authenticate solely with their share token.
+		ctx.Token = ""
+	}
 
 	// Perspective: papers are public → published by default; --perspective lets a
 	// caller see drafts/raw. An empty/unknown value falls back to published.
@@ -151,39 +216,67 @@ func runPaperView(out *writer, g globals, args []string) int {
 		Dataset:     ctx.Dataset,
 		Perspective: perspective,
 	})
+	releaseRef, pinned, pinErr := releasePaperRef(opt)
+	if pinErr != nil {
+		return paperError(out, jsonOut, "invalid_release_pin", pinErr.Error(), exitUsage)
+	}
+	if pinned && target.share != "" {
+		return paperError(out, jsonOut, "invalid_release_pin", "release-pinned Paper reads cannot use a mutable share URL", exitUsage)
+	}
 
-	// Fetch every paper, then match the slug. The query endpoint's `filter` param
-	// is a no-op on this server, so we go through the RAW query body to get the
-	// _id/slug/title for matching and the not-found slug list. (apiclient.Doc now
-	// also normalizes "_id" into Doc.ID, but the raw path stays — it needs every
-	// doc's slug, not just the typed subset.) The matched raw doc is then decoded
-	// into an apiclient.Doc so Doc.PaperBlocks() drives the render, per the M0
-	// client contract.
-	raws, qerr := paperFetchAll(client, perspective)
+	// A Paper link already names canonical document identity. Read its narrow,
+	// fail-closed source projection so the CLI cannot render a mixed blocks +
+	// body_html document that the browser/email readers reject.
+	var raw []byte
+	var qerr error
+	if pinned {
+		var source apiclient.ReleasePaperSource
+		source, qerr = client.PaperReleaseSource(releaseRef)
+		if qerr == nil && source.DocID != opt.slug {
+			qerr = fmt.Errorf("release Paper doc_id %q does not match requested slug %q", source.DocID, opt.slug)
+		}
+		if qerr == nil {
+			if jsonOut {
+				raw = source.Raw
+			} else {
+				raw, qerr = source.DocumentJSON(opt.slug)
+			}
+		}
+	} else if target.share != "" {
+		raw, qerr = fetchSharedPaper(ctx.Server, target)
+	} else if jsonOut {
+		// Machine output is a compatibility surface: preserve the complete raw
+		// PaperDoc envelope consumers already parse. Only rendered output needs
+		// the narrow canonical-source authority.
+		raw, qerr = client.PaperDoc(ctx.Dataset, opt.slug, perspective)
+	} else {
+		var source apiclient.PaperSource
+		source, qerr = client.PaperSource(ctx.Dataset, opt.slug, perspective)
+		if qerr == nil {
+			raw, qerr = source.DocumentJSON(opt.slug)
+		}
+	}
 	if qerr != nil {
-		return paperError(out, jsonOut, "query", fmt.Sprintf("query papers failed: %v", qerr), exitGeneric)
+		return paperError(out, jsonOut, "not_found", fmt.Sprintf("read paper %q failed: %v", opt.slug, qerr), exitNotFound)
 	}
-	if len(raws) == 0 {
-		return paperError(out, jsonOut, "empty",
-			"no papers found on "+ctx.Server+" (dataset "+ctx.Dataset+", perspective "+perspective+")",
-			exitNotFound)
-	}
-
-	match, found := paperMatch(raws, opt.slug)
-	if !found {
-		return paperNotFound(out, jsonOut, opt.slug, raws, ctx.Server)
-	}
+	match := paperRawDoc{id: opt.slug, slug: opt.slug, raw: raw}
 
 	// -o json: print the raw paper document verbatim (re-indented for stability).
 	if jsonOut {
-		out.renderRaw(match.raw)
+		out.renderRaw(raw)
 		return exitOK
 	}
+
+	// Width is a property of every terminal representation, including the
+	// legacy body_html adapter below. Resolve it before selecting the source
+	// path so HTML-only Papers cannot bypass the same display boundary as blocks.
+	stdoutTTY := isatty.IsTerminal(os.Stdout.Fd())
+	width := paperResolveWidth(opt, stdoutTTY)
 
 	// Decode the matched doc's block tree through the apiclient.Doc seam, then via
 	// pdrender.Decode → []pdrender.Block.
 	var doc apiclient.Doc
-	if err := json.Unmarshal(match.raw, &doc); err != nil {
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		return paperError(out, jsonOut, "decode", "decode paper: "+err.Error(), exitGeneric)
 	}
 	blocksRaw := doc.PaperBlocks()
@@ -194,7 +287,7 @@ func runPaperView(out *writer, g globals, args []string) int {
 		// misreport the paper as having no content. Only when body_html is ALSO
 		// empty is the paper genuinely blank.
 		if text := htmlToPlainText(doc.BodyHTML); text != "" {
-			out.outf("%s", text)
+			out.outf("%s", wrapPaperPlainText(text, width))
 			return exitOK
 		}
 		return paperError(out, jsonOut, "empty",
@@ -208,8 +301,6 @@ func runPaperView(out *writer, g globals, args []string) int {
 	// Resolve width + theme + profile from stdout's nature. The theme IDENTITY
 	// (which emitted skin) comes from BP_THEME/config via ResolveThemeID; the
 	// --theme flag (opt.theme) still selects the light/dark MODE this wave (D30).
-	stdoutTTY := isatty.IsTerminal(os.Stdout.Fd())
-	width := paperResolveWidth(opt, stdoutTTY)
 	cfg, _ := LoadConfig() // missing/unreadable config → nil → env/default theme id
 	theme := paperResolveTheme(opt.theme, ResolveThemeID(cfg))
 	profile := paperResolveProfile(opt.profile, stdoutTTY)
@@ -228,7 +319,7 @@ func runPaperView(out *writer, g globals, args []string) int {
 		Theme:         theme,
 		Profile:       profile,
 		RefResolver:   paperRefResolver(client, ctx.Dataset, perspective),
-		TaskResolver:  paperTaskResolver(client, ctx.Dataset, perspective, raws),
+		TaskResolver:  paperTaskResolver(client, ctx.Dataset, perspective, []paperRawDoc{match}),
 		ValueResolver: paperValueResolver(client, ctx.Dataset, perspective, blocksRaw),
 		ImageResolver: paperImageResolver(ctx.Server, ctx.Token),
 	}
@@ -238,8 +329,300 @@ func runPaperView(out *writer, g globals, args []string) int {
 	// (chrome is dropped below MinWidth), so no post-processing that could break
 	// that guarantee. outf adds the single trailing newline.
 	out.outf("%s", rendered)
+
+	// Append the Related section (weighted-tag + backlink affinity, ae-w10). A
+	// SECONDARY read, FAIL-OPEN by contract: any transport error, non-2xx, or
+	// empty result yields "" and the section simply does not appear — the paper
+	// render above must never break on this new read. Skipped for the -o json /
+	// share / release-pinned paths above (they return before here).
+	if section := paperRenderRelated(client, ctx.Dataset, opt.slug, paperRelatedTopN, width); section != "" {
+		out.outf("%s", section)
+	}
 	return exitOK
 }
+
+// paperRelatedTopN caps both the fetch limit and the rendered entry count of the
+// Related section — the top matches are the only useful ones in a terminal.
+const paperRelatedTopN = 5
+
+// paperRelatedSharedTag is one shared-tag detail carried by a related entry: the
+// tag NAME and the source/candidate strengths that scored the affinity.
+type paperRelatedSharedTag struct {
+	Tag          string `json:"tag"`
+	SrcStrength  int    `json:"src_strength"`
+	CandStrength int    `json:"cand_strength"`
+}
+
+// paperRelatedEntry mirrors ONE element of the GET /v1/data/related response's
+// result.related array (query_controller.related → Content.Related.entry). Title
+// is the documents.title COLUMN — empty for most weighted docs (a proven prod
+// trap), so the renderer falls back to DocID.
+type paperRelatedEntry struct {
+	DocID      string                  `json:"doc_id"`
+	Type       string                  `json:"type"`
+	Title      string                  `json:"title"`
+	Score      float64                 `json:"score"`
+	Sources    []string                `json:"sources"`
+	SharedTags []paperRelatedSharedTag `json:"shared_tags"`
+}
+
+// backlinkOnly reports whether an entry's provenance is inbound references ONLY
+// (no shared-tag leg) — the "sources":["references"] degrade for a zero-tag or
+// tag-mismatched neighbour. The renderer marks these so a reader knows the link
+// is a backlink, not a tag affinity.
+func (e paperRelatedEntry) backlinkOnly() bool {
+	hasTags, hasRefs := false, false
+	for _, s := range e.Sources {
+		switch s {
+		case "tags":
+			hasTags = true
+		case "references":
+			hasRefs = true
+		}
+	}
+	return hasRefs && !hasTags
+}
+
+// paperRenderRelated fetches GET /v1/data/related/:dataset/:id and renders the
+// plain-text Related section (top paperRelatedTopN entries). It mirrors
+// paperLoadTitles' secondary-read pattern exactly — paperScopedURL + doRequest +
+// optional bearer, NO apiclient change. FAIL-OPEN: a nil client, empty id, any
+// transport error, a non-2xx status (incl. the anon 404 existence-hiding), a
+// decode failure, or an empty related list all yield "" so the caller prints
+// nothing and the paper render is never broken by this read.
+func paperRenderRelated(client *apiclient.Client, dataset, id string, limit, width int) string {
+	id = strings.TrimSpace(id)
+	if client == nil || dataset == "" || id == "" {
+		return ""
+	}
+	u := paperScopedURL(client, "/v1/data/related/"+url.PathEscape(dataset)+"/"+url.PathEscape(id))
+	if limit > 0 {
+		u += "?limit=" + strconv.Itoa(limit)
+	}
+	headers := map[string]string{}
+	if t := client.Token(); t != "" {
+		headers["Authorization"] = "Bearer " + t
+	}
+	status, body, err := doRequest("GET", u, headers, nil)
+	if err != nil || status < 200 || status >= 300 {
+		return ""
+	}
+	var env struct {
+		Result struct {
+			Related []paperRelatedEntry `json:"related"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(body, &env) != nil || len(env.Result.Related) == 0 {
+		return ""
+	}
+	return formatRelatedSection(env.Result.Related, width)
+}
+
+// formatRelatedSection renders up to paperRelatedTopN entries as a plain-text
+// block: a leading blank line separates it from the paper body, then a "Related"
+// heading, then one line per entry (score, title-or-id, type, backlink marker)
+// with an indented shared-tags detail line. No SGR — plain text keeps piped and
+// golden captures clean and honours a NoColor profile. Returns "" for no
+// entries; the returned string carries NO trailing newline (outf adds it).
+func formatRelatedSection(entries []paperRelatedEntry, width int) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	if len(entries) > paperRelatedTopN {
+		entries = entries[:paperRelatedTopN]
+	}
+	lines := []string{"", "Related"}
+	for _, e := range entries {
+		label := strings.TrimSpace(e.Title)
+		if label == "" {
+			label = e.DocID
+		}
+		typeSuffix := ""
+		if e.Type != "" {
+			typeSuffix = "  (" + e.Type + ")"
+		}
+		marker := ""
+		if e.backlinkOnly() {
+			marker = "  · backlink"
+		}
+		prefix := fmt.Sprintf("  %.2f  ", e.Score)
+		lines = append(lines, wrapRelatedLine(prefix, label+typeSuffix+marker, width)...)
+		if len(e.SharedTags) > 0 {
+			parts := make([]string, 0, len(e.SharedTags))
+			for _, t := range e.SharedTags {
+				parts = append(parts, fmt.Sprintf("%s (%d·%d)", t.Tag, t.SrcStrength, t.CandStrength))
+			}
+			lines = append(lines, wrapRelatedLine("        tags: ", strings.Join(parts, ", "), width)...)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// wrapRelatedLine keeps the Related appendix under the same width contract as
+// the PortableDoc body. Continuations align under the content, so a long title
+// or tag list remains readable instead of becoming the only overflowing line
+// in an otherwise valid 80-column render.
+func wrapRelatedLine(prefix, content string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	prefixWidth := ansi.StringWidth(prefix)
+	if prefixWidth >= width {
+		return strings.Split(wrapPaperPlainText(prefix+content, width), "\n")
+	}
+	wrapped := strings.Split(wrapPaperPlainText(content, width-prefixWidth), "\n")
+	continuation := strings.Repeat(" ", prefixWidth)
+	lines := make([]string, len(wrapped))
+	for i, line := range wrapped {
+		if i == 0 {
+			lines[i] = prefix + line
+			continue
+		}
+		lines[i] = continuation + line
+	}
+	return lines
+}
+
+// normalizePaperRef accepts the three forms users naturally paste into a
+// terminal: a bare Paper id, a `/papers/<id>` path, or a full scoped/unscoped
+// Paper URL. The public route segment is the stable boundary; query strings,
+// fragments, and a trailing slash never become part of document identity.
+type paperRef struct {
+	id          string
+	server      string
+	workspace   string
+	project     string
+	dataset     string
+	browserPath string
+	share       string
+}
+
+func parsePaperRef(ref string) paperRef {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return paperRef{}
+	}
+	parsed, err := url.Parse(ref)
+	if err != nil {
+		return paperRef{id: ref}
+	}
+	path := parsed.Path
+	if path == "" || (!strings.HasPrefix(ref, "/") && parsed.Scheme == "" && parsed.Host == "") {
+		return paperRef{id: ref}
+	}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	target := paperRef{browserPath: parsed.EscapedPath(), share: parsed.Query().Get("share")}
+	if parsed.Scheme != "" && parsed.Host != "" {
+		target.server = parsed.Scheme + "://" + parsed.Host
+	}
+	for i := 0; i+1 < len(parts); i++ {
+		switch parts[i] {
+		case "w":
+			target.workspace, _ = url.PathUnescape(parts[i+1])
+		case "p":
+			target.project, _ = url.PathUnescape(parts[i+1])
+		case "d":
+			target.dataset, _ = url.PathUnescape(parts[i+1])
+		}
+	}
+	for i := len(parts) - 2; i >= 0; i-- {
+		if parts[i] == "papers" && parts[i+1] != "" {
+			if id, unescapeErr := url.PathUnescape(parts[i+1]); unescapeErr == nil {
+				target.id = id
+				return completePaperRef(target)
+			}
+			target.id = parts[i+1]
+			return completePaperRef(target)
+		}
+		if i > 0 && parts[i-1] == "studio" && parts[i] == "paper" && parts[i+1] != "" {
+			if id, unescapeErr := url.PathUnescape(parts[i+1]); unescapeErr == nil {
+				target.id = id
+				return completePaperRef(target)
+			}
+			target.id = parts[i+1]
+			return completePaperRef(target)
+		}
+	}
+	target.id = ref
+	return target
+}
+
+func completePaperRef(target paperRef) paperRef {
+	if target.workspace == "" {
+		target.workspace = "default"
+	}
+	if target.project == "" {
+		target.project = "default"
+	}
+	if target.dataset == "" {
+		target.dataset = "production"
+	}
+	return target
+}
+
+func paperServerTrusted(target, active string) bool {
+	normalize := func(value string) string { return strings.TrimRight(value, "/") }
+	if normalize(target) == normalize(active) {
+		return true
+	}
+	if cfg, err := LoadConfig(); err == nil && cfg != nil {
+		_, ok := cfg.FindServer(target)
+		return ok
+	}
+	return false
+}
+
+func fetchSharedPaper(server string, target paperRef) ([]byte, error) {
+	if target.browserPath == "" || target.share == "" {
+		return nil, fmt.Errorf("invalid Paper share URL")
+	}
+	endpoint := strings.TrimRight(server, "/") + strings.TrimRight(target.browserPath, "/") +
+		"/source?share=" + url.QueryEscape(target.share)
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "*/*")
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Paper source status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Title  string `json:"title"`
+		Source struct {
+			Kind   string          `json:"kind"`
+			Blocks json.RawMessage `json:"blocks"`
+			HTML   string          `json:"html"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	doc := map[string]any{"_id": target.id, "_type": "paper", "title": payload.Title}
+	switch payload.Source.Kind {
+	case "blocks":
+		var blocks any
+		if err := json.Unmarshal(payload.Source.Blocks, &blocks); err != nil {
+			return nil, err
+		}
+		doc["blocks"] = blocks
+	case "html":
+		doc["body_html"] = payload.Source.HTML
+	default:
+		return nil, fmt.Errorf("Paper source is empty")
+	}
+	return json.Marshal(doc)
+}
+
+func normalizePaperRef(ref string) string { return parsePaperRef(ref).id }
 
 // paperRawDoc is one fetched paper: its identity fields (for matching + the
 // not-found list) and the verbatim JSON (for -o json and block decode).
@@ -896,6 +1279,26 @@ func parsePaperArgs(args []string) (parsedPaperArgs, error) {
 			}
 			p.server = v
 			i = ni
+		case "--epic-id", "--wave-id", "--release-gate-id", "--revision-id", "--candidate-id", "--paper-role":
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, key)
+			if err != nil {
+				return p, err
+			}
+			switch key {
+			case "--epic-id":
+				p.epicID = v
+			case "--wave-id":
+				p.waveID = v
+			case "--release-gate-id":
+				p.releaseGateID = v
+			case "--revision-id":
+				p.revisionID = v
+			case "--candidate-id":
+				p.candidateID = v
+			case "--paper-role":
+				p.paperRole = v
+			}
+			i = ni
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
 				return p, fmt.Errorf("unknown paper flag %q", a)
@@ -911,6 +1314,36 @@ func parsePaperArgs(args []string) (parsedPaperArgs, error) {
 		p.slug = pos[0]
 	}
 	return p, nil
+}
+
+func releasePaperRef(opt parsedPaperArgs) (apiclient.ReleasePaperRef, bool, error) {
+	values := []struct {
+		name  string
+		value string
+	}{
+		{"--epic-id", opt.epicID},
+		{"--wave-id", opt.waveID},
+		{"--release-gate-id", opt.releaseGateID},
+		{"--revision-id", opt.revisionID},
+		{"--candidate-id", opt.candidateID},
+		{"--paper-role", opt.paperRole},
+	}
+	pinned := false
+	for _, field := range values {
+		pinned = pinned || strings.TrimSpace(field.value) != ""
+	}
+	if !pinned {
+		return apiclient.ReleasePaperRef{}, false, nil
+	}
+	for _, field := range values {
+		if strings.TrimSpace(field.value) == "" {
+			return apiclient.ReleasePaperRef{}, true, fmt.Errorf("%s is required with release-pinned Paper reads", field.name)
+		}
+	}
+	return apiclient.ReleasePaperRef{
+		EpicID: opt.epicID, WaveID: opt.waveID, ReleaseGateID: opt.releaseGateID,
+		RevisionID: opt.revisionID, CandidateID: opt.candidateID, Role: opt.paperRole,
+	}, true, nil
 }
 
 // validPaperTheme reports whether v names a theme paperResolveTheme understands,
@@ -1027,20 +1460,12 @@ var paperHTMLEntities = strings.NewReplacer(
 	"&#39;", "'", "&apos;", "'", "&nbsp;", " ", "&mdash;", "—", "&ndash;", "–",
 )
 
-// paperBlockTagBreak matches the block-level tag boundaries whose visible effect
-// is a line break: paragraph/heading/list-item/table-row/div closes and <br>.
-// Rendered to "\n" so the dump keeps paragraph structure a naive tag-strip would
-// collapse into one run-on line. Only CLOSING tags break (plus the void <br>) —
-// breaking on opens too would double-space every list item.
-var paperBlockTagBreak = regexp.MustCompile(`(?i)</(p|h[1-6]|li|tr|div|blockquote|ul|ol|table|section|article|pre)>|<br\s*/?>`)
-
-// paperTagStrip matches any remaining HTML tag (inline formatting, attributes),
-// dropped to leave the visible text.
-var paperTagStrip = regexp.MustCompile(`(?s)<[^>]*>`)
-
-// paperBlankRuns collapses three-or-more consecutive newlines to two, so the
-// dump never carries large vertical gaps from stacked block closes.
-var paperBlankRuns = regexp.MustCompile(`\n{3,}`)
+var paperBlockBreakTags = map[string]bool{
+	"p": true, "h1": true, "h2": true, "h3": true, "h4": true,
+	"h5": true, "h6": true, "li": true, "tr": true, "div": true,
+	"blockquote": true, "ul": true, "ol": true, "table": true,
+	"section": true, "article": true, "pre": true,
+}
 
 // htmlToPlainText renders a paper's body_html to a readable plain-text dump: it
 // turns block-level tag boundaries into line breaks, strips every remaining tag,
@@ -1049,21 +1474,84 @@ var paperBlankRuns = regexp.MustCompile(`\n{3,}`)
 // — the goal is legible content in the terminal, not fidelity. Returns "" for
 // empty/whitespace-only or all-tag input, so the caller can distinguish a truly
 // empty paper from one that renders.
-func htmlToPlainText(html string) string {
-	if strings.TrimSpace(html) == "" {
+func htmlToPlainText(source string) string {
+	if strings.TrimSpace(source) == "" {
 		return ""
 	}
-	s := paperBlockTagBreak.ReplaceAllString(html, "\n")
-	s = paperTagStrip.ReplaceAllString(s, "")
-	s = paperHTMLEntities.Replace(s)
-	// Trim trailing spaces on each line, then collapse blank runs.
-	lines := strings.Split(s, "\n")
-	for i, ln := range lines {
-		lines[i] = strings.TrimRight(ln, " \t")
+
+	// Tokenize rather than globally replacing entities after stripping tags.
+	// Raw text inside code/pre is authored literal data and must remain byte-
+	// faithful; semantic prose gets the finite decoder exactly once. Using Raw
+	// also avoids the tokenizer's full HTML entity decoder widening this policy.
+	z := html.NewTokenizer(strings.NewReader(source))
+	var b strings.Builder
+	literalDepth := 0
+	for {
+		tt := z.Next()
+		switch tt {
+		case html.ErrorToken:
+			s := b.String()
+			lines := strings.Split(s, "\n")
+			for i, ln := range lines {
+				lines[i] = strings.TrimRight(ln, " \t")
+			}
+			s = strings.Join(lines, "\n")
+			for strings.Contains(s, "\n\n\n") {
+				s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
+			}
+			return strings.TrimSpace(s)
+		case html.TextToken:
+			raw := string(z.Raw())
+			if literalDepth == 0 {
+				raw = paperHTMLEntities.Replace(raw)
+			}
+			b.WriteString(raw)
+		case html.StartTagToken:
+			tok := z.Token()
+			if tok.Data == "code" || tok.Data == "pre" {
+				literalDepth++
+			}
+			if tok.Data == "br" {
+				b.WriteByte('\n')
+			}
+		case html.SelfClosingTagToken:
+			if z.Token().Data == "br" {
+				b.WriteByte('\n')
+			}
+		case html.EndTagToken:
+			tok := z.Token()
+			if tok.Data == "code" || tok.Data == "pre" {
+				if literalDepth > 0 {
+					literalDepth--
+				}
+			}
+			if paperBlockBreakTags[tok.Data] {
+				b.WriteByte('\n')
+			}
+		}
 	}
-	s = strings.Join(lines, "\n")
-	s = paperBlankRuns.ReplaceAllString(s, "\n\n")
-	return strings.TrimSpace(s)
+}
+
+// wrapPaperPlainText applies the resolved terminal width without flattening the
+// explicit paragraph boundaries produced by htmlToPlainText. ansi.Wrap counts
+// display cells (wide runes included) and hard-breaks overlong tokens.
+func wrapPaperPlainText(text string, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if ansi.StringWidth(line) > width {
+			wrapped := strings.Split(ansi.Wrap(line, width, " "), "\n")
+			for j, segment := range wrapped {
+				if ansi.StringWidth(segment) > width {
+					wrapped[j] = ansi.Hardwrap(segment, width, false)
+				}
+			}
+			lines[i] = strings.Join(wrapped, "\n")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // usagePaper prints the `bp paper` noun usage (its single verb). An explicit
@@ -1079,6 +1567,24 @@ func usagePaper(out *writer, toStdout bool) {
 	p("verbs:")
 	p("  view <slug>      render a paper to the terminal (the CLI counterpart")
 	p("                   to opening it in the browser)")
+	p("  capture <url>    capture immutable CLI, task-board, and TUI readers")
+	p("")
+	p("working copy (BPML — papers as files under .barkpark/papers/):")
+	p("  new <slug>       scaffold a wall-passing BPML starter + rev-0 anchor")
+	p("                   (LOCAL — no server call); push creates the paper")
+	p("  pull <slug>      fetch the paper as BPML + a pristine snapshot + rev anchor")
+	p("  status [<slug>]  edited? (vs pristine) and behind? (anchor vs server)")
+	p("  diff <slug>      line diff of your edits")
+	p("  push <slug>      send the edited file; the SERVER derives and applies the")
+	p("                   op batch under your anchor, then the file converges on")
+	p("                   the returned canonical BPML. An ABSENT slug is CREATED")
+	p("                   through the full publish wall. --check dry-runs the")
+	p("                   wall (every violation, nothing written)")
+	p("")
+	p("to author a NEW paper: bp paper new <slug> → edit → bp paper push <slug>")
+	p("  (--check first to see violations). Guide: /papers/paper-authoring-excellence")
+	p("  JSON producers: bp bulldocs publish <slug> --file payload.json (blocks")
+	p("  payload — never hand-rolled HTML; the slug also goes INSIDE the JSON)")
 }
 
 // usagePaperView prints the `bp paper view` command signature. An explicit
@@ -1101,6 +1607,12 @@ func usagePaperView(out *writer, toStdout bool) {
 	p("                             read view (default published; papers are public)")
 	p("  -o json                    emit the raw paper document (default: rendered ANSI)")
 	p("  -s, --server <name|url>    target a saved server or URL")
+	p("  --epic-id <id>              release gate epic (requires all release pins)")
+	p("  --wave-id <id>              release gate Wave key")
+	p("  --release-gate-id <uuid>    immutable open admission")
+	p("  --revision-id <uuid>        immutable Wave revision (wire: wave_revision)")
+	p("  --candidate-id <uuid>       exact immutable Paper candidate")
+	p("  --paper-role campaign|successor")
 }
 
 // paperImageResolver is the image-bytes seam (pdrender-terminal-images): given

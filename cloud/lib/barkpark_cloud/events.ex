@@ -40,7 +40,8 @@ defmodule BarkparkCloud.Events do
   # The closed set of invalidation channels, sorted. Mirrored byte-for-byte
   # (as a sorted JSON array) in priv/static/__fixtures__/event_types.json.
   @event_types ~w(audit barkpark.restored barkpark.suspended deployments fleet
-                  github members notifications onboarding sites subscription)
+                  github members notifications onboarding site.deploy.stage sites
+                  subscription)
 
   @typedoc "A coarse invalidation channel the dashboard knows how to refetch."
   @type event_type :: String.t()

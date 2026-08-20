@@ -4,9 +4,11 @@ name: pr-task-gate
 # paper): every PR must be backed by a task that is actively being worked, on
 # the ledger-of-record (guerrilla — decision D4). No task, no merge.
 #
-# The pure ledger decision lives in scripts/pr-task-gate.sh (unit-tested); this
-# workflow only plumbs the GitHub PR context into it and applies two escape
-# hatches that are part of the design, not loopholes:
+# The pure parts live in scripts/pr-task-gate.sh (unit-tested by
+# scripts/pr-task-gate.test.sh): both the trailer grammar (`--extract-task-id`)
+# and the ledger decision. This workflow only plumbs the GitHub PR context into
+# them and applies two escape hatches that are part of the design, not
+# loopholes:
 #
 #   • Merge-base cutoff (D-rollout): a PR whose base commit predates this gate
 #     is grandfathered. Detected self-referentially — if this workflow file is
@@ -14,23 +16,89 @@ name: pr-task-gate
 #     so it is exempt. This is why turning the gate on does NOT red the open-PR
 #     fleet. A PR rebased onto post-gate main adopts the rule.
 #
+#     FOUR states, not two (charter D25 + wave 56 S4). The cutoff used to test only
+#     `git cat-file -e "$BASE_SHA:<this file>"`, which cannot tell "the base
+#     resolves and the file is genuinely absent" from "BASE_SHA does not resolve
+#     at all" — both took the grandfather branch, every downstream step carries
+#     `if: enforced == '1'`, and the job then reported SUCCESS having checked
+#     nothing. A guard that fails open is worse than no guard, and this was one
+#     inside the gate whose whole job is blocking. The commit is now resolved
+#     FIRST: unresolvable is UNKNOWN and fails loudly, never grandfathered.
+#     The fourth state is the predicate's own premise: the literal path it tests
+#     is a path to THIS FILE, so a rename makes it stale silently and
+#     grandfathers the entire open-PR fleet (and the renaming PR itself, whose
+#     base still has the old path). The path is now self-checked at HEAD —
+#     absent at HEAD means the cutoff cannot be believed, and the job FAILS
+#     CLOSED rather than certifying a PR it never evaluated.
+#     And when a PR IS legitimately grandfathered, the job now emits a
+#     `::notice title=PR task gate: green — nothing evaluated::` — the same
+#     nothing-dispatched disclosure the other three required contexts carry, on
+#     the only channel (annotations) that reaches the check-run API.
+#
 #   • Hotfix lane (D3): a `hotfix!` label passes the gate AND auto-files a
 #     linked override task (the durable record), rather than silently waiving
 #     the requirement. The exception path SATISFIES the invariant (a task now
 #     exists for the change) instead of skipping it. Auto-file needs a write
-#     token secret (BARKPARK_TASK_TOKEN); without it the lane still passes but
-#     logs that the record was not filed — a human-provisioned gate.
+#     token secret (BARKPARK_TASK_TOKEN), and the record is the CONDITION of the
+#     bypass: if the task cannot be filed, the lane REFUSES (red) rather than
+#     passing with a warning nobody reads. A bypass with no attributable record
+#     is indistinguishable from the gate being off.
+#     STATE OF THE LANE, re-derived 2026-08-04: `BARKPARK_TASK_TOKEN` is NOT
+#     provisioned (repo secrets are BREAKGLASS_TOKEN, CP_HOST, DEPLOY_SSH_KEY,
+#     GUERRILLA_HOST, HETZNER_DNS_TOKEN, NPM_TOKEN; the owner is a User, so no
+#     org tier can hide it), while the `hotfix!` label DOES exist. So applying
+#     the label today does not waive this gate — `hotfix_record` exits 1 and it
+#     is the only step left running (`:216`, `:238`, `:253` all carry
+#     `hotfix != '1'`), i.e. a guaranteed red. That is the designed refusal, not
+#     a bug, and it is why nothing in this file may advertise the lane as an
+#     escape. The armed escape is admin break-glass (`scripts/breakglass.sh`).
 #
-# Enforcement note: `main` has no branch protection today, so a red check here
-# does not yet mechanically block a merge. To make it binding, add this job to
-# the required-status-checks list BY NAME (see merge-gates.md). Required-by-name
-# is load-bearing (D3): a workflow that silently never runs on a conflicted PR
-# must read as "not satisfied", not as a passing/absent check.
+# Enforcement note: THIS CHECK IS BINDING. As of 2026-07-28 `main` is protected
+# with `enforce_admins: true`, and `PR references an active task` is one of the
+# four required contexts pinned by name in `.github/required-checks.json`
+# (`Elixir gate`, `PR references an active task`, `Cloud gate`, `Console gate` —
+# live protection re-read 2026-08-04). A red here blocks the merge server-side for
+# everyone, admins included — `gh pr merge --admin` is refused. The merge verb is
+# `scripts/bp-merge.sh`.
+#
+# Two consequences the rest of this file is written against, and neither is
+# hypothetical any more:
+#   * Required-by-name is load-bearing (D3): a workflow that silently never runs
+#     on a conflicted PR must read as "not satisfied", not as a passing/absent
+#     check. A required context that never renders reports `is expected.`
+#     forever, which is a DEADLOCK — hence no paths filter below, ever.
+#   * The emergency lane is NOT a way past a red on a genuinely urgent PR while
+#     its write token is unprovisioned — it reds. It must still actually engage
+#     (the `labeled` trigger) and must still leave a record (the
+#     `hotfix_record` step's hard failure), because the day the token exists the
+#     record is what makes the bypass legitimate. The escape that is armed today
+#     is admin break-glass: `scripts/breakglass.sh --open/--close`, which writes
+#     an attributable record to `docs/ops/break-glass-log.md` and is watched by
+#     `breakglass-watch.yml` (BREAKGLASS_TOKEN). See merge-gates.md.
 
 on:
   pull_request:
     # No paths filter: any change needs a task, so every PR is checked. The job
     # is cheap (one HTTPS GET), and the merge-base cutoff grandfathers old PRs.
+    #
+    # `edited` is load-bearing: without it the default set is opened/synchronize/
+    # reopened, so a PR that failed for a missing or wrong `Task:` trailer stays
+    # STICKY-red after the body is corrected. The workaround seen in the wild was
+    # closing and reopening the PR. Both escape hatches are safe on `edited`: the
+    # merge-base cutoff step has no `if:` and recomputes `enforced` fresh from
+    # base.sha on every trigger, and the hotfix auto-file is keyed on the PR
+    # number via createIfNotExists, so re-firing cannot duplicate it.
+    #
+    # `labeled`/`unlabeled` are load-bearing for the SAME reason, and they are the
+    # emergency exit's own re-fire: applying `hotfix!` to an already-red open PR
+    # emits `labeled`, not `edited`, so without them the lane could only be
+    # entered by pushing a commit — during the emergency the lane exists for.
+    # `unlabeled` is the other half and is not symmetry for its own sake: removing
+    # the label must RE-RED the PR, otherwise a bypass, once taken, is permanent
+    # and invisible. Both are safe to re-fire on for the reasons above: the cutoff
+    # recomputes from base.sha every time, and the auto-file is createIfNotExists
+    # keyed on the PR number.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -40,6 +108,23 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # The gate's own predicate, proven on every PR (charter D26). This job lives
+  # HERE and not in shell-harnesses.yml on purpose: that workflow is
+  # workflow-level `on: paths:` filtered, and a paths-filtered workflow emits no
+  # check run at all on a PR it skips — which a required-status list reads as a
+  # permanent deadlock (D18), so it can never carry a required name. This
+  # workflow has no paths filter, so the harness runs on every PR, including the
+  # ones that edit the gate. It is deliberately NOT a `needs:` of the gate job:
+  # a red harness must not turn the gate itself into a `skipped` conclusion,
+  # because GitHub counts `skipped` as SATISFYING a required context (D19).
+  pr-task-gate-selftest:
+    name: PR task gate self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hermetic fixtures for the gate predicate and its step bodies
+        run: bash scripts/pr-task-gate.test.sh
+
   pr-task-gate:
     name: PR references an active task
     runs-on: ubuntu-latest
@@ -54,30 +139,98 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          # NOTE: GitHub runs this as `bash -e {0}`; `set -uo pipefail` adds -u
+          # and pipefail but does NOT clear -e. Every command below is therefore
+          # either inside an `if`/`||` or is meant to abort the step.
           set -uo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
-          if git cat-file -e "${BASE_SHA}:.github/workflows/pr-task-gate.yml" 2>/dev/null; then
+          GATE_PATH=".github/workflows/pr-task-gate.yml"
+          # State 1 of 4 — IS THE PREDICATE STILL POINTING AT THIS GATE?
+          # (cloud-console-hardening wave 56, slice 4.) The cutoff below asks whether a hard-coded
+          # LITERAL PATH exists at the base commit, and that literal is a path to
+          # THIS FILE. Rename or move the workflow and the literal goes stale
+          # silently: every subsequent PR's base lacks the path, so `enforced=0`
+          # fleet-wide, the required context goes green on EVERY PR while checking
+          # nothing — and the PR doing the rename grandfathers itself, because at
+          # ITS base the old path still exists. One rename disarms a required gate
+          # with no red anywhere.
+          # The literal is kept (it is legible, and deriving it from
+          # github.workflow_ref would move the failure mode rather than remove it),
+          # but it is now SELF-CHECKED against the checkout: the path must exist at
+          # HEAD. Present at HEAD + absent at base = a genuine pre-gate base.
+          # ABSENT AT HEAD = the literal no longer names this gate, so the cutoff
+          # cannot be believed at all — FAIL CLOSED, never grandfather.
+          if [ ! -f "$GATE_PATH" ]; then
+            echo "::error title=pr-task-gate cannot trust its own cutoff::This gate decides whether a PR predates it by testing for '${GATE_PATH}' at the PR's base commit, and that path DOES NOT EXIST in this checkout — so the workflow has been renamed or moved and the test now grandfathers every PR while checking nothing. Refusing to certify a PR on a predicate that no longer points at this gate. Fix: update GATE_PATH in the cutoff step (and scripts/pr-task-gate.test.sh) to the new path, in the same commit as the rename." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # State 2 of 4 — can we resolve the base COMMIT at all? Anything that
+          # answers "no" here (a force-pushed base, a shallow fetch that missed,
+          # a deleted branch) is UNKNOWN, not "old". Fail loudly: the gate must
+          # never certify a PR it could not evaluate.
+          if ! git rev-parse --verify --quiet "${BASE_SHA}^{commit}" >/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          fi
+          if ! git rev-parse --verify --quiet "${BASE_SHA}^{commit}" >/dev/null; then
+            echo "::error title=pr-task-gate could not evaluate this PR::The base commit ${BASE_SHA} does not resolve in this checkout, even after fetching it, so the gate cannot tell whether this PR predates the gate. Refusing to grandfather what it cannot read — rebase the PR onto current main, or re-run this check." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # States 3 and 4 — the base resolves AND the literal still names this
+          # gate, so the file test is now meaningful: present = enforced, absent =
+          # genuinely pre-gate.
+          if git cat-file -e "${BASE_SHA}:${GATE_PATH}" 2>/dev/null; then
             echo "enforced=1" >> "$GITHUB_OUTPUT"
           else
             echo "enforced=0" >> "$GITHUB_OUTPUT"
-            echo "This PR's base ($BASE_SHA) predates the pr-task-gate — grandfathered, not enforced." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "This PR's base ($BASE_SHA) resolves but predates the pr-task-gate — grandfathered, not enforced." | tee -a "$GITHUB_STEP_SUMMARY"
+            # THE DISCLOSURE. Grandfathering makes every downstream step skip
+            # (`if: enforced == '1'`), so this required context reports SUCCESS
+            # having verified no task at all — byte-identical, on the check-run
+            # API, to a run where a live claim was proven. The other three required
+            # contexts each emit exactly this shape when nothing was dispatched
+            # (cloud.yml, console-harness.yml, elixir.yml); this one emitted
+            # nothing but a $GITHUB_STEP_SUMMARY line, which does NOT reach the
+            # check-run API (0 of 32 check-runs returned a non-null summary) while
+            # a bare ::notice:: does. ONE notice, never one per step — GitHub caps
+            # annotations at 10 per level per step and truncates the rest silently.
+            echo "::notice title=PR task gate: green — nothing evaluated::NO TASK WAS CHECKED on this PR.%0AThis gate is green because the PR's base commit ($BASE_SHA) predates the gate and was grandfathered, NOT because a task was found or its claim verified — every evaluating step was skipped.%0AGreen here means NOT APPLICABLE to this PR. Read it as 'no task check ran', never as 'this PR is task-backed'. Rebase onto current main to be evaluated for real."
           fi
 
       - name: Detect hotfix label
+        # `id:` is how scripts/pr-task-gate.test.sh addresses this step body to
+        # execute it verbatim under GitHub's real shell. Do not remove it.
         id: hotfix
         if: steps.cutoff.outputs.enforced == '1'
         run: |
           set -uo pipefail
-          if jq -e '.pull_request.labels[]?.name == "hotfix!"' "$GITHUB_EVENT_PATH" >/dev/null; then
+          # ORDER-INDEPENDENT, and that is the whole point. `.labels[]?.name ==
+          # "hotfix!"` is a GENERATOR: it emits one boolean PER LABEL and `jq -e`
+          # sets its exit status from the LAST one. Measured on this jq:
+          # [hotfix!,bug] -> exit 1, [bug,hotfix!] -> exit 0, [bug] -> exit 1,
+          # [] -> exit 4. So the emergency lane engaged only when `hotfix!`
+          # happened to be the last label — it would have failed silently the
+          # first time a human added a second label to a genuinely urgent PR.
+          # Collecting the names into ONE array and asking `index` once yields a
+          # single value, so the exit status answers the question actually asked.
+          if jq -e '[.pull_request.labels[]?.name] | index("hotfix!")' "$GITHUB_EVENT_PATH" >/dev/null; then
             echo "hotfix=1" >> "$GITHUB_OUTPUT"
           else
             echo "hotfix=0" >> "$GITHUB_OUTPUT"
           fi
 
-      # D3: the hotfix lane files a task instead of waiving the rule. Best-effort
-      # — the label alone passes the gate; the auto-file is the durable record,
-      # and its absence (missing token) is logged, not fatal.
+      # D3: the hotfix lane files a task instead of waiving the rule — and the
+      # record is the CONDITION of the bypass, not a courtesy alongside it. This
+      # step used to warn-and-`exit 0` on a missing token or a non-200 ledger, and
+      # it could not have reded anyway: every step below carries `if: hotfix !=
+      # '1'`, so once the lane engaged this step was the only one left and the job
+      # reported SUCCESS regardless of what it wrote. That is a silent, unlogged
+      # waiver of a required check. An unwritten override record is now the JOB'S
+      # FAILURE: no record, no bypass. The `::notice` announcing the record has
+      # moved BELOW the write, because announcing a durable record before
+      # attempting to write it is how the log came to disagree with the ledger.
       - name: Hotfix lane — auto-file the override task
+        # `id:` is how scripts/pr-task-gate.test.sh addresses this step body to
+        # execute it verbatim under GitHub's real shell. Do not remove it.
+        id: hotfix_record
         if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix == '1'
         env:
           LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
@@ -87,10 +240,9 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -uo pipefail
-          echo "::notice title=Hotfix lane::PR labelled 'hotfix!' — gate passes; filing an override task as the durable record."
           if [ -z "${TASK_TOKEN:-}" ]; then
-            echo "::warning title=Hotfix override not recorded::BARKPARK_TASK_TOKEN secret is not set, so the override task was not auto-filed. Provision the secret to close this gap (see merge-gates.md)." | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
+            echo "::error title=Hotfix override not recorded::PR #${PR_NUMBER} is labelled 'hotfix!', but BARKPARK_TASK_TOKEN is not set, so the override task could not be filed. The hotfix lane is a RECORDED bypass, not a silent one — with no record it is refused. Provision the secret (see docs/ops/merge-gates.md), or remove the 'hotfix!' label and back the PR with a task." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
           # Idempotent create keyed on the PR number, so re-runs don't duplicate.
           # jq --arg reads values as DATA — the attacker-controlled PR title
@@ -110,9 +262,10 @@ jobs:
             -H "Content-Type: application/json" \
             --data "$body" 2>/dev/null || echo 000)"
           if [ "$code" = "200" ] || [ "$code" = "201" ]; then
-            echo "Filed override task hotfix-pr-${PR_NUMBER}." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::notice title=Hotfix lane::PR #${PR_NUMBER} passes under the 'hotfix!' lane; override task hotfix-pr-${PR_NUMBER} is filed on the ledger as the durable record." | tee -a "$GITHUB_STEP_SUMMARY"
           else
-            echo "::warning title=Hotfix auto-file failed::Ledger returned HTTP ${code}; the gate still passes but the override task was not recorded." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Hotfix override not recorded::Filing the override task for PR #${PR_NUMBER} returned HTTP ${code}, so the bypass has no durable record and is refused. Re-run this check once the ledger answers, or remove the 'hotfix!' label and back the PR with a task." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
       - name: Extract the task reference from the PR
@@ -123,12 +276,14 @@ jobs:
         run: |
           set -uo pipefail
           # PR-controlled text arrives via env (never interpolated into the
-          # script body) so it cannot inject shell. Match a `Task: <doc_id>`
-          # trailer, case-insensitive, first occurrence.
-          task_id="$(printf '%s' "${PR_BODY:-}" \
-            | grep -ioE '^[[:space:]]*task:[[:space:]]*[a-z0-9][a-z0-9._/-]*' \
-            | head -1 \
-            | sed -E 's/^[[:space:]]*[Tt][Aa][Ss][Kk]:[[:space:]]*//')"
+          # script body) so it cannot inject shell. The trailer GRAMMAR — which
+          # forms are accepted, which are deliberately not, and why the id is
+          # stripped of backticks before it reaches the ledger URL — lives with
+          # the extractor in scripts/pr-task-gate.sh. Keeping one copy is the
+          # point: while the regex sat inline here, the hermetic harness could
+          # not reach it, and it silently dropped every backtick-wrapped trailer
+          # (PR #5290 red vs #5307 green, run 29804094521).
+          task_id="$(bash scripts/pr-task-gate.sh --extract-task-id)"
           echo "task_id=${task_id}" >> "$GITHUB_OUTPUT"
 
       # Optional author→worker map: .github/pr-task-workers.json = { "<gh-login>": "<worker-id>" }.
@@ -149,17 +304,61 @@ jobs:
           echo "expected=${expected}" >> "$GITHUB_OUTPUT"
 
       - name: Verify the task is active on the ledger
+        # `id:` is how scripts/pr-task-gate.test.sh addresses this step body to
+        # execute it verbatim under GitHub's real shell. Do not remove it.
+        id: verify
         if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix != '1'
         env:
           TASK_ID: ${{ steps.ref.outputs.task_id }}
           EXPECTED_WORKER: ${{ steps.worker.outputs.expected }}
           LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          # The lease predicate is PR-relative (charter D58): a lapsed claim
+          # backs this PR iff it was still live when the PR was OPENED. created_at
+          # is the right stamp and the only stable one — it does not move on
+          # synchronize/edited/reopened (verified on #6414: created_at
+          # 2026-07-27T21:27:32Z vs updated_at 2026-07-28T07:13:05Z), so a
+          # re-fire cannot decay a verdict. The gate REFUSES rather than falls
+          # open if this is ever empty or unreadable.
+          PR_OPENED_AT: ${{ github.event.pull_request.created_at }}
+          # Authenticated ledger read (wave-3 token plumbing). Same secret the
+          # hotfix_record step uses. It is UNPROVISIONED today, and fork PRs never
+          # receive secrets, so this is normally empty — the gate adds the Bearer
+          # header ONLY when it is set, and treats a token-absent 404 as an outage
+          # (exit 2, "provision BARKPARK_TASK_TOKEN"), never a PR accusation. Once
+          # the secret exists, a future private-task flip on the ledger cannot make
+          # main unmergeable: authenticated reads still see the task.
+          LEDGER_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
         run: |
+          # `set -uo pipefail` does NOT clear the -e in GitHub's `bash -e {0}`,
+          # so a bare `bash scripts/pr-task-gate.sh` on a non-zero exit aborts
+          # the step HERE and everything below becomes dead code — which is what
+          # the exit-2 handler was for the whole life of this gate (D24). `|| rc=$?`
+          # is the -e-safe form; scripts/pr-task-gate.test.sh executes this exact
+          # step body under `bash --noprofile --norc -e -o pipefail` so it cannot
+          # silently revert.
           set -uo pipefail
-          bash scripts/pr-task-gate.sh
-          rc=$?
+          rc=0
+          bash scripts/pr-task-gate.sh || rc=$?
           if [ "$rc" = "2" ]; then
-            echo "::warning title=Ledger unreachable::The task ledger could not be reached, so this PR's task backing could not be verified. Not blocking the merge on an infra error — re-run once the ledger is reachable." | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
+            # Exit 2 = "could not check", after the script's own bounded retries.
+            # It is a FAILURE, not a pass: GitHub has no `neutral` conclusion for
+            # exit codes, so the only alternative to red is a green check that
+            # verified nothing. Red, with the one instruction that fixes it.
+            #
+            # The instruction must name an escape that is ARMED. This message
+            # used to end "if it stays down, the hotfix! lane is the documented
+            # override", which was false twice: BARKPARK_TASK_TOKEN is not
+            # provisioned, so `hotfix_record` exits 1 and — being the only step
+            # left once the lane engages — converts this required context into a
+            # guaranteed red; and even WITH the token that step POSTs to the
+            # same ledger host whose outage produced this very message, so the
+            # documented escape from a guerrilla outage was gated on guerrilla
+            # being up. The `hotfix!` label exists, so a blocked human at 2am
+            # could follow that advice and make things strictly worse.
+            # scripts/pr-task-gate.test.sh executes this file's own
+            # `hotfix_record` body with an empty token and cross-checks this
+            # text against merge-gates.md, so the false lane cannot drift back.
+            echo "::error title=Ledger unreachable — task backing UNVERIFIED::The task ledger did not answer after the gate's bounded retries, so whether this PR is task-backed is UNKNOWN. This is not a finding against the PR. Re-run this check once the ledger is up. Do NOT reach for the 'hotfix!' label: BARKPARK_TASK_TOKEN is unprovisioned, so that lane REDS this same required context with every evaluating step skipped, and even with the token it files its record on the ledger that is down. The one armed override is admin break-glass — scripts/breakglass.sh --open --reason ... --task ... , merge, then --close (docs/ops/merge-gates.md)." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
           exit "$rc"

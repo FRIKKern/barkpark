@@ -336,7 +336,11 @@ func TestMouseHoverTintsAndClears(t *testing.T) {
 
 	plain := renderFooter(m.ui, inner) // hover 0
 
-	m, _ = step(t, m, tea.MouseMsg{X: cx, Y: m.height - 1, Action: tea.MouseActionMotion})
+	m, cmd := step(t, m, tea.MouseMsg{X: cx, Y: m.height - 1, Action: tea.MouseActionMotion})
+	if cmd == nil || m.ui.HoverFooterVerb != 0 || m.hoverPendingVerb != 'c' {
+		t.Fatalf("footer hover was not debounced: visible=%q pending=%q", string(m.ui.HoverFooterVerb), string(m.hoverPendingVerb))
+	}
+	m, _ = step(t, m, hoverDebounceMsg{gen: m.hoverGen})
 	if m.ui.HoverFooterVerb != 'c' {
 		t.Fatalf("hover over claim = %q, want 'c'", string(m.ui.HoverFooterVerb))
 	}
@@ -405,8 +409,16 @@ func TestMToggleReleasesAndReArmsMouse(t *testing.T) {
 }
 
 // TestFooterVerbAtDegradesHonestly proves the hit test returns no target where
-// there is no clickable footer: wide mode, a pushed reading frame, and any row
-// that is not the footer line.
+// there is no clickable footer: a non-footer row, and a pushed reading frame.
+//
+// The wide-mode assertion was FLIPPED in W19 (charter D111): the wide board footer
+// now IS clickable, so the m.wide hard-bail is gone. This test's old wide branch
+// asserted "wide exposes no footer verb target" against the NARROW-derived click
+// coords — those coords land in the inter-verb gap under the narrower wide board
+// pane, so a naive flip would falsely pass. Instead we resolve the verb span from
+// the WIDE geometry (wideClickVerb) and assert the click hits, proving the gate
+// really opened rather than merely missing. Full click/shed coverage lives in the
+// TestWideFooterVerb* tests below.
 func TestFooterVerbAtDegradesHonestly(t *testing.T) {
 	m := mouseModel(activeOrphans(readyTask("r1")))
 	click := clickVerb(m, 'c')
@@ -415,16 +427,240 @@ func TestFooterVerbAtDegradesHonestly(t *testing.T) {
 	if _, ok := m.footerVerbAt(click.X, 0); ok {
 		t.Error("a non-footer row hit a verb")
 	}
-	// Wide mode exposes no board footer targets this wave.
+	// Wide mode NOW exposes the board footer verbs (D111 flip): a click resolved
+	// against the wide geometry hits its verb.
 	wm := m
 	wm.wide = true
-	if _, ok := wm.footerVerbAt(click.X, click.Y); ok {
-		t.Error("wide mode exposed a footer verb target")
+	wc, ok := wideClickVerb(wm, 'c')
+	if !ok {
+		t.Fatal("wide claim verb span not emitted at the default split")
 	}
-	// A pushed reading frame's footer omits the verbs.
+	if verb, ok := wm.footerVerbAt(wc.X, wc.Y); !ok || verb != 'c' {
+		t.Errorf("wide claim verb not clickable (D111): got (%q,%v)", string(verb), ok)
+	}
+	// A pushed reading frame's footer still omits the verbs.
 	rm := m
 	(&rm).pushFrame(Frame{Kind: FrameTask, Ref: "r1", Title: "r1"})
 	if _, ok := rm.footerVerbAt(click.X, click.Y); ok {
 		t.Error("a reading frame exposed a board footer verb target")
+	}
+}
+
+// ── Wide-mode footer verb clicks (charter D111) ──────────────────────────────
+//
+// The wide board footer sheds against the live dragged/persisted boardPaneCols,
+// not the portrait inner width, so its verb spans move as the divider drags.
+// These tests resolve every coordinate from the SAME buildBoardFooter/boardPaneCols
+// producers the shell uses — never a literal column — so they track the ladder
+// wherever it sheds.
+
+// wideClickVerb builds a left-press MouseMsg on a wide board-pane footer verb,
+// resolving its span from the wide geometry footerVerbAt uses (the left board
+// pane at boardPaneCols, the pane's last row). ok is false when the ladder has
+// shed that verb at the current split.
+func wideClickVerb(m Model, verb rune) (tea.MouseMsg, bool) {
+	gl, innerW, inner := m.wideGeom()
+	boardW := m.boardPaneCols(innerW)
+	_, spans := buildBoardFooter(boardW, m.ui.MouseReleased)
+	for _, s := range spans {
+		if s.verb == verb {
+			x := gl + (s.start+s.end)/2
+			return tea.MouseMsg{X: x, Y: inner, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}, true
+		}
+	}
+	return tea.MouseMsg{}, false
+}
+
+// wideMouseModel is mouseModel flipped into the two-pane frame — same fixture,
+// same cursor on the loose task, so the wide claim/close reducers act on it.
+func wideMouseModel(b Board) Model {
+	m := mouseModel(b)
+	m.wide = true
+	return m
+}
+
+// TestWideFooterVerbClickClaimsLikeKey proves a click on the wide footer's claim
+// verb fires the SAME claim command as pressing c — routed through handleWideMouse,
+// against the live boardPaneCols geometry (charter D111 / D96).
+func TestWideFooterVerbClickClaimsLikeKey(t *testing.T) {
+	t.Setenv("BARKPARK_WORKER_ID", "opus-9")
+	m := wideMouseModel(activeOrphans(readyTask("r1")))
+
+	var gotDoc, gotWorker string
+	m.doClaim = func(_ *apiclient.Client, docID, worker string) ActionResult {
+		gotDoc, gotWorker = docID, worker
+		return ActionResult{OK: true, Message: "claimed as opus-9 · epoch 1"}
+	}
+
+	click, ok := wideClickVerb(m, 'c')
+	if !ok {
+		t.Fatal("wide claim verb span not emitted at the default split")
+	}
+	m, cmd := step(t, m, click)
+	if cmd == nil {
+		t.Fatal("clicking the wide claim verb fired no command")
+	}
+	if _, ok := cmd().(actionResultMsg); !ok {
+		t.Fatal("wide claim click did not produce an actionResultMsg")
+	}
+	if gotDoc != "r1" || gotWorker != "opus-9" {
+		t.Fatalf("DoClaim got (%q,%q), want (r1,opus-9)", gotDoc, gotWorker)
+	}
+}
+
+// TestWideFooterVerbClickCloseTwoStep proves the wide close verb walks the EXISTING
+// pendingClose two-step across two clicks — the verb-first early-out in
+// handleWideMouse must fire ABOVE the unconditional pendingClose clear, or the arm
+// would be wiped before the second click could fire (charter D111).
+func TestWideFooterVerbClickCloseTwoStep(t *testing.T) {
+	t.Setenv("BARKPARK_WORKER_ID", "opus-9")
+	m := wideMouseModel(activeOrphans(claimedTask("c1", 7)))
+
+	var gotDoc, gotWorker string
+	var gotEpoch int
+	m.doClose = func(_ *apiclient.Client, docID, worker string, epoch int) ActionResult {
+		gotDoc, gotWorker, gotEpoch = docID, worker, epoch
+		return ActionResult{OK: true, Message: "closed · epoch 7"}
+	}
+
+	click, ok := wideClickVerb(m, 'x')
+	if !ok {
+		t.Fatal("wide close verb span not emitted at the default split")
+	}
+
+	// First click ARMS (no command, prompt shown) — proving the clear did NOT run.
+	m, cmd := step(t, m, click)
+	if cmd != nil {
+		t.Fatal("first wide close click fired a close (should only arm)")
+	}
+	if m.pendingClose != "c1" {
+		t.Fatalf("pendingClose = %q after first wide click, want c1", m.pendingClose)
+	}
+	if !strings.Contains(m.ui.Strip.Message, "press x again") {
+		t.Fatalf("first wide click strip = %q, want the confirm prompt", m.ui.Strip.Message)
+	}
+
+	// Second click on the SAME verb fires with the observed epoch.
+	m, cmd = step(t, m, click)
+	if cmd == nil {
+		t.Fatal("second wide close click did not fire the close")
+	}
+	if _, ok := cmd().(actionResultMsg); !ok {
+		t.Fatal("wide close click did not produce an actionResultMsg")
+	}
+	if gotDoc != "c1" || gotWorker != "opus-9" || gotEpoch != 7 {
+		t.Fatalf("DoClose got (%q,%q,%d), want (c1,opus-9,7)", gotDoc, gotWorker, gotEpoch)
+	}
+	if m.pendingClose != "" {
+		t.Fatal("pendingClose not cleared after firing")
+	}
+}
+
+// TestWideChromeClickDisarms proves the documented clear still runs for a GENUINE
+// non-verb wide press: arm the close on the x verb, then click the board pane
+// away from any verb — the guard disarms exactly as the pre-D111 clear did.
+func TestWideChromeClickDisarms(t *testing.T) {
+	m := wideMouseModel(activeOrphans(claimedTask("c1", 7)))
+	m.doClose = func(_ *apiclient.Client, _, _ string, _ int) ActionResult {
+		t.Fatal("close fired after a chrome click should have disarmed it")
+		return ActionResult{}
+	}
+	arm, ok := wideClickVerb(m, 'x')
+	if !ok {
+		t.Fatal("wide close verb span not emitted at the default split")
+	}
+	m, _ = step(t, m, arm)
+	if m.pendingClose != "c1" {
+		t.Fatalf("arm failed: pendingClose = %q", m.pendingClose)
+	}
+	// A press on the board pane's top content row (not the footer) is genuine
+	// chrome/pane input — it must reach the clear and disarm.
+	off := tea.MouseMsg{X: 2, Y: 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	m, _ = step(t, m, off)
+	if m.pendingClose != "" {
+		t.Fatal("a genuine wide chrome click did not disarm the close guard")
+	}
+}
+
+// TestWideFooterVerbShedHonesty proves the wide footer sheds RIGHT-TO-LEFT against
+// the dragged boardW — footerVerbAt returns no target for a shed verb and the spans
+// buildBoardFooter emits are the single source of truth. Two cases: the zero-verb
+// floor (boardW clamped to its minimum) and a partial shed where only claim
+// survives.
+func TestWideFooterVerbShedHonesty(t *testing.T) {
+	// Zero-verb floor: drag the divider to the board minimum — every verb sheds.
+	zero := wideMouseModel(activeOrphans(readyTask("r1")))
+	zero.wideBoardCols = minBoardWidth
+	_, zInnerW, zInner := zero.wideGeom()
+	zBoardW := zero.boardPaneCols(zInnerW)
+	if _, spans := buildBoardFooter(zBoardW, zero.ui.MouseReleased); len(spans) != 0 {
+		t.Fatalf("boardW=%d should shed every verb, got %d spans", zBoardW, len(spans))
+	}
+	for x := 0; x <= zero.width; x++ {
+		if verb, ok := zero.footerVerbAt(x, zInner); ok {
+			t.Fatalf("shed footer still hit %q at x=%d", string(verb), x)
+		}
+	}
+
+	// Partial shed: a boardW where claim survives but close and studio are gone.
+	part := wideMouseModel(activeOrphans(readyTask("r1")))
+	part.wideBoardCols = 40
+	_, pInnerW, _ := part.wideGeom()
+	pBoardW := part.boardPaneCols(pInnerW)
+	_, spans := buildBoardFooter(pBoardW, part.ui.MouseReleased)
+	have := map[rune]footerVerbSpan{}
+	for _, s := range spans {
+		have[s.verb] = s
+	}
+	if _, ok := have['c']; !ok {
+		t.Fatalf("boardW=%d dropped the claim verb; spans=%v", pBoardW, spans)
+	}
+	if _, ok := have['x']; ok {
+		t.Fatalf("boardW=%d should have shed close; spans=%v", pBoardW, spans)
+	}
+	if _, ok := have['o']; ok {
+		t.Fatalf("boardW=%d should have shed studio; spans=%v", pBoardW, spans)
+	}
+	// Claim is clickable; a click where close's span WOULD sit on the wider default
+	// split lands off every span here and returns honest !ok.
+	if verb, ok := part.footerVerbAt(1+(have['c'].start+have['c'].end)/2, part.height-1); !ok || verb != 'c' {
+		t.Errorf("surviving claim verb not clickable: got (%q,%v)", string(verb), ok)
+	}
+	if verb, ok := part.footerVerbAt(1+have['c'].end+2, part.height-1); ok {
+		t.Errorf("a shed verb region still hit %q", string(verb))
+	}
+}
+
+// TestWideFooterVerbHoverTints proves a wide-mode pointer over the footer's claim
+// verb tints it through HoverFooterVerb (the D96 background grammar, painted by
+// verbHoverStyle in renderFooterSegs) — one hover grammar for narrow and wide.
+func TestWideFooterVerbHoverTints(t *testing.T) {
+	m := wideMouseModel(activeOrphans(readyTask("r1")))
+	gl, innerW, inner := m.wideGeom()
+	boardW := m.boardPaneCols(innerW)
+	_, spans := buildBoardFooter(boardW, m.ui.MouseReleased)
+	var cx int
+	for _, s := range spans {
+		if s.verb == 'c' {
+			cx = gl + s.start
+		}
+	}
+	if cx == 0 {
+		t.Fatal("wide claim verb span not emitted at the default split")
+	}
+
+	m, cmd := step(t, m, tea.MouseMsg{X: cx, Y: inner, Action: tea.MouseActionMotion})
+	if cmd == nil || m.hoverPendingVerb != 'c' {
+		t.Fatalf("wide footer hover was not debounced: pending=%q", string(m.hoverPendingVerb))
+	}
+	m, _ = step(t, m, hoverDebounceMsg{gen: m.hoverGen})
+	if m.ui.HoverFooterVerb != 'c' {
+		t.Fatalf("wide hover over claim = %q, want 'c'", string(m.ui.HoverFooterVerb))
+	}
+	// Motion off the verbs clears it.
+	m, _ = step(t, m, tea.MouseMsg{X: gl, Y: inner, Action: tea.MouseActionMotion})
+	m, _ = step(t, m, hoverDebounceMsg{gen: m.hoverGen})
+	if m.ui.HoverFooterVerb != 0 {
+		t.Fatalf("wide hover not cleared off the verbs: %q", string(m.ui.HoverFooterVerb))
 	}
 }

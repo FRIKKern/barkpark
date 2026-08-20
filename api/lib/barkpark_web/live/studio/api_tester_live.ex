@@ -465,7 +465,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           </div>
         </.pane_column>
 
-        <.pane_column title={docs_column_title(@endpoint)} flex="1.1">
+        <.pane_column title={docs_column_title(@endpoint)} marker_class="api-col-docs">
           <:header_actions>
             <%= if @endpoint && @endpoint.kind == :endpoint do %>
               <span class={"badge #{auth_badge_class(@endpoint.auth)}"}><%= @endpoint.auth %></span>
@@ -484,7 +484,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           </div>
         </.pane_column>
 
-        <.pane_column title="Response" flex="1" last>
+        <.pane_column title="Response" marker_class="api-col-response" last>
           <:header_actions>
             <%= if @scenario_results != [] do %>
               <div class="api-response-meta">
@@ -542,13 +542,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       #api-tester-panes { height: calc(100vh - 48px); }
       /* Nav column inherits .pane-column's 260px default. Docs and response
          columns override width + min-width so they actually flex instead of
-         staying pinned. */
-      .api-col-docs {
-        width: auto; min-width: 0; flex: 1.1 1 0;
-      }
-      .api-col-response {
-        width: auto; min-width: 0; flex: 1 1 0; border-right: none;
-      }
+         staying pinned. These two rules are the whole reason pane_column no
+         longer carries a :flex attr: the declarations below are byte-for-byte
+         what that attr used to inline, but as classes they stay beatable by
+         the width-bucket rules in root.html.heex (an inline style was not). */
+      .api-col-docs { flex: 1.1; width: auto; min-width: 0; }
+      .api-col-response { flex: 1; width: auto; min-width: 0; }
       .api-col-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
 
       /* HTTP method pill — echoes shadcn badge shape */

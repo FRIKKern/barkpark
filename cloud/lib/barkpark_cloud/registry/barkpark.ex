@@ -22,8 +22,13 @@ defmodule BarkparkCloud.Registry.Barkpark do
       "we are no longer serving you", not "you are down" (Coolify-anchor:
       `Team::subscriptionEnded()`). Set in bulk by
       `Registry.suspend_team_barkparks/2` on lapse, cleared by
-      `resume_team_barkparks/1` on recovery. `suspended_reason` is
-      `"billing_lapsed"` | `"billing_past_due"`.
+      `Registry.resume_billing_suspended/1` on recovery (cch-w55-s4: it was the
+      reason-blind `resume_team_barkparks/1`, which lifted flags the billing
+      axis never set). `suspended_reason` on that axis is `"billing_lapsed"` |
+      `"billing_past_due"` — but it is NOT only those two: the quota reconciler
+      writes `"quota_exceeded"` through the single-row
+      `Registry.suspend_barkpark/2` (`Billing.reconcile_plan_limit/1`), so any
+      reader treating this column as a two-value billing enum is wrong.
 
   A server can be reachable while its agent is offline, or vice-versa; collapsing
   them would lose that signal. `last_seen_at` is the agent's last health report.
@@ -75,10 +80,28 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # fallback for pre-feature instances (404) and failed/unreachable checks.
   @update_states ~w(unknown current behind disabled)
 
+  # cch-w58 — the reasons `update_state` reads "unknown". `update_states/0` says
+  # WHAT the row shows; this says WHY, so the five worlds behind that one rung
+  # stop being one word. `identity_refused` (401) is the only REFUTATION of the
+  # stored admin token; `no_self_update_route` (404) is a PRE-FEATURE box and is
+  # deliberately its own rung — folding a 404 into "refused" is the exact
+  # conflation that made `verify_reachable` useless (charter D684). NULL (absent
+  # from this list) is the un-enumerated state: no refusal on file.
+  #
+  # EVERY rung here has a writer in `Registry.refresh_update_status/1` — a word
+  # in this vocabulary that nothing can persist would be a small lie of its own.
+  @update_unavailable_reasons ~w(identity_refused forbidden no_self_update_route unreachable bad_shape instance_error no_admin_token decrypt_failed not_live)
+
   # The rollout channels (isu-w5.2): "staging" boxes are the canary the rollout
   # worker advances first; "prod" is the fleet default and only advances once the
   # staging gate is green.
   @channels ~w(prod staging)
+
+  # Personal Dev Fleet roles (Wave C, PDF-D61). A "main" is the developer's home
+  # base; a "support" is a subordinate box bound to exactly one main. NULL (absent
+  # from this list) is the third, un-enumerated state: "ungrouped" — every legacy
+  # row, never validated against this set.
+  @fleet_roles ~w(main support)
 
   # The worker-reported host lands here via succeed_job/2 — an IPv4/IPv6 address
   # or a DNS hostname. Permissive enough for all three (and the FakeProvider's
@@ -86,12 +109,25 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # alphanumerics, dot, colon, underscore, hyphen.
   @host_format ~r/^[A-Za-z0-9.:_-]+$/
 
-  # Instance custom domains, v1 DELIBERATELY narrow: exactly ONE RFC-1035 label
-  # under the platform zone (`gyldendal.barkpark.cloud`) — we own that DNS zone,
-  # so the attach worker can stand the record up unassisted. Arbitrary customer
-  # domains (their own zone, CNAME/A verification) are a later wave. The regex is
+  # Instance custom domains — the PLATFORM shape: exactly ONE RFC-1035 label
+  # under the platform zone (`gyldendal.barkpark.cloud`) — we own that DNS
+  # zone, so the attach worker can stand the record up unassisted. The regex is
   # the whole gate: anything it rejects never reaches a Caddyfile or a shell.
   @custom_host_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.barkpark\.cloud$/
+
+  # Attach-domain V2 — the EXTERNAL customer-domain shape: an arbitrary
+  # customer-owned FQDN (`barkpark.jarl.no`), TWO OR MORE well-formed lowercase
+  # RFC labels. Same defensive posture as the platform regex: the value is
+  # interpolated into a Caddyfile and a shell script on the box, so ONLY dots,
+  # hyphens, and alphanumerics are admitted — every shell/Caddy metacharacter
+  # dies here. The 253-char FQDN cap and the numeric-TLD (bare-IP) reject ride
+  # alongside in `custom_host_changeset/2`. A host UNDER the platform zone never
+  # takes this path — it must match the strict single-label platform shape.
+  @external_host_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/
+
+  # An all-digit final label is the bare-IP shape (`203.0.113.9`) — no real TLD
+  # is numeric, and an IP must never become an on-demand-ACME Caddy vhost.
+  @numeric_tld_format ~r/\.[0-9]+$/
 
   schema "barkparks" do
     field :name, :string
@@ -139,6 +175,14 @@ defmodule BarkparkCloud.Registry.Barkpark do
     # the owner retrieves it only through the team-admin-gated /credentials route.
     field :admin_token_encrypted, :string
 
+    # push-relay spike (mobile charter D15b) — the per-barkpark shared secret the
+    # instance signs chat_blocked webhook deliveries with and Cloud's
+    # /v1/relay/chat-blocked/:barkpark_id receiver verifies against. SAME custody
+    # as admin_token_encrypted (Registry.Vault AES-256-GCM, never plaintext,
+    # never serialized in barkpark_json). Nil = no relay configured — the
+    # receiver answers a silent 404 (severable by absence).
+    field :push_relay_secret_encrypted, :string
+
     # dwb-4 content-template bootstrap. `template` is the deploy-template slug
     # picked at launch (validated in the go-live handler against
     # `Registry.known_templates/0`); the bootstrap_* columns are the outputs the
@@ -163,6 +207,39 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :update_running_release, :string
     field :update_latest_release, :string
     field :update_checked_at, :utc_datetime_usec
+
+    # cch-w58 — WHY the mirror above says "unknown". `update_state: "unknown"` is
+    # the one rung that collapses five different worlds: the box refused OUR
+    # credential (401), refused the principal (403), has no such route at all
+    # (404 — a pre-feature box), was unreachable, or answered something we could
+    # not read. Only the first is a refutation of the stored admin token, and
+    # before this column the discriminating byte was read once an hour and
+    # thrown away. NULL means "no refusal on file" — every row before this
+    # column's first write, and every row whose last check was a clean 200
+    # (`persist_update_check/2` CLEARS it, so a stale refusal cannot survive a
+    # recovery). Whitelisted against `update_unavailable_reasons/0`.
+    #
+    # READ-ONLY VERDICT: nothing refuses on this column yet. It is the evidence
+    # a later slice needs, not the guard.
+    field :update_unavailable_reason, :string
+
+    # deploy-reliability W21 (S2) — the DERIVED freshness verdict, deliberately
+    # NOT a fifth `update_state` rung (a fifth rung excludes the row from the
+    # rollout that would fix it and can freeze the staging gate fail-CLOSED).
+    # `update_state` above is the box's own release-tag self-grade; these three
+    # are the control plane's own measurement of the commit it actually serves,
+    # from ONE unauthenticated GitHub compare call
+    # (`BarkparkCloud.GitHub.CommitDistance`), written hourly by
+    # `UpdateStatusWorker` through the narrow `commit_distance_changeset/2`.
+    #
+    # `commit_distance` is "commits of `main` this box does NOT have", and NULL
+    # means UNMEASURED — an empty `git_commit` (agent offline), a 404 on an
+    # unknown sha, and a rate-limit refusal all land NULL, never 0. Renderers
+    # must show NULL as unmetered and sort it to the TOP: a 0 there would be the
+    # same unearned green in a fresh column.
+    field :commit_distance, :integer
+    field :commit_ancestry, :string
+    field :commit_distance_checked_at, :utc_datetime_usec
 
     # isu-w4 fleet autoupdate policy — read by the AutoupdateRolloutWorker to
     # decide whether a `behind` instance may be auto-updated. OPT-OUT:
@@ -194,12 +271,36 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :vercel_claim_encrypted, :string
     field :vercel_claim_minted_at, :utc_datetime_usec
 
-    # Instance custom domain (isu follow-up) — the bare platform-zone host
-    # (`gyldendal.barkpark.cloud`) attached to this managed instance. Written
+    # Instance custom domain (isu follow-up; arbitrary FQDNs since attach-domain
+    # V2) — the platform-zone host (`gyldendal.barkpark.cloud`) OR external
+    # customer FQDN (`barkpark.jarl.no`) attached to this managed instance. Written
     # ONLY through the narrow `custom_host_changeset/2` (via
     # `Registry.set_custom_host/2`, which also runs the cross-surface taken
     # check); globally unique via `barkparks_custom_host_unique_idx`.
     field :custom_host, :string
+
+    # On-demand VERIFY verdict (BP-ONB-09 backend) — the cached headline of the
+    # last golden-path probe run (`run_verify/3` → `Registry.record_verify_result/2`),
+    # so the fleet list carries a queryable "last verified" fact without walking
+    # the `verify` agent_event stream. Both NULL until the suite first runs;
+    # `verify_reachable` is the run's envelope `reachable` (a real `false` is
+    # distinct from the NULL "never verified"). Written ONLY through the narrow
+    # `verify_changeset/2` (best-effort, via `Registry.record_verify_result/2`).
+    field :last_verified_at, :utc_datetime_usec
+    field :verify_reachable, :boolean
+
+    # Personal Dev Fleet GROUP record (Wave C, PDF-D61). The two-tier main -> N
+    # supports relationship lives on THIS machine row (no new table, no join):
+    #   * `fleet_role` is "main" | "support" | nil (ungrouped — every legacy row).
+    #   * `fleet_parent_id` is the SELF-referential FK to the main's id, set ONLY
+    #     on support rows (`on_delete: :nilify_all` — a deleted main orphans, never
+    #     cascade-deletes, its supports). Modelled as a self `belongs_to`.
+    #   * `fleet_token_id` is the OPAQUE minted-token id (for later revocation),
+    #     never the secret — distinct custody from `admin_token_encrypted`, so it
+    #     IS serialized in barkpark_json. Written only through `fleet_changeset/2`.
+    field :fleet_token_id, :string
+    belongs_to :fleet_parent, __MODULE__, foreign_key: :fleet_parent_id, type: :binary_id
+    field :fleet_role, :string
 
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -212,8 +313,10 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def health_statuses, do: @health_statuses
   def agent_statuses, do: @agent_statuses
   def update_states, do: @update_states
+  def update_unavailable_reasons, do: @update_unavailable_reasons
   def channels, do: @channels
   def providers, do: @providers
+  def fleet_roles, do: @fleet_roles
 
   @doc "The public zone managed Barkparks live under (`barkpark.cloud`)."
   @spec base_domain() :: String.t()
@@ -331,10 +434,21 @@ defmodule BarkparkCloud.Registry.Barkpark do
   (`gyldendal.barkpark.cloud`) and a suffixed one
   (`gyldendal-71069eaa.barkpark.cloud`) each yield the correct label. Falls back
   to `provisioning_subdomain/1` when `url` is missing (pre-reservation rows).
+
+  Self-normalises `trim |> downcase` before stripping (aligned with the write-side
+  `normalize_url` fold, cch-w69-bl / D865): this output mints the worker's
+  `dns_label`, the claim slug it turns into the DNS record + Hetzner box name, and
+  the deprovision label — so it must NOT depend on upstream cleanliness. Without
+  the fold a leading space defeats the case-sensitive `replace_prefix`, and an
+  uppercase scheme or mixed-case host passes through untouched, minting a wrong
+  DNS label for old rows, the pre-`normalize_url` write window, and any
+  changeset-bypassing write.
   """
   @spec subdomain_from_url(t()) :: String.t()
   def subdomain_from_url(%__MODULE__{url: url}) when is_binary(url) do
     url
+    |> String.trim()
+    |> String.downcase()
     |> String.replace_prefix("https://", "")
     |> String.replace_prefix("http://", "")
     |> String.replace_suffix("." <> @base_domain, "")
@@ -343,16 +457,34 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def subdomain_from_url(%__MODULE__{} = bp), do: provisioning_subdomain(bp)
 
   @doc """
-  The DNS label of the attached custom host — `"gyldendal"` for
-  `gyldendal.barkpark.cloud`. A v1 custom host is exactly one label under
+  The platform DNS label of the attached custom host — `"gyldendal"` for
+  `gyldendal.barkpark.cloud`. A platform custom host is exactly one label under
   `#{@base_domain}` (enforced by `custom_host_changeset/2`), so stripping the
-  zone suffix is the whole derivation. `nil` when no custom host is attached.
+  zone suffix is the whole derivation. `nil` when no custom host is attached
+  OR when the attached host is an EXTERNAL customer FQDN (attach-domain V2) —
+  the customer owns that DNS, so there is no platform label to upsert.
   """
   @spec custom_host_label(t()) :: String.t() | nil
-  def custom_host_label(%__MODULE__{custom_host: host}) when is_binary(host),
-    do: String.replace_suffix(host, "." <> @base_domain, "")
+  def custom_host_label(%__MODULE__{custom_host: host}) when is_binary(host) do
+    if platform_custom_host?(host),
+      do: String.replace_suffix(host, "." <> @base_domain, ""),
+      else: nil
+  end
 
   def custom_host_label(%__MODULE__{}), do: nil
+
+  @doc """
+  Is `host` a platform-zone custom host (any host under `#{@base_domain}`), as
+  opposed to an external customer FQDN (attach-domain V2)? Splits the claim
+  payload: platform hosts carry `dns_label`/`dns_zone` for the worker's
+  A-record upsert; external hosts carry nil halves and the worker verifies
+  resolution instead of writing platform DNS.
+  """
+  @spec platform_custom_host?(String.t() | nil) :: boolean()
+  def platform_custom_host?(host) when is_binary(host),
+    do: String.ends_with?(host, "." <> @base_domain)
+
+  def platform_custom_host?(_), do: false
 
   @doc """
   A subdomain-safe, stable short id for a team UUID: the first
@@ -392,6 +524,20 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :server_type,
       :team_id
     ])
+    # Normalise-on-write at the single chokepoint every writer shares
+    # (register/upsert/adopt all flow through `Registry.register_barkpark/2` →
+    # here). The worker route `POST /v1/internal/barkparks` stores the body `url`
+    # VERBATIM (Auth.require_worker, no validate_format), and
+    # `barkparks_url_unique_idx` is on the RAW column — so ` https://h` and
+    # `https://h` were two distinct rows for one hostname, and every other reader
+    # (`subdomain_from_url/1`, DomainStatus.platform_host/1) had to re-derive the
+    # trim or diverge (cch-w69 D852). Folding the hostile spelling out here
+    # NARROWS what the index admits — it does not make the index canonical. The
+    # fold closes whitespace, case, and the trailing slash; it leaves trailing
+    # dot, scheme variance, port and path alone, so `barkparks_url_unique_idx`
+    # still admits six distinct rows for one claim host (enumerated in
+    # `normalize_url/1`). NEW-WRITES-ONLY — see `normalize_url/1`.
+    |> update_change(:url, &normalize_url/1)
     |> validate_required([:name, :slug, :team_id])
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:template, max: 255)
@@ -442,6 +588,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
   under the same containment: they land ONLY in the provision-success write
   (`Registry.succeed_job/3`, secrets already Vault-encrypted at the call site),
   and the agent report path never builds them into its attrs.
+
+  `fleet_token_id` (task-5866ec745efcd7f7) is castable here under the same
+  containment: it lands ONLY in the provision-success write for a
+  `provision_support` job (`Registry.succeed_job/3` guards it to
+  `fleet_role: "support"` rows), the agent report path never builds it, and it
+  is an OPAQUE revocation handle — never the token value itself.
   """
   def health_changeset(barkpark, attrs) do
     barkpark
@@ -457,21 +609,29 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :bootstrap_project,
       :bootstrap_dataset,
       :bootstrap_read_token_encrypted,
-      :bootstrap_env_encrypted
+      :bootstrap_env_encrypted,
+      :fleet_token_id
     ])
     |> validate_length(:host, max: 255)
     |> validate_format(:host, @host_format)
     |> validate_inclusion(:health_status, @health_statuses)
     |> validate_inclusion(:agent_status, @agent_statuses)
+    |> validate_length(:fleet_token_id, max: 255)
   end
 
   @doc """
   Narrow changeset for a billing-suspension write — only the three suspension
   columns are castable, so a billing-triggered suspend/resume can never rename a
   Barkpark or reassign its Team (the same containment posture as
-  `health_changeset/2`). Used by `Registry.suspend_team_barkparks/2` /
-  `resume_team_barkparks/1` for the single-row path; the bulk path uses
-  `Repo.update_all`.
+  `health_changeset/2`). Used by the SINGLE-ROW helpers —
+  `Registry.suspend_barkpark/2` and `Registry.unsuspend_barkpark/1`, the quota
+  reconciler's axis. The three BULK helpers
+  (`suspend_team_barkparks/2`, `resume_team_barkparks/1`,
+  `resume_billing_suspended/1`) never reach this changeset: they issue a
+  `Repo.update_all` and so bypass every validation here. (cch-w55-s4 review:
+  this doc named the two bulk functions as the single-row path, which is
+  backwards — a reader trusting it would expect `validate_length/3` to run on a
+  billing suspend, and it does not.)
   """
   def suspend_changeset(barkpark, attrs) do
     barkpark
@@ -480,12 +640,18 @@ defmodule BarkparkCloud.Registry.Barkpark do
   end
 
   @doc """
-  Narrow changeset for a self-update status refresh (isu-6) — only the four
+  Narrow changeset for a self-update status refresh (isu-6) — only the five
   update-status cache columns are castable, so mirroring the instance's verdict
   can never rename a Barkpark or reassign its Team (the same containment posture
   as `health_changeset/2` / `suspend_changeset/2`). `update_state` is whitelisted
   against `update_states/0`; the caller (`Registry.refresh_update_status/1`)
   maps anything else to `"unknown"` before it gets here.
+
+  The fifth column, `update_unavailable_reason` (cch-w58), is whitelisted against
+  `update_unavailable_reasons/0` and is the WHY behind an "unknown" state. `nil`
+  is a legal value and means "no refusal on file" — `validate_inclusion` skips a
+  nil change, which is exactly how `persist_update_check/2` CLEARS a stale
+  refusal on a recovered box. This changeset stays narrow: five columns, no more.
   """
   def update_status_changeset(barkpark, attrs) do
     barkpark
@@ -493,11 +659,90 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :update_state,
       :update_running_release,
       :update_latest_release,
-      :update_checked_at
+      :update_checked_at,
+      :update_unavailable_reason
     ])
     |> validate_inclusion(:update_state, @update_states)
+    |> validate_inclusion(:update_unavailable_reason, @update_unavailable_reasons)
     |> validate_length(:update_running_release, max: 255)
     |> validate_length(:update_latest_release, max: 255)
+  end
+
+  @doc """
+  Narrow changeset for the DERIVED commit-distance verdict (deploy-reliability
+  W21) — only the three freshness columns are castable, so mirroring a compare
+  result can never rename a Barkpark, reassign its Team, or (the point) touch
+  `update_state`. Written only by `Registry.refresh_commit_distance/2`.
+
+  Deliberately SEPARATE from `update_status_changeset/2` and
+  `health_changeset/2`: neither of those casts these fields, so an agent health
+  beat and the instance's own self-update mirror CANNOT write a freshness
+  verdict by accident. The ancestry is whitelisted against
+  `BarkparkCloud.GitHub.CommitDistance.ancestries/0` and the distance may never
+  be negative — an out-of-range value is a changeset ERROR, not a silent 0.
+  """
+  def commit_distance_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [:commit_distance, :commit_ancestry, :commit_distance_checked_at])
+    |> validate_inclusion(:commit_ancestry, BarkparkCloud.GitHub.CommitDistance.ancestries())
+    |> validate_number(:commit_distance, greater_than_or_equal_to: 0)
+  end
+
+  @doc """
+  Narrow changeset for the on-demand VERIFY verdict (BP-ONB-09) — only the two
+  verify cache columns are castable, so persisting a probe run can never rename a
+  Barkpark or reassign its Team (the same containment posture as
+  `update_status_changeset/2` / `health_changeset/2`). Written only by
+  `Registry.record_verify_result/2`, best-effort in `run_verify/3`.
+  """
+  def verify_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [:last_verified_at, :verify_reachable])
+  end
+
+  @doc """
+  Narrow changeset for the Personal Dev Fleet GROUP record (Wave C, PDF-D61) —
+  only the three fleet columns are castable, so binding a machine into (or out
+  of) a fleet can never rename a Barkpark or reassign its Team (the same
+  containment posture as `verify_changeset/2`). The relationship invariants:
+
+    * `fleet_role` must be `main` or `support` when set. NULL is the un-enumerated
+      "ungrouped" state and passes through untouched (legacy rows).
+    * `fleet_parent_id` is REQUIRED when `fleet_role == "support"` (a support with
+      no main is meaningless) and FORBIDDEN when `fleet_role == "main"` (a main IS
+      the root — it has no parent). An ungrouped row constrains neither.
+    * `assoc_constraint(:fleet_parent)` maps the self-FK so a parent id that names
+      no row fails as a validation error, never a 500.
+
+  Written only by `Registry.register_support_barkpark/2` (via the team-scoped
+  `/v1/fleet/supports` endpoint).
+  """
+  def fleet_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [:fleet_role, :fleet_parent_id, :fleet_token_id])
+    |> validate_inclusion(:fleet_role, @fleet_roles)
+    |> validate_length(:fleet_token_id, max: 255)
+    |> validate_fleet_parent()
+    |> assoc_constraint(:fleet_parent)
+  end
+
+  # role=support ⇒ parent required; role=main ⇒ parent forbidden; nil role
+  # (ungrouped) ⇒ no constraint. `get_field` reads the post-cast value so the
+  # rule sees both the incoming change and any already-persisted value.
+  defp validate_fleet_parent(changeset) do
+    role = get_field(changeset, :fleet_role)
+    parent = get_field(changeset, :fleet_parent_id)
+
+    cond do
+      role == "support" and is_nil(parent) ->
+        add_error(changeset, :fleet_parent_id, "is required for a support")
+
+      role == "main" and not is_nil(parent) ->
+        add_error(changeset, :fleet_parent_id, "is forbidden for a main")
+
+      true ->
+        changeset
+    end
   end
 
   @doc """
@@ -570,11 +815,19 @@ defmodule BarkparkCloud.Registry.Barkpark do
   (the same containment posture as `vercel_changeset/2`). The value is
   normalized (lowercased, trimmed, trailing dot stripped — the SAME
   normalization `Registry.domain_registered?/1` applies, so the stored host and
-  the ask-gate lookup can never diverge) and validated against the v1
-  one-label-under-`#{@base_domain}` format. Written only by
-  `Registry.set_custom_host/2`, which layers the cross-surface taken check on
-  top; the `barkparks_custom_host_unique_idx` unique constraint is the atomic
-  race backstop.
+  the ask-gate lookup can never diverge) and shape-validated, split by zone
+  (attach-domain V2):
+
+    * under `#{@base_domain}` → the strict one-label platform format (we own
+      the zone; deeper nesting is never claimable)
+    * the `#{@base_domain}` apex itself → always rejected
+    * anywhere else → a well-formed lowercase external FQDN (≥ 2 labels,
+      ≤ 253 chars, dots/hyphens/alphanumerics only, non-numeric TLD)
+
+  Written only by `Registry.set_custom_host/2`, which layers the cross-surface
+  taken check (and, router-side, the DNS ownership proof) on top; the
+  `barkparks_custom_host_unique_idx` unique constraint is the atomic race
+  backstop.
   """
   def custom_host_changeset(barkpark, attrs) do
     barkpark
@@ -582,19 +835,123 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> update_change(:custom_host, &normalize_custom_host/1)
     |> validate_required([:custom_host])
     |> validate_length(:custom_host, max: 253)
-    |> validate_format(:custom_host, @custom_host_format,
-      message: "must be a single label under #{@base_domain}"
-    )
+    |> validate_custom_host_shape()
     |> unique_constraint(:custom_host,
       name: :barkparks_custom_host_unique_idx,
       message: "is already taken"
     )
   end
 
+  # The zone-split shape gate (see `custom_host_changeset/2`). Runs on the
+  # NORMALIZED value; anything it rejects never reaches a Caddyfile or a shell.
+  defp validate_custom_host_shape(changeset) do
+    validate_change(changeset, :custom_host, fn :custom_host, host ->
+      cond do
+        host == @base_domain ->
+          [custom_host: {"the platform apex itself cannot be attached", []}]
+
+        String.ends_with?(host, "." <> @base_domain) ->
+          if Regex.match?(@custom_host_format, host),
+            do: [],
+            else: [custom_host: {"must be a single label under #{@base_domain}", []}]
+
+        Regex.match?(@external_host_format, host) and
+            not Regex.match?(@numeric_tld_format, host) ->
+          []
+
+        true ->
+          [custom_host: {"must be a well-formed lowercase fully-qualified domain", []}]
+      end
+    end)
+  end
+
   defp normalize_custom_host(host) when is_binary(host),
     do: host |> String.downcase() |> String.trim() |> String.trim_trailing(".")
 
   defp normalize_custom_host(other), do: other
+
+  # Fold a hostile `:url` spelling to its canonical origin form (cch-w69 D852):
+  # strip leading/trailing whitespace (Elixir `String.trim/1` covers space, tab,
+  # NBSP, and CR/LF), downcase (scheme + host are case-insensitive; a managed
+  # `clean_url/1` value is already all-lowercase so it passes through
+  # byte-identical), and drop the trailing slash so `https://h/` and `https://h`
+  # collapse to one row under `barkparks_url_unique_idx`.
+  #
+  # THE SCHEME SEPARATOR IS NOT A TRAILING SLASH. This fold is a THIRD
+  # normaliser standing beside the claim-walk twins that #11785 built a census
+  # for, so it owes them the composition property
+  # `normalize_claim_host(normalize_url(x)) == normalize_claim_host(x)` — a fold
+  # that changes a claim-walk answer re-opens the `:free`-for-a-live-host hole by
+  # spelling. Stripping trailing slashes from the WHOLE string breaks it:
+  # `"https://"` would fold to `"https:"`, and the read side's scheme regex is
+  # ANCHORED on `://`, so it would stop recognising the scheme, fall through to
+  # its "cut at the first non-hostname character" step, and answer with the
+  # SCHEME LABEL as the hostname (`""` before the fold, `"https"` after). So the
+  # separator is preserved and only the part after it is trimmed.
+  # `barkpark_url_normalisation_test.exs` drives the composition property over
+  # the corpus rather than trusting this paragraph.
+  #
+  # WHAT THIS DOES NOT CLOSE. Whitespace, case and the trailing slash, and
+  # nothing else — trailing dot, scheme variance, port and path all survive the
+  # fold, so `barkparks_url_unique_idx` still admits SIX distinct rows that the
+  # read side maps onto the one claim host `gyldendal.barkpark.cloud`:
+  #
+  #     https://gyldendal.barkpark.cloud       https://gyldendal.barkpark.cloud.
+  #     http://gyldendal.barkpark.cloud        https://gyldendal.barkpark.cloud/studio
+  #     https://gyldendal.barkpark.cloud:4000  gyldendal.barkpark.cloud
+  #
+  # The claim walk is safe across all six (it normalises them together); the
+  # index is NARROWED, not made canonical, and the defense-in-depth backstop
+  # stays bypassable by those spellings.
+  #
+  # HONESTY CLAUSE (durable, carried by the merge): this is NEW-WRITES-ONLY. It
+  # does NOT backfill existing rows and does NOT strengthen the raw-column unique
+  # index into an expression index — a pre-existing ` https://h` row and a fresh
+  # `https://h` write can still coexist until the backfill lands. The backfill is
+  # owned by `cch-w70-bl-worker-url-backfill-gated-on-prod-dup-scan`, gated on
+  # this prod dup-scan first (rows that would COLLIDE on normalisation must be
+  # reconciled by hand before a unique backfill, or the UPDATE fails). The
+  # expression mirrors the fold below, separator-preservation included:
+  #
+  #     SELECT lower(regexp_replace(btrim(url), '(://)?/*$', '\1')) AS normalised,
+  #            count(*), array_agg(url)
+  #       FROM barkparks
+  #      WHERE url IS NOT NULL
+  #      GROUP BY 1
+  #     HAVING count(*) > 1;
+  #
+  # A collision the scan misses is not a 500: `unique_constraint(:url, name:
+  # :barkparks_url_unique_idx)` is already declared on this changeset, so a write
+  # whose normalised url lands on an existing row degrades to
+  # `{:error, changeset}` and the worker route renders a clean 422 — never a
+  # raised `Postgrex.Error`. That is the reason the fold is safe to ship ahead of
+  # the backfill, not any claim that a collision cannot happen.
+  defp normalize_url(url) when is_binary(url) do
+    case fold_url(url) do
+      # A slash-only url (`"/"`, `"//"`) folds to `""`, and `""` IS indexed:
+      # `barkparks_url_unique_idx` is partial on `WHERE url IS NOT NULL`, and
+      # `''` is not NULL. Letting the fold manufacture that value would hand the
+      # first junk write a GLOBAL claim on `''`, and the next team's write the
+      # 422 "is already provisioned" — a row `provisioning_fqdn_claim/2` has no
+      # empty-`norm` guard against either. Pre-fold those inputs stored as
+      # themselves and stayed distinct; they still do. (Whitespace-only input
+      # never reaches here — Ecto's `cast/3` treats it as an empty value and
+      # drops the change, so `:url` stays nil.)
+      "" when url != "" -> url
+      folded -> folded
+    end
+  end
+
+  defp normalize_url(other), do: other
+
+  defp fold_url(url) do
+    trimmed = url |> String.trim() |> String.downcase()
+
+    case String.split(trimmed, "://", parts: 2) do
+      [scheme, rest] -> scheme <> "://" <> String.trim_trailing(rest, "/")
+      [bare] -> String.trim_trailing(bare, "/")
+    end
+  end
 
   @doc """
   Changeset for the `StalenessWorker`'s offline flip and for the report path's

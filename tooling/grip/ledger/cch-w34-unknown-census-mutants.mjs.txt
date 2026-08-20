@@ -1,0 +1,92 @@
+// PROBE (verifier): mutate the tree, prove the census can LOSE.
+import fs from "node:fs";
+import { execFileSync } from "node:child_process";
+
+const SRC = "cloud/priv/static/app.js";
+const TMP = "/private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/47ba8708-cd1d-47ac-93d4-7cb707cf3e3c/scratchpad/app.mutant.js";
+const base = fs.readFileSync(SRC, "utf8");
+
+function run(text, label) {
+  fs.writeFileSync(TMP, text);
+  let out, code = 0;
+  try {
+    out = execFileSync("node", ["cloud/priv/static/__unknown_census.mjs", TMP], { encoding: "utf8" });
+  } catch (e) { out = e.stdout + (e.stderr || ""); code = e.status; }
+  console.log("### " + label + "  (exit " + code + ")");
+  console.log(out.split("\n").map((l) => "    " + l).join("\n").replace(new RegExp(TMP, "g"), "<mutant>"));
+  return { out, code };
+}
+
+// ---------------------------------------------------------------- BASELINE
+run(base, "M0 BASELINE (origin/main tree)");
+
+// ------------------------------------- M1: REGRESS the correct twin loadSites
+const M1_FROM = `      var r = res[0];
+      if (!r.ok) {
+        body.innerHTML = '<div class="empty-state"><h2>Couldn\\'t load sites</h2><p>' +
+          esc(friendly(r.data)) + "</p></div>";
+        return;
+      }
+      var sites = (r.data && r.data.sites) || [];`;
+const M1_TO = `      var r = res[0];
+      var sites = (r.ok && r.data && r.data.sites) || [];`;
+if (!base.includes(M1_FROM)) { console.error("M1 anchor MISSING — mutation invalid"); process.exit(3); }
+run(base.replace(M1_FROM, M1_TO), "M1 REGRESSION: loadSites loses its !r.ok arm");
+
+// ------------------------------------- M2: a BRAND-NEW collapsing renderer
+const M2 = base.replace(
+  "  // =========================================================== WIRE-UP",
+  `  // MUTANT: a new surface nobody remembered to put on a hand list.
+  function loadBackupSnapshots() {
+    var box = $("#backup-snapshots");
+    if (!box) return;
+    api("GET", "/v1/backups").then(function (r) {
+      var snaps = (r.ok && r.data && r.data.snapshots) || [];
+      if (!snaps.length) {
+        box.innerHTML = '<div class="empty-state"><h2>No backups yet</h2></div>';
+        return;
+      }
+      box.innerHTML = snaps.length + " snapshots";
+    });
+  }
+
+  // =========================================================== WIRE-UP`
+);
+if (M2 === base) { console.error("M2 anchor MISSING — mutation invalid"); process.exit(3); }
+run(M2, "M2 NEW RENDERER: loadBackupSnapshots collapses unknown");
+
+// ------------------------------------- M3: FIX the flagged loadInstanceSites
+const M3_FROM = `      var all = (r.ok && r.data && r.data.sites) || [];`;
+const M3_TO = `      if (!r.ok) { box.innerHTML = unknownStateHtml(r); return; }
+      var all = (r.data && r.data.sites) || [];`;
+if (!base.includes(M3_FROM)) { console.error("M3 anchor MISSING"); process.exit(3); }
+run(base.replace(M3_FROM, M3_TO), "M3 FIX: loadInstanceSites gains a real unknown arm");
+
+// ------------------------------------- M4: can the CONTROL clause lose?
+const M4_FROM = `  function presenceChip(row) {
+    if (!row || typeof row.status !== "string" || !row.status) {`;
+const M4_TO = `  function presenceChip(row) {
+    var xs = (row.ok && row.data && row.data.xs) || [];
+    if (!xs.length) { return { state: "offline", online: false, label: "Offline" }; }
+    if (!row || typeof row.status !== "string" || !row.status) {`;
+if (!base.includes(M4_FROM)) { console.error("M4 anchor MISSING"); process.exit(3); }
+run(base.replace(M4_FROM, M4_TO), "M4 CONTROL BREACH: presenceChip itself collapses");
+
+// ---- M5: the ADVERSARIAL case a COUNT-only gate cannot see -----------------
+// Fix one collapse AND introduce a new one in the same commit: the population
+// COUNT is unchanged, so a gate asserting "count <= 7" ships the new collapse.
+const m5 = base.replace(M3_FROM, M3_TO).replace(
+  "  // =========================================================== WIRE-UP",
+  `  function loadBackupSnapshots() {
+    var box = $("#backup-snapshots");
+    if (!box) return;
+    api("GET", "/v1/backups").then(function (r) {
+      var snaps = (r.ok && r.data && r.data.snapshots) || [];
+      if (!snaps.length) { box.innerHTML = '<div class="empty-state"><h2>No backups yet</h2></div>'; return; }
+      box.innerHTML = snaps.length + " snapshots";
+    });
+  }
+
+  // =========================================================== WIRE-UP`
+);
+run(m5, "M5 ADVERSARIAL: fix one + add one (count-only gate goes GREEN)");

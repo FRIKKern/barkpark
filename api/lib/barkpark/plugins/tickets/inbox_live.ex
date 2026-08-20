@@ -376,13 +376,16 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
     end)
   end
 
-  defp apply_key_action(_socket, :rotate, id),
-    do: safely("keys_rotate", fn -> Keys.rotate(id) end)
+  # Every by-id key action is scoped to the operator's workspace (same
+  # `workspace_id/1` mint uses) so Studio cannot reach a key in another tenant.
+  defp apply_key_action(socket, :rotate, id),
+    do: safely("keys_rotate", fn -> Keys.rotate(id, workspace_id(socket)) end)
 
-  defp apply_key_action(_socket, :pause, id), do: safely("keys_pause", fn -> Keys.pause(id) end)
+  defp apply_key_action(socket, :pause, id),
+    do: safely("keys_pause", fn -> Keys.pause(id, workspace_id(socket)) end)
 
-  defp apply_key_action(_socket, :unpause, id),
-    do: safely("keys_unpause", fn -> Keys.unpause(id) end)
+  defp apply_key_action(socket, :unpause, id),
+    do: safely("keys_unpause", fn -> Keys.unpause(id, workspace_id(socket)) end)
 
   # Run a direct sibling call, degrading a runtime raise (DB blip, etc.) to the
   # honest `{:error, :unavailable}` state instead of crashing the LiveView. The

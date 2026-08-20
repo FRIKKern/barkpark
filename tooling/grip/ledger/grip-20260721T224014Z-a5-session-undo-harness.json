@@ -1,0 +1,34 @@
+{
+  "grip_id": "a5-session-undo-harness-2026-07-22",
+  "verifier": "spill-janitor (A5-session-undo-harness)",
+  "wave": "felix-pristine-wave-14-2026-07-22",
+  "assignment": "C4 harness + finding confirm: does proving map_size(state.undo) grows unboundedly with N distinct client-supplied 'user' strings require a DB, or is it a pure GenServer-free state-fn call? Confirm depth-is-capped-per-key-but-key-count-is-not.",
+  "verdict": "CONFIRMED, and CHEAPER than assumed. Both record_undo/3 and record_batch_undo/2 in Barkpark.Plugins.Sheets.Session.Ops are PUBLIC functions operating on a plain map (`%{undo: %{}, redo: %{}}` is sufficient shape -- push_stack/put_stack only do Map.fetch!(state, key)). Proved via `mix run --no-start` (zero OTP app boot, zero DB, zero GenServer, zero Session/DynamicSupervisor) that 500 distinct 'user' strings produce map_size(state.undo) == 500 (unbounded key growth) while a single user pushed 500 times caps at exactly 100 entries (@undo_depth). C4 is NOT co-gated with A3's DB answer -- it is offline-provable exactly like C1, via a plain ExUnit.Case unit test hitting Ops.record_undo/3 directly, no Barkpark.DataCase / Barkpark.Repo / live Postgres needed at all. (Separately confirmed DB IS live locally right now -- api/test/barkpark/sheets/session_undo_test.exs, the existing GenServer+DataCase harness, passes 36/36 in 0.9s -- so the GenServer-route mutation test is ALSO buildable if a builder prefers exercising apply_ops end-to-end; the offline pure-fn route is the cheaper/cleaner gate command.)",
+  "gate_command_for_builder": "cd /Volumes/SATECHI/github/barkpark/api && mix test test/barkpark/plugins/sheets/session/ops_undo_key_growth_test.exs  # NEW plain `use ExUnit.Case` file calling Barkpark.Plugins.Sheets.Session.Ops.record_undo/3 directly on a fabricated %{undo: %{}, redo: %{}} map -- no DataCase, no DB fixture, no live session required. (Existing DB-backed regression stays at: cd api && mix test test/barkpark/sheets/session_undo_test.exs)",
+  "recipes": [
+    {
+      "claim": "record_undo/3 and record_batch_undo/2 are public (def) functions in Session.Ops that only need a plain map with :undo/:redo keys -- push_stack/put_stack call Map.fetch!(state, key), no struct, no DB field required",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && sed -n '640,710p' api/lib/barkpark/plugins/sheets/session/ops.ex"
+    },
+    {
+      "claim": "@undo_depth is 100, defined once at the top of ops.ex, and is the ONLY bound applied by push_stack -- it bounds per-key list length via Enum.take, never the number of distinct keys in the outer map",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n '@undo_depth\\|defp push_stack' api/lib/barkpark/plugins/sheets/session/ops.ex"
+    },
+    {
+      "claim": "500 distinct client-supplied 'user' strings produce map_size(state.undo) == 500 (unbounded key growth), computed via a PURE function call with `mix run --no-start` -- zero app boot, zero DB, zero GenServer/Session/DynamicSupervisor in the call path",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && mix run --no-start -e 'alias Barkpark.Plugins.Sheets.Session.Ops; state = Enum.reduce(1..500, %{undo: %{}, redo: %{}}, fn i, s -> Ops.record_undo(s, %{\"op\" => \"set_cell\", \"user\" => \"user-#{i}\"}, %{\"op\" => \"clear_cell\", \"user\" => \"user-#{i}\"}) end); IO.puts(map_size(state.undo))'"
+    },
+    {
+      "claim": "the SAME pure call, repeated 500x for ONE user instead of 500 distinct users, caps the per-key stack at exactly 100 (proves depth-is-capped-per-key is real and NOT what is broken -- the outer key-count is the unbounded axis)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && mix run --no-start -e 'alias Barkpark.Plugins.Sheets.Session.Ops; state = Enum.reduce(1..500, %{undo: %{}, redo: %{}}, fn i, s -> Ops.record_undo(s, %{\"op\" => \"set_cell\", \"user\" => \"alice\"}, %{\"op\" => \"clear_cell\", \"n\" => i, \"user\" => \"alice\"}) end); IO.puts(length(Map.get(state.undo, \"alice\")))'"
+    },
+    {
+      "claim": "the existing GenServer+DB-backed regression suite for this exact code path is ALSO green right now (DB is live locally) -- 36/36 in 0.9s, so the DB route is a viable but strictly more expensive alternative to the offline pure-fn harness",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && mix test test/barkpark/sheets/session_undo_test.exs 2>&1 | tail -5"
+    },
+    {
+      "claim": "no test file for the unbounded-key-count growth scenario exists yet anywhere under api/test -- the existing session_undo_test.exs suite only locks the per-key depth-100 bound (single/two-user cases), never asserts on map_size(state.undo) across many distinct users",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && grep -rn 'map_size' test/barkpark/sheets/session_undo_test.exs test/barkpark/sheets/session_test.exs"
+    }
+  ]
+}

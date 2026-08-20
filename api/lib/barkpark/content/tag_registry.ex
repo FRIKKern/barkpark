@@ -49,8 +49,9 @@ defmodule Barkpark.Content.TagRegistry do
   require Logger
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, Scope}
+  alias Barkpark.Content.{Document, Scope, SchemaDefinition}
   alias Barkpark.Repo
+  alias Barkpark.Tenancy
 
   @tag_type "tag"
 
@@ -96,9 +97,53 @@ defmodule Barkpark.Content.TagRegistry do
   The fail-loud upsert seam behind `register!/1`, parameterized on `attrs` so
   the raise-on-error contract is directly testable (`register!/1` itself only
   ever feeds it the canonical `schema_attrs/0`).
+
+  ## The pull-provenance guard, on the UPDATE only (PDS-D125/D126)
+
+  This is the SECOND boot-time writer into `schema_definitions` — it runs
+  outside `Plugins.Bootstrap`'s registry walk and outside `SchemaBootstrap`'s
+  rescue — so it can clobber a pulled row exactly as bootstrap could. It
+  clobbers a SMALLER set: `schema_attrs/0` declares five keys and
+  `Ecto.Changeset.cast/3` ignores keys absent from params, so a stamped `tag`
+  row lost `title`, `icon`, `visibility`, `fields` while `owner_scoped`,
+  `cors_origins`, `desk_groups`, `list_preview` survived. Measured, not
+  reasoned.
+
+  So: when the row this write would MATCH is pull-provenance-stamped data
+  (`Tenancy.pulled_schema_row/2` — the ONE predicate, shared with bootstrap),
+  the UPDATE is skipped, the drift is logged, and the pulled row is returned
+  unchanged.
+
+  INSERT-WHEN-ABSENT STAYS UNCONDITIONAL, and that asymmetry is the point. D12
+  puts this call outside the boot rescue precisely so a missing core `tag`
+  schema fails the boot CLOSED rather than booting a system whose publish wall
+  can resolve no tag at all. A guard that also skipped the insert would trade a
+  clobber bug for a boot-closed-guarantee bug — the predicate returns `nil` when
+  there is no row, so the insert simply proceeds.
   """
   @spec register_attrs!(map(), String.t()) :: Barkpark.Content.SchemaDefinition.t()
   def register_attrs!(attrs, dataset) when is_map(attrs) and is_binary(dataset) do
+    case Tenancy.pulled_schema_row(attrs["name"], dataset) do
+      %SchemaDefinition{} = pulled -> skip_pulled(pulled, dataset)
+      nil -> do_register!(attrs, dataset)
+    end
+  end
+
+  # The sticky skip needs a way out, and the operator gets the literal call —
+  # same escape hatch, same wording contract as `Plugins.Bootstrap.skip_pulled/3`.
+  defp skip_pulled(%SchemaDefinition{} = pulled, dataset) do
+    Logger.warning(
+      "TagRegistry: core `tag` schema (dataset=#{inspect(dataset)}) sits in a PULLED " <>
+        "workspace/dataset (pull_provenance stamped) — skipping the content update. The " <>
+        "local `tag` declaration and the pulled row have DRIFTED. Re-pull to refresh the " <>
+        "row, or accept the local version by clearing the stamp from a console: " <>
+        "Barkpark.Tenancy.set_pull_provenance(<workspace_id_or_struct>, #{inspect(dataset)}, %{})"
+    )
+
+    pulled
+  end
+
+  defp do_register!(attrs, dataset) do
     case Content.upsert_schema(attrs, dataset) do
       {:ok, schema} ->
         schema
@@ -229,17 +274,51 @@ defmodule Barkpark.Content.TagRegistry do
     |> MapSet.new()
   end
 
+  # Trgm-nearest registered tags to an unknown `name`, via the `%` operator so
+  # the coarse net rides the PARTIAL GIN index `documents_doc_id_trgm_idx`
+  # (migration 20260713130000; authoring-excellence D49/D50 — the D46 `%` +
+  # `SET LOCAL` idiom, keyed on doc_id). `registered_tags_query/2` always carries
+  # `type='tag' AND status='published'`, exactly the index's partial predicate —
+  # keep both literals there or the planner silently drops the index.
+  #
+  # CLIFF: `@suggestion_floor` (0.1) is BELOW pg_trgm's 0.3 default. The `%`
+  # operator reads its threshold from the `pg_trgm.similarity_threshold` GUC, so
+  # WITHOUT the `SET LOCAL` below, `%` would silently tighten to 0.3 and drop
+  # every 0.1–0.3 gray-zone near-match. `SET LOCAL` is transaction-scoped, so the
+  # whole probe runs inside one explicit `Repo.transaction` with the SET FIRST.
+  # The literal is interpolated (SET takes no bind params) but sourced from the
+  # single `@suggestion_floor` attribute so the operator and the GUC can't drift.
+  #
+  # Fail-open: a DBConnection error (or any raise) inside the txn degrades to
+  # "no suggestions" — an empty list — never a 500 on the publish-rejection path
+  # (mirrors `DedupWall.fetch_candidates`).
   defp nearest_registered(name, dataset, opts) do
-    registered_tags_query(dataset, opts)
-    |> where([d], fragment("similarity(?, ?) > ?", d.doc_id, ^name, ^@suggestion_floor))
-    |> order_by([d],
-      desc: fragment("similarity(?, ?)", d.doc_id, ^name),
-      # doc_id tiebreak so equal-similarity candidates order deterministically.
-      asc: d.doc_id
-    )
-    |> limit(@suggestion_limit)
-    |> select([d], d.doc_id)
-    |> Repo.all()
+    query =
+      registered_tags_query(dataset, opts)
+      |> where([d], fragment("? % ?", d.doc_id, ^name))
+      |> order_by([d],
+        desc: fragment("similarity(?, ?)", d.doc_id, ^name),
+        # doc_id tiebreak so equal-similarity candidates order deterministically.
+        asc: d.doc_id
+      )
+      |> limit(@suggestion_limit)
+      |> select([d], d.doc_id)
+
+    Repo.transaction(fn ->
+      Repo.query!("SET LOCAL pg_trgm.similarity_threshold = #{@suggestion_floor}")
+      Repo.all(query)
+    end)
+    |> case do
+      {:ok, results} -> results
+      {:error, _reason} -> []
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "TagRegistry.nearest_registered fail-open: suggestion probe failed: #{inspect(e)}"
+      )
+
+      []
   end
 
   defp registered_tags_query(dataset, opts) do

@@ -2,6 +2,7 @@ package taskboard
 
 import (
 	"flag"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+)
+
+const (
+	taskReleaseGate = "11111111-1111-4111-8111-111111111111"
+	taskWaveRev     = "22222222-2222-4222-8222-222222222222"
+	taskCandidate   = "33333333-3333-4333-8333-333333333333"
+	taskDocument    = "44444444-4444-4444-8444-444444444444"
 )
 
 var updatePaper = flag.Bool("update-paper", false, "regenerate the paper-frame golden")
@@ -34,11 +42,14 @@ const fixtureBlocks = `[
   {"type":"code","code":"go test ./internal/taskboard/...","language":"bash"}
 ]`
 
-// paperServer answers the scoped paper-doc GET with the given result object.
-func paperServer(t *testing.T, resultJSON string) *httptest.Server {
+// paperServer answers the scoped canonical-source GET with the given payload.
+func paperServer(t *testing.T, payload string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"result":` + resultJSON + `}`))
+		if !strings.Contains(r.URL.Path, "/papers/") || !strings.HasSuffix(r.URL.Path, "/source") {
+			t.Errorf("FetchPaper used non-canonical path %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(payload))
 	}))
 }
 
@@ -57,7 +68,7 @@ func resetPaperCache() {
 }
 
 func TestFetchPaperHydratesBlocks(t *testing.T) {
-	srv := paperServer(t, `{"_id":"drafts.the-paper","title":"The Charter","_rev":"rev-7","blocks":`+fixtureBlocks+`}`)
+	srv := paperServer(t, `{"id":"drafts.the-paper","title":"The Charter","_rev":"rev-7","source":{"kind":"blocks","blocks":`+fixtureBlocks+`}}`)
 	defer srv.Close()
 
 	ps, err := FetchPaper(paperClient(srv.URL), "production", "drafts.the-paper")
@@ -78,9 +89,49 @@ func TestFetchPaperHydratesBlocks(t *testing.T) {
 	}
 }
 
+func TestFetchPaperUsesCanonicalReleaseReferenceWithoutFallback(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		wantPath := "/w/ws/p/proj/v1/cycles/epic/wave/release-gates/" + taskReleaseGate + "/papers/campaign/source"
+		if r.URL.Path != wantPath || r.URL.Query().Get("wave_revision") != taskWaveRev ||
+			r.URL.Query().Get("candidate_id") != taskCandidate || len(r.URL.Query()) != 2 {
+			t.Fatalf("release request = %q, want pinned scoped route", r.URL.RequestURI())
+		}
+		w.Header().Set("ETag", `"sha256:`+strings.Repeat("b", 64)+`"`)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Barkpark-Release-Gate", taskReleaseGate)
+		w.Header().Set("X-Barkpark-Wave-Revision", taskWaveRev)
+		w.Header().Set("X-Barkpark-Paper-Candidate", taskCandidate)
+		w.Header().Set("X-Barkpark-Paper-Role", "campaign")
+		_, _ = fmt.Fprintf(w, `{"release_gate_id":%q,"wave_revision":%q,"candidate_id":%q,"role":"campaign","document_id":%q,"doc_id":"campaign-paper","title":"Campaign","content_digest":%q,"source":{"kind":"blocks","blocks":%s}}`,
+			taskReleaseGate, taskWaveRev, taskCandidate, taskDocument, strings.Repeat("b", 64), fixtureBlocks)
+	}))
+	defer srv.Close()
+	ref := srv.URL + "/w/ws/p/proj/v1/cycles/epic/wave/release-gates/" + taskReleaseGate +
+		"/papers/campaign/source?wave_revision=" + taskWaveRev + "&candidate_id=" + taskCandidate
+
+	ps, err := FetchPaper(paperClient(srv.URL), "production", ref)
+	if err != nil {
+		t.Fatalf("FetchPaper release ref: %v", err)
+	}
+	if requests != 1 || ps.Rev != taskCandidate || ps.Title != "Campaign" || !blocksNonEmpty(ps.BlocksRaw) {
+		t.Fatalf("release Paper state drifted: requests=%d state=%+v", requests, ps)
+	}
+}
+
+func TestFetchPaperRejectsReleaseReferenceScopeDrift(t *testing.T) {
+	ref := "https://other.example/w/other/p/proj/v1/cycles/epic/wave/release-gates/" + taskReleaseGate +
+		"/papers/campaign/source?wave_revision=" + taskWaveRev + "&candidate_id=" + taskCandidate
+	ps, err := FetchPaper(paperClient("https://api.example"), "production", ref)
+	if err == nil || ps.Err == "" {
+		t.Fatalf("scope/origin drift accepted: state=%+v err=%v", ps, err)
+	}
+}
+
 // A block-less paper that carries body_html is the honest browser-handoff state.
 func TestFetchPaperHTMLOnly(t *testing.T) {
-	srv := paperServer(t, `{"_id":"p","title":"Legacy","_rev":"r1","blocks":[],"body_html":"<h1>hi</h1>"}`)
+	srv := paperServer(t, `{"id":"p","title":"Legacy","_rev":"r1","source":{"kind":"html","html":"<h1>hi</h1>"}}`)
 	defer srv.Close()
 
 	ps, err := FetchPaper(paperClient(srv.URL), "production", "p")
@@ -238,7 +289,7 @@ func drivenFixture() []Task {
 // rail), strips ANSI, and compares to the golden.
 func TestRenderPaperFrameGolden80(t *testing.T) {
 	resetPaperCache()
-	srv := paperServer(t, `{"_id":"drafts.the-paper","title":"Paper frame charter","_rev":"rev-7","blocks":`+fixtureBlocks+`}`)
+	srv := paperServer(t, `{"id":"drafts.the-paper","title":"Paper frame charter","_rev":"rev-7","source":{"kind":"blocks","blocks":`+fixtureBlocks+`}}`)
 	defer srv.Close()
 
 	ps, err := FetchPaper(paperClient(srv.URL), "production", "drafts.the-paper")

@@ -1,0 +1,351 @@
+defmodule BarkparkWeb.Plugs.PaperRevisionHeadersTest do
+  @moduledoc """
+  Pins for the reader conditional (http-edge-truth W1 S1 — charter D9/D10/D11):
+  a weak, time-bucketed ETag on EVERY published paper, honored with a CSP-free
+  304 on both flat reader routes (`/papers/:slug` and `/d/:dataset/papers/:slug`).
+
+  The router-level tests drive the real `:public_root` pipeline (browser →
+  PaperReaderCsp → PaperRevisionHeaders → LiveView dead render), so the 304
+  pins prove the halt fires BEFORE the dead render and the CSP delete undoes
+  the nonce the CSP plug just minted. The direct-call tests pin the plug's
+  fail-closed self-gating without a render in the way.
+  """
+
+  use BarkparkWeb.ConnCase, async: false
+
+  alias Barkpark.{Content, EpicFleet, Repo}
+  alias Barkpark.Content.{Document, Revision}
+  alias BarkparkWeb.Plugs.PaperRevisionHeaders
+
+  import Barkpark.TenancyFixtures
+
+  @dataset "production"
+  @bucket_seconds 604_800
+
+  setup %{conn: conn} = ctx do
+    {default_ws, default_project} = ensure_default_scope!()
+
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => "conditional-paper",
+          "dataset" => @dataset,
+          "body_html" => "<h1>Conditional Paper</h1><p>edge truth</p>",
+          "workspace_id" => default_ws.id,
+          "project_id" => default_project.id
+        })
+      )
+
+    paper = pin_released_revision!(paper)
+
+    {:ok, Map.merge(ctx, %{conn: conn, ws: default_ws, project: default_project, paper: paper})}
+  end
+
+  defp stored_content(paper), do: Repo.get!(Document, paper.id).content
+
+  defp current_bucket, do: div(System.os_time(:second), @bucket_seconds)
+
+  defp weak_etag(content),
+    do: ~s(W/"sha256:#{EpicFleet.canonical_digest(content)}.#{current_bucket()}")
+
+  defp replay(path, if_none_match) do
+    build_conn()
+    |> put_req_header("if-none-match", if_none_match)
+    |> get(path)
+  end
+
+  describe "flat /papers/:slug — emit + honor (D9/D10)" do
+    test "200 emits the weak bucketed etag; exact replay is a CSP-free 304 carrying the same etag + cache-control",
+         %{conn: conn, paper: paper} do
+      conn200 = get(conn, "/papers/conditional-paper")
+
+      assert html_response(conn200, 200) =~ "Conditional Paper"
+      assert [etag] = get_resp_header(conn200, "etag")
+      assert etag == weak_etag(stored_content(paper))
+      # The 200 still carries the full nonced reader policy (layer-2 backstop).
+      assert [policy] = get_resp_header(conn200, "content-security-policy")
+      assert policy =~ "'nonce-"
+
+      conn304 = replay("/papers/conditional-paper", etag)
+
+      assert conn304.status == 304
+      assert conn304.resp_body == ""
+      # RFC 9110 §15.4.5: the 304 re-emits the SAME validator + cache-control
+      # (RFC 9111 §3.2 merge semantics — see the second-review ledger row).
+      assert get_resp_header(conn304, "etag") == [etag]
+
+      # Second-review condition 2: pin the LITERAL policy on both sides — the
+      # old same-as-200 comparison was [] == [], vacuously green.
+      assert get_resp_header(conn200, "cache-control") ==
+               ["private, max-age=0, must-revalidate"]
+
+      assert get_resp_header(conn304, "cache-control") ==
+               ["private, max-age=0, must-revalidate"]
+
+      # D10: a 304 carrying a fresh nonce would permanently kill the cached
+      # reader in every conforming browser — the 304 branch DELETES the policy.
+      assert get_resp_header(conn304, "content-security-policy") == []
+    end
+
+    test "a published paper with NO released revision still emits + honors the etag (rrid gate dropped)",
+         %{conn: conn, ws: ws, project: project} do
+      {:ok, unpinned} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "unpinned-paper",
+            "dataset" => @dataset,
+            "body_html" => "<h1>Unpinned Paper</h1>",
+            "workspace_id" => ws.id,
+            "project_id" => project.id
+          })
+        )
+
+      conn200 = get(conn, "/papers/unpinned-paper")
+
+      assert conn200.status == 200
+      assert [etag] = get_resp_header(conn200, "etag")
+      assert etag == weak_etag(stored_content(unpinned))
+      # x-barkpark-paper-revision stays rrid-gated: no revision, no header.
+      assert get_resp_header(conn200, "x-barkpark-paper-revision") == []
+
+      conn304 = replay("/papers/unpinned-paper", etag)
+      assert conn304.status == 304
+    end
+
+    test "the released revision id rides along when pinned", %{conn: conn, paper: paper} do
+      conn200 = get(conn, "/papers/conditional-paper")
+      paper = Repo.get!(Document, paper.id)
+
+      assert get_resp_header(conn200, "x-barkpark-paper-revision") ==
+               [paper.released_revision_id]
+    end
+  end
+
+  describe "dataset-prefixed /d/:dataset/papers/:slug — emit + honor (D9)" do
+    test "emits the weak bucketed etag and honors it with a 304", %{conn: conn, paper: paper} do
+      conn200 = get(conn, "/d/#{@dataset}/papers/conditional-paper")
+
+      assert conn200.status == 200
+      assert [etag] = get_resp_header(conn200, "etag")
+      assert etag == weak_etag(stored_content(paper))
+
+      conn304 = replay("/d/#{@dataset}/papers/conditional-paper", etag)
+
+      assert conn304.status == 304
+      assert conn304.resp_body == ""
+      assert get_resp_header(conn304, "content-security-policy") == []
+    end
+  end
+
+  describe "time bucket (D9)" do
+    test "an adjacent bucket window flips the 304 back to 200", %{paper: paper} do
+      digest = EpicFleet.canonical_digest(stored_content(paper))
+      stale = ~s(W/"sha256:#{digest}.#{current_bucket() - 1}")
+
+      conn = replay("/papers/conditional-paper", stale)
+
+      assert conn.status == 200
+      assert html_response(conn, 200) =~ "Conditional Paper"
+    end
+  end
+
+  describe "If-None-Match semantics (D11)" do
+    test "list form: our etag anywhere in a comma-separated list matches", %{paper: paper} do
+      etag = weak_etag(stored_content(paper))
+      conn = replay("/papers/conditional-paper", ~s("mismatch-a", "mismatch-b", #{etag}))
+
+      assert conn.status == 304
+    end
+
+    test "star matches any current representation" do
+      conn = replay("/papers/conditional-paper", "*")
+
+      assert conn.status == 304
+    end
+
+    test "weak comparison: a strong-form tag matches our weak etag", %{paper: paper} do
+      strong = String.replace_prefix(weak_etag(stored_content(paper)), "W/", "")
+      conn = replay("/papers/conditional-paper", strong)
+
+      assert conn.status == 304
+    end
+
+    test "a non-matching tag stays a 200" do
+      conn = replay("/papers/conditional-paper", ~s(W/"sha256:not-the-digest.0"))
+
+      assert conn.status == 200
+    end
+  end
+
+  describe "live task blocks are excluded (D9)" do
+    setup %{ws: ws, project: project} do
+      {:ok, task_paper} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "live-task-paper",
+            "dataset" => @dataset,
+            "blocks" => [
+              %{
+                "id" => "tp-intro",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Board below."}]
+              },
+              %{"id" => "tp-board", "type" => "task-board", "query" => %{"status" => "open"}}
+            ],
+            "workspace_id" => ws.id,
+            "project_id" => project.id
+          })
+        )
+
+      {:ok, task_paper: task_paper}
+    end
+
+    test "a paper with a live task block emits NO etag on either flat route and never 304s",
+         %{conn: conn} do
+      flat = get(conn, "/papers/live-task-paper")
+      assert flat.status == 200
+      assert get_resp_header(flat, "etag") == []
+
+      prefixed = get(build_conn(), "/d/#{@dataset}/papers/live-task-paper")
+      assert prefixed.status == 200
+      assert get_resp_header(prefixed, "etag") == []
+
+      # Even a star conditional never converts: there is no validator to honor.
+      conn = replay("/papers/live-task-paper", "*")
+      assert conn.status == 200
+    end
+
+    test "the predicate recurses into container children (direct call, no render)",
+         %{ws: ws, project: project} do
+      {:ok, nested} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "nested-task-paper",
+            "dataset" => @dataset,
+            "blocks" => [
+              %{
+                "id" => "np-section",
+                "type" => "section",
+                "children" => [
+                  %{"id" => "np-tasks", "type" => "tasks", "query" => %{"tag" => "infra"}}
+                ]
+              }
+            ],
+            "workspace_id" => ws.id,
+            "project_id" => project.id
+          })
+        )
+
+      _ = nested
+
+      conn =
+        Plug.Test.conn(:get, "/papers/nested-task-paper")
+        |> PaperRevisionHeaders.call([])
+
+      assert get_resp_header(conn, "etag") == []
+      refute conn.halted
+    end
+
+    test "a query-less task-typed block is NOT live — the etag still flows (direct call)",
+         %{ws: ws, project: project} do
+      {:ok, static} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "static-task-paper",
+            "dataset" => @dataset,
+            "blocks" => [
+              %{
+                "id" => "sp-intro",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Static board."}]
+              },
+              %{"id" => "sp-board", "type" => "task-board"}
+            ],
+            "workspace_id" => ws.id,
+            "project_id" => project.id
+          })
+        )
+
+      conn =
+        Plug.Test.conn(:get, "/papers/static-task-paper")
+        |> PaperRevisionHeaders.call([])
+
+      assert get_resp_header(conn, "etag") == [weak_etag(stored_content(static))]
+    end
+  end
+
+  describe "fail-closed self-gating (direct call)" do
+    test "a missing slug leaves the conn untouched" do
+      conn =
+        Plug.Test.conn(:get, "/papers/no-such-paper-xyz")
+        |> PaperRevisionHeaders.call([])
+
+      assert get_resp_header(conn, "etag") == []
+      assert get_resp_header(conn, "x-barkpark-paper-revision") == []
+      refute conn.halted
+    end
+
+    test "a draft paper leaves the conn untouched", %{paper: paper} do
+      paper |> Ecto.Changeset.change(status: "draft") |> Repo.update!()
+
+      conn =
+        Plug.Test.conn(:get, "/papers/conditional-paper")
+        |> PaperRevisionHeaders.call([])
+
+      assert get_resp_header(conn, "etag") == []
+      refute conn.halted
+    end
+
+    test "non-paper sibling paths on the shared bucket fall through untouched" do
+      for path <- ["/sheets/some-sheet", "/quiz/host/1234", "/finder"] do
+        conn = Plug.Test.conn(:get, path) |> PaperRevisionHeaders.call([])
+
+        assert get_resp_header(conn, "etag") == [], "expected no etag for #{path}"
+        refute conn.halted
+      end
+    end
+
+    test "the scoped spelling still honors a matching conditional (direct call)",
+         %{ws: ws, project: project, paper: paper} do
+      etag = weak_etag(stored_content(paper))
+
+      conn =
+        Plug.Test.conn(:get, "/w/#{ws.slug}/p/#{project.slug}/papers/conditional-paper")
+        |> Plug.Conn.assign(:current_workspace, ws)
+        |> Plug.Conn.assign(:current_project, project)
+        |> put_req_header("if-none-match", etag)
+        |> PaperRevisionHeaders.call([])
+
+      assert conn.halted
+      assert conn.status == 304
+      assert conn.resp_body == ""
+      assert get_resp_header(conn, "etag") == [etag]
+    end
+  end
+
+  defp pin_released_revision!(paper) do
+    revision =
+      %Revision{}
+      |> Revision.changeset(%{
+        document_id: paper.id,
+        doc_id: paper.doc_id,
+        type: paper.type,
+        dataset: paper.dataset,
+        dataset_id: paper.dataset_id,
+        workspace_id: paper.workspace_id,
+        project_id: paper.project_id,
+        title: paper.title,
+        status: paper.status,
+        action: "publish",
+        content: paper.content
+      })
+      |> Repo.insert!()
+
+    paper
+    |> Ecto.Changeset.change(
+      current_revision_id: revision.id,
+      released_revision_id: revision.id
+    )
+    |> Repo.update!()
+  end
+end

@@ -1,0 +1,155 @@
+COMMAND "Add a Console Pure Helper" DESCRIPTION "Scaffold one node-pinned pure helper across the Cloud console SPA pair in a single run: the `function` skeleton planted in app.js's console-helpers zone, its export entry planted in the console-hook-map zone (the __bpTestHook object tail), and its starter test group planted in __app.test.mjs's console-tests zone -- the three-site chore EVERY console feature repeats by hand (55 of the 82 app.js commits in 12 months co-touch the harness; the house law is stamped on dozens of hook groups: pure helpers node-pinned via __bpTestHook, DOM mounts browser-verified). REQUIRES ensure-console-hook-zones applied first: all three anchors are the scaffy:zone mark lines that command plants, so on a virgin tree every op refuses loud (exit 5, anchor not found, nothing written) and the recipe is two runs -- zones, then helper. The skeleton is an identity passthrough with a test pinning exactly that, DELIBERATELY: growing the body reds the starter test, forcing the test group to grow in the same change -- parity at birth, kept at every step. Closes on the pair's own enforced gate, run LOCAL: `node --test` (the same suite console-harness.yml reds PRs with; zero deps, ~250ms)." LAST_UPDATED "17-07-2026-21-00-00" DOMAIN "barkpark" TAGS "cloud-console", "spa", "scaffold" CONCEPT "console-helper" VARIANT "js" DIRECTION "add" VARIABLES
+  VARIABLE 1 "HelperName" TITLE "Name the helper" DESCRIPTION "The helper's name; its camel spelling is the identifier everywhere (`function freshnessModel`, `freshnessModel: freshnessModel,`, `hooks.freshnessModel`) -- the house convention for every hook-exported helper. Pick a derivation-shaped name (model/fold/copy/markup), not a DOM verb: mounts and wiring never go through this seam." EXAMPLES "FreshnessModel", "PaletteFuzzy"
+  VARIABLE 2 "Purpose" OPAQUE TITLE "One-line purpose" DESCRIPTION "Honest one-line prose for the helper comment and the test-group header -- what the helper derives, e.g. `derive the freshness badge model for a site row`. OPAQUE: verbatim prose, never re-cased, one spelling per file. Plain ASCII, no double quotes (it is spliced into JS comments only, never into string literals or guards)." EXAMPLES "derive the freshness badge model for a site row"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THIS COMMAND EXISTS — the console vein's one mechanical shape
+# ─────────────────────────────────────────────────────────────────────────────
+# The cloud console vein is vertical (router + Registry + SPA move together),
+# but the survey ruled its Elixir and CSS legs CUT — bespoke bodies,
+# contextual placement (evidence in ensure-console-hook-zones' WHY block).
+# What remains, and what this command serves, is the vein's one genuinely
+# mechanical, thrice-repeated shape:
+#
+#   op 1 → MARK:zone-console-helpers  — the pure-function skeleton. The
+#          zone's law: IIFE-scoped declarations + eval-tail hook call make
+#          position semantics-free.
+#   op 2 → MARK:zone-console-hook-map — the export entry. The zone's law:
+#          order-free object keys + house trailing-comma style make the
+#          append separator-safe.
+#   op 3 → MARK:zone-console-tests    — the starter test group. The zone's
+#          law: node:test registration order is NOT semantics-free, so the
+#          zone lives at the harness TAIL, below every top-level await.
+#
+# What varies across the live helpers is exactly the two declared variables:
+# the name and the one-line purpose. Everything else — the PURE discipline,
+# the hook entry shape, the exported-typeof pin — is invariant house shape.
+#
+# NOT THIS COMMAND: DOM mounts, fetch flows, SSE wiring (browser-verified by
+# house law — the harness's own CARVE-OUT header names them); app.css rules
+# (feature CSS lands next to its section, contextual by design); the router/
+# Registry legs of a feature (bespoke Elixir, cut with evidence). This is the
+# node-pinned seam alone.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REQUIRES: ensure-console-hook-zones applied first — precondition by refusal
+# ─────────────────────────────────────────────────────────────────────────────
+# All three anchors below are zone MARK LINES another command plants, and
+# commands ship UNAPPLIED — on a virgin tree these anchors do not exist. The
+# engine's D20 conservatism IS the precondition mechanism: an absent anchor
+# refuses loud (exit 5, nothing written — runs are transactional), so a
+# mis-ordered run cannot half-apply. The recipe is two runs:
+#
+#   bp scaffy run scaffy/commands/ensure-console-hook-zones.scaffy
+#   bp scaffy run scaffy/commands/add-console-helper.scaffy \
+#       --var HelperName=FreshnessModel \
+#       --var "Purpose=derive the freshness badge model for a site row"
+#
+# CROSS-COMMAND REMOVES are per-command receipt replays: remove THIS command
+# first, then the zones (LIFO). The anti-LIFO geometry here matches
+# add-plugin-bucket's observed behavior — zone payloads are pure comments, so
+# an early zones-remove strands the helper at the zone's ordering-safe
+# position, benign by the zone idiom; re-running the zones command replants
+# above it.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 1 — the pure-helper skeleton, planted in the console-helpers zone
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the zone comment's mark line — byte-unique, never consumed (INSERT
+# leaves it intact), so sibling helpers re-anchor here forever with no
+# REANCHOR family needed. Guard = the function head the op itself writes
+# (payload-derived, D3(c)): duplicate `function f(){}` declarations are LEGAL
+# JS where the later silently wins — a corruption no gate would red — so a
+# hand-written helper of the same name must skip the plant, not shadow it.
+IN "cloud/priv/static/app.js"
+### Plant the {{.helperName}} skeleton in the console-helpers zone
+INSERT AFTER FIRST
+::: console-helpers zone mark line :::
+  // comment only whole, on its own lines. MARK:zone-console-helpers
+::: console-helpers zone mark line :::
+WITH
+::: {{.helper-name}} skeleton :::
+
+  // scaffy:add-console-helper {{.helperName}} MARK:console-helper-{{.helper-name}}
+  // {{.Purpose}}
+  // PURE + node-pinned via __bpTestHook (house law: pure helpers node-pinned,
+  // DOM mounts browser-verified). Grow the body in place -- its hook entry and
+  // test group carry the same {{.helper-name}} mark family, and the starter
+  // identity test below MUST grow with it.
+  function {{.helperName}}(input) {
+    return input;
+  }
+::: {{.helper-name}} skeleton :::
+MARK "console-helper-{{.helper-name}}"
+ASLONG FILE DONT CONTAIN "function {{.helperName}}("
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 2 — the export entry, planted in the console-hook-map zone
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the hook-map zone's mark line — same never-consumed idiom. An entry
+# directly below it is separator-safe by the zone's own stated law (house
+# trailing commas + order-free keys + comment-legal object literal). Guard =
+# the entry line the op itself writes: one helper has exactly one export,
+# hand-written or planted — a duplicate key is legal JS where the later
+# silently wins, the same corruption class op 1 refuses.
+IN "cloud/priv/static/app.js"
+### Export {{.helperName}} from the __bpTestHook map in the console-hook-map zone
+INSERT AFTER FIRST
+::: console-hook-map zone mark line :::
+      // move this comment only whole, on its own lines. MARK:zone-console-hook-map
+::: console-hook-map zone mark line :::
+WITH
+::: {{.helper-name}} hook entry :::
+      // scaffy:add-console-helper {{.helperName}} MARK:console-hook-{{.helper-name}}
+      {{.helperName}}: {{.helperName}},
+::: {{.helper-name}} hook entry :::
+MARK "console-hook-{{.helper-name}}"
+ASLONG FILE DONT CONTAIN "{{.helperName}}: {{.helperName}},"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 3 — the starter test group, planted in the console-tests zone
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the tests zone's mark line — same never-consumed idiom; groups
+# stack newest-first below it. Order is NOT free under node:test, which is
+# exactly why that mark now lives at the harness TAIL (below the file's last
+# top-level await): a group planted above a top-level await is drained before
+# the later top-level consts initialise and TDZ-crashes. Anchoring on the mark
+# rather than on a fixed line means this op follows the zone wherever it sits.
+# Two starter pins:
+# the exported-typeof test (the harness's own first-test idiom) and the
+# identity pin — DELIBERATELY brittle, so growing the helper body reds it and
+# forces the test group to grow in the same change. Guard = the typeof
+# assertion line the op itself writes.
+IN "cloud/priv/static/__app.test.mjs"
+### Plant the {{.helperName}} starter test group in the console-tests zone
+INSERT AFTER FIRST
+::: console-tests zone mark line :::
+// Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
+::: console-tests zone mark line :::
+WITH
+::: {{.helper-name}} test group :::
+
+// ── {{.helperName}} -- {{.Purpose}} ──
+// scaffy:add-console-helper {{.helperName}} MARK:console-test-{{.helper-name}}
+test("{{.helperName}} is exported (node-pinned via __bpTestHook)", () => {
+  assert.equal(typeof hooks.{{.helperName}}, "function");
+});
+test("{{.helperName}} starter is the identity passthrough -- replace alongside the real body", () => {
+  assert.equal(hooks.{{.helperName}}("probe"), "probe");
+});
+::: {{.helper-name}} test group :::
+MARK "console-test-{{.helper-name}}"
+ASLONG FILE DONT CONTAIN "typeof hooks.{{.helperName}}, "
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# All three marked sites present, and the pair's OWN enforced gate green,
+# LOCAL: the same `node --test` suite console-harness.yml reds PRs with (zero
+# deps, ~250ms) — a green close means the helper evaluates, exports, and its
+# starter behavior is pinned. cloud/** auto-deploys on merge; the skeleton is
+# production-inert (the hook guard is absent in real browsers).
+ASSERT FILE "cloud/priv/static/app.js" CONTAINS "MARK:console-helper-{{.helper-name}}"
+ASSERT FILE "cloud/priv/static/app.js" CONTAINS "MARK:console-hook-{{.helper-name}}"
+ASSERT FILE "cloud/priv/static/__app.test.mjs" CONTAINS "MARK:console-test-{{.helper-name}}"
+ASSERT CMD "node --test cloud/priv/static/__app.test.mjs"

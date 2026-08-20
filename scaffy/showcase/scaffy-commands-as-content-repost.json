@@ -1,0 +1,1250 @@
+{
+  "slug": "scaffy-commands-as-content",
+  "style": "article",
+  "description": "The Scaffy masterplan: scaffolding as commands — declarative, idempotent, reversible documents stored in Barkpark and executed by bp. Covers the lineage (PortableDoc for code), the .scaffy format and its mark mechanic, the verified Barkpark command catalog (add block-type flagship), add/remove symmetry, format-hardening findings, and the build roadmap.",
+  "tags": [
+    {
+      "rationale": "The design paper for Scaffy itself — commands as content.",
+      "strength": 90,
+      "tag": "scaffy"
+    },
+    {
+      "rationale": "Full architecture design: format, engine, catalog, roadmap.",
+      "strength": 70,
+      "tag": "design-doc"
+    },
+    {
+      "rationale": "States the propagation doctrine: runtime-collected, generated, or command-applied — never hand-maintained.",
+      "strength": 50,
+      "tag": "doctrine"
+    },
+    {
+      "rationale": "The engine lands as a bp subcommand in the Go CLI.",
+      "strength": 30,
+      "tag": "go-cli"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "scf-001",
+      "text": "Scaffy · Architecture Doctrine",
+      "type": "eyebrow"
+    },
+    {
+      "id": "scf-002",
+      "level": 1,
+      "text": "Commands as Content — the Scaffy Masterplan",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffy turns scaffolding into commands: declarative, idempotent, reversible documents that create files AND wire them into the registries, routers, barrels and index files a plain generator can never touch. Stored in Barkpark like Papers and Tasks, served over one connect, executed by bp — a command is a standard in runnable form. This paper is the full design: the lineage, the format, the mark mechanic, the Barkpark command catalog, and the add/remove symmetry that makes features portable."
+        }
+      ],
+      "id": "scf-003",
+      "type": "ingress"
+    },
+    {
+      "id": "scf-004",
+      "items": [
+        {
+          "label": "runtimes one block-type touches",
+          "value": "4"
+        },
+        {
+          "label": "accretion points per plugin",
+          "value": "~8"
+        },
+        {
+          "label": "DSL keywords",
+          "value": "24"
+        },
+        {
+          "label": "target for 'the typical thing'",
+          "value": "30 s"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "id": "scf-005",
+      "type": "divider"
+    },
+    {
+      "id": "scf-006",
+      "level": 2,
+      "text": "The lineage — everything merges into Barkpark",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Every organ of Barkpark followed the same move: take something the world treats as environment-bound, make it declarative and portable, then merge it in as a first-class content type. Scaffy applies that move to the last thing still bound to its repo: the code structure itself."
+        }
+      ],
+      "id": "scf-007",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Piece"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Was bound to"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Became"
+          }
+        ]
+      ],
+      "id": "scf-008",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "PortableDoc"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "its editor/renderer"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one block truth, projected onto every surface"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Paperflow → Papers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "local files"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "served, versioned Barkpark documents"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Tasks"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "external trackers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "type:task documents on the same wire"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Cody"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a developer's head"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a queryable x-ray of the codebase"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Scaffy"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the repo's layout"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "commands — scaffolding as served content"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scaffy is PortableDoc for code."
+        }
+      ],
+      "id": "scf-009",
+      "type": "pullquote"
+    },
+    {
+      "caption": "The loop: Cody perceives, truths constrain, Scaffy acts, features ship.",
+      "id": "scf-010",
+      "source": "flowchart LR\n  C[\"Cody x-ray: patterns, dup, feature bounds\"] --> T[\"Sources of truth: capabilities, schemas, tokens, canonical markers\"]\n  T --> S[\"Scaffy commands: create + inject + assert\"]\n  S --> F[\"Features: zip, transport, 1 connect\"]\n  F --> C",
+      "type": "diagram"
+    },
+    {
+      "id": "scf-011",
+      "type": "divider"
+    },
+    {
+      "id": "scf-012",
+      "level": 2,
+      "text": "The idea — commands, not generators",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A generator stamps files once and walks away. A command is a maintained artifact that owns a repeated shape end to end: it creates the vertical slice, injects the wiring at guarded anchors, proves the result with assertions, and can retract everything it added. Run it twice — nothing happens. Run it with new variables — the new instance lands beside the old one, at markers the first run planted."
+        }
+      ],
+      "id": "scf-013",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-014",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "VARIABLES with prompts, examples and case morphology (singular + plural)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "CREATE FILE IF ABSENT — the owned files of the slice"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "IN … INSERT/REPLACE … guarded — the connective tissue: index files, registries, routers"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "MARK — planted anchors that make re-runs, sibling runs and removal deterministic"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "ASSERT — postconditions that run the project's own gates"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "goals + hints — the agent-readable layer for when anchors drift"
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A documented standard describes; a linter punishes after the fact. A command IS the standard, executable. Nobody deviates because deviating is slower than conforming — the paved road wins every time, and when the standard changes you change one command."
+        }
+      ],
+      "id": "scf-015",
+      "title": "Why this beats docs and linters",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A standard that isn't executable is a wish."
+        }
+      ],
+      "id": "scf-016",
+      "type": "pullquote"
+    },
+    {
+      "id": "scf-017",
+      "type": "divider"
+    },
+    {
+      "id": "scf-018",
+      "level": 2,
+      "text": "The .scaffy format",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Commands are authored in a sentence-shaped DSL (or in a GUI, stored as structured content — same artifact, two faces). The header carries catalog taxonomy; every op reads as English."
+        }
+      ],
+      "id": "scf-019",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-020",
+      "lang": "scaffy",
+      "type": "code",
+      "value": "COMMAND \"Add PortableDoc Block Type\"\nDESCRIPTION \"New block rendered on all four surfaces from commit one.\"\nDOMAIN \"barkpark\" CONCEPT \"block-type\" VARIANT \"leaf\"\nVARIABLES\n  VARIABLE 1 \"BlockName\" TITLE \"Block type name\"\n    EXAMPLES \"timeline\", \"gantt\", \"poll\""
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Variable tokens carry their transform in their own spelling — write the token in the case you want out, and canonicalization folds every spelling back to one prompt:"
+        }
+      ],
+      "id": "scf-021",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-022",
+      "lang": "scaffy",
+      "type": "code",
+      "value": "{{.BlockName}}        →  Timeline      (Pascal)\n{{.blockName}}        →  timeline      (camel)\n{{.block-name}}       →  timeline      (kebab)\n{{.BLOCK_NAME}}       →  TIMELINE      (screaming snake)"
+    },
+    {
+      "id": "scf-023",
+      "level": 3,
+      "text": "The mark mechanic",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The hardest problem in code injection is anchor fragility: anchoring on live code lines breaks the moment someone refactors. Marks solve it — the first run anchors on a structural target and plants a marker comment; every later run anchors on the mark."
+        }
+      ],
+      "id": "scf-024",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-025",
+      "lang": "scaffy",
+      "type": "code",
+      "value": "IN \"internal/pdrender/pdrender.go\"\n### Register renderer in DefaultRegistry\nINSERT\n::: payload :::\n\tr.blocks[\"{{.block-name}}\"] = {{.blockName}}Renderer{ir: ir}\n::: payload :::\nBELOW FIRST \"r.blocks[\\\"PdSheet\\\"]\"     # structural target, first run only\nMARK \"SCAFFY BLOCK REGISTRY\"            # planted; primary anchor forever after"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Run 1 (timeline) plants the mark. Run 2 (gantt) lands at the mark, beside its sibling. The command converts the host file into a registry as a side effect — and the mark is the retraction handle for remove."
+        }
+      ],
+      "id": "scf-026",
+      "title": "Marks make commands accretive, not just idempotent",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "scf-027",
+      "type": "divider"
+    },
+    {
+      "id": "scf-028",
+      "level": 2,
+      "text": "Flagship command: add block-type",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Adding a PortableDoc block type is Barkpark's four-surface parity monster: a Go renderer in the TUI, an Elixir clause in the reader, a JS emitter in the SDK, and edit CSS in Studio. Today that shape is held together by parity sweeps and audits after the fact. One command makes parity a birth property."
+        }
+      ],
+      "id": "scf-029",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-030",
+      "lang": "text",
+      "type": "code",
+      "value": "barkpark/                                   # ● created   ○ injected\n├── internal/pdrender/\n│   ├── timeline.go                         # ● renderer\n│   ├── timeline_test.go                    # ● golden test\n│   └── pdrender.go                         # ○ r.blocks[\"timeline\"] = …\n├── api/lib/barkpark/portable_doc/\n│   └── render.ex                           # ○ render clause (render_block/2)\n├── js/packages/react/src/blocks/\n│   ├── timeline.ts                         # ● emitter\n│   └── registry.ts                         # ○ registration line\n└── api/lib/barkpark_web/components/layouts/\n    └── root.html.heex                      # ○ .bp-timeline edit CSS"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Two files created, four registries injected — each at a marked anchor, each guarded, and the run ends by proving the wiring:"
+        }
+      ],
+      "id": "scf-031",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-032",
+      "lang": "scaffy",
+      "type": "code",
+      "value": "ASSERT FILE \"internal/pdrender/pdrender.go\"            CONTAINS \"r.blocks[\\\"{{.block-name}}\\\"]\"\nASSERT FILE \"js/packages/react/src/blocks/registry.ts\" CONTAINS \"{{.block-name}}\"\nASSERT CMD  \"go test ./internal/pdrender/ -run {{.BlockName}}\" EXIT 0"
+    },
+    {
+      "children": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp add block-type --var BlockName=timeline"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "created   internal/pdrender/timeline.go"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "created   internal/pdrender/timeline_test.go"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "created   js/packages/react/src/blocks/timeline.ts"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "inserted  4 registrations (marks planted)"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "asserts   3/3 pass — parity at birth"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "$ bp add block-type --var BlockName=timeline"
+            }
+          ],
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "0 created, 0 inserted, 7 skipped (already present)"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "footer": "idempotent · re-run is a no-op · remove retracts the marks",
+      "id": "scf-033",
+      "type": "terminal"
+    },
+    {
+      "id": "scf-034",
+      "type": "divider"
+    },
+    {
+      "id": "scf-035",
+      "level": 2,
+      "text": "The Barkpark command catalog",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Ranked by frequency times pain — how often we give birth to the shape, times how much of it is tribal knowledge today. Anchors verified against the live tree."
+        }
+      ],
+      "id": "scf-036",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Command"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Creates"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Injects into"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Pain it kills"
+          }
+        ]
+      ],
+      "id": "scf-037",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "add block-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Go renderer + test, JS emitter"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "pdrender.go, render.ex, registry.ts, root.html.heex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "4-surface parity chased by after-the-fact audits"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add plugin"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "plugins/<name>.ex + slice (cli, settings, …), migration"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "almost nothing — registry auto-discovers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "canonical minimal callback set is tribal knowledge"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add api-route (parity)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "controller action, SDK method, tests"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "router.ex (marks mandatory), js core client"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the layer-parity sweep, as construction instead of detection"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add oban-worker"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "worker + test"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "config.exs crontab list"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "crontab drifts from workers"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add docs-card / remove"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "card file with doc-tier header"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "CLAUDE.md routing table"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "7-card cap forces the remove path — symmetry proof"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add cli-verb"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "plugin cli_commands list"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one INSERT; manifest does the rest"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "—"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FOREACH over query_controller + legacy_controller"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the 'grep whole lib/ + test/' warning, encoded"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add finder-template"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "framework × theme scaffold"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "4 hardcoded catalogs"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the search-template install path itself"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "scf-038",
+      "level": 3,
+      "text": "Where commands are NOT needed",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Barkpark already beat accretion inside the BEAM: the plugin behaviour collects routes, crontabs, schemas and CLI verbs at runtime, and the bp binary derives its whole surface from the capabilities manifest. Never write-time-template what a runtime collector or generator already derives. Commands are the third propagation mechanism, for the residue the other two cannot reach — everything cross-runtime."
+        }
+      ],
+      "id": "scf-039",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Mechanism"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Bind time"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Reaches"
+          }
+        ]
+      ],
+      "id": "scf-040",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Plugin behaviour + resolver chains"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "runtime"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "everything inside the BEAM"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Manifests + codegen (capabilities, tokens, js/codegen)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "build"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "derived surfaces"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Scaffy commands"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "write"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "cross-runtime residue: Go, JS, CSS, config, docs"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "scf-041",
+      "type": "divider"
+    },
+    {
+      "id": "scf-042",
+      "level": 2,
+      "text": "Add/remove symmetry — features as plugs",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Remove is the half everyone skips, and it is what turns a scaffolder into architecture. If everything a command adds is attributable — whole owned files, mark-bounded insertions — then removal is mechanical: delete the owned files, retract the marked spans, replay the apply receipt in reverse. That constraint forbids entangled contributions and forces every feature to stay a clean vertical slice."
+        }
+      ],
+      "id": "scf-043",
+      "type": "paragraph"
+    },
+    {
+      "id": "scf-044",
+      "lang": "text",
+      "type": "code",
+      "value": "tickets.feature.zip\n├── files/                        # the whole slice, all runtimes\n│   ├── api/…/plugins/tickets/    #   Elixir plugin\n│   ├── internal/…                #   Go CLI/TUI parts\n│   └── js/…                      #   SDK parts\n└── feature.scaffy                # the connective tissue, declared:\n                                  #   every registry line, marked + guarded"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Unzip anywhere Barkpark-shaped, run, one connect — the feature wires itself in. Guards make its footprint detectable, hence removable, hence swappable. The repo becomes a socket board; features become plugs."
+        }
+      ],
+      "id": "scf-045",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Without marks and receipts, insertions are orphans the day they land — unremovable, unattributable, invisible to the next command. Every mutating op must plant its mark. This is the difference between scaffolding a repo and littering it."
+        }
+      ],
+      "id": "scf-046",
+      "title": "Add-only commands decay",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "id": "scf-047",
+      "type": "divider"
+    },
+    {
+      "id": "scf-048",
+      "level": 2,
+      "text": "Format hardening — review findings",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A close review of the reference command (698 lines, the page-type scaffold) found the voice right and the guarantees missing. Three real bugs were sitting in the example — each preventable at validate time."
+        }
+      ],
+      "id": "scf-049",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Priority"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Finding"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Fix"
+          }
+        ]
+      ],
+      "id": "scf-050",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "P0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Unfenced multi-line anchors mis-parse silently"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fence anchors and targets like payloads"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "P0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Hand-typed guards drift from their own payloads (re-insert loop found)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "derive guards from the rendered payload by default; validate overrides"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "P0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "'CONTAIN START AND END OF TARGET' is unspecified magic"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "explicit REPLACE FROM … TO … WITH grammar"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "P1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "No mark planting → no remove, no sibling accretion"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "MARK clause + apply receipts"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "P1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Token typos mint phantom variables"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "strict mode: every token must resolve to a declared VARIABLE"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "P1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Casing divergence between path and URL tokens (404 found)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "lint: same variable, path vs URL casing must agree"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "P2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Identical payload pasted three times"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "SNIPPET / USE reuse"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "P3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Import management via weak textual guard (dead op found)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ENSURE IMPORT sugar"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "scf-051",
+      "type": "divider"
+    },
+    {
+      "id": "scf-052",
+      "level": 2,
+      "text": "Roadmap",
+      "type": "heading"
+    },
+    {
+      "id": "scf-053",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Harden the format: fenced anchors, derived guards, MARK + receipts, strict tokens, SNIPPET."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Engine: Scaffy's Go core (parser, executor, guards, marks, asserts) as a bp subcommand — same binary, manifest-driven."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Command as a Barkpark document type: authored in Studio or as .scaffy, stored, versioned, tagged, served."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Flagship: add block-type — highest run count ahead (11 wanted data-viz blocks), worst manual cost, cleanest anchors."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Second: add docs-card + remove docs-card — the 7-card cap forces symmetry immediately, pure-markdown risk."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Catalog: one command per 'typical thing', concept × variant, browsable in the dashboard, installable via bp."
+          }
+        ]
+      ],
+      "ordered": true,
+      "type": "list"
+    },
+    {
+      "id": "scf-055",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "The catalog is no longer hypothetical: the full Wave-1 command corpus — every .scaffy file at full text, with run and re-run transcripts — is on display in "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "Scaffy in Action: the Command Showcase"
+        },
+        {
+          "type": "text",
+          "value": " at /papers/scaffy-command-showcase."
+        }
+      ]
+    },
+    {
+      "id": "scf-056",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Commands are served now. The Wave-4 loop this paper argued for is live: the seven commands above exist as command documents on the connected Barkpark, served over one connect exactly like Papers and Tasks — "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "bp scaffy ls --remote"
+        },
+        {
+          "type": "text",
+          "value": " renders the server's catalog, and any command is pulled from a connected Barkpark via "
+        },
+        {
+          "type": "text",
+          "marks": [
+            "strong"
+          ],
+          "value": "bp scaffy pull <concept>/<variant>"
+        },
+        {
+          "type": "text",
+          "value": " — validated before anything can run, written byte-identical (sha256-verified against the served source) beside a provenance sidecar. Remote content stays inside the trust model: pull never executes, and running a pulled command is consent-gated — without an explicit --yes it refuses with the full list of substituted CMDs it would run — see the showcase."
+        }
+      ]
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Every fact has one owner; every derived surface is collected at runtime, generated from a manifest, or applied by a command — and never maintained by hand. Cody sees, truths constrain, Scaffy acts. Fast scaffolding is the forcing function that keeps the codebase standard-shaped."
+        }
+      ],
+      "id": "scf-054",
+      "title": "The one-line doctrine",
+      "tone": "info",
+      "type": "callout"
+    }
+  ]
+}

@@ -130,7 +130,6 @@ function computeImageSrc(
     // full-size original. Warn once so that invisible fallback isn't a mystery.
     if (getAssetId(asset) === undefined && !warnedPresetWithoutId) {
       warnedPresetWithoutId = true
-      // eslint-disable-next-line no-console
       console.warn(
         `[BarkparkImage] preset '${preset}' requested but the asset has no resolvable id (bare URL string or missing _ref/_id); serving the full-size original instead of the rendition.`,
       )
@@ -237,7 +236,6 @@ export function BarkparkImage(props: BarkparkImageProps): ReactElement | null {
     // blank" is debuggable.
     if (id !== undefined && !warnedMissingBaseUrlIds.has(id)) {
       warnedMissingBaseUrlIds.add(id)
-      // eslint-disable-next-line no-console
       console.warn(
         `[BarkparkImage] asset '${id}' has no .url and no baseUrl was provided; skipping render.`,
       )

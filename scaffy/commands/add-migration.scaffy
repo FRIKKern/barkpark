@@ -1,0 +1,54 @@
+COMMAND "Add Ecto Migration" DESCRIPTION "Scaffold one timestamped Ecto migration under api/priv/repo/migrations — a single change/0 that alters a table, adds a column, and creates a partial index. CREATE-only: no accretion file is touched, so it composes with the migrator's filename ordering instead of fighting it." LAST_UPDATED "16-07-2026-00-00-00" DOMAIN "barkpark" TAGS "ecto", "migration", "schema" CONCEPT "migration" VARIANT "alter-add-index" DIRECTION "add" VARIABLES
+  VARIABLE 1 "Ts" OPAQUE SHAPE "ts14" TITLE "Migration timestamp" DESCRIPTION "14-digit UTC stamp YYYYMMDDHHMMSS — the ordering prefix Ecto's own generator emits. A command has no clock, so this is a DECLARED variable: the caller supplies it and SHAPE ts14 is validated (exactly 14 ASCII digits forming a real UTC calendar instant). Generate it with `date -u +%Y%m%d%H%M%S`. OPAQUE — never re-cased; it only ever appears in the filename prefix. WARNING: IF ABSENT guards the FILENAME only — re-running with a fresh Ts but identical remaining args creates a second migration with a duplicate body (same alter + index), which then fails on apply. Re-runs must reuse the original Ts." EXAMPLES "20260714150200", "20260716093000", "20260801120000"
+  VARIABLE 2 "MigrationName" TITLE "Migration name" DESCRIPTION "What the migration does, in words. This is the A1 casing showcase: the SAME variable spells the snake_case filename suffix ({{.migration_name}}) and the PascalCase module suffix ({{.MigrationName}}) — one declaration, two derived surfaces, guaranteed in agreement. Follow the repo convention `add_<thing>` / `create_<thing>`." EXAMPLES "AddChatExecutionEventProjection", "AddPublishedAtToDocuments", "CreatePaperRevisions"
+  VARIABLE 3 "TableName" OPAQUE TITLE "Table" DESCRIPTION "The existing table to alter, snake_case plural — the argument to `table(:...)`. OPAQUE: never re-cased, one spelling per file." EXAMPLES "chat_execution_events", "documents", "paper_revisions"
+  VARIABLE 4 "ColumnName" OPAQUE TITLE "Column" DESCRIPTION "The column to add, snake_case. Reused verbatim in the add, the index columns list, and the partial-index predicate. OPAQUE: never re-cased, one spelling per file." EXAMPLES "projected_at", "published_at", "archived_at"
+  VARIABLE 5 "ColumnType" OPAQUE TITLE "Column type" DESCRIPTION "The Ecto column type. OPAQUE literal passed straight into `add :.../2` — never re-cased." EXAMPLES ":utc_datetime_usec", ":string", ":boolean"
+
+# Prior art: `mix ecto.gen.migration <name>` already stamps an empty timestamped
+# skeleton — this command formalizes that same convention, then fills the body
+# with the shape we actually reach for (alter + add + partial backfill index),
+# modeled 1:1 on api/priv/repo/migrations/20260714150200_add_chat_execution_event_projection.exs.
+#
+# CREATE-only by design: migrations are never edited in place and never registered
+# anywhere — the migrator discovers them by the {{.Ts}} filename prefix. There is
+# no accretion file to inject into, so this command has zero IN ops.
+#
+# IDEMPOTENCY WARNING — the guard is the FILENAME, and Ts is part of it. IF
+# ABSENT makes a re-run with the SAME Ts a no-op, but a re-run with a FRESH Ts
+# and identical remaining args creates a second, differently-named migration
+# with a duplicate body: the second `alter table ... add` of the same column
+# fails when the migrator applies it. A fresh Ts is a NEW migration, never a
+# retry — to re-run this command, reuse the original Ts.
+CREATE FILE IF ABSENT "api/priv/repo/migrations/{{.Ts}}_{{.migration_name}}.exs"
+WITH
+::: {{.migration-name}} migration :::
+defmodule Barkpark.Repo.Migrations.{{.MigrationName}} do
+  use Ecto.Migration
+
+  def change do
+    alter table(:{{.table_name}}) do
+      add :{{.column_name}}, {{.column_type}}
+    end
+
+    # Partial index, mirroring the exemplar's backfill shape: indexes only the rows
+    # still awaiting a value. Narrow the predicate to the real invariant this column
+    # guards, or drop `where:` for a plain index. `change/0` auto-reverses all three
+    # ops (alter/add + create index), so `mix ecto.rollback` needs no `down/0`.
+    create index(:{{.table_name}}, [:{{.column_name}}], where: "{{.column_name}} IS NULL")
+  end
+end
+::: {{.migration-name}} migration :::
+
+# Post-conditions — the file exists with the derived module name and the exemplar body.
+# ASSERT FILE guards are ASCII, brace-safe (every `}}` is followed by a space, `)`, `,`
+# or `]`, never a literal `}`), and each is a verbatim substring of the payload above.
+ASSERT FILE "api/priv/repo/migrations/{{.Ts}}_{{.migration_name}}.exs" CONTAINS "defmodule Barkpark.Repo.Migrations.{{.MigrationName}} do"
+ASSERT FILE "api/priv/repo/migrations/{{.Ts}}_{{.migration_name}}.exs" CONTAINS "alter table(:{{.table_name}}) do"
+ASSERT FILE "api/priv/repo/migrations/{{.Ts}}_{{.migration_name}}.exs" CONTAINS "add :{{.column_name}}, {{.column_type}}"
+ASSERT FILE "api/priv/repo/migrations/{{.Ts}}_{{.migration_name}}.exs" CONTAINS "create index(:{{.table_name}}, [:{{.column_name}}]"
+
+# Run gate — applies the migration against the test DB, then rolls it back so the
+# schema is left as found. TIER ci: every Elixir gate runs in CI only (no scoped
+# single-file mix run is proven locally safe yet — D12/A2).
+ASSERT CMD "cd api && mix ecto.migrate && mix ecto.rollback" TIER ci

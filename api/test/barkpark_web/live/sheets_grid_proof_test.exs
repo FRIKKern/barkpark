@@ -317,11 +317,21 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     assert input_html =~ ~s(aria-autocomplete="list")
     assert input_html =~ ~s(aria-expanded="false")
 
-    # NOT-editable (the View toggle and the read-only reader share the ONE
-    # `@editable` gate — see GridData.derive_editable/1) renders neither the
-    # hook's data-fns nor the datalist: no autocomplete surface for a viewer.
+    # NOT-editable renders no AUTOCOMPLETE surface — no data-fns, no datalist.
+    #
+    # THE HOOK ITSELF NOW STAYS ATTACHED, and that is this slice's whole point.
+    # It used to key on `@editable`, so a member entitled to READ a sheet lost
+    # the hook and with it selection and copy — they could see the numbers and
+    # not take them. It now keys on `@hookable`, which is true for every Studio
+    # grid; the hook's own read-mode branch strips the write gestures. So the
+    # thing that must be absent for a viewer is the autocomplete AFFORDANCE,
+    # never the hook, and asserting the hook's absence here would re-pin the
+    # defect this slice exists to remove.
     view_html = render_hook(grid, "toggle-mode", %{})
-    refute view_html =~ ~s(phx-hook="SheetGrid")
+
+    assert view_html =~ ~s(phx-hook="SheetGrid"),
+           "the hook stays attached in read mode — that is what lets a viewer select and copy"
+
     refute view_html =~ "data-fns="
     refute view_html =~ ~s(data-test-id="sheet-fns-list")
   end
@@ -387,9 +397,11 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     # ── the =SUM formula through the formula bar ──────────────────────────
     render_submit(grid, "bar-commit", %{"value" => "=SUM(B1:B3)"})
 
-    html = render(editor)
     # The grid shows the COMPUTED total on B4…
-    assert html =~ ~s(data-ref="B4" data-r="4" data-c="2" data-v="6750")
+    wait_until(fn ->
+      render(editor) =~ ~s(data-ref="B4" data-r="4" data-c="2" data-v="6750")
+    end)
+
     # …and the bar reads back the formula for the still-active B4.
     assert editor |> element(~s([data-test-id="sheet-formula-bar"])) |> render() =~
              ~s{value="=SUM(B1:B3)"}
@@ -401,9 +413,12 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     editor |> element(~s(th[data-r="1"] button.sheet-head-menu-btn)) |> render_click()
     editor |> element("div.sheet-menu button", "Insert above") |> render_click()
 
-    html = render(editor)
-    assert html =~ ~s(data-ref="A2" data-r="2" data-c="1" data-v="Jul")
-    assert html =~ ~s(data-ref="B5" data-r="5" data-c="2" data-v="6750")
+    wait_until(fn ->
+      html = render(editor)
+
+      html =~ ~s(data-ref="A2" data-r="2" data-c="1" data-v="Jul") and
+        html =~ ~s(data-ref="B5" data-r="5" data-c="2" data-v="6750")
+    end)
 
     # The session rewrote the formula's refs and recomputed.
     {:ok, content} = Session.peek(@slug, @dataset)
@@ -426,11 +441,14 @@ defmodule BarkparkWeb.SheetsGridProofTest do
 
     render_hook(grid, "paste", %{"tsv" => "1300\t1500\n3500\t3600\n"})
 
-    html = render(editor)
-    assert html =~ ~s(data-ref="B2" data-r="2" data-c="2" data-v="1300")
-    assert html =~ ~s(data-ref="C3" data-r="3" data-c="3" data-v="3600")
-    # The total recomputed over the pasted figures: 1300 + 3500 + 2150.
-    assert html =~ ~s(data-ref="B5" data-r="5" data-c="2" data-v="6950")
+    wait_until(fn ->
+      html = render(editor)
+
+      # The total recomputed over the pasted figures: 1300 + 3500 + 2150.
+      html =~ ~s(data-ref="B2" data-r="2" data-c="2" data-v="1300") and
+        html =~ ~s(data-ref="C3" data-r="3" data-c="3" data-v="3600") and
+        html =~ ~s(data-ref="B5" data-r="5" data-c="2" data-v="6950")
+    end)
 
     # ── the colleague's pane converged on the whole story, hands off ──────
     expected_screen = %{

@@ -118,6 +118,14 @@ defmodule Barkpark.Content.TagRegistryTest do
                "a rescue-swallowed failure boots a publish wall that can never resolve a tag"
     end
 
+    test "SchemaBootstrap has no five-second init deadline" do
+      src = File.read!("lib/barkpark/schema_bootstrap.ex")
+
+      assert src =~ "GenServer.start_link(__MODULE__, :ok, timeout: :infinity)",
+             "synchronous production schema registration may exceed GenServer's default " <>
+               "five-second init timeout; timing it out kills the whole application boot"
+    end
+
     test "registration never routes via Plugins.Bootstrap.register_all_schemas (empty plugins-off)" do
       src = File.read!("lib/barkpark/content/tag_registry.ex")
 

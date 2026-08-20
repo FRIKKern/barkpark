@@ -1,0 +1,150 @@
+COMMAND "Ensure root layout marker zones" DESCRIPTION "Idempotently plant the two named scaffy:zone marker comments in api/lib/barkpark_web/layouts/root.html.heex -- the repo's second-hottest accretion file (169 commits/12 months), which W1 and W7 both ruled un-anchorable because its append streams had no stable landing sites. This command IS the anchor repair: a one-time, reversible plant of a head-anchor comment at each of the file's two genuinely append-shaped neighborhoods (new script assets after the body content; new LiveView hook definitions after the Hooks map opener), so every later append -- human or a future scaffy command -- lands at a named mark instead of drifting against volatile neighbor text. No variables: the zones are fixed artifacts, planted once, guarded by their own declaration text." LAST_UPDATED "17-07-2026-15-00-00" DOMAIN "barkpark" TAGS "studio", "scaffold" CONCEPT "ensure-root-layout-zones" VARIANT "heex" DIRECTION "add" VARIABLES
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THIS COMMAND EXISTS — the measured append streams of root.html.heex
+# ─────────────────────────────────────────────────────────────────────────────
+# Loop-tick mining (2026-07-17): a 25-commit sample since 2026-04 splits
+# 9 PURE_ADD + 5 MOSTLY_ADD (56%) vs 11 MIXED sweep-refactors. The pure adds
+# decompose into FOUR streams, and the survey verdict differs per stream:
+#
+#   1. LiveView HOOK definitions — `Hooks.X = {...}` in the closing inline
+#      nonce script. EIGHTEEN live hooks today; 17 separate commits added one
+#      since April (ExpiryCountdown #2145, SgFit #1862, BpThemeMirror #1744,
+#      SgTheme #1439, BarkparkBoardDrag #1271, BarkparkColorField #986, ...).
+#      The heaviest hand-append stream in the file. → ZONE (op 2).
+#
+#   2. SCRIPT ASSET tags — `<script src="/assets/bp-*.js">` in the body tail.
+#      ~15 additions since April (bp-chat-composer #1702, bp-paper-mermaid
+#      #1646, bp-tmux-terminal #1201, bp-sheet-formula/pointing #1061, ...).
+#      → ZONE (op 1).
+#
+#   3. THEME blocks — html[data-bp-theme="..."] pairs (charple +58/-0 #2854).
+#      CUT. The whole theme run (root.html.heex lines ~78-396) sits inside
+#      `BEGIN GENERATED: tokens ... END GENERATED` — "do not hand-edit",
+#      emitted by `node design/emit.mjs --write` from design/themes/*.json.
+#      The charple commit proves it: 19 files, and the +58 here was emitter
+#      output riding design/themes/charple.json. A derived surface that is
+#      already generated from a manifest is NEVER command-maintained (the
+#      scaffy doctrine's own second clause), and no zone may live inside a
+#      generated region — the next emitter run would strand or delete it.
+#
+#   4. FEATURE-AFFORDANCE CSS chunks (airdrop access panel +14 #2145, composer
+#      chrome +54 #2064, keyboard affordances +10). CUT. The evidence shows
+#      feature CSS lands NEXT TO its semantically related section, scattered
+#      across the ~4900-line <style> (the access panel beside .item-share at
+#      ~1466, composer chrome as its own section beside the buttons at ~575)
+#      — contextual proximity IS the file's real organization, and the MIXED
+#      44% (UI-premium sweeps #2067/#2088/#2101) actively reorganize by
+#      feature. One "CSS appends here" zone would collect unrelated rules and
+#      fight both. This re-affirms W1's add-block-type CSS-leg cut verbatim
+#      ("no per-type anchor, only ad-hoc editor-affordance rules") and D85
+#      (block CSS lives in paper-surface.css, not here).
+#
+# So: TWO zones, not four — planted exactly where the append stream is
+# genuinely head-stable, cut with evidence where it is not.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE ENSURE CONTRACT, ZONE SPELLING — and how this differs from D57 classics
+# ─────────────────────────────────────────────────────────────────────────────
+# Like every ensure-* command this guarantees an END STATE and keys each guard
+# on payload text a hand edit would also produce — here the zone declaration
+# `scaffy:zone <name>` itself, NOT the trailing `MARK:` token. The D57
+# consequences bind: a hand-planted identical zone wins (the run skips, writes
+# NO receipt), and `bp scaffy remove` after such a skip exits 4 — correct,
+# scaffy never owned that line. Unlike ensure-cli-noun there is no non-scaffy
+# hand-equivalent artifact: the zone comment is scaffy vocabulary by
+# definition, so in the common case scaffy plants it, owns it, and remove
+# retracts it byte-clean.
+#
+# ZONE MECHANICS — head anchor, append-below. Both ops use the array-opening
+# idiom proven by ensure-cli-noun: anchor at the neighborhood's OPENING line
+# (unique, stable, never consumed by any append), plant the zone comment
+# directly after it, and direct all future appends DIRECTLY BELOW the zone
+# comment. Order is neutral in both neighborhoods (the Hooks map is a
+# dictionary read once at the LiveSocket tail; the script list at this point
+# is position-independent for defer Web Components and window-global
+# providers alike). Because the marks sit on their own comment lines, the
+# MIXED sweep-refactors that move surrounding content carry or leave them
+# whole — a mark line is never a substring of a rule a sweep rewrites.
+#
+# A FUTURE add-live-hook / add-script-asset command anchors at these marks
+# with plain INSERT AFTER FIRST — that is the payoff: the mark mechanic's
+# first-contact behavior (charter D5/W1 inverted) done once, so every later
+# command against this file starts anchored instead of surveying 6400 lines.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 1 — plant the script-assets zone after the body content opening
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: the `<body>` + `{@inner_content}` pair — byte-unique in the file,
+# flush against each other since the layout's birth, consumed by nothing. The
+# zone MUST sit after {@inner_content}, never between <body> and the content:
+# a non-defer script above the page content is exactly the blocking-Lucide
+# mistake Golden Rule 4 exists to prevent. New tags below the zone land at
+# the HEAD of the script list — safe for both script species (defer Web
+# Components execute in DOM order after parse; non-defer window-global
+# providers only need to precede the inline Hooks script far below).
+# The payload is a HEEx comment (`<%!-- --%>`, the file's body-region
+# convention) — stripped at compile, zero bytes shipped to the client.
+IN "api/lib/barkpark_web/layouts/root.html.heex"
+### Plant the script-assets zone head anchor
+INSERT AFTER FIRST
+::: body content opening :::
+<body>
+  {@inner_content}
+::: body content opening :::
+WITH
+::: script-assets zone :::
+  <%!-- scaffy:zone script-assets (ensure-root-layout-zones) -- stable head
+        anchor for NEW script assets: add your script tag DIRECTLY BELOW this
+        comment (src="/assets/<asset>.js"; defer for independent Web
+        Components, non-defer only when the inline Hooks script at the tail
+        must read your window.* global at registration time). NEVER a
+        blocking script in <head> (Golden Rule 4). Sweeps: move this comment
+        only whole, on its own lines. MARK:zone-script-assets --%>
+::: script-assets zone :::
+MARK "zone-script-assets"
+ASLONG FILE DONT CONTAIN "scaffy:zone script-assets"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP 2 — plant the live-hooks zone after the Hooks map opener
+# ─────────────────────────────────────────────────────────────────────────────
+# Anchor: `let Hooks = {};` — the map's opening line, unique in the file
+# (verified: exactly one occurrence), stable since the LiveSocket script's
+# birth, and ordering-neutral: a definition right after the opener is as
+# valid as one at the tail, because the map is only read by the
+# `new LiveView.LiveSocket(...)` construct at the script's end. This is the
+# same opening-line idiom as ensure-cli-noun's completionNouns anchor. The
+# payload is a JS line comment — the script region's native syntax.
+IN "api/lib/barkpark_web/layouts/root.html.heex"
+### Plant the live-hooks zone head anchor
+INSERT AFTER FIRST
+::: hooks map opener :::
+    let Hooks = {};
+::: hooks map opener :::
+WITH
+::: live-hooks zone :::
+    // scaffy:zone live-hooks (ensure-root-layout-zones) -- stable head anchor
+    // for NEW LiveView hook definitions: add `Hooks.YourHook = {...}` (or a
+    // guarded `if (window.X) Hooks.Y = window.X;` bridge) DIRECTLY BELOW this
+    // comment. The Hooks map is order-neutral -- every definition here
+    // precedes the `new LiveView.LiveSocket(...)` read at the script tail.
+    // Sweeps: move this comment only whole, on its own lines.
+    // MARK:zone-live-hooks
+::: live-hooks zone :::
+MARK "zone-live-hooks"
+ASLONG FILE DONT CONTAIN "scaffy:zone live-hooks"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# Both zone declarations present (each a verbatim substring of its op's
+# payload). Holds whether this run planted them or a prior run / hand edit
+# already had them — the ensure contract guarantees the END STATE. There is
+# no cheap LOCAL runtime gate for HEEx (every mix gate compiles the world,
+# A2), so the LOCAL close is grep-shaped and the compile proof is TIER ci:
+# comment-only payloads in valid comment syntax (HEEx comment in the body
+# region, JS comment inside the script) cannot change rendered output, and
+# `mix compile` in CI reds if either comment form were malformed.
+ASSERT FILE "api/lib/barkpark_web/layouts/root.html.heex" CONTAINS "scaffy:zone script-assets"
+ASSERT FILE "api/lib/barkpark_web/layouts/root.html.heex" CONTAINS "scaffy:zone live-hooks"
+ASSERT CMD "cd api && mix compile" TIER ci

@@ -21,8 +21,6 @@ defmodule Barkpark.Tenancy.RolePermission do
     timestamps(type: :utc_datetime_usec)
   end
 
-  def actions, do: @actions
-
   def changeset(perm, attrs) do
     perm
     |> cast(attrs, [:role_id, :action])

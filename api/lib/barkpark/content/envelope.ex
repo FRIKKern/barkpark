@@ -42,6 +42,7 @@ defmodule Barkpark.Content.Envelope do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, SchemaDefinition}
   alias Barkpark.Crypto.FieldCipher
+  alias Barkpark.PortableDoc.Projection
 
   @reserved ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt)
 
@@ -51,6 +52,8 @@ defmodule Barkpark.Content.Envelope do
       (doc.content || %{})
       |> Map.drop(@reserved)
       |> Map.put("title", doc.title)
+
+    {user_fields, derived_from_body?} = promote_paper_blocks(user_fields, doc.type)
 
     Map.merge(user_fields, %{
       "_id" => doc.doc_id,
@@ -62,7 +65,26 @@ defmodule Barkpark.Content.Envelope do
       "_updatedAt" => to_iso8601(doc.updated_at)
     })
     |> redact_by_field_visibility(schema, caller_context, doc_owner_id(doc))
+    |> maybe_drop_orphaned_promotion(derived_from_body?)
   end
+
+  defp promote_paper_blocks(fields, "paper") do
+    case Projection.read_blocks(fields) do
+      blocks when is_list(blocks) ->
+        {Map.put(fields, "blocks", blocks), not is_list(fields["blocks"])}
+
+      _ ->
+        {fields, false}
+    end
+  end
+
+  defp promote_paper_blocks(fields, _type), do: {fields, false}
+
+  defp maybe_drop_orphaned_promotion(fields, true) do
+    if Map.has_key?(fields, "body"), do: fields, else: Map.delete(fields, "blocks")
+  end
+
+  defp maybe_drop_orphaned_promotion(fields, false), do: fields
 
   def render_many(docs, schema \\ nil, caller_context \\ nil),
     do: Enum.map(docs, &render(&1, schema, caller_context))
@@ -186,8 +208,10 @@ defmodule Barkpark.Content.Envelope do
 
   Fail-closed and consistent with `render/3`'s visibility rules:
 
-    * `nil` / `:internal` caller and admins ⇒ unrestricted (internal/system
-      reads; their output still rides the `render/3` redaction boundary).
+    * `:internal` caller and admins ⇒ unrestricted (internal/system reads;
+      their output still rides the `render/3` redaction boundary). A `nil`
+      caller FAILS CLOSED — the most restrictive anonymous principal, mirroring
+      `render/3`'s nil clause; it is NEVER an "unrestricted" signal.
     * reserved (`_id`…) and promoted (`title`/`status`/`doc_id`) fields ⇒ always
       allowed.
     * a declared `private` / `owner_only` / `readable_by` field ⇒ allowed ONLY
@@ -197,7 +221,18 @@ defmodule Barkpark.Content.Envelope do
       parity). Encrypted-marked fields are already immune (stored ciphertext
       never matches a plaintext probe).
   """
-  def field_readable?(_schema, _field_name, nil), do: true
+  # No caller context => FAIL CLOSED. A nil caller is the most restrictive
+  # anonymous principal: a declared private / owner_only / readable_by field is
+  # NEVER filterable/orderable by it. This mirrors `render/3`'s nil clause
+  # (see :149-153) — a nil caller is the anonymous PUBLIC-ONLY principal, never
+  # an "internal full-content" signal. Internal/writer paths that must reference
+  # a private field in a WHERE/ORDER clause pass the explicit `:internal`
+  # sentinel below — NEVER nil. (Every production caller already threads a
+  # %CallerContext{}; this fail-closed default is defence in depth.)
+  def field_readable?(_schema, _field_name, nil), do: false
+
+  # Explicit internal/full-content sentinel — internal/system reads whose output
+  # still rides the `render/3` redaction boundary. Not reachable from a request path.
   def field_readable?(_schema, _field_name, :internal), do: true
   def field_readable?(_schema, _field_name, %CallerContext{is_admin: true}), do: true
 
@@ -219,7 +254,9 @@ defmodule Barkpark.Content.Envelope do
     end
   end
 
-  def field_readable?(_schema, _field_name, _ctx), do: true
+  # Any other caller shape => FAIL CLOSED (mirrors `render/3`'s redaction default
+  # — an unrecognized principal is the most restrictive, never a bypass).
+  def field_readable?(_schema, _field_name, _ctx), do: false
 
   # Top-level segment of a (possibly nested / `content.`-prefixed) filter path —
   # `content.meta.seo` and `meta.seo` both resolve their visibility against the
@@ -310,4 +347,42 @@ defmodule Barkpark.Content.Envelope do
   end
 
   defp to_iso8601(nil), do: nil
+
+  # ── field projection ──────────────────────────────────────────────────────
+  # The system identity/versioning keys every projected hit keeps regardless of
+  # the allowlist — a hit must stay addressable and cache-comparable.
+  @projection_always ~w(_id _type _draft _publishedId _rev _createdAt _updatedAt)
+
+  @doc """
+  Project rendered documents down to a caller-supplied comma-separated field
+  ALLOWLIST (plus the system keys) — pure SUBTRACTION after `render`, so it can
+  never expose anything the render itself did not.
+
+  Why: the finder surfaces request `limit=100` per keystroke, and a rendered
+  paper envelope carries ~37KB of `body_html` the finder never reads — 15MB of
+  JSON per keystroke (seconds of wall time; live-caught at 10s on a slow link).
+  `?fields=title,description,slug,…` cuts the same reply to ~100KB.
+
+  `nil`/empty/whitespace-only field lists are a no-op (the full envelopes), so
+  every existing caller is byte-identical without the param.
+  """
+  @spec project([map()], String.t() | nil) :: [map()]
+  def project(docs, fields) when is_binary(fields) do
+    keys =
+      fields
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    case keys do
+      [] ->
+        docs
+
+      keys ->
+        take = MapSet.new(keys ++ @projection_always)
+        Enum.map(docs, &Map.filter(&1, fn {k, _v} -> MapSet.member?(take, k) end))
+    end
+  end
+
+  def project(docs, _fields), do: docs
 end

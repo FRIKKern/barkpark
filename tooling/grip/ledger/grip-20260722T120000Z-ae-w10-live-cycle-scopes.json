@@ -1,0 +1,38 @@
+{
+  "run_id": "grip-20260722T120000Z",
+  "recipes": [
+    {
+      "subject": "cmd:gh-pr-list",
+      "quantity": "gh:pr-files-fence-scan",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && gh pr list --state open --json number,files --jq '.[] | {n: .number, f: [.files[].path]}' | grep -E 'content/(query|graph)|documents_retriever|router\\.ex|\"web/|internal/cli'",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-22T12:00:00Z"
+    },
+    {
+      "subject": "task:pt-w1-scheduled-gate-alerting",
+      "quantity": "bp:task-get-status-and-file-scope",
+      "rerun": "bp task get pt-w1-scheduled-gate-alerting -o json | python3 -c \"import json,sys; d=json.load(sys.stdin); print(d['doc']['status'], d['doc']['assignee'])\"",
+      "derived_level": "L1",
+      "deps": [
+        "scripts/file-ci-failure-issue.sh",
+        ".github/workflows/paper-readers.yml",
+        ".github/workflows/codebase-intel.yml",
+        ".github/workflows/renew-mail-cert.yml"
+      ],
+      "observed_at": "2026-07-22T12:00:00Z"
+    },
+    {
+      "subject": "commit:8aa6f3a50",
+      "quantity": "git:show-diff-scope",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show 8aa6f3a50 --stat && git merge-base --is-ancestor 8aa6f3a50 origin/main; echo ancestor=$?; gh pr list --state all --head loop-epic/the-spill-stream-the-copy-producer-tar-f-0-r --json number,state",
+      "derived_level": "L1",
+      "deps": [
+        "api/lib/barkpark/tenancy/workspace_bundle.ex",
+        "api/lib/barkpark/tenancy/workspace_bundle/archive.ex",
+        "api/lib/barkpark_web/controllers/workspace_controller.ex"
+      ],
+      "observed_at": "2026-07-22T12:00:00Z"
+    }
+  ]
+}

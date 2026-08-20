@@ -36,28 +36,89 @@ defmodule Barkpark.PortableDoc.Render do
 
   alias Barkpark.PortableDoc.Render.{Compose, Palettes, Stylesheet, Util, Walk}
 
-  # Render-output version for the body_html cache. Bump when render output
-  # semantics change — e.g. the #857/#861 tolerance change class — so a paper
-  # whose frozen `content["body_html"]` was written by an OLDER renderer is
-  # detectable as stale (its `content["body_html_sv"]` lags this) and can be
-  # rehydrated by `mix barkpark.rehydrate_body_html`.
+  # Render-output version for the body_html cache: a sha256 DIGEST OF THE
+  # RENDERER'S OWN SOURCE TEXT, computed at compile time. It replaces the
+  # hand-typed integer that preceded it (v1→v3), which was a version only as
+  # long as a human remembered to bump it — four S-tier pdrender rounds landed
+  # without a bump and the published papers went stale behind a matching stamp.
+  # Derived, the stamp cannot lag the renderer: editing any covered file moves
+  # the digest, and `mix barkpark.rehydrate_body_html` sees the drift.
   #
-  # v2: article prose emits bare semantic elements styled by Render.Stylesheet.
-  # v3: article ROLES/TONES/CHROME (text roles, callout tones, table/sheet band +
-  # cell rules, wikilink/tag/task-chip/embed/blockref/button/hr frames) emit
-  # `bp-*` classes instead of inline THEME styles — the final Stage-2 emit change.
-  # deploy step: run mix barkpark.rehydrate_body_html on guerrilla + prod after
-  # this wave merges; prerequisite for deleting the root.html.heex de-inline
-  # overrides (wave 3). Old cached v1/v2 HTML stays self-styled (inline) and keeps
-  # rendering; block_ops stamps body_html_sv on every fresh render.
-  @body_html_render_version 3
+  # Covered set: this file + every `render/*.ex` + `slots.ex` — the whole render
+  # path and nothing else (Tiers and Constraints are not on it). `@external_resource`
+  # on each one makes mix recompile this module whenever any of them changes.
+  #
+  # The bytes are hashed in an EXPLICITLY SORTED order (never filesystem
+  # enumeration order) and each file contributes its basename alongside its
+  # contents, so the digest is stable across machines and build directories but
+  # still moves if files are renamed or swapped.
+  #
+  # NOT a .beam hash: a raw whole-.beam MD5 embeds the absolute source path and
+  # is therefore not rebuild-stable, and `:beam_lib.md5/1` needs already-loaded
+  # modules — a chicken-and-egg at this module's own compile time, and sensitive
+  # to the OTP toolchain (the prod host is ARM/ASDF).
+  #
+  # KNOWN AND ACCEPTED: a transitive Hex dependency bump can change rendered
+  # bytes without touching a covered file, leaving the digest unmoved. The
+  # rehydrate sweep's byte-compare is the backstop for that class; solving it
+  # here is explicitly out of scope.
+  # Sorted as names RELATIVE to this directory, never as absolute paths: the
+  # relative names are identical on every machine and in every build directory,
+  # so the hash order cannot shift with a checkout location.
+  @render_source_names ([
+                          "render.ex",
+                          "slots.ex"
+                        ] ++
+                          Enum.map(
+                            ~w(
+                              cards_email.ex components.ex compose.ex data_viz.ex figures.ex
+                              fleet_email.ex forms.ex inline.ex math.ex palettes.ex
+                              panels_email.ex status_vocab.ex stylesheet.ex tokens_gen.ex
+                              util.ex walk.ex
+                            ),
+                            &("render/" <> &1)
+                          ))
+                       |> Enum.sort()
+
+  @render_source_files Enum.map(@render_source_names, &Path.join(__DIR__, &1))
+
+  for path <- @render_source_files do
+    @external_resource path
+  end
+
+  @body_html_render_version @render_source_names
+                            |> Enum.reduce(:crypto.hash_init(:sha256), fn name, acc ->
+                              :crypto.hash_update(
+                                acc,
+                                name <> "\0" <> File.read!(Path.join(__DIR__, name))
+                              )
+                            end)
+                            |> :crypto.hash_final()
+                            |> Base.encode16(case: :lower)
 
   @doc """
-  The current body_html render-version. Stamped onto `content["body_html_sv"]`
-  at every fresh block→HTML render (the paper write path) so a stale frozen
-  cache — one rendered by a prior renderer — is detectable and rehydratable.
+  The current body_html render-version — a sha256 hex digest of the renderer's
+  own source. Stamped onto `content["body_html_sv"]` at every fresh block→HTML
+  render (the paper write path) so a stale frozen cache — one rendered by a
+  prior renderer — is detectable and rehydratable.
+
+  A content hash has NO TOTAL ORDER: only identity is meaningful. Compare it
+  with `==`, never `>=`.
   """
   def body_html_render_version, do: @body_html_render_version
+
+  @doc """
+  The covered file names — relative to the portable_doc directory, in the exact
+  sorted order the digest hashes them. Exposed so a test can assert the covered
+  set against the render directory on disk: a newly added `render/*.ex` that is
+  not listed here would otherwise fall silently outside the digest.
+  """
+  def render_source_names, do: @render_source_names
+
+  @doc """
+  The absolute paths whose bytes feed `body_html_render_version/0`, in hash order.
+  """
+  def render_source_files, do: @render_source_files
 
   @doc false
   defdelegate email_palette, to: Palettes
@@ -268,6 +329,19 @@ defmodule Barkpark.PortableDoc.Render do
     card =
       ~s(<div style="max-width:#{palette.width}px;margin:0 auto;padding:28px 24px;background:#{palette.paper};border-radius:12px;">) <>
         body <> "</div>"
+
+    document(~s(<div style="padding:28px 12px;">) <> card <> "</div>", palette)
+  end
+
+  @doc "Wrap an already-sanitized legacy HTML fragment in the email document chrome."
+  def render_html_document(html, opts \\ %{}) when is_binary(html) do
+    style = Map.get(opts, :style, :email)
+    theme = Map.get(opts, :theme, :evergreen)
+    palette = Barkpark.PortableDoc.Render.Palettes.palette_for(style, theme)
+
+    card =
+      ~s(<div style="max-width:#{palette.width}px;margin:0 auto;padding:28px 24px;background:#{palette.paper};border-radius:12px;">) <>
+        html <> "</div>"
 
     document(~s(<div style="padding:28px 12px;">) <> card <> "</div>", palette)
   end

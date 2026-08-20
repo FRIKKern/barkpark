@@ -119,8 +119,14 @@ defmodule BarkparkWeb.ShareMeta do
   def manifest(content, url, doc_type, fallback_title \\ nil)
 
   def manifest(content, url, doc_type, fallback_title) when is_map(content) do
-    content["preview"] || read_time_manifest(content, url, doc_type, fallback_title) ||
-      degraded_manifest(content, url, doc_type, fallback_title)
+    stamped = content["preview"]
+
+    if is_map(stamped) do
+      stamped
+    else
+      read_time_manifest(content, url, doc_type, fallback_title) ||
+        degraded_manifest(content, url, doc_type, fallback_title)
+    end
   end
 
   def manifest(_content, url, doc_type, fallback_title),
@@ -268,9 +274,24 @@ defmodule BarkparkWeb.ShareMeta do
   defp name(_), do: nil
 
   defp strings(nil), do: []
-  defp strings(list) when is_list(list), do: list |> Enum.map(&clean/1) |> Enum.reject(&is_nil/1)
+
+  defp strings(list) when is_list(list),
+    do: list |> Enum.map(&tag_name/1) |> Enum.reject(&is_nil/1)
+
   defp strings(one) when is_binary(one), do: strings([one])
   defp strings(_), do: []
+
+  # Dual-shape tag element (authoring-excellence D18): a weighted label
+  # `%{"tag" => name, "strength" => _}` reads as its tag name; any OTHER map is
+  # dropped (interpolating a Map into the `content={tag}` HEEx attr raises
+  # Protocol.UndefinedError — the /papers/:slug crash this guards). Scalars and
+  # strings clean exactly as before, so this module no longer depends on the
+  # upstream Preview projection having already flattened the manifest's tags.
+  # Mirrors `Barkpark.Preview.element_name/1`, but drops (nil) rather than "" —
+  # ShareMeta rejects nils, so a bad map leaves NO empty article:tag behind.
+  defp tag_name(%{"tag" => name}) when is_binary(name), do: clean(name)
+  defp tag_name(%{}), do: nil
+  defp tag_name(other), do: clean(other)
 
   # JSON-LD Article — `escape: :html_safe` escapes `<`, `>`, `&` (and the line
   # separators) to \\u escapes, so a title containing `</script>` cannot break

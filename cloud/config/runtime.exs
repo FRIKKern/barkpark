@@ -208,23 +208,49 @@ if config_env() == :prod do
     bucket: System.get_env("BARKPARK_BUNDLE_BUCKET"),
     location: System.get_env("BARKPARK_BUNDLE_LOCATION") || "fsn1"
 
+  # ── Push relay credentials (mobile charter D15) — THE HUMAN GATE ───────────
+  #
+  # These five (+ one) env vars are the ONLY thing standing between the built,
+  # tested relay and real notifications. Set them and restart; nothing else
+  # changes. Absent, BarkparkCloud.Push.adapter_for/1 resolves to
+  # Adapters.NotConfigured and every send cancels terminally — no flag, no dead
+  # code, no half-state. The full acquisition steps (which Apple/Firebase
+  # console page, what the value looks like, and the CLIENT-side entitlements
+  # that must land in the same wave) live in the moduledoc of
+  # BarkparkCloud.Push.Adapters.NotConfigured — read that before opening the
+  # gate. cloud/.env.example carries the same list in env form.
+  #
+  # The two platforms are INDEPENDENT: Android alone is a valid state.
+  config :barkpark_cloud, BarkparkCloud.Push.Adapters.APNS,
+    # The FULL .p8 PEM contents. Docker/systemd env cannot carry raw newlines,
+    # so a literal "\n" in the value is expanded back — paste the file with
+    # `awk '{printf "%s\\n", $0}' AuthKey_XXX.p8` or with real newlines; both work.
+    key_p8: System.get_env("APNS_KEY_P8") |> then(&(&1 && String.replace(&1, "\\n", "\n"))),
+    key_id: System.get_env("APNS_KEY_ID"),
+    team_id: System.get_env("APNS_TEAM_ID"),
+    topic: System.get_env("APNS_BUNDLE_ID"),
+    # "sandbox" (default) or "production". The wrong value 400s every send with
+    # BadDeviceToken on a perfectly valid token — the classic APNs trap.
+    env: System.get_env("APNS_ENV") || "sandbox"
+
+  config :barkpark_cloud, BarkparkCloud.Push.Adapters.FCM,
+    service_account_json: System.get_env("FCM_SERVICE_ACCOUNT_JSON")
+
   # Web (cloud-12a): the JSON API's listen port in prod, from PORT (default 4100).
   config :barkpark_cloud, BarkparkCloud.Web.Endpoint,
     server: true,
     port: String.to_integer(System.get_env("PORT") || "4100")
 
-  # Artifact uploads (P7): the on-disk dir where the control plane writes the
-  # tarballs streamed in via POST /v1/sites/:id/artifact. The builder reads
-  # them back via the returned `file://` URL, so the dir must be shared with
-  # the builder process. In prod we default to /var/lib/barkpark-cloud/artifacts
-  # — a writable system path that survives restarts. Override via
-  # BARKPARK_CLOUD_ARTIFACT_DIR (e.g. point at a tmpfs or a mounted volume).
-  # Max upload bytes default to 100 MB; raise via BARKPARK_CLOUD_MAX_ARTIFACT_BYTES.
-  config :barkpark_cloud, BarkparkCloud.Web.Router,
-    artifact_dir:
-      System.get_env("BARKPARK_CLOUD_ARTIFACT_DIR") || "/var/lib/barkpark-cloud/artifacts",
-    max_artifact_bytes:
-      String.to_integer(System.get_env("BARKPARK_CLOUD_MAX_ARTIFACT_BYTES") || "104857600")
+  # Artifact uploads: NO on-disk config, deliberately (site-spawner W9, charter
+  # D91). This block used to set `artifact_dir` — a host-local path the upload
+  # route wrote tarballs to, returned as a `file://` URL, with a comment claiming
+  # it "survives restarts". The compose file refutes that: the control-plane
+  # container declares no volume for it, and the box that would read the path
+  # runs on a different host entirely, so nothing could ever open the URL. The
+  # sink is now Postgres (`site_artifacts` on cloud_pgdata, the CP's only durable
+  # volume) and the 32 MB cap is a module attribute on the router — a size that
+  # bounds a build OUTPUT rather than a whole project dir needs no per-deploy
+  # tuning knob.
 
   # Provisioning: the shared WORKER token the off-box Go warm-pool
   # provisioner presents to /v1/internal/provision-jobs/*. May be nil here — the
@@ -355,4 +381,48 @@ if config_env() == :prod do
   if dashboard_url = System.get_env("DASHBOARD_URL") do
     config :barkpark_cloud, dashboard_url: dashboard_url
   end
+
+  # site-spawner W5 (charter D45): the control plane's own public origin, the host
+  # a co-located box POSTs a content-publish webhook back to. Falls back to the
+  # config.exs default (the prod API host).
+  if public_url = System.get_env("PUBLIC_URL") || System.get_env("CONTROL_PLANE_URL") do
+    config :barkpark_cloud, :public_url, public_url
+  end
+end
+
+# cch-w1-peer-ip-pin: the front-door peers whose X-Forwarded-For may move
+# conn.remote_ip, as a comma-separated list of IP addresses (e.g.
+# "172.18.0.1"). Loopback is always trusted in code and does not need listing.
+#
+# Deliberately OUTSIDE the prod block: the container runs this stack in any
+# MIX_ENV, and the docker bridge gateway is a property of the DEPLOYMENT, not of
+# the environment name. Unset keeps the config.exs default (the pinned gateway),
+# which is what compose's pinned subnet allocates.
+#
+# List INDIVIDUAL ADDRESSES ONLY, and keep this in step with the `networks:`
+# subnet in cloud/docker-compose.yml. Do not be tempted to accept CIDR ranges
+# here: a range re-opens the forgery hole this pin exists to close (charter D5 —
+# 172.18.0.2 is an internet-facing SMTP container). A malformed entry raises at
+# boot rather than silently degrading the guard to a no-op.
+if peers = System.get_env("TRUSTED_PROXY_PEERS") do
+  config :barkpark_cloud,
+         :trusted_proxy_peers,
+         peers
+         |> String.split(",")
+         |> Enum.map(&String.trim/1)
+         |> Enum.reject(&(&1 == ""))
+         |> Enum.map(fn peer ->
+           case :inet.parse_address(String.to_charlist(peer)) do
+             {:ok, address} ->
+               address
+
+             {:error, _} ->
+               raise """
+               TRUSTED_PROXY_PEERS contains #{inspect(peer)}, which is not a valid IP address.
+               Expected a comma-separated list of individual addresses, e.g. "172.18.0.1".
+               CIDR ranges are NOT supported: trusting a whole subnet lets any container on
+               it forge every client's session IP and rate-limit bucket.
+               """
+           end
+         end)
 end

@@ -9,7 +9,10 @@ defmodule Barkpark.Tasks.Stamp do
   #
   #   * `{:met, evidence}` — flips the criterion's `met` to true and writes the
   #     (REQUIRED, non-empty) evidence. A met without evidence is rejected
-  #     before any DB work — a lock never flips on an empty claim.
+  #     before any DB work — a lock never flips on an empty claim. It ALSO
+  #     requires `:criterion_text` (D56): the index alone is not enough to
+  #     identify a criterion, and an unguarded index-only met-flip is the
+  #     proven false-done vector (`:criterion_text_required`).
   #   * `{:miss, note}` — records the honest attempt WITHOUT flipping: appends
   #     `%{"note","ts","worker"}` to the criterion's `attempts` list (bounded
   #     to the 5 most recent, app-enforced) and PINS `met` explicitly to its
@@ -37,11 +40,10 @@ defmodule Barkpark.Tasks.Stamp do
   # (`index`, `result` "met"|"miss", `worker`) so the events feed and every
   # board can render the stamp without diffing content.
 
-  import Ecto.Query, only: [from: 2]
-
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       insert_mutation_event!: 5,
       caller_stamp: 1,
       check_holder: 2,
@@ -67,19 +69,29 @@ defmodule Barkpark.Tasks.Stamp do
       * `:criterion` (required integer ≥ 0) — index into
         `content.acceptance_criteria`.
       * `:outcome` (required) — `{:met, evidence}` | `{:miss, note}`.
+      * `:criterion_text` — the criterion's EXPECTED stored text, threaded into
+        the merge as the `"criterion"` CAS key. **REQUIRED for `{:met, _}`**
+        (D56): without it the merge fails closed with
+        `:criterion_text_required`, because an index-only met-flip silently
+        lands on whatever row the index hits (the 1-based-habit off-by-one that
+        fabricated a done in Wave 4). With it, a mis-based index whose text does
+        not match the row is REJECTED (`:criteria_mismatch`) instead of flipping
+        the neighbour. OPTIONAL for `{:miss, _}` — a miss flips nothing.
       * `:caller_token_id` (optional) — audit stamp on the event row.
 
   Errors: `:not_found`, `{:not_in_progress, status}`, `:not_holder`,
   `:fenced_off`, `:stale_claim`, `:criteria_index_out_of_range`,
-  `:evidence_required`, `:note_required`, `:invalid_criteria`.
+  `:criteria_mismatch`, `:criterion_text_required`, `:evidence_required`,
+  `:note_required`, `:invalid_criteria`.
   """
   def stamp(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
     index = Keyword.fetch!(opts, :criterion)
     outcome = Keyword.fetch!(opts, :outcome)
+    criterion_text = Keyword.get(opts, :criterion_text)
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
-    with {:ok, update, result_tag} <- build_update(index, outcome, worker_id) do
+    with {:ok, update, result_tag} <- build_update(index, outcome, worker_id, criterion_text) do
       do_stamp_txn(task_id, worker_id, observed_epoch, update, result_tag, caller_token_id)
     end
   end
@@ -88,28 +100,46 @@ defmodule Barkpark.Tasks.Stamp do
   # payload is shaped, so `met` is always explicit and a miss always carries
   # its attempt. Validation is here (not just the controller) so internal
   # callers get the same evidence-or-nothing contract.
-  defp build_update(index, _outcome, _worker) when not (is_integer(index) and index >= 0),
-    do: {:error, :invalid_criteria}
+  #
+  # `criterion_text` is the criteria-grain CAS: `put_guard` sets the `"criterion"`
+  # key on the update map ONLY when a non-empty string is given, so
+  # `Internal.merge_criteria` rejects a mis-based / off-by-one index
+  # (`:criteria_mismatch`) whose text does not match the stored row. A blank / nil
+  # guard leaves the update unguarded — which merge_criteria now REFUSES on a
+  # met-flip (`:criterion_text_required`, D56). The refusal lives in
+  # merge_criteria, not here, so EVERY write path (stamp AND close) fails closed
+  # from one definition; a miss carries no lock to flip and stays permissive.
+  defp build_update(index, _outcome, _worker, _text)
+       when not (is_integer(index) and index >= 0),
+       do: {:error, :invalid_criteria}
 
-  defp build_update(index, {:met, evidence}, _worker)
+  defp build_update(index, {:met, evidence}, _worker, text)
        when is_binary(evidence) and evidence != "" do
-    {:ok, %{"index" => index, "met" => true, "evidence" => evidence}, "met"}
+    {:ok, put_guard(%{"index" => index, "met" => true, "evidence" => evidence}, text), "met"}
   end
 
-  defp build_update(_index, {:met, _no_evidence}, _worker), do: {:error, :evidence_required}
+  defp build_update(_index, {:met, _no_evidence}, _worker, _text),
+    do: {:error, :evidence_required}
 
-  defp build_update(index, {:miss, note}, worker) when is_binary(note) and note != "" do
+  defp build_update(index, {:miss, note}, worker, text) when is_binary(note) and note != "" do
     attempt = %{
       "note" => note,
       "ts" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "worker" => worker
     }
 
-    {:ok, %{"index" => index, "attempt" => attempt}, "miss"}
+    {:ok, put_guard(%{"index" => index, "attempt" => attempt}, text), "miss"}
   end
 
-  defp build_update(_index, {:miss, _no_note}, _worker), do: {:error, :note_required}
-  defp build_update(_index, _outcome, _worker), do: {:error, :invalid_criteria}
+  defp build_update(_index, {:miss, _no_note}, _worker, _text), do: {:error, :note_required}
+  defp build_update(_index, _outcome, _worker, _text), do: {:error, :invalid_criteria}
+
+  # Thread the expected criterion text into the merge as the CAS `"criterion"`
+  # key — only when it is a real, non-empty string (nil/"" stay permissive).
+  defp put_guard(update, text) when is_binary(text) and text != "",
+    do: Map.put(update, "criterion", text)
+
+  defp put_guard(update, _text), do: update
 
   defp do_stamp_txn(task_id, worker_id, observed_epoch, update, result_tag, caller_token_id) do
     result =
@@ -194,15 +224,9 @@ defmodule Barkpark.Tasks.Stamp do
     with {:ok, new_content} <- merge_criteria(doc.content, [update]) do
       new_rev = generate_rev()
 
-      {rows, _} =
-        from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)
-        |> Repo.update_all(
-          set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-        )
-
-      case rows do
-        1 -> {:ok, %{doc | content: new_content, rev: new_rev}}
-        0 -> {:error, :stale_claim}
+      case fenced_content_write(doc, doc.rev, new_content, new_rev) do
+        {:ok, updated} -> {:ok, updated}
+        :stale -> {:error, :stale_claim}
       end
     end
   end

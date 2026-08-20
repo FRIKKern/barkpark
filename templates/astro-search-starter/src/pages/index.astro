@@ -1,0 +1,51 @@
+---
+// The landing IS the finder — THE finder from the original Search template,
+// mounted as ONE React `client:only` island (charter D37-D47). Dual-engine
+// (indx typo-tolerant + Postgres FTS) per-keystroke search runs browser-direct
+// against the flat, anonymous Barkpark search API; when a public-read WS token
+// is provisioned it upgrades to the persistent Phoenix channel. No server sits
+// between the visitor and the engine — the deployed site is pure static files.
+import Base from '../layouts/Base.astro'
+import FinderIsland from '../components/FinderIsland'
+import { env } from '../lib/bp'
+import '../styles/globals.css'
+
+// bp-doc-id HEALTH marker (content-truth): one real doc id proves the corpus is
+// live, so the deploy gate fails CLOSED on an empty corpus. Read via the FLAT
+// ANONYMOUS route — the finder itself never bakes a token, and the scoped query
+// route requires one; a build-time hiccup degrades to an empty marker, never a
+// crash.
+const origin = new URL(env.apiUrl).origin
+let docId = ''
+try {
+  const res = await fetch(
+    `${origin}/v1/data/query/${env.dataset}/${env.docType}?limit=1`,
+  )
+  if (res.ok) {
+    const j = await res.json()
+    docId = j?.result?.documents?.[0]?._id || ''
+  }
+} catch {
+  /* empty marker → deploy HEALTH fails closed, as designed */
+}
+
+const title = (process.env.BARKPARK_SITE_TITLE || 'Search everything.').trim()
+---
+
+<Base title={title} docId={docId}>
+  {/* The split shell is PAGE-owned so ClientRouter can swap the right pane on
+      navigation while the island (transition:persist) is reused untouched —
+      that is what makes opening a document feel like the Next edition: no
+      reload, the finder keeps its query, results and scroll.
+
+      The persist NAME must match the document page's island exactly, or Astro
+      treats them as different elements and remounts. */}
+  <div class="flex h-screen w-full overflow-hidden">
+    <FinderIsland client:only="react" transition:persist="finder-rail" />
+    {/* The graph's landing slot. The island PORTALS the corpus graph in here,
+        keeping it inside the finder's React tree (the context bridge) while its
+        DOM belongs to this page — so a document page, which renders no slot,
+        simply has no graph. */}
+    <div id="bp-graph-slot" class="hidden min-w-0 flex-1 md:block"></div>
+  </div>
+</Base>

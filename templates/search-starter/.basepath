@@ -1,0 +1,3 @@
+This template bakes basePath=$BARKPARK_SITE_BASE into the build (next.config.mjs).
+site-deploy-node.sh reads this marker: Caddy arms `handle` (no prefix strip) and the
+HEALTH probe hits the sub-path. Explicit BARKPARK_SITE_BASEPATH env overrides.

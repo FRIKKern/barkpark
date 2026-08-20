@@ -67,7 +67,7 @@ defmodule Barkpark.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:corsica, "~> 2.1"},
-      {:req, "~> 0.5"},
+      {:req, "~> 0.6.1"},
       # OIDC id_token (JWT/JWS) verification for enterprise SSO (era-w3-oidc-rp).
       {:jose, "~> 1.11"},
       # SAML 2.0 SP: vetted XML-dsig assertion verification (era-w3-saml).

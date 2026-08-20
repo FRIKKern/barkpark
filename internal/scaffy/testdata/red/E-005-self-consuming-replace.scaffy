@@ -1,0 +1,16 @@
+# expect: E-005 5
+DIRECTION "add"
+VARIABLE 1 "WorkerName" TITLE "t" DESCRIPTION "d" EXAMPLES "Reaper"
+IN "api/config/config.exs"
+REPLACE
+::: cron tail anchor :::
+       {"* * * * *", Barkpark.Workers.Tail}
+::: cron tail anchor :::
+WITH
+::: worker cron :::
+       {"* * * * *", Barkpark.Workers.Tail},
+       # scaffy:add-oban-worker MARK:cron-{{.worker-name}}
+       {"0 * * * *", Barkpark.Workers.{{.WorkerName}}}
+::: worker cron :::
+MARK "cron-{{.worker-name}}"
+ASLONG FILE DONT CONTAIN "MARK:cron-{{.worker-name}}"

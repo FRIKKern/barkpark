@@ -80,6 +80,8 @@ func TestLifecycleConstsMatchGeneratedTokens(t *testing.T) {
 		"cancelled":   lifeCancelled,
 		"ready":       lifeReady,
 		"open":        lifeOpen,
+		"considering": lifeConsidering,
+		"researching": lifeResearching,
 	}
 	for want, got := range consts {
 		if got != want {

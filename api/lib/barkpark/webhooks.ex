@@ -189,6 +189,10 @@ defmodule Barkpark.Webhooks do
     # A webhook with audit_categories set is an AUDIT subscriber, not a content
     # one — exclude it from content fan-out so the two channels never cross.
     |> where([w], fragment("? = '{}'", w.audit_categories))
+    # A webhook with a blocked_threshold_s is a CHAT_BLOCKED subscriber (herd
+    # layer, D59h) — exclude it too, else a chat_blocked row with the default
+    # empty events/types would match every content event and cross channels.
+    |> where([w], is_nil(w.blocked_threshold_s))
     |> where([w], fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.events, w.events, ^event))
     |> where([w], fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.types, w.types, ^type))
     |> scope(opts)
@@ -224,6 +228,26 @@ defmodule Barkpark.Webhooks do
 
   defp audit_org_scope(query, org_id),
     do: where(query, [w], is_nil(w.organization_id) or w.organization_id == ^org_id)
+
+  @doc """
+  Active CHAT_BLOCKED subscriptions for a workspace (herd layer, charter D59h):
+  a workspace-scoped `webhooks` row with a non-NULL `blocked_threshold_s` (the
+  subscription flag AND the per-workspace debounce threshold in one column).
+
+  WORKSPACE-scoped, never org-wide — deliberately UNLIKE `audit_webhooks_for/3`,
+  whose org-only semantics are untouched. A `nil` `workspace_id` never matches
+  (`w.workspace_id == ^nil` is a forbidden Ecto comparison AND fail-closed by
+  intent — a NULL-owner session must never notify, D43h), so the caller must not
+  pass nil; `BlockedSweeper` only ever passes the concrete owner_workspace_id of
+  a session that actually has a pending ask.
+  """
+  def chat_blocked_webhooks_for(workspace_id) when is_binary(workspace_id) do
+    Webhook
+    |> where([w], w.active == true)
+    |> where([w], w.workspace_id == ^workspace_id)
+    |> where([w], not is_nil(w.blocked_threshold_s))
+    |> Repo.all()
+  end
 
   # Apply the workspace/project tenant boundary from `opts`. Nil-safe via
   # Content.Scope: an absent workspace_id returns the query untouched.
@@ -279,6 +303,39 @@ defmodule Barkpark.Webhooks do
   end
 
   @doc """
+  Claim a CHAT_BLOCKED delivery slot for `(endpoint_id, dedupe_key)` (herd
+  layer, charter D57h). Returns `{:ok, delivery}` on the first claim, or
+  `{:error, :already_delivered}` if a chat_blocked row already exists for this
+  pair. The `dedupe_key` is the pending ask's `chat_messages` id stringified, so
+  a re-sweep of the SAME still-blocked ask claims the same slot and no-ops —
+  exactly-once per ask. `event_id` stays NULL; the exactly-once axis is the
+  partial UNIQUE(endpoint_id, dedupe_key) WHERE source_kind='chat_blocked', which
+  Ecto infers via the `:unsafe_fragment` conflict target (a plain column list
+  cannot express the partial predicate). `payload_snapshot` carries the encoded
+  body so a crash-recovery retry rebuilds without a `mutation_events` source.
+  """
+  def claim_chat_blocked_delivery(endpoint_id, dedupe_key, payload_snapshot)
+      when is_binary(dedupe_key) and is_map(payload_snapshot) do
+    case Repo.insert(
+           Delivery.changeset(%Delivery{}, %{
+             source_kind: "chat_blocked",
+             endpoint_id: endpoint_id,
+             dedupe_key: dedupe_key,
+             status: "pending",
+             attempts: 0,
+             payload_snapshot: payload_snapshot
+           }),
+           on_conflict: :nothing,
+           conflict_target:
+             {:unsafe_fragment, "(endpoint_id, dedupe_key) WHERE source_kind = 'chat_blocked'"}
+         ) do
+      {:ok, %Delivery{id: nil}} -> {:error, :already_delivered}
+      {:ok, %Delivery{} = d} -> {:ok, d}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
   Insert a durable MEDIA delivery row (`source_kind: "media"`).
 
   Media endpoints are config-driven (`:media_webhooks`), so there is no `webhooks`
@@ -311,6 +368,30 @@ defmodule Barkpark.Webhooks do
     |> Delivery.changeset(%{
       source_kind: "audit",
       endpoint_id: endpoint_id,
+      status: "pending",
+      attempts: 0,
+      payload_snapshot: payload_snapshot
+    })
+    |> Repo.insert()
+  end
+
+  @doc """
+  Insert a durable TEST delivery row (`source_kind: "test"`, GR45) for a one-shot
+  admin PROBE (`POST /v1/webhooks/:dataset/:id/test-send`).
+
+  Mirrors `create_media_delivery/1` deliberately: `endpoint_id` and `event_id`
+  stay NULL, so the row carries only the synthetic body in `payload_snapshot`.
+  A NULL `endpoint_id` is the crux of the safety contract — `mark_delivered/4`
+  and `mark_giveup/5` no-op their streak accounting on a nil endpoint, so a test
+  send (success OR failure) never resets a healthy endpoint's history nor pushes
+  a flaky one toward auto-disable. The probe is single-attempt (see
+  `Dispatcher.deliver_test/3`) and never resumed, so no `endpoint_id` is needed
+  for a retry to re-target.
+  """
+  def create_test_delivery(payload_snapshot) when is_map(payload_snapshot) do
+    %Delivery{}
+    |> Delivery.changeset(%{
+      source_kind: "test",
       status: "pending",
       attempts: 0,
       payload_snapshot: payload_snapshot

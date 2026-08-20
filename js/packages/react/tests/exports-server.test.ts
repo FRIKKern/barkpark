@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PortableText, BarkparkImage, imageUrl, toPlainText } from '../src/server'
+import { PortableText, PortableDoc, renderPortableDocument, BarkparkImage, imageUrl, toPlainText } from '../src/server'
 import type {
   PortableTextProps,
   PortableTextComponents,
@@ -8,6 +8,9 @@ import type {
   PortableTextSpan,
   PortableTextMarkDef,
   CustomBlock,
+  PortableDocProps,
+  Block,
+  Inline,
   BarkparkImageProps,
   ImageAsset,
   ImageAssetRef,
@@ -32,8 +35,12 @@ import type {
 // Portable Text / image data-shape types and imageUrl, so a Server Component
 // could not type its content or build rendition URLs from `@barkpark/react`.
 describe('RSC (server) entry exports', () => {
-  it('exports the two context-free components + imageUrl at runtime', () => {
+  it('exports the context-free components + imageUrl at runtime', () => {
     expect(typeof PortableText).toBe('function')
+    // PortableDoc is context-free (no createContext, no hooks), so it ships from
+    // the RSC entry identically to the client entry (charter D2/D3).
+    expect(typeof PortableDoc).toBe('function')
+    expect(typeof renderPortableDocument).toBe('function')
     expect(typeof BarkparkImage).toBe('function')
     expect(typeof imageUrl).toBe('function')
     expect(typeof toPlainText).toBe('function')
@@ -56,6 +63,9 @@ describe('RSC (server) entry exports', () => {
       | PortableTextSpan
       | PortableTextMarkDef
       | CustomBlock
+      | PortableDocProps
+      | Block
+      | Inline
       | BarkparkImageProps
       | ImageAsset
       | ImageAssetRef

@@ -1,0 +1,25 @@
+{
+  "name": "@barkpark/media-parity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wave-4 render-path-unification proof: the two PortableDoc MEDIA blocks the static harness (W1-W3) cannot cover — a mermaid `diagram` and an asciinema `asciicast`, both emitted by @barkpark/react's PortableDoc as INERT mount points — are hydrated by the new @barkpark/react/client `hydratePortableDoc` and OBSERVED transforming under a real Playwright chromium browser (mermaid → live SVG, asciicast → attached .ap-player). Browser mode is MANDATORY: happy-dom renders no SVG and asciinema throws on the missing 2D-canvas context. Test-only — never published.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@barkpark/react": "workspace:^"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.0",
+    "@vitest/browser": "^4.1.0",
+    "@vitest/browser-playwright": "^4.1.0",
+    "playwright": "^1.48.0",
+    "mermaid": "^11.0.0",
+    "asciinema-player": "^3.8.0"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}

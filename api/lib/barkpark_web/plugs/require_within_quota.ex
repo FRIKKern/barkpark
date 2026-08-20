@@ -7,19 +7,24 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
 
   ## Placement
 
-  Runs AFTER `ResolveWorkspace` (so `conn.assigns[:current_workspace]` is set)
-  and BEFORE `RequireWritePermission`, in BOTH scoped mutate pipelines —
-  `:scoped_mutate` (docs) AND `:scoped_media_mutate` (media). This is the ONLY
-  seam that covers both: media writes go straight to `Barkpark.Media.upload/3`
-  (a raw `Repo.insert`), never through `Content.apply_mutations`, so a
-  Content-context hook can't gate them (charter D11, REFUTED).
+  Runs AFTER the workspace scope is resolved (so `conn.assigns[:current_workspace]`
+  is set) and BEFORE `RequireWritePermission`, in all THREE mutate pipelines —
+  `:scoped_mutate` (docs) AND `:scoped_media_mutate` (scoped media) AND the flat
+  `:media_mutate` (legacy media). This is the ONLY seam that covers both content
+  and media: media writes go straight to `Barkpark.Media.upload/3` (a raw
+  `Repo.insert`), never through `Content.apply_mutations`, so a Content-context
+  hook can't gate them (charter D11, REFUTED).
 
-  Deliberately NOT wired on the flat standalone `:media_mutate` pipeline (legacy
-  `/media/*`, `/v1/media/:dataset/*`): that path has no `ResolveWorkspace` — it
-  uses `AssignDefaultScope` (the seeded Default Workspace), so a quota check
-  there would misattribute every legacy write to one workspace. That gap is a
-  known, filed backlog item (`bpb-flat-media-quota-hole`), NOT closed here
-  (charter D14).
+  The flat standalone `:media_mutate` pipeline (legacy `/media/*`,
+  `/v1/media/:dataset/*`) has no `ResolveWorkspace` — it once fell straight to
+  `AssignDefaultScope` (the seeded Default Workspace), so a quota check there
+  would have misattributed every legacy write to one workspace. That hole
+  (`bpb-flat-media-quota-hole`, charter D14) is now CLOSED by
+  `DeriveWorkspaceFromToken`, which stamps `:current_workspace` from the caller's
+  `api_token.workspace_id` BEFORE `AssignDefaultScope` (D30 — token-derive, not
+  the ambiguous `dataset` slug). A nil-workspace_id token still falls back to the
+  Default Workspace, so this plug meters the flat media write against the token's
+  OWN workspace with no regression on the legacy path.
 
   ## Metering (charter D12)
 

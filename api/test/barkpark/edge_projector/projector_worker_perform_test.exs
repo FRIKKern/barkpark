@@ -11,6 +11,10 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPerformTest do
     * `{:cancel, :doc_gone}` when the content seam returns `{:error, :not_found}`.
     * Upsert happy path via the `"projector"` / `"content"` test-seam overrides
       (atom-keyed modules injected directly, bypassing the real DB).
+    * ERROR-NOT-SNOOZE: a raising projector surfaces as `{:error, e}` on all
+      three ops, and a raising rebuild CONSUMES attempts and DISCARDS at
+      `max_attempts` under a draining Oban — never the immortal snooze loop
+      (Oban's `snooze_job` refunds the attempt via `inc: [max_attempts: 1]`).
 
   Uses `Oban.Testing.perform_job/2` (config/test.exs is `testing: :manual`).
   Fake modules are defined in this file so their atoms are pre-existing.
@@ -43,6 +47,14 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPerformTest do
     def rebuild_scope(_scope, _docs, _opts), do: {:ok, %{added: 0, deleted: 0}}
     def upsert_record(_doc, _opts), do: {:ok, %{added: 1, removed: 0}}
     def delete_record(_ref, _opts), do: {:ok, 0}
+  end
+
+  # ── Fake seam: projector module that always raises (a poison projection) ──
+  defmodule FakeProjectorRaise do
+    @moduledoc false
+    def rebuild_scope(_scope, _docs, _opts), do: raise("boom: poison rebuild")
+    def upsert_record(_doc, _opts), do: raise("boom: poison upsert")
+    def delete_record(_ref, _opts), do: raise("boom: poison delete")
   end
 
   # ── delete op ─────────────────────────────────────────────────────────────────
@@ -143,6 +155,72 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPerformTest do
                  "projector" =>
                    "Barkpark.EdgeProjector.ProjectorWorkerPerformTest.FakeProjectorOk"
                })
+    end
+  end
+
+  # ── ERROR-NOT-SNOOZE (fail-loud doctrine) ─────────────────────────────────────
+  #
+  # The three rescue clauses used to return {:snooze, 60}. Vendored Oban's
+  # snooze_job does `inc: [max_attempts: 1]` — exactly refunding fetch's
+  # `inc: [attempt: 1]` — so a raising projection NEVER exhausted its attempts:
+  # max_attempts: 5 was decorative and every poison job retried forever. The
+  # rescues now return {:error, e}: Oban applies real backoff and the job is
+  # DISCARDED at max_attempts.
+
+  @raising_rebuild_args %{
+    "op" => "rebuild",
+    "scope" => "production",
+    "types" => ["post"],
+    "content" => "Barkpark.EdgeProjector.ProjectorWorkerPerformTest.FakeContentFound",
+    "projector" => "Barkpark.EdgeProjector.ProjectorWorkerPerformTest.FakeProjectorRaise"
+  }
+
+  describe "a raising projection ERRORS — never snoozes" do
+    test "rebuild: a raise surfaces as {:error, e}" do
+      assert {:error, %RuntimeError{message: "boom: poison rebuild"}} =
+               perform_job(ProjectorWorker, @raising_rebuild_args)
+    end
+
+    test "upsert: a raise surfaces as {:error, e}" do
+      assert {:error, %RuntimeError{message: "boom: poison upsert"}} =
+               perform_job(ProjectorWorker, %{
+                 "op" => "upsert",
+                 "scope" => "production",
+                 "_id" => "doc-1",
+                 "types" => ["post"],
+                 "content" =>
+                   "Barkpark.EdgeProjector.ProjectorWorkerPerformTest.FakeContentFound",
+                 "projector" =>
+                   "Barkpark.EdgeProjector.ProjectorWorkerPerformTest.FakeProjectorRaise"
+               })
+    end
+
+    test "delete: a raise surfaces as {:error, e}" do
+      assert {:error, %RuntimeError{message: "boom: poison delete"}} =
+               perform_job(ProjectorWorker, %{
+                 "op" => "delete",
+                 "scope" => "production",
+                 "_id" => "doc-1",
+                 "projector" =>
+                   "Barkpark.EdgeProjector.ProjectorWorkerPerformTest.FakeProjectorRaise"
+               })
+    end
+
+    test "a raising rebuild CONSUMES attempts and DISCARDS at max_attempts" do
+      # Drain with retries (with_scheduled + with_recursion re-executes
+      # retryable jobs until the queue stabilises). Under the old snooze
+      # rescue this loop NEVER terminated — snoozed re-scheduled the job with
+      # max_attempts bumped, forever. Now: max_attempts(5) executions total —
+      # 4 recorded failures, then the 5th attempt exhausts the job → discard.
+      # Zero snoozes.
+      Oban.insert!(ProjectorWorker.new(@raising_rebuild_args))
+
+      assert %{failure: 4, discard: 1, snoozed: 0} =
+               Oban.drain_queue(
+                 queue: :edge_projector,
+                 with_scheduled: true,
+                 with_recursion: true
+               )
     end
   end
 end

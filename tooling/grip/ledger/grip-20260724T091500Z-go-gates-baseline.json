@@ -1,0 +1,41 @@
+{
+  "grip_id": "go-gates-baseline-2026-07-24",
+  "verifier": "go-gates-baseline",
+  "wave": "personal-dev-fleet-wave-mvp0-2026-07-24",
+  "assignment": "Prove the Go gates are green on current origin/main before any builder branches: full build, vet, and the provisioner + cli test suites. Confirm the per-kind claim-loop wiring in worker.go one more time at tip (post-#6036).",
+  "verdict": "GREEN. `CC=clang go build ./...` exits 0 with no output; `go vet ./internal/cli/... ./internal/provisioner/...` exits 0 clean; `go test ./internal/provisioner/... ./internal/cli/...` is all `ok` (provisioner, provisioner/catalog, cli, cli/cloud, cli/cloud/azure, cli/setup). Baseline is safe for builders to branch from. CLAIM-LOOP WIRING RECONFIRMED at tip (repo HEAD 4b46ccbe6): the worker is FOUR independent goroutines in cmd/barkpark-provisioner/main.go (RunWith/RunOnce, RunDeprovisionWith, RunAttachDomainWith, RunResurrectWith), each polling its OWN dedicated claim route — provision-jobs/claim, deprovision-jobs/claim, attach-domain-jobs/claim, resurrect-jobs/claim — never a single kind-filtered claim endpoint. router.ex lists these as four separate `post \"/v1/internal/<kind>-jobs/claim\"` routes (line 4678, 4864, 4941, 5033); resurrect is the precedent for a NEW kind done cheaply: it gets its own dedicated claim route but REUSES the provision-jobs succeed/fail/step/console routes (router.ex comment at 5026: 'Reuses the provision-jobs succeed/fail/step/console'). This is the live precedent Decide should pick for a new support-provision kind rather than inventing a shared kind-filtered claim endpoint (which nothing in the codebase does today). Also reconfirmed live: provision_job.ex @kinds is `~w(provision deprovision attach_domain resurrect)` (4 words, line 47) and @steps is the validated 7-word enum `~w(create freshen secure configure content verify ready)` (line 74) gating validate_step/2 at line 131 — any new support-provision steps MUST map into these 7 words or extend the enum, exactly as the digest's landmine warned, and the file lives at cloud/lib/barkpark_cloud/registry/provision_job.ex (module BarkparkCloud.Registry.ProvisionJob) — NOT api/lib/barkpark/provision_job.ex as one upstream citation had it; the wrong path is itself worth flagging so Decide's builders don't grep a dead location.",
+  "recipes": [
+    {
+      "claim": "Full repo build is green with no compile errors.",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark && CC=clang go build ./... && echo BUILD_OK"
+    },
+    {
+      "claim": "go vet is clean on the two packages the wave will touch.",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark && CC=clang go vet ./internal/cli/... ./internal/provisioner/..."
+    },
+    {
+      "claim": "Provisioner + cli test suites all pass (provisioner, provisioner/catalog, cli, cli/cloud, cli/cloud/azure, cli/setup).",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark && CC=clang go test ./internal/provisioner/... ./internal/cli/..."
+    },
+    {
+      "claim": "worker.go defines FOUR separate per-kind claim path constants, not one kind-filtered endpoint: claimPath (provision), deprovisionClaimPath, attachDomainClaimPath, resurrectClaimPath.",
+      "rerun": "grep -n 'ClaimPath\\s*=\\|^const resurrectClaimPath' internal/provisioner/worker.go"
+    },
+    {
+      "claim": "cmd/barkpark-provisioner/main.go runs four independent claim-loop goroutines (RunResurrectWith, RunDeprovisionWith, RunAttachDomainWith, plus the foreground RunWith for provision), each its own kind.",
+      "rerun": "sed -n '341,378p' cmd/barkpark-provisioner/main.go"
+    },
+    {
+      "claim": "router.ex exposes four disjoint claim routes, one per kind — never a single kind-parameterized claim endpoint.",
+      "rerun": "grep -n 'jobs/claim' cloud/lib/barkpark_cloud/web/router.ex"
+    },
+    {
+      "claim": "resurrect is precedent for adding a kind cheaply: its OWN claim route but reuses provision-jobs succeed/fail/step/console.",
+      "rerun": "sed -n '5020,5035p' cloud/lib/barkpark_cloud/web/router.ex"
+    },
+    {
+      "claim": "@kinds is 4 words today (provision, deprovision, attach_domain, resurrect) and @steps is the validated 7-word enum gating validate_step/2, at the REAL path cloud/lib/barkpark_cloud/registry/provision_job.ex (not api/lib/barkpark/provision_job.ex, which does not exist).",
+      "rerun": "grep -n '@kinds\\|@steps\\|def validate_step' cloud/lib/barkpark_cloud/registry/provision_job.ex"
+    }
+  ]
+}

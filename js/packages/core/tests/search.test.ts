@@ -43,6 +43,7 @@ describe('search', () => {
             parsedQuery: { terms: ['headless'] },
             recovery: { applied: false },
             truncation: false,
+            searchEventId: 'evt_abc123',
             ms: 42,
           },
           { status: 200 },
@@ -65,6 +66,8 @@ describe('search', () => {
     expect(res.recovery).toEqual({ applied: false })
     expect(res.truncation).toBe(false)
     expect(res.ms).toBe(42)
+    // searchEventId round-trips — required by /search/interaction (was dropped before).
+    expect(res.searchEventId).toBe('evt_abc123')
 
     const url = new URL(seenUrl)
     expect(url.pathname).toBe(`/v1/data/search/${TEST_DATASET}`)
@@ -142,6 +145,8 @@ describe('search', () => {
     expect(res.count).toBe(0)
     expect(res.query).toBe('nothing') // falls back to the query arg
     expect(res.correctedTo).toBeNull()
+    // Absent on the wire -> defaults to null, not undefined.
+    expect(res.searchEventId).toBeNull()
   })
 
   it('rejects a types entry containing a comma (fail-closed, no request sent)', async () => {

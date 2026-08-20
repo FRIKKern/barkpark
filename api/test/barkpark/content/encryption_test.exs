@@ -16,7 +16,7 @@ defmodule Barkpark.Content.EncryptionTest do
     * DEK rotation is transparent (old ciphertext still reveals).
     * No behaviour change when nothing is marked encrypted.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Document, Encryption, SchemaDefinition}
@@ -516,7 +516,9 @@ defmodule Barkpark.Content.EncryptionTest do
       {:ok, stored} = Content.get_document(created.doc_id, type, @dataset)
       assert stored.content["secret"]["k"] == 1
 
-      {2, _new} = DataKeys.rotate_dek("dataset:" <> @dataset)
+      # The DEK is attributed to the document's workspace (charter D51-D54), so a
+      # rotation must target the SAME (workspace_id, scope) the write sealed under.
+      {2, _new} = DataKeys.rotate_dek(stored.workspace_id, "dataset:" <> @dataset)
 
       admin = %CallerContext{principal_type: :api_token, is_admin: true}
 
@@ -581,9 +583,10 @@ defmodule Barkpark.Content.EncryptionTest do
       bound = Enum.find(raw["blocks"], &(&1["fieldName"] == "secret"))
       assert bound["value"]["_bpenc"] == 1
 
-      # Reveal still round-trips to plaintext.
+      # Reveal still round-trips to plaintext — the DEK is attributed to the
+      # paper's workspace (charter D51-D54), so decrypt threads doc.workspace_id.
       assert {:ok, "hunter2"} =
-               FieldCipher.decrypt(raw["secret"], "dataset:" <> dataset)
+               FieldCipher.decrypt(raw["secret"], "dataset:" <> dataset, doc.workspace_id)
 
       # No plaintext anywhere in the on-disk content (the body_html cache redacts
       # the encrypted bound block to "", so the rendered HTML never leaks it).
@@ -625,7 +628,10 @@ defmodule Barkpark.Content.EncryptionTest do
       bound = Enum.find(raw["blocks"], &(&1["fieldName"] == "secret"))
       assert bound["value"]["_bpenc"] == 1
 
-      assert {:ok, "second"} = FieldCipher.decrypt(raw["secret"], "dataset:" <> dataset)
+      # DEK attributed to the paper's workspace (charter D51-D54).
+      assert {:ok, "second"} =
+               FieldCipher.decrypt(raw["secret"], "dataset:" <> dataset, doc.workspace_id)
+
       refute String.contains?(Jason.encode!(raw), "second")
     end
 

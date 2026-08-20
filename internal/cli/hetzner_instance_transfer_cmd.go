@@ -226,17 +226,30 @@ func runInstanceExport(out *writer, g globals, args []string) int {
 	if outPath == "" {
 		outPath = "bp-export-" + strings.ReplaceAll(fqdn, ".", "-") + "-" + time.Now().UTC().Format("20060102-150405") + ".tar.gz"
 	}
-	f, ferr := os.Create(outPath)
+	// Stream into a temp file BESIDE the destination and promote on success.
+	// os.Create(outPath) lost the operator's archive twice on a failed run: it
+	// truncated a pre-existing --out before the SSH stream even opened, and the
+	// failure path's os.Remove then deleted a file this verb never created. The
+	// temp is ours, so removing it destroys nothing but our own half-write, and
+	// a same-directory rename is atomic (PDS-D394).
+	destDir := filepath.Dir(outPath)
+	f, ferr := os.CreateTemp(destDir, "."+filepath.Base(outPath)+".part-*")
 	if ferr != nil {
-		return useError(out, "failed", "export "+fqdn+": "+ferr.Error(), exitGeneric)
+		return useError(out, "failed", "export "+fqdn+": create temp file in "+destDir+": "+ferr.Error(), exitGeneric)
 	}
+	tmpName := f.Name()
 	if serr := instSSHStream(host, script, f); serr != nil {
 		_ = f.Close()
-		_ = os.Remove(outPath) // never leave a truncated archive looking valid
+		_ = os.Remove(tmpName) // never leave a truncated archive looking valid
 		return useError(out, "failed", "export "+fqdn+": "+serr.Error(), exitGeneric)
 	}
 	if cerr := f.Close(); cerr != nil {
+		_ = os.Remove(tmpName)
 		return useError(out, "failed", "export "+fqdn+": "+cerr.Error(), exitGeneric)
+	}
+	if rerr := os.Rename(tmpName, outPath); rerr != nil {
+		_ = os.Remove(tmpName)
+		return useError(out, "failed", "export "+fqdn+": promote "+tmpName+" to "+outPath+": "+rerr.Error(), exitGeneric)
 	}
 	info, _ := os.Stat(outPath)
 	extra := map[string]any{"file": outPath}

@@ -80,10 +80,49 @@ func TestMigrateErrorJSONEmitsEnvelope(t *testing.T) {
 		t.Fatalf("exit = %d, want %d", code, exitGeneric)
 	}
 	got := stdout.String()
-	if !strings.Contains(got, "{") || !strings.Contains(got, "\"ok\": false") {
-		t.Errorf("json stdout missing braces / `\"ok\": false`:\n%s", got)
+	if !strings.Contains(got, "{") || !strings.Contains(got, "\"ok\":false") {
+		t.Errorf("json stdout missing braces / `\"ok\":false`:\n%s", got)
 	}
 	if strings.Contains(stderr.String(), "bp:") {
 		t.Errorf("json path leaked the human stderr line:\n%s", stderr.String())
+	}
+}
+
+// ── PDS wave 48 — the receipt's CHECKMARK must descend from the count too ───
+//
+// The success-claim registry pins that `written` VARIES with the server's
+// response; it cannot pin the checkmark, because both halves of its pair vary
+// and so both would still differ if the ✓ were printed unconditionally
+// (measured: forcing the short-write branch off leaves the registry green).
+//
+// The ✓ is the part a human reads. A short write wearing one is the same lie
+// the count fix removed, one glyph out — so it gets its own falsifier here:
+// the checkmark is legal ONLY when the server confirmed everything sent.
+func TestMigrateTypeReceiptDropsTheCheckmarkOnAShortWrite(t *testing.T) {
+	full := migrateTypeReceipt("post", 2, 2)
+	if !strings.Contains(full, "✓") {
+		t.Errorf("a fully-confirmed write must keep the checkmark:\n%s", full)
+	}
+
+	short := migrateTypeReceipt("post", 1, 2)
+	if strings.Contains(short, "✓") {
+		t.Errorf("a SHORT write must not wear a checkmark — the server confirmed 1 of 2:\n%s", short)
+	}
+	if !strings.Contains(short, "!") {
+		t.Errorf("a short write must be marked, not merely counted:\n%s", short)
+	}
+	// And it must SAY what went unconfirmed, not just drop a glyph a reader
+	// might not notice is missing.
+	for _, want := range []string{"1/2", "confirmed 1 write results", "2 documents sent"} {
+		if !strings.Contains(short, want) {
+			t.Errorf("the short-write line must contain %q:\n%s", want, short)
+		}
+	}
+
+	// The over-count direction too: a server confirming MORE than we sent is
+	// also a disagreement, and must not print as a clean success.
+	over := migrateTypeReceipt("post", 3, 2)
+	if strings.Contains(over, "✓") {
+		t.Errorf("a server confirming more writes than documents sent is not a clean ✓:\n%s", over)
 	}
 }

@@ -9,6 +9,63 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
 
   alias BarkparkWeb.Studio.ClaudeChat
 
+  # A stub bridge for the TOOL-connector seam (connectors D69/D73). It plays the
+  # `fetch_tool_descriptors/1` role WITHOUT a running Node process, and — the
+  # non-vacuous part — it DECODES the ticket and only answers a descriptor when
+  # the runner signed a real TOOL-SESSION ticket (provider `tool-session`) for
+  # the expected workspace. So a config file that ends up with the `github`
+  # server PROVES `setup_mcp` minted the right ticket for the right workspace,
+  # not that a canned value was stuffed in.
+  defmodule ToolBridgeStub do
+    @behaviour Barkpark.Connectors.Bridge
+
+    @impl true
+    def validate(_ticket, _credential), do: {:error, :unreachable}
+    @impl true
+    def connect(_ticket, _credential, _chat_token), do: {:error, :unreachable}
+    @impl true
+    def disconnect(_ticket, _install_key), do: {:error, :unreachable}
+    @impl true
+    def stage_pending(_ticket, _chat_token), do: {:error, :unreachable}
+
+    @impl true
+    def fetch_tool_descriptors(ticket) do
+      with [body, _sig] <- String.split(ticket, ".", parts: 2),
+           {:ok, json} <- Base.url_decode64(body, padding: false),
+           {:ok, %{"p" => "tool-session", "w" => ws}} <- Jason.decode(json),
+           ^ws <- Application.get_env(:barkpark, :tool_stub_ws) do
+        {:ok,
+         [
+           %{
+             "provider" => "github",
+             "type" => "http",
+             "url" => "https://api.githubcopilot.com/mcp/",
+             "headersHelper" =>
+               "curl -sS -X POST -d '{\"ticket\":\"#{ticket}\"}' " <>
+                 "http://127.0.0.1:4020/connectors/connect/tool-headers/github"
+           }
+         ]}
+      else
+        _ -> {:ok, []}
+      end
+    end
+  end
+
+  # Set `config :barkpark, Barkpark.Connectors, …`, restoring on exit. The tool
+  # seam reads `connect_secret` (to sign the ticket) and `bridge` (to dispatch)
+  # from here — the default is `connect_secret: nil`, i.e. no tool servers.
+  defp put_connectors_config(overrides) do
+    prev = Application.get_env(:barkpark, Barkpark.Connectors)
+    merged = Keyword.merge(prev || [], overrides)
+    Application.put_env(:barkpark, Barkpark.Connectors, merged)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, Barkpark.Connectors, prev),
+        else: Application.delete_env(:barkpark, Barkpark.Connectors)
+    end)
+  end
+
   defp put_chat_config(config) do
     prev = Application.get_env(:barkpark, :claude_chat)
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
@@ -287,6 +344,87 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       assert is_binary(url) and url != ""
     end
 
+    test "mcp_config/2 with no descriptors == mcp_config/1 (back-compat, connectors D69)" do
+      assert ClaudeChat.mcp_config("bpcs_x", []) == ClaudeChat.mcp_config("bpcs_x")
+    end
+
+    test "mcp_config/2 FOLDS a tool descriptor as a SECOND mcpServers key (D69/D71)" do
+      helper =
+        "curl -sS -X POST -d '{\"ticket\":\"t\"}' " <>
+          "http://127.0.0.1:4020/connectors/connect/tool-headers/github"
+
+      descriptor = %{
+        "provider" => "github",
+        "type" => "http",
+        "url" => "https://api.githubcopilot.com/mcp/",
+        "headersHelper" => helper
+      }
+
+      servers = ClaudeChat.mcp_config("bpcs_secret", [descriptor])["mcpServers"]
+
+      # The loopback server survives UNSHADOWED, still carrying the minted token —
+      # a tool connector is ADDITIVE, never a replacement.
+      assert servers["barkpark"]["env"]["BARKPARK_API_TOKEN"] == "bpcs_secret"
+
+      # …and github lands as a SECOND key, DERIVED from the descriptor (provider,
+      # transport, url, and the non-secret headersHelper that fetches the PAT).
+      assert servers["github"] == %{
+               "type" => "http",
+               "url" => "https://api.githubcopilot.com/mcp/",
+               "headersHelper" => helper
+             }
+
+      assert map_size(servers) == 2
+    end
+
+    test "a SECOND tool connector is a SECOND mcpServers key — the acceptance bar (D69)" do
+      descriptors = [
+        %{
+          "provider" => "github",
+          "type" => "http",
+          "url" => "https://api.githubcopilot.com/mcp/",
+          "headersHelper" => "curl github"
+        },
+        %{
+          "provider" => "linear",
+          "type" => "http",
+          "url" => "https://mcp.linear.app/sse",
+          "headersHelper" => "curl linear"
+        }
+      ]
+
+      servers = ClaudeChat.mcp_config("bpcs", descriptors)["mcpServers"]
+      # ZERO core-loop change: two tool connectors, two entries, no special-case.
+      assert Enum.sort(Map.keys(servers)) == ["barkpark", "github", "linear"]
+    end
+
+    test "mcp_config/2 FAILS CLOSED on malformed / reserved-name descriptors (never shadows barkpark)" do
+      bad = [
+        # no url/type
+        %{"provider" => "github"},
+        # reserved name — must NEVER override the loopback server's minted token
+        %{"provider" => "barkpark", "type" => "http", "url" => "https://evil.example/"},
+        # no provider
+        %{"type" => "http", "url" => "https://x.example/"},
+        # non-http transport (only http is a tool transport today, D71)
+        %{"provider" => "linear", "type" => "stdio", "url" => "x"},
+        # blank url
+        %{"provider" => "zed", "type" => "http", "url" => ""}
+      ]
+
+      servers = ClaudeChat.mcp_config("bpcs_secret", bad)["mcpServers"]
+      # ONLY the loopback server, and its token intact — no rogue shadow.
+      assert map_size(servers) == 1
+      assert servers["barkpark"]["env"]["BARKPARK_API_TOKEN"] == "bpcs_secret"
+    end
+
+    test "a tool descriptor with no headersHelper folds a URL-only server (fail-soft)" do
+      descriptor = %{"provider" => "github", "type" => "http", "url" => "https://x.example/mcp/"}
+      servers = ClaudeChat.mcp_config("bpcs", [descriptor])["mcpServers"]
+      assert servers["github"] == %{"type" => "http", "url" => "https://x.example/mcp/"}
+      refute Map.has_key?(servers["github"], "headersHelper")
+    end
+
     test "plan mode road-blocks Workflow (D65/D68 fail-closed until S3's verdict)" do
       args = ClaudeChat.build_args("plan", %{session_id: @uuid})
       assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--disallowedTools", "Workflow"])
@@ -328,6 +466,20 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
                      bp_doc_ls bp_doc_query bp_search_query) do
         assert ClaudeChat.mcp_auto_approved?("mcp__barkpark__#{tool}"),
                "#{tool} should auto-approve"
+      end
+    end
+
+    test "herd read tools auto-approve; herd write tools stay approval-gated (herd-s4)" do
+      # herd-s4: fleet OBSERVATION (read the wire) auto-approves; anything that
+      # spawns or sends a message MUTATES and lands the D31 approval card.
+      for tool <- ~w(chat_read_tail chat_wait_for_state) do
+        assert ClaudeChat.mcp_auto_approved?("mcp__barkpark__#{tool}"),
+               "#{tool} (herd read) should auto-approve"
+      end
+
+      for tool <- ~w(chat_spawn_session chat_send) do
+        refute ClaudeChat.mcp_auto_approved?("mcp__barkpark__#{tool}"),
+               "#{tool} (herd write) must NOT auto-approve"
       end
     end
 
@@ -429,6 +581,53 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
                         }
                       }},
                      2_000
+    end
+
+    test "an allowed ExitPlanMode reports the plan-approve fact to the sink" do
+      exit_plan =
+        ~s({"type":"control_request","request_id":"req-plan","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"# The plan"},"title":"Ready to code?"}})
+
+      script = ~s(printf '%s\n' '#{exit_plan}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      assert_receive {:claude_chat_permission, %{request_id: "req-plan"}}, 2_000
+
+      ClaudeChat.respond_permission(session, "req-plan", :allow)
+
+      # The fact fires AFTER the control_response is on the wire (stdio order:
+      # the CLI's own plan→default flip happens first, then any policy steer).
+      assert_receive {:claude_chat_event, %{"type" => "control_response"}}, 2_000
+      assert_receive {:claude_chat_plan_approved, "req-plan"}, 2_000
+    end
+
+    test "a denied ExitPlanMode (keep planning) reports NO plan-approve fact" do
+      exit_plan =
+        ~s({"type":"control_request","request_id":"req-plan","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"# The plan"}}})
+
+      script = ~s(printf '%s\n' '#{exit_plan}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      assert_receive {:claude_chat_permission, %{request_id: "req-plan"}}, 2_000
+
+      ClaudeChat.respond_permission(session, "req-plan", {:deny, "keep planning"})
+
+      assert_receive {:claude_chat_event, %{"type" => "control_response"}}, 2_000
+      refute_receive {:claude_chat_plan_approved, _}, 200
+    end
+
+    test "an allowed NON-plan tool reports NO plan-approve fact" do
+      script = ~s(printf '%s\n' '#{@can_use_tool}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      assert_receive {:claude_chat_permission, %{request_id: "req-1"}}, 2_000
+
+      ClaudeChat.respond_permission(session, "req-1", :allow)
+
+      assert_receive {:claude_chat_event, %{"type" => "control_response"}}, 2_000
+      refute_receive {:claude_chat_plan_approved, _}, 200
     end
 
     test "an {:allow, updated} carries the CALLER's updatedInput (question answers, D32)" do
@@ -623,6 +822,31 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       refute File.exists?(path)
     end
 
+    # ── stdout buffer ceiling (charter D126, codex-twin parity) ───────────────
+    #
+    # The CLI streams newline-delimited JSON, so parse_chunk normally holds only
+    # the trailing partial line. A malformed/stalled stream that never emits a
+    # newline would otherwise grow `state.buffer` without bound in the long-lived
+    # per-session GenServer. This stub floods stdout with a NEWLINE-FREE blob well
+    # past a shrunk cap: no complete line ever reaches the event path, so the cap
+    # must fire at the accumulation seam. UNCAPPED code never emits the overflow
+    # error (the buffer just grows until the stub exits) — this reds without the
+    # cap and greens with it. Asserts threshold-crossing behavior, never bytes.
+    test "caps the stdout line-reassembly buffer and stops with a named overflow" do
+      put_chat_config(
+        command: {"sh", ["-c", "head -c 200000 /dev/zero | tr '\\0' 'x'"]},
+        max_buffer_bytes: 64 * 1024
+      )
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      ref = Process.monitor(session)
+
+      # Named error reaches the sink…
+      assert_receive {:claude_chat_error, :buffer_overflow, _tail}, 2_000
+      # …and the session stops cleanly (terminate/2 cleanup runs), never crashes.
+      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, 2_000
+    end
+
     test "session dies with its sink (no leaked subprocess owner)" do
       put_chat_config(command: {"cat", []})
 
@@ -711,6 +935,586 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
+  # The Cloud execution-profile seam (connectors D107–D110). The profile is a
+  # config-keyed resolver in `command/2` — `:self_hosted` (default) stays
+  # byte-identical to the pre-D107 host-CLI argv; `:cloud` returns the
+  # `cloud-sandbox-runner` shim + the D109 argv, gated on a concrete workspace
+  # principal (D110). Pure tests pin the argv contract; the end-to-end tests
+  # drive a chmod+x fake shim through the REAL Port + parse pipeline so a
+  # bogus-key result frame proves the wire without a live sandbox.
+  describe "execution profile — self-hosted default (connectors D107)" do
+    test "no config ⇒ :self_hosted, and command/0 is byte-identical to the pre-D107 host argv" do
+      put_chat_config([])
+      assert ClaudeChat.execution_profile() == :self_hosted
+
+      {exe, args} = ClaudeChat.command()
+      assert exe == "claude"
+      # Routes through build_args/2 unchanged — the :cloud branch must never
+      # perturb the default path.
+      assert {exe, args} == {ClaudeChat.binary(), ClaudeChat.build_args("plan", %{})}
+
+      # Concrete interactive-argv prefix — a drift tripwire on the host path.
+      assert Enum.take(args, 11) == [
+               "--print",
+               "--verbose",
+               "--input-format",
+               "stream-json",
+               "--output-format",
+               "stream-json",
+               "--include-partial-messages",
+               "--permission-mode",
+               "plan",
+               "--permission-prompt-tool",
+               "stdio"
+             ]
+
+      assert "--disallowedTools" in args
+      assert "Workflow" in args
+    end
+
+    test "an unrecognized :execution_profile value fails to :self_hosted (never silently cloud)" do
+      put_chat_config(execution_profile: :bogus)
+      assert ClaudeChat.execution_profile() == :self_hosted
+      assert {"claude", _args} = ClaudeChat.command()
+    end
+  end
+
+  describe "execution profile — cloud (connectors D108/D109/D110)" do
+    # W14 session-identity fixtures (connectors D135/D137/D139): a Barkpark session
+    # UUID and a bound sandbox id.
+    @cloud_uuid "11111111-1111-4111-8111-111111111111"
+    @cloud_sandbox "sbx_cloud_abc123"
+
+    test ":cloud 0 installs, fresh session — shim runner + W13 belt with the ALWAYS-ON --keep-sandbox and a fresh --session-id (D141 byte-identity MODULO session flags)" do
+      # The 0-install row of the D130 argv table: no `:tool_descriptors` in
+      # session_opts ⇒ CloudPolicy emits `%{}` ⇒ NO `--mcp-config-b64` flag ⇒ the
+      # argv is byte-identical to W12 MODULO the W14 session-identity flags. The
+      # ≥1-install rows (flag present, scoped map) live in the DB-backed "cloud
+      # mcp-config wiring" describe below and in cloud_policy_test.exs's argv table.
+      put_chat_config(execution_profile: :cloud, sandbox_runner: "cloud-sandbox-runner")
+
+      {exe, args} = ClaudeChat.command("plan", %{workspace_id: "ws-42", session_id: @cloud_uuid})
+      assert exe == "cloud-sandbox-runner"
+
+      # No connector-scoped MCP flag on the 0-install path.
+      refute "--mcp-config-b64" in args
+
+      # The shim's OWN pre-`--` argv: `--workspace <id>`, then the ALWAYS-ON
+      # `--keep-sandbox` (no binding ⇒ NO `--sandbox-id`), then the `--` separator.
+      assert Enum.take(args, 4) == ["--workspace", "ws-42", "--keep-sandbox", "--"]
+      refute "--sandbox-id" in args
+
+      # The post-`--` claude segment: the session-identity flags at the FRONT
+      # (fresh ⇒ `--session-id`, never `--resume`), then the full D109 base + the
+      # D116/D117 CloudPolicy belts (mode clamped, all built-ins removed, deny
+      # set, deny JSON string, disallowedTools last).
+      assert Enum.drop(args, 4) ==
+               ["--session-id", @cloud_uuid] ++
+                 [
+                   "--input-format",
+                   "stream-json",
+                   "--output-format",
+                   "stream-json",
+                   "--include-partial-messages",
+                   "--verbose",
+                   "--permission-mode",
+                   "plan",
+                   "--tools",
+                   "",
+                   "--settings",
+                   Barkpark.Connectors.CloudPolicy.settings_deny_json()
+                 ] ++
+                 ["--disallowedTools" | Barkpark.Connectors.CloudPolicy.cloud_disallowed_tools()]
+
+      refute "--resume" in args
+    end
+
+    test ":cloud bound session — pre-`--` --sandbox-id + --keep-sandbox, post-`--` --resume (D135/D137)" do
+      args =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: "ws-42",
+          session_id: @cloud_uuid,
+          cloud_sandbox_id: @cloud_sandbox
+        })
+
+      sep = Enum.find_index(args, &(&1 == "--"))
+
+      # Pre-`--`: the bound sandbox id then --keep-sandbox (D141's W14-1 order:
+      # `--sandbox-id <id> --keep-sandbox`).
+      assert Enum.take(args, sep) == [
+               "--workspace",
+               "ws-42",
+               "--sandbox-id",
+               @cloud_sandbox,
+               "--keep-sandbox"
+             ]
+
+      # Post-`--`: --resume at the FRONT of the claude segment, NEVER --session-id.
+      assert Enum.take(Enum.drop(args, sep + 1), 2) == ["--resume", @cloud_uuid]
+      refute "--session-id" in args
+
+      # The full W12/W13 belt is intact — a bound multi-turn session is STILL
+      # locked down (multi-turn never re-opens host tools).
+      assert_w12_belt_intact(args)
+    end
+
+    test "D139 LAW — resume-ness derives from the BINDING, never session_opts[:resume]/message_count" do
+      # A session_opts[:resume] flag (the self-hosted transport signal) must NOT
+      # force --resume on the cloud path when there is NO sandbox binding: a
+      # resume into a vanished sandbox would hit an empty filesystem.
+      no_binding =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: "ws-42",
+          session_id: @cloud_uuid,
+          resume: true
+        })
+
+      assert Enum.chunk_every(no_binding, 2, 1) |> Enum.member?(["--session-id", @cloud_uuid])
+      refute "--resume" in no_binding
+      refute "--sandbox-id" in no_binding
+      assert_w12_belt_intact(no_binding)
+
+      # Conversely, a bound session resumes even with `resume: false` — the
+      # binding, not the transport boolean, is the sole signal.
+      bound =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: "ws-42",
+          session_id: @cloud_uuid,
+          resume: false,
+          cloud_sandbox_id: @cloud_sandbox
+        })
+
+      assert Enum.chunk_every(bound, 2, 1) |> Enum.member?(["--resume", @cloud_uuid])
+      refute "--session-id" in bound
+      assert_w12_belt_intact(bound)
+    end
+
+    test ":cloud with no session_id — neither session flag, but --keep-sandbox still rides (defensive)" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-42"})
+
+      refute "--session-id" in args
+      refute "--resume" in args
+      assert "--keep-sandbox" in args
+      refute "--sandbox-id" in args
+      assert_w12_belt_intact(args)
+    end
+
+    test ":cloud DROPS the permission-prompt bridge and ALL mcp args (D109)" do
+      args =
+        ClaudeChat.cloud_build_args("plan", %{
+          workspace_id: "ws-1",
+          mcp_config_path: "/host/mcp.json"
+        })
+
+      refute "--permission-prompt-tool" in args
+      refute "stdio" in args
+      refute "--mcp-config" in args
+      refute "--strict-mcp-config" in args
+      refute "/host/mcp.json" in args
+    end
+
+    test ":cloud NEVER emits a bypass flag — not even for an ARMED bypassPermissions (structural, D109/D24)" do
+      for opts <- [
+            %{workspace_id: "ws-1"},
+            %{workspace_id: "ws-1", bypass_armed: true},
+            %{workspace_id: "ws-1", bypass_armed: true, session_id: "s-1"}
+          ] do
+        args = ClaudeChat.cloud_build_args("bypassPermissions", opts)
+        refute "--allow-dangerously-skip-permissions" in args
+        refute "--dangerously-skip-permissions" in args
+      end
+    end
+
+    test ":cloud HARD-FAILS on a nil/:global/blank workspace_id — never an unattributed turn (D110)" do
+      assert_raise ArgumentError, ~r/workspace_id/, fn ->
+        ClaudeChat.cloud_build_args("plan", %{})
+      end
+
+      for bad <- [nil, "", "global"] do
+        assert_raise ArgumentError, ~r/workspace_id/, fn ->
+          ClaudeChat.cloud_build_args("plan", %{workspace_id: bad})
+        end
+      end
+    end
+
+    test ":cloud command/2 refuses to assemble an argv without a workspace principal" do
+      put_chat_config(execution_profile: :cloud)
+
+      assert_raise ArgumentError, ~r/workspace_id/, fn ->
+        ClaudeChat.command("plan", %{})
+      end
+    end
+  end
+
+  # The D24 permission reversal at the ARGV layer (D116/D117): the :cloud argv
+  # clamps the mode and carries CloudPolicy's three tool-removal belts. Every
+  # assertion pins what the launch contract REQUESTS — the live host-denial
+  # observation rides `connectors-hg-live-isolated-cloud-turn`, never faked here.
+  describe "cloud policy belts — CloudPolicy on the :cloud argv (connectors D116/D117)" do
+    alias Barkpark.Connectors.CloudPolicy
+
+    # The variadic `--disallowedTools` list is emitted LAST, so everything after
+    # the flag is the deny set (unambiguous argv boundary).
+    defp cloud_disallowed_argv(args) do
+      args |> Enum.drop_while(&(&1 != "--disallowedTools")) |> Enum.drop(1)
+    end
+
+    defp settings_deny_from_argv(args) do
+      idx = Enum.find_index(args, &(&1 == "--settings"))
+      json = Enum.at(args, idx + 1)
+      Jason.decode!(json)["permissions"]["deny"]
+    end
+
+    test "knob 2a — `--tools \"\"` removes ALL built-in tools" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-1"})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--tools", ""])
+    end
+
+    test "knob 2b — `--disallowedTools` carries the full host-FS/exec/network deny set" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-1"})
+
+      assert cloud_disallowed_argv(args) == CloudPolicy.cloud_disallowed_tools()
+
+      # The concrete built-ins that must never reach a Cloud turn.
+      for tool <- ~w(Bash Edit Write Read NotebookEdit WebFetch WebSearch Task) do
+        assert tool in cloud_disallowed_argv(args), "#{tool} must be denied on the cloud argv"
+      end
+    end
+
+    test "knob 2c — `--settings` is a deny JSON STRING, decoding to the deny list" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-1"})
+
+      assert Enum.chunk_every(args, 2, 1)
+             |> Enum.member?(["--settings", CloudPolicy.settings_deny_json()])
+
+      assert settings_deny_from_argv(args) == CloudPolicy.cloud_disallowed_tools()
+    end
+
+    test "NO-DRIFT — the argv `--disallowedTools` list equals the `--settings` deny list" do
+      args = ClaudeChat.cloud_build_args("plan", %{workspace_id: "ws-1"})
+
+      # The two belts are built from the SAME source; if a future edit forks one,
+      # this reds before the divergence can ship.
+      assert cloud_disallowed_argv(args) == settings_deny_from_argv(args)
+    end
+
+    test "knob 1 — a bypassPermissions mode CLAMPS to plan on the cloud argv" do
+      args = ClaudeChat.cloud_build_args("bypassPermissions", %{workspace_id: "ws-1"})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "plan"])
+
+      refute Enum.chunk_every(args, 2, 1)
+             |> Enum.member?(["--permission-mode", "bypassPermissions"])
+    end
+
+    test "knob 1 — an unknown/garbage mode CLAMPS to plan on the cloud argv" do
+      for bad <- ["nonsense", "", "DROP TABLE", "default"] do
+        args = ClaudeChat.cloud_build_args(bad, %{workspace_id: "ws-1"})
+
+        assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "plan"]),
+               "mode #{inspect(bad)} must clamp to plan"
+      end
+    end
+
+    test "knob 1 — a Cloud-valid mode passes through verbatim (clamp is validity, not force-plan)" do
+      for mode <- CloudPolicy.cloud_modes() do
+        args = ClaudeChat.cloud_build_args(mode, %{workspace_id: "ws-1"})
+        assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", mode])
+      end
+    end
+
+    test "bypass is STILL structurally unreachable through the clamp (extends the W11 down-payment)" do
+      for mode <- ["bypassPermissions", "plan", "acceptEdits"],
+          opts <- [%{workspace_id: "ws-1"}, %{workspace_id: "ws-1", bypass_armed: true}] do
+        args = ClaudeChat.cloud_build_args(mode, opts)
+        refute "--allow-dangerously-skip-permissions" in args
+        refute "--dangerously-skip-permissions" in args
+      end
+    end
+
+    test "self-hosted argv NEVER carries the cloud belts (byte-identical host path)" do
+      # The cloud belts live only on the cloud path; the host build_args is
+      # untouched (the D107 byte-identical guarantee).
+      host = ClaudeChat.build_args("plan", %{})
+      refute "--tools" in host
+      refute "--settings" in host
+      # The host path's only --disallowedTools is the plan-mode Workflow road-block
+      # (a single token), never the cloud deny set.
+      refute "Bash" in host
+    end
+  end
+
+  # The knob-3 CONFIG half at the ARGV layer (connectors D126/D127/D128/D130):
+  # with ≥1 tool-direction install, `cloud_build_args/2` emits ONE
+  # `--mcp-config-b64` pair BEFORE `--` whose decode is EXACTLY the workspace's
+  # connector HTTP servers. REAL installs (raw SQL — the bridge's writer, D54) +
+  # INJECTED bridge descriptors (no live bridge). The W12 deny belt is re-asserted
+  # intact in every row — knob 3 ADDS connector tools, never re-opens host reach.
+  describe "cloud mcp-config wiring — knob 3 CONFIG half (connectors D126/D127/D128/D130)" do
+    alias Barkpark.Connectors.CloudPolicy
+
+    setup do
+      owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Barkpark.Repo, shared: true)
+      on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner) end)
+      ws = Barkpark.TenancyFixtures.create_workspace!("cloud-mcp-argv-ws")
+      {:ok, ws: ws}
+    end
+
+    # The bridge is production's only writer; tests write raw SQL (D54).
+    defp insert_install(provider, key, ws_id) do
+      Barkpark.Repo.query!(
+        """
+        INSERT INTO chat_bridge.connector_installs
+          (provider, install_key, workspace_id, credential_ref, chat_token_ref, created_at)
+        VALUES ($1, $2, $3, $4, $5, now())
+        """,
+        [provider, key, ws_id, "SEALED-CREDENTIAL-BLOB", "SEALED-CHAT-TOKEN-BLOB"]
+      )
+    end
+
+    # A bridge descriptor as fetch_tool_descriptors/1 returns it — WITH a
+    # headersHelper the cloud emission must STRIP (host-loopback curl is dead
+    # across the Firecracker boundary — D126).
+    defp tool_descriptor(provider, url) do
+      %{
+        "provider" => provider,
+        "type" => "http",
+        "url" => url,
+        "headersHelper" => "curl -sS http://127.0.0.1:4020/connectors/tool-headers/#{provider}"
+      }
+    end
+
+    # `--mcp-config-b64` rides BEFORE the `--` separator (shim-own); assert that,
+    # then decode the base64 payload to the mcpServers document.
+    defp mcp_flag_value(args) do
+      sep = Enum.find_index(args, &(&1 == "--"))
+      idx = Enum.find_index(args, &(&1 == "--mcp-config-b64"))
+      assert is_integer(idx) and idx < sep, "--mcp-config-b64 must ride pre-`--`"
+      args |> Enum.at(idx + 1) |> Base.decode64!() |> Jason.decode!()
+    end
+
+    defp assert_w12_belt_intact(args) do
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--tools", ""])
+
+      disallowed = args |> Enum.drop_while(&(&1 != "--disallowedTools")) |> Enum.drop(1)
+      assert disallowed == CloudPolicy.cloud_disallowed_tools()
+
+      settings_idx = Enum.find_index(args, &(&1 == "--settings"))
+
+      deny =
+        args |> Enum.at(settings_idx + 1) |> Jason.decode!() |> get_in(["permissions", "deny"])
+
+      assert deny == CloudPolicy.cloud_disallowed_tools()
+    end
+
+    # The Elixir argv NEVER carries the shim-owned host-path mcp flags (D127) —
+    # even when it emits the b64 config, --mcp-config/--strict-mcp-config are the
+    # shim's job in-VM.
+    defp assert_no_host_mcp_path(args) do
+      refute "--mcp-config" in args
+      refute "--strict-mcp-config" in args
+    end
+
+    # The `--egress-host` values that ride pre-`--` (shim-own, knob 6 D238/D240 —
+    # W29): each host is its OWN repeated pair, NEVER comma-joined. Returned in
+    # argv order (the derivation is sorted+unique at the CloudPolicy layer).
+    defp egress_hosts(args) do
+      sep = Enum.find_index(args, &(&1 == "--"))
+
+      args
+      |> Enum.take(sep)
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.filter(fn [flag, _] -> flag == "--egress-host" end)
+      |> Enum.map(fn [_, host] -> host end)
+    end
+
+    test "1 tool install — exactly that provider's HTTP server, headersHelper stripped, belt intact",
+         %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+
+      # A github descriptor (installed) AND a linear descriptor (NOT installed for
+      # this ws): only github survives the install cross-check.
+      descriptors = [
+        tool_descriptor("github", "https://api.githubcopilot.com/mcp/"),
+        tool_descriptor("linear", "https://mcp.linear.app/mcp")
+      ]
+
+      args =
+        ClaudeChat.cloud_build_args("plan", %{workspace_id: ws.id, tool_descriptors: descriptors})
+
+      assert mcp_flag_value(args) == %{
+               "mcpServers" => %{
+                 "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"}
+               }
+             }
+
+      # W29 (D237/D238): the egress allowlist is the SAME survivor set — exactly
+      # github's host, never the non-installed linear's.
+      assert egress_hosts(args) == ["api.githubcopilot.com"]
+      refute "mcp.linear.app" in args
+
+      assert_w12_belt_intact(args)
+      assert_no_host_mcp_path(args)
+    end
+
+    test "2 tool installs (github + linear) — both HTTP servers, nothing else, belt intact",
+         %{ws: ws} do
+      insert_install("github", "octocat/repo", ws.id)
+      insert_install("linear", "team-x", ws.id)
+
+      descriptors = [
+        tool_descriptor("github", "https://api.githubcopilot.com/mcp/"),
+        tool_descriptor("linear", "https://mcp.linear.app/mcp")
+      ]
+
+      args =
+        ClaudeChat.cloud_build_args("plan", %{workspace_id: ws.id, tool_descriptors: descriptors})
+
+      assert mcp_flag_value(args) == %{
+               "mcpServers" => %{
+                 "github" => %{"type" => "http", "url" => "https://api.githubcopilot.com/mcp/"},
+                 "linear" => %{"type" => "http", "url" => "https://mcp.linear.app/mcp"}
+               }
+             }
+
+      # W29 (D237/D238): both installed connectors' declared hosts, SORTED UNIQUE,
+      # as SEPARATE repeated --egress-host pairs (never comma-joined).
+      assert egress_hosts(args) == ["api.githubcopilot.com", "mcp.linear.app"]
+      assert Enum.count(args, &(&1 == "--egress-host")) == 2
+      refute "api.githubcopilot.com,mcp.linear.app" in args
+      refute "api.anthropic.com" in args
+
+      # Every --egress-host rides pre-`--` (shim-own, not a claude flag).
+      sep = Enum.find_index(args, &(&1 == "--"))
+
+      for {flag, i} <- Enum.with_index(args), flag == "--egress-host" do
+        assert i < sep, "--egress-host must ride pre-`--`"
+      end
+
+      assert_w12_belt_intact(args)
+      assert_no_host_mcp_path(args)
+    end
+
+    test "a channel install never yields a tool server (github descriptor, telegram install)",
+         %{ws: ws} do
+      insert_install("telegram", "111:aaa", ws.id)
+
+      # A github descriptor is injected but github has NO install for this ws ⇒
+      # dropped ⇒ 0 servers ⇒ argv byte-identical to W12 (no flag).
+      descriptors = [tool_descriptor("github", "https://api.githubcopilot.com/mcp/")]
+
+      args =
+        ClaudeChat.cloud_build_args("plan", %{workspace_id: ws.id, tool_descriptors: descriptors})
+
+      refute "--mcp-config-b64" in args
+      # No mcp flag, no session_id ⇒ the only pre-`--` addition is the ALWAYS-ON
+      # --keep-sandbox (W14 D137). No binding ⇒ no --sandbox-id.
+      assert Enum.take(args, 4) == ["--workspace", ws.id, "--keep-sandbox", "--"]
+      refute "--sandbox-id" in args
+      # W29 (D237): 0 surviving servers ⇒ NO egress widening — the deny-all wall is
+      # preserved (a non-installed github descriptor never opens github's host).
+      refute "--egress-host" in args
+      assert egress_hosts(args) == []
+    end
+  end
+
+  describe "cloud runtime wiring (connectors D110 — recorder→session_opts principal)" do
+    test "Runtime.Claude threads workspace_id into the cloud shim argv (today dropped)" do
+      argv_file = capture_path("argv")
+      put_chat_config(execution_profile: :cloud, sandbox_runner: argv_echo_binary(argv_file))
+
+      {:ok, session} =
+        Barkpark.StudioChat.Runtime.Claude.start(%{
+          sink: self(),
+          workspace_id: "ws-threaded-99",
+          session_opts: %{}
+        })
+
+      argv = read_lines(argv_file)
+      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--workspace", "ws-threaded-99"])
+
+      ClaudeChat.close(session)
+    end
+
+    test "Runtime.Claude refuses a cloud spawn that carries no workspace principal (fail-closed)" do
+      put_chat_config(execution_profile: :cloud, sandbox_runner: "cloud-sandbox-runner")
+
+      assert {:error, _reason} =
+               Barkpark.StudioChat.Runtime.Claude.start(%{sink: self(), session_opts: %{}})
+    end
+  end
+
+  # D123: the two production entry points (chat_live.ex, chat_controller.ex)
+  # thread `workspace_id` correctly, but NO existing D110 test crosses
+  # `Recorder.ensure` — the actual server-owned spawn path. This closes that gap:
+  # a `:cloud` turn with a nil workspace must fail CLOSED all the way through the
+  # real Session pipeline, and the SAME path WITH a workspace must spawn (so the
+  # refusal is the workspace gate, not a broken harness). Needs live Postgres —
+  # Recorder.init reads CycleFleet + acquires admission before the spawn.
+  describe "Recorder-level cloud fail-close (connectors D123)" do
+    alias Barkpark.StudioChat.Recorder
+
+    setup do
+      :ok = Ecto.Adapters.SQL.Sandbox.checkout(Barkpark.Repo)
+      Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, {:shared, self()})
+      on_exit(fn -> Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual) end)
+      :ok
+    end
+
+    test ":cloud + a nil workspace fails CLOSED through Recorder.ensure — no spawn, no live recorder" do
+      # A shim that WOULD record its argv if it ever launched — it must not.
+      never = capture_path("never")
+      put_chat_config(execution_profile: :cloud, sandbox_runner: argv_echo_binary(never))
+      sid = Ecto.UUID.generate()
+
+      assert {:error, _reason} =
+               Recorder.ensure(%{session_id: sid, mode: "plan", execution_target: "managed"})
+
+      # NON-VACUITY: were the workspace gate broken, cloud_build_args would return
+      # an argv, the shim WOULD spawn, `ensure` would return `{:ok, pid}`, and the
+      # argv-echo shim would have written `never`. All three refute a spawn:
+      assert Recorder.whereis(sid) == nil
+      refute File.exists?(never)
+    end
+  end
+
+  describe "cloud turn end-to-end — fake shim through the real pipeline (connectors D113b)" do
+    test "a bogus-key result frame reaches the sink via the SAME parse_chunk pipeline and classifies as an auth failure" do
+      put_chat_config(execution_profile: :cloud, sandbox_runner: bogus_key_shim())
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{sink: self(), session_opts: %{workspace_id: "ws-7"}})
+
+      assert_receive {:claude_chat_event, %{"type" => "result"} = frame}, 2_000
+      assert frame["is_error"] == true
+      assert frame["api_error_status"] == 401
+      assert frame["result"] =~ "Invalid API key"
+      # The non-vacuous bar: the frame the runtime auth guard actually reads.
+      assert ClaudeChat.auth_failure?(frame)
+      refute ClaudeChat.result_success?(frame)
+
+      ClaudeChat.close(session)
+    end
+  end
+
+  # A chmod +x fake `cloud-sandbox-runner` that emits the canned bogus-key result
+  # frame (non-volatile fields byte-matched to unauthed_stream.ndjson) then `cat`s
+  # to keep the Port alive. Stands in for the real shim's terminal frame WITHOUT a
+  # live Vercel Sandbox — the live sandbox proof is the committed harness
+  # (w11-isolated-turn-proof.sh) and the human gate.
+  defp bogus_key_shim do
+    frame =
+      ~s({"type":"result","subtype":"success","is_error":true,"api_error_status":401,) <>
+        ~s("result":"Invalid API key","terminal_reason":"api_error"})
+
+    path =
+      Path.join(System.tmp_dir!(), "cloud_shim_#{System.unique_integer([:positive])}.sh")
+
+    File.write!(path, "#!/bin/sh\nprintf '%s\\n' '#{frame}'\ncat\n")
+    File.chmod!(path, 0o755)
+    on_exit(fn -> File.rm_rf(path) end)
+    path
+  end
+
   # The spawn-env seam (chat-task-hands charter D1/D3): the child gets bp
   # credentials injected and the BEAM's prod secrets SCRUBBED. Before this seam
   # the child inherited the FULL server env — DATABASE_URL, SECRET_KEY_BASE,
@@ -755,6 +1559,80 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       # The merge keeps everything unlisted — claude's OAuth lives under $HOME.
       refute "HOME" in scrubbed
       refute "PATH" in scrubbed
+    end
+
+    test "the denylist tracks secret-shaped env reads in runtime.exs" do
+      runtime =
+        "../../../config/runtime.exs"
+        |> Path.expand(__DIR__)
+        |> File.read!()
+
+      runtime_secrets =
+        ~r/System\.(?:get_env|fetch_env!?)\(\s*"([A-Z][A-Z0-9_]*)"/
+        |> Regex.scan(runtime, capture: :all_but_first)
+        |> List.flatten()
+        |> Enum.filter(fn name ->
+          name == "DATABASE_URL" or
+            Regex.match?(~r/(?:^|_)(?:TOKEN|SECRET|PASSWORD|KEY|COOKIE)$/, name)
+        end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      missing = runtime_secrets -- ClaudeChat.scrubbed_env_names()
+
+      assert missing == [],
+             "secret-shaped runtime env reads missing from ClaudeChat.scrubbed_env_names/0: #{inspect(missing)}"
+
+      refute "HOME" in ClaudeChat.scrubbed_env_names()
+      refute "PATH" in ClaudeChat.scrubbed_env_names()
+    end
+
+    test "the denylist covers every secret-shaped env read in api/lib (scrub-OR-allowlisted)" do
+      # Widen the runtime.exs-only audit to the whole app tree (charter D173):
+      # any `System.get_env/fetch_env!` of a secret-shaped name in api/lib must
+      # be EITHER scrubbed from the chat child OR on the intentional-passthrough
+      # allowlist. A read that is neither reds here, forcing a conscious
+      # scrub-or-allowlist decision before it can ship.
+      lib_root = Path.expand("../../../lib", __DIR__)
+
+      # Secret-shape: the terminal token before the closing quote is one of
+      # TOKEN|SECRET|PASSWORD|KEY|COOKIE (anchored on `_` or start), or the
+      # bare DATABASE_URL. Anchoring on the terminal correctly EXCLUDES
+      # PUBLIC_READ_TOKEN_FILE (…_FILE) and BARKPARK_HOME (…_HOME).
+      read_re = ~r/System\.(?:get_env|fetch_env!?)\(\s*"([A-Z][A-Z0-9_]*)"/
+      secret_re = ~r/(?:^|_)(?:TOKEN|SECRET|PASSWORD|KEY|COOKIE)$/
+
+      lib_secrets =
+        (lib_root <> "/**/*.ex")
+        |> Path.wildcard()
+        |> Enum.flat_map(fn path ->
+          path
+          |> File.read!()
+          |> then(&Regex.scan(read_re, &1, capture: :all_but_first))
+          |> List.flatten()
+        end)
+        |> Enum.filter(fn name ->
+          name == "DATABASE_URL" or Regex.match?(secret_re, name)
+        end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      # Sanity: the scan is finding real reads, not silently matching nothing.
+      assert lib_secrets != [],
+             "the api/lib secret-read scan matched nothing — the regex or path is broken"
+
+      covered = ClaudeChat.scrubbed_env_names() ++ ClaudeChat.intentional_env_passthrough_names()
+      uncovered = lib_secrets -- covered
+
+      assert uncovered == [],
+             "secret-shaped env reads in api/lib that are neither scrubbed nor " <>
+               "allowlisted (add to @scrubbed_env, or to @intentional_env_passthrough " <>
+               "with a rationale): #{inspect(uncovered)}"
+
+      # The allowlist is the deliberate exception — it must never leak HOME/PATH
+      # or accidentally swallow the whole denylist into a passthrough.
+      refute "HOME" in ClaudeChat.intentional_env_passthrough_names()
+      refute "PATH" in ClaudeChat.intentional_env_passthrough_names()
     end
 
     test "worker_id/1 is claude-chat-<sid8> (cmux precedent — one worker per chat tab)" do
@@ -858,6 +1736,68 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       assert get_in(config, ["mcpServers", "barkpark", "env", "BARKPARK_API_TOKEN"]) == token
 
       assert ClaudeChat.task_hands(session) == :minted
+
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+    end
+
+    test "a connected TOOL connector folds a SECOND mcpServers key into the ON-DISK config (D69)",
+         %{minter: minter, ws: ws} do
+      # A configured connect seam + a stub bridge that answers ONLY a real
+      # tool-session ticket for THIS workspace (see ToolBridgeStub). No Node.
+      put_connectors_config(connect_secret: "tool-seam-test-secret", bridge: ToolBridgeStub)
+      Application.put_env(:barkpark, :tool_stub_ws, ws.id)
+      on_exit(fn -> Application.delete_env(:barkpark, :tool_stub_ws) end)
+
+      file = capture_path("env")
+      put_chat_config(command: env_dump_command(file))
+      uuid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: uuid, minter: minter}
+        })
+
+      # Wait for the child to boot (the env dump lands), then read the config file.
+      _env = read_child_env(file)
+      config_path = Path.join(System.tmp_dir!(), "barkpark-claude-#{uuid}.mcp.json")
+      servers = config_path |> File.read!() |> Jason.decode!() |> Map.fetch!("mcpServers")
+
+      # The loopback server still carries the minted token …
+      assert servers["barkpark"]["env"]["BARKPARK_API_TOKEN"] |> String.starts_with?("bpcs_")
+
+      # … AND github landed as a SECOND server, DERIVED from the bridge descriptor.
+      # This only happens if setup_mcp signed a REAL tool-session ticket bound to
+      # THIS workspace — the stub returns [] otherwise (non-vacuous, D69/D38).
+      assert servers["github"]["type"] == "http"
+      assert servers["github"]["url"] == "https://api.githubcopilot.com/mcp/"
+      assert servers["github"]["headersHelper"] =~ "/connect/tool-headers/github"
+
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+    end
+
+    test "no connect seam ⇒ NO tool servers, config unchanged (fail-soft, D69)", %{minter: minter} do
+      # The default instance: connect_secret nil. sign_tool short-circuits BEFORE
+      # any bridge call, so the config is byte-identical to the pre-wave shape.
+      file = capture_path("env")
+      put_chat_config(command: env_dump_command(file))
+      uuid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: uuid, minter: minter}
+        })
+
+      _env = read_child_env(file)
+      config_path = Path.join(System.tmp_dir!(), "barkpark-claude-#{uuid}.mcp.json")
+      servers = config_path |> File.read!() |> Jason.decode!() |> Map.fetch!("mcpServers")
+
+      assert Map.keys(servers) == ["barkpark"]
 
       ref = Process.monitor(session)
       ClaudeChat.close(session)

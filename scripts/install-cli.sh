@@ -137,12 +137,93 @@ else
   echo "install-cli: installed bp -> ${dest}"
 fi
 
-# ── PATH hint + success line ─────────────────────────────────────────────────
-case ":${PATH}:" in
-  *":${BIN_DIR}:"*) ;;
-  *) echo "install-cli: NOTE — ${BIN_DIR} is not on your PATH; add it, e.g.:"
-     echo "             export PATH=\"${BIN_DIR}:\$PATH\"" ;;
+# ── PATH postcondition (clean-shell verify + rc patch) ───────────────────────
+# A string-membership test (`case ":$PATH:" in *":$BIN_DIR:"*`) only proves
+# THIS process can see bp. It says nothing about the user's NEXT terminal,
+# which starts a FRESH shell that builds PATH from rc files — not this
+# installer's in-memory PATH. An in-process `export PATH` dies with this
+# process. So verify the real postcondition: spawn a fresh login shell with
+# BIN_DIR scrubbed from the PATH we hand it, and confirm it resolves `bp`.
+# If it can't, patch the login rc file with the export stanza and re-verify.
+
+PATH_MARKER="# barkpark-bp path (added by install-cli)"
+
+# Emit $PATH with every literal occurrence of $BIN_DIR removed, so an in-process
+# export can never mask a missing rc entry during the probe.
+path_without_bindir() {
+  printf '%s' "${PATH}" | tr ':' '\n' | grep -vxF "$BIN_DIR" | paste -sd ':' -
+}
+
+# Resolve a probe shell that supports `-l` (login). bash/zsh do; dash rejects
+# it, so fall back to bash when the login shell is a bare POSIX sh.
+probe_shell="${SHELL:-/bin/sh}"
+[ -x "$probe_shell" ] || probe_shell="/bin/sh"
+login_shell_name="$(basename "$probe_shell" 2>/dev/null || echo sh)"
+case "$login_shell_name" in
+  bash|zsh) probe_login="-l" ;;
+  *)
+    if command -v bash >/dev/null 2>&1; then
+      probe_shell="$(command -v bash)"; login_shell_name="bash"; probe_login="-l"
+    else
+      probe_login=""   # bare POSIX sh: no login flag (dash errors on -l)
+    fi
+    ;;
 esac
+
+# Does a fresh login shell resolve bp? BIN_DIR is scrubbed from the handed-in
+# PATH, so the only ways bp can resolve are (a) a system dir already on PATH
+# (login init / path_helper) or (b) the rc file's export — exactly what the
+# user's next terminal sees. $1 = rc file to source (may be empty/absent).
+probe_resolves_bp() {
+  env -i HOME="${HOME}" PATH="$(path_without_bindir)" \
+    "$probe_shell" $probe_login -c \
+    '[ -n "${1:-}" ] && [ -r "$1" ] && . "$1"; command -v bp >/dev/null 2>&1' \
+    bp-probe "${1:-}"
+}
+
+# Map the login shell to the rc file a new interactive terminal reads.
+rc_file_for_shell() {
+  case "$1" in
+    zsh)  echo "${ZDOTDIR:-$HOME}/.zshrc" ;;
+    bash) if   [ -f "$HOME/.bashrc" ];       then echo "$HOME/.bashrc"
+          elif [ -f "$HOME/.bash_profile" ]; then echo "$HOME/.bash_profile"
+          else echo "$HOME/.profile"; fi ;;
+    *)    echo "$HOME/.profile" ;;
+  esac
+}
+
+# Append the export stanza once (idempotent on PATH_MARKER — never double-add).
+patch_rc_file() {
+  _rc="$1"
+  if [ -f "$_rc" ] && grep -qF "$PATH_MARKER" "$_rc" 2>/dev/null; then
+    return 0
+  fi
+  {
+    printf '\n%s\n' "$PATH_MARKER"
+    printf 'export PATH="%s:$PATH"\n' "$BIN_DIR"
+  } >> "$_rc"
+}
+
+rc_file="$(rc_file_for_shell "$login_shell_name")"
+if probe_resolves_bp "$rc_file"; then
+  : # a fresh shell already resolves bp (system dir on PATH, or rc already set)
+else
+  if patch_rc_file "$rc_file" && probe_resolves_bp "$rc_file"; then
+    echo "install-cli: added ${BIN_DIR} to PATH in ${rc_file} (new terminals will find bp)"
+  else
+    err "NOTE — ${BIN_DIR} is not on your PATH and a fresh shell still can't"
+    err "       resolve bp. Add it manually:"
+    err "         export PATH=\"${BIN_DIR}:\$PATH\""
+  fi
+fi
+
+# GUI-agent stale-PATH caveat: a Cursor / Claude Desktop / VS Code process
+# spawns `bp mcp serve` with the PATH captured when the AGENT launched, so an
+# already-running agent won't see bp until it is fully quit and reopened.
+echo "install-cli: NOTE — a GUI-launched agent (Cursor, Claude Desktop, VS Code)"
+echo "             runs 'bp mcp serve' with the PATH it captured at its own"
+echo "             launch, so an already-running agent won't see bp until you"
+echo "             fully quit and reopen it (a new shell alone is not enough)."
 
 echo "install-cli: done."
 echo ""

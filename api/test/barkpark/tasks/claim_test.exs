@@ -12,7 +12,9 @@ defmodule Barkpark.Tasks.ClaimTest do
     6. claim_by_id/3 — resource conflict: refuses when the requested resource is held.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
+
+  import Ecto.Query, only: [from: 2]
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.Document
@@ -149,6 +151,48 @@ defmodule Barkpark.Tasks.ClaimTest do
 
       # Second targeted claim on the same task — must be rejected as not_ready.
       assert {:error, :not_ready} = Tasks.claim_by_id(task.doc_id, "worker-second", scope)
+    end
+
+    test "targeted claims fail closed for every persisted non-executable gate", %{scope: scope} do
+      gates = [
+        %{"version" => 1, "state" => "human_gated", "reason" => "approval"},
+        %{"version" => 1, "state" => "parked", "reason" => "later"},
+        %{
+          "version" => 1,
+          "state" => "evidence_stalled",
+          "reason" => "proof missing",
+          "evidence" => "attempted test"
+        }
+      ]
+
+      Enum.each(gates, fn gate ->
+        task = mk_task!(uniq("target-gated"), scope, %{"queue_gate" => gate})
+        assert {:error, :not_ready} = Tasks.claim_by_id(task.doc_id, "worker-gated", scope)
+      end)
+    end
+
+    test "same-holder renewals stop when a live claim becomes non-executable", %{scope: scope} do
+      for gate <- [
+            %{"version" => 1, "state" => "human_gated", "reason" => "approval"},
+            %{"version" => 1, "state" => "parked", "reason" => "later"},
+            %{
+              "version" => 1,
+              "state" => "evidence_stalled",
+              "reason" => "proof missing",
+              "evidence" => "attempted test"
+            }
+          ] do
+        task = mk_task!(uniq("renew-gated"), scope)
+        assert {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "renew-holder", scope)
+
+        Repo.update_all(
+          from(d in Document, where: d.id == ^task.id),
+          set: [content: Map.put(claimed.content, "queue_gate", gate)]
+        )
+
+        assert {:error, :not_ready} = Tasks.claim_by_id(task.doc_id, "renew-holder", scope)
+        assert Repo.get!(Document, task.id).content["claim"]["epoch"] == 1
+      end
     end
   end
 

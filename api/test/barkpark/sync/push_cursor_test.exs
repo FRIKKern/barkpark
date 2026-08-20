@@ -5,8 +5,17 @@ defmodule Barkpark.Sync.PushCursorTest do
   pre-enablement history (so it is never replayed to the remote — invariant #4),
   is idempotent/never-rewinding (invariant #3), and is dataset-scoped. No worker,
   no network (invariant #7).
+
+  ## workspace_id attribution (charter D55/D57)
+
+  `sync_push_cursors` gained a nullable `workspace_id` ATTRIBUTION column (for E1
+  export + FK-cascade delete), stamped on the write path. It is NOT a key
+  component — the `{source, dataset}` PK and monotonic-upsert conflict target are
+  unchanged — so these mechanics are exactly preserved. These tests pass `nil`,
+  exercising the workspace-agnostic per-dataset path the LIVE GitHub outbound
+  mirror (`Barkpark.Plugins.Github.Cursor`) uses.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo
@@ -38,7 +47,7 @@ defmodule Barkpark.Sync.PushCursorTest do
     _e2 = insert_event!("b", "api")
     e3 = insert_event!("c", "api")
 
-    assert :ok = PushCursor.bootstrap_if_absent(source, @dataset)
+    assert :ok = PushCursor.bootstrap_if_absent(nil, source, @dataset)
     assert PushCursor.get(source, @dataset) == e3.id
 
     # The Outbox window starts strictly above the cursor → nothing pre-enable replays.
@@ -50,19 +59,19 @@ defmodule Barkpark.Sync.PushCursorTest do
     e1 = insert_event!("a", "api")
     head = e1.id
 
-    assert :ok = PushCursor.bootstrap_if_absent(source, @dataset)
+    assert :ok = PushCursor.bootstrap_if_absent(nil, source, @dataset)
     assert PushCursor.get(source, @dataset) == head
 
     # Advance well past head, then call bootstrap again: it must be a NO-OP.
-    :ok = PushCursor.put(source, @dataset, head + 5)
-    assert :ok = PushCursor.bootstrap_if_absent(source, @dataset)
+    :ok = PushCursor.put(nil, source, @dataset, head + 5)
+    assert :ok = PushCursor.bootstrap_if_absent(nil, source, @dataset)
     assert PushCursor.get(source, @dataset) == head + 5
   end
 
   test "no events → cursor seeds to 0" do
     source = src()
     other_dataset = "empty-#{System.unique_integer([:positive])}"
-    assert :ok = PushCursor.bootstrap_if_absent(source, other_dataset)
+    assert :ok = PushCursor.bootstrap_if_absent(nil, source, other_dataset)
     assert PushCursor.get(source, other_dataset) == 0
   end
 
@@ -73,7 +82,7 @@ defmodule Barkpark.Sync.PushCursorTest do
     # A higher-id event in a DIFFERENT dataset must not raise our head.
     _theirs = insert_event!("o", "api", other)
 
-    assert :ok = PushCursor.bootstrap_if_absent(source, @dataset)
+    assert :ok = PushCursor.bootstrap_if_absent(nil, source, @dataset)
     assert PushCursor.get(source, @dataset) == mine.id
   end
 end

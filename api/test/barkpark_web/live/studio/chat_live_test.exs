@@ -16,6 +16,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
   import Phoenix.LiveViewTest
 
+  import Barkpark.TenancyFixtures, only: [ensure_default_scope!: 0]
+
   alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.StudioChat
@@ -38,7 +40,39 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     def run(_binary, _args), do: {:error, :disabled_in_tests}
   end
 
+  defmodule FakeCodexAdapter do
+    @behaviour Barkpark.StudioChat.Runtime.Adapter
+
+    def start(_opts), do: {:error, :not_started_by_identity_picker_tests}
+    def resume(_opts), do: {:error, :not_started_by_identity_picker_tests}
+    def send_turn(_runtime, _content), do: :ok
+    def steer(_runtime, _command), do: :ok
+    def interrupt(_runtime), do: {:ok, "interrupt-test"}
+    def answer_approval(_runtime, _approval_id, _decision), do: :ok
+    def close(_runtime), do: :ok
+    def readiness(_opts), do: %{binary: true, authed?: true}
+    def capabilities, do: %{modes: ["read-only"], models: ["gpt-5.6"], efforts: ["high"]}
+    def normalize_mode(value), do: if(value == "read-only", do: value, else: "read-only")
+    def normalize_model(value), do: if(value == "gpt-5.6", do: value)
+    def normalize_effort(value), do: if(value == "high", do: value)
+    def cwd, do: "/tmp/codex-managed"
+  end
+
   setup %{conn: conn} do
+    # Wave-26 leaked-session pollution guard (felix-w27, third victim — same
+    # class the felix-w27-s6 slice guarded in studio_chat_test.exs and
+    # chat_render_golden_test.exs): a Recorder that outlived a prior test's
+    # sandbox owner can COMMIT chat_sessions rows that escape rollback and ride
+    # list_sessions' recency-desc ordering ahead of seeded rows — reddening the
+    # sidebar/empty-state assertions here on a shifting set. At setup no test
+    # in this file has created a session yet, so every visible row is such a
+    # leak; purge for a clean baseline. Restrict-FK children first; deleting
+    # sessions cascades the delete_all children. Runs inside this test's
+    # sandbox transaction and rolls back with it — test-infra hygiene only.
+    Barkpark.Repo.query!("DELETE FROM chat_runtime_usage_receipts")
+    Barkpark.Repo.query!("DELETE FROM epic_assignment_runtime_attempts")
+    Barkpark.Repo.delete_all(Barkpark.StudioChat.Session)
+
     {:ok, _} =
       Auth.create_token(@admin_token, "chat admin", "production", ["read", "write", "admin"])
 
@@ -84,6 +118,22 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         else: Application.delete_env(:barkpark, :claude_chat)
 
       Application.put_env(:barkpark, :public_demo_studio, prev_demo)
+    end)
+  end
+
+  defp enable_fake_codex_adapter do
+    previous = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
+
+    Application.put_env(
+      :barkpark,
+      :studio_chat_runtime_adapters,
+      Map.put(previous || %{}, :codex, FakeCodexAdapter)
+    )
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:barkpark, :studio_chat_runtime_adapters, previous),
+        else: Application.delete_env(:barkpark, :studio_chat_runtime_adapters)
     end)
   end
 
@@ -265,6 +315,30 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
     StudioChat.rename(id, title)
     if status = opts[:status], do: StudioChat.update_status(id, status)
+
+    # the herd column (charter D38/D40) — what the sidebar pill actually reads.
+    # D80h: a blocked flip carries its :ask corroboration (a real pending ask
+    # row); every other state is a :derived write through the same funnel.
+    case opts[:agent_state] do
+      nil ->
+        :ok
+
+      "blocked" ->
+        {:ok, _} =
+          StudioChat.append_message(id, %{
+            role: "approval",
+            metadata: %{
+              "request_id" => "cl-#{System.unique_integer([:positive])}",
+              "approval_status" => "pending"
+            }
+          })
+
+        {1, _} = StudioChat.set_agent_state(id, "blocked", :ask)
+
+      agent_state ->
+        {1, _} = StudioChat.set_agent_state(id, agent_state, :derived)
+    end
+
     id
   end
 
@@ -713,6 +787,66 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert render(view) =~ "Hello!"
     end
 
+    # The codex turn_completed path (studio_chat_runtime_event) commits the
+    # streamed answer to a durable :assistant message so it survives turn
+    # completion (which always resets `streaming: nil`). The `streaming` assign
+    # is a StreamTail BARE MAP (%{text: ...}) — the old `text when is_binary(text)`
+    # clause never matched a map, so the just-streamed answer vanished from the
+    # open transcript at turn completion. MUTATION-PROOF: reverting the clause to
+    # `text when is_binary(text)` reds this — streaming resets to nil and the
+    # sentinel disappears because it was never appended.
+    test "turn_completed commits the streamed codex answer to a durable assistant message",
+         %{view: view} do
+      # populate the shared `streaming` StreamTail via the delta path
+      send(view.pid, {:claude_chat_event, stream_delta("ZZ_STREAMED_ANSWER_ZZ")})
+      assert render(view) =~ "ZZ_STREAMED_ANSWER_ZZ"
+
+      # codex end-of-turn — after this, streaming is nil no matter what
+      send(view.pid, {:studio_chat_runtime_event, codex_turn_completed()})
+
+      assert lv_assigns(view)[:streaming] == nil
+      # the streamed answer is still visible — now a durable :assistant message
+      assert render(view) =~ "ZZ_STREAMED_ANSWER_ZZ"
+    end
+
+    # A stdout buffer overflow (claude_chat.ex D126) sends a NAMED reason before
+    # the DOWN follows. Without a {:claude_chat_error, ...} clause it fell to the
+    # catch-all no-op and the user saw only the generic DOWN banner, losing the
+    # captured stderr tail. MUTATION-PROOF: removing the clause reds this — the
+    # render no longer carries the overflow copy or the captured reason.
+    test "a buffer_overflow error surfaces the captured reason, not the generic DOWN banner",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+
+      send(
+        view.pid,
+        {:claude_chat_error, :buffer_overflow, "codex: runaway stdout ZZ_OVERFLOW_TAIL_ZZ"}
+      )
+
+      html = render(view)
+      assert html =~ "more data than this session can buffer"
+      assert html =~ "ZZ_OVERFLOW_TAIL_ZZ"
+      refute html =~ "ended unexpectedly"
+    end
+
+    # A codex runtime FAILURE event (protocol.ex :protocol_error / :error /
+    # :process_failed) carries an `error` map with the reason. Before this clause
+    # these kinds fell to the bare %Runtime.Event{} catch-all and rendered NOTHING
+    # — a framing buffer overflow left the transcript silent. MUTATION-PROOF:
+    # removing the codex-failure handle_info clause reds this — the render no
+    # longer carries the failure copy or the captured reason.
+    test "a codex :protocol_error surfaces its reason instead of rendering nothing",
+         %{view: view} do
+      send(
+        view.pid,
+        {:studio_chat_runtime_event, codex_protocol_error("ZZ_PROTOCOL_REASON_ZZ")}
+      )
+
+      html = render(view)
+      assert html =~ "protocol error"
+      assert html =~ "ZZ_PROTOCOL_REASON_ZZ"
+    end
+
     # charter D41 — the wire carries no thinking text, so the pulse is a live
     # counter off `system/thinking_tokens` (cumulative `estimated_tokens`).
     test "thinking_tokens frames render a live ✻ pulse with the cumulative count",
@@ -934,6 +1068,96 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
       assert html =~ "Hello, final."
       refute html =~ "▌"
+    end
+
+    # felix W22 (charter D131): the streaming display accumulator is bounded at a
+    # config-overridable byte cap. A flood of many small WELL-FORMED deltas keeps
+    # the transport buffer near-empty yet would grow this display assign (and
+    # re-render the full prefix per delta) unboundedly. On breach the live bubble
+    # freezes at the last stable block with an honest marker; the DURABLE full
+    # text still lands untruncated on completion (this accumulator is
+    # display-only for both providers).
+    test "a flood of well-formed deltas caps the display but completion still yields the FULL text",
+         %{view: view} do
+      # shrink the cap far below the flood; merge into the live :claude_chat env
+      # so `enabled`/`command` survive, and restore on exit.
+      prev = Application.get_env(:barkpark, :claude_chat, [])
+
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(prev, :max_streaming_display_bytes, 4096)
+      )
+
+      on_exit(fn -> Application.put_env(:barkpark, :claude_chat, prev) end)
+
+      # Well-formed prose with balanced-fence block boundaries — the buffer stays
+      # complete-lines the whole time (the transport cap never trips), only THIS
+      # sink grows. 400 × ~48B ≈ 19.2 KiB, ~4.7× the 4096 cap.
+      chunk = "Lorem ipsum dolor sit amet, consectetur adipi.\n\n"
+
+      for _ <- 1..400 do
+        send(view.pid, {:claude_chat_event, stream_delta(chunk)})
+      end
+
+      html = render(view)
+      streaming = lv_assigns(view)[:streaming]
+
+      # RED-BEFORE (uncapped): streaming.text would grow to the full ~19.2 KiB
+      # flood. GREEN (capped): it froze at the last stable boundary at/under the
+      # cap plus at most one delta of slack.
+      assert streaming.capped == true
+      assert byte_size(streaming.text) <= 4096 + byte_size(chunk)
+      # the honest marker stands in for the dropped forming tail
+      assert html =~ "live preview truncated"
+      assert html =~ "data-streaming-capped"
+      # never a live cursor once frozen (the tail was dropped at a stable boundary)
+      refute html =~ "▌"
+
+      # …and the completion path is UNBOUNDED by the display cap: a full frame far
+      # larger than the cap renders in full, sentinel and all.
+      full = String.duplicate("full durable body paragraph. ", 1000) <> "ZZ_FULL_TAIL_SENTINEL_ZZ"
+
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => full}]}
+         }}
+      )
+
+      done = render(view)
+      assert done =~ "ZZ_FULL_TAIL_SENTINEL_ZZ"
+      # the streamed preview is superseded (no marker lingers post-completion)
+      refute done =~ "live preview truncated"
+    end
+
+    # A capped state is terminal: every further delta is ignored, so neither the
+    # accumulator nor the per-delta full-prefix re-render can keep growing.
+    test "once capped, further deltas do not grow the frozen display", %{view: view} do
+      prev = Application.get_env(:barkpark, :claude_chat, [])
+
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(prev, :max_streaming_display_bytes, 2048)
+      )
+
+      on_exit(fn -> Application.put_env(:barkpark, :claude_chat, prev) end)
+
+      chunk = "The quick brown fox jumps over the lazy dog.\n\n"
+      for _ <- 1..200, do: send(view.pid, {:claude_chat_event, stream_delta(chunk)})
+
+      frozen = lv_assigns(view)[:streaming]
+      assert frozen.capped == true
+      frozen_size = byte_size(frozen.text)
+
+      # 200 more deltas after the freeze must not budge the frozen text.
+      for _ <- 1..200, do: send(view.pid, {:claude_chat_event, stream_delta(chunk)})
+      after_more = lv_assigns(view)[:streaming]
+      assert after_more.capped == true
+      assert byte_size(after_more.text) == frozen_size
     end
 
     test "assistant markdown renders through the paper engine", %{view: view} do
@@ -1498,7 +1722,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute pid_before == nil
 
       html =
-        render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+        render_change(view, "set-mode", %{"mode" => "acceptEdits"})
 
       # the mode change is recorded honestly with the friendly label…
       assert html =~ "Permission mode → accept edits"
@@ -1512,7 +1736,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
     test "mode change with no live session just updates the selector", %{view: view} do
       html =
-        render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+        render_change(view, "set-mode", %{"mode" => "acceptEdits"})
 
       refute html =~ "New session started"
       assert html =~ "accept edits"
@@ -1525,7 +1749,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "picking bypass opens the arm panel and never steers on the select alone",
          %{view: view} do
       html =
-        render_change(element(view, ~s(form[phx-change=set-mode])), %{
+        render_change(view, "set-mode", %{
           "mode" => "bypassPermissions"
         })
 
@@ -1755,7 +1979,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "a confirmed mode echo keeps the switch and posts no revert line", %{view: view} do
       spawn_silent_session(view)
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      render_change(view, "set-mode", %{"mode" => "acceptEdits"})
       rid = pending_mode_req(view)
       # the CLI echoes back exactly the mode we asked for → confirmed
       send(view.pid, {:claude_chat_control, :set_mode, rid, %{"mode" => "acceptEdits"}})
@@ -1775,7 +1999,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       # optimistic switch to acceptEdits…
       html =
-        render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+        render_change(view, "set-mode", %{"mode" => "acceptEdits"})
 
       assert html =~ "accept edits"
       rid = pending_mode_req(view)
@@ -1785,7 +2009,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, {:claude_chat_control, :set_mode, rid, %{}})
       html = render(view)
       assert html =~ "switch permission mode"
-      assert html =~ "plan (read-only)"
+      assert has_element?(view, ".mode-tab-plan.active")
       # revert persists too: the store never keeps a mode the CLI refused.
       assert StudioChat.get_session(store_id(view)).mode == "plan"
     end
@@ -1793,14 +2017,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "a mismatched mode echo reverts to the prior mode", %{view: view} do
       spawn_silent_session(view)
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      render_change(view, "set-mode", %{"mode" => "acceptEdits"})
       rid = pending_mode_req(view)
       # the CLI reports a DIFFERENT mode than we asked → the switch did not take
       send(view.pid, {:claude_chat_control, :set_mode, rid, %{"mode" => "plan"}})
 
       html = render(view)
       assert html =~ "switch permission mode"
-      assert html =~ "plan (read-only)"
+      assert has_element?(view, ".mode-tab-plan.active")
     end
 
     test "a stale ack from a superseded rapid switch is ignored (no mis-revert)",
@@ -1808,9 +2032,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       spawn_silent_session(view)
 
       # rapid double switch: acceptEdits (req A) then auto (req B) before any ack
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      render_change(view, "set-mode", %{"mode" => "acceptEdits"})
       rid_a = pending_mode_req(view)
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "auto"})
+      render_change(view, "set-mode", %{"mode" => "auto"})
       rid_b = pending_mode_req(view)
       refute rid_a == rid_b
 
@@ -1819,13 +2043,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # request_id it is stale (B superseded it) → ignored, mode stays auto.
       send(view.pid, {:claude_chat_control, :set_mode, rid_a, %{"mode" => "acceptEdits"}})
       html = render(view)
-      assert html =~ "auto-run"
+      assert has_element?(view, ".mode-tab-autopilot.active")
       refute html =~ "Couldn't switch permission mode"
 
       # req B's ack then confirms auto honestly.
       send(view.pid, {:claude_chat_control, :set_mode, rid_b, %{"mode" => "auto"}})
       html = render(view)
-      assert html =~ "auto-run"
+      assert has_element?(view, ".mode-tab-autopilot.active")
       refute html =~ "Couldn't switch permission mode"
       assert lv_assigns(view)[:pending_mode] == nil
       assert StudioChat.get_session(store_id(view)).mode == "auto"
@@ -2152,7 +2376,56 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   describe "sessions become a place (persistence + resume, S3)" do
     setup %{conn: conn} do
       enable_fake_chat()
+      enable_fake_codex_adapter()
       {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "provider and execution identity are selectable only before first send", %{conn: conn} do
+      host_id = Ecto.UUID.generate()
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      assert has_element?(view, ~s(form[phx-change=set-provider]))
+      assert has_element?(view, ~s(form[phx-change=set-execution-target]))
+
+      render_change(element(view, ~s(form[phx-change=set-provider])), %{"provider" => "codex"})
+
+      render_change(element(view, ~s(form[phx-change=set-execution-target])), %{
+        "execution_target" => "registered_host"
+      })
+
+      render_change(element(view, ~s(form[phx-change=set-execution-host])), %{
+        "execution_host_id" => host_id
+      })
+
+      assert lv_assigns(view)[:provider] == "codex"
+      assert lv_assigns(view)[:execution_target] == "registered_host"
+      assert lv_assigns(view)[:execution_host_id] == host_id
+      assert store_id(view) == nil
+    end
+
+    test "reopen restores immutable provider and execution identity without pickers", %{
+      conn: conn
+    } do
+      sid = Ecto.UUID.generate()
+      host_id = Ecto.UUID.generate()
+
+      assert {:ok, _session} =
+               StudioChat.create_session(%{
+                 id: sid,
+                 provider: "codex",
+                 execution_target: "registered_host",
+                 execution_host_id: host_id,
+                 mode: "read-only"
+               })
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+
+      assert lv_assigns(view)[:provider] == "codex"
+      assert lv_assigns(view)[:execution_target] == "registered_host"
+      assert lv_assigns(view)[:execution_host_id] == host_id
+      refute has_element?(view, ~s(form[phx-change=set-provider]))
+      refute has_element?(view, ~s(form[phx-change=set-execution-target]))
+      refute has_element?(view, ~s(form[phx-change=set-execution-host]))
     end
 
     test "the sidebar teaches when there are no sessions yet", %{conn: conn} do
@@ -2166,7 +2439,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # nudge recency so the ordering is deterministic
       StudioChat.update_status(older, "active")
       Process.sleep(5)
-      _newer = seed_session("Newer chat", status: "working")
+      _newer = seed_session("Newer chat", status: "working", agent_state: "working")
 
       {:ok, _view, html} = live(conn, "/studio/chat")
 
@@ -2179,6 +2452,35 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # tokenized lifecycle pills (never the undefined .bp-pill)
       assert html =~ "badge-chat-working"
       refute html =~ "bp-pill"
+    end
+
+    test "cold pills read the persisted agent_state (herd wave 1): blocked → needs you, unknown → offline",
+         %{conn: conn} do
+      seed_session("Blocked chat", agent_state: "blocked")
+      seed_session("Unknown chat", agent_state: "unknown")
+      seed_session("Idle chat")
+
+      {:ok, _view, html} = live(conn, "/studio/chat")
+
+      # blocked wears the warn-toned needs-you pill straight off the column
+      assert html =~ "badge-chat-approval"
+      assert html =~ "needs you"
+      # a mid-turn death (unknown) reads as offline
+      assert html =~ "badge-chat-offline"
+      assert html =~ "offline"
+      # a plain resting session stays the idle pill
+      assert html =~ "badge-chat-idle"
+    end
+
+    test "a {:chat_heartbeat} liveness tick is explicitly ignored (charter D41h)",
+         %{conn: conn} do
+      sid = seed_session("Quiet chat")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      send(view.pid, {:chat_heartbeat, sid, DateTime.utc_now()})
+
+      assert render(view) =~ "Quiet chat"
+      assert Process.alive?(view.pid)
     end
 
     test "reopening a stored session replays its history with NO spawn", %{conn: conn} do
@@ -2206,9 +2508,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello there"})
 
+      # First-send dispatch is deliberately deferred through handle_info; wait
+      # for its public navigation signal before inspecting internal assigns.
+      path = assert_patch(view, 1_000)
       sid = store_id(view)
       assert is_binary(sid)
-      assert_patched(view, "/studio/chat/#{sid}")
+      assert path == "/studio/chat/#{sid}"
 
       # the user message is persisted (source markdown, D7)
       roles = StudioChat.list_messages(sid) |> Enum.map(&{&1.role, &1.source_markdown})
@@ -2300,7 +2605,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # reopen did NOT spawn — this is the no-live-session set-mode branch
       assert session_pid(view) == nil
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      render_change(view, "set-mode", %{"mode" => "acceptEdits"})
 
       # the store row carries the switch (not its stale creation mode)…
       assert StudioChat.get_session(sid).mode == "acceptEdits"
@@ -2716,14 +3021,17 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # v2.1.205): the post-plan init reports `"default"` — the D34 assumption is
     # PROVEN, not assumed. This test is now pinned to that measured value.
 
-    test "a system/init reporting a new permissionMode flips the mode + persists it + narrates it",
+    test "the CLI's post-plan default flip is INERT in the LiveView (the Recorder owns that seam)",
          %{view: view} do
       spawn_silent_session(view)
       sid = store_id(view)
       assert StudioChat.get_session(sid).mode == "plan"
 
-      # the CLI flipped plan → default inside ExitPlanMode; we learn it here
-      # (the real-binary-proven value, charter D52)
+      # The CLI flipped plan → default inside ExitPlanMode (the real-binary-
+      # proven value, charter D52). The LiveView no longer adopts it — the
+      # Recorder observes the SAME init frame, engages Autopilot (steer +
+      # persist), and broadcasts; adopting here too would double-persist and
+      # race the steer.
       send(
         view.pid,
         {:claude_chat_event,
@@ -2731,16 +3039,25 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       )
 
       html = render(view)
-      # the selector adopts the observed mode — the CLI's real post-plan mode is
-      # `default`, which now surfaces as the "ask (legacy)" option (charter D48:
-      # observe reflects CLI reality; a persisted default still spawns verbatim).
-      assert html =~ "ask (legacy)"
-      assert lv_assigns(view).mode == "default"
-      # …and it is PERSISTED, so a reopen and the next --resume carry it
-      assert StudioChat.get_session(sid).mode == "default"
-      # NO SILENT ESCALATION (charter D52): the CLI-initiated flip to a mode the
-      # user never picked surfaces as a visible system line.
-      assert html =~ "Permission mode is now ask (legacy) after plan approval"
+      assert lv_assigns(view).mode == "plan"
+      assert StudioChat.get_session(sid).mode == "plan"
+      refute html =~ "Permission mode is now"
+    end
+
+    test "the Recorder's adoption broadcast engages Autopilot in the toggle + narrates it",
+         %{view: view} do
+      spawn_silent_session(view)
+
+      # The Recorder engaged Autopilot (an approved plan) — steer + persist
+      # happened server-side; the LiveView renders only.
+      send(view.pid, {:studio_chat_mode_adopted, "auto", :plan_approved})
+
+      html = render(view)
+      assert lv_assigns(view).mode == "auto"
+      assert lv_assigns(view)[:pending_mode] == nil
+      assert has_element?(view, ".mode-tab-autopilot.active")
+      # NO SILENT ESCALATION (charter D52): the flip surfaces as a system line.
+      assert html =~ "Plan approved — Autopilot engaged."
     end
 
     test "an unrecognized init permissionMode is surfaced but NEVER adopted (charter D52)",
@@ -2770,7 +3087,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       sid = store_id(view)
 
       # persist bypass through the only legal road — the arm ceremony (D48)
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
       render_click(element(view, ~s(button[phx-click=arm-bypass])))
@@ -4872,13 +5189,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "the arm panel is hidden until bypass is picked", %{view: view} do
       refute has_element?(view, ~s(button[phx-click=arm-bypass]))
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       assert has_element?(view, ~s(button[phx-click=arm-bypass]))
     end
 
     test "the Arm button is disabled until the exact word is typed", %{view: view} do
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       assert has_element?(view, ~s(button[phx-click=arm-bypass][disabled]))
 
@@ -4892,7 +5209,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
       sid = store_id(view)
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
       html = render_click(element(view, ~s(button[phx-click=arm-bypass])))
@@ -4907,7 +5224,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "cancel closes the panel and never arms", %{view: view} do
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       assert has_element?(view, ~s(button[phx-click=arm-bypass]))
 
@@ -4920,7 +5237,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # native form submit that navigates the LiveView away — and the submit path
     # rides the SAME server-side exact-word guard as the button.
     test "Enter in the confirm input arms via phx-submit, word-guarded", %{view: view} do
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       # wrong word: submit never arms, panel stays open for another try
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "nope"})
@@ -5233,7 +5550,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, view, _html} = live(conn, "/studio/chat")
 
       # pick bypass → opens the arm panel (mode still plan, nothing persisted)
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       assert lv_assigns(view)[:mode] == "plan"
 
@@ -5254,7 +5571,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, view, _html} = live(conn, "/studio/chat")
 
       # pick bypass but NEVER complete the ceremony
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "no arming"})
 
@@ -5269,7 +5586,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{conn: conn, marker: marker} do
       {:ok, view, _html} = live(conn, "/studio/chat")
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(view, "set-mode", %{"mode" => "bypassPermissions"})
 
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "yes"})
       # the button is disabled client-side; a FORGED event by name still hits the
@@ -5473,16 +5790,29 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       sid = seed_session("Doomed store")
       {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
 
-      # Delete the row so the post-dispatch append hits the terminal {:error} of
-      # do_append (a vanished-session FK). A true concurrent seq-conflict cannot
-      # be forced on one sandbox connection; this exercises the SAME exhaustion
-      # branch of persist_user_message with a deterministic {:error}.
+      # Warm the session to a LIVE runtime FIRST (the row still exists, so the
+      # lazy resume-spawn succeeds), then settle the turn back to :ready. This is
+      # load-bearing: since the chat_sessions fail-closed store seal (c8d952a6c),
+      # a resume-spawn of a VANISHED session fail-closes at spawn ("Failed to
+      # start…") — so deleting the row BEFORE the first send would trip the spawn
+      # guard, not the persist guard this test is about. We must dispatch through
+      # a genuinely live runtime, then delete the row underneath it.
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "warm up"})
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      _ = render(view)
+
+      # NOW delete the row so the next post-dispatch append hits the terminal
+      # {:error} of do_append (a vanished-session FK) AFTER the live runtime has
+      # already taken the turn. A true concurrent seq-conflict cannot be forced
+      # on one sandbox connection; this exercises the SAME exhaustion branch of
+      # persist_user_message with a deterministic {:error}.
       Barkpark.Repo.delete!(StudioChat.get_session(sid))
 
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "resend me"})
       _ = render(view)
 
-      # The model DID get the turn (cat dispatched it), so the echo STAYS…
+      # The model DID get the turn (the live runtime dispatched it), so the echo
+      # STAYS…
       assert has_element?(view, ~s([data-role="user"]))
       html = render(view)
       assert html =~ "resend me"
@@ -5531,9 +5861,34 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert html =~ ~s(id="chat-slash-menu")
       assert html =~ ~s(role="combobox")
-      # The two control builtins are the hard floor (charter D48 retired /default).
+      # The control-builtin floor (charter D48 retired /default; the toggle
+      # added /autopilot, and /bypass is the arm ceremony's entry point).
       assert html =~ "/plan"
+      assert html =~ "/autopilot"
+      assert html =~ "/bypass"
       assert html =~ "/model"
+    end
+
+    test "a /autopilot submit engages auto through the mode rail", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      assert lv_assigns(view)[:mode] == "plan"
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/autopilot"})
+
+      assert lv_assigns(view)[:mode] == "auto"
+      assert has_element?(view, ".mode-tab-autopilot.active")
+    end
+
+    test "a /bypass submit opens the arm ceremony and changes NO mode (D48)", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/bypass"})
+
+      assert lv_assigns(view)[:arming_bypass] == true
+      assert has_element?(view, ~s(button[phx-click=arm-bypass]))
+      # nothing armed, nothing announced — the typed confirm word is the gate
+      assert lv_assigns(view)[:mode] == "plan"
+      refute html =~ "Permission mode → bypass"
     end
 
     test "the retired /default builtin is gone from the floor", %{conn: conn} do
@@ -5976,6 +6331,20 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
   defp count_substring(haystack, needle), do: length(String.split(haystack, needle)) - 1
 
+  # A codex end-of-turn runtime event (the studio_chat_runtime_event path). The
+  # terminal_state drives the closing line; `:completed` yields no extra line, so
+  # the durable-append assertion is the only thing under test.
+  defp codex_turn_completed do
+    %Barkpark.StudioChat.Runtime.Event{kind: :turn_completed, terminal_state: :completed}
+  end
+
+  defp codex_protocol_error(detail) do
+    %Barkpark.StudioChat.Runtime.Event{
+      kind: :protocol_error,
+      error: %{"code" => "buffer_overflow", "detail" => detail}
+    }
+  end
+
   defp stream_delta(text) do
     %{
       "type" => "stream_event",
@@ -6150,6 +6519,328 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         |> Map.new(fn {k, v} -> {to_string(k), v} end)
 
       Barkpark.Content.upsert_schema(attrs, "production", [])
+    end
+  end
+
+  # ── wave-session-card: the sidebar's two conditional lines (wsc D8-D11) ────
+  # A session driving an epic cycle earns (a) phase ticks + phase word +
+  # settled/total counter and (b) an epic-goal line — and ONLY such a session:
+  # every plain row renders byte-identically to before (D11). Live truth is the
+  # {:chat_workflow} overlay (D4); cold truth is workflow_summary over the
+  # select-widened rail_snapshot at refresh_sessions (D7).
+
+  # A live 2-phase rail: Explore settled, Build 1 done + 1 running (2/3 settled
+  # counting the explorer, D2's done+failed law exercised via unit tests).
+  defp live_workflow_rail do
+    %{
+      "wf" => %{
+        "status" => "running",
+        "seq" => 1,
+        "row" => %{"task_type" => "local_workflow", "description" => "wave 1"},
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"},
+          %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "explore",
+            "state" => "done",
+            "startedAt" => 100,
+            "tokens" => 10
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "build:a",
+            "state" => "done",
+            "startedAt" => 200,
+            "tokens" => 5
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "build:b",
+            "state" => "progress",
+            "startedAt" => 300
+          }
+        ]
+      }
+    }
+  end
+
+  # epic_goal reads the published documents table directly — lean ledger rows,
+  # no claim machinery (the READ fold is under test, not the write path).
+  defp insert_ledger_task!(doc_id, title, content) do
+    Barkpark.Repo.insert!(%Barkpark.Content.Document{
+      doc_id: doc_id,
+      type: "task",
+      title: title,
+      status: "published",
+      content: content,
+      rev: Ecto.UUID.generate()
+    })
+  end
+
+  defp seed_epic_ledger!(worker) do
+    insert_ledger_task!("task-wsc-epic", "Wave Session Card", %{
+      "lifecycle_status" => "in_progress",
+      "wave_status" => "wave: building 5 slices"
+    })
+
+    insert_ledger_task!("task-wsc-held", "Slice s3", %{
+      "lifecycle_status" => "in_progress",
+      "parent_id" => "task-wsc-epic",
+      "claim" => %{"worker" => worker, "now" => "gating"}
+    })
+
+    insert_ledger_task!("task-wsc-s1", "Slice s1", %{
+      "lifecycle_status" => "done",
+      "parent_id" => "task-wsc-epic"
+    })
+
+    insert_ledger_task!("task-wsc-s2", "Slice s2", %{
+      "lifecycle_status" => "open",
+      "parent_id" => "task-wsc-epic"
+    })
+
+    :ok
+  end
+
+  describe "wave session card — sidebar two lines (wsc charter D8-D11)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "COLD: a completed rail renders every tick settled + complete · n/n — no Recorder alive",
+         %{conn: conn} do
+      rail = fold_epic(load_epic("epic_cycle_progress.ndjson"))
+      summary = StudioChat.workflow_summary(rail)
+      assert summary.outcome == :completed
+
+      {:ok, sess} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(sess.id, rail)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      card = view |> element(~s([data-test-id="chat-workflow-#{sess.id}"])) |> render()
+      assert card =~ "complete · #{summary.agents_done}/#{summary.agents_total}"
+      # one tick per phase, all settled — a completed cycle never breathes
+      assert length(String.split(card, "border-radius: 50%")) - 1 == summary.phases_total
+      assert length(String.split(card, "var(--life-done)")) - 1 == summary.phases_total
+      refute card =~ "bp-chat-live-dot"
+    end
+
+    test "LIVE: a {:chat_workflow} ping overlays ticks + phase word + counter; the active tick breathes",
+         %{conn: conn} do
+      {:ok, sess} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      refute has_element?(view, ~s([data-test-id="chat-workflow-#{sess.id}"]))
+
+      summary = StudioChat.workflow_summary(live_workflow_rail())
+      send(view.pid, {:chat_workflow, sess.id, summary})
+
+      card = view |> element(~s([data-test-id="chat-workflow-#{sess.id}"])) |> render()
+      assert card =~ "Build · 2/3 agents"
+      # done tick evergreen, active tick breathing on the EXISTING pulse class
+      assert card =~ "var(--life-done)"
+      assert card =~ "bp-chat-live-dot"
+      assert card =~ "var(--life-in_progress)"
+      # the future-phase outline is the dim border token — none here (2 phases,
+      # frontier is the last), so pin the tick count instead
+      assert length(String.split(card, "border-radius: 50%")) - 1 == summary.phases_total
+    end
+
+    test "INTERRUPTED: a dead rail renders its frontier honestly and never breathes", %{
+      conn: conn
+    } do
+      rail =
+        "epic_cycle_interrupted.ndjson"
+        |> load_epic()
+        |> fold_epic()
+        |> Map.new(fn
+          {tid, %{"status" => "running"} = e} -> {tid, Map.put(e, "status", "interrupted")}
+          other -> other
+        end)
+
+      summary = StudioChat.workflow_summary(rail)
+      assert summary.outcome == :interrupted
+
+      {:ok, sess} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(sess.id, rail)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      card = view |> element(~s([data-test-id="chat-workflow-#{sess.id}"])) |> render()
+
+      assert card =~
+               "interrupted in #{summary.phase} · #{summary.agents_done}/#{summary.agents_total}"
+
+      # the dead frontier wears the blocked token and NEVER the pulse class
+      assert card =~ "var(--life-blocked)"
+      refute card =~ "bp-chat-live-dot"
+    end
+
+    test "MINIMALISM (D11): a non-workflow row renders byte-identical with vs without rail data",
+         %{conn: conn} do
+      # pin the row's only clock read far in the past so both mounts read the
+      # same age label
+      {:ok, sess} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+      two_days_ago = DateTime.add(DateTime.utc_now(), -2 * 86_400, :second)
+
+      StudioChat.get_session(sess.id)
+      |> Ecto.Changeset.change(last_active_at: two_days_ago)
+      |> Barkpark.Repo.update!()
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      plain_row = view |> element(~s([data-test-id="chat-session-row"])) |> render()
+
+      # a rail WITHOUT workflow nodes (a plain background shell task) must not
+      # move a byte of the row
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(sess.id, %{
+          "bg" => %{
+            "status" => "running",
+            "seq" => 1,
+            "row" => %{"task_type" => "local_shell", "description" => "npm test"}
+          }
+        })
+
+      {:ok, view2, _html} = live(conn, "/studio/chat")
+      with_rail_row = view2 |> element(~s([data-test-id="chat-session-row"])) |> render()
+
+      assert plain_row == with_rail_row
+      refute plain_row =~ "chat-workflow-"
+      refute plain_row =~ "chat-epic-"
+    end
+
+    test "EPIC (D9): the epic-goal line folds title · slices · wave_status off the ledger", %{
+      conn: conn
+    } do
+      sid = Ecto.UUID.generate()
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+      {:ok, _sess} = StudioChat.create_session(%{id: sid, mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(sid, live_workflow_rail())
+      seed_epic_ledger!(worker)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      line = view |> element(~s([data-test-id="chat-epic-#{sid}"])) |> render()
+      assert line =~ "Wave Session Card"
+      assert line =~ "1/3 slices"
+      assert line =~ "wave: building 5 slices"
+      # "PRs open" was DROPPED (D8) — no data source exists; never invented
+      refute render(view) =~ "PRs open"
+    end
+
+    test "SIBLING (D9): the epic parent's heartbeat re-reads the line; the claim.worker fold is untouched",
+         %{conn: conn} do
+      sid = Ecto.UUID.generate()
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+      {:ok, _sess} = StudioChat.create_session(%{id: sid, mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(sid, live_workflow_rail())
+      seed_epic_ledger!(worker)
+
+      # open the session so the Doing strip / hand-task fold is live for it
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      assert render(view) =~ "wave: building 5 slices"
+
+      # the EXISTING claim.worker clause raises the strip (untouched behavior)
+      send(
+        view.pid,
+        task_changed("task-wsc-held", "Slice s3", %{
+          "lifecycle_status" => "in_progress",
+          "parent_id" => "task-wsc-epic",
+          "claim" => %{"worker" => worker, "now" => "gating"},
+          "acceptance_criteria" => [%{"met" => true}]
+        })
+      )
+
+      assert render(view) =~ "data-role=\"chat-hand-task\""
+
+      # the epic heartbeat moves on the ledger…
+      Barkpark.Repo.get_by!(Barkpark.Content.Document, doc_id: "task-wsc-epic", type: "task")
+      |> Ecto.Changeset.change(
+        content: %{
+          "lifecycle_status" => "in_progress",
+          "wave_status" => "wave: complete — debrief"
+        }
+      )
+      |> Barkpark.Repo.update!()
+
+      # …and the SIBLING step (doc_id == a held task's parent_id) re-reads it
+      # off the same dataset stream — zero new PubSub topics
+      send(
+        view.pid,
+        task_changed("task-wsc-epic", "Wave Session Card", %{
+          "lifecycle_status" => "in_progress",
+          "wave_status" => "wave: complete — debrief"
+        })
+      )
+
+      html = render(view)
+      assert html =~ "wave: complete — debrief"
+      refute html =~ "wave: building 5 slices"
+      # the strip row survived — the claim.worker clause is untouched
+      assert html =~ "data-role=\"chat-hand-task\""
+    end
+  end
+
+  # Connectors epic wave 1 (charter D17/D18): the admin chat LiveView is the
+  # `:global` superuser path — the tenant seam added to the store MUST NOT change
+  # what the admin sidebar sees. It surfaces sessions of EVERY owner (a
+  # workspace-owned one and a NULL-owner/global one alike), exactly as today.
+  describe "tenant seam — admin sidebar is the :global superuser (charter D17/D18)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, conn: conn}
+    end
+
+    test "the admin sidebar lists sessions of every owner (workspace + global)", %{conn: conn} do
+      ws_a = Ecto.UUID.generate()
+
+      {:ok, tenant} =
+        StudioChat.create_session(
+          %{id: Ecto.UUID.generate(), cwd: "/tmp/x"},
+          {:workspace, ws_a}
+        )
+
+      {:ok, global} =
+        StudioChat.create_session(%{id: Ecto.UUID.generate(), cwd: "/tmp/y"}, :global)
+
+      assert tenant.owner_workspace_id == ws_a
+      assert is_nil(global.owner_workspace_id)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      html = render(view)
+
+      # Both owners' sessions render in the sidebar — the admin path is unfiltered.
+      assert html =~ "/studio/chat/#{tenant.id}"
+      assert html =~ "/studio/chat/#{global.id}"
+      assert has_element?(view, ~s([data-test-id="chat-session-row"]))
+    end
+
+    # Herd charter D43h: `BlockedSweeper` is fail-closed on NULL owners, so a
+    # `nil`-owned session can never fire `chat_blocked`. The Studio create path
+    # used to stamp `:global` (NULL) for managed sessions — this pins the fix:
+    # the first send creates a store row OWNED by the resolved workspace
+    # (Default Workspace fallback on the unscoped admin route).
+    test "the first send stamps the created session's owner_workspace_id (D43h)", %{conn: conn} do
+      {default_ws, _project} = ensure_default_scope!()
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+
+      sid = store_id(view)
+      assert sid, "the first send must create the store session row"
+
+      owner = StudioChat.get_session(sid).owner_workspace_id
+
+      assert owner == default_ws.id,
+             "a Studio-created managed session must carry a non-NULL owner " <>
+               "(got #{inspect(owner)}) — a NULL owner is invisible to BlockedSweeper forever"
     end
   end
 

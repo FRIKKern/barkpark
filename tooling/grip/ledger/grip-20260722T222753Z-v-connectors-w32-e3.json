@@ -1,0 +1,50 @@
+{
+  "kind": "grip-rederivation-ledger",
+  "wave": "connectors-w32-2026-07-22",
+  "arm": "E (E3) — research-depth scaled by charter/ground freshness",
+  "role": "verifier (last explorer before Decide)",
+  "created_utc": "2026-07-22T22:27:53Z",
+  "facts": [
+    {
+      "id": "npm-audit-17-vulns",
+      "claim": "connectors/ npm audit reports exactly 17 vulns (15 moderate, 1 high, 1 critical) at this checkout — premise CONFIRMED.",
+      "rerun": "cd connectors && npm audit --json | python3 -c \"import json,sys;print(json.load(sys.stdin)['metadata']['vulnerabilities'])\""
+    },
+    {
+      "id": "npm-audit-all-semver-major",
+      "claim": "EVERY one of the 17 findings has fixAvailable.isSemVerMajor=true — ZERO non-breaking upgrades exist; the task's 'apply safe non-breaking upgrades' clause fires on nothing.",
+      "rerun": "cd connectors && npm audit --json | python3 -c \"import json,sys;d=json.load(sys.stdin);print([(k,v.get('fixAvailable')) for k,v in d['vulnerabilities'].items()])\""
+    },
+    {
+      "id": "critical-high-dev-only",
+      "claim": "critical=vitest (UI-server arbitrary file read/exec) and high=vite (path traversal / fs.deny bypass / esbuild) are DEV test toolchain only; fix target = vitest 4.1.10 (installed 2.1.9, two majors). Not reachable from the bridge webhook runtime.",
+      "rerun": "cd connectors && npm ls vitest vite esbuild"
+    },
+    {
+      "id": "moderates-via-imessage",
+      "claim": "all 15 moderates route through chat-adapter-imessage@1.1.0 -> spectrum-ts -> @photon-ai/otel -> @opentelemetry/* ; chat-adapter-imessage is a WIRED production operator adapter (src/connectors/imessage.ts imports iMessageAdapter) and its exact version is pinned by test/imessage-connector.test.ts — cannot be dropped as a 'safe' fix.",
+      "rerun": "cd connectors && npm ls @opentelemetry/core && grep -rn 'chat-adapter-imessage' src test"
+    },
+    {
+      "id": "discord-smoke-gap",
+      "claim": "package.json has smoke:telegram/teams/whatsapp but NO smoke:discord — the discord-slash-registration-smoke gap is real.",
+      "rerun": "python3 -c \"import json;print([k for k in json.load(open('connectors/package.json'))['scripts'] if k.startswith('smoke')])\""
+    },
+    {
+      "id": "discord-gateway-modal-ceiling",
+      "claim": "@chat-adapter/discord@4.34.0 dist index.js:1163 (gateway path) calls handleApplicationCommandInteraction(context, flags) WITHOUT the options arg, whereas the webhook path (line 901) passes options — so onOpenModal cannot ride the gateway path. discord-gateway-modal-hold REFUTE (real vendor ceiling) CONFIRMED against vendored dist.",
+      "rerun": "grep -n 'handleApplicationCommandInteraction' connectors/node_modules/@chat-adapter/discord/dist/index.js"
+    },
+    {
+      "id": "egress-reuse-frozen",
+      "claim": "egress-reuse-rederive: reuse branch byte-identical since W29 (#4184); sole post-D243 commit #5552 (W30) touched only sanitize sites; D250 (W31, yesterday) found a live network-policy-update API but its stopped/auto-resume + open-connection behavior are LIVE-ONLY questions -> still no offline build. REFUTE (stays frozen, re-escalate at live gate) — no new facts in W32.",
+      "rerun": "git log -3 --format='%h %ci %s' -- scripts/connectors/cloud-sandbox-runner.mjs"
+    },
+    {
+      "id": "freshness-classification",
+      "claim": "E3 classifier input from git: connectors/package.json last touched W17 (d35b7cecc, 2026-07-16) = STALE (wish's 'W30/W31-touched' label is WRONG); scripts/connectors/cloud-sandbox-runner.mjs W30 = fresh; connectors/src/connectors/ discord W31 (2026-07-22) = fresh.",
+      "rerun": "git log -1 --format='%h %ci' -- connectors/package.json && git log -1 --format='%h %ci' -- scripts/connectors/cloud-sandbox-runner.mjs"
+    }
+  ],
+  "e3_verdict": "SUPPORTED but with a classification caveat. Fresh sites (discord W31) had NO hidden premise failures (gateway ceiling + smoke gap both held on a light read). The one site carrying a survey-worthy surprise (npm-audit: 'apply safe upgrades' refuted, all fixes semver-major) is on STALE ground (package.json W17) — so freshness DID predict where depth was needed, NOT a kill. CAVEAT: the wave prompt hand-labeled package.json 'fresh (W30/W31)'; git says W17. E3 only works if freshness is derived from git recency + charter wave-log, never from an asserted label — trusting the wish's label here would have skipped the survey that surfaces the real disposition."
+}

@@ -1,0 +1,14 @@
+# next build output (includes the standalone node-slot server)
+.next/
+out/
+# next type generation
+next-env.d.ts
+# deps
+node_modules/
+# local env — NEVER commit real tokens
+.env
+.env.local
+.env.*.local
+# os / editor
+.DS_Store
+*.tsbuildinfo

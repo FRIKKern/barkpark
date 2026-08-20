@@ -6,6 +6,11 @@ defmodule Barkpark.Search.SurfaceConfig do
   @primary_key {:id, :binary_id, autogenerate: true}
 
   schema "search_surface_config" do
+    # Per-workspace attribution (charter D45/D49). NULL = the workspace-agnostic
+    # global default row (what `seed_defaults!/0` writes and the anonymous search
+    # read path reads); a real workspace_id = that tenant's own config. Server-set
+    # from the resolved scope, never cast from a caller PUT.
+    field :workspace_id, :binary_id
     field :surface, :string
     field :scope, :string
     field :searchable_fields, {:array, :map}, default: []
@@ -35,15 +40,20 @@ defmodule Barkpark.Search.SurfaceConfig do
   def changeset(config, attrs) do
     config
     |> cast(attrs, @castable)
-    # Defense in depth (constraints-are-truth): the DB carries a UNIQUE index on
-    # (surface, scope) (search_surface_config_surface_scope_idx). The upsert write
-    # path guards the concurrent-first-write race with ON CONFLICT, but any path
-    # that does a plain `Repo.insert/2` on a duplicate (surface, scope) must get a
-    # clean {:error, changeset} (rendered 422) instead of a raw Ecto.ConstraintError
-    # (a 500). Mapping the constraint here is what turns the raised error into a
-    # changeset error.
+    # Defense in depth (constraints-are-truth): the DB carries TWO partial UNIQUE
+    # indexes (charter D57) — `(surface, scope) WHERE workspace_id IS NULL`
+    # (search_surface_config_surface_scope_idx, the global-default rows) and
+    # `(workspace_id, surface, scope)` (…_workspace_surface_scope_idx, the
+    # per-tenant rows). The upsert write path guards the concurrent-first-write
+    # race with ON CONFLICT, but any path that does a plain `Repo.insert/2` on a
+    # duplicate must get a clean {:error, changeset} (rendered 422) instead of a
+    # raw Ecto.ConstraintError (a 500). Map BOTH so either domain's duplicate
+    # surfaces as a changeset error.
     |> unique_constraint([:surface, :scope],
       name: :search_surface_config_surface_scope_idx
+    )
+    |> unique_constraint([:workspace_id, :surface, :scope],
+      name: :search_surface_config_workspace_surface_scope_idx
     )
   end
 end

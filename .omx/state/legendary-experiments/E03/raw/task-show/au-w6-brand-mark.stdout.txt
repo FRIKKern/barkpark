@@ -1,0 +1,162 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "One mark + one favicon asset is applied consistently across Studio, web, paper, and the CLI about surface",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "A brand sign-off page composes the mark, palette, and type from the token source",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "Favicon/mark load without blocking assets (Golden Rules honored)",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "Human brand sign-off recorded",
+          "evidence": "",
+          "met": false
+        }
+      ],
+      "blocked_by": [
+        "au-w1-token-source"
+      ],
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Why. The final identity layer: one Barkpark mark and one favicon rendered consistently on every surface, plus a brand sign-off page that shows the mark in context for human approval. Approach. Define the mark + favicon as brand tokens/assets, apply them across Studio/web/paper/CLI-about, and author a brand sign-off page composing the mark, palette, and type for a final human look. Out of scope. The cross-surface visual audit (W6.17). This is the mark/favicon + brand page. Driven by the charter (W6 enforce) + spec §6."
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Ready for execution. 0 of 4 recorded acceptance criteria are marked met."
+              }
+            ],
+            "id": "state-copy",
+            "title": "open",
+            "tone": "note",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "id": "done-list",
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "One mark + one favicon asset is applied consistently across Studio, web, paper, and the CLI about surface"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "A brand sign-off page composes the mark, palette, and type from the token source"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Favicon/mark load without blocking assets (Golden Rules honored)"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Human brand sign-off recorded"
+                }
+              ]
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ],
+        "version": 1
+      },
+      "description": "**Why.** The final identity layer: one Barkpark mark and one favicon rendered consistently on every surface, plus a brand sign-off page that shows the mark in context for human approval.\n\n**Approach.** Define the mark + favicon as brand tokens/assets, apply them across Studio/web/paper/CLI-about, and author a brand sign-off page composing the mark, palette, and type for a final human look.\n\n**Out of scope.** The cross-surface visual audit (W6.17). This is the mark/favicon + brand page.\n\nDriven by the charter (W6 enforce) + spec §6.",
+      "github": {
+        "issue": 1336,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_fingerprint": 70196047,
+        "synced_rev": "646345c9c6e77fa8690c1e5b320134dc"
+      },
+      "kind": "task",
+      "labels": [
+        "proj:design-system",
+        "phase:6-enforce",
+        "area:studio",
+        "area:web",
+        "area:tui",
+        "area:pdrender"
+      ],
+      "lifecycle_status": "open",
+      "parent_id": "aesthetic-unification-epic",
+      "priority": 4
+    },
+    "criteria_progress": {
+      "met": 0,
+      "total": 4
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "au-w6-brand-mark",
+    "execution_policy": null,
+    "id": "e05367a2-013a-4703-ad6e-d3e4feeb2755",
+    "inserted_at": "2026-07-04T17:33:39.566996Z",
+    "kind": "task",
+    "labels": [
+      "proj:design-system",
+      "phase:6-enforce",
+      "area:studio",
+      "area:web",
+      "area:tui",
+      "area:pdrender"
+    ],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": "aesthetic-unification-epic",
+    "priority": 4,
+    "rev": "1c65cb4c169984858e8bbf1a98cb8942",
+    "status": "published",
+    "title": "W6.16 · Unify one mark + favicon across surfaces; brand sign-off page",
+    "type": "task",
+    "updated_at": "2026-07-12T11:19:14.561937Z"
+  },
+  "ok": true
+}

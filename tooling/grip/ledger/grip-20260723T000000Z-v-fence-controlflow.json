@@ -1,0 +1,61 @@
+{
+  "run_id": "grip-20260723T000000Z-v-fence-controlflow",
+  "recipes": [
+    {
+      "subject": ".claude/workflows/bp-epic-cycle.workflow.js",
+      "quantity": "wc:-l@origin/main",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | wc -l",
+      "derived_level": "L2",
+      "deps": [".claude/workflows/bp-epic-cycle.workflow.js"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "no-real-git-logic (all git is prompt-text, not JS exec)",
+      "quantity": "grep:absent",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -nE 'execSync|spawnSync|child_process'",
+      "derived_level": "L2",
+      "deps": [".claude/workflows/bp-epic-cycle.workflow.js"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "#5730 charter-push fix is prompt-text at Decide lines 561-562",
+      "quantity": "git:show-diff",
+      "rerun": "git show 7a7a542ee -- .claude/workflows/bp-epic-cycle.workflow.js",
+      "derived_level": "L2",
+      "deps": [".claude/workflows/bp-epic-cycle.workflow.js"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "5 existing *_BLOCK constants (lines 51-85), schemas start at 87",
+      "quantity": "grep:-n",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -nE 'const [A-Z_]+_BLOCK ='",
+      "derived_level": "L2",
+      "deps": [".claude/workflows/bp-epic-cycle.workflow.js"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "floor checks run OUTSIDE agent() prompt strings (403,473,581)",
+      "quantity": "grep:-n",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js | grep -nE 'FLOOR|\\.slice\\(0,'",
+      "derived_level": "L2",
+      "deps": [".claude/workflows/bp-epic-cycle.workflow.js"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "node --check baseline passes on origin/main file",
+      "quantity": "node:--check",
+      "rerun": "git show origin/main:.claude/workflows/bp-epic-cycle.workflow.js > /tmp/wf.js && node --check /tmp/wf.js && echo OK",
+      "derived_level": "L2",
+      "deps": [".claude/workflows/bp-epic-cycle.workflow.js"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    },
+    {
+      "subject": "stale branch reverts #5730 workflow text (merge-base predates #5730)",
+      "quantity": "git:diff-name",
+      "rerun": "git diff origin/main..origin/loop-epic/s1-bp-bulldocs-patch-if-rev-enters-the-j-0-r -- .claude/workflows/bp-epic-cycle.workflow.js",
+      "derived_level": "L2",
+      "deps": [".claude/workflows/bp-epic-cycle.workflow.js"],
+      "observed_at": "2026-07-23T00:00:00Z"
+    }
+  ]
+}

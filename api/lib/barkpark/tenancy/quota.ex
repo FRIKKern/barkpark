@@ -122,6 +122,25 @@ defmodule Barkpark.Tenancy.Quota do
   end
 
   @doc """
+  Set (or clear) the workspace's document-count cap. An integer writes the cap;
+  `nil` clears it back to unlimited (`NULL`) — the two documented quota states.
+
+  `workspaces.quota` is deliberately NOT in the changeset cast whitelist (D13),
+  so this uses the same raw-changeset bypass as `suspend/2`
+  (`Ecto.Changeset.change/2` writes the field directly, dodging the cast). Emits
+  NO audit line — mirroring `reinstate/1`, a quota-set is an operator config
+  knob, not a security event. Returns `{:ok, %Workspace{}}` or
+  `{:error, Ecto.Changeset.t()}`.
+  """
+  @spec set_quota(Workspace.t(), non_neg_integer() | nil) ::
+          {:ok, Workspace.t()} | {:error, Ecto.Changeset.t()}
+  def set_quota(%Workspace{} = ws, cap) when is_nil(cap) or is_integer(cap) do
+    ws
+    |> Ecto.Changeset.change(%{quota: cap})
+    |> Repo.update()
+  end
+
+  @doc """
   Append a `workspace.quota_exceeded` line to the audit chain. Called by the
   gate at the blocking seam so the wall being hit is observable. Best-effort:
   an audit failure never changes the caller's control flow.

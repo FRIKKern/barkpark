@@ -1,0 +1,77 @@
+---
+// Base layout — bakes the HEALTH markers (bp-build-id / bp-content-rev /
+// bp-doc-id) the deploy engine asserts by value, plus the two-axis theme
+// bootstrap (data-theme mode × data-bp-theme identity, deploy-pinned default).
+import { ClientRouter } from 'astro:transitions'
+import { env } from '../lib/bp'
+interface Props {
+  title: string
+  docId?: string
+}
+const { title, docId } = Astro.props
+// The two-axis theme is applied to <html> at RUNTIME, so it lives nowhere in
+// the static markup. Astro's ClientRouter replaces the root element's
+// attributes on every swap, which drops both axes and drops the page to its
+// light default mid-session (live-caught: navigating from the landing to a
+// document flipped a dark session white).
+//
+// So the applier is a NAMED function bound to `astro:after-swap` as well as run
+// inline. `after-swap` — not `page-load` — because it fires BEFORE the new
+// document is painted; `page-load` would repaint and show a flash of the wrong
+// theme on every navigation.
+const themeBoot =
+  '(function(){function apply(){try{' +
+  "var t=localStorage.getItem('theme');" +
+  "if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}" +
+  'document.documentElement.dataset.theme=t;' +
+  "document.documentElement.dataset.bpTheme=localStorage.getItem('bp_theme')||" +
+  JSON.stringify(env.theme) +
+  ';}catch(e){}}' +
+  'apply();' +
+  "document.addEventListener('astro:after-swap',apply);" +
+  '})();'
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="bp-build-id" content={env.buildId} />
+    <meta name="bp-content-rev" content={env.contentRev} />
+    <meta name="bp-site-base" content={env.siteBase} />
+    {docId && <meta name="bp-doc-id" content={docId} />}
+    <script set:html={themeBoot} />
+    {/* Client-side navigation: opening a document must NOT reload the page —
+        the finder rail has to keep its typed query, its results and its scroll
+        exactly as the Next edition does (Next swaps only the `children`
+        segment of a single mounted layout). ClientRouter intercepts same-origin
+        link clicks, fetches the target, swaps the DOM, and REUSES any element
+        marked `transition:persist` — which is how the finder island survives
+        the navigation instead of remounting. */}
+    <ClientRouter />
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>
+
+<style is:global>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fafafa; color: #18181b; }
+  html[data-theme="dark"] body { background: #101012; color: #e4e4e7; }
+  .bp-search { max-width: 640px; margin: 0 auto; }
+  .bp-search-row { display: flex; gap: 8px; align-items: center; }
+  .bp-search-input { flex: 1; font: inherit; padding: 10px 14px; border: 1px solid #d4d4d8; border-radius: 10px; background: #fff; color: inherit; }
+  html[data-theme="dark"] .bp-search-input { background: #18181b; border-color: #3f3f46; }
+  .bp-search-badge { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid #d4d4d8; opacity: .75; }
+  .bp-search-badge--live { border-color: #16a34a; color: #16a34a; }
+  .bp-search-hits { list-style: none; margin: 12px 0 0; padding: 0; text-align: left; }
+  .bp-search-hits li { padding: 8px 4px; border-bottom: 1px solid rgba(128,128,128,.15); }
+  .bp-search-hits a { color: inherit; text-decoration: none; }
+  .bp-search-hits a:hover strong { text-decoration: underline; }
+  .bp-search-x { opacity: .65; font-size: .92em; }
+  .bp-search-err { opacity: .7; font-size: .9em; }
+</style>

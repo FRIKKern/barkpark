@@ -1,0 +1,33 @@
+{
+  "accepted_capture": false,
+  "block_reason": "CANDIDATE_EMAIL_ENDPOINT_UNAVAILABLE_NO_MESSAGE_IMPORTED",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_materialized": false,
+  "candidate_source_sha256": "201c5ae6d548a04326051e8871c3ff1f5f98ab3a1769098554365f882aa68414",
+  "capture_sha256": null,
+  "evidence_boundary": "REAL_SURFACE_ATTEMPT_ONLY_NOT_A_CAPTURE",
+  "fixture_id": "adv-missing-fields",
+  "observation": {
+    "endpoint": {
+      "body_bytes": 21,
+      "body_sha256": "d2dfdc9511fbeaa0701d1f8730f4989313b062ca1b61a2bd8bed8f4f5d654b5d",
+      "content_type": "application/json; charset=utf-8",
+      "final_url": "https://api.barkpark.cloud/papers/candidate-lossless-semantic-tree--adv-missing-fields/email",
+      "http_status": 404
+    },
+    "real_client": {
+      "mail_app_present": true,
+      "mail_app_running_probe": {
+        "diagnostic": "true\n",
+        "exit_code": 0,
+        "stderr_bytes": 0,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_bytes": 5,
+        "stdout_sha256": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74"
+      }
+    }
+  },
+  "schema_version": "legendary-e17-real-surface-attempt/v1",
+  "surface": "real_client_email",
+  "target": "https://api.barkpark.cloud/papers/candidate-lossless-semantic-tree--adv-missing-fields/email"
+}

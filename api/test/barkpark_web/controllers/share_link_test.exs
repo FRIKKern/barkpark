@@ -7,8 +7,12 @@ defmodule BarkparkWeb.ShareLinkTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content, Media}
+  alias Barkpark.Content.Document
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
+  alias Barkpark.Sharing.ShareLink
+
+  import Ecto.Query, only: [from: 2]
 
   import Barkpark.TenancyFixtures
 
@@ -16,15 +20,29 @@ defmodule BarkparkWeb.ShareLinkTest do
   @admin "share-link-admin"
   @junior "share-link-junior"
 
+  defmodule MissingRedirectTenancy do
+    def get_workspace_by_id(_id), do: nil
+    def get_project_by_id(_id), do: nil
+  end
+
   setup %{conn: conn} do
     # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
     # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
     Barkpark.LabelFixtures.register_tags!(@dataset)
 
-    {:ok, _} = Auth.create_token(@admin, "sl-admin", @dataset, ["read", "write", "admin"])
+    {:ok, admin_tok} = Auth.create_token(@admin, "sl-admin", @dataset, ["read", "write", "admin"])
     {:ok, _} = Auth.create_token(@junior, "sl-junior", @dataset, ["read", "write"])
 
     ws = create_workspace!("link-ws")
+
+    # FIXTURE REPAIR (arpss-w8): `Auth.create_token/4` resolves
+    # `workspace_id || default_workspace_id()`, so @admin's home membership lands
+    # in the seeded `default` workspace, while `create_workspace!/1` writes NO
+    # membership at all — the admin was a total STRANGER to the workspace these
+    # tests act on. That is a fixture that never expressed tenancy, not a
+    # contract saying a stranger may manage another tenant's links. @junior
+    # needs nothing: `:require_admin` stops it upstream.
+    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, admin_tok.id, "admin")
     proj = create_project!(ws, "link-proj")
     scope = [workspace_id: ws.id, project_id: proj.id]
 
@@ -76,6 +94,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     %{
       conn: conn,
       ws: ws,
+      admin_tok: admin_tok,
       proj: proj,
       scope_str: "#{ws.slug}/#{proj.slug}/#{@dataset}",
       media: media
@@ -140,6 +159,12 @@ defmodule BarkparkWeb.ShareLinkTest do
       |> put_req_header("authorization", "Bearer #{@junior}")
       |> put_req_header("content-type", "application/json")
 
+  defp attacker(conn, raw),
+    do:
+      conn
+      |> put_req_header("authorization", "Bearer #{raw}")
+      |> put_req_header("content-type", "application/json")
+
   defp mint(conn, body),
     do: conn |> admin() |> post("/v1/shares/links", body) |> json_response(201)
 
@@ -172,24 +197,89 @@ defmodule BarkparkWeb.ShareLinkTest do
   # path must (a) not KeyError on the shared template's backlinks/driven-tasks
   # sections and (b) still carry the branded social-share head, because a share
   # link IS the sharing flow.
-  test "a PAPER link whose scope no longer resolves serves the static render with a branded share head",
-       %{conn: conn, scope_str: scope} do
+  test "a PAPER link static fallback renders scoped blocks instead of stale cache",
+       %{conn: conn, scope_str: scope, ws: ws, proj: proj} do
     %{"token" => token} =
       mint(conn, %{scope: scope, kind: "doc", ref_type: "paper", ref_id: "demo-paper"})
 
-    # Simulate a link whose workspace/project can no longer be resolved (the
-    # serve/3 `with` chain falls through to serve_paper_static).
-    {1, _} =
-      Repo.update_all(Barkpark.Sharing.ShareLink, set: [workspace_id: nil, project_id: nil])
+    # Same referenced id in another tenant. The static fallback must bind label
+    # resolution to the LINK's still-valid scope, not global/default scope.
+    other_ws = create_workspace!("link-static-other-ws")
+    other_proj = create_project!(other_ws, "link-static-other-proj")
+    other_scope = [workspace_id: other_ws.id, project_id: other_proj.id]
 
-    resp = get(build_conn(), "/s/#{token}")
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "type" => "string"}]
+        },
+        @dataset,
+        other_scope
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => "post1", "title" => "Other Tenant Post"},
+        @dataset,
+        other_scope
+      )
+
+    {:ok, _} = Content.publish_document("post1", "post", @dataset, other_scope)
+
+    {:ok, paper} =
+      Content.get_document(
+        "demo-paper",
+        "paper",
+        @dataset,
+        workspace_id: ws.id,
+        project_id: proj.id
+      )
+
+    blocks = [
+      %{
+        "id" => "title",
+        "type" => "heading",
+        "role" => "title",
+        "level" => 1,
+        "text" => "Static Block Authority"
+      },
+      %{
+        "id" => "ref",
+        "type" => "field-reference",
+        "label" => "Linked post",
+        "refType" => "post",
+        "value" => "post1"
+      }
+    ]
+
+    stale_content =
+      paper.content
+      |> Map.put("blocks", blocks)
+      |> Map.put("body_html", "<p>STALE STATIC CACHE</p>")
+
+    paper
+    |> Document.changeset(%{"content" => stale_content, "rev" => "share-static-stale"})
+    |> Repo.update!()
+
+    # Deterministically force the redirect lookup to miss while retaining the
+    # link's real workspace/project ids for the static reader scope.
+    resp =
+      build_conn()
+      |> Plug.Conn.put_private(:share_link_tenancy, MissingRedirectTenancy)
+      |> get("/s/#{token}")
 
     assert resp.status == 200
-    # The article body renders (no KeyError on @backlinks_html/@driven_tasks_html).
-    assert resp.resp_body =~ "Shared via a direct link"
+    assert resp.resp_body =~ "Static Block Authority"
+    assert resp.resp_body =~ "A Post"
+    refute resp.resp_body =~ "Other Tenant Post"
+    refute resp.resp_body =~ "STALE STATIC CACHE"
     # The share head: og/twitter tags with the paper title and (no manifest
     # image on this classic doc) the branded default card.
-    assert resp.resp_body =~ ~s(property="og:title" content="Demo Paper")
+    assert resp.resp_body =~ ~s(property="og:title" content="Static Block Authority")
     assert resp.resp_body =~ ~s(property="og:site_name" content="Barkpark")
     assert resp.resp_body =~ "/images/og-default.jpg"
     assert resp.resp_body =~ ~s(name="twitter:card" content="summary_large_image")
@@ -369,5 +459,187 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert length(list["links"]) == 1
     refute Map.has_key?(hd(list["links"]), "token_hash")
     refute Map.has_key?(hd(list["links"]), "token")
+  end
+
+  # ── arpss-w8: cross-tenant confinement ────────────────────────────────────
+  #
+  # The test just above ("no token/hash") refutes two absent MAP KEYS and passes
+  # on the LEAKING controller, because the secret rides in `url`. It is left in
+  # place as this wave's own resident failure mode, and it is why everything
+  # below asserts on the SERIALIZED BODY (`resp_body =~`) instead.
+  describe "tenancy confinement on /v1/shares/links" do
+    # The attacker is the shape the predicate choice turns on: an admin of its
+    # OWN workspace A, built the way a real install builds one
+    # (`Auth.create_token/5`, which writes the home membership), PLUS a REAL
+    # plain `member` membership in the victim workspace B. A total stranger to B
+    # is denied under BOTH candidate predicates and would prove nothing.
+    setup %{ws: ws} do
+      raw = "sl-attacker-#{System.unique_integer([:positive])}"
+      ws_a = create_workspace!("attacker-ws-#{System.unique_integer([:positive])}")
+
+      {:ok, actor} =
+        Auth.create_token(raw, "sl-attacker", @dataset, ["read", "write", "admin"], ws_a.id)
+
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, actor.id, "member")
+
+      # PRECONDITION, asserted inline so the predicate choice is provably
+      # load-bearing: this actor IS a member of B and DOES pass authorize/3
+      # (whose api_token arm ORs in the token's GLOBAL permissions), and is NOT
+      # a workspace admin of B. Swap the gate to authorize/3 and these tests go
+      # green on a leaking controller.
+      assert Barkpark.Tenancy.Auth.membership_role(actor, ws.id) == "member"
+      assert Barkpark.Tenancy.Auth.authorize(actor, ws.id, :admin) == :ok
+      refute Barkpark.Tenancy.Auth.workspace_admin?(actor, ws.id)
+
+      %{attacker_raw: raw, attacker: actor}
+    end
+
+    test "POSITIVE CONTROL: the legitimate own-workspace 200 body DOES carry the raw token",
+         %{conn: conn, scope_str: scope} do
+      %{"token" => raw} =
+        mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
+
+      resp =
+        conn
+        |> admin()
+        |> get("/v1/shares/links?scope=#{scope}&kind=doc&ref_type=post&ref_id=post1")
+
+      # Without this control, `refute body =~ raw` is green on ANY denial body
+      # and proves nothing about serialization.
+      assert resp.status == 200
+      assert resp.resp_body =~ raw
+      assert resp.resp_body =~ "/s/#{raw}"
+    end
+
+    test "LEAK CLOSED — list: a foreign admin never sees B's raw token in the body", %{
+      conn: conn,
+      scope_str: scope,
+      attacker_raw: raw_actor
+    } do
+      %{"token" => raw} =
+        mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
+
+      resp =
+        conn
+        |> attacker(raw_actor)
+        |> get("/v1/shares/links?scope=#{scope}&kind=doc&ref_type=post&ref_id=post1")
+
+      # ORDER IS LOAD-BEARING: with the status assert first, deleting the
+      # confinement reds on the STATUS and never demonstrates the credential
+      # leak. Assert only on the raw token and the bare "/s/" — never a host
+      # prefix (`Sharing.share_link_base/0` is a LAN IP locally, nil in CI).
+      refute resp.resp_body =~ raw
+      refute resp.resp_body =~ "/s/"
+      assert resp.status == 403
+      assert json_response(resp, 403)["error"]["code"] == "forbidden"
+    end
+
+    test "LEAK CLOSED — mint: a foreign admin cannot manufacture an edit credential in B", %{
+      conn: conn,
+      scope_str: scope,
+      ws: ws,
+      attacker_raw: raw_actor
+    } do
+      before = Repo.aggregate(from(l in ShareLink, where: l.workspace_id == ^ws.id), :count)
+
+      resp =
+        conn
+        |> attacker(raw_actor)
+        |> post("/v1/shares/links", %{
+          scope: scope,
+          kind: "doc",
+          ref_type: "post",
+          ref_id: "post1",
+          access: "edit"
+        })
+
+      refute resp.resp_body =~ "/s/"
+      assert resp.status == 403
+      assert json_response(resp, 403)["error"]["code"] == "forbidden"
+
+      # The gate sits BEFORE get_project/2 and before ensure_item_exists, so no
+      # row is written and the item-existence oracle is closed in its loudest
+      # (201) form too.
+      assert Repo.aggregate(from(l in ShareLink, where: l.workspace_id == ^ws.id), :count) ==
+               before
+    end
+
+    test "LEAK CLOSED — revoke: a foreign admin gets a 404 byte-identical to a missing row", %{
+      conn: conn,
+      scope_str: scope,
+      attacker_raw: raw_actor
+    } do
+      %{"link" => %{"id" => link_id}, "token" => raw} =
+        mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
+
+      foreign = conn |> attacker(raw_actor) |> delete("/v1/shares/links/#{link_id}")
+      missing = conn |> attacker(raw_actor) |> delete("/v1/shares/links/#{Ecto.UUID.generate()}")
+
+      refute foreign.resp_body =~ raw
+      assert foreign.status == 404
+      assert missing.status == 404
+
+      # Byte-identity modulo the ONE per-request value in the envelope: the
+      # request_id, which Plug.RequestId regenerates per connection. Everything
+      # else — code, message, hint — must match, and it does because both arms
+      # reach the SAME `not_found_json(conn, "link not found")` call site.
+      assert blank_request_id(foreign) == blank_request_id(missing)
+      assert json_response(foreign, 404)["error"]["message"] == "link not found"
+
+      # ...and the row survives the denial: a 404 that silently revoked would be
+      # the same cross-tenant write in disguise.
+      refute is_nil(Repo.get(ShareLink, link_id))
+      assert is_nil(Repo.get(ShareLink, link_id).revoked_at)
+    end
+
+    test "a non-castable link id is a denial, never a 500", %{
+      conn: conn,
+      attacker_raw: raw_actor
+    } do
+      resp = conn |> attacker(raw_actor) |> delete("/v1/shares/links/not-a-uuid")
+      assert resp.status == 404
+
+      admin_resp = conn |> admin() |> delete("/v1/shares/links/not-a-uuid")
+      assert admin_resp.status == 404
+    end
+
+    test "HOST-ADMIN PRESERVED: a real-install admin does list -> show -> revoke end to end", %{
+      conn: conn,
+      scope_str: scope
+    } do
+      # The actor here is the setup's @admin, minted by `Auth.create_token/4`
+      # and granted its membership the way `create_token/5` grants one — never a
+      # hand-inserted `%ApiToken{workspace_id: nil}`, a shape `create_token` can
+      # never produce.
+      %{"link" => %{"id" => link_id}, "token" => raw} =
+        mint(conn, %{scope: scope, kind: "doc", ref_type: "post", ref_id: "post1"})
+
+      listed =
+        conn
+        |> admin()
+        |> get("/v1/shares/links?scope=#{scope}&kind=doc&ref_type=post&ref_id=post1")
+        |> json_response(200)
+
+      assert Enum.any?(listed["links"], &(&1["id"] == link_id))
+      assert Enum.any?(listed["links"], &(&1["url"] =~ "/s/#{raw}"))
+
+      served = get(build_conn(), "/s/#{raw}")
+      assert served.status in [200, 302]
+
+      revoked = conn |> admin() |> delete("/v1/shares/links/#{link_id}") |> json_response(200)
+      assert revoked["revoked"] == true
+    end
+  end
+
+  # Blank the ONE per-connection value in the v1 error envelope so two bodies
+  # can be compared as bytes.
+  defp blank_request_id(%Plug.Conn{} = conn) do
+    case Jason.decode!(conn.resp_body) do
+      %{"error" => %{"request_id" => id}} when is_binary(id) ->
+        String.replace(conn.resp_body, id, "<request_id>")
+
+      _ ->
+        conn.resp_body
+    end
   end
 end

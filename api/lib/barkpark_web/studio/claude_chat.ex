@@ -34,6 +34,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
   require Logger
 
+  alias Barkpark.Connectors.CloudPolicy
+
   @default_binary "claude"
   # The real `--permission-mode` choices the CLI documents (probed v2.1.205,
   # charter D48). Moves TOGETHER with Session's @modes. `default` (our retired
@@ -50,6 +52,14 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   # Reasoning-effort tiers the CLI's `--effort` flag accepts (probed v2.1.205,
   # charter D48). Ascending intensity; defined here so build_args' guard sees it.
   @efforts ~w(low medium high xhigh max)
+  # Ceiling on the Port stdout line-reassembly buffer (Session.handle_info →
+  # parse_chunk). The CLI emits newline-delimited JSON, so in normal operation
+  # the buffer only ever holds the trailing partial line. A malformed or stalled
+  # stream that never emits a newline would otherwise grow one binary without
+  # bound in the long-lived per-session GenServer (the codex-twin scar-class).
+  # Config-overridable per host/test via `config :barkpark, :claude_chat,
+  # max_buffer_bytes: N` (validator.ex @default/config/0/Keyword.get technique).
+  @default_max_buffer_bytes 8 * 1024 * 1024
 
   @doc """
   Whether the chat may run on this host. ON by default; requires the flag
@@ -83,6 +93,16 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   def binary, do: Keyword.get(config(), :binary, @default_binary)
 
   @doc """
+  Byte ceiling on the Port stdout line-reassembly buffer (`@default_max_buffer_bytes`,
+  8 MiB). Overridable via `config :barkpark, :claude_chat, max_buffer_bytes: N`
+  (tests shrink it to force the overflow path). Read in `Session.handle_info` where
+  the raw bytes arrive — a newline-free stream never yields a complete line, so the
+  cap must live at the accumulation seam, not the event path (charter D126).
+  """
+  @spec max_buffer_bytes() :: pos_integer()
+  def max_buffer_bytes, do: Keyword.get(config(), :max_buffer_bytes, @default_max_buffer_bytes)
+
+  @doc """
   The subprocess command as `{executable, args}`. Defaults to the Claude CLI
   in streaming print mode, plan permission mode. Overridable via config
   (tests inject a trivial command so they don't require `claude`).
@@ -90,6 +110,25 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   `session_opts` threads session identity onto the real argv through the pure
   `build_args/2` seam (`%{session_id: uuid}` ⇒ `--session-id`,
   `%{session_id: uuid, resume: true}` ⇒ `--resume`).
+
+  ## Execution profile (connectors D107 — the Cloud crux seam)
+
+  A new app config `:execution_profile` under `:claude_chat` selects WHERE the
+  turn runs, WITHOUT touching the `{exe,args,env,cwd} → NDJSON` spawn contract
+  (the same `Port.open`, the same parse pipeline). It is an instance/deployment
+  property, never a per-session user choice — a cloud session still carries
+  `execution_target=managed`:
+
+    * `:self_hosted` (default, greenfield) — the host `claude` CLI subprocess,
+      full host access, `bypassPermissions` reachable via the armed ceremony.
+      The returned tuple is **byte-identical** to the pre-D107 behavior (no
+      config ⇒ this branch is never entered).
+    * `:cloud` — `{sandbox_runner(), cloud_build_args(mode, opts)}`: the turn
+      runs inside an isolated Vercel Sandbox via the `cloud-sandbox-runner`
+      shim, NO host access, connector-scoped tools, gated on a concrete
+      workspace principal. The cloud argv (D109) drops the permission-prompt
+      bridge and ALL mcp args and **never** emits bypass flags; the shim gets
+      the workspace id and hard-fails on a nil/`:global` workspace (D110).
 
   VACUOUS-GREEN LAW: the `:command` config override returns its tuple
   **verbatim**, bypassing `build_args/2` entirely — never assert session/mode
@@ -100,8 +139,339 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   @spec command(String.t(), map()) :: {String.t(), [String.t()]}
   def command(mode \\ @default_mode, session_opts \\ %{}) do
     case Keyword.get(config(), :command) do
-      {exe, args} when is_binary(exe) and is_list(args) -> {exe, args}
-      _ -> {binary(), build_args(mode, session_opts)}
+      {exe, args} when is_binary(exe) and is_list(args) ->
+        {exe, args}
+
+      _ ->
+        case execution_profile(session_opts) do
+          :cloud -> {sandbox_runner(), cloud_build_args(mode, session_opts)}
+          _self_hosted -> {binary(), build_args(mode, session_opts)}
+        end
+    end
+  end
+
+  @default_execution_profile :self_hosted
+  @default_sandbox_runner "cloud-sandbox-runner"
+
+  @doc """
+  The configured execution profile (`:self_hosted` default | `:cloud`). Greenfield
+  config key (connectors D107) — an unset or unrecognized value fails to the
+  host CLI, never silently into the sandbox path.
+  """
+  @spec execution_profile() :: :self_hosted | :cloud
+  def execution_profile do
+    case Keyword.get(config(), :execution_profile, @default_execution_profile) do
+      :cloud -> :cloud
+      _ -> :self_hosted
+    end
+  end
+
+  @doc """
+  The turn's EFFECTIVE execution profile (connectors D205): the per-workspace
+  choice when the Session resolved one into `session_opts` (see
+  `resolve_workspace_execution_profile/1`), else the global config
+  (`execution_profile/0`). The Session resolves the workspace ONCE in `init/1`
+  and threads `:execution_profile` here, so BOTH consumers — `command/2` and
+  the cloud tool-descriptor threading — read the SAME resolution.
+  """
+  @spec execution_profile(map()) :: :self_hosted | :cloud
+  def execution_profile(session_opts) when is_map(session_opts) do
+    case Map.get(session_opts, :execution_profile) do
+      profile when profile in [:cloud, :self_hosted] -> profile
+      _ -> execution_profile()
+    end
+  end
+
+  @doc """
+  Resolve `session_opts[:workspace_id]` into an explicit `:execution_profile`
+  (connectors D205 — the per-workspace consumer seam). ONE `Tenancy` lookup per
+  Session spawn, from `Session.init/1` — per-session human cadence, never a
+  Registry callback. Fail-safe: a nil workspace_id (host-admin/:global sessions
+  stamp SQL NULL), a missing row, an absent/malformed/unknown
+  `settings["chat"]["execution_profile"]`, or ANY lookup failure leaves
+  `session_opts` untouched — `execution_profile/1` then falls through to the
+  global config and thus `:self_hosted` (fail-safe, never fail-cloud). When the
+  workspace carries an explicit `"cloud"`/`"self_hosted"`, the per-workspace
+  value WINS over the global config in BOTH directions; the `:command` config
+  tuple stays the outermost verbatim bypass in `command/2`, untouched by this.
+  """
+  @spec resolve_workspace_execution_profile(map()) :: map()
+  def resolve_workspace_execution_profile(session_opts) when is_map(session_opts) do
+    case workspace_execution_profile(Map.get(session_opts, :workspace_id)) do
+      profile when profile in [:cloud, :self_hosted] ->
+        Map.put(session_opts, :execution_profile, profile)
+
+      _ ->
+        session_opts
+    end
+  end
+
+  defp workspace_execution_profile(workspace_id) when is_binary(workspace_id) do
+    workspace = Barkpark.Tenancy.get_workspace_by_id(workspace_id)
+
+    case Barkpark.Tenancy.workspace_chat_settings(workspace)["execution_profile"] do
+      "cloud" -> :cloud
+      "self_hosted" -> :self_hosted
+      _ -> nil
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "claude chat: workspace execution-profile lookup failed (#{inspect(e)}) — global profile"
+      )
+
+      nil
+  end
+
+  defp workspace_execution_profile(_), do: nil
+
+  @doc """
+  The executable that spawns a Cloud turn — the `cloud-sandbox-runner` shim
+  (connectors D108/D111). Config-overridable (`:sandbox_runner`) so tests inject
+  a chmod+x fake and a real deploy points at the committed
+  `scripts/connectors/cloud-sandbox-runner.mjs`. Resolved through the same
+  `System.find_executable` path as the host binary.
+  """
+  @spec sandbox_runner() :: String.t()
+  def sandbox_runner, do: Keyword.get(config(), :sandbox_runner, @default_sandbox_runner)
+
+  @doc ~S"""
+  The Cloud-profile argv (connectors D109/D127/D137) — the shim's OWN argv.
+  Structure:
+
+      ["--workspace", <workspace_id>,
+       ("--mcp-config-b64", <b64>)?,
+       ("--sandbox-id", <id>)?, "--keep-sandbox",
+       ("--egress-host", <host>)*,
+       "--" | <claude args>]
+
+  The shim buffers the first user frame from its stdin, creates (or, with
+  `--sandbox-id`, reuses the auto-resuming) isolated sandbox tagged with the
+  workspace, and runs `claude <claude args> < turn.jsonl` inside it.
+
+  ## Multi-turn session continuity (connectors D135/D137/D139 — W14)
+
+  A Cloud chat is a real multi-turn Barkpark Chat SESSION whose memory lives in
+  the sandbox filesystem, not a held subprocess (interactive stdin into a
+  sandbox is impossible — D108). Two additive seams carry it:
+
+    * pre-`--` (SHIM-own): `--keep-sandbox` ALWAYS (teardown STOPS, not removes —
+      the sandbox + its `/tmp` claude transcript survive to the next turn), plus
+      `--sandbox-id <id>` when `session_opts[:cloud_sandbox_id]` is a non-empty
+      binary (skip create, exec the bound sandbox).
+    * post-`--` (claude-own, at the FRONT of the segment so `--disallowedTools`
+      stays the boundary): `--resume <session_id>` when the session is BOUND to a
+      sandbox, else a fresh `--session-id <session_id>`.
+
+  D139 LAW: resume-ness derives SOLELY from the sandbox binding, NEVER from
+  `session_opts[:resume]`/a message_count — a session whose bound sandbox
+  vanished must mint a fresh `--session-id`, never `--resume` into an empty
+  filesystem. The claude argv KEEPS `--input-format/--output-format stream-json`,
+  `--include-partial-messages`, `--verbose`, `--permission-mode <mode>`; it DROPS
+  `--permission-prompt-tool stdio` (no channel answers asks one-shot) and ALL
+  HOST mcp args (a host-written `--mcp-config` PATH hard-fails in-sandbox with
+  zero output). It **structurally never** emits
+  `--allow-dangerously-skip-permissions` — bypass is unreachable from this
+  builder (a down-payment on D24 knob 1).
+
+  Knob 3's CONFIG wiring (D126/D127) rides a SHIM-OWN flag: when the workspace
+  has ≥1 tool-direction install whose bridge descriptor survives
+  `CloudPolicy.cloud_mcp_servers/2`, this builder emits ONE `--mcp-config-b64
+  <base64(mcpServers json)>` pair BEFORE the `--` separator (0 installs ⇒ the
+  argv is byte-identical to W12). The Elixir argv itself NEVER carries
+  `--mcp-config`/`--strict-mcp-config`/a host path — the shim decodes the b64 to
+  an in-VM /tmp file and appends those to the claude exec.
+
+  The D24 permission reversal (D116/D117) rides here: the mode is CLAMPED through
+  `Barkpark.Connectors.CloudPolicy` (bypass/unknown → `"plan"`) and the argv
+  carries `CloudPolicy`'s three tool-removal belts — `--tools ""`,
+  `--disallowedTools <deny set>`, and a `--settings` deny JSON STRING (the SAME
+  deny list, pinned no-drift). `CloudPolicy` is the single legible owner of the
+  cloud posture; this function only emits it.
+
+  Fail-closed principal (D110): a nil/`:global`/blank `workspace_id` RAISES here
+  (the `registered_host` `Map.fetch!` shape) rather than spawning an
+  unattributed cloud turn.
+  """
+  @spec cloud_build_args(String.t(), map()) :: [String.t()]
+  def cloud_build_args(mode, session_opts \\ %{}) do
+    workspace_id = cloud_workspace_id!(session_opts)
+
+    ["--workspace", workspace_id] ++
+      cloud_mcp_config_args(session_opts) ++
+      cloud_sandbox_args(session_opts) ++
+      cloud_egress_args(session_opts) ++
+      ["--"] ++
+      cloud_claude_args(mode, session_opts)
+  end
+
+  # The shim-own per-connector egress allowlist (knob 6's WIRING, D238/D240 — W29)
+  # — repeated `--egress-host <host>` pairs emitted AFTER the sandbox-lifecycle
+  # flags and BEFORE the `--` separator, so the SHIM (never claude) owns them and
+  # can widen the sandbox's deny-all egress to EXACTLY the workspace's installed
+  # tool connectors' declared MCP hosts. Derived from the SAME `installs ∩
+  # descriptors` truth as `--mcp-config-b64` via `CloudPolicy.cloud_egress_hosts/2`
+  # (sorted, unique, D239-sanitized). With 0 surviving hosts this is `[]` and the
+  # argv is BYTE-IDENTICAL to W25 (deny-all preserved). Each host rides its OWN
+  # `--egress-host` pair — NEVER comma-joined, and `api.anthropic.com` (the shim's
+  # env base, never a connector descriptor) never appears.
+  defp cloud_egress_args(session_opts) do
+    workspace = Map.get(session_opts, :workspace_id)
+    descriptors = Map.get(session_opts, :tool_descriptors, [])
+
+    workspace
+    |> CloudPolicy.cloud_egress_hosts(descriptors)
+    |> Enum.flat_map(fn host -> ["--egress-host", host] end)
+  end
+
+  # The shim-own sandbox-lifecycle flags (connectors D137/D138), emitted pre-`--`
+  # so the SHIM (never claude) owns them. `--keep-sandbox` ALWAYS rides a Cloud
+  # turn: teardown STOPS the sandbox (auto-snapshot) instead of REMOVING it, so
+  # the session's sandbox — and the claude transcript under its persisted /tmp
+  # HOME — survives to the next turn (the per-turn timeout, not the whole chat,
+  # bounds one running turn). When the session is already BOUND to a sandbox
+  # (`session_opts[:cloud_sandbox_id]` is a non-empty binary), ALSO emit
+  # `--sandbox-id <id>` so the shim skips create and execs straight into the
+  # auto-resuming sandbox. Order matches D141's W14-1 line: `--sandbox-id <id>
+  # --keep-sandbox`. A nil/blank binding ⇒ just `--keep-sandbox` (fresh sandbox
+  # this turn, kept for the next).
+  defp cloud_sandbox_args(session_opts) do
+    case Map.get(session_opts, :cloud_sandbox_id) do
+      id when is_binary(id) and id != "" -> ["--sandbox-id", id, "--keep-sandbox"]
+      _ -> ["--keep-sandbox"]
+    end
+  end
+
+  # Whether this Cloud session is bound to a live sandbox — the SOLE source of
+  # resume-ness (D139 LAW). Derived from the binding column, NEVER from
+  # `session_opts[:resume]`/a message_count: a session whose bound sandbox
+  # vanished (expired/removed) must NOT `--resume` into an empty filesystem, and
+  # a bound session resumes even if the transport's `resume?` boolean is inert.
+  defp cloud_sandbox_bound?(session_opts) do
+    case Map.get(session_opts, :cloud_sandbox_id) do
+      id when is_binary(id) and id != "" -> true
+      _ -> false
+    end
+  end
+
+  # The shim-own `--mcp-config-b64 <b64>` flag (knob 3's CONFIG wiring, D127) —
+  # emitted BEFORE the `--` separator so the SHIM (never claude) owns it, and ONLY
+  # when the workspace has ≥1 tool-direction install whose host-fetched bridge
+  # descriptor survives `CloudPolicy.cloud_mcp_servers/2`'s filter. With 0
+  # surviving servers the argv is BYTE-IDENTICAL to W12 (no flag at all). The b64
+  # payload is the full `%{"mcpServers" => …}` document; the shim decodes it to a
+  # /tmp file IN-VM and appends `--mcp-config <path> --strict-mcp-config` to the
+  # claude exec — so the Elixir argv NEVER carries `--mcp-config`,
+  # `--strict-mcp-config`, or a host path (those are shim-owned). Descriptors are
+  # host-fetched into `session_opts[:tool_descriptors]` (fail-soft to []) by the
+  # Session; CloudPolicy cross-checks them against the workspace's live installs.
+  defp cloud_mcp_config_args(session_opts) do
+    workspace = Map.get(session_opts, :workspace_id)
+    descriptors = Map.get(session_opts, :tool_descriptors, [])
+
+    case CloudPolicy.cloud_mcp_servers(workspace, descriptors) do
+      servers when map_size(servers) > 0 ->
+        # W25-E (D214/D217): fold the SAME per-turn tool-session ticket (threaded
+        # beside the descriptors, minted ONCE in `tool_descriptors_for/1`) into the
+        # payload as a TOP-LEVEL `bpConnectorTicket` — the wire contract the shim
+        # (W25-N) reads HOST-side to fetch each entry's FINISHED auth headers from
+        # the bridge's loopback tool-headers route, then embeds them into the config
+        # it copies into the sandbox (D213: the BRIDGE owns decryption; the shim
+        # never sees a credential_ref). D38 held: Elixir threads only the non-secret
+        # ticket — never a sealed ref, never plaintext. It rides ONLY when ≥1 server
+        # survived (the flag itself does), so a 0-server turn is byte-identical to
+        # W12 regardless of the ticket. The key name is the wire contract — NEVER
+        # rename.
+        json = Jason.encode!(cloud_mcp_payload(servers, session_opts))
+        ["--mcp-config-b64", Base.encode64(json)]
+
+      _ ->
+        []
+    end
+  end
+
+  # The b64 mcp document: always `mcpServers`; adds `bpConnectorTicket` when the
+  # turn threaded a non-empty tool-session ticket (a :cloud turn with ≥1 install
+  # always does — see `maybe_thread_cloud_tool_descriptors/1`). A blank/absent
+  # ticket omits the key rather than emit `null`, keeping the payload well-formed.
+  defp cloud_mcp_payload(servers, session_opts) do
+    base = %{"mcpServers" => servers}
+
+    case Map.get(session_opts, :tool_session_ticket) do
+      ticket when is_binary(ticket) and ticket != "" ->
+        Map.put(base, "bpConnectorTicket", ticket)
+
+      _ ->
+        base
+    end
+  end
+
+  # The claude argv that runs INSIDE the sandbox (D109/D116/D117). Never derived
+  # from any bypass/arming knob, so `--allow-dangerously-skip-permissions` is
+  # structurally unreachable. The mode is CLAMPED through CloudPolicy (a bypass or
+  # unknown mode → plan — knob 1's validity clamp, NOT a tool-confinement claim).
+  # The three tool-removal belts (knob 2) are emitted from the single CloudPolicy
+  # owner: `--tools ""` (remove all built-ins), `--disallowedTools <deny set>`
+  # (structural per-tool removal), and a `--settings` deny JSON STRING carrying the
+  # SAME deny list (pinned argv-deny == settings-deny, no drift). `--disallowedTools`
+  # is emitted LAST so its variadic tool list has an unambiguous argv boundary.
+  # The session-identity flags (D135/D139) ride at the FRONT of this segment so
+  # `--disallowedTools` stays the final boundary — the shim passes the whole
+  # segment through to `claude` untouched.
+  defp cloud_claude_args(mode, session_opts) do
+    cloud_session_args(session_opts) ++
+      [
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--include-partial-messages",
+        "--verbose",
+        "--permission-mode",
+        CloudPolicy.cloud_permission_mode(mode),
+        "--tools",
+        "",
+        "--settings",
+        CloudPolicy.settings_deny_json()
+      ] ++ ["--disallowedTools" | CloudPolicy.cloud_disallowed_tools()]
+  end
+
+  # The Cloud-profile session-identity flags (connectors D135/D139) — the front
+  # of the post-`--` claude segment. `--session-id <uuid>` (mint fresh) turns 1;
+  # `--resume <uuid>` once the session is bound to a sandbox whose /tmp HOME
+  # carries the prior transcript. D139 LAW: which one is chosen derives SOLELY
+  # from the sandbox binding (`cloud_sandbox_bound?/1`), NEVER from
+  # `session_opts[:resume]` or a message_count — the self-hosted `session_args/1`
+  # keys off `:resume`, but a Cloud `--resume` into a vanished sandbox would hit
+  # an empty filesystem (`No conversation found`, D135), so the binding is the
+  # only honest signal. The uuid is the Barkpark session's public UUID
+  # (`session_opts[:session_id]`) — the SAME value the self-hosted path emits.
+  # Absent/blank session_id ⇒ neither flag (defensive; a real Cloud turn always
+  # carries one).
+  defp cloud_session_args(session_opts) do
+    case Map.get(session_opts, :session_id) do
+      id when is_binary(id) and id != "" ->
+        if cloud_sandbox_bound?(session_opts), do: ["--resume", id], else: ["--session-id", id]
+
+      _ ->
+        []
+    end
+  end
+
+  # Fail-closed workspace principal for a Cloud turn (D110). A concrete workspace
+  # binary passes; nil, the sentinel `:global`/`"global"`, or a blank string
+  # RAISE — the cloud profile never spawns an unattributed turn (mirror of the
+  # runtime.ex:349 `registered_host` Map.fetch! posture, never the fail-soft
+  # mcp empty-list pattern).
+  defp cloud_workspace_id!(session_opts) do
+    case Map.get(session_opts, :workspace_id) do
+      id when is_binary(id) and id != "" and id != "global" ->
+        id
+
+      other ->
+        raise ArgumentError,
+              "cloud execution profile requires a concrete workspace_id; refusing to spawn " <>
+                "an unattributed cloud turn (got: #{inspect(other)})"
     end
   end
 
@@ -238,12 +608,16 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   # WRITE, and the `bp_auth_*` verbs mutate credentials even where the
   # manifest marks them non-writing) surfaces the D31 approval card instead.
   # Curated task reads + the bridged task/doc/search reads (`bp_<noun>_<verb>`
-  # per mcp_bridge.go's naming).
+  # per mcp_bridge.go's naming). `chat_read_tail`/`chat_wait_for_state` are the
+  # herd read tools (charter D65) — pure observation of the fleet wire, so they
+  # auto-approve; `chat_spawn_session`/`chat_send` MUTATE and stay
+  # approval-gated.
   @mcp_auto_approve_tools ~w(
     task_ready task_show task_prime
     bp_task_get bp_task_ready bp_task_prime
     bp_doc_get bp_doc_ls bp_doc_query bp_doc_backlinks bp_doc_history bp_doc_revision
     bp_search_query
+    chat_read_tail chat_wait_for_state
   )
 
   @doc "True when `name` is one of OUR loopback server's tools (charter D64)."
@@ -323,31 +697,86 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   def result_success?(_), do: false
 
   @doc """
-  The per-session MCP config map (charter D63/D64) — `Session.init` serializes
-  it into a temp file that `--mcp-config` references. ONE server: Barkpark
-  itself, through `bp mcp serve --tools all` (`all` because the paper + search
-  legs need the bridged verbs, not just the curated task six). The env block
-  is the credential seam: BOTH `BARKPARK_API_URL` and `BARKPARK_API_TOKEN` are
-  set so the child `bp` NEVER falls back to the host's saved config — the
-  host's credential is typically ADMIN (proven live, wave-12 V1), and the
-  short-lived minted session token is the whole point. Pure (data in, data
-  out) so the shape is unit-testable without a session.
+  The per-session MCP config map (charter D63/D64; connectors D69/D73) —
+  `Session.init` serializes it into a temp file that `--mcp-config` references.
+
+  ALWAYS one server: Barkpark itself, through `bp mcp serve --tools all` (`all`
+  because the paper + search legs need the bridged verbs, not just the curated
+  task six). The env block is the credential seam: BOTH `BARKPARK_API_URL` and
+  `BARKPARK_API_TOKEN` are set so the child `bp` NEVER falls back to the host's
+  saved config — the host's credential is typically ADMIN (proven live, wave-12
+  V1), and the short-lived minted session token is the whole point.
+
+  PLUS, once per TOOL connector the session's workspace has connected: a SECOND
+  (third, …) `mcpServers` key, DERIVED from the bridge's descriptor
+  (`%{"provider", "type", "url", "headersHelper"}`) — this is the epic's OTHER
+  direction (connectors D69). The agent talks to a human through a channel AND
+  ACTS on GitHub, because a tool connector is simply another `mcpServers` entry.
+
+  Two invariants make the fold safe: it is keyed on `descriptor["provider"]` (a
+  registry id, never a provider special-case), and it uses `Map.put_new` so a
+  rogue descriptor can never SHADOW the loopback `barkpark` server whose env
+  carries the minted token. The descriptor is NON-SECRET (D38): the PAT rides
+  the `headersHelper` at MCP-connect, never this file. Pure (data in, data out)
+  so the shape is unit-testable without a session or a bridge.
   """
   @spec mcp_config(String.t()) :: map()
-  def mcp_config(raw_token) when is_binary(raw_token) do
-    %{
-      "mcpServers" => %{
-        "barkpark" => %{
-          "command" => Keyword.get(config(), :bp_binary, "bp"),
-          "args" => ["mcp", "serve", "--tools", "all"],
-          "env" => %{
-            "BARKPARK_API_URL" => mcp_api_url(),
-            "BARKPARK_API_TOKEN" => raw_token
-          }
+  def mcp_config(raw_token) when is_binary(raw_token), do: mcp_config(raw_token, [])
+
+  @spec mcp_config(String.t(), [map()]) :: map()
+  def mcp_config(raw_token, tool_descriptors)
+      when is_binary(raw_token) and is_list(tool_descriptors) do
+    barkpark = %{
+      "barkpark" => %{
+        "command" => Keyword.get(config(), :bp_binary, "bp"),
+        "args" => ["mcp", "serve", "--tools", "all"],
+        "env" => %{
+          "BARKPARK_API_URL" => mcp_api_url(),
+          "BARKPARK_API_TOKEN" => raw_token
         }
       }
     }
+
+    servers =
+      Enum.reduce(tool_descriptors, barkpark, fn descriptor, acc ->
+        case tool_server_entry(descriptor) do
+          {name, entry} -> Map.put_new(acc, name, entry)
+          :skip -> acc
+        end
+      end)
+
+    %{"mcpServers" => servers}
   end
+
+  # One tool descriptor -> one `mcpServers` entry, or `:skip`. Fail-closed: a
+  # descriptor missing its provider/url, naming a non-http transport, or
+  # colliding with the reserved `barkpark` name is DROPPED — a malformed bridge
+  # answer degrades the toolset, never poisons the loopback server. `type: "http"`
+  # is the only transport a tool connector uses today (D71); `headersHelper` is
+  # folded in only when present (the non-secret command that fetches the PAT).
+  defp tool_server_entry(%{"provider" => provider, "type" => "http", "url" => url} = descriptor)
+       when is_binary(provider) and provider != "" and provider != "barkpark" and
+              is_binary(url) and url != "" do
+    entry = %{"type" => "http", "url" => url}
+
+    # The credential seam (D38): the subprocess runs `headersHelper` at
+    # MCP-connect and prints `{"Authorization":"Bearer <pat>"}` into the
+    # transport. Folded in ONLY when present — Elixir writes the command, never
+    # the token. A descriptor with no helper is a URL-only server (harmless; an
+    # unauthenticated MCP server, which GitHub's is not, but the type allows it).
+    entry =
+      case descriptor["headersHelper"] do
+        helper when is_binary(helper) and helper != "" ->
+          Map.put(entry, "headersHelper", helper)
+
+        _ ->
+          entry
+      end
+
+    {provider, entry}
+  end
+
+  defp tool_server_entry(_), do: :skip
 
   @doc """
   The API URL the loopback `bp mcp serve` child talks to. Config
@@ -384,7 +813,9 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   # Secret env vars the child must NEVER inherit: everything secret-valued that
   # config/runtime.exs reads, plus RELEASE_COOKIE (BEAM distribution) and
   # BARKPARK_TOKEN (the host's bp credential — typically ADMIN), plus the
-  # Hetzner tokens a cloud host's .env exports. Unsetting an absent var is a
+  # Hetzner tokens a cloud host's .env exports, plus BARKPARK_ADMIN_TOKEN
+  # (ApiTesterLive-reachable, charter D173) and BARKPARK_SEED_ADMIN_TOKEN
+  # (deploy-shell-only, scrubbed defensively). Unsetting an absent var is a
   # proven no-op, so the list errs wide. HOME and PATH are deliberately NOT
   # here — the merge keeps them, and claude's OAuth lives under $HOME.
   @scrubbed_env ~w(
@@ -393,17 +824,46 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     BOKBASEN_CLIENT_ID BOKBASEN_CLIENT_SECRET
     INDX_USER_EMAIL INDX_USER_PASSWORD INDX_API_TOKEN
     BARKPARK_SYNC_TOKEN
+    BARKPARK_RELEASE_CAPTURE_TOKEN BARKPARK_RELEASE_CAPTURE_HMAC_SECRET
     MEDIA_SIGNING_SECRET MEDIA_CDN_INVALIDATION_SECRET
     MEDIA_PROCESSING_CALLBACK_TOKEN MEDIA_WEBHOOK_SECRET
     SMTP_USERNAME SMTP_PASSWORD
     PREVIEW_JWT_SECRET
     BARKPARK_INGEST_TOKEN PAPERFLOW_INGEST_TOKEN
     HETZNER_API_TOKEN HCLOUD_TOKEN
+    CONNECTORS_CONNECT_SECRET
+    BARKPARK_ADMIN_TOKEN BARKPARK_SEED_ADMIN_TOKEN
   )
 
   @doc "The secret env var names scrubbed from every chat child (charter D3)."
   @spec scrubbed_env_names() :: [String.t()]
   def scrubbed_env_names, do: @scrubbed_env
+
+  # Secret-shaped env vars that are DELIBERATELY inherited (never scrubbed).
+  # This is the rationale-carrying exception to the api/lib-wide self-audit
+  # (claude_chat_test.exs — "the denylist covers every secret-shaped env read
+  # in api/lib"): a secret read that is neither scrubbed NOR listed here reds
+  # the audit, forcing a conscious scrub-or-allowlist decision.
+  #
+  # ANTHROPIC_API_KEY (charter D23): it IS the cloud path's `claude` auth
+  # mechanism. The claude CLI natively authenticates on this var, and whether
+  # cloud-sandbox-runner.mjs depends on inheriting it is UNRESOLVED Node-side —
+  # a blind scrub could break the human-gated cloud turn. NEVER blind-scrub it;
+  # the local in-process reads (studio_chat/titles.ex, tasks/judge.ex) are the
+  # server's own Anthropic identity, out of the chat child's scrub scope by
+  # design.
+  @intentional_env_passthrough ~w(
+    ANTHROPIC_API_KEY
+  )
+
+  @doc """
+  Secret-shaped env var names that are DELIBERATELY inherited by chat children
+  rather than scrubbed (charter D23). The self-audit asserts every secret read
+  in `api/lib` is either scrubbed (`scrubbed_env_names/0`) OR listed here —
+  a flat subset would fail forever on this legitimate exception.
+  """
+  @spec intentional_env_passthrough_names() :: [String.t()]
+  def intentional_env_passthrough_names, do: @intentional_env_passthrough
 
   @doc """
   The `env:` option for the chat child's `Port.open` (charter D1/D3). Injects
@@ -537,6 +997,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       bounded tail of the child's captured stderr rides along (empty on a clean
       exit, `nil` on the crash/idle-reap paths that carry no captured stderr) so
       the UI can tell a rejected-argv death from an ordinary end (charter D54)
+    * `{:claude_chat_error, :buffer_overflow, stderr_tail}` — the stdout
+      line-reassembly buffer crossed `max_buffer_bytes/0`; the session closed the
+      Port and stopped cleanly. Carries the same bounded stderr tail as an exit so
+      the UI can surface the captured reason.
 
   The session monitors the sink and shuts the subprocess down when the sink
   dies, so an abandoned LiveView never leaks a `claude` process.
@@ -790,6 +1254,9 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       end
     end
 
+    # All file paths used by this callback are minted below from the OS temp
+    # directory and a server-owned session identity; none comes from a request.
+    # sobelow_skip ["Traversal.FileModule"]
     @impl true
     def init(%{sink: sink} = opts) do
       session_opts = Map.get(opts, :session_opts, %{})
@@ -813,6 +1280,25 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
           _ ->
             session_opts
         end
+
+      # Resolve the turn's EFFECTIVE execution profile ONCE from the session's
+      # workspace (connectors D205 — the per-workspace consumer seam): a
+      # workspace with `settings["chat"]["execution_profile"]` set wins over
+      # the global config in both directions; nil workspace / missing row /
+      # unset key / any lookup failure falls through to the global config and
+      # thus :self_hosted (fail-safe, never fail-cloud). The stashed profile
+      # feeds BOTH consumers below — the descriptor threading AND `command/2` —
+      # so a cloud-profiled workspace can never get a cloud turn with no tool
+      # descriptors (a half-resolution is banned by D205).
+      session_opts = ClaudeChat.resolve_workspace_execution_profile(session_opts)
+
+      # For a :cloud turn, fetch this workspace's tool-connector descriptors
+      # HOST-side (the SAME fail-soft bridge idiom as setup_mcp) and thread them
+      # into session_opts so `cloud_build_args/2` can emit the scoped
+      # `--mcp-config-b64` (knob 3's CONFIG half, D126/D127). Self-hosted turns
+      # are untouched — their descriptors ride the per-session mcp-config FILE
+      # instead. No bridge / no workspace ⇒ [] ⇒ argv byte-identical to W12.
+      session_opts = maybe_thread_cloud_tool_descriptors(session_opts)
 
       {exe, args} = ClaudeChat.command(Map.get(opts, :mode, "plan"), session_opts)
 
@@ -921,11 +1407,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     @impl true
     def handle_cast({:respond_permission, request_id, decision}, state) do
-      # Consume the tracked ask input (charter D32): a plain `:allow` echoes it
+      # Consume the tracked ask (charter D32): a plain `:allow` echoes its input
       # verbatim as `updatedInput`; a `{:allow, updated}` carries the caller's
       # map (question answers); a deny drops it. Pruned either way so the map
       # never grows unbounded across a long session.
-      {original, pending_asks} = Map.pop(state.pending_asks, request_id)
+      {ask, pending_asks} = Map.pop(state.pending_asks, request_id)
+      original = ask && ask.input
 
       payload =
         case decision do
@@ -950,6 +1437,18 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         }) <> "\n"
 
       safe_command(state.port, line)
+
+      # An allowed ExitPlanMode IS the plan-approve fact: report it to the sink
+      # AFTER the control_response is on the wire (stdio is serialized, so any
+      # follow-up steer lands behind the CLI's own internal mode flip). Fact
+      # only — the mode POLICY lives in the Recorder, never here. `ask` is nil
+      # for an untracked request_id (a bare answer with no pending ask) — the
+      # strict-boolean `and` needs the explicit nil check, never truthiness.
+      if ask != nil and ask.tool_name == "ExitPlanMode" and
+           (decision == :allow or match?({:allow, _}, decision)) do
+        send(state.sink, {:claude_chat_plan_approved, request_id})
+      end
+
       {:noreply, %{state | pending_asks: pending_asks}}
     end
 
@@ -1001,10 +1500,36 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     @impl true
     def handle_info({port, {:data, chunk}}, %{port: port} = state) do
-      {events, rest} = ClaudeChat.parse_chunk(state.buffer, chunk)
-      # Thread state so a control_response ack can prune its pending entry.
-      state = Enum.reduce(events, %{state | buffer: rest}, &dispatch_event/2)
-      {:noreply, state}
+      # Cap the line-reassembly buffer WHERE the bytes arrive (charter D126). The
+      # CLI streams newline-delimited JSON, so parse_chunk normally hands back only
+      # the trailing partial line — but a malformed/stalled stream that never emits
+      # a newline would grow `state.buffer` without bound in this long-lived
+      # per-session GenServer (the codex-twin scar-class). Check the accumulated
+      # size BEFORE parse_chunk consumes it: on breach close the Port and stop the
+      # session with a named overflow error. terminate/2 still runs (revokes the
+      # MCP token + removes the stderr tmpfile) — port is nil'd so it closes once.
+      buffered = byte_size(state.buffer) + byte_size(chunk)
+      cap = ClaudeChat.max_buffer_bytes()
+
+      if buffered > cap do
+        Logger.warning(
+          "claude chat: stdout buffer #{buffered} bytes exceeds #{cap}-byte cap; closing session"
+        )
+
+        if port in Port.list(), do: Port.close(port)
+
+        send(
+          state.sink,
+          {:claude_chat_error, :buffer_overflow, read_stderr_tail(state[:stderr_path])}
+        )
+
+        {:stop, :normal, %{state | port: nil}}
+      else
+        {events, rest} = ClaudeChat.parse_chunk(state.buffer, chunk)
+        # Thread state so a control_response ack can prune its pending entry.
+        state = Enum.reduce(events, %{state | buffer: rest}, &dispatch_event/2)
+        {:noreply, state}
+      end
     end
 
     def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
@@ -1040,6 +1565,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     # The stderr capture file must not outlive the session (charter D54) — remove
     # it on every teardown path (clean close, exit, crash). Best-effort.
+    # sobelow_skip ["Traversal.FileModule"]
     defp cleanup_stderr(%{stderr_path: path}) when is_binary(path), do: File.rm(path)
     defp cleanup_stderr(_), do: :ok
 
@@ -1049,6 +1575,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # path, mirroring cleanup_stderr. Total and best-effort: a dead Repo at
     # teardown must never turn a normal stop into a crash — the token's short
     # TTL is the crash backstop.
+    # sobelow_skip ["Traversal.FileModule"]
     defp cleanup_mcp(%{mcp_token: token} = state) when not is_nil(token) do
       safe_revoke(token)
       cleanup_mcp_file(state)
@@ -1057,6 +1584,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     defp cleanup_mcp(state) when is_map(state), do: cleanup_mcp_file(state)
     defp cleanup_mcp(_), do: :ok
 
+    # The path was minted by `mcp_config_path/1` under the OS temp directory.
+    # sobelow_skip ["Traversal.FileModule"]
     defp cleanup_mcp_file(%{mcp_config_path: path}) when is_binary(path), do: File.rm(path)
     defp cleanup_mcp_file(_), do: :ok
 
@@ -1102,7 +1631,24 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
       case Barkpark.Auth.create_claude_session_token(minter, session_id) do
         {:ok, {raw, token}} ->
-          %{mint: :minted, raw: raw, token: token, config_path: write_mcp_config(opts, raw)}
+          # The OTHER direction (connectors D69): fetch this workspace's TOOL
+          # connectors from the bridge and fold them into the config as extra
+          # `mcpServers` keys. Scoped to the MINTED token's workspace — the SAME
+          # workspace the loopback bp token authorizes — so tool scope and chat
+          # scope agree by construction, not by hope. Fail-soft: an instance with
+          # no connect seam (or an unreachable bridge) simply gets no tool
+          # servers, exactly as before this wave. The self-hosted mcp-config file
+          # embeds each descriptor's own ticket-authenticated headersHelper, so the
+          # surfaced tool-session ticket is unused on this path (it rides the
+          # :cloud b64 payload only — W25-E).
+          {_tool_ticket, descriptors} = tool_descriptors_for(token.workspace_id)
+
+          %{
+            mint: :minted,
+            raw: raw,
+            token: token,
+            config_path: write_mcp_config(opts, raw, descriptors)
+          }
 
         {:error, reason} ->
           Logger.warning(
@@ -1121,14 +1667,93 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     defp setup_mcp(_opts, _session_opts),
       do: %{mint: :not_attempted, raw: nil, token: nil, config_path: nil}
 
+    # The tool-connector fetch (connectors D69/D73) — the outbound direction. Sign
+    # a session-length tool ticket for `workspace_id` and ask the bridge which MCP
+    # servers this workspace's agent may connect to. Every step is FAIL-SOFT to an
+    # empty list, because a missing/broken tool seam must NEVER poison a chat
+    # session (the loopback `barkpark` server is what makes the chat useful; tool
+    # connectors are additive):
+    #
+    #   * no connect secret (the default instance)      -> {:error, :not_configured}
+    #   * the bridge does not implement the callback     -> function_exported? false
+    #   * the bridge is unreachable / refuses            -> {:error, _}
+    #   * any crash                                      -> rescued
+    #
+    # ONLY a `{:ok, list}` yields tool servers. D38 holds: the bridge returns
+    # NON-SECRET descriptors; the subprocess fetches the PAT via `headersHelper`;
+    # Elixir never decrypts and never holds plaintext.
+    #
+    # Returns `{ticket, descriptors}`: the SAME workspace-scoped tool-session
+    # ticket that authorized the descriptor fetch is surfaced so a :cloud turn can
+    # thread it into the b64 mcp payload as `bpConnectorTicket` (W25-E, D214/D217)
+    # — the shim reads it HOST-side to fetch each connector's FINISHED auth headers
+    # from the bridge (the bridge owns decryption, D213). It is
+    # minted EXACTLY ONCE here (never a second mint downstream); the self-hosted
+    # mcp-config path ignores it (its descriptors carry a self-fetching
+    # headersHelper). Any failure path returns `{nil, []}` — no ticket, no servers.
+    defp tool_descriptors_for(workspace_id) when is_binary(workspace_id) do
+      alias Barkpark.Connectors
+      alias Barkpark.Connectors.ConnectTicket
+
+      with {:ok, ticket} <- ConnectTicket.sign_tool(workspace_id),
+           bridge when is_atom(bridge) and not is_nil(bridge) <- Connectors.bridge(),
+           true <- Code.ensure_loaded?(bridge),
+           true <- function_exported?(bridge, :fetch_tool_descriptors, 1),
+           {:ok, descriptors} when is_list(descriptors) <- bridge.fetch_tool_descriptors(ticket) do
+        {ticket, descriptors}
+      else
+        _ -> {nil, []}
+      end
+    rescue
+      e ->
+        Logger.warning(
+          "claude chat: tool-descriptor fetch crashed (#{inspect(e)}) — no tool servers"
+        )
+
+        {nil, []}
+    end
+
+    defp tool_descriptors_for(_), do: {nil, []}
+
+    # Thread the workspace's tool-connector descriptors into session_opts for a
+    # :cloud turn only (knob 3 CONFIG half, D126/D127) — the SAME host-side,
+    # fail-soft `tool_descriptors_for/1` fetch the self-hosted mcp-config uses,
+    # keyed on the cloud turn's session-opts workspace_id (D110 guarantees it is
+    # present). `cloud_build_args/2` reads `:tool_descriptors` and CloudPolicy
+    # cross-checks them against the workspace's live installs. A self-hosted turn
+    # is returned untouched (its descriptors ride the mcp-config file); a cloud
+    # turn with no bridge/workspace gets `[]` ⇒ argv byte-identical to W12.
+    # Reads the SAME per-spawn resolution `init/1` stashed into session_opts
+    # (connectors D205) — never a second/global-only read, which would strip a
+    # cloud-profiled workspace's tool descriptors.
+    defp maybe_thread_cloud_tool_descriptors(session_opts) do
+      if ClaudeChat.execution_profile(session_opts) == :cloud do
+        # ONE `tool_descriptors_for/1` call ⇒ ONE mint: store the descriptors AND
+        # the SAME tool-session ticket that authorized their fetch. `cloud_build_args/2`
+        # emits the ticket as `bpConnectorTicket` in the b64 payload beside
+        # `mcpServers` (W25-E, D214/D217) — the shim reads it HOST-side to fetch each
+        # connector's FINISHED auth headers from the bridge. A turn with no bridge/workspace gets
+        # `{nil, []}` ⇒ no descriptors, no ticket ⇒ argv byte-identical to W12.
+        {ticket, descriptors} = tool_descriptors_for(Map.get(session_opts, :workspace_id))
+
+        session_opts
+        |> Map.put(:tool_descriptors, descriptors)
+        |> Map.put(:tool_session_ticket, ticket)
+      else
+        session_opts
+      end
+    end
+
     # Serialize the mcp-config to its per-session temp file. Fail-soft to nil
     # (the MCP lane is lost, the spawn-env lane keeps the SAME token): the
     # mint stays valid, so a transient tmp-dir problem degrades hands, never
     # revokes them. Rescues internally so a post-mint crash can't leak the
     # token past setup_mcp's return.
-    defp write_mcp_config(opts, raw) do
+    # `mcp_config_path/1` always anchors this file in `System.tmp_dir!/0`.
+    # sobelow_skip ["Traversal.FileModule"]
+    defp write_mcp_config(opts, raw, tool_descriptors) do
       path = mcp_config_path(opts)
-      json = Jason.encode!(ClaudeChat.mcp_config(raw))
+      json = Jason.encode!(ClaudeChat.mcp_config(raw, tool_descriptors))
 
       # 0600 BEFORE the secret lands: create empty, clamp perms, then write.
       with :ok <- File.touch(path),
@@ -1184,6 +1809,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # that carry no captured stderr.
     defp read_stderr_tail(nil), do: ""
 
+    # `stderr_path/1` always anchors this file in `System.tmp_dir!/0`.
+    # sobelow_skip ["Traversal.FileModule"]
     defp read_stderr_tail(path) do
       case File.open(path, [:read, :binary]) do
         {:ok, io} ->
@@ -1243,8 +1870,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
       # Remember the ask's input so a plain `:allow` can echo it as
       # `updatedInput` (charter D32) — the answer seam never reconstructs it
-      # from an untrusted round-trip.
-      put_in(state.pending_asks[request_id], input)
+      # from an untrusted round-trip. The tool_name rides along so the answer
+      # seam can recognize an allowed ExitPlanMode (the plan-approve fact).
+      put_in(state.pending_asks[request_id], %{
+        input: input,
+        tool_name: Map.get(request, "tool_name", "tool")
+      })
     end
 
     defp dispatch_event(

@@ -33,6 +33,7 @@ on:
 
 permissions:
   contents: read
+  issues: write # so a failed weekly drift-guard run can surface itself to a human
 
 concurrency:
   group: codebase-intel-${{ github.ref }}
@@ -178,3 +179,27 @@ jobs:
             cat /tmp/parity.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # SCOPE, stated honestly: every analysis step above is continue-on-error
+      # by design (drift-guard is observability, it never blocks a merge), so
+      # this fires on INFRASTRUCTURE failure — checkout, Setup Node, Setup Go —
+      # not on drift being detected. That is the failure mode that would
+      # otherwise be invisible: a weekly job that silently stopped producing any
+      # signal at all still shows a green-ish tab. Turning drift itself into a
+      # red is a policy change and deliberately NOT made here.
+      # `cancelled()` is here because `failure()` evaluates FALSE on a cancelled
+      # run, and cancelled is the dominant non-success conclusion on this
+      # repository's scheduled workflows. A gate that stopped running is the same
+      # silence as a gate that ran red — worse, because its old issue keeps
+      # sitting there looking current.
+      - name: Report failure to a human
+        if: failure() || cancelled()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: codebase-intel-drift-guard
+          CI_FAILURE_DETAIL: |
+            The weekly codebase-intel drift guard failed to RUN. Its analysis
+            steps are continue-on-error, so this is an infrastructure failure
+            (checkout / toolchain / runner), not a drift finding — the guard
+            produced no signal at all this week.
+        run: bash scripts/file-ci-failure-issue.sh

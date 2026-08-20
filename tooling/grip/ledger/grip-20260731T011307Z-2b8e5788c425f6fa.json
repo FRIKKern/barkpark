@@ -1,0 +1,56 @@
+{
+  "run_id": "grip-20260731T011307Z",
+  "recipes": [
+    {
+      "subject": "api/lib/barkpark/content/lifecycle.ex",
+      "quantity": "grep:-n:AuthoringWall",
+      "rerun": "grep -n 'AuthoringWall' api/lib/barkpark/content/lifecycle.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/content/lifecycle.ex"
+      ],
+      "observed_at": "2026-07-31T01:13:07Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/live/studio/studio_live/components.ex",
+      "quantity": "grep:-n:Publish is READ-ONLY state",
+      "rerun": "grep -n 'Publish is READ-ONLY state' api/lib/barkpark_web/live/studio/studio_live/components.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/live/studio/studio_live/components.ex"
+      ],
+      "observed_at": "2026-07-31T01:13:07Z"
+    },
+    {
+      "subject": "api/lib/barkpark_web/studio/pane_builder.ex",
+      "quantity": "grep:-n:view: :paper",
+      "rerun": "grep -n 'view: :paper' api/lib/barkpark_web/studio/pane_builder.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark_web/studio/pane_builder.ex"
+      ],
+      "observed_at": "2026-07-31T01:13:07Z"
+    },
+    {
+      "subject": "api/lib/barkpark/content/writer.ex",
+      "quantity": "grep:-n:DraftId.draft_id(raw_id)",
+      "rerun": "grep -n 'DraftId.draft_id(raw_id)' api/lib/barkpark/content/writer.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/content/writer.ex"
+      ],
+      "observed_at": "2026-07-31T01:13:07Z"
+    },
+    {
+      "subject": "api/lib/barkpark/content/writer.ex",
+      "quantity": "grep:-rn:stamp_article_style",
+      "rerun": "grep -rn 'stamp_article_style' api/lib/barkpark/content/writer.ex api/lib/barkpark/content/papers/block_ops.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/content/writer.ex",
+        "api/lib/barkpark/content/papers/block_ops.ex"
+      ],
+      "observed_at": "2026-07-31T01:13:07Z"
+    }
+  ]
+}

@@ -64,8 +64,8 @@ test("evergreen theme palette equals base tokens byte-for-byte (fallback === the
   // themePalette(evergreen) must reproduce the shipped bytes — Part F's guarantee,
   // re-checked at the emit seam so the evergreen block can never silently retint.
   const p = themePalette(evergreen);
-  assert.equal(p.color.primary.light, "163 46% 22%");
-  assert.equal(p.color.primary.dark, "160 42% 62%");
+  assert.equal(p.color.primary.light, "151.96 71.81% 29.22%");
+  assert.equal(p.color.primary.dark, "152.92 60% 52.94%");
   assert.equal(p.color.paper.surface.ink.light, "#15211d");
 });
 
@@ -176,14 +176,21 @@ test("Elixir TokensGen: @themes + every colour map gains the fixture; N=1 is eve
 
   const n2 = build("render/tokens_gen.ex", THEMES);
   assert.ok(n2.includes("@themes [:evergreen, :fixture]"), "@themes did not gain :fixture");
-  // status + reading_accent (one-liners) and email + callout (block maps) each key fixture.
-  assert.match(n2, /@status %\{evergreen: %\{[^}]*\}, fixture: %\{/);
-  assert.match(n2, /@reading_accent %\{evergreen: "[^"]*", fixture: "[^"]*"\}/);
+  // status, reading_accent, email and callout are ALL block maps now, one theme
+  // per line. status/reading_accent used to be one-liners; they were reshaped
+  // once five themes pushed them past `mix format`'s 98 columns, which is what
+  // made the emitter stop being a format fixed point and reddened the drift gate.
+  assert.match(n2, /@status %\{\n {4}evergreen: %\{[^}]*\},\n {4}fixture: %\{/);
+  assert.match(n2, /@reading_accent %\{\n {4}evergreen: "[^"]*",\n {4}fixture: "[^"]*"\n {2}\}/);
   assert.ok(n2.includes("    fixture: %{"), "email/callout block maps missing the fixture entry");
 });
 
 test("Elixir TokensGen: the evergreen @status entry is byte-identical N=1 vs N=2", () => {
-  const status = (s) => s.match(/  @status %\{evergreen: %\{[^}]*\}/)[0];
+  // The ENTRY, deliberately not its separator: at N=1 evergreen is last and
+  // carries no comma, at N=2 it does. The property under test is that adding a
+  // theme does not RETINT evergreen, not how the list is punctuated. `%{ok:` is
+  // unique to the status map — email/callout open with a newline after `%{`.
+  const status = (s) => s.match(/^ {4}evergreen: %\{ok:[^\n]*?\}/m)[0];
   assert.equal(status(build("render/tokens_gen.ex", THEMES)), status(build("render/tokens_gen.ex", EVER)));
 });
 

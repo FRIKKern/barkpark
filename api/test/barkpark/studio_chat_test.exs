@@ -34,6 +34,45 @@ defmodule Barkpark.StudioChatTest do
     session
   end
 
+  # A fresh workspace id — no FK on owner_workspace_id (greenfield/additive
+  # migration), so a bare generated UUID is a legitimate owner for the store
+  # tenant-seam tests below.
+  defp ws, do: Ecto.UUID.generate()
+
+  # A session owned under `scope` (`:global | {:workspace, ws} | ws`).
+  defp owned_session(scope) do
+    id = Ecto.UUID.generate()
+    {:ok, s} = StudioChat.create_session(%{id: id, cwd: "/tmp/x"}, scope)
+    s
+  end
+
+  # ── Wave-26 leaked-session pollution guard (felix-w27-s6) ────────────────────
+  #
+  # The StudioChat Recorder is an app-tree GenServer (RuntimeSupervisor) that can
+  # outlive a prior test's sandbox owner and COMMIT chat_sessions rows which then
+  # escape that test's transaction rollback. Those committed rows ride
+  # `list_sessions/*`'s recency-desc ordering AHEAD of this file's freshly-seeded
+  # rows, reddening the cap / recency / archived-filter assertions on a SHIFTING,
+  # order-dependent set (refuted as a prod defect in the wave-26 review, real as
+  # suite pollution). At setup — before any test here has created a single session
+  # — every visible `chat_sessions` row is such a leak, so purge them for a clean
+  # baseline. Restrict-FK children (`chat_runtime_usage_receipts`,
+  # `epic_assignment_runtime_attempts`) are cleared first; deleting the sessions
+  # then cascades the on_delete:delete_all children (messages, telemetry, leases).
+  # The purge runs inside this test's sandbox transaction and rolls back with it —
+  # test-infra hygiene only, ZERO prod code touched.
+  setup do
+    purge_leaked_chat_sessions!()
+    :ok
+  end
+
+  defp purge_leaked_chat_sessions! do
+    Repo.query!("DELETE FROM chat_runtime_usage_receipts")
+    Repo.query!("DELETE FROM epic_assignment_runtime_attempts")
+    Repo.delete_all(Session)
+    :ok
+  end
+
   describe "create_session/1 + get_session/1" do
     test "the caller-minted UUID is the PK (autogenerate false) and round-trips" do
       id = Ecto.UUID.generate()
@@ -345,6 +384,56 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "set_cloud_sandbox_id/2 — session-scoped Cloud sandbox binding (charter D137/D139)" do
+    test "SETS, OVERWRITES, and CLEARS — deliberately NOT write-once" do
+      s = new_session()
+      assert s.cloud_sandbox_id == nil
+
+      # SET
+      {:ok, bound} = StudioChat.set_cloud_sandbox_id(s.id, "sbx-alpha")
+      assert bound.cloud_sandbox_id == "sbx-alpha"
+      assert StudioChat.get_session(s.id).cloud_sandbox_id == "sbx-alpha"
+
+      # OVERWRITE — a fresh sandbox after an expiry re-binds (this is the exact
+      # departure from write-once provider_session_id below).
+      {:ok, rebound} = StudioChat.set_cloud_sandbox_id(s.id, "sbx-beta")
+      assert rebound.cloud_sandbox_id == "sbx-beta"
+      assert StudioChat.get_session(s.id).cloud_sandbox_id == "sbx-beta"
+
+      # CLEAR — nil is a legal transition (expiry with no replacement yet, D139).
+      {:ok, cleared} = StudioChat.set_cloud_sandbox_id(s.id, nil)
+      assert cleared.cloud_sandbox_id == nil
+      assert StudioChat.get_session(s.id).cloud_sandbox_id == nil
+    end
+
+    test "CONTRASTS with write-once set_provider_session_id/2 (which refuses overwrite)" do
+      s = new_session()
+
+      # A managed session's provider identity is stamped to its own UUID at create
+      # and is WRITE-ONCE: a different value is rejected, the row is untouched.
+      assert s.provider_session_id == s.id
+      assert {:error, :immutable} = StudioChat.set_provider_session_id(s.id, "native-2")
+      assert StudioChat.get_session(s.id).provider_session_id == s.id
+
+      # The sandbox binding is NOT — the same double-set succeeds and moves the id.
+      {:ok, _} = StudioChat.set_cloud_sandbox_id(s.id, "sbx-1")
+      assert {:ok, moved} = StudioChat.set_cloud_sandbox_id(s.id, "sbx-2")
+      assert moved.cloud_sandbox_id == "sbx-2"
+    end
+
+    test "a blank id trips the non-empty DB check (never a fake binding)" do
+      s = new_session()
+      assert {:error, changeset} = StudioChat.set_cloud_sandbox_id(s.id, "   ")
+      assert %{cloud_sandbox_id: _} = errors_on(changeset)
+      assert StudioChat.get_session(s.id).cloud_sandbox_id == nil
+    end
+
+    test "set on a missing session is honest" do
+      assert {:error, :not_found} =
+               StudioChat.set_cloud_sandbox_id(Ecto.UUID.generate(), "sbx-x")
+    end
+  end
+
   describe "titles — clobber guard (charter D13)" do
     test "AI title lands on a default title, then a human rename overrides it" do
       s = new_session()
@@ -557,6 +646,60 @@ defmodule Barkpark.StudioChatTest do
       assert :noop = StudioChat.unarchive_session("nope")
     end
 
+    test "delete_session with a RESTRICT runtime ledger returns {:error, changeset}, never a crash" do
+      s = new_session()
+
+      # A managed-codex session that recorded a runtime usage receipt: its
+      # session_id FK is on_delete: :restrict (migration 20260715000900), so the
+      # session cannot be hard-deleted while the ledger row lives. Seed one
+      # directly — the receipt table is append-only (the immutability trigger
+      # blocks UPDATE/DELETE, not INSERT), and task_id needs a real document.
+      task_doc =
+        Barkpark.Repo.insert!(%Barkpark.Content.Document{
+          doc_id: "sc-restrict-#{System.unique_integer([:positive])}",
+          type: "task",
+          title: "restrict guard task",
+          status: "published",
+          content: %{},
+          rev: Ecto.UUID.generate()
+        })
+
+      {1, _} =
+        Barkpark.Repo.insert_all(Barkpark.StudioChat.RuntimeUsage.Receipt, [
+          %{
+            id: Ecto.UUID.generate(),
+            cycle_id: Ecto.UUID.generate(),
+            assignment_id: Ecto.UUID.generate(),
+            session_id: s.id,
+            task_id: task_doc.id,
+            task_doc_id: "sc-restrict-task",
+            task_worker_id: "worker-1",
+            task_epoch: 1,
+            task_work_digest: "0123456789abcdef",
+            provider: "codex",
+            provider_session_id: "thread-1",
+            turn_id: "turn-1",
+            boundary: "baseline",
+            observation_state: "observed",
+            counter_domain: "tokens",
+            counters: %{},
+            payload_hash: String.duplicate("a", 64),
+            inserted_at: DateTime.utc_now()
+          }
+        ])
+
+      # Mapped to a changeset error — never an unhandled Ecto.ConstraintError
+      # crashing the admin LiveView. Mutation: strip the foreign_key_constraint
+      # mapping in delete_session/2 → Repo.delete raises → this assert fails.
+      assert {:error, %Ecto.Changeset{} = cs} = StudioChat.delete_session(s.id)
+
+      assert {"has recorded runtime usage receipts and cannot be deleted", _} =
+               cs.errors[:id]
+
+      # A failed delete leaves the session intact — a bounded, recoverable outcome.
+      assert StudioChat.get_session(s.id) != nil
+    end
+
     test "archive stamps archived_at; unarchive clears it — status is untouched" do
       s = new_session()
       {:ok, _} = StudioChat.update_status(s.id, "working")
@@ -723,14 +866,20 @@ defmodule Barkpark.StudioChatTest do
       assert reload(s.id).pending_approvals == 0
     end
 
-    test "resolving a resolved approval again does NOT underflow the counter" do
+    test "a terminal approval is immutable and a duplicate resolve does not decrement again" do
       s = new_session()
       ask(s, "req-1")
-      {:ok, _} = StudioChat.update_approval_status(s.id, "req-1", "allowed")
+      assert {:ok, allowed} = StudioChat.update_approval_status(s.id, "req-1", "allowed")
+      assert allowed.metadata["approval_status"] == "allowed"
       assert reload(s.id).pending_approvals == 0
 
-      # a duplicate/racy resolve must never drive the count negative
-      {:ok, _} = StudioChat.update_approval_status(s.id, "req-1", "denied")
+      # A duplicate/opposite answer is a no-op: terminal truth never flips and
+      # the denormalised counter is decremented exactly once.
+      assert {:error, :not_found} =
+               StudioChat.update_approval_status(s.id, "req-1", "denied")
+
+      [persisted] = StudioChat.list_messages(s.id)
+      assert persisted.metadata["approval_status"] == "allowed"
       assert reload(s.id).pending_approvals == 0
     end
 
@@ -1041,6 +1190,26 @@ defmodule Barkpark.StudioChatTest do
   end
 
   describe "agents rail: signature + pure folds (charter D47)" do
+    test "rail_apply_codex_item exposes native Codex subagent lifecycle" do
+      item = %{
+        "type" => "collabAgentToolCall",
+        "tool" => "spawn_agent",
+        "prompt" => "Review the provider boundary",
+        "model" => "gpt-5.6-sol",
+        "receiverThreadIds" => ["thread-child-1"],
+        "status" => "inProgress"
+      }
+
+      rail = StudioChat.rail_apply_codex_item(%{}, item, :started)
+      assert rail["thread-child-1"]["status"] == "running"
+      assert rail["thread-child-1"]["row"]["description"] == "Review the provider boundary"
+
+      completed =
+        StudioChat.rail_apply_codex_item(rail, %{item | "status" => "completed"}, :completed)
+
+      assert completed["thread-child-1"]["status"] == "completed"
+    end
+
     test "set_rail_snapshot round-trips the jsonb column and get_session carries it" do
       s = new_session()
       rail = %{"t" => %{"row" => %{"description" => "run"}, "status" => "running"}}
@@ -1087,6 +1256,63 @@ defmodule Barkpark.StudioChatTest do
         Map.put(base, "u", %{"row" => %{"description" => "another"}, "status" => "running"})
 
       refute StudioChat.rail_signature(base) == StudioChat.rail_signature(row_added)
+    end
+
+    # wsc-ad D26 (LOAD-BEARING): the per-agent detail fields the drill-down renders
+    # MUST ride the signature — else a detail-only frame (a new tool line, a settled
+    # result) yields an EQUAL term, the change-only guard swallows it, and the live
+    # pane FREEZES + the frame is never persisted. Before this slice the strip kept
+    # only [type,title,label,phaseIndex,model,state]; a lastToolName/resultPreview/
+    # attempt/promptPreview change was INVISIBLE to the signature. This proves each
+    # of those now MOVES it — while lastProgressAt/tokens (heartbeat churn) still do
+    # NOT (the accepted D13 ceiling: the NOW age refreshes only on a real change).
+    test "rail_signature reflects per-agent DETAIL deltas (wsc-ad D26) but still ignores heartbeat churn" do
+      base = %{
+        "t" => %{
+          "row" => %{"task_type" => "local_workflow", "description" => "run"},
+          "status" => "running",
+          "workflow" => [
+            %{
+              "type" => "workflow_agent",
+              "agentId" => "a1",
+              "label" => "explorer",
+              "state" => "start",
+              "lastToolName" => "Read",
+              "lastToolSummary" => "reading auth.ex",
+              "attempt" => 1,
+              "promptPreview" => "You are the explorer…",
+              "tokens" => 10,
+              "lastProgressAt" => 1000
+            }
+          ]
+        }
+      }
+
+      detail_delta = fn key, value ->
+        put_in(base, ["t", "workflow", Access.at(0), key], value)
+      end
+
+      # each detail field the drill-down renders MOVES the signature
+      for {key, value} <- [
+            {"lastToolName", "StructuredOutput"},
+            {"lastToolSummary", "wrote the finding"},
+            {"resultPreview", "the leak was in query_controller"},
+            {"attempt", 2},
+            {"promptPreview", "You are the explorer, now revised…"}
+          ] do
+        refute StudioChat.rail_signature(base) ==
+                 StudioChat.rail_signature(detail_delta.(key, value)),
+               "a #{key} delta did NOT move rail_signature — the live pane would freeze (D26)"
+      end
+
+      # …but a pure heartbeat tick (progress time / token churn) still does NOT —
+      # the change-only guard is intact, so the hot loop stays render-on-change.
+      heartbeat =
+        base
+        |> put_in(["t", "workflow", Access.at(0), "lastProgressAt"], 9_999_999)
+        |> put_in(["t", "workflow", Access.at(0), "tokens"], 500_000)
+
+      assert StudioChat.rail_signature(base) == StudioChat.rail_signature(heartbeat)
     end
 
     test "rail_apply_background upserts live rows and completes the vanished" do
@@ -1162,6 +1388,79 @@ defmodule Barkpark.StudioChatTest do
       assert out["t"]["row"]["description"] == "x"
     end
 
+    test "rail_stamp_status folds a terminal end_time onto the entry (charter D5)" do
+      rail = %{"t" => %{"status" => "running", "row" => %{"description" => "x"}}}
+
+      # a non-terminal stamp (no end_time) never adds the key
+      out = StudioChat.rail_stamp_status(rail, "t", "running")
+      refute Map.has_key?(out["t"], "end_time")
+
+      # a terminal stamp with end_time lands it verbatim
+      out = StudioChat.rail_stamp_status(rail, "t", "completed", 1_782_767_600_000)
+      assert out["t"]["status"] == "completed"
+      assert out["t"]["end_time"] == 1_782_767_600_000
+
+      # a ghost task with an end_time still stamps nothing
+      assert StudioChat.rail_stamp_status(%{}, "ghost", "completed", 123) == %{}
+    end
+
+    test "workflow_summary/1 is nil for a plain rail, real for a workflow-bearing one" do
+      # no entry carries a workflow list ⇒ plain chats pay zero
+      assert StudioChat.workflow_summary(%{}) == nil
+
+      assert StudioChat.workflow_summary(%{
+               "t" => %{"status" => "running", "row" => %{"description" => "run"}}
+             }) == nil
+
+      rail = %{
+        "t" => %{
+          "status" => "running",
+          "seq" => 1,
+          "end_time" => 1_782_767_600_000,
+          "row" => %{"description" => "epic-cycle · wsc"},
+          "workflow" => [
+            %{"type" => "workflow_phase", "index" => 1, "title" => "Design"},
+            %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+            %{
+              "type" => "workflow_agent",
+              "phaseIndex" => 1,
+              "label" => "design:a",
+              "state" => "completed",
+              "startedAt" => 1_782_767_557_221,
+              "tokens" => 10
+            },
+            %{
+              "type" => "workflow_agent",
+              "phaseIndex" => 1,
+              "label" => "design:b",
+              "state" => "error",
+              "startedAt" => 1_782_767_557_999,
+              "tokens" => 5
+            }
+          ]
+        }
+      }
+
+      summary = StudioChat.workflow_summary(rail)
+      assert summary.label == "epic-cycle · wsc"
+      assert summary.phases_total == 2
+      # settled + failed = the honest done counter (1 completed + 1 error)
+      assert summary.agents_done == 2
+      assert summary.agents_total == 2
+      assert summary.running == 0
+      assert summary.tokens == 15
+      # min startedAt across the workflow nodes
+      assert summary.started_at == 1_782_767_557_221
+      # the stamped terminal end_time surfaces as ended_at
+      assert summary.ended_at == 1_782_767_600_000
+      # phase 1 (has the agents, the live frontier) breathes; phase 2 is future
+      assert summary.ticks == [:active, :future]
+      assert summary.phase == "Design"
+      assert summary.phase_index == 1
+      assert summary.terminal? == false
+      assert summary.outcome == :live
+    end
+
     test "the rail caps at 20, pruning oldest-terminal first and never a runner" do
       # 21 terminal entries + 1 running; the running one must survive the cap
       tasks =
@@ -1214,6 +1513,39 @@ defmodule Barkpark.StudioChatTest do
     |> File.read!()
     |> String.split("\n", trim: true)
     |> Enum.map(&Jason.decode!/1)
+  end
+
+  defp wire_frames(name),
+    do: Enum.reject(load_ndjson(name), &(&1["type"] == "fixture_provenance"))
+
+  describe "Claude queue-race wire fixtures (charter D11/D12/D62)" do
+    test "no-active-turn interrupt is a benign empty queue acknowledgement" do
+      assert [ack] = wire_frames("interrupt_no_active_turn.ndjson")
+      assert ack["type"] == "control_response"
+      assert get_in(ack, ["response", "subtype"]) == "success"
+      assert get_in(ack, ["response", "response", "still_queued"]) == []
+    end
+
+    test "mid-turn user input is ordered after turn one and before a fresh turn init" do
+      frames = wire_frames("mid_turn_queued_user.ndjson")
+
+      assert Enum.map(frames, &{&1["type"], &1["subtype"]}) == [
+               {"system", "init"},
+               {"stream_event", nil},
+               {"user", nil},
+               {"result", "success"},
+               {"system", "init"},
+               {"stream_event", nil},
+               {"result", "success"}
+             ]
+
+      assert get_in(Enum.at(frames, 2), ["message", "content", Access.at(0), "text"]) ==
+               "queued question"
+
+      assert Enum.at(frames, 3)["result"] == "turn one"
+      assert Enum.at(frames, 4)["uuid"] == "turn-2-init"
+      assert Enum.at(frames, 6)["result"] == "turn two"
+    end
   end
 
   defp workflow_progress_frames(frames) do
@@ -1456,6 +1788,209 @@ defmodule Barkpark.StudioChatTest do
       assert s.done == 1
       assert s.failed == 0
     end
+
+    # wsc-bl-real-fixtures (D62/D21): a NEW provenance-headed fixture replaying the
+    # SAME real killed run (wf_1e38c940-f75) VERBATIM, but carrying a
+    # fixture_provenance header line — the convention the pre-header
+    # epic_cycle_interrupted fixture predates. Two invariants that fixture never
+    # asserted: fold_rail NO-OPS on the header line (it dispatches on subtype; a
+    # provenance frame has none), and the interrupt SIGNATURE is the ABSENCE of a
+    # terminal type:result frame (a SIGKILL never flushes one).
+    test "a REAL provenance-headed killed run folds the interrupted frontier — header no-ops, no result frame" do
+      frames = load_ndjson("epic_cycle_interrupted_real.ndjson")
+
+      # the D62 provenance header rides the file …
+      assert Enum.any?(frames, &(&1["type"] == "fixture_provenance"))
+      # … and the SIGKILL signature: the CLI flushed NO terminal result frame
+      refute Enum.any?(frames, &(&1["type"] == "result"))
+
+      rail = fold_rail(frames)
+      # fold_rail no-ops on the header (no subtype) → exactly one workflow entry,
+      # still "running" because no terminal frame ever arrived
+      assert only_entry(rail)["status"] == "running"
+
+      # teardown supplies "interrupted" (as prod's interrupt_rail_entries does)
+      entry = rail |> interrupt_flip() |> only_entry()
+      assert entry["status"] == "interrupted"
+
+      %{phases: phases, summary: s} = StudioChat.workflow_journey(entry)
+      by_index = Map.new(phases, &{&1.index, &1.status})
+
+      assert by_index[1] == :done
+      assert by_index[2] == :interrupted
+      # phases 3–7 never breathed → :unreached tail
+      assert Enum.all?(3..7, &(by_index[&1] == :unreached))
+
+      assert s.entry_status == :interrupted
+      assert s.active == %{index: 2, title: "Explore"}
+      assert s.phases_run == 1
+      assert s.agents_total == 5
+      assert s.running == 4
+      assert s.done == 1
+      assert s.failed == 0
+    end
+  end
+
+  describe "workflow_summary/1 — sidebar-fold edges (wsc charter D2/D3/D7)" do
+    # The pinned D3 shape, the two committed-fixture folds, nil/no-workflow
+    # rails, and the highest-seq pick are proven in the canonical
+    # "workflow_summary/1 — … (D3 shape)" describes below (wsc-s1). These are
+    # the s3-side edges the sidebar leans on.
+
+    test "a stamped end_time rides through as ended_at (D5 read side)" do
+      rail = "epic_cycle_progress.ndjson" |> load_ndjson() |> fold_rail()
+      [{tid, entry}] = Map.to_list(rail)
+      rail = Map.put(rail, tid, Map.put(entry, "end_time", 1_782_771_832_104))
+
+      assert StudioChat.workflow_summary(rail).ended_at == 1_782_771_832_104
+    end
+
+    test "a live run wears the active phase word and the settled counter" do
+      summary =
+        StudioChat.workflow_summary(%{
+          "wf" => %{
+            "status" => "running",
+            "seq" => 1,
+            "row" => %{"task_type" => "local_workflow", "description" => "wave 1"},
+            "workflow" => [
+              %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"},
+              %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+              %{
+                "type" => "workflow_agent",
+                "phaseIndex" => 1,
+                "label" => "explore",
+                "state" => "done",
+                "startedAt" => 100,
+                "tokens" => 10
+              },
+              %{
+                "type" => "workflow_agent",
+                "phaseIndex" => 2,
+                "label" => "build:a",
+                "state" => "error",
+                "startedAt" => 200
+              },
+              %{
+                "type" => "workflow_agent",
+                "phaseIndex" => 2,
+                "label" => "build:b",
+                "state" => "progress",
+                "startedAt" => 150
+              }
+            ]
+          }
+        })
+
+      assert summary.outcome == :live
+      assert summary.terminal? == false
+      assert summary.phase == "Build"
+      assert summary.phase_index == 2
+      # the tick spine mirrors the journey statuses in order
+      assert summary.ticks == [:done, :active]
+      # done + failed = settled (the error terminal counts as finished, D2)
+      assert summary.agents_done == 2
+      assert summary.agents_total == 3
+      assert summary.running == 1
+      assert summary.started_at == 100
+      assert summary.label == "wave 1"
+    end
+  end
+
+  # Direct Repo inserts — epic_goal reads the published documents table; no
+  # claim machinery is exercised (the fold under test is the READ, not the
+  # write path).
+  defp insert_task!(doc_id, title, content) do
+    Barkpark.Repo.insert!(%Barkpark.Content.Document{
+      doc_id: doc_id,
+      type: "task",
+      title: title,
+      status: "published",
+      content: content,
+      rev: Ecto.UUID.generate()
+    })
+  end
+
+  describe "epic_goal/2 — one-hop ledger read (wsc charter D8/D9)" do
+    test "resolves epic title · slices done/total · wave_status through the held claim" do
+      sid = Ecto.UUID.generate()
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      insert_task!("task-wsc-epic", "Wave Session Card", %{
+        "kind" => "task",
+        "lifecycle_status" => "in_progress",
+        "wave_status" => "wave: building 5 slices"
+      })
+
+      insert_task!("task-wsc-held", "Slice s3", %{
+        "lifecycle_status" => "in_progress",
+        "parent_id" => "task-wsc-epic",
+        "claim" => %{"worker" => worker}
+      })
+
+      insert_task!("task-wsc-s1", "Slice s1", %{
+        "lifecycle_status" => "done",
+        "parent_id" => "task-wsc-epic"
+      })
+
+      insert_task!("task-wsc-s2", "Slice s2", %{
+        "lifecycle_status" => "cancelled",
+        "parent_id" => "task-wsc-epic"
+      })
+
+      insert_task!("task-wsc-s4", "Slice s4", %{
+        "lifecycle_status" => "open",
+        "parent_id" => "task-wsc-epic"
+      })
+
+      goal = StudioChat.epic_goal("claude", sid)
+
+      assert goal.id == "task-wsc-epic"
+      assert goal.title == "Wave Session Card"
+      # done + cancelled are settled; held (in_progress) + open are not
+      assert goal.slices_done == 2
+      assert goal.slices_total == 4
+      assert goal.wave_status == "wave: building 5 slices"
+      # "PRs open" has no data source (D8) — the shape carries no such key
+      refute Map.has_key?(goal, :prs_open)
+    end
+
+    test "nil at every missing hop — no claim, no parent, vanished epic" do
+      sid = Ecto.UUID.generate()
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      # no claim at all
+      assert StudioChat.epic_goal("claude", sid) == nil
+
+      # a held claim WITHOUT a parent hop
+      insert_task!("task-wsc-orphan", "Orphan", %{
+        "lifecycle_status" => "in_progress",
+        "claim" => %{"worker" => worker}
+      })
+
+      assert StudioChat.epic_goal("claude", sid) == nil
+
+      # a parent hop to a task that does not exist
+      insert_task!("task-wsc-dangling", "Dangling", %{
+        "lifecycle_status" => "in_progress",
+        "parent_id" => "task-never-published",
+        "claim" => %{"worker" => worker}
+      })
+
+      assert StudioChat.epic_goal("claude", sid) == nil
+    end
+
+    test "a draft-twin claim never resolves (published ledger only)" do
+      sid = Ecto.UUID.generate()
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      insert_task!("drafts.task-wsc-draft", "Draft twin", %{
+        "lifecycle_status" => "in_progress",
+        "parent_id" => "task-wsc-epic",
+        "claim" => %{"worker" => worker}
+      })
+
+      assert StudioChat.epic_goal("claude", sid) == nil
+    end
   end
 
   describe "workflow_journey/1 — derived-truth edges (charter D58)" do
@@ -1626,6 +2161,512 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  # ── Card-level workflow_summary/1 (D1–D4) ───────────────────────────────────
+  #
+  # Fold the two committed epic-cycle fixtures into a rail exactly as the Recorder
+  # does, then project the pinned D3 card shape. The interrupted fixture ends
+  # mid-flight (no terminal frames), so — as production replays — the teardown
+  # `interrupt_flip` supplies "interrupted" before the summary is read.
+
+  defp summary_of(fixture, transform) do
+    fixture
+    |> load_ndjson()
+    |> fold_rail()
+    |> transform.()
+    |> StudioChat.workflow_summary()
+  end
+
+  describe "workflow_summary/1 — completed fixture (D3 shape)" do
+    test "the completed 7-phase 29-agent run projects a settled complete card" do
+      entry = "epic_cycle_progress.ndjson" |> load_ndjson() |> fold_rail() |> only_entry()
+      journey = StudioChat.workflow_journey(entry)
+      card = StudioChat.workflow_summary(%{"t" => entry})
+
+      # every field of the pinned shape
+      assert Map.keys(card) |> Enum.sort() ==
+               ~w(agents_done agents_total ended_at label outcome phase phase_index
+                  phases_total running started_at terminal? ticks tokens)a
+
+      assert card.ticks == List.duplicate(:done, 7)
+      assert card.phases_total == 7
+      # a completed cycle collapses the active phase — no m/n phase, just the settle line
+      assert card.phase == nil
+      assert card.phase_index == nil
+      assert card.outcome == :completed
+      assert card.terminal? == true
+      assert card.running == 0
+      assert card.agents_done == 29
+      assert card.agents_total == 29
+      assert card.tokens == 2_137_873
+      # timestamps are READ: startedAt present, end_time absent today (S2 stamps later)
+      assert is_integer(card.started_at)
+      assert card.ended_at == nil
+
+      # agents_done/agents_total are journey's OWN counts — not a parallel tally
+      assert card.agents_done == journey.summary.done + journey.summary.failed
+      assert card.agents_total == journey.summary.agents_total
+      assert card.running == journey.summary.running
+    end
+  end
+
+  describe "workflow_summary/1 — interrupted fixture (D3 shape)" do
+    test "a killed run shows the interrupted frontier, honest settled count, live agents kept" do
+      journey =
+        "epic_cycle_interrupted.ndjson"
+        |> load_ndjson()
+        |> fold_rail()
+        |> interrupt_flip()
+        |> only_entry()
+        |> StudioChat.workflow_journey()
+
+      card = summary_of("epic_cycle_interrupted.ndjson", &interrupt_flip/1)
+
+      assert card.outcome == :interrupted
+      assert card.terminal? == true
+      # frontier phase = the one that breathed when the run died
+      assert card.phase == "Explore"
+      assert card.phase_index == 2
+      assert card.ticks == [:done, :interrupted] ++ List.duplicate(:unreached, 5)
+      # the 4 explorers are still `progress` (non-terminal) — running, never done
+      assert card.agents_done == 1
+      assert card.agents_total == 5
+      assert card.running == 4
+
+      # progress-state agents keep startedAt and never got durationMs/ended_at
+      assert is_integer(card.started_at)
+      assert card.ended_at == nil
+
+      # cross-assert against journey's own summary — one truth table
+      assert card.agents_done == journey.summary.done + journey.summary.failed
+      assert card.agents_total == journey.summary.agents_total
+      assert card.running == journey.summary.running
+    end
+
+    test "before teardown the same rail is honestly live (outcome :live, not terminal)" do
+      card = summary_of("epic_cycle_interrupted.ndjson", & &1)
+      assert card.outcome == :live
+      assert card.terminal? == false
+      # the frontier still breathes while live
+      assert card.phase == "Explore"
+      assert card.running == 4
+    end
+
+    # wsc-bl-real-fixtures (D62/D21): the D3 CARD side of the provenance-headed real
+    # killed run. summary_of folds load_ndjson |> fold_rail (header no-ops) |>
+    # interrupt_flip |> workflow_summary — the compact sidebar card the five merged
+    # surfaces read must project the interrupted frontier from prod-shaped data.
+    test "the REAL provenance-headed killed run projects the interrupted D3 card" do
+      card = summary_of("epic_cycle_interrupted_real.ndjson", &interrupt_flip/1)
+
+      assert card.outcome == :interrupted
+      assert card.terminal? == true
+      assert card.phase == "Explore"
+      assert card.phase_index == 2
+      assert card.ticks == [:done, :interrupted] ++ List.duplicate(:unreached, 5)
+      # the 4 explorers stayed `progress` (non-terminal) — never counted done
+      assert card.agents_done == 1
+      assert card.agents_total == 5
+      assert card.running == 4
+      # progress-state agents keep startedAt and never earn durationMs/ended_at
+      assert is_integer(card.started_at)
+      assert card.ended_at == nil
+    end
+  end
+
+  describe "workflow_summary/1 — derived-truth edges (D3)" do
+    test "an `error` agent is a settled FAILURE — counted in agents_done, never running" do
+      entry = %{
+        "seq" => 1,
+        "row" => %{"description" => "epic — fix the leak"},
+        "status" => "completed",
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Judge"},
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "judge:ok",
+            "state" => "done",
+            "startedAt" => 100,
+            "tokens" => 100
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "judge:boom",
+            "state" => "error",
+            "startedAt" => 90,
+            "tokens" => 50
+          }
+        ]
+      }
+
+      card = StudioChat.workflow_summary(%{"t" => entry})
+      # label is the opaque composite — a bare em-dash inside is NEVER split
+      assert card.label == "epic — fix the leak"
+      assert card.agents_done == 2
+      assert card.agents_total == 2
+      assert card.running == 0
+      assert card.tokens == 150
+      # earliest start across the tree
+      assert card.started_at == 90
+    end
+
+    test "the highest-seq workflow-bearing entry wins across a mixed rail" do
+      wf_a = %{
+        "seq" => 3,
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "A"},
+          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "a", "state" => "done"}
+        ]
+      }
+
+      wf_b = %{
+        "seq" => 9,
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "B"},
+          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "b", "state" => "start"}
+        ]
+      }
+
+      # a plain-chat entry with no workflow list is ignored
+      plain = %{"seq" => 12, "status" => "running"}
+
+      card = StudioChat.workflow_summary(%{"a" => wf_a, "b" => wf_b, "p" => plain})
+      # wf_b has the higher seq → its phase title is the card's
+      assert card.phase == "B"
+    end
+
+    test "nil for empty rail, a no-workflow rail, and non-map input" do
+      assert StudioChat.workflow_summary(%{}) == nil
+      assert StudioChat.workflow_summary(%{"t" => %{"status" => "running"}}) == nil
+      # an entry with an empty workflow list is not workflow-bearing
+      assert StudioChat.workflow_summary(%{"t" => %{"workflow" => []}}) == nil
+      assert StudioChat.workflow_summary(nil) == nil
+      assert StudioChat.workflow_summary([]) == nil
+      assert StudioChat.workflow_summary("nope") == nil
+    end
+  end
+
+  # ── Shared parity fixtures (Mechanism A) ────────────────────────────────────
+  #
+  # workflow_summary/1 output for both committed fixtures, written byte-identical
+  # to an api mirror and a Go mirror so the Go card surface reads the SAME truth.
+  # Regenerate by running this file with REGEN_WORKFLOW_SUMMARY=1 (writes both
+  # mirrors from one encoded string), then re-run without it to prove freshness.
+  @summary_api_path Path.expand(
+                      "../support/fixtures/workflow_summary/workflow_summary.json",
+                      __DIR__
+                    )
+  @summary_go_path Path.expand(
+                     "../../../internal/chat/testdata/workflow_summary.json",
+                     __DIR__
+                   )
+
+  defp fresh_summaries do
+    %{
+      "epic_cycle_progress" => summary_of("epic_cycle_progress.ndjson", & &1),
+      "epic_cycle_interrupted" => summary_of("epic_cycle_interrupted.ndjson", &interrupt_flip/1)
+    }
+  end
+
+  # JSON round-trip normalizes atom values/keys (statuses, outcomes) to the strings
+  # the committed bytes carry — so a fresh fold compares cleanly to the mirror.
+  defp normalized_fresh, do: fresh_summaries() |> Jason.encode!() |> Jason.decode!()
+
+  describe "workflow_summary parity fixtures (Mechanism A)" do
+    test "the committed api mirror equals a fresh fold" do
+      if System.get_env("REGEN_WORKFLOW_SUMMARY") do
+        json = Jason.encode!(fresh_summaries(), pretty: true) <> "\n"
+        File.write!(@summary_api_path, json)
+        File.write!(@summary_go_path, json)
+      end
+
+      assert File.read!(@summary_api_path) |> Jason.decode!() == normalized_fresh(),
+             "workflow_summary.json is stale — re-run with REGEN_WORKFLOW_SUMMARY=1."
+    end
+
+    test "the api and Go mirrors are byte-identical" do
+      assert File.read!(@summary_api_path) == File.read!(@summary_go_path),
+             "the Go mirror drifted — re-run with REGEN_WORKFLOW_SUMMARY=1."
+    end
+
+    test "the fixture carries both the completed and interrupted card shapes" do
+      committed = File.read!(@summary_api_path) |> Jason.decode!()
+      assert committed["epic_cycle_progress"]["outcome"] == "completed"
+      assert committed["epic_cycle_interrupted"]["outcome"] == "interrupted"
+      # the 13/17-style settled counter survives the round-trip
+      assert committed["epic_cycle_progress"]["agents_done"] == 29
+      assert committed["epic_cycle_interrupted"]["agents_done"] == 1
+    end
+  end
+
+  # ── workflow_agent_detail/1 — the per-agent drill-down projection (wsc-ad) ───
+  #
+  # The pure fold the Studio rail's expandable agent rows AND the TUI sibling both
+  # read. Unit-proven against the real fixtures, then mirrored byte-identical to an
+  # api + a Go mirror (Mechanism A), regenerated with REGEN_WORKFLOW_AGENT_DETAIL=1.
+
+  defp detail_of(fixture),
+    do: fixture |> load_ndjson() |> fold_rail() |> StudioChat.workflow_agent_detail()
+
+  describe "workflow_agent_node_detail/1 (wsc-ad D27/D28)" do
+    test "a node with NO detail-signal field yields %{} (the no-affordance gate)" do
+      # a thin node (no brief/tool/result/attempt) — the rail shows no drill-down
+      assert StudioChat.workflow_agent_node_detail(%{
+               "type" => "workflow_agent",
+               "agentId" => "x",
+               "label" => "agent",
+               "state" => "start",
+               "startedAt" => 1000
+             }) == %{}
+
+      assert StudioChat.workflow_agent_node_detail(%{}) == %{}
+      assert StudioChat.workflow_agent_node_detail(nil) == %{}
+      assert StudioChat.workflow_agent_node_detail("nope") == %{}
+    end
+
+    test "a node with detail passes wire fields VERBATIM, omits absent, derives terminal/failed" do
+      detail =
+        StudioChat.workflow_agent_node_detail(%{
+          "type" => "workflow_agent",
+          "agentId" => "a1",
+          "label" => "explore:auth",
+          "state" => "error",
+          "promptPreview" => "You are the explorer…",
+          "lastToolName" => "StructuredOutput",
+          "lastToolSummary" => "found the leak",
+          "resultPreview" => ~s({"finding":"leak in query_controller"}),
+          "attempt" => 1,
+          "startedAt" => 100,
+          "lastProgressAt" => 200,
+          "durationMs" => 100,
+          # tokens is NOT a detail key — it must be dropped
+          "tokens" => 4200
+        })
+
+      # wire fields verbatim + raw epoch-ms timestamps
+      assert detail["promptPreview"] == "You are the explorer…"
+      assert detail["lastToolName"] == "StructuredOutput"
+      assert detail["resultPreview"] == ~s({"finding":"leak in query_controller"})
+      assert detail["startedAt"] == 100
+      assert detail["lastProgressAt"] == 200
+      assert detail["durationMs"] == 100
+      # tokens is not part of the detail shape
+      refute Map.has_key?(detail, "tokens")
+      # terminal/failed DERIVED from the shared helper sets — error is a failure
+      assert detail["terminal"] == true
+      assert detail["failed"] == true
+    end
+
+    test "resultPreview passes through UNCAPPED (each surface caps at render)" do
+      long = String.duplicate("x", 900)
+
+      detail =
+        StudioChat.workflow_agent_node_detail(%{
+          "type" => "workflow_agent",
+          "agentId" => "a1",
+          "state" => "done",
+          "resultPreview" => long
+        })
+
+      assert detail["resultPreview"] == long
+      assert detail["terminal"] == true
+      assert detail["failed"] == false
+    end
+  end
+
+  describe "workflow_agent_detail/1 (wsc-ad D28 — rail → list)" do
+    test "[] for empty / no-workflow / non-map rails" do
+      assert StudioChat.workflow_agent_detail(%{}) == []
+      assert StudioChat.workflow_agent_detail(%{"t" => %{"status" => "running"}}) == []
+      assert StudioChat.workflow_agent_detail(%{"t" => %{"workflow" => []}}) == []
+      assert StudioChat.workflow_agent_detail(nil) == []
+      assert StudioChat.workflow_agent_detail("nope") == []
+    end
+
+    test "the completed run projects one detail map per agent (29), all terminal" do
+      detail = detail_of("epic_cycle_progress.ndjson")
+      assert length(detail) == 29
+      assert Enum.all?(detail, & &1["terminal"])
+      assert Enum.all?(detail, &is_binary(&1["agentId"]))
+      # a real completed agent carries the brief, a settled result, and timing
+      first = hd(detail)
+      assert is_binary(first["promptPreview"])
+      assert is_binary(first["resultPreview"])
+      assert is_integer(first["startedAt"])
+    end
+
+    test "the interrupted run keeps its 5 agents; the live explorers are non-terminal" do
+      detail = detail_of("epic_cycle_interrupted.ndjson")
+      assert length(detail) == 5
+      # 1 settled strategist + 4 live explorers (the interrupted frontier)
+      assert Enum.count(detail, & &1["terminal"]) == 1
+      assert Enum.count(detail, &(not &1["terminal"])) == 4
+      # the live ones carry a NOW tool line but never a durationMs/resultPreview
+      live = Enum.filter(detail, &(not &1["terminal"]))
+      assert Enum.all?(live, &is_binary(&1["lastToolName"]))
+      refute Enum.any?(live, &Map.has_key?(&1, "durationMs"))
+    end
+
+    test "the highest-seq workflow-bearing entry wins, detail-less nodes drop out" do
+      rail = %{
+        "a" => %{
+          "seq" => 2,
+          "workflow" => [
+            %{
+              "type" => "workflow_agent",
+              "agentId" => "old",
+              "state" => "done",
+              "resultPreview" => "old"
+            }
+          ]
+        },
+        "b" => %{
+          "seq" => 9,
+          "workflow" => [
+            # a detail-less agent — dropped from the list
+            %{"type" => "workflow_agent", "agentId" => "thin", "state" => "start"},
+            %{
+              "type" => "workflow_agent",
+              "agentId" => "rich",
+              "state" => "start",
+              "lastToolName" => "Read"
+            },
+            # a non-agent node is ignored
+            %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"}
+          ]
+        }
+      }
+
+      detail = StudioChat.workflow_agent_detail(rail)
+      assert Enum.map(detail, & &1["agentId"]) == ["rich"]
+    end
+  end
+
+  # ── Shared parity fixture (Mechanism A) — workflow_agent_detail ──────────────
+  #
+  # workflow_agent_detail/1 output for both committed fixtures, byte-identical to an
+  # api mirror and a Go mirror so the TUI sibling reads the SAME per-agent shapes.
+  # Regenerate with REGEN_WORKFLOW_AGENT_DETAIL=1, then re-run to prove freshness.
+  @detail_api_path Path.expand(
+                     "../support/fixtures/workflow_summary/workflow_agent_detail.json",
+                     __DIR__
+                   )
+  @detail_go_path Path.expand(
+                    "../../../internal/chat/testdata/workflow_agent_detail.json",
+                    __DIR__
+                  )
+
+  defp fresh_details do
+    %{
+      "epic_cycle_progress" => detail_of("epic_cycle_progress.ndjson"),
+      "epic_cycle_interrupted" => detail_of("epic_cycle_interrupted.ndjson")
+    }
+  end
+
+  defp normalized_fresh_details, do: fresh_details() |> Jason.encode!() |> Jason.decode!()
+
+  describe "workflow_agent_detail parity fixtures (Mechanism A)" do
+    test "the committed api mirror equals a fresh fold" do
+      if System.get_env("REGEN_WORKFLOW_AGENT_DETAIL") do
+        json = Jason.encode!(fresh_details(), pretty: true) <> "\n"
+        File.write!(@detail_api_path, json)
+        File.write!(@detail_go_path, json)
+      end
+
+      assert File.read!(@detail_api_path) |> Jason.decode!() == normalized_fresh_details(),
+             "workflow_agent_detail.json is stale — re-run with REGEN_WORKFLOW_AGENT_DETAIL=1."
+    end
+
+    test "the api and Go mirrors are byte-identical" do
+      assert File.read!(@detail_api_path) == File.read!(@detail_go_path),
+             "the Go mirror drifted — re-run with REGEN_WORKFLOW_AGENT_DETAIL=1."
+    end
+
+    test "the fixture carries the completed and interrupted agent rosters" do
+      committed = File.read!(@detail_api_path) |> Jason.decode!()
+      assert length(committed["epic_cycle_progress"]) == 29
+      assert length(committed["epic_cycle_interrupted"]) == 5
+      # every committed detail map carries a derived terminal flag and an agentId
+      all = committed["epic_cycle_progress"] ++ committed["epic_cycle_interrupted"]
+      assert Enum.all?(all, &Map.has_key?(&1, "terminal"))
+      assert Enum.all?(all, &is_binary(&1["agentId"]))
+      # honest attempt==1 across the real capture (no fabricated retry — D29 keeps
+      # attempt>1 to the synthetic render node, never this verbatim-from-real fold)
+      assert Enum.all?(all, &(&1["attempt"] == 1))
+    end
+  end
+
+  # ── attempt>1 closes by DOCUMENTED PROOF (wsc-bl-real-fixtures, charter D21/D25) ─
+  #
+  # `attempt` is external Claude-Code Task-tool telemetry, forwarded through the
+  # rail VERBATIM: rail_put_workflow (studio_chat.ex) is a bare `Map.put` with no
+  # field logic and no derive path, and barkpark has NO repo mechanism (workflow
+  # runner or Studio UI) to force a retry. So every workflow_agent node on every
+  # wire we hold carries attempt==1 — the honest proof, never a fabricated
+  # attempt=2. This test asserts it across BOTH the Elixir ndjson fixtures AND the
+  # Go testdata mirrors the merged bp-chat card decodes, SCOPED to workflow_agent
+  # nodes so fixtures with none no-op rather than false-pass.
+  @testdata_dir Path.expand("../../../internal/chat/testdata", __DIR__)
+
+  # Recursively collect every `attempt` value under a "workflow_agent"-typed node,
+  # at any nesting depth (task_progress frames nest them under "workflow_progress";
+  # rail snapshots nest them under an entry's "workflow" list).
+  defp collect_agent_attempts(%{"type" => "workflow_agent"} = node),
+    do: [Map.get(node, "attempt")]
+
+  defp collect_agent_attempts(map) when is_map(map),
+    do: Enum.flat_map(Map.values(map), &collect_agent_attempts/1)
+
+  defp collect_agent_attempts(list) when is_list(list),
+    do: Enum.flat_map(list, &collect_agent_attempts/1)
+
+  defp collect_agent_attempts(_), do: []
+
+  describe "workflow_agent attempt==1 across every committed fixture (D21/D25 documented proof)" do
+    test "every workflow_agent node — ndjson fixtures AND Go mirrors — carries attempt==1" do
+      ndjson_attempts =
+        @fixtures_dir
+        |> Path.join("*.ndjson")
+        |> Path.wildcard()
+        |> Enum.map(&Path.basename/1)
+        |> Enum.flat_map(fn name ->
+          name |> load_ndjson() |> Enum.flat_map(&collect_agent_attempts/1)
+        end)
+
+      testdata_attempts =
+        @testdata_dir
+        |> Path.join("*.json")
+        |> Path.wildcard()
+        |> Enum.flat_map(fn path ->
+          path |> File.read!() |> Jason.decode!() |> collect_agent_attempts()
+        end)
+
+      all = ndjson_attempts ++ testdata_attempts
+
+      # non-vacuous: the fixtures/mirrors that DO carry workflow_agent nodes were
+      # actually visited (guards against a silent false-pass on an empty walk)
+      assert length(all) > 0
+      # and every collected value is a real retry counter of exactly 1 — no node
+      # carries attempt>1 anywhere, and no missing/phantom attempt slipped in
+      assert Enum.uniq(all) == [1],
+             "a workflow_agent node carried attempt != 1: #{inspect(Enum.uniq(all))} — " <>
+               "attempt>1 must never be fabricated (D21); rail_put_workflow is a bare Map.put"
+    end
+
+    test "the scoping is real — the non-workflow ndjson fixtures no-op, not false-pass" do
+      no_workflow =
+        ~w(background_tasks.ndjson foreground_task.ndjson interrupt_no_active_turn.ndjson
+           mcp_permission_denied.ndjson mcp_tool_success.ndjson mid_turn_queued_user.ndjson
+           transcript_workday.ndjson unauthed_stream.ndjson)
+
+      for name <- no_workflow do
+        attempts = name |> load_ndjson() |> Enum.flat_map(&collect_agent_attempts/1)
+        assert attempts == [], "#{name} unexpectedly carried workflow_agent nodes"
+      end
+    end
+  end
+
   describe "format_tokens/1 (charter D59)" do
     test "raw < 1k; one-decimal k < 10k; integer k < 1M; one-decimal M above" do
       assert StudioChat.format_tokens(845) == "845"
@@ -1640,13 +2681,13 @@ defmodule Barkpark.StudioChatTest do
 
   # ── the needs-you strip (wave 12 — sidebar inbox) ──────────────────────────
 
-  # Pin the away-axis pair directly (bypassing the mutation helpers, whose
+  # Pin the activity stamp directly (bypassing the mutation helpers, whose
   # `utc_now()` stamps would make ordering-sensitive tests racy by microseconds).
-  defp set_times(session_id, active, visited) do
+  defp set_active(session_id, active) do
     {1, _} =
       Repo.update_all(
         from(s in Session, where: s.id == ^session_id),
-        set: [last_active_at: active, last_visited_at: visited]
+        set: [last_active_at: active]
       )
 
     StudioChat.get_session(session_id)
@@ -1663,29 +2704,6 @@ defmodule Barkpark.StudioChatTest do
         role: role,
         metadata: %{"request_id" => request_id, "approval_status" => "pending"}
       })
-  end
-
-  describe "mark_visited/1 + creation stamp (wave 12)" do
-    test "creation stamps last_visited_at EQUAL to last_active_at — never unseen at birth" do
-      s = new_session()
-      assert %DateTime{} = s.last_visited_at
-      assert DateTime.compare(s.last_visited_at, s.last_active_at) == :eq
-      refute StudioChat.finished_while_away?(s)
-    end
-
-    test "mark_visited stamps the visit WITHOUT bumping last_active_at" do
-      s = set_times(new_session().id, minutes_ago(10), minutes_ago(30))
-
-      assert {:ok, updated} = StudioChat.mark_visited(s.id)
-      assert DateTime.compare(updated.last_visited_at, s.last_visited_at) == :gt
-      # visiting must not reorder the sidebar (the set_draft precedent)
-      assert DateTime.compare(updated.last_active_at, s.last_active_at) == :eq
-    end
-
-    test "a missing or non-UUID id is a clean :not_found" do
-      assert StudioChat.mark_visited(Ecto.UUID.generate()) == {:error, :not_found}
-      assert StudioChat.mark_visited("not-a-uuid") == {:error, :not_found}
-    end
   end
 
   describe "pending_ask_roles/1 (wave 12)" do
@@ -1710,10 +2728,13 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
-  describe "strip_kind/3 — per-session derivation (wave 12)" do
+  describe "strip_kind/3 — per-session derivation (wave 12, re-based on agent_state herd wave 1)" do
     test "pending ask roles map to kinds with approval > question > plan precedence" do
       s = new_session()
       seed_pending_ask(s, "approval", "r1")
+      # the Recorder persists "blocked" when the ask flips needs_you (D38) —
+      # the strip reads the COLUMN, not the pending counter
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
       s = StudioChat.get_session(s.id)
 
       assert StudioChat.strip_kind(s, ["plan", "question", "approval"], nil) ==
@@ -1721,7 +2742,7 @@ defmodule Barkpark.StudioChatTest do
 
       assert StudioChat.strip_kind(s, ["plan", "question"], nil) == :awaiting_input
       assert StudioChat.strip_kind(s, ["plan"], nil) == :plan_ready
-      # an overlay :needs_you racing the store read degrades to the generic
+      # a blocked row with no known pending roles degrades to the generic
       # kind — never dropped
       assert StudioChat.strip_kind(s, [], nil) == :pending_approval
     end
@@ -1737,72 +2758,66 @@ defmodule Barkpark.StudioChatTest do
                :awaiting_input
     end
 
-    test "working: live overlay OR persisted status — and it beats finished-while-away" do
+    test "working: live overlay OR persisted agent_state alone (cold mount)" do
       s = new_session()
       assert StudioChat.strip_kind(s, [], %{state: :working, line: "writing…"}) == :working
 
-      # persisted "working" alone (cold mount) is enough — even with an unseen
-      # last_active_at, a running turn is :working, never :finished_while_away
-      {:ok, _} = StudioChat.update_status(s.id, "working")
-      s = set_times(s.id, minutes_ago(1), minutes_ago(10))
+      # the persisted column alone (cold mount) is enough
+      {1, _} = StudioChat.set_agent_state(s.id, "working", :derived)
+      s = set_active(s.id, minutes_ago(1))
       assert StudioChat.strip_kind(s, [], nil) == :working
     end
 
-    test "a pending ask outranks a running turn" do
+    test "a blocked row (pending ask) outranks a running-turn overlay" do
       s = new_session()
       seed_pending_ask(s, "approval", "r1")
-      {:ok, _} = StudioChat.update_status(s.id, "working")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
       s = StudioChat.get_session(s.id)
 
       assert StudioChat.strip_kind(s, ["approval"], %{state: :working, line: "writing…"}) ==
                :pending_approval
     end
 
-    test "finished-while-away: settled after the last visit; quiet otherwise" do
-      # settled (active) with activity AFTER the visit → surfaces
-      s = set_times(new_session().id, minutes_ago(1), minutes_ago(10))
-      assert StudioChat.strip_kind(s, [], nil) == :finished_while_away
+    test "a settled session is QUIET — the wave-12 unseen-finish kind is retired (herd, no read receipts)" do
+      # settled (active) with recent activity → no strip entry
+      s = set_active(new_session().id, minutes_ago(1))
+      assert StudioChat.strip_kind(s, [], nil) == nil
 
-      # exited counts as settled too
+      # exited is just as quiet — settling never surfaces a session
       {:ok, _} = StudioChat.update_status(s.id, "exited")
-      s = set_times(s.id, minutes_ago(1), minutes_ago(10))
-      assert StudioChat.strip_kind(s, [], nil) == :finished_while_away
+      s = set_active(s.id, minutes_ago(1))
+      assert StudioChat.strip_kind(s, [], nil) == nil
 
-      # visited AFTER it settled → seen, quiet
-      quiet = set_times(new_session().id, minutes_ago(10), minutes_ago(1))
-      assert StudioChat.strip_kind(quiet, [], nil) == nil
-
-      # a nil last_visited_at (pre-migration row) is honestly QUIET, never a
-      # fake unseen-finish
-      unknown = set_times(new_session().id, minutes_ago(1), nil)
-      assert StudioChat.strip_kind(unknown, [], nil) == nil
+      # ...and the retired kind is gone from the vocabulary entirely
+      refute :finished_while_away in StudioChat.strip_kinds()
     end
   end
 
   describe "needs_you_strip/2 — cross-session aggregation (wave 12)" do
     test "COLD-MOUNT correct: kinds + priority order derive from persisted rows alone" do
-      # done (settled after last visit)
-      done = set_times(new_session().id, minutes_ago(2), minutes_ago(20))
-
-      # working (persisted status — no overlay)
+      # working (persisted herd column — no overlay)
       working = new_session()
-      {:ok, _} = StudioChat.update_status(working.id, "working")
+      {1, _} = StudioChat.set_agent_state(working.id, "working", :derived)
       working = StudioChat.get_session(working.id)
 
-      # plan ready / awaiting input / pending approval (pending rows + counter)
+      # plan ready / awaiting input / pending approval: the pending ask rows
+      # carry the KIND detail; the persisted "blocked" column carries the state
       plan = new_session()
       seed_pending_ask(plan, "plan", "rp")
+      {1, _} = StudioChat.set_agent_state(plan.id, "blocked", :ask)
       question = new_session()
       seed_pending_ask(question, "question", "rq")
+      {1, _} = StudioChat.set_agent_state(question.id, "blocked", :ask)
       approval = new_session()
       seed_pending_ask(approval, "approval", "rap")
+      {1, _} = StudioChat.set_agent_state(approval.id, "blocked", :ask)
 
-      # quiet: visited after settling — no entry
-      quiet = set_times(new_session().id, minutes_ago(20), minutes_ago(2))
+      # quiet: settled — no entry (unseen-finish tracking retired, herd)
+      quiet = set_active(new_session().id, minutes_ago(2))
 
       sessions =
         Enum.map(
-          [done.id, working.id, plan.id, question.id, approval.id, quiet.id],
+          [working.id, plan.id, question.id, approval.id, quiet.id],
           &StudioChat.get_session/1
         )
 
@@ -1813,10 +2828,10 @@ defmodule Barkpark.StudioChatTest do
         )
 
       assert Enum.map(strip, & &1.kind) ==
-               [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+               [:pending_approval, :awaiting_input, :plan_ready, :working]
 
       assert Enum.map(strip, & &1.session.id) ==
-               [approval.id, question.id, plan.id, working.id, done.id]
+               [approval.id, question.id, plan.id, working.id]
 
       refute Enum.any?(strip, &(&1.session.id == quiet.id))
     end
@@ -1824,6 +2839,7 @@ defmodule Barkpark.StudioChatTest do
     test "the on-screen session is never 'away' — excluded even mid-ask" do
       s = new_session()
       seed_pending_ask(s, "approval", "r1")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
       s = StudioChat.get_session(s.id)
 
       assert StudioChat.needs_you_strip([s],
@@ -1837,8 +2853,13 @@ defmodule Barkpark.StudioChatTest do
     end
 
     test "within a kind, most recently active first" do
-      older = set_times(new_session().id, minutes_ago(30), minutes_ago(60))
-      newer = set_times(new_session().id, minutes_ago(5), minutes_ago(60))
+      older = new_session()
+      {1, _} = StudioChat.set_agent_state(older.id, "working", :derived)
+      older = set_active(older.id, minutes_ago(30))
+
+      newer = new_session()
+      {1, _} = StudioChat.set_agent_state(newer.id, "working", :derived)
+      newer = set_active(newer.id, minutes_ago(5))
 
       assert [%{session: %{id: first}}, %{session: %{id: second}}] =
                StudioChat.needs_you_strip([older, newer])
@@ -1855,31 +2876,329 @@ defmodule Barkpark.StudioChatTest do
                  activity: %{s.id => %{state: :working, line: "Bash — mix test"}}
                )
 
-      # leave: overlay gone (idle deletes the entry) + row still settled-as-seen
-      # → no entry; the strip yields to the store
+      # leave: overlay gone (idle deletes the entry) + settled row → no entry;
+      # the strip yields to the store
       assert StudioChat.needs_you_strip([s], activity: %{}) == []
     end
 
-    test "visiting clears a finished-while-away entry (mark_visited round-trip)" do
-      s = set_times(new_session().id, minutes_ago(2), minutes_ago(20))
-      assert [%{kind: :finished_while_away}] = StudioChat.needs_you_strip([s])
-
-      {:ok, _} = StudioChat.mark_visited(s.id)
-      s = StudioChat.get_session(s.id)
-      assert StudioChat.needs_you_strip([s]) == []
-    end
-
     test "list_sessions carries the strip fields (select must not orphan the derivation)" do
-      s = set_times(new_session().id, minutes_ago(2), minutes_ago(20))
+      s = set_active(new_session().id, minutes_ago(2))
 
+      # the herd column rides the sidebar select (herd wave 1): a select that
+      # omitted it would feed the schema default ("idle") to every pill/strip
+      {1, _} = StudioChat.set_agent_state(s.id, "working", :derived)
       listed = Enum.find(StudioChat.list_sessions(), &(&1.id == s.id))
-      assert %DateTime{} = listed.last_visited_at
-      assert [%{kind: :finished_while_away}] = StudioChat.needs_you_strip([listed])
+      assert listed.agent_state == "working"
+      assert %DateTime{} = listed.agent_state_at
+      assert [%{kind: :working}] = StudioChat.needs_you_strip([listed])
     end
 
     test "strip_kinds/0 IS the priority order (S7's notification vocabulary)" do
       assert StudioChat.strip_kinds() ==
-               [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+               [:pending_approval, :awaiting_input, :plan_ready, :working]
+    end
+  end
+
+  describe "agent_state store writes (herd wave 1, charter D38–D41h)" do
+    test "set_agent_state persists state + stamp in one update_all; the vocabulary is guarded" do
+      s = new_session()
+      assert s.agent_state == "idle"
+      assert s.agent_state_at == nil
+
+      assert {1, nil} = StudioChat.set_agent_state(s.id, "working", :derived)
+
+      updated = StudioChat.get_session(s.id)
+      assert updated.agent_state == "working"
+      assert %DateTime{} = updated.agent_state_at
+
+      # four states ONLY — "done" does not exist (herd doctrine)
+      assert_raise FunctionClauseError, fn ->
+        StudioChat.set_agent_state(s.id, "done", :derived)
+      end
+    end
+
+    test "touch_agent_state_at bumps ONLY the liveness stamp — never the state" do
+      s = new_session()
+      seed_pending_ask(s, "approval", "touch-1")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
+      %{agent_state_at: at0} = StudioChat.get_session(s.id)
+
+      {1, _} = StudioChat.touch_agent_state_at(s.id)
+
+      touched = StudioChat.get_session(s.id)
+      assert touched.agent_state == "blocked"
+      assert DateTime.compare(touched.agent_state_at, at0) == :gt
+    end
+
+    test "the DB CHECK mirrors the four-state vocabulary (constraint, not just code)" do
+      s = new_session()
+
+      assert_raise Postgrex.Error, ~r/chat_sessions_agent_state_check/, fn ->
+        Repo.update_all(
+          from(x in Session, where: x.id == ^s.id),
+          set: [agent_state: "done"]
+        )
+      end
+    end
+
+    test "resolving the LAST pending ask flips blocked→working; an earlier resolve keeps blocked" do
+      s = new_session()
+      seed_pending_ask(s, "approval", "ub-1")
+      seed_pending_ask(s, "question", "ub-2")
+      {1, _} = StudioChat.set_agent_state(s.id, "blocked", :ask)
+
+      # one ask down, one still pending — the human is still needed
+      {:ok, _} = StudioChat.update_approval_status(s.id, "ub-1", "allowed")
+      assert StudioChat.get_session(s.id).agent_state == "blocked"
+
+      # the LAST ask resolves: the turn resumes, the persisted state unblocks
+      {:ok, _} = StudioChat.update_approval_status(s.id, "ub-2", "denied")
+      assert StudioChat.get_session(s.id).agent_state == "working"
+    end
+
+    test "resolution never resurrects a non-blocked row (a dangling cancel after death)" do
+      s = new_session()
+      seed_pending_ask(s, "approval", "ub-3")
+      # the Recorder already died mid-turn: the offline rule wrote "unknown"
+      {1, _} = StudioChat.set_agent_state(s.id, "unknown", :derived)
+
+      {:ok, _} = StudioChat.update_approval_status(s.id, "ub-3", "canceled")
+      assert StudioChat.get_session(s.id).agent_state == "unknown"
+    end
+  end
+
+  # A live execution-lease fence for `session_id` (herd-s6 fixtures): a real
+  # registered host + a real chat_execution_leases row, because the :reported
+  # corroboration is an in-WHERE EXISTS over that table — never a stub.
+  defp lease_fence!(session_id, opts \\ []) do
+    suffix = System.unique_integer([:positive])
+    {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "s6-#{suffix}", name: "S6 #{suffix}"})
+    {:ok, %{host: host}} = Barkpark.ChatHosts.issue_enrollment(ws.id, %{name: "reporter"})
+
+    {:ok, lease} =
+      %Barkpark.ChatHosts.ExecutionLease{}
+      |> Barkpark.ChatHosts.ExecutionLease.changeset(%{
+        host_id: host.id,
+        workspace_id: ws.id,
+        session_id: session_id,
+        provider: "claude",
+        command_key: "ck-#{suffix}",
+        status: Keyword.get(opts, :status, "running"),
+        expires_at: Keyword.get(opts, :expires_at, DateTime.add(DateTime.utc_now(), 60, :second))
+      })
+      |> Repo.insert()
+
+    lease
+  end
+
+  describe "blocked-source guard at the choke point (herd-s6, charter D80h)" do
+    test "blocked with :ask is corroborated IN-WHERE: pending_approvals==0 writes {0, nil}" do
+      s = new_session()
+
+      # MUTATION-PROVEN guard: a declared :ask with no pending ask row writes
+      # NOTHING — remove the corroboration WHERE and this red-lines.
+      assert {0, nil} = StudioChat.set_agent_state(s.id, "blocked", :ask)
+      assert StudioChat.get_session(s.id).agent_state == "idle"
+
+      # …and the SAME call with real store evidence writes.
+      seed_pending_ask(s, "approval", "bsg-1")
+      assert {1, nil} = StudioChat.set_agent_state(s.id, "blocked", :ask)
+      assert StudioChat.get_session(s.id).agent_state == "blocked"
+    end
+
+    test "blocked with :reported demands a LIVE lease fence: a self-report without one writes {0, nil}" do
+      s = new_session()
+
+      # no lease at all → nothing written
+      assert {0, nil} = StudioChat.set_agent_state(s.id, "blocked", :reported)
+      assert StudioChat.get_session(s.id).agent_state == "idle"
+
+      # an EXPIRED lease is not a fence either (the dead-reporter clock)
+      _expired =
+        lease_fence!(s.id, expires_at: DateTime.add(DateTime.utc_now(), -5, :second))
+
+      assert {0, nil} = StudioChat.set_agent_state(s.id, "blocked", :reported)
+
+      # a live leased/running lease IS the corroboration
+      _live = lease_fence!(s.id)
+      assert {1, nil} = StudioChat.set_agent_state(s.id, "blocked", :reported)
+      assert StudioChat.get_session(s.id).agent_state == "blocked"
+    end
+
+    test "no heuristic blocked: :derived-blocked and any unlisted source raise" do
+      s = new_session()
+
+      # blocked is NEVER a derived/heuristic write — only :ask or :reported
+      assert_raise FunctionClauseError, fn ->
+        StudioChat.set_agent_state(s.id, "blocked", :derived)
+      end
+
+      # an unlisted source raises for EVERY state — the vocabulary of writers
+      # is closed, exactly like the four-state vocabulary itself
+      assert_raise FunctionClauseError, fn ->
+        StudioChat.set_agent_state(s.id, "working", :heuristic)
+      end
+
+      assert_raise FunctionClauseError, fn ->
+        StudioChat.set_agent_state(s.id, "blocked", :sweep)
+      end
+    end
+
+    test "census tripwire: every agent_state update_all lives in studio_chat.ex; the literal blocked write only in set_agent_state" do
+      lib = Path.expand("../../lib", __DIR__)
+      files = Path.wildcard(Path.join(lib, "**/*.ex"))
+      assert files != [], "census must scan a real lib tree"
+
+      set_writers =
+        for f <- files,
+            Regex.match?(~r/set:\s*\[[^\]]*\bagent_state:/, File.read!(f)),
+            do: Path.relative_to(f, lib)
+
+      assert set_writers == ["barkpark/studio_chat.ex"],
+             "agent_state update_all writes must funnel through studio_chat.ex, found: #{inspect(set_writers)}"
+
+      blocked_writers =
+        for f <- files,
+            String.contains?(File.read!(f), ~s(agent_state: "blocked")),
+            do: Path.relative_to(f, lib)
+
+      assert blocked_writers == ["barkpark/studio_chat.ex"],
+             ~s(the literal blocked write may exist only in set_agent_state, found: #{inspect(blocked_writers)})
+    end
+  end
+
+  describe "tenant seam — owner_workspace_id scope (Connectors epic wave 1, D14/D15/D17/D19b)" do
+    test "create_session stamps owner_workspace_id from scope ({:workspace,ws}=>ws, :global=>nil)" do
+      ws_a = ws()
+
+      tenant = owned_session({:workspace, ws_a})
+      assert tenant.owner_workspace_id == ws_a
+
+      # :global (the default) and an unscoped create both stamp NULL — the admin
+      # / legacy session, invisible to any workspace-scoped caller.
+      global = owned_session(:global)
+      assert is_nil(global.owner_workspace_id)
+
+      {:ok, defaulted} = StudioChat.create_session(%{id: Ecto.UUID.generate()})
+      assert is_nil(defaulted.owner_workspace_id)
+
+      # A bare workspace binary is accepted defensively (same stamp as the tuple).
+      bare = owned_session(ws_a)
+      assert bare.owner_workspace_id == ws_a
+    end
+
+    test "get_session is fail-closed: ws-B cannot see a ws-A-owned session, :global + ws-A can" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+
+      # Owner and the global superuser resolve it…
+      assert StudioChat.get_session(a.id, ws_a).id == a.id
+      assert StudioChat.get_session(a.id, :global).id == a.id
+      # …a foreign workspace and a nil scope get nil (indistinguishable from missing).
+      assert StudioChat.get_session(a.id, ws_b) == nil
+      assert StudioChat.get_session(a.id, nil) == nil
+
+      # A :global (NULL-owner) session is admin-only: no workspace scope sees it
+      # (a NULL never matches the owner_workspace_id equality — legacy rows stay
+      # invisible without a blanket is_nil carve-out).
+      g = owned_session(:global)
+      assert StudioChat.get_session(g.id, :global).id == g.id
+      assert StudioChat.get_session(g.id, ws_a) == nil
+    end
+
+    test "get_session_with_messages honours the scope gate" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+      {:ok, _} = StudioChat.append_message(a, %{role: "user", source_markdown: "secret"})
+
+      assert %Session{} = StudioChat.get_session_with_messages(a.id, ws_a)
+      assert StudioChat.get_session_with_messages(a.id, ws_b) == nil
+    end
+
+    test "list_sessions is scoped: each workspace sees only its own; :global sees all" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+      b = owned_session({:workspace, ws_b})
+      g = owned_session(:global)
+
+      a_ids = StudioChat.list_sessions([], ws_a) |> Enum.map(& &1.id)
+      assert a.id in a_ids
+      refute b.id in a_ids
+      refute g.id in a_ids
+
+      b_ids = StudioChat.list_sessions([], ws_b) |> Enum.map(& &1.id)
+      assert b.id in b_ids
+      refute a.id in b_ids
+
+      global_ids = StudioChat.list_sessions([], :global) |> Enum.map(& &1.id)
+      assert a.id in global_ids
+      assert b.id in global_ids
+      assert g.id in global_ids
+
+      # a nil scope is fail-closed — zero rows, never a cross-tenant leak.
+      assert StudioChat.list_sessions([], nil) == []
+    end
+
+    test "list_messages is fail-closed: ws-B reads [] on a ws-A session; :global + ws-A read it" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+      {:ok, _} = StudioChat.append_message(a, %{role: "user", source_markdown: "one"})
+      {:ok, _} = StudioChat.append_message(a, %{role: "assistant", source_markdown: "two"})
+
+      assert length(StudioChat.list_messages(a.id, :global)) == 2
+      assert length(StudioChat.list_messages(a.id, ws_a)) == 2
+      # foreign tenant: no transcript leak.
+      assert StudioChat.list_messages(a.id, ws_b) == []
+      # the scoped LIMIT form (charter D17 "+/2 limit threads it") is gated too.
+      assert length(StudioChat.list_messages(a.id, 1, ws_a)) == 1
+      assert StudioChat.list_messages(a.id, 1, ws_b) == []
+    end
+
+    test "delete_session is fail-closed: ws-B cannot delete a ws-A session; ws-A can" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+
+      # foreign workspace: no-op, the row survives.
+      assert :noop = StudioChat.delete_session(a.id, ws_b)
+      assert StudioChat.get_session(a.id, ws_a).id == a.id
+
+      # owner deletes it for real.
+      assert {:ok, %Session{}} = StudioChat.delete_session(a.id, ws_a)
+      assert StudioChat.get_session(a.id, :global) == nil
+    end
+
+    test "archive/unarchive are fail-closed against a foreign workspace" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+
+      # ws-B cannot archive ws-A's session — no-op, archived_at stays nil.
+      assert :noop = StudioChat.archive_session(a.id, ws_b)
+      assert is_nil(StudioChat.get_session(a.id, ws_a).archived_at)
+
+      # owner archives, then ws-B cannot unarchive it back.
+      {:ok, archived} = StudioChat.archive_session(a.id, ws_a)
+      assert archived.archived_at != nil
+      assert :noop = StudioChat.unarchive_session(a.id, ws_b)
+
+      {:ok, unarchived} = StudioChat.unarchive_session(a.id, ws_a)
+      assert is_nil(unarchived.archived_at)
+    end
+
+    test "back-compat: the default scope is :global — every legacy call site is unchanged" do
+      s = new_session()
+      {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "hi"})
+
+      # /1 + /2-limit legacy arities keep resolving globally.
+      assert StudioChat.get_session(s.id).id == s.id
+      assert Enum.any?(StudioChat.list_sessions(), &(&1.id == s.id))
+      assert length(StudioChat.list_messages(s.id)) == 1
+      assert length(StudioChat.list_messages(s.id, 1)) == 1
     end
   end
 end

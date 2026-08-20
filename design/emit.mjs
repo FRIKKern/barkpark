@@ -7,12 +7,48 @@
 //   node design/emit.mjs            # default: report drift, write nothing (== --check)
 //   node design/emit.mjs --check    # same as default
 //   node design/emit.mjs --write    # rewrite every artifact in place
+//   node design/emit.mjs --write --force   # rewrite even where content is UNATTRIBUTED
+//   node design/emit.mjs --adopt    # bless what is on disk as generated; write nothing
+//
+// THE WRITE FENCE (charter D21). `--write` used to replace a generated region
+// unconditionally, so any hand-written line a developer had put INSIDE the marker
+// vanished with no diff, no warning, and no log line naming it — and check.mjs
+// then printed a clean PASS, because it compares build() against a file build()
+// had just written (a tautology: `current` IS `expected` by construction). That is
+// not hypothetical: commit 1d928b3bf deleted 33 hand-written `.bp-lc-*` rules this
+// way. The fix lives HERE, at the point of loss, because evaluate() already knows
+// `current` and `expected` in the same pass and therefore already knows the delta
+// BEFORE writeFileSync — it costs zero new I/O and no external dependency.
+//
+// The missing ingredient is MEMORY: nothing on disk records what the emitter last
+// produced, so a region full of hand-written CSS is indistinguishable from a
+// region that is merely stale. design/emit-manifest.json supplies it (the
+// side-channel-attribution pattern design/status-manifest.json already
+// establishes next door): one SHA-256 per artifact over the GENERATED REGION ONLY,
+// rewritten by every successful --write. A region whose digest matches is
+// attributable to a prior generation and is safe to replace; a region whose digest
+// does not match holds bytes this emitter never wrote, and replacing it destroys
+// them. The fence refuses that write, names every line it would have deleted, and
+// exits non-zero. `--force` performs it anyway, `--adopt` re-blesses the tree.
+//
+// THE LEDGER KEY IS `<path>#<artifact name>`, NOT the path alone. One file may
+// carry TWO generated regions (the registry below explicitly invites it via
+// markerBegin/markerEnd — the cloud SPA's app.js is the first case), and a ledger
+// keyed by path alone gives both regions ONE slot: last write wins, the loser
+// reads "unattributed" forever, check.mjs reds permanently and --write refuses
+// all-or-nothing. The chosen shape is the flat composite `${path}#${name}` (over a
+// nested {path: {name: digest}}) because it keeps the manifest one sorted level
+// deep — greppable, and a stale entry is one visibly deleted line. The artifact
+// `name` is the same string the CLI prints, so a manifest line names the surface a
+// refusal names. A unit with NO name (check.mjs' Part I synthetic fixtures, which
+// exercise attribute() on invented paths) keys by the bare path.
 //
 // CSS surfaces are spliced into a BEGIN/END GENERATED: tokens marker block that
 // must already exist (mirrors the status-tones precedent). Go surfaces are whole
 // generated *_gen.go files. check.mjs imports the builders here for the drift gate
 // and the §6 cross-surface parity assertion.
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
@@ -148,6 +184,12 @@ export const BASE_ROLES = [
 export const STATUS_ROLES = ["ok", "warn", "danger", "info"];
 export const LIFE_ORDER = [
   "in_progress", "blocked", "done", "closed", "cancelled", "ready", "open",
+  // The pre-open thought states (task-lifecycle-visibility epic): a candidate
+  // the strategizer just named (considering ◌) → under investigation
+  // (researching ◎) → open (ready). Appended so the canonical emission order the
+  // whole generated chain reads (Go board/semrole, Studio TokensGen, paper-surface
+  // .bp-lg--, root --life-*) extends without renumbering the shipped states.
+  "considering", "researching",
 ];
 // Cloud INSTANCE lifecycle emission order (matches tokens.instanceLifecycle).
 export const INST_ORDER = [
@@ -163,6 +205,36 @@ export const instRoleChannels = (role) =>
 // Chrome type-scale steps, largest → smallest (display order for the Studio type
 // ladder). Mirrors tokens.type.chrome; the emitter and check.mjs both key off it.
 export const TYPE_STEPS = ["2xl", "xl", "lg", "base", "sm", "xs"];
+// The reader AIR ladder (tokens.space.air), lightest opening → heaviest. Emission
+// order IS the ladder order design/validate.mjs asserts monotonic, and every step
+// here has a consumer in paper-surface.css — an entry with none is a dead token.
+export const AIR_STEPS = ["code", "table", "asciicast", "callout", "stats", "figure"];
+// The EVIDENCE BAND inputs (tokens.space.evidence), in emission order. Emitted as
+// `--tok-evidence-*`; paper-surface.css composes all five into ONE width
+// expression, so what ships is the law and not a resolved pixel. Every key here
+// has a live consumer — check.mjs Part K refuses a member with none, and
+// validate.mjs refuses a member that is not on this list.
+export const EVIDENCE_KEYS = ["band", "bandMax", "fill", "gutter", "caption"];
+// `fill` is a bare RATIO (it is multiplied by 100cqw) and `caption` is a reading
+// MEASURE in characters — neither is a pixel, and emitting them as one would be
+// the drift the units exist to prevent.
+export const EVIDENCE_UNITS = { band: "px", bandMax: "px", fill: "", gutter: "px", caption: "ch" };
+// The SECTION BOUNDARY inputs (tokens.space.section), in emission order. `beat` is
+// a ratio of `--tok-air-beat` (so section rhythm and evidence rhythm retune
+// together); `rule` and `gap` are pixels — a hairline does not scale with a beat.
+// Every key has a live consumer on the `h2` rule of BOTH surfaces; check.mjs
+// Part L refuses a member with none, validate.mjs refuses a member not listed here.
+export const SECTION_KEYS = ["beat", "rule", "gap"];
+export const SECTION_UNITS = { beat: "", rule: "px", gap: "px" };
+// The RULE LADDER (tokens.space.rule). `space.section.rule` is the STRUCTURAL
+// weight and has its own key above; this is the OTHER rung — the weight every
+// line that is not a section boundary draws at. Kept as a token rather than a
+// literal `1px` for one reason: a census can only assert "chrome is quieter than
+// structure" if both weights are named, and check.mjs Part M reads this list to
+// find what the census is allowed to see.
+export const RULE_KEYS = ["hairline"];
+export const RULE_UNITS = { hairline: "px" };
+const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
 // Paper reading-surface `--paper-*` color roles, in emission order. Sourced from
 // color.paper.surface for paper-surface.css (paperBlock) and color.paper.reader
 // for the bulldocs reader skin (bulldocsBlock). VERBATIM (rgba/hex as-authored).
@@ -180,6 +252,29 @@ const strongAlpha = tokens.color._convention.strongAlpha; // { light, dark, _not
 const MARKER_BEGIN =
   "/* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */";
 const MARKER_END = "/* END GENERATED: tokens */";
+
+// The cloud SPA's BP_THEMES list (app.js) is GENERATED, not hand-kept (GR12):
+// the hand-list had already drifted (charple emitted in CSS but unreachable
+// because the JS enum omitted it). emit.mjs owns the theme-id enum now; a hand
+// edit reds design/check.mjs Part A the same way a stale CSS surface does. The
+// marker is a JS block comment (valid CSS-comment syntax too), so it rides the
+// same splice machinery — see the app.js artifact's markerBegin/markerEnd.
+const BP_THEMES_MARKER_BEGIN =
+  "/* BEGIN GENERATED: bp-theme ids (design/themes/*.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
+const BP_THEMES_MARKER_END = "/* END GENERATED: bp-theme ids */";
+
+// The cloud SPA's ACTION_LABELS object (app.js) is the SECOND generated region in
+// that file — the audit verb table cloud/priv/audit-actions.json owns BOTH the
+// closed Elixir @actions vocabulary and the console's human sentence fragments, so
+// the two can no longer drift apart by hand (charter cch-w65). Same splice
+// machinery, its own marker, its own ledger slot (the `<path>#<name>` key, charter
+// D835). The marker string below is the emitter's LOOKUP KEY and is BYTE-PINNED to
+// the marker line shipped inside app.js's generated region — cch-w53 repoints both
+// to cloud/priv/audit-actions.json (the table moved there in #11781) in one commit:
+// the marker text here and the matching hand-edited marker line in app.js.
+const ACTION_LABELS_MARKER_BEGIN =
+  "/* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */";
+const ACTION_LABELS_MARKER_END = "/* END GENERATED: audit action labels */";
 
 // ── color helpers ───────────────────────────────────────────────────────────
 const hsl = (ch) => `hsl(${ch})`;
@@ -268,6 +363,112 @@ function providerVars(theme, indent) {
   const p = tokens.color.provider;
   return PROVIDERS.map((k) => indent + `--provider-${k}: ${p[k][theme]};`).join("\n");
 }
+
+// ── cloudChrome shell vocabulary (GUI-remake GR2) ────────────────────────────
+// The designer v4 shell's chrome roles, emitted --cc-<role> into the cloud SPA's
+// bare :root / [data-theme=dark] ONLY (identity-INVARIANT passthrough — the v4
+// applyTheme() only ever moves the 5 accent vars). check.mjs Part G D25 bans
+// --cc-* from every [data-bp-theme] identity block, so this NEVER runs there.
+// GR29 dead-var retirement (gr-p3-hygiene-guard): 11 zero-consumer roles removed
+// at the SOURCE — azure, backdrop, blue-hover, cloudflare, fg5, github, hetzner,
+// on-red, spark-dim, toast, toast-fg (all R2-dead, 0 var() consumers). Regenerate
+// the app.css block with `node design/emit.mjs --write` — never hand-edit it.
+export const CC_ROLES = [
+  "bg", "bg-side", "card", "card2", "modal",
+  "fg", "fg2", "fg3", "fg4", "line-rgb",
+  "red", "red-strong", "blue", "amber",
+];
+function cloudChromeVars(theme, indent) {
+  const cc = tokens.color.cloudChrome;
+  return CC_ROLES.map((r) => indent + `--cc-${r}: ${cc[r][theme]};`).join("\n");
+}
+
+// ── GR7 legacy alias bridge ──────────────────────────────────────────────────
+// One generated move retints the 123KB hand CSS: the ~consumed legacy shell vars
+// map role-for-role onto the designer ladder (GR6 rulings). Identity-INVARIANT,
+// so bare :root / [data-theme=dark] only. --dim→fg3 (NEVER fg4: fg4-as-text fails
+// 4.5:1 at 3.96/3.41 — fg4 is a meta-only token duty-capped at 3:1). --border is
+// a line-rgb/alpha judgment. --primary-hover is RETIRED (0 consumers, proven dead)
+// — deliberately absent here. --accent is RETIRED too (GUI-remake GR7 endgame,
+// gr-p3-site-detail): its sole consumer (.previews .deploy-row.preview-row
+// border) now reads --cc-amber directly — the identical bytes the alias resolved
+// to — so the decorative-amber alias carries zero consumers and dies.
+function aliasBridge(theme, indent) {
+  const borderAlpha = theme === "light" ? "0.12" : "0.14";
+  const lines = [
+    `--bg: var(--cc-bg);`,
+    `--surface: var(--cc-card);`,
+    `--muted-surface: var(--cc-card2);`,
+    `--text: var(--cc-fg);`,
+    `--muted-text: var(--cc-fg2);`,
+    `--dim: var(--cc-fg3);`,
+    `--border: rgba(var(--cc-line-rgb), ${borderAlpha});`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
+
+// ── cloud status text-voices (GR6) ───────────────────────────────────────────
+// warn/danger/info -hsl channels drive the -soft PILL tints (status-hue machinery
+// preserved); the TEXT voices ride the designer ramp: --danger→red-strong,
+// --info→blue. --warn keeps the status amber (dot/glyph); its -strong TEXT voice
+// is a SOLID tuned tone (GR6: light #7d5500 4.10→5.44; dark the light amber that
+// reads on the dark pill) — NOT the translucent status tint that failed every
+// ramp state at 1.35–2.07:1. Identity-INVARIANT: bare :root / [data-theme=dark].
+const WARN_STRONG_SOLID = { light: "#7d5500", dark: "#e8b45a" };
+// --danger is red TEXT on a red -soft tint: light = dark-on-light → the DARKER
+// red-strong (#b23636, GR6 tuned; designer base #bb4040 fails at 4.31); dark =
+// light-on-dark → the LIGHTER plain red (#e57f7f) clears 4.5 where red-strong
+// #e56a6a lands at 4.48. Strong-per-direction, both the designer's danger red.
+const DANGER_TEXT = { light: "var(--cc-red-strong)", dark: "var(--cc-red)" };
+function cloudStatusVars(theme, indent) {
+  const st = tokens.color.status;
+  const a = alpha(softAlpha[theme]);
+  const lines = [
+    `--warn-hsl: ${st.warn[theme]}; --danger-hsl: ${st.danger[theme]}; --info-hsl: ${st.info[theme]};`,
+    `--warn: hsl(var(--warn-hsl)); --danger: ${DANGER_TEXT[theme]}; --info: var(--cc-blue);`,
+    `--warn-soft: hsl(var(--warn-hsl) / ${a}); --danger-soft: hsl(var(--danger-hsl) / ${a}); --info-soft: hsl(var(--info-hsl) / ${a});`,
+    `--warn-strong: ${WARN_STRONG_SOLID[theme]};`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
+
+// ── cloud accent block (GR6: green IS the accent) ────────────────────────────
+// The per-identity 5-tuple: --primary + its -hsl/-soft machinery, the brand ring,
+// and the --ok family that now TRACKS accent.primary (no standalone green). NEW
+// --ok-strong = accent.hover is the text-on-tint voice (fixes the light evergreen
+// 4.06 / ember 4.23 pill-text fails). Emitted in the bare :root (evergreen
+// fallback) AND inside each [data-bp-theme] block — the ONLY per-identity vars.
+// Carries NO --cc-* and NO shell roles (D25 / GR2). primary/primary-fg/ring/
+// primary-hover are HSL channel strings in tokens; --ok-strong reads the hover
+// channel WITHOUT re-emitting the retired --primary-hover var.
+function cloudAccentVars(theme, indent, t = tokens) {
+  const a = alpha(softAlpha[theme]);
+  const p = t.color.primary[theme];
+  const hover = t.color["primary-hover"][theme];
+  const lines = [
+    `--primary: hsl(${p});`,
+    `--primary-fg: hsl(${t.color["primary-fg"][theme]});`,
+    `--ring: hsl(${t.color.ring[theme]});`,
+    `--primary-hsl: ${p};`,
+    // --primary-soft retired (GUI-remake GR22, gr-p2-launch-theater): its sole
+    // consumer (.size-opt selected tint) now reads --ok-soft — the identical
+    // channel/alpha, since --ok TRACKS accent.primary (GR6). The Studio
+    // surface's primaryVars copy is untouched (root.html.heex still consumes it).
+    // --ring-hsl/--ring-soft PROMOTED (gr-p5r7-ring-soft-accent-invariant): the
+    // focus ring's soft tint was hand-stamped TWICE outside the generated region
+    // (evergreen green in both modes), so :focus-visible stayed green under
+    // ember/fjord/charple/iris. It now rides the identity's OWN ring channel —
+    // the same channel --ring already reads — through the shared softAlpha
+    // convention, exactly as the login surface derives it in authRows().
+    `--ring-hsl: ${t.color.ring[theme]};`,
+    `--ring-soft: hsl(var(--ring-hsl) / ${a});`,
+    `--ok-hsl: ${p};`,
+    `--ok: hsl(var(--ok-hsl));`,
+    `--ok-soft: hsl(var(--ok-hsl) / ${a});`,
+    `--ok-strong: hsl(${hover});`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
 function instClasses() {
   const il = tokens.instanceLifecycle;
   return INST_ORDER
@@ -279,31 +480,33 @@ function instClasses() {
 // compound — equal-idiom to the bare :root/[data-theme=dark] pair, one step more
 // specific so the theme wins). Provider tints + .bp-inst-- glyph tones are
 // theme-INVARIANT passthrough (Part D counts them positionally) — NOT here (D25).
+// Identity block: ONLY the per-identity accent 5-tuple (GR2 — the shell
+// vocabulary + status pill machinery are identity-INVARIANT, declared once in the
+// bare :root above). Light and dark scopes carry the SAME var set (Part G D26
+// tone-pair nesting). No --cc-* / no shell roles reach here (D25).
 const cloudThemeBlock = (name, t) => [
   `html[data-bp-theme="${name}"] {`,
-  baseVars("light", "  ", t),
-  primaryVars("light", "  ", t),
-  statusVars("light", "  ", t),
+  cloudAccentVars("light", "  ", t),
   "}",
   `html[data-bp-theme="${name}"][data-theme="dark"] {`,
-  baseVars("dark", "  ", t),
-  primaryVars("dark", "  ", t),
-  statusVars("dark", "  ", t),
+  cloudAccentVars("dark", "  ", t),
   "}",
 ].join("\n");
 
 function cloudBlock(themes = loadThemes()) {
   const lines = [
     ":root {",
-    baseVars("light", "  "),
-    primaryVars("light", "  "),
-    statusVars("light", "  "),
+    cloudChromeVars("light", "  "),
+    aliasBridge("light", "  "),
+    cloudStatusVars("light", "  "),
+    cloudAccentVars("light", "  "),
     providerVars("light", "  "),
     "}",
     '[data-theme="dark"] {',
-    baseVars("dark", "  "),
-    primaryVars("dark", "  "),
-    statusVars("dark", "  "),
+    cloudChromeVars("dark", "  "),
+    aliasBridge("dark", "  "),
+    cloudStatusVars("dark", "  "),
+    cloudAccentVars("dark", "  "),
     providerVars("dark", "  "),
     "}",
     "/* instance-lifecycle glyph tones — colour READ THROUGH the state's status",
@@ -315,6 +518,51 @@ function cloudBlock(themes = loadThemes()) {
   const themed = themeBlocks(themes, cloudThemeBlock);
   if (themed) lines.push(THEME_BANNER, themed);
   return lines.join("\n");
+}
+
+// ── surface: living styleguide swatch grid (cloud/priv/static/styleguide.html) ─
+// The agency spec's "01 · Tokens" swatch table, byte-spliced into styleguide.html
+// so a chip label can never drift from design/tokens.json. Each cell renders its
+// CSS var LIVE (background: var(--cc-*)/var(--primary)) — the styleguide clones
+// each pane into a light and a dark scope, so the chip resolves per theme — while
+// the value line is the CANONICAL tokens.json truth (light · dark). The 11 slots
+// mirror the agency's own list: the cloudChrome passthrough family (identity-
+// invariant, so one light+dark pair each — GR2) plus the accent slot --primary
+// (per-identity; the evergreen value is shown, labelled). An HTML-comment marker
+// (kind "html") is the splice target, mirroring the CSS surfaces' BEGIN/END block.
+const SWATCH_TOKENS = [
+  { css: "--cc-bg", cc: "bg" },
+  { css: "--cc-card", cc: "card" },
+  { css: "--cc-card2", cc: "card2" },
+  { css: "--cc-fg", cc: "fg" },
+  { css: "--cc-fg2", cc: "fg2" },
+  { css: "--cc-fg3", cc: "fg3" },
+  { css: "--cc-fg4", cc: "fg4" },
+  { css: "--primary", accent: true }, // the mint/evergreen accent (restyles per identity)
+  { css: "--cc-amber", cc: "amber" },
+  { css: "--cc-red", cc: "red" },
+  { css: "--cc-blue", cc: "blue" },
+];
+
+function styleguideSwatches() {
+  const cc = tokens.color.cloudChrome;
+  const cell = (css, light, dark) =>
+    [
+      `              <div class="sg-swatch">`,
+      `                <div class="sg-swatch-chip" style="background: var(${css});"></div>`,
+      `                <div class="sg-swatch-meta">`,
+      `                  <div class="sg-swatch-name">${css}</div>`,
+      `                  <div class="sg-swatch-val">${light} · ${dark}</div>`,
+      `                </div>`,
+      `              </div>`,
+    ].join("\n");
+  return SWATCH_TOKENS.map((s) => {
+    if (s.accent) {
+      const p = tokens.color.primary;
+      return cell(s.css, hslToHex(p.light), hslToHex(p.dark));
+    }
+    return cell(s.css, cc[s.cc].light, cc[s.cc].dark);
+  }).join("\n");
 }
 
 // ── surface: paper-surface (api/assets/paper-surface/paper-surface.css) ──────
@@ -358,17 +606,65 @@ const paperThemeBlock = (name, t) => [
 
 function paperBlock(themes = loadThemes()) {
   const r = tokens.type.reading;
+  // Each reading step emits size + line-height, and a tracking var ONLY where
+  // tokens.json declares a letterSpacing. The tracking leaves were declared in
+  // the source and emitted NOWHERE until pe-w1-reader-editorial-typography — the
+  // `--bp-*-tracking` vars were hand-authored beside a token that claimed to own
+  // them, so the single source was single in name only.
+  const step = (name, s) => [
+    `--tok-reading-${name}-size: ${s.size}px;`,
+    `--tok-reading-${name}-lh: ${s.lineHeight};`,
+    ...(s.letterSpacing == null ? [] : [`--tok-reading-${name}-tracking: ${s.letterSpacing}em;`]),
+  ];
+  // The AIR scale (space.air): the beat an EVIDENCE block opens with. Emitted as
+  // a ratio of `--tok-air-beat` rather than a resolved pixel, so the LAW ("evidence
+  // opens at 1.1-1.85x the paragraph beat") is what ships — retune the beat and the
+  // whole scale moves together instead of eight literals drifting apart.
+  const a = tokens.space.air;
+  const airVars = [
+    `--tok-air-beat: ${a.beat}px;`,
+    ...AIR_STEPS.map((k) => `--tok-air-${k}: calc(var(--tok-air-beat) * ${a[k]});`),
+  ];
+  // The EVIDENCE BAND (space.evidence): how wide a block that improves with width
+  // may grow when it steps out of the prose column. Emitted as the four inputs to
+  // one law, never as a resolved width — paper-surface.css composes them into a
+  // single `--bp-evidence-width` expression, so the band is CONTINUOUS in the
+  // available inline space and there is no breakpoint literal to drift.
+  // `caption` carries `ch`, not `px`: it is a reading measure, and a caption
+  // inside a wide figure must wrap at a character count, not at a pixel.
+  const e = tokens.space.evidence;
+  const evidenceVars = EVIDENCE_KEYS.map(
+    (k) => `--tok-evidence-${kebab(k)}: ${e[k]}${EVIDENCE_UNITS[k]};`,
+  );
+  // The SECTION BOUNDARY (space.section): the air that ends a section and the rule
+  // that opens the next. `beat` emits as a ratio of `--tok-air-beat` — the same
+  // anchor the evidence ladder hangs off, so retuning the beat moves section
+  // rhythm and evidence rhythm together instead of letting them drift apart.
+  // `rule`/`gap` emit as pixels: a hairline is a hairline at any beat.
+  const sc = tokens.space.section;
+  const sectionVars = SECTION_KEYS.map((k) =>
+    k === "beat"
+      ? `--tok-section-beat: calc(var(--tok-air-beat) * ${sc.beat});`
+      : `--tok-section-${k}: ${sc[k]}${SECTION_UNITS[k]};`,
+  );
+  // The RULE LADDER (space.rule): the weight of every horizontal line that is
+  // NOT a section boundary. Emitted beside the section rule on purpose — the two
+  // are one ladder, and a reader who sees them apart is reading a paper where a
+  // table header shouts as loud as a chapter break.
+  const rl = tokens.space.rule;
+  const ruleVars = RULE_KEYS.map((k) => `--tok-rule-${kebab(k)}: ${rl[k]}${RULE_UNITS[k]};`);
+
   const readingVars = [
     `--tok-reading-font: ${tokens.font.reading.stack};`,
     `--tok-reading-heading-weight: ${r.headingWeight};`,
-    `--tok-reading-body-size: ${r.body.size}px;`,
-    `--tok-reading-body-lh: ${r.body.lineHeight};`,
-    `--tok-reading-h1-size: ${r.h1.size}px;`,
-    `--tok-reading-h1-lh: ${r.h1.lineHeight};`,
-    `--tok-reading-h2-size: ${r.h2.size}px;`,
-    `--tok-reading-h2-lh: ${r.h2.lineHeight};`,
-    `--tok-reading-h3-size: ${r.h3.size}px;`,
-    `--tok-reading-h3-lh: ${r.h3.lineHeight};`,
+    ...step("body", r.body),
+    ...step("h1", r.h1),
+    ...step("h2", r.h2),
+    ...step("h3", r.h3),
+    ...airVars,
+    ...sectionVars,
+    ...ruleVars,
+    ...evidenceVars,
   ].map((l) => "  " + l).join("\n");
 
   const lifeClasses = (theme) =>
@@ -691,10 +987,12 @@ function taskboardGo(themes = loadThemes()) {
     return [
       `\t${JSON.stringify(name)}: {`,
       "\t\tLifecycle: map[string]GenLifecycleToken{",
-      ...litRows,
+      ...alignMap(litRows),
       "\t\t},",
-      `\t\tBrailleFrames: [10]string{${litFrames}},`,
-      `\t\tBrailleStill: "${glyphOf(pl.in_progress.framesStill)}",`,
+      ...alignMap([
+        `\t\tBrailleFrames: [10]string{${litFrames}},`,
+        `\t\tBrailleStill: "${glyphOf(pl.in_progress.framesStill)}",`,
+      ]),
       "\t},",
     ];
   };
@@ -968,13 +1266,13 @@ function semroleGo(themes = loadThemes()) {
     return [
       `\t${JSON.stringify(name)}: {`,
       "\t\tStatusTone: map[string]lipgloss.AdaptiveColor{",
-      ...SEMROLE_TONES.map(([, role]) => `\t\t\t"${role}": ${goAdaptive(hslToHex(pst[role].light), hslToHex(pst[role].dark))},`),
+      ...alignMap(SEMROLE_TONES.map(([, role]) => `\t\t\t"${role}": ${goAdaptive(hslToHex(pst[role].light), hslToHex(pst[role].dark))},`)),
       "\t\t},",
       "\t\tLifecycleHue: map[string]lipgloss.AdaptiveColor{",
-      ...LIFE_ORDER.map((s) => `\t\t\t"${s}": ${goAdaptive(plife[s].color.light, plife[s].color.dark)},`),
+      ...alignMap(LIFE_ORDER.map((s) => `\t\t\t"${s}": ${goAdaptive(plife[s].color.light, plife[s].color.dark)},`)),
       "\t\t},",
       "\t\tANSI16: map[string]int{",
-      ...SEMROLE_TONES.map(([, role]) => `\t\t\t"${role}": ${SEMROLE_ANSI16[role]},`),
+      ...alignMap(SEMROLE_TONES.map(([, role]) => `\t\t\t"${role}": ${SEMROLE_ANSI16[role]},`)),
       "\t\t},",
       "\t},",
     ];
@@ -1100,7 +1398,7 @@ function cliChromeGo(themes = loadThemes()) {
     const p = themePalette(spec);
     return [
       `\t${JSON.stringify(name)}: {Chrome: map[string]lipgloss.AdaptiveColor{`,
-      ...all.map(([, role]) => { const h = cliChromeHex(role, p); return `\t\t\t"${role}": ${goAdaptive(h.light, h.dark)},`; }),
+      ...alignMap(all.map(([, role]) => { const h = cliChromeHex(role, p); return `\t\t"${role}": ${goAdaptive(h.light, h.dark)},`; })),
       "\t}},",
     ];
   };
@@ -1269,14 +1567,27 @@ function elixirTokensGen(themes = loadThemes()) {
     "  defp resolve(_), do: :evergreen",
     "",
     "  # Semantic status tones (design/tokens.json color.status, light theme → hex).",
-    `  @status %{${themes.map(statusEntry).join(", ")}}`,
+    // One entry per LINE, for the same reason `@reading_font` is an attribute
+    // below: `mix format` splits any map literal past 98 columns, and this one
+    // crossed that the moment the theme count went from 1 to 5. A single-line
+    // emit was a format fixed point at N=1 and silently stopped being one — the
+    // drift gate then fires on the NEXT person to run the formatter, blaming
+    // them for a latent property of the emitter. Per-line is a fixed point at
+    // every N. (Each inner status map stays on one line: ~78 columns at the
+    // longest theme name, comfortably under the limit.)
+    "  @status %{",
+    ...themes.map((t, i) => `    ${statusEntry(t)}${isLast(i) ? "" : ","}`),
+    "  }",
     "  def tone_ok(theme \\\\ :evergreen), do: @status[resolve(theme)].ok",
     "  def tone_info(theme \\\\ :evergreen), do: @status[resolve(theme)].info",
     "  def tone_warn(theme \\\\ :evergreen), do: @status[resolve(theme)].warn",
     "  def tone_danger(theme \\\\ :evergreen), do: @status[resolve(theme)].danger",
     "",
     "  # Warm reading accent — the paper terracotta, tokenized.",
-    `  @reading_accent %{${themes.map(readingAccentEntry).join(", ")}}`,
+    // Per-line for the same reason as `@status` above.
+    "  @reading_accent %{",
+    ...themes.map((t, i) => `    ${readingAccentEntry(t)}${isLast(i) ? "" : ","}`),
+    "  }",
     "  def reading_accent(theme \\\\ :evergreen), do: @reading_accent[resolve(theme)]",
     "",
     "  # Reading type (design/tokens.json font.reading / type.reading). Theme-INVARIANT.",
@@ -1337,6 +1648,7 @@ function studioTokensGen() {
   const p = tokens.color.presence.palette;
   const cf = tokens.color.sheetCf;
   const sh = tokens.color.statusHealth;
+  const fs = tokens.color.fleetStatus;
   const list = (arr) => arr.map((h) => `"${h}"`).join(", ");
   const life = tokens.lifecycle;
   const lifeRows = LIFE_ORDER.map((s) => {
@@ -1384,10 +1696,35 @@ function studioTokensGen() {
     "  # NOT a CSS role. partial_outage is an out-of-model tone between warn-amber",
     "  # (degraded) and danger-red (major_outage): the severity distinction must",
     "  # survive, so it is NOT recolored onto --warn/--danger.",
-    `  def status_health, do: %{operational: "${sh.operational}", degraded: "${sh.degraded}", partial_outage: "${sh.partial_outage}", major_outage: "${sh.major_outage}"}`,
+    // Emitted in the mix-format-STABLE multi-line shape: the one-line
+    // `def status_health, do: %{…}` exceeds the 98-col default and mix format
+    // wraps it, so a one-line emission made the drift gate and the Format gate
+    // permanently disagree (only one could pass). Emit the wrapped form both
+    // agree on.
+    "  def status_health,",
+    "    do: %{",
+    `      operational: "${sh.operational}",`,
+    `      degraded: "${sh.degraded}",`,
+    `      partial_outage: "${sh.partial_outage}",`,
+    `      major_outage: "${sh.major_outage}"`,
+    "    }",
     "",
     "  # Neutral gray fallback for an unrecognised / missing status.",
     `  def status_health_unknown, do: "${sh.unknown}"`,
+    "",
+    "  # Personal Dev Fleet listener-status DATA tones (fleet_live.ex @pills dot +",
+    "  # track tint at /admin/fleet) — the PDF-D23 vocabulary as inline-style hex,",
+    "  # categorical listener-liveness DATA, not a CSS role. STRING keys: the",
+    "  # consumer keys by the runtime status string; an unrecognised status falls",
+    "  # back to \"idle\" in FleetLive.pill/1.",
+    "  def fleet_status,",
+    "    do: %{",
+    `      "working" => "${fs.working}",`,
+    `      "idle" => "${fs.idle}",`,
+    `      "blocked" => "${fs.blocked}",`,
+    `      "provisioning" => "${fs.provisioning}",`,
+    `      "offline" => "${fs.offline}"`,
+    "    }",
     "",
     "  # Lifecycle mirror — one row per state, canonical emission order. glyph +",
     "  # ascii are text CONTENT; light/dark are the adaptive hue LABELS (the applied",
@@ -1555,8 +1892,12 @@ function sheetsBlock(themes = loadThemes()) {
 // ── surface: /papers reader skin (api/lib/barkpark_web/layouts/bulldocs.html.heex)
 // The reader article's `--paper-*` skin overrides (color.paper.reader) PLUS the
 // mail-client popup chrome (color.mailChrome, the ONLY --mail-* copy, relocated
-// into this one marker region). The reader theme-swaps via prefers-color-scheme
-// (it NEVER stamps data-theme), and DELIBERATELY diverges from the shared
+// into this one marker region). The reader is a HYBRID surface: default mode
+// follows prefers-color-scheme, but the reader's dark/light toggle stamps
+// html[data-theme] (pre-paint, localStorage `barkpark_theme` shared with
+// Studio) and the explicit stamp wins — so every mode pair emits THREE ways:
+// bare light fallback, @media dark (the no-JS/first-paint owner), and
+// [data-theme] companions. The reader DELIBERATELY diverges from the shared
 // paper-surface skin on --paper-rule (solid vs rgba) — never collapsed onto the
 // shared tokens this wave (charter D4). The load-bearing rationale comments are
 // emitted VERBATIM so `emit --write` preserves them; the callout --bp-tone-*
@@ -1564,15 +1905,16 @@ function sheetsBlock(themes = loadThemes()) {
 // TokensGen.callout/1) — byte-identical emission, single-sourced tone values.
 // Indented 4 spaces to sit inside the reader <style>; the marker block is CSS
 // comments, invisible to the browser.
-// Bulldocs reader theme block. The reader is a MEDIA surface (it NEVER stamps
-// data-theme; it theme-swaps via prefers-color-scheme) — so the per-theme dark
-// re-declarations nest inside the same @media idiom, prefixed with the theme
-// attribute. The reader page never stamps data-bp-theme today, so this block is
-// the structural hook (a theme swap reaches the reader skin the moment a surface
-// sets the attribute); reader-dark-parity stays green because the selectors carry
-// `html[data-bp-theme=X]` (not the bare `html[data-theme="dark"]` the guard
-// scans) and the dark re-skins live inside prefers-color-scheme blocks the guard
-// treats as reader coverage.
+// Bulldocs reader theme block. The reader defaults to the OS scheme, so the
+// per-theme dark re-declarations nest inside the same @media idiom, prefixed
+// with the theme attribute — PLUS `[data-theme]` companions (two attrs, so a
+// toggled mode beats both the theme-light block and the base [data-theme]
+// blocks that precede the themed region in the cascade). The reader page never
+// stamps data-bp-theme today, so this block is the structural hook (a theme
+// swap reaches the reader skin the moment a surface sets the attribute);
+// reader-dark-parity stays green because the guard's edit-side scan reads
+// paper-surface.css only, and the reader-coverage scan still finds these dark
+// re-skins inside prefers-color-scheme blocks.
 const bulldocsThemeBlock = (name, t) => {
   const rl = t.color.paper.reader.light;
   const rd = t.color.paper.reader.dark;
@@ -1604,6 +1946,25 @@ const bulldocsThemeBlock = (name, t) => {
     `--bp-tone-danger-bg: ${cd.danger.bg}; --bp-tone-danger-fg: ${cd.danger.fg};`,
     `--bp-tone-neutral-bg: ${cd.neutral.bg}; --bp-tone-neutral-fg: ${cd.neutral.fg};`,
   ];
+  // The [data-theme="light"] companion must re-declare every token the reader's
+  // @media dark block re-skins — the media block's selector outranks the bare
+  // paper-surface light fallbacks, so a forced-light reader under an OS-dark
+  // scheme would otherwise keep DARK callout tones / faint ink / chrome (the
+  // mirror image of the #1217 bug). Light values come from the shared surface
+  // family + paperCallout.light — the same values the un-stamped light path
+  // resolves through paper-surface.css.
+  const sf = t.color.paper.surface;
+  const cl = t.color.paperCallout.light;
+  const lightExtra = [
+    `--paper-ink-faint: ${sf["ink-faint"].light};`,
+    `--paper-chrome-bg: ${sf["chrome-bg"].light};`,
+    `--paper-chrome-border: ${sf["chrome-border"].light};`,
+    `--bp-tone-info-bg: ${cl.info.bg}; --bp-tone-info-fg: ${cl.info.fg};`,
+    `--bp-tone-success-bg: ${cl.success.bg}; --bp-tone-success-fg: ${cl.success.fg};`,
+    `--bp-tone-warning-bg: ${cl.warning.bg}; --bp-tone-warning-fg: ${cl.warning.fg};`,
+    `--bp-tone-danger-bg: ${cl.danger.bg}; --bp-tone-danger-fg: ${cl.danger.fg};`,
+    `--bp-tone-neutral-bg: ${cl.neutral.bg}; --bp-tone-neutral-fg: ${cl.neutral.fg};`,
+  ];
   const mailVars = (theme) =>
     [
       `--mail-paper: ${mc.paper[theme]}; --mail-bar: ${mc.bar[theme]}; --mail-rule: ${mc.rule[theme]};`,
@@ -1628,6 +1989,20 @@ const bulldocsThemeBlock = (name, t) => {
     ...mailVars("dark").map((l) => "  " + l),
     "      }",
     "    }",
+    `    ${p}[data-theme="light"] body:has(.bp-paper-article),`,
+    `    ${p}[data-theme="light"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {`,
+    ...readerVars(rl, "light", lightExtra).map((l) => l.replace(/^ {8}/, "      ")),
+    "    }",
+    `    ${p}[data-theme="dark"] body:has(.bp-paper-article),`,
+    `    ${p}[data-theme="dark"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {`,
+    ...readerVars(rd, "dark", darkExtra).map((l) => l.replace(/^ {8}/, "      ")),
+    "    }",
+    `    ${p}[data-theme="light"] #bp-mailapp {`,
+    ...mailVars("light"),
+    "    }",
+    `    ${p}[data-theme="dark"] #bp-mailapp {`,
+    ...mailVars("dark"),
+    "    }",
   ].join("\n");
 };
 
@@ -1636,6 +2011,10 @@ function bulldocsBlock(themes = loadThemes()) {
   const rd = tokens.color.paper.reader.dark;
   const mc = tokens.color.mailChrome;
   const cd = tokens.color.paperCallout.dark; // dark callout tone re-stamps
+  const cl = tokens.color.paperCallout.light; // light re-stamps for [data-theme="light"]
+  const sfl = Object.fromEntries(
+    ["ink-faint", "chrome-bg", "chrome-border"].map((r) => [r, tokens.color.paper.surface[r].light])
+  );
   // S7 stub: the warm reading accent (color.reading-accent), UNCONSUMED until S8.
   const ra = (theme) => hslToHex(tokens.color["reading-accent"][theme]);
   const themed = themeBlocks(themes, bulldocsThemeBlock);
@@ -1655,14 +2034,16 @@ function bulldocsBlock(themes = loadThemes()) {
     "       `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline",
     "       `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on",
     "       the reader on the bp-theme (a shared ink #15211d, rule #dde7e2,",
-    "       etc.). Dark-mode note: the shared source keys dark on",
-    "       `html[data-theme=\"dark\"]`, which the reader NEVER stamps — so the shared",
-    "       dark tokens never match here, and the `prefers-color-scheme: dark` block",
-    "       below (also carried onto <main>) is what owns reader dark mode, flipping",
-    "       the palette to cool bp-dark with light ink so the inline `var(--paper-*)`",
-    "       HTML stays readable. Without the <main>-scoped override the shared light",
-    "       fallback would paint dark ink on the browser's dark theme — the",
-    "       visibility bug. */",
+    "       etc.). Dark-mode note: the reader stamps `html[data-theme]` only via",
+    "       its pre-paint toggle script (localStorage `barkpark_theme`, shared",
+    "       with Studio); before that script runs — and with JS off — the",
+    "       `prefers-color-scheme: dark` block below (also carried onto <main>)",
+    "       owns reader dark mode, flipping the palette to cool bp-dark with",
+    "       light ink so the inline `var(--paper-*)` HTML stays readable. The",
+    "       `html[data-theme]` companions further down repeat both palettes so an",
+    "       explicit toggle beats the OS scheme. Without the <main>-scoped",
+    "       override the shared light fallback would paint dark ink on the",
+    "       browser's dark theme — the visibility bug. */",
     "    body:has(.bp-paper-article),",
     "    body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {",
     `      --paper-bg:         ${rl["bg"]};`,
@@ -1699,13 +2080,14 @@ function bulldocsBlock(themes = loadThemes()) {
     `        --paper-reading-accent: ${ra("dark")}; /* S7 stub — S8 consumes */`,
     "        /* Callout TONE tokens + faint ink + chrome — the SAME reason as the",
     "           --paper-* above: paper-surface.css keys their DARK values on",
-    "           `html[data-theme=\"dark\"]`, which the reader NEVER stamps, so an",
-    "           OS-dark reader (prefers-color-scheme, no toggle) was left with the",
-    "           LIGHT callout tones (#eff6ff on a #131d19 page — a light box on the",
-    "           dark article). Re-skin them here, byte-mirroring the dark values in",
-    "           paper-surface.css's `html[data-theme=\"dark\"] .bp-paper-surface` block.",
-    "           Edit surfaces stamp data-theme and get those directly; this is the",
-    "           reader's prefers-color-scheme companion. */",
+    "           `html[data-theme=\"dark\"]`, which the reader stamps only after its",
+    "           pre-paint toggle script runs, so an OS-dark reader (no JS / first",
+    "           paint) was left with the LIGHT callout tones (#eff6ff on a #131d19",
+    "           page — a light box on the dark article). Re-skin them here,",
+    "           byte-mirroring the dark values in paper-surface.css's",
+    "           `html[data-theme=\"dark\"] .bp-paper-surface` block. Edit surfaces",
+    "           stamp data-theme and get those directly; this is the reader's",
+    "           prefers-color-scheme companion. */",
     `        --paper-ink-faint:    ${rd["ink-faint"]};`,
     `        --paper-chrome-bg:    ${rd["chrome-bg"]};`,
     `        --paper-chrome-border: ${rd["chrome-border"]};`,
@@ -1732,15 +2114,208 @@ function bulldocsBlock(themes = loadThemes()) {
     `        --mail-ink: ${mc.ink.dark}; --mail-soft: ${mc.soft.dark}; --mail-accent: ${mc.accent.dark};`,
     "      }",
     "    }",
+    "    /* Explicit mode stamp — html[data-theme] companions to the light",
+    "       fallback + prefers-color-scheme pair above. The reader's pre-paint",
+    "       <head> script stamps data-theme from localStorage `barkpark_theme`",
+    "       (shared with Studio) or the OS scheme, and the dark/light toggle",
+    "       pill rewrites it — one attribute of extra specificity, so a toggled",
+    "       choice beats the @media blocks in BOTH directions. The @media pair",
+    "       stays byte-complete as the no-JS / first-paint fallback (it is also",
+    "       what the reader-dark-parity guard scans for coverage). */",
+    '    html[data-theme="light"] body:has(.bp-paper-article),',
+    '    html[data-theme="light"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {',
+    `      --paper-bg:         ${rl["bg"]};`,
+    `      --paper-bg-deep:    ${rl["bg-deep"]};`,
+    `      --paper-ink:        ${rl["ink"]};`,
+    `      --paper-ink-soft:   ${rl["ink-soft"]};`,
+    `      --paper-rule:       ${rl["rule"]};`,
+    `      --paper-accent:     ${rl["accent"]};`,
+    `      --paper-accent-soft: ${rl["accent-soft"]};`,
+    `      --paper-reading-accent: ${ra("light")}; /* S7 stub — S8 consumes */`,
+    "      /* Light re-declarations for every token the @media dark block above",
+    "         re-skins — its selector outranks the bare paper-surface light",
+    "         fallbacks, so WITHOUT these a forced-light reader under an OS-dark",
+    "         scheme keeps dark callout tones / faint ink / chrome (the mirror",
+    "         image of the #1217 bug). Values match the un-stamped light path. */",
+    `      --paper-ink-faint:    ${sfl["ink-faint"]};`,
+    `      --paper-chrome-bg:    ${sfl["chrome-bg"]};`,
+    `      --paper-chrome-border: ${sfl["chrome-border"]};`,
+    `      --bp-tone-info-bg:    ${cl.info.bg}; --bp-tone-info-fg:    ${cl.info.fg};`,
+    `      --bp-tone-success-bg: ${cl.success.bg}; --bp-tone-success-fg: ${cl.success.fg};`,
+    `      --bp-tone-warning-bg: ${cl.warning.bg}; --bp-tone-warning-fg: ${cl.warning.fg};`,
+    `      --bp-tone-danger-bg:  ${cl.danger.bg}; --bp-tone-danger-fg:  ${cl.danger.fg};`,
+    `      --bp-tone-neutral-bg: ${cl.neutral.bg}; --bp-tone-neutral-fg: ${cl.neutral.fg};`,
+    "    }",
+    '    html[data-theme="dark"] body:has(.bp-paper-article),',
+    '    html[data-theme="dark"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {',
+    `      --paper-bg:         ${rd["bg"]};`,
+    `      --paper-bg-deep:    ${rd["bg-deep"]};`,
+    `      --paper-ink:        ${rd["ink"]};`,
+    `      --paper-ink-soft:   ${rd["ink-soft"]};`,
+    `      --paper-rule:       ${rd["rule"]};`,
+    `      --paper-accent:     ${rd["accent"]};`,
+    `      --paper-accent-soft: ${rd["accent-soft"]};`,
+    `      --paper-reading-accent: ${ra("dark")}; /* S7 stub — S8 consumes */`,
+    `      --paper-ink-faint:    ${rd["ink-faint"]};`,
+    `      --paper-chrome-bg:    ${rd["chrome-bg"]};`,
+    `      --paper-chrome-border: ${rd["chrome-border"]};`,
+    `      --bp-tone-info-bg:    ${cd.info.bg}; --bp-tone-info-fg:    ${cd.info.fg};`,
+    `      --bp-tone-success-bg: ${cd.success.bg}; --bp-tone-success-fg: ${cd.success.fg};`,
+    `      --bp-tone-warning-bg: ${cd.warning.bg}; --bp-tone-warning-fg: ${cd.warning.fg};`,
+    `      --bp-tone-danger-bg:  ${cd.danger.bg}; --bp-tone-danger-fg:  ${cd.danger.fg};`,
+    `      --bp-tone-neutral-bg: ${cd.neutral.bg}; --bp-tone-neutral-fg: ${cd.neutral.fg};`,
+    "    }",
+    '    html[data-theme="light"] #bp-mailapp {',
+    `      --mail-paper: ${mc.paper.light}; --mail-bar: ${mc.bar.light}; --mail-rule: ${mc.rule.light};`,
+    `      --mail-ink: ${mc.ink.light}; --mail-soft: ${mc.soft.light}; --mail-accent: ${mc.accent.light};`,
+    "    }",
+    '    html[data-theme="dark"] #bp-mailapp {',
+    `      --mail-paper: ${mc.paper.dark}; --mail-bar: ${mc.bar.dark}; --mail-rule: ${mc.rule.dark};`,
+    `      --mail-ink: ${mc.ink.dark}; --mail-soft: ${mc.soft.dark}; --mail-accent: ${mc.accent.dark};`,
+    "    }",
     ...(themed ? ["    " + THEME_BANNER, themed] : []),
   ].join("\n");
 }
 
+// The cloud SPA theme-id enum (app.js `var BP_THEMES = [ … ]`). loadThemes()
+// leads with the default skin (evergreen) then dir order, so the emitted list is
+// the SAME ordering every other generated enumeration uses (Go Themes(), the
+// Studio picker, the CSS blocks). Indented 4 spaces to sit inside the array
+// literal in the IIFE; no trailing comma or newline (the marker's END line
+// carries the newline). This kills the GR12 drift: the SPA's identity picker
+// reads BP_THEMES at runtime, so a new design/themes/<id>.json reaches the picker
+// the moment `emit --write` runs — no second hand-list to forget.
+export function bpThemesList(themes = loadThemes()) {
+  return "    " + themes.map(({ name }) => JSON.stringify(name)).join(", ");
+}
+
+// ── the audit verb table (charter cch-w65; moved into the image cch-w69-s1) ──
+// cloud/priv/audit-actions.json is the SOLE authority for the audit register's
+// verb vocabulary. It lives under cloud/priv — NOT design/ — because its Elixir
+// consumer compile-time-reads it inside the control-plane image build, and that
+// image is built from cloud/ alone (D841/D842: the design/ home broke every cp
+// deploy). Two artifacts read it and NEITHER reads the other:
+//
+//   • cloud/lib/barkpark_cloud/accounts/audit_event.ex derives @actions from
+//     `actions[].verb` at COMPILE time (@external_resource + Jason.decode!), so
+//     validate_inclusion(:action, @actions) still enforces the identical closed set.
+//   • cloud/priv/static/app.js's ACTION_LABELS is the generated region below,
+//     built from `actions[].label`.
+//
+// A row IS the declaration and its label rides ON that row, so there is no place
+// to write a label for a verb the vocabulary does not declare — the shape makes
+// that state unrepresentable rather than merely checked. `label: null` is the
+// honest case charter D582 blessed (humanAction falls back to the raw dotted
+// slug), but a null must CARRY its rationale: `reason_code` from the closed set
+// the manifest itself declares, plus a `reason` that names the open row owning
+// the copy (or, for a producerless verb, the census allowlist excusing it). That
+// turns "unlabelled on purpose" from a discipline into a gate.
+export const AUDIT_ACTIONS_PATH = "cloud/priv/audit-actions.json";
+const VERB_RE = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/;
+const REASON_MIN = 60;
+// Per-code predicates the `reason` prose must satisfy. A minimum length alone
+// buys mush; each code has to point at something that can rot loudly — the same
+// property the Elixir census's @producerless anchor/blocker pair carries.
+const REASON_MUST_CITE = {
+  "d582-copy-not-written": {
+    re: /cch-w\d+-[a-z0-9-]+/,
+    what: "the `cch-w…` slug of the open row that owns the copy",
+  },
+  "no-producer": {
+    re: /@producerless/,
+    what: "`@producerless` — the census allowlist that already excuses the verb by name",
+  },
+};
+
+let auditActionsCache = null;
+export function auditActions() {
+  if (auditActionsCache) return auditActionsCache;
+  const abs = join(repoRoot, AUDIT_ACTIONS_PATH);
+  let table;
+  try { table = JSON.parse(readFileSync(abs, "utf8")); }
+  catch (e) { throw new Error(`${AUDIT_ACTIONS_PATH} is unreadable or not valid JSON: ${e.message}`); }
+  const codes = table.reason_codes;
+  if (!codes || typeof codes !== "object")
+    throw new Error(`${AUDIT_ACTIONS_PATH} declares no \`reason_codes\` object — the closed set every null label must name.`);
+  for (const code of Object.keys(codes)) {
+    if (!REASON_MUST_CITE[code])
+      throw new Error(`${AUDIT_ACTIONS_PATH} declares reason_code ${JSON.stringify(code)} with no predicate in emit.mjs' REASON_MUST_CITE — a code nothing checks is a sentence with no exit code.`);
+  }
+  const rows = table.actions;
+  if (!Array.isArray(rows) || rows.length === 0)
+    throw new Error(`${AUDIT_ACTIONS_PATH} has no \`actions\` array — the whole vocabulary would read as empty and every downstream gate would go vacuous.`);
+
+  const seen = new Set();
+  for (const row of rows) {
+    const at = `${AUDIT_ACTIONS_PATH} row ${JSON.stringify(row?.verb ?? row)}`;
+    if (!row || typeof row !== "object" || Array.isArray(row))
+      throw new Error(`${AUDIT_ACTIONS_PATH}: every entry of \`actions\` must be an object; found ${JSON.stringify(row)}.`);
+    if (typeof row.verb !== "string" || !VERB_RE.test(row.verb))
+      throw new Error(`${at}: \`verb\` must be a dotted <noun>.<verb> slug matching ${VERB_RE}.`);
+    if (seen.has(row.verb))
+      throw new Error(`${at}: declared twice. The vocabulary is a set; a duplicate row means one of the two labels is dead.`);
+    seen.add(row.verb);
+    if (!("label" in row))
+      throw new Error(`${at}: no \`label\` key at all. Every declared verb states its console label EXPLICITLY — a string, or null WITH \`reason_code\` + \`reason\`. An absent key is the silent third state this table exists to remove.`);
+    if (row.label !== null && (typeof row.label !== "string" || row.label.trim() === ""))
+      throw new Error(`${at}: \`label\` must be a non-empty string or null; found ${JSON.stringify(row.label)}.`);
+    if (row.label === null) {
+      const code = row.reason_code;
+      if (!code || !Object.prototype.hasOwnProperty.call(codes, code))
+        throw new Error(`${at}: \`label\` is null, so it needs a \`reason_code\` from the declared set [${Object.keys(codes).join(", ")}]; found ${JSON.stringify(code)}.`);
+      if (typeof row.reason !== "string" || row.reason.trim().length < REASON_MIN)
+        throw new Error(`${at}: \`label\` is null, so it needs a \`reason\` of at least ${REASON_MIN} characters saying why. Found ${JSON.stringify(row.reason)}.`);
+      const { re, what } = REASON_MUST_CITE[code];
+      if (!re.test(row.reason))
+        throw new Error(`${at}: reason_code ${JSON.stringify(code)} requires the \`reason\` to cite ${what} (${re}). It does not, so the excuse points at nothing and cannot rot loudly.`);
+    } else if ("reason_code" in row || "reason" in row) {
+      throw new Error(`${at}: carries a label AND a reason_code/reason. A labelled verb needs no excuse — drop them, or the next reader cannot tell which state is live.`);
+    }
+    if ("note" in row && !(Array.isArray(row.note) && row.note.every((l) => typeof l === "string")))
+      throw new Error(`${at}: \`note\` must be an array of single-line strings (each is emitted as one \`//\` comment above the entry).`);
+  }
+  auditActionsCache = rows;
+  return rows;
+}
+
+// The cloud SPA's ACTION_LABELS body (app.js). Only LABELLED verbs get an entry —
+// humanAction(a) returns ACTION_LABELS[a] || a, so a null row is served by that
+// documented fallback and needs no key (D582). The unlabelled count is emitted as
+// ONE derived comment line rather than a hand-typed figure, so the number in the
+// shipped artifact cannot drift from the table the way 55-vs-56 did. Indented 4
+// spaces to sit inside the object literal in the IIFE; no trailing comma and no
+// trailing newline (the marker's END line carries it).
+export function auditActionLabels(rows = auditActions()) {
+  const labelled = rows.filter((r) => r.label !== null);
+  const lines = [
+    `    // ${rows.length - labelled.length} of the ${rows.length} declared verbs have no entry here: they render`,
+    `    // as their raw dotted slug through humanAction's fallback below, each one`,
+    // This line is part of the generated region shipped in app.js; it is now
+    // repointed to cloud/priv/audit-actions.json (the table moved there in
+    // #11781) by cch-w53 in the same commit that hand-edits the marker line.
+    `    // declared unlabelled ON PURPOSE with a reason in ${AUDIT_ACTIONS_PATH}`,
+    `    // (charter D582 — ugly, not false).`,
+  ];
+  labelled.forEach((r, i) => {
+    for (const l of r.note ?? []) lines.push(`    // ${l}`);
+    lines.push(`    ${JSON.stringify(r.verb)}: ${JSON.stringify(r.label)}${i === labelled.length - 1 ? "" : ","}`);
+  });
+  return lines.join("\n");
+}
+
 // ── artifact registry ────────────────────────────────────────────────────────
-// kind "css"             : splice content between the shared marker block.
+// kind "css"             : splice content between a marker block. The shared
+//                          BEGIN/END GENERATED: tokens marker by default; an
+//                          artifact may override with markerBegin/markerEnd to
+//                          own a DISTINCT marker in a file that also carries the
+//                          tokens block elsewhere (the cloud SPA's app.js).
 // kind "go"/"ts"/"elixir": the build() is the WHOLE file.
 export const ARTIFACTS = [
   { name: "cloud SPA", path: "cloud/priv/static/app.css", kind: "css", build: cloudBlock },
+  { name: "cloud SPA theme ids", path: "cloud/priv/static/app.js", kind: "css",
+    markerBegin: BP_THEMES_MARKER_BEGIN, markerEnd: BP_THEMES_MARKER_END, build: bpThemesList },
+  { name: "cloud SPA audit action labels", path: "cloud/priv/static/app.js", kind: "css",
+    markerBegin: ACTION_LABELS_MARKER_BEGIN, markerEnd: ACTION_LABELS_MARKER_END, build: auditActionLabels },
   { name: "paper-surface", path: "api/assets/paper-surface/paper-surface.css", kind: "css", build: paperBlock },
   { name: "Studio", path: "api/lib/barkpark_web/layouts/root.html.heex", kind: "css", build: studioBlock },
   { name: "/papers reader skin", path: "api/lib/barkpark_web/layouts/bulldocs.html.heex", kind: "css", build: bulldocsBlock },
@@ -1756,6 +2331,7 @@ export const ARTIFACTS = [
   { name: "error page (error_html)", path: "api/lib/barkpark_web/controllers/error_html.ex", kind: "css", build: errorPageBlock },
   { name: "status page chrome", path: "api/lib/barkpark_web/controllers/status_controller.ex", kind: "css", build: statusChromeBlock },
   { name: "/sheets reader", path: "api/lib/barkpark_web/layouts/sheets.html.heex", kind: "css", build: sheetsBlock },
+  { name: "living styleguide swatches", path: "cloud/priv/static/styleguide.html", kind: "html", build: styleguideSwatches },
 ];
 
 // Tolerant of leading indentation on the marker lines (Studio's markers sit
@@ -1765,9 +2341,26 @@ const markerRe = new RegExp(
 );
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
+// The kind "html" splice target: an HTML-comment marker (the swatch grid lives
+// inside styleguide.html's [data-sg-swatches] host, not a <style> block, so a CSS
+// comment can't mark it). Same tolerant leading-indent capture as markerRe.
+const HTML_MARKER_BEGIN =
+  "<!-- BEGIN GENERATED: swatches (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) -->";
+const HTML_MARKER_END = "<!-- END GENERATED: swatches -->";
+const htmlMarkerRe = new RegExp(
+  `([ \\t]*${escapeRe(HTML_MARKER_BEGIN)}\\n)([\\s\\S]*?)(\\n[ \\t]*${escapeRe(HTML_MARKER_END)})`
+);
+
 // Compute {expected, current, path, kind, name} for one artifact. `expected` is
 // the desired full file text; `current` is what's on disk. A missing marker for a
 // css artifact is a hard error (surface not prepared with the marker block).
+//
+// Also returns the GENERATED REGION on both sides — `currentRegion` (what the
+// marker holds on disk right now) and `expectedRegion` (what build() produced).
+// The write fence attributes on the REGION, never the whole file: for a css/html
+// artifact everything outside the marker is legitimately hand-written and must not
+// affect attribution, and for a whole-file (go/ts/elixir) artifact the region IS
+// the file. Both are always the exact bytes that a --write would swap.
 export function evaluate(a) {
   const abs = join(repoRoot, a.path);
   let current;
@@ -1775,33 +2368,218 @@ export function evaluate(a) {
   catch { current = null; }
   const content = a.build();
 
-  if (a.kind !== "css") {
-    // whole-file artifacts (Go, TS): the build() output IS the entire file.
-    return { ...a, abs, current, expected: content };
+  if (a.kind === "html") {
+    // html: splice into the HTML-comment marker of the CURRENT file (same
+    // mechanism as css, different marker). A missing marker is a hard error.
+    const base = current == null ? "" : current;
+    const m = base.match(htmlMarkerRe);
+    if (!m) {
+      return { ...a, abs, current, expected: null, error: `no BEGIN/END GENERATED: swatches marker in ${a.path}` };
+    }
+    const expected = base.slice(0, m.index) + m[1] + content + m[3] + base.slice(m.index + m[0].length);
+    return { ...a, abs, current, expected, currentRegion: m[2], expectedRegion: content };
   }
-  // css: splice into the marker block of the CURRENT file
+  if (a.kind !== "css") {
+    // whole-file artifacts (Go, TS): the build() output IS the entire file, so
+    // the generated region is the file — nothing here is hand-writable, and a
+    // --write overwrites more bluntly than any marker splice.
+    return { ...a, abs, current, expected: content, currentRegion: current, expectedRegion: content };
+  }
+  // css: splice into the marker block of the CURRENT file. Most surfaces share
+  // the tokens marker; an artifact may name its OWN marker (markerBegin/End) to
+  // splice a distinct region in a file that carries the tokens block elsewhere.
   const base = current == null ? "" : current;
-  const m = base.match(markerRe);
+  const re = a.markerBegin
+    ? new RegExp(`([ \\t]*${escapeRe(a.markerBegin)}\\n)([\\s\\S]*?)(\\n[ \\t]*${escapeRe(a.markerEnd)})`)
+    : markerRe;
+  const m = base.match(re);
   if (!m) {
-    return { ...a, abs, current, expected: null, error: `no BEGIN/END GENERATED: tokens marker in ${a.path}` };
+    return { ...a, abs, current, expected: null, error: `no ${a.markerBegin || "BEGIN/END GENERATED: tokens"} marker in ${a.path}` };
   }
   const expected = base.slice(0, m.index) + m[1] + content + m[3] + base.slice(m.index + m[0].length);
-  return { ...a, abs, current, expected };
+  return { ...a, abs, current, expected, currentRegion: m[2], expectedRegion: content };
 }
 
 export function evaluateAll() { return ARTIFACTS.map(evaluate); }
 
-function run(mode) {
+// ── the write fence: attribution by generated-region digest (charter D21) ────
+// design/emit-manifest.json maps `<path>#<artifact name>` → SHA-256 of the region
+// this emitter last wrote there. It is written ONLY by --write and --adopt, and it
+// is the emitter's entire memory of its own output. Committed alongside the
+// artifacts, exactly like the 18 generated files themselves: change tokens.json,
+// run --write, commit the artifacts AND the manifest.
+export const MANIFEST_PATH = "design/emit-manifest.json";
+const MANIFEST_ABS = join(here, "emit-manifest.json");
+
+// The ledger key: an artifact's IDENTITY, not its path. Two ARTIFACTS entries may
+// share one file (distinct markerBegin/markerEnd), and both must own a slot — see
+// the header note for why the shape is a flat `${path}#${name}` composite. A unit
+// without a name (synthetic fixtures) keys by path alone, which is what it is.
+export function regionKey(u) {
+  return u.name ? `${u.path}#${u.name}` : u.path;
+}
+
+export function regionDigest(region) {
+  return region == null ? null : createHash("sha256").update(region, "utf8").digest("hex");
+}
+
+export function readManifest() {
+  let raw;
+  try { raw = readFileSync(MANIFEST_ABS, "utf8"); }
+  catch { return null; } // absent entirely — a first run, handled as UNKNOWN below
+  try { return JSON.parse(raw).regions ?? {}; }
+  catch (e) { throw new Error(`${MANIFEST_PATH} is not valid JSON (${e.message}); repair it or re-bless with: node design/emit.mjs --adopt`); }
+}
+
+function writeManifest(regions) {
+  const sorted = {};
+  for (const k of Object.keys(regions).sort()) sorted[k] = regions[k];
+  writeFileSync(MANIFEST_ABS, JSON.stringify({
+    $comment:
+      "GENERATED ATTRIBUTION LEDGER — do not hand-edit. One SHA-256 per artifact, " +
+      "keyed `<path>#<artifact name>` (NOT path alone: one file may carry two " +
+      "generated regions, and each owns its own slot), taken " +
+      "over the GENERATED REGION ONLY (the marker interior for css/html surfaces, " +
+      "the whole file for go/ts/elixir). design/emit.mjs --write refuses to replace " +
+      "a region whose digest does not match, because those bytes were never emitted " +
+      "and replacing them destroys hand-written work (see commit 1d928b3bf). " +
+      "Rewritten by `node design/emit.mjs --write`; re-bless the tree with --adopt.",
+    regions: sorted,
+  }, null, 2) + "\n");
+}
+
+// Attribute what is on disk RIGHT NOW against the ledger. Three outcomes:
+//   "attributed"   — the region is byte-identical to what this emitter last wrote;
+//                    replacing it loses nothing.
+//   "unattributed" — the region holds bytes the emitter never produced. A --write
+//                    would DELETE them. This is the case the fence exists for.
+//   "unknown"      — no ledger entry (a brand-new artifact, or a missing manifest).
+//                    Treated as unsafe: refusing a write on an unrecorded region is
+//                    the milder failure, and --adopt clears it in one command.
+export function attribute(r, regions) {
+  if (r.error || r.currentRegion == null) return "unknown";
+  const recorded = regions?.[regionKey(r)];
+  if (recorded === undefined) return "unknown";
+  return recorded === regionDigest(r.currentRegion) ? "attributed" : "unattributed";
+}
+
+// The lines a --write would remove from the region and NOT put back. Multiset
+// difference, so a legitimate token edit (`--x: #aaa` → `--x: #bbb`) reports the
+// one line it truly drops rather than the whole block, and a hand-written rule
+// that exists nowhere in the new output is always reported.
+export function lostLines(currentRegion, expectedRegion) {
+  const keep = new Map();
+  for (const l of (expectedRegion ?? "").split("\n")) keep.set(l, (keep.get(l) ?? 0) + 1);
+  const lost = [];
+  for (const l of (currentRegion ?? "").split("\n")) {
+    const n = keep.get(l) ?? 0;
+    if (n > 0) keep.set(l, n - 1);
+    else if (l.trim() !== "") lost.push(l);
+  }
+  return lost;
+}
+
+// Report the exact bytes a --write would have destroyed. The old --write printed
+// only `WROTE <name>`, which named the artifact and never the delta — the single
+// property that let 33 hand-written rules disappear unnoticed.
+function reportUnattributed(u, label = "REFUSED") {
+  console.error(`  ${label} ${u.name} (${u.path})`);
+  const why = u.attribution === "unknown"
+    ? `no entry in ${MANIFEST_PATH} — this emitter has no record of ever generating this region`
+    : `the region on disk does not match what this emitter last wrote there`;
+  console.error(`    ${why}.`);
+  const lost = lostLines(u.currentRegion, u.expectedRegion);
+  if (lost.length === 0) {
+    console.error(`    A --write would rewrite it, dropping no whole line — but the bytes are still unattributed.`);
+  } else {
+    console.error(`    A --write would DELETE ${lost.length} line(s) that do not appear in the regenerated output:`);
+    for (const l of lost.slice(0, 12)) console.error(`      - ${l}`);
+    if (lost.length > 12) console.error(`      … and ${lost.length - 12} more`);
+  }
+}
+
+function run(mode, { force = false } = {}) {
   const results = evaluateAll();
+  const regions = readManifest() ?? {};
   let changed = 0, errored = 0;
+
+  // The mirror is a SECOND generation hop off the just-emitted paper-surface.css,
+  // so its write must run after the artifact loop. Its attribution, however, is a
+  // property of the bundle on disk (a different file the loop never touches), so
+  // it is safe — and necessary — to pre-flight it here with everything else.
+  const mr = evaluateMirror(repoRoot);
+  const mirrorUnit = mr.error ? null : {
+    ...mr, currentRegion: mr.currentBlock, expectedRegion: mr.generatedBlock,
+  };
+
+  // ── --adopt: bless what is on disk as this emitter's own output ─────────────
+  // The one sanctioned escape from a refusal that is NOT a destructive write:
+  // after relocating hand-written rules outside the marker (the fix 55d61ab4c
+  // applied by hand), or after a merge left the ledger behind its artifacts.
+  if (mode === "adopt") {
+    const next = { ...regions };
+    let adopted = 0;
+    for (const u of [...results, ...(mirrorUnit ? [mirrorUnit] : [])]) {
+      if (u.error || u.currentRegion == null) { console.error(`  skip  ${u.name}: ${u.error ?? "region unreadable"}`); continue; }
+      const d = regionDigest(u.currentRegion);
+      const k = regionKey(u);
+      if (next[k] !== d) { next[k] = d; console.log(`  adopt ${u.name} (${u.path})`); adopted++; }
+      else console.log(`  ok    ${u.name} (already blessed)`);
+    }
+    writeManifest(next);
+    console.log(`\nemit --adopt: ${adopted} region(s) newly blessed in ${MANIFEST_PATH}. Nothing was rewritten.`);
+    return;
+  }
+
+  // ── the write fence: pre-flight EVERY unit before writing ANY of them ───────
+  // All-or-nothing on purpose. A per-artifact refusal mid-loop would leave the
+  // tree half-regenerated, which is its own honesty problem: some surfaces new,
+  // some old, and a check.mjs run that cannot tell you which.
+  const units = [...results, ...(mirrorUnit ? [mirrorUnit] : [])];
+  for (const u of units) {
+    u.drift = !u.error && u.current !== u.expected;
+    u.attribution = u.error ? "unknown" : attribute(u, regions);
+    // Only a write that REPLACES bytes can destroy them. A region already equal to
+    // what we would emit is not at risk, whatever the ledger says about it.
+    u.blocked = u.drift && u.attribution !== "attributed";
+  }
+  if (mode === "write") {
+    const blocked = units.filter((u) => u.blocked);
+    if (blocked.length && !force) {
+      console.error(`emit --write: REFUSED — ${blocked.length} region(s) hold content this emitter cannot attribute to a prior generation.\n`);
+      for (const u of blocked) reportUnattributed(u);
+      console.error(`
+  Nothing was written. ${units.filter((u) => u.drift).length} artifact(s) drifted; none were touched.
+
+  This is the fence that commit 1d928b3bf drove through: hand-written rules placed
+  INSIDE a generated marker are deleted by regeneration, and the drift gate then
+  passes over the wreckage. Pick one:
+
+    • Hand-written content?  MOVE it outside the BEGIN/END GENERATED marker, then
+      re-run. That is the durable fix (precedent: 55d61ab4c).
+    • Legitimately generated, just unrecorded (new artifact, or a merge that left
+      ${MANIFEST_PATH} behind)?  node design/emit.mjs --adopt
+    • Certain the listed lines are expendable?  node design/emit.mjs --write --force
+`);
+      process.exit(1);
+    }
+    if (blocked.length && force) {
+      console.error(`emit --write --force: OVERRIDING the fence on ${blocked.length} region(s) — the lines below are being DELETED.\n`);
+      for (const u of blocked) reportUnattributed(u, "DELETING");
+      console.error("");
+    }
+  }
+
+  const nextRegions = { ...regions };
   for (const r of results) {
     if (r.error) { console.error(`  ERROR ${r.name}: ${r.error}`); errored++; continue; }
-    const drift = r.current !== r.expected;
     if (mode === "write") {
-      if (drift) { writeFileSync(r.abs, r.expected); console.log(`  WROTE ${r.name} (${r.path})`); changed++; }
+      if (r.drift) { writeFileSync(r.abs, r.expected); console.log(`  WROTE ${r.name} (${r.path})`); changed++; }
       else { console.log(`  ok    ${r.name} (already current)`); }
+      nextRegions[regionKey(r)] = regionDigest(r.expectedRegion);
     } else {
-      if (drift) { console.error(`  DRIFT ${r.name} (${r.path})`); changed++; }
+      if (r.drift) { console.error(`  DRIFT ${r.name} (${r.path})`); changed++; }
+      else if (r.attribution !== "attributed") { console.error(`  UNATTRIBUTED ${r.name} (${r.path}) — in sync with tokens.json, but ${MANIFEST_PATH} has no matching record`); changed++; }
       else { console.log(`  ok    ${r.name}`); }
     }
   }
@@ -1809,34 +2587,41 @@ function run(mode) {
   // paper-surface.css (a second generation hop), so it runs AFTER the artifact
   // loop has written paper-surface.css to disk. One shared transform with
   // design/check.mjs + scripts/paper-editor-mirror-check.sh — they can't disagree.
-  const mr = evaluateMirror(repoRoot);
+  // Re-evaluated here (not reusing the pre-flight copy) because the surface it
+  // derives from may have just changed on disk.
   if (mr.error) {
     console.error(`  ERROR ${mr.name}: ${mr.error}`);
     errored++;
   } else {
-    const drift = mr.current !== mr.expected;
+    const post = evaluateMirror(repoRoot);
+    const drift = post.current !== post.expected;
     if (mode === "write") {
-      if (drift) { writeFileSync(mr.abs, mr.expected); console.log(`  WROTE ${mr.name} (${mr.path})`); changed++; }
-      else { console.log(`  ok    ${mr.name} (already current)`); }
+      if (drift) { writeFileSync(post.abs, post.expected); console.log(`  WROTE ${post.name} (${post.path})`); changed++; }
+      else { console.log(`  ok    ${post.name} (already current)`); }
+      nextRegions[regionKey(post)] = regionDigest(post.generatedBlock);
     } else {
-      if (drift) { console.error(`  DRIFT ${mr.name} (${mr.path})`); changed++; }
-      else { console.log(`  ok    ${mr.name}`); }
+      if (drift) { console.error(`  DRIFT ${post.name} (${post.path})`); changed++; }
+      else if (mirrorUnit.attribution !== "attributed") { console.error(`  UNATTRIBUTED ${post.name} (${post.path}) — in sync, but ${MANIFEST_PATH} has no matching record`); changed++; }
+      else { console.log(`  ok    ${post.name}`); }
     }
   }
 
   if (errored) { console.error(`emit: ${errored} artifact(s) missing their marker block.`); process.exit(1); }
+  if (mode === "write") writeManifest(nextRegions);
   if (mode !== "write" && changed) {
-    console.error(`\nemit --check: ${changed} artifact(s) DRIFTED from design/tokens.json. Fix: node design/emit.mjs --write`);
+    console.error(`\nemit --check: ${changed} artifact(s) DRIFTED from design/tokens.json or are UNATTRIBUTED. Fix: node design/emit.mjs --write`);
     process.exit(1);
   }
   const total = results.length + 1; // + paper-editor mirror
   console.log(mode === "write"
-    ? `emit --write: ${changed} artifact(s) regenerated, ${total - changed} already current.`
-    : `emit --check: all ${total} artifacts in sync (${results.length} surfaces + paper-editor mirror).`);
+    ? `emit --write: ${changed} artifact(s) regenerated, ${total - changed} already current; ${MANIFEST_PATH} updated.`
+    : `emit --check: all ${total} artifacts in sync (${results.length} surfaces + paper-editor mirror), every generated region attributed.`);
 }
 
 // CLI
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const mode = process.argv.includes("--write") ? "write" : "check";
-  run(mode);
+  const mode = process.argv.includes("--adopt") ? "adopt"
+    : process.argv.includes("--write") ? "write"
+    : "check";
+  run(mode, { force: process.argv.includes("--force") });
 }

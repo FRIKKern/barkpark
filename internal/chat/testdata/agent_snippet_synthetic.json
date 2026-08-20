@@ -1,0 +1,20 @@
+{
+  "_comment": "SYNTHETIC (wave session-card charter D40, D29/D37 precedent): no real capture carries an untruncated resultPreview — 817/820 clip at exactly 401 chars — so the defensive whole-parse branch of agentSnippet is exercised by these hand-built payloads, never by a doctored real fixture.",
+  "cases": [
+    {
+      "name": "whole_parse_untruncated_object",
+      "preview": "{\"phase\":5,\"ok\":true,\"summary\":\"All five phases verified; gate green.\"}",
+      "want": "All five phases verified; gate green."
+    },
+    {
+      "name": "whole_parse_key_priority_direction_wins",
+      "preview": "{\"summary\":\"second choice\",\"direction\":\"WAVE 12 — steer the fleet from chat.\"}",
+      "want": "WAVE 12 — steer the fleet from chat."
+    },
+    {
+      "name": "whole_parse_unknown_keys_never_brace_noise",
+      "preview": "{\"phase\":5,\"ok\":true,\"committed\":false}",
+      "want": ""
+    }
+  ]
+}

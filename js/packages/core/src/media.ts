@@ -316,6 +316,9 @@ export async function searchAssets(
   if (data.highlights !== undefined) result.highlights = data.highlights as Record<string, unknown>
   if (data.parsedQuery !== undefined) result.parsedQuery = data.parsedQuery as Record<string, unknown>
   if (data.ms !== undefined) result.ms = data.ms as number
+  // Top-level on the response (asymmetric envelope, like highlights/ms) —
+  // required by the paired /search/interaction routes.
+  result.searchEventId = (data.searchEventId as string | null | undefined) ?? null
   return result
 }
 

@@ -132,15 +132,19 @@ defmodule Barkpark.Plugins.Indx.Persistence do
   def load_all do
     case File.ls(dir()) do
       {:ok, files} ->
-        for file <- files, String.ends_with?(file, ".term"), into: %{} do
-          scope = file |> String.trim_trailing(".term") |> URI.decode_www_form()
-
-          case load(scope) do
-            {:ok, entry} -> {scope, entry}
-            :error -> nil
-          end
+        # Reject the `:error` branch BEFORE it reaches the map collector: a
+        # bare `nil` element would flow into `:maps.from_list/1` mid-collect and
+        # raise ArgumentError (a corrupt file would take the whole recovery down
+        # with it). The `{:ok, entry} <- [...]` filter-generator drops any scope
+        # whose `load/1` returned `:error` (already logged) so only valid scopes
+        # collect — honoring the "corrupt files are skipped (logged)" contract.
+        for file <- files,
+            String.ends_with?(file, ".term"),
+            scope = file |> String.trim_trailing(".term") |> URI.decode_www_form(),
+            {:ok, entry} <- [load(scope)],
+            into: %{} do
+          {scope, entry}
         end
-        |> Map.drop([nil])
 
       {:error, :enoent} ->
         %{}

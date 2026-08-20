@@ -1,0 +1,141 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "A live heatmap frame (constant 2048B) observed on guerrilla and the host canvas renders the density cloud; evidence recorded (frames + screenshot)",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "Whatever lever was used is reversible and reversed: threshold restored to 300 / harness connections closed; teardown evidence recorded",
+          "evidence": "",
+          "met": false
+        }
+      ],
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "The heatmap O(1) path engages only above @heatmap_threshold 300 (room.ex:58) and set_heatmap_threshold/2 has NO production call path: zero HTTP/channel/LiveView callers, and guerrilla runs a non-distributed BEAM (mix phx.server from source; no epmd/-sname/release console) — box-level proven 2026-07-12. hq-w1-live-verify therefore parks the heatmap leg as decoder-only (Decision J). Two honest options: (a) an admin-gated verb (HTTP or channel, admin token required) that calls Quiz.set_heatmap_threshold/2 — new .ex code, own PR through the Elixir Test gate, use-and-document; (b) a scripted load harness opening >300 real WS connections to wss://guerrilla.barkpark.cloud/quiz/websocket joining one room (the wire protocol is proven at N=1 by the 2026-07-12 synthetic probe: Phoenix V2 join + binary cursors frames, 2+6N codec) — heavier and rate-limit-unverified at scale. Either way the proof is a live 2048-byte heatmap frame + the purple density cloud on the host canvas, then teardown (threshold restored / connections closed; rooms self-reap)."
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "This task is open and has not yet recorded completion evidence."
+              }
+            ],
+            "id": "state-callout",
+            "title": "Ready to begin",
+            "tone": "info",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "id": "done-list",
+            "items": [
+              "A live heatmap frame (constant 2048B) observed on guerrilla and the host canvas renders the density cloud; evidence recorded (frames + screenshot)",
+              "Whatever lever was used is reversible and reversed: threshold restored to 300 / harness connections closed; teardown evidence recorded"
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ],
+        "version": 1
+      },
+      "description": "The heatmap O(1) path engages only above @heatmap_threshold 300 (room.ex:58) and set_heatmap_threshold/2 has NO production call path: zero HTTP/channel/LiveView callers, and guerrilla runs a non-distributed BEAM (mix phx.server from source; no epmd/-sname/release console) — box-level proven 2026-07-12. hq-w1-live-verify therefore parks the heatmap leg as decoder-only (Decision J). Two honest options: (a) an admin-gated verb (HTTP or channel, admin token required) that calls Quiz.set_heatmap_threshold/2 — new .ex code, own PR through the Elixir Test gate, use-and-document; (b) a scripted load harness opening >300 real WS connections to wss://guerrilla.barkpark.cloud/quiz/websocket joining one room (the wire protocol is proven at N=1 by the 2026-07-12 synthetic probe: Phoenix V2 join + binary cursors frames, 2+6N codec) — heavier and rate-limit-unverified at scale. Either way the proof is a live 2048-byte heatmap frame + the purple density cloud on the host canvas, then teardown (threshold restored / connections closed; rooms self-reap).",
+      "github": {
+        "issue": 2801,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_rev": "29a2d6e9d4e1b1197849db33555cd448"
+      },
+      "kind": "task",
+      "labels": [
+        "build",
+        "proj:hyperquiz",
+        "backlog",
+        "area:api"
+      ],
+      "lifecycle_status": "open",
+      "main_tag": "quiz",
+      "parent_id": "hyperquiz-epic",
+      "priority": 3,
+      "tags": [
+        {
+          "rationale": "proves the heatmap crossover live",
+          "strength": 85,
+          "tag": "quiz"
+        },
+        {
+          "rationale": "load/verification harness work",
+          "strength": 45,
+          "tag": "testing"
+        },
+        {
+          "rationale": "option (a) adds an admin-gated verb in api/",
+          "strength": 20,
+          "tag": "elixir"
+        }
+      ],
+      "wave_paper": "hyperquiz-epic-wave-2026-07-12"
+    },
+    "criteria_progress": {
+      "met": 0,
+      "total": 2
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "hq-heatmap-live-lever",
+    "execution_policy": null,
+    "id": "de9724b3-0aff-41dc-8e89-2c2cf0ea5f52",
+    "inserted_at": "2026-07-12T13:33:56.081738Z",
+    "kind": "task",
+    "labels": [
+      "build",
+      "proj:hyperquiz",
+      "backlog",
+      "area:api"
+    ],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": "hyperquiz-epic",
+    "priority": 3,
+    "rev": "451cf251f1c7f954c5aa519aff595907",
+    "status": "published",
+    "title": "Give the heatmap crossover a prod-provable path (admin-gated lever or 301-conn harness)",
+    "type": "task",
+    "updated_at": "2026-07-12T13:34:38.664704Z"
+  },
+  "ok": true
+}

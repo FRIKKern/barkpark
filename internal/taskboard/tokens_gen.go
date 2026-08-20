@@ -21,10 +21,12 @@ var GenLifecycle = map[string]GenLifecycleToken{
 	"cancelled":   {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
 	"ready":       {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
 	"open":        {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+	"considering": {Glyph: "◌", ASCIIGlyph: "?", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+	"researching": {Glyph: "◎", ASCIIGlyph: "R", Role: "", ColorLight: "#7c3aed", ColorDark: "#a78bfa"},
 }
 
 // GenLifecycleOrder is the canonical emission order (matches the source).
-var GenLifecycleOrder = []string{"in_progress", "blocked", "done", "closed", "cancelled", "ready", "open"}
+var GenLifecycleOrder = []string{"in_progress", "blocked", "done", "closed", "cancelled", "ready", "open", "considering", "researching"}
 
 // GenBrailleFrames mirrors lifecycle.in_progress.frames (spinner.go).
 var GenBrailleFrames = [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -50,41 +52,62 @@ var genLifecycleThemes = map[string]ThemeLifecycle{
 	"charple": {
 		Lifecycle: map[string]GenLifecycleToken{
 			"in_progress": {Glyph: "⠋", ASCIIGlyph: "~", Role: "info", ColorLight: "#2563eb", ColorDark: "#60a5fa"},
-			"blocked": {Glyph: "!", ASCIIGlyph: "!", Role: "warn", ColorLight: "#d97706", ColorDark: "#fbbf24"},
-			"done": {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
-			"closed": {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
-			"cancelled": {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
-			"ready": {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
-			"open": {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"blocked":     {Glyph: "!", ASCIIGlyph: "!", Role: "warn", ColorLight: "#d97706", ColorDark: "#fbbf24"},
+			"done":        {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"closed":      {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"cancelled":   {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"ready":       {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
+			"open":        {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"considering": {Glyph: "◌", ASCIIGlyph: "?", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"researching": {Glyph: "◎", ASCIIGlyph: "R", Role: "", ColorLight: "#7c3aed", ColorDark: "#a78bfa"},
 		},
 		BrailleFrames: [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
-		BrailleStill: "⠿",
+		BrailleStill:  "⠿",
 	},
 	"ember": {
 		Lifecycle: map[string]GenLifecycleToken{
 			"in_progress": {Glyph: "⠋", ASCIIGlyph: "~", Role: "info", ColorLight: "#2563eb", ColorDark: "#60a5fa"},
-			"blocked": {Glyph: "!", ASCIIGlyph: "!", Role: "warn", ColorLight: "#d97706", ColorDark: "#fbbf24"},
-			"done": {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
-			"closed": {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
-			"cancelled": {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
-			"ready": {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
-			"open": {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"blocked":     {Glyph: "!", ASCIIGlyph: "!", Role: "warn", ColorLight: "#d97706", ColorDark: "#fbbf24"},
+			"done":        {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"closed":      {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"cancelled":   {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"ready":       {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
+			"open":        {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"considering": {Glyph: "◌", ASCIIGlyph: "?", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"researching": {Glyph: "◎", ASCIIGlyph: "R", Role: "", ColorLight: "#7c3aed", ColorDark: "#a78bfa"},
 		},
 		BrailleFrames: [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
-		BrailleStill: "⠿",
+		BrailleStill:  "⠿",
 	},
 	"fjord": {
 		Lifecycle: map[string]GenLifecycleToken{
 			"in_progress": {Glyph: "⠋", ASCIIGlyph: "~", Role: "info", ColorLight: "#2563eb", ColorDark: "#60a5fa"},
-			"blocked": {Glyph: "!", ASCIIGlyph: "!", Role: "warn", ColorLight: "#d97706", ColorDark: "#fbbf24"},
-			"done": {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
-			"closed": {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
-			"cancelled": {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
-			"ready": {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
-			"open": {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"blocked":     {Glyph: "!", ASCIIGlyph: "!", Role: "warn", ColorLight: "#d97706", ColorDark: "#fbbf24"},
+			"done":        {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"closed":      {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"cancelled":   {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"ready":       {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
+			"open":        {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"considering": {Glyph: "◌", ASCIIGlyph: "?", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"researching": {Glyph: "◎", ASCIIGlyph: "R", Role: "", ColorLight: "#7c3aed", ColorDark: "#a78bfa"},
 		},
 		BrailleFrames: [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
-		BrailleStill: "⠿",
+		BrailleStill:  "⠿",
+	},
+	"iris": {
+		Lifecycle: map[string]GenLifecycleToken{
+			"in_progress": {Glyph: "⠋", ASCIIGlyph: "~", Role: "info", ColorLight: "#2563eb", ColorDark: "#60a5fa"},
+			"blocked":     {Glyph: "!", ASCIIGlyph: "!", Role: "warn", ColorLight: "#d97706", ColorDark: "#fbbf24"},
+			"done":        {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"closed":      {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"cancelled":   {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"ready":       {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
+			"open":        {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+			"considering": {Glyph: "◌", ASCIIGlyph: "?", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"researching": {Glyph: "◎", ASCIIGlyph: "R", Role: "", ColorLight: "#7c3aed", ColorDark: "#a78bfa"},
+		},
+		BrailleFrames: [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		BrailleStill:  "⠿",
 	},
 }
 

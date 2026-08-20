@@ -25,6 +25,7 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
+  alias BarkparkCloud.Registry.InstanceApiCatalog
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.StudioLinkFakeHttpClient, as: Fake
   alias BarkparkCloud.Web.Router
@@ -76,6 +77,15 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
     |> Repo.update!()
   end
 
+  # A LIVE box under a BILLING suspension (cch-w57-s4) — everything the proxy
+  # needs is present; only the billing verdict differs.
+  defp suspended_barkpark(team) do
+    team
+    |> live_barkpark()
+    |> Ecto.Changeset.change(suspended: true, suspended_reason: "billing_lapsed")
+    |> Repo.update!()
+  end
+
   defp session_token(user) do
     {:ok, token} = Accounts.create_user_session_token(user)
     token
@@ -120,6 +130,39 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
     team
     |> Accounts.list_audit_events()
     |> Enum.count(&(&1.action == action))
+  end
+
+  # Drive `method`/`path_fun.(id)` as an actor from team A against a barkpark
+  # owned by team B, and assert the object-level-authorization fail-closed:
+  # a wrong-team id is the SAME 404 as a nonexistent id (no existence leak),
+  # the Fake upstream is never touched, and — for a `:mutate` — team B's audit
+  # log stays empty. The proof of load-bearingness is that reverting
+  # resolve_team_barkpark/2's `when tid == team.id` guard reds every call site.
+  defp assert_cross_team_404(method, path_fun, opts \\ []) do
+    body = Keyword.get(opts, :body)
+    mutating = Keyword.get(opts, :mutating, false)
+
+    {_owner_b, team_b} = user_with_team()
+    bp_b = live_barkpark(team_b)
+
+    {user_a, _team_a} = user_with_team()
+    token_a = session_token(user_a)
+    Fake.program([])
+
+    call_opts = if body, do: [token: token_a, body: body], else: [token: token_a]
+
+    wrong_team = call(method, path_fun.(bp_b.id), call_opts)
+    nonexistent = call(method, path_fun.(Ecto.UUID.generate()), call_opts)
+
+    assert wrong_team.status == 404
+    assert nonexistent.status == 404
+    # No existence leak: the barkpark the actor does NOT own is indistinguishable
+    # from one that never existed.
+    assert json_body(wrong_team) == json_body(nonexistent)
+    assert json_body(wrong_team) == %{"ok" => false, "error" => %{"code" => "not_found"}}
+    # The credential was never spent — the relay never happened.
+    assert Fake.requests() == []
+    if mutating, do: assert(Accounts.list_audit_events(team_b) == [])
   end
 
   describe "route surface — explicit, no free-form passthrough" do
@@ -334,6 +377,49 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       assert event.metadata["event_id"] == "evt_5"
     end
 
+    test "test-send POSTs the test-send sub-path and writes one webhook.test_sent event" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      program(ok_json(200, ~s({"delivered":true,"status":204})))
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/test-send",
+          token: session_token(user)
+        )
+
+      assert conn.status == 200
+      assert [req] = Fake.requests()
+      assert req.method == :post
+      # The capability ATOM is underscored; only the upstream PATH is hyphenated.
+      assert req.url == @instance_url <> "/v1/webhooks/production/wh_9/test-send"
+
+      # The audit clause is load-bearing: maybe_audit_instance_mutation/4 calls
+      # instance_mutation_action/1 unconditionally for every :mutate tier and has
+      # no catch-all, so a missing clause would be a FunctionClauseError right
+      # here rather than a quiet missing row.
+      assert audit_count(team, "webhook.test_sent") == 1
+      [event] = Accounts.list_audit_events(team)
+      assert event.metadata["capability"] == "webhook.test_send"
+      assert event.metadata["webhook_id"] == "wh_9"
+    end
+
+    test "test-send on a too-old instance degrades to capability_unavailable, not a bare 404" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      # Phoenix's UNCODED 404 — the shape a box that predates the route returns.
+      program(ok_json(404, ~s({"errors":{"detail":"Not Found"}})))
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/test-send",
+          token: session_token(user)
+        )
+
+      assert conn.status == 502
+      assert %{"error" => %{"code" => "capability_unavailable"}} = json_body(conn)
+      # A failed capability is not a mutation that happened.
+      assert audit_count(team, "webhook.test_sent") == 0
+    end
+
     test "a rejected mutation (upstream 422) writes NO audit event" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
@@ -422,6 +508,114 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
              }
 
       assert_token_custody(conn)
+    end
+  end
+
+  # cch-w57-s4 — the :read / :mutate authority split on a SUSPENDED box
+  # (charter D673). Isolation withholds the platform's maintenance attention, so
+  # a `:mutate` relayed with the stored admin credential is refused BEFORE the
+  # ciphertext is decrypted; a `:read` grants nothing durable and still relays.
+  # The caller is a plain "member" — the actually-reachable, non-admin path.
+  describe "a SUSPENDED box — :mutate is refused, :read still relays" do
+    test "a :read still relays and still answers 200 (the grant is NOT withdrawn)" do
+      {user, team} = user_with_team("member")
+      bp = suspended_barkpark(team)
+      program(ok_json(200, ~s({"webhooks":[{"id":"wh_1","name":"revalidation"}]})))
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/api/webhooks", token: session_token(user))
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+      assert [req] = Fake.requests()
+      assert req.url == @instance_url <> "/v1/webhooks/production"
+      assert_token_custody(conn)
+    end
+
+    test "a :mutate (create) → 409 suspended with ZERO upstream requests" do
+      {user, team} = user_with_team("member")
+      bp = suspended_barkpark(team)
+      # Programmed to SUCCEED: if the guard is missing this relays a 201 and the
+      # recorded request carries the plaintext admin token.
+      program(ok_json(201, ~s({"id":"wh_new","secret":"whsec_x"})))
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks",
+          body: %{"url" => "https://acme.test/hook", "events" => ["create"]},
+          token: session_token(user)
+        )
+
+      # The credential was never spent — asserted FIRST so a lost guard fails
+      # with the relayed request (bearer and all) in the message, not just a 201.
+      assert Fake.requests() == []
+      assert conn.status == 409
+      assert json_body(conn) == %{"ok" => false, "error" => %{"code" => "suspended"}}
+      refute conn.resp_body =~ @instance_admin_token
+      assert Accounts.list_audit_events(team) == []
+    end
+
+    test "every other :mutate verb is refused the same way, upstream untouched" do
+      {user, team} = user_with_team("member")
+      bp = suspended_barkpark(team)
+      Fake.program([])
+      token = session_token(user)
+
+      calls = [
+        call(:put, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9",
+          body: %{"active" => false},
+          token: token
+        ),
+        call(:delete, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9", token: token),
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/rotate", token: token),
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/test-send", token: token),
+        call(
+          :post,
+          "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/deliveries/evt_1/replay",
+          token: token
+        )
+      ]
+
+      for conn <- calls do
+        assert conn.status == 409
+        assert json_body(conn)["error"]["code"] == "suspended"
+      end
+
+      assert Fake.requests() == []
+      assert Accounts.list_audit_events(team) == []
+    end
+
+    # The sweep above enumerates its verbs BY HAND, which is only as complete as
+    # the day it was typed. This arm derives the population from the catalog, so a
+    # capability ADDED at `:mutate` reds here instead of silently gaining a route
+    # around the refusal. It is the ADD direction the hand list cannot have.
+    test "the hand-swept :mutate verbs ARE the catalog's :mutate population" do
+      mutating =
+        InstanceApiCatalog.catalog()
+        |> Enum.filter(&(&1.tier == :mutate))
+        |> Enum.map(& &1.capability)
+        |> MapSet.new()
+
+      swept =
+        MapSet.new([
+          :"webhook.create",
+          :"webhook.update",
+          :"webhook.delete",
+          :"webhook.rotate",
+          :"webhook.test_send",
+          :"webhook.replay"
+        ])
+
+      assert MapSet.equal?(mutating, swept),
+             "the proxy's :mutate population drifted from the suspended-box sweep above.\n" <>
+               "  in the catalog but NOT swept (ADD): " <>
+               "#{inspect(MapSet.difference(mutating, swept) |> MapSet.to_list())}\n" <>
+               "  swept but no longer :mutate (STALE): " <>
+               "#{inspect(MapSet.difference(swept, mutating) |> MapSet.to_list())}\n" <>
+               "A new :mutate capability needs a driven 409-with-zero-upstream-requests row in this " <>
+               "describe; a capability that stopped mutating needs this pin lowered deliberately."
+
+      refute MapSet.size(mutating) == 0,
+             "the catalog reports NO :mutate capability at all — an unreadable population must never " <>
+               "read as 'nothing to refuse'"
     end
   end
 
@@ -631,6 +825,60 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       assert conn.status == 404
       assert Fake.requests() == []
       assert Accounts.list_audit_events(team_b) == []
+    end
+
+    # The 2 tests above cover GET base (list) and nested DELETE. The remaining 7
+    # webhook-proxy verbs funnel through the SAME proxy_instance_webhook/2 ->
+    # resolve_team_barkpark/2 gate, but each is a distinct route with its own
+    # method + path; a per-verb cross-team row proves the object-level check is
+    # not accidentally bypassed by any one of them (IDOR/BOLA capstone).
+
+    test "create (POST base) across teams is the SAME 404, no upstream, no audit" do
+      assert_cross_team_404(
+        :post,
+        &"/v1/barkparks/#{&1}/api/webhooks",
+        body: %{"url" => "https://acme.test/hook", "events" => ["create"]},
+        mutating: true
+      )
+    end
+
+    test "show (GET :webhook_id) across teams is the SAME 404, upstream never called" do
+      assert_cross_team_404(:get, &"/v1/barkparks/#{&1}/api/webhooks/wh_9")
+    end
+
+    test "update (PUT :webhook_id) across teams is the SAME 404, no upstream, no audit" do
+      assert_cross_team_404(
+        :put,
+        &"/v1/barkparks/#{&1}/api/webhooks/wh_9",
+        body: %{"active" => false},
+        mutating: true
+      )
+    end
+
+    test "rotate across teams is the SAME 404, no upstream, no audit" do
+      assert_cross_team_404(:post, &"/v1/barkparks/#{&1}/api/webhooks/wh_9/rotate",
+        mutating: true
+      )
+    end
+
+    test "deliveries (GET) across teams is the SAME 404, upstream never called" do
+      assert_cross_team_404(:get, &"/v1/barkparks/#{&1}/api/webhooks/wh_9/deliveries")
+    end
+
+    test "replay across teams is the SAME 404, no upstream, no audit" do
+      assert_cross_team_404(
+        :post,
+        &"/v1/barkparks/#{&1}/api/webhooks/wh_9/deliveries/evt_5/replay",
+        mutating: true
+      )
+    end
+
+    test "test-send across teams is the SAME 404, no upstream, no audit" do
+      assert_cross_team_404(
+        :post,
+        &"/v1/barkparks/#{&1}/api/webhooks/wh_9/test-send",
+        mutating: true
+      )
     end
   end
 end

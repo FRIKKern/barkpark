@@ -28,8 +28,8 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
   wall** across repeated runs (parse + evaluate dominate; ~47k cells at tens of
   µs each). That is higher than a naive "toposort is instant" guess — the cost
   is a real constant factor, but it is *linear*: tripling the row count grows
-  the time ~3.9× (verified in the linearity test below and in local sweeps),
-  nowhere near the ~9× a quadratic rescan would show.
+  the time ~4× on a quiet machine (see §The linearity ratio below for the
+  measured distribution), nowhere near the ~9× a quadratic rescan would show.
 
   The guard bound is **10_000 ms** — roughly **8× the worst observed run
   (~1.3 s) and ~10× the typical run (~1.0 s)**, the headroom the slice brief
@@ -41,6 +41,60 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
   The main test performs exactly ONE near-cap recompute and the linearity
   test uses small grids, so the file's own wall time stays a few seconds,
   well under the 10 s file budget even on a 2–3× slower runner.
+
+  ## The linearity ratio, and why its ceiling is 8×
+
+  The second test divides the big grid's time by the small grid's. It is a
+  *wall-clock ratio*, so it inherits every scheduler artefact of the machine it
+  runs on. Its ceiling was 6.0 with a documented "~3.9× observed locally"; both
+  numbers were wrong, and the gap red-flagged main on PR #4686 — a PR that
+  changed one shell script and zero Elixir. A re-run of the identical sha
+  passed 11957/0, and no `api/` file changed anywhere in that PR's range
+  (`Engine.recompute` is untouched since #2044). It was contention, not a
+  regression.
+
+  Measured ratios, `MIX_ENV=test`, Apple Silicon, best-of-3 as shipped:
+
+    * quiet machine, 6 samples: **4.0, 4.3, 2.7, 4.2, 4.3, 4.3**
+    * same machine under moderate load, 5 samples: **6.2, 4.0, 5.6, 5.7, 5.8**
+    * shared CI runner (#4686), 1 sample: **6.1**
+
+  Two things fall out. First, the loaded local machine printed **6.2** — the
+  old 6.0 ceiling is reproducibly exceeded by a *healthy* engine, so #4686 was
+  not bad luck. Second, the 2.7 sample is the tell: its small grid measured
+  119.7 ms against a typical 65 ms, i.e. contention landed in the *small*
+  block and DEFLATED the ratio. Noise here is not a one-sided upward push; it
+  skews whichever grid's measurement block it happens to land in.
+
+  That is also why best-of-3 cannot save this: min-of-N removes a spike shorter
+  than one sample, but a contention burst spanning a whole block is present in
+  every sample the min chooses from. Contention on a shared runner is
+  correlated, and correlated noise survives minimisation.
+
+  **A denoising fix was tried and rejected on the evidence.** Interleaving the
+  grids (small, big, small, big …) so a shared burst hits both and cancels in
+  the ratio is the textbook answer, and it did NOT help this workload: in a
+  paired A/B controlling for load drift, block-sequential gave 6.2/4.0/5.6/5.7/5.8
+  (median 5.7) and interleaved gave 7.4/5.3/5.2/5.0/5.2 (median 5.2) — a lower
+  median but a HIGHER maximum, which is the only statistic a guard's ceiling
+  cares about. Plausibly the alternation costs cache locality that the big grid
+  pays for. The measurement code is therefore left exactly as it was; do not
+  re-try interleaving without re-measuring maxima, not medians.
+
+  So the fix is margin, honestly sized. The ceiling is **8.0×**: ~1.3× above the
+  worst healthy sample ever observed (6.2), ~1.9× above the quiet-machine
+  typical (4.3), and below the ~9× floor of a genuine quadratic.
+
+  The margin between 8 and 9 is admittedly thin, and it is thin *on purpose*
+  rather than by accident — because this test is NOT the primary quadratic
+  guard. The near-cap test above is: an O(n²) rescan of 47k cells across a
+  3.6k-deep chain needs tens of seconds to minutes and blows the 10 s absolute
+  bound by orders of magnitude, on every run, on any runner. The ratio test is
+  the corroborating shape signal. A corroborating signal that reds main on
+  unrelated PRs is worth less than one that fires only when the primary guard
+  does too, so it is tuned to be quiet under contention rather than maximally
+  sensitive. If you are tempted to lower it back toward the noise floor, lower
+  the *variance* first (a dedicated perf runner), not the ceiling.
 
   This test is intentionally UN-tagged: it runs in the default suite. An
   excluded guard is a vacuous guard.
@@ -111,7 +165,9 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
     # cap so this probe is cheap. The ceiling is deliberately loose — it flags a
     # quadratic CLIFF, not constant-factor or GC noise. Best-of-3 (min) per grid
     # absorbs first-run alloc noise and GC spikes, and the small time is floored
-    # to avoid divide-by-noise at millisecond scale.
+    # to avoid divide-by-noise at millisecond scale. Best-of-3 does NOT absorb
+    # correlated runner contention — see @moduledoc §The linearity ratio, which
+    # is why the ceiling carries the margin instead.
     test "recompute scales roughly linearly, not quadratically, with cell count" do
       small = fast_path_content(@lin_small_rows)
       big = fast_path_content(@lin_small_rows * @lin_factor)
@@ -125,9 +181,12 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
 
       ratio = big_ms / small_ms
       # big has @lin_factor× (3×) the rows of small. Linear ≈ 3×; quadratic
-      # ≈ 9×. A 6× ceiling sits cleanly between the ~3.9× observed locally and
-      # the 9× a quadratic rescan would show.
-      assert ratio < 6.0,
+      # ≈ 9×. The 8× ceiling clears the worst HEALTHY sample measured (6.2 on a
+      # loaded machine; 6.1 on the CI runner that red-flagged #4686) with ~1.3×
+      # to spare, and still trips below a quadratic's ~9×. Full measured
+      # distribution and the rejected denoising alternative: @moduledoc
+      # §The linearity ratio. Do not lower this without new measurements.
+      assert ratio < 8.0,
              """
              recompute time grew #{Float.round(ratio, 1)}x when rows grew \
              #{@lin_factor}x (small #{Float.round(small_ms, 1)}ms -> \

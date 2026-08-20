@@ -58,6 +58,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Paths do
   def flat_root(dataset), do: "/studio/#{dataset}"
 
   @doc """
+  The `/w/:ws/p/:proj` scope prefix, or `""` when either slug is absent
+  (the flat surfaces that ride the flat→scoped funnel). ONE owner for the
+  scope-prefix grammar the chat root composes over.
+  """
+  def scope_prefix(ws_slug, proj_slug)
+      when is_binary(ws_slug) and is_binary(proj_slug),
+      do: "/w/#{ws_slug}/p/#{proj_slug}"
+
+  def scope_prefix(_ws_slug, _proj_slug), do: ""
+
+  @doc """
+  The Studio chat root — the flat `/studio/chat` singleton, or the scoped
+  `scope_prefix <> "/studio/chat"`. ONE owner for the chat grammar so the
+  scoped literal never gets hand-built at a call site.
+  """
+  def chat_root(scope_prefix \\ "")
+  def chat_root(nil), do: "/studio/chat"
+  def chat_root(scope_prefix) when is_binary(scope_prefix), do: scope_prefix <> "/studio/chat"
+
+  @doc """
   Standalone paper reader URL — `scope_prefix` + `/papers/:slug`.
   """
   def paper_path(scope_prefix, slug), do: (scope_prefix || "") <> "/papers/#{slug}"

@@ -1,11 +1,12 @@
 defmodule BarkparkWeb.Studio.ChatLive do
   @moduledoc """
-  Studio **Claude chat** at `/studio/chat` — admin-only agent chat backed by
-  the host's Claude Code CLI. Sessions are a PLACE: every conversation is
+  Studio agent chat at `/studio/chat` (or its workspace-scoped route) — an
+  admin-only control plane backed by the selected Claude Code or Codex runtime.
+  Sessions are a PLACE: every conversation is
   persisted (`Barkpark.StudioChat`), listed in the sidebar, addressable at
   `/studio/chat/:session_id`, and resumable via the CLI's `--resume`.
 
-  The chat subprocess is owned by `BarkparkWeb.Studio.ClaudeChat.Session`,
+  The chat subprocess is owned by the selected provider Runtime adapter,
   started lazily on the first send — never on mount, never on reopen
   (reopen replays OUR persisted history instantly). Every decoded
   stream-json event arrives here as `{:claude_chat_event, map}`:
@@ -17,8 +18,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
                         blocks render as dim activity lines
     * `result`        → the turn is over — back to ready, usage in the footer
 
-  Gating lives in `BarkparkWeb.Studio.ClaudeChat` — this mount redirects out
-  unless `ClaudeChat.enabled?/0` (which hard-refuses public-demo hosts and
+  Gating lives behind `Barkpark.StudioChat.Runtime` — this mount redirects out
+  unless the selected provider is enabled (which hard-refuses public-demo hosts and
   honors the per-host opt-out), and the `:admin_studio` live_session carrying
   the route applies the admin `on_mount` gate.
 
@@ -31,15 +32,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   require Logger
 
+  alias Barkpark.ChatHosts
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.Tasks
   alias Barkpark.StudioChat.Recorder
+  alias Barkpark.StudioChat.Runtime
+  alias Barkpark.StudioChat.StreamTail
   alias BarkparkWeb.Studio.ChatToolRenderer
-  alias BarkparkWeb.Studio.ClaudeChat
   alias BarkparkWeb.Studio.ReturnTo
+  alias BarkparkWeb.Studio.StudioLive.Paths
 
   # Spawn-row heuristics + labels for the nested agent trace (charter D40) — pure
   # helpers shared by the live render and the store-replay path.
@@ -136,7 +140,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # CLI's memory on the next send via `--resume`.
   @impl true
   def mount(params, _session, socket) do
-    if ClaudeChat.enabled?() do
+    enabled_provider = Enum.find(StudioChat.Session.providers(), &Runtime.enabled?/1)
+
+    if enabled_provider do
       {:ok,
        socket
        |> assign(
@@ -152,6 +158,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # affordance can land the admin back in the SAME scope instead of the
          # `/studio` session funnel. nil when arrived at flat/directly.
          return_to: ReturnTo.sanitize(params["return_to"]),
+         chat_base_path: chat_base_path(params),
          session: nil,
          store_session_id: nil,
          session_id: nil,
@@ -184,7 +191,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
          rail: %{},
          rail_sig: [],
          rail_expanded: %{},
-         mode: "plan",
+         # Per-tab agent drill-down override (wsc-ad): agentId => bool, default
+         # CLOSED, a manual toggle wins. Never broadcast, reset on session load
+         # (rail_expanded precedent).
+         agent_detail_expanded: %{},
+         mode: List.first(Runtime.capabilities(enabled_provider).modes) || "default",
+         provider: enabled_provider,
+         execution_target: "managed",
+         execution_host_id: nil,
+         execution_hosts: execution_hosts(socket),
          model_choice: "default",
          # Reasoning-effort intent (charter D48), the exact mirror of model_choice.
          effort_choice: "default",
@@ -251,8 +266,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # Live sidebar overlay (wave 5): session_id → %{state, line}, fed by
          # every Recorder's activity broadcasts. Renders over the stored row.
          activity: %{},
+         # Wave-session-card (wsc charter D8-D11): `workflow` is the LIVE
+         # compact-summary overlay (session_id → D3 summary, fed by
+         # {:chat_workflow} pings, D4); `workflow_summaries` is the COLD half
+         # folded from the stored rail_snapshot at refresh_sessions (D7);
+         # `epic_goals` carries the epic-goal line per workflow row (D9).
+         # A sidebar of plain chats keeps all three empty — zero cost.
+         workflow: %{},
+         workflow_summaries: %{},
+         epic_goals: %{},
          # The hand-task surface (chat ⇄ ledger): every bp-task claim THIS
-         # session's worker (ClaudeChat.worker_id/1) currently holds, keyed by
+         # session's provider-scoped worker id currently holds, keyed by
          # published doc id — fed live off the dataset's task-document
          # broadcasts and hydrated from the ledger on session open. Renders as
          # the Doing strip above the composer.
@@ -290,7 +314,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # the truthful scope over the session-resolving redirect.
       {:ok,
        socket
-       |> put_flash(:error, "Claude chat is not enabled on this instance.")
+       |> put_flash(:error, "No Studio Chat provider is enabled on this instance.")
        |> redirect(to: ReturnTo.sanitize(params["return_to"]) || "/studio")}
     end
   end
@@ -310,12 +334,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       true ->
         # Switch-away moment (charter D36c): persist the draft of the session we
         # are LEAVING before anything else, so its unsent words survive the swap
-        # and reload when it is reopened. Leaving also stamps last_visited_at
-        # (wave 12) — everything up to the departure was SEEN, so only what
-        # happens after counts as "while away".
-        socket = socket |> capture_draft() |> stamp_visited_on_leave()
+        # and reload when it is reopened.
+        socket = capture_draft(socket)
 
-        case StudioChat.get_session(sid) do
+        case StudioChat.get_session(sid, :global) do
           nil ->
             # Unknown/deleted session — fall back to the new-chat state with an
             # honest notice. (A mount-time push_patch would fight the initial
@@ -332,14 +354,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_params(params, _uri, socket) do
-    # Leaving to the new-chat state stamps the departed session's visit (wave
-    # 12) and re-reads the list, so the strip never claims "finished while away"
-    # for the session you just walked out of watching.
+    # Leaving to the new-chat state persists the departed session's draft and
+    # re-reads the list.
     {:noreply,
      socket
      |> put_return_to(params)
      |> capture_draft()
-     |> stamp_visited_on_leave()
      |> reset_to_new_chat()
      |> refresh_sessions()}
   end
@@ -355,24 +375,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  defp execution_hosts(socket) do
+    case socket.assigns[:current_workspace] do
+      %{id: workspace_id} -> ChatHosts.list_hosts(workspace_id)
+      _ -> []
+    end
+  end
+
+  defp chat_base_path(params) do
+    params["workspace_slug"]
+    |> Paths.scope_prefix(params["project_slug"])
+    |> Paths.chat_root()
+  end
+
   # Persist the leaving session's composer draft (charter D36c). No-op on the
   # new-chat state (no store row yet) — a fresh chat's draft is discarded, never
   # persisted to a row that doesn't exist. Blank drafts clear the column.
   defp capture_draft(socket) do
     if sid = socket.assigns[:store_session_id] do
       StudioChat.set_draft(sid, socket.assigns[:composer_draft])
-    end
-
-    socket
-  end
-
-  # Leaving a session stamps its `last_visited_at` (wave 12, the needs-you
-  # strip): everything up to the departure was on screen — SEEN — so only what
-  # happens after you leave can count as "finished while away". Rides the same
-  # switch-away seam as capture_draft; no-op on the new-chat state.
-  defp stamp_visited_on_leave(socket) do
-    if sid = socket.assigns[:store_session_id] do
-      StudioChat.mark_visited(sid)
     end
 
     socket
@@ -408,6 +429,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
       {:set_model, choice} ->
         {:noreply, socket |> clear_persisted_draft() |> change_model(choice) |> clear_composer()}
+
+      :arm_bypass ->
+        # Open the arm ceremony — the SAME assigns as the set-mode bypass road;
+        # nothing is armed until the exact typed confirm word (charter D48).
+        {:noreply,
+         socket
+         |> clear_persisted_draft()
+         |> assign(arming_bypass: true, bypass_confirm: "", bypass_disarmed: false)
+         |> clear_composer()}
 
       :model_usage ->
         {:noreply,
@@ -517,11 +547,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # probe (~1–2s on a real host) runs off the LiveView process.
   def handle_event("readiness-recheck", _params, socket) do
     session = socket.assigns[:session]
+    provider = socket.assigns.provider
 
     {:noreply,
      socket
      |> assign(readiness: :checking)
-     |> start_async(:readiness_probe, fn -> compute_readiness(session) end)}
+     |> start_async(:readiness_probe, fn -> compute_readiness(provider, session) end)}
   end
 
   # Stop a running turn. The interrupt is a control-request frame on stdin
@@ -549,7 +580,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {:noreply, socket}
 
       true ->
-        ClaudeChat.interrupt(socket.assigns.session)
+        Runtime.interrupt(socket.assigns.provider, socket.assigns.session)
 
         Process.send_after(
           self(),
@@ -582,18 +613,62 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, assign(socket, arming_bypass: true, bypass_confirm: "", bypass_disarmed: false)}
   end
 
+  def handle_event("set-provider", %{"provider" => provider}, socket) do
+    if is_nil(socket.assigns[:store_session_id]) and provider in StudioChat.Session.providers() do
+      capabilities = Runtime.capabilities(provider)
+
+      {:noreply,
+       socket
+       |> assign(
+         provider: provider,
+         mode: List.first(capabilities.modes) || "default",
+         model_choice: "default",
+         effort_choice: "default",
+         readiness: :checking
+       )
+       |> start_async(:readiness_probe, fn -> compute_readiness(provider, nil) end)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("set-execution-target", %{"execution_target" => target}, socket) do
+    if is_nil(socket.assigns[:store_session_id]) and
+         target in StudioChat.Session.execution_targets() do
+      {:noreply, assign(socket, execution_target: target, execution_host_id: nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("set-execution-host", %{"execution_host_id" => host_id}, socket) do
+    if is_nil(socket.assigns[:store_session_id]) and Ecto.UUID.cast(host_id) != :error do
+      {:noreply, assign(socket, execution_host_id: host_id)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("set-mode", %{"mode" => mode}, socket) do
-    # Steering to any non-bypass mode drops the live arming token (charter D55):
-    # the next resume of what was a bypass session can never fail open.
-    {:noreply,
-     socket
-     |> assign(
-       arming_bypass: false,
-       bypass_confirm: "",
-       bypass_disarmed: false,
-       bypass_live_armed: false
-     )
-     |> change_mode(ClaudeChat.normalize_mode(mode))}
+    normalized = Runtime.normalize_mode(socket.assigns.provider, mode)
+
+    # The toggle's active segment stays clickable — a same-mode click (with no
+    # switch in flight) is a no-op, never a redundant steer + transcript line.
+    if normalized == socket.assigns.mode and is_nil(socket.assigns[:pending_mode]) do
+      {:noreply, socket}
+    else
+      # Steering to any non-bypass mode drops the live arming token (charter D55):
+      # the next resume of what was a bypass session can never fail open.
+      {:noreply,
+       socket
+       |> assign(
+         arming_bypass: false,
+         bypass_confirm: "",
+         bypass_disarmed: false,
+         bypass_live_armed: false
+       )
+       |> change_mode(normalized)}
+    end
   end
 
   # Track the confirm word as it's typed so the Arm button only enables on an
@@ -652,7 +727,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # trap), so we do not pend/revert on it: the next init/result frame reports
   # the answering model as fact, rendered beside the picker.
   def handle_event("set-model", %{"model" => raw}, socket) do
-    {:noreply, change_model(socket, ClaudeChat.normalize_model(raw))}
+    {:noreply, change_model(socket, Runtime.normalize_model(socket.assigns.provider, raw))}
   end
 
   # Pick the reasoning-effort tier (charter D48). Intent-only: it persists on the
@@ -660,7 +735,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # (the four control subtypes are closed), so a mid-session change never steers
   # the running turn — we post an honest "applies from the next resume" line.
   def handle_event("set-effort", %{"effort" => raw}, socket) do
-    {:noreply, change_effort(socket, ClaudeChat.normalize_effort(raw))}
+    {:noreply, change_effort(socket, Runtime.normalize_effort(socket.assigns.provider, raw))}
   end
 
   def handle_event("approve", %{"rid" => request_id}, socket) do
@@ -737,6 +812,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     {:noreply,
      assign(socket, rail_expanded: Map.put(socket.assigns.rail_expanded, id, not current))}
+  end
+
+  # Expand/collapse ONE rail agent's per-agent detail (wsc-ad) — keyed by the
+  # node's agentId, default CLOSED, a manual toggle is the per-tab override that
+  # wins. Never broadcast (a co-viewer's collapse is their own). A stale id (the
+  # session switched under an in-flight click) is a harmless no-op flip.
+  def handle_event("rail-agent-toggle", %{"id" => id}, socket) do
+    current = agent_detail_open?(socket.assigns.agent_detail_expanded, id)
+
+    {:noreply,
+     assign(socket,
+       agent_detail_expanded: Map.put(socket.assigns.agent_detail_expanded, id, not current)
+     )}
   end
 
   # ── AskUserQuestion answer form (charter D31/D32) ────────────────────────
@@ -846,20 +934,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_event("session-archive", %{"id" => id}, socket) do
-    StudioChat.archive_session(id)
+    # Admin LiveView is the `:global` superuser path (charter D17/D18) — the
+    # sidebar sees every workspace's sessions, unchanged from today.
+    StudioChat.archive_session(id, :global)
     {:noreply, after_lifecycle_mutation(socket, id)}
   end
 
   # Unarchive keeps an on-screen session on screen (store_session_id unchanged);
   # it only leaves the archived shelf, so a refresh is enough — no push_patch.
   def handle_event("session-unarchive", %{"id" => id}, socket) do
-    StudioChat.unarchive_session(id)
+    StudioChat.unarchive_session(id, :global)
     {:noreply, socket |> assign(open_menu_session: nil) |> refresh_sessions()}
   end
 
   def handle_event("session-delete", %{"id" => id}, socket) do
-    StudioChat.delete_session(id)
-    {:noreply, after_lifecycle_mutation(socket, id)}
+    # A managed-codex session that recorded a runtime attempt / usage receipt is
+    # protected by RESTRICT FKs (StudioChat.delete_session maps them to a
+    # changeset error). Surface that as a flash — never let the FK abort crash
+    # the admin LiveView. Its ledgers are permanent; archive is the way out.
+    case StudioChat.delete_session(id, :global) do
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "That chat has a recorded runtime ledger and can't be deleted — archive it instead."
+         )}
+
+      _ok_or_noop ->
+        {:noreply, after_lifecycle_mutation(socket, id)}
+    end
   end
 
   # Flip the active ⇄ archived shelf. refresh_sessions reads the new flag.
@@ -891,7 +995,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # the request_id (latest-outstanding correlation) and the revert target:
         # the last known-good mode, which a chain of unconfirmed rapid switches
         # must preserve rather than fold into an intermediate optimistic value.
-        {:ok, request_id} = ClaudeChat.set_permission_mode(session, mode)
+        {:ok, request_id} = Runtime.steer(socket.assigns.provider, session, %{mode: mode})
         revert_to = revert_target(socket)
 
         socket
@@ -910,7 +1014,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
     label = if choice, do: model_label(choice), else: "the CLI default"
 
     if sid = socket.assigns[:store_session_id], do: StudioChat.set_model_choice(sid, choice)
-    if session = socket.assigns[:session], do: ClaudeChat.set_model(session, choice || "default")
+
+    if session = socket.assigns[:session],
+      do: Runtime.steer(socket.assigns.provider, session, %{model: choice || "default"})
 
     socket
     |> assign(model_choice: choice || "default")
@@ -937,13 +1043,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Classify a submitted composer line as a BUILTIN slash command (charter D36b)
   # or `:none` (send it to the model as-is). Only EXACT builtins route — a
   # `/plan` with trailing prose is ambiguous, so it falls through as user text.
-  # The floor is /plan · /model (the retired /default builtin is gone, charter
-  # D48 — `default` is no longer an offered mode); session-mutating CLI commands
-  # (/compact, /clear) are NOT builtins — they ride through as plain user text
-  # so the CLI handles them itself, and our store identity is pinned by
-  # `--session-id`/`--resume` regardless of what a slash-turn result echoes (D8;
-  # spot-check assumption per D36b — we never scrape ids off frames).
+  # The floor is /plan · /autopilot · /bypass · /model (the retired /default
+  # builtin is gone, charter D48 — `default` is no longer an offered mode);
+  # session-mutating CLI commands (/compact, /clear) are NOT builtins — they
+  # ride through as plain user text so the CLI handles them itself, and our
+  # store identity is pinned by `--session-id`/`--resume` regardless of what a
+  # slash-turn result echoes (D8; spot-check assumption per D36b — we never
+  # scrape ids off frames).
   defp builtin_command("/plan"), do: {:set_mode, "plan"}
+  defp builtin_command("/autopilot"), do: {:set_mode, "auto"}
+  # The toggle never offers bypass (charter D48) — this builtin is the arm
+  # ceremony's entry point now that the raw six-mode select is gone.
+  defp builtin_command("/bypass"), do: :arm_bypass
   defp builtin_command("/model"), do: :model_usage
 
   # /task builtins (hand-task surface): both expand to a doctrine prompt the
@@ -977,7 +1088,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # would silently reset a sticky choice to the CLI default on any typo
         # ("/model opsu"). An unrecognized alias shows usage instead; only an
         # explicit "/model default" resets.
-        case ClaudeChat.normalize_model(arg) do
+        case Runtime.normalize_model("claude", arg) do
           nil -> :model_usage
           choice -> {:set_model, choice}
         end
@@ -1039,7 +1150,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
              |> assign(status: :ready)}
 
           blocks ->
-            case ClaudeChat.send_message(session, blocks) do
+            case Runtime.send_turn(socket.assigns.provider, session, blocks) do
               :ok ->
                 # With images, upgrade the phase-1 text echo to the full bubble
                 # (text + thumbnails) now that the stored data-URIs exist.
@@ -1117,6 +1228,77 @@ defmodule BarkparkWeb.Studio.ChatLive do
      |> assign_messages(clear_queued_badges(socket.assigns.messages))
      |> observe_permission_mode(observed)}
   end
+
+  def handle_info(
+        {:studio_chat_runtime_event, %Runtime.Event{kind: :text_delta} = event},
+        socket
+      ) do
+    text = get_in(event.native, ["params", "delta"]) || ""
+    {:noreply, assign(socket, streaming: advance_streaming(socket.assigns.streaming, text))}
+  end
+
+  def handle_info(
+        {:studio_chat_runtime_event, %Runtime.Event{kind: :turn_completed} = event},
+        socket
+      ) do
+    socket =
+      case socket.assigns.streaming do
+        %{text: text} when is_binary(text) and text != "" ->
+          append_message(socket, :assistant, text)
+
+        _ ->
+          socket
+      end
+
+    line =
+      case event.terminal_state do
+        :interrupted -> "⊘ Interrupted — the session is still live."
+        :failed -> "The turn ended with an error."
+        _ -> nil
+      end
+
+    socket = if line, do: append_message(socket, :system, line), else: socket
+
+    {:noreply,
+     socket
+     |> assign(status: :ready, streaming: nil, interrupt_requested: false)
+     |> refresh_sessions()}
+  end
+
+  def handle_info(
+        {:studio_chat_runtime_event, %Runtime.Event{kind: kind, native: native}},
+        socket
+      )
+      when kind in [:item_started, :item_completed] do
+    lifecycle = if kind == :item_started, do: :started, else: :completed
+    item = get_in(native, ["params", "item"]) || %{}
+
+    {:noreply,
+     fold_rail(
+       socket,
+       StudioChat.rail_apply_codex_item(socket.assigns.rail, item, lifecycle)
+     )}
+  end
+
+  # Codex runtime FAILURE events (codex/protocol.ex): `:protocol_error` (framing
+  # buffer overflow at :139, malformed JSONL at :157), a bare `:error` frame, and
+  # `:process_failed` (the codex process exiting non-zero). Each carries an `error`
+  # map with the reason. Without a clause they fell to the bare %Runtime.Event{}
+  # catch-all below and rendered NOTHING — a hard failure left the transcript
+  # silent (recorder.ex records these kinds; only this LiveView surface was dark).
+  # Surface the reason as an honest :system line. Purely additive: the turn
+  # lifecycle (status/streaming) is left to the terminal turn_completed / DOWN
+  # paths, so a mid-stream malformed line does not falsely settle the turn.
+  def handle_info(
+        {:studio_chat_runtime_event, %Runtime.Event{kind: kind, error: error}},
+        socket
+      )
+      when kind in [:protocol_error, :error, :process_failed] do
+    {:noreply, append_message(socket, :system, codex_failure_line(kind, error))}
+  end
+
+  def handle_info({:studio_chat_runtime_event, %Runtime.Event{}}, socket),
+    do: {:noreply, socket}
 
   def handle_info(
         {:claude_chat_event,
@@ -1204,7 +1386,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # CLI's assistant frame carries `error:"authentication_failed"` — flip the
     # onboarding card to :not_logged_in the moment it shows. The frame's text
     # blocks still render below (transcript stays honest).
-    socket = if ClaudeChat.auth_failure?(ev), do: flag_auth_failure(socket), else: socket
+    socket =
+      if Runtime.auth_failure?(socket.assigns.provider, ev),
+        do: flag_auth_failure(socket),
+        else: socket
 
     # A sub-agent's frames carry a top-level parent_tool_use_id (charter D40);
     # every row this frame produces inherits it so children indent under the
@@ -1281,10 +1466,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # `terminal_reason:"api_error"` (captured wire truth —
         # fixtures/claude_chat/unauthed_stream.ndjson). This clause runs FIRST:
         # subtype alone is never trusted.
-        ClaudeChat.auth_failure?(ev) ->
+        Runtime.auth_failure?(socket.assigns.provider, ev) ->
           flag_auth_failure(socket)
 
-        ClaudeChat.result_success?(ev) ->
+        Runtime.result_success?(socket.assigns.provider, ev) ->
           maybe_kick_title(socket)
 
         interrupted? ->
@@ -1371,6 +1556,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # them so they never fall to the noisy catch-all.
   def handle_info({:claude_chat_control, _kind, _request_id, _response}, socket),
     do: {:noreply, socket}
+
+  # The Recorder engaged Autopilot (an approved plan — steer + persist already
+  # done server-side, surface-agnostic). Render only: flip the toggle, drop any
+  # in-flight user switch (the adoption supersedes it), tell the transcript.
+  def handle_info({:studio_chat_mode_adopted, mode, :plan_approved}, socket) do
+    {:noreply,
+     socket
+     |> assign(mode: mode, pending_mode: nil)
+     |> append_message(:system, "Plan approved — #{mode_label(mode)} engaged.")}
+  end
 
   # A permission ask (charter D31). The SAME wire message routes to one of three
   # cards by its tool_name: AskUserQuestion → an answer FORM, ExitPlanMode → the
@@ -1580,14 +1775,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, teardown_session(socket, message)}
   end
 
-  # The interrupt timed out (charter D18). CRITICAL: `ClaudeChat.close/1` does
+  # The interrupt timed out (charter D18). CRITICAL: runtime `close/1` does
   # NOT emit {:claude_chat_exit} (only a real port exit_status does), so this
   # path must force-close AND run teardown itself. Guarded: a `result` arriving
   # first left `:interrupting`, and a session switch changed `store_session_id`
   # — both make a stale timer a no-op.
   def handle_info({:interrupt_timeout, sid}, socket) do
     if socket.assigns.status == :interrupting and socket.assigns[:store_session_id] == sid do
-      if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
+      if pid = socket.assigns[:session],
+        do: Runtime.close(socket.assigns.provider, pid)
 
       {:noreply,
        teardown_session(
@@ -1650,6 +1846,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
      )}
   end
 
+  # The Session hit its stdout buffer cap (claude_chat.ex D126): the CLI streamed
+  # bytes without a newline past the reassembly cap, so the Session force-closed
+  # the port and stopped itself. It sends this NAMED reason before the DOWN
+  # follows; without a clause it fell through to the catch-all no-op and the user
+  # saw only the generic "ended unexpectedly" DOWN banner. Surface the captured
+  # reason honestly, mirroring the :claude_chat_exit path (the stderr tail is
+  # appended when the CLI wrote one). Ordered before the DOWN handler so the
+  # named message wins the race against the bare process-down that follows.
+  def handle_info({:claude_chat_error, :buffer_overflow, stderr_tail}, socket) do
+    reason = stderr_reason(stderr_tail)
+
+    base =
+      "Claude sent more data than this session can buffer, so it was stopped. " <>
+        "Send a message to resume it."
+
+    message = if reason != "", do: base <> "\n" <> reason, else: base
+
+    {:noreply, teardown_session(socket, message)}
+  end
+
   # A bare process DOWN with no prior exit frame (an unexpected Session crash, or
   # the DOWN that follows our own force-close). Only act while WE still own that
   # pid — after a teardown set `session: nil`, the double-fire DOWN finds no
@@ -1674,7 +1890,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
     if String.starts_with?(id, "drafts.") do
       {:noreply, socket}
     else
-      worker = ClaudeChat.worker_id(socket.assigns.store_session_id)
+      # SIBLING step (wsc charter D9): a mutation of a held hand-task's PARENT
+      # is the epic heartbeat (a wave_status patch, a slice closing under it) —
+      # re-read the epic-goal lines. Purely additive: the claim.worker fold
+      # below is untouched, and no new PubSub topic exists (this is the same
+      # dataset document stream the Doing strip already rides).
+      socket =
+        if Enum.any?(socket.assigns.hand_tasks, fn {_tid, row} -> row.parent_id == id end),
+          do: refresh_epic_goals(socket),
+          else: socket
+
+      worker = Runtime.worker_id(socket.assigns.provider, socket.assigns.store_session_id)
       content = (msg.doc && msg.doc.content) || %{}
       claim = content["claim"] || %{}
 
@@ -1722,20 +1948,46 @@ defmodule BarkparkWeb.Studio.ChatLive do
         do: Map.delete(socket.assigns.activity, sid),
         else: Map.put(socket.assigns.activity, sid, activity)
 
-    # Watching a session settle counts as SEEING it (wave 12): a terminal
-    # activity for the ON-SCREEN session re-stamps last_visited_at, so the
-    # needs-you strip never claims "finished while away" for a finish that
-    # happened right in front of you.
-    if sid == socket.assigns.store_session_id and activity.state in [:idle, :offline] do
-      StudioChat.mark_visited(sid)
-    end
-
     # Always re-read the list: a session that just became active may not be in
     # the sidebar yet (created by another tab), and a terminal transition needs
     # the fresh stored summary/status. Activity events are change-only, so this
     # stays cheap.
     {:noreply, socket |> assign(activity: overlay) |> refresh_sessions()}
   end
+
+  # A Recorder's workflow-summary ping (wsc charter D4): the compact D3 summary,
+  # broadcast change-only on rail-signature flips. Overlay ONLY — the
+  # {:chat_activity} clause above is untouched (D45's law stands) and the stored
+  # rail_snapshot keeps the durable truth for cold mounts (D7). A summary for a
+  # row without an epic-goal line yet also fetches it once — nil is cached, so
+  # an epic-less workflow never re-queries the ledger per frame.
+  def handle_info({:chat_workflow, sid, summary}, socket) when is_map(summary) do
+    socket = assign(socket, workflow: Map.put(socket.assigns.workflow, sid, summary))
+
+    socket =
+      if Map.has_key?(socket.assigns.epic_goals, sid) do
+        socket
+      else
+        case Enum.find(socket.assigns.sessions, &(&1.id == sid)) do
+          nil ->
+            socket
+
+          s ->
+            assign(socket,
+              epic_goals:
+                Map.put(socket.assigns.epic_goals, sid, StudioChat.epic_goal(s.provider, s.id))
+            )
+        end
+      end
+
+    {:noreply, socket}
+  end
+
+  # Herd-layer liveness ticks (charter D41h) ride the same activity topic so
+  # the fleet wire can badge stalls; the Studio sidebar keys off flips only —
+  # explicitly ignored here so the tick is documented, not merely swallowed by
+  # the catch-all below.
+  def handle_info({:chat_heartbeat, _sid, _ts}, socket), do: {:noreply, socket}
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 
@@ -1862,14 +2114,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           <span style="color: var(--primary); flex: none;">●</span>
           <span style="min-width: 0; overflow-wrap: anywhere;" data-gutter-text>{@message.text}</span>
         </div>
-        <%!-- D38: a file-mutating tool call renders as a real colored
+        <%!-- D38 + D25: a file-mutating tool call renders as a real colored
               diff (dispatch on input SHAPE, not tool name) beneath the
-              ● header; a non-diff shape renders nothing here and keeps
-              the generic ⎿ row below. --%>
-        <ChatToolRenderer.tool_diff
-          :if={ChatToolRenderer.diff?(@message[:input])}
-          input={@message.input}
-        />
+              ● header. Routed through the `chat-tool-diff` PortableDoc block
+              (compose_block :article → Components.chat_tool_diff_html) — the
+              SAME block path the assistant reply body uses (D8) and the Go TUI
+              decodes — so this is ONE dual-surface renderer, not a GUI-only
+              widget (Law 1). A non-diff shape yields "" and keeps the ⎿ row. --%>
+        {Phoenix.HTML.raw(chat_tool_diff_html(@message[:input]))}
         <%!-- A classified MCP result renders as a chip INSTEAD of dumping the
               raw JSON blob — the store keeps the full output either way. --%>
         <ChatToolRenderer.tool_chip :if={mcp_chip} chip={mcp_chip} />
@@ -1894,10 +2146,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
           <% end %>
         </div>
       <% :todo -> %>
-        <%!-- The living checklist card (charter D39): one ☐/◐/☒ card the
+        <%!-- The living checklist card (charter D39 + D25): one ☐/◐/☒ card the
               Recorder collapsed + the reducer superseded, so it renders
-              the turn's LATEST todo state whether live or replayed. --%>
-        <ChatToolRenderer.todo_card todos={@message.todos} />
+              the turn's LATEST todo state whether live or replayed. Routed
+              through the `chat-todo` PortableDoc block (compose_block :article →
+              Components.chat_todo_html) — ONE dual-surface renderer the Go TUI
+              decodes too (Law 1), not a bespoke inline HEEx card. --%>
+        {Phoenix.HTML.raw(chat_todo_html(@message.todos))}
       <% :approval -> %>
         <div
           :if={@message.approval_status == :pending}
@@ -2029,12 +2284,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
           </a>
         </div>
       <% :thinking -> %>
-        <%!-- Settled thinking bout (charter D41): dim mono ✻, no text
-              ever — only "thought for ~N tokens". Same shape live and on
-              replay. --%>
-        <div class="text-xs text-dim" style="font-family: var(--font-mono);">
-          <span aria-hidden="true">✻</span> <%= @message.text %>
-        </div>
+        <%!-- Settled thinking bout (charter D41 + D25): dim mono ✻, no text
+              ever — only "thought for ~N tokens". A token-bearing bout routes
+              through the `chat-thinking` PortableDoc block (compose_block
+              :article → Components.chat_thinking_html) — ONE dual-surface
+              renderer the Go TUI decodes too (Law 1). A legacy row with no
+              persisted count degrades to its plain ✻ text. --%>
+        <%= if is_integer(@message[:tokens]) do %>
+          {Phoenix.HTML.raw(chat_thinking_html(@message[:tokens]))}
+        <% else %>
+          <div class="text-xs text-dim" style="font-family: var(--font-mono);">
+            <span aria-hidden="true">✻</span> <%= @message.text %>
+          </div>
+        <% end %>
       <% _ -> %>
         <div class="text-xs text-dim" style="font-family: var(--font-mono);">
           <span aria-hidden="true">✻</span> <%= @message.text %>
@@ -2280,7 +2542,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <.icon name="message-circle" size={15} /> chats
           </span>
           <.link
-            patch={ReturnTo.with_return_to("/studio/chat", @return_to)}
+            patch={ReturnTo.with_return_to(@chat_base_path, @return_to)}
             class="btn btn-primary text-xs"
             style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px;"
           >
@@ -2316,7 +2578,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           </div>
           <.link
             :for={e <- strip}
-            patch={ReturnTo.with_return_to("/studio/chat/#{e.session.id}", @return_to)}
+            patch={ReturnTo.with_return_to("#{@chat_base_path}/#{e.session.id}", @return_to)}
             class="bp-chat-strip-row"
             data-test-id={"chat-strip-#{e.session.id}"}
           >
@@ -2364,9 +2626,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
               No chats yet
             </div>
             <p style="margin: 0 0 8px;">
-              This is your remembered agent workspace. Every conversation with
-              <code>claude</code> on this host is saved here — reopen one to pick up
-              exactly where you left off. Admins only.
+              This is your remembered agent workspace. Provider and execution location
+              are stored with every conversation — reopen one to pick up exactly where
+              you left off. Admins only.
             </p>
             <p style="margin: 0;">
               Try: <em>“Walk the studio LiveViews and sketch how a request flows.”</em>
@@ -2403,7 +2665,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   />
                 </form>
               <% else %>
-                <.link patch={ReturnTo.with_return_to("/studio/chat/#{s.id}", @return_to)} class="bp-chat-session-link">
+                <.link patch={ReturnTo.with_return_to("#{@chat_base_path}/#{s.id}", @return_to)} class="bp-chat-session-link">
                   <% act = @activity[s.id] %>
                   <% {pill_class, pill_text} = session_pill(s, act) %>
                   <div style="display: flex; align-items: center; gap: 6px; padding-right: 22px;">
@@ -2443,6 +2705,47 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                   >
                     <%= s.summary %>
+                  </div>
+                  <%!-- Wave-session-card (wsc charter D8-D11): two lines that
+                        exist ONLY while the session's rail carries a workflow —
+                        a plain chat's row renders byte-identically to before.
+                        Live truth is the {:chat_workflow} overlay (D4); cold
+                        truth is the compact summary folded from rail_snapshot
+                        at refresh_sessions (D7). --%>
+                  <% ws = @workflow[s.id] || @workflow_summaries[s.id] %>
+                  <div
+                    :if={ws}
+                    class="text-xs"
+                    style="margin-top: 3px; display: flex; align-items: center; gap: 6px; min-width: 0;"
+                    data-test-id={"chat-workflow-#{s.id}"}
+                  >
+                    <span
+                      :if={ws.ticks != []}
+                      aria-hidden="true"
+                      style="display: inline-flex; gap: 3px; flex: none;"
+                    >
+                      <span
+                        :for={tick <- ws.ticks}
+                        class={workflow_tick_class(tick)}
+                        style={workflow_tick_style(tick)}
+                      >
+                      </span>
+                    </span>
+                    <span
+                      style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text);"
+                      data-test-id={"chat-workflow-line-#{s.id}"}
+                    >
+                      <%= workflow_card_line(ws) %>
+                    </span>
+                  </div>
+                  <% eg = ws && @epic_goals[s.id] %>
+                  <div
+                    :if={eg}
+                    class="text-xs text-dim"
+                    style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    data-test-id={"chat-epic-#{s.id}"}
+                  >
+                    ↳ <%= eg.title %> · <%= eg.slices_done %>/<%= eg.slices_total %> slices<%= if eg.wave_status, do: " · #{eg.wave_status}" %>
                   </div>
                 </.link>
 
@@ -2554,8 +2857,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       >
         <div style="display: flex; flex-direction: column; gap: 10px; max-width: 860px; width: 100%; margin: 0 auto;">
           <p :if={@messages == [] and @streaming == nil} class="text-sm text-dim">
-            An agent chat backed by this host's <code>claude</code> login. Plan mode: it can
-            read this host's files, but cannot edit or execute anything.
+            An agent chat backed by <code><%= @provider %></code> on the selected execution
+            location. Plan mode can read approved files, but cannot edit or execute anything.
           </p>
 
           <div
@@ -2617,17 +2920,30 @@ defmodule BarkparkWeb.Studio.ChatLive do
             >
               {Phoenix.HTML.raw(@streaming.stable_html)}
             </div>
-            <%= case classify_tail(streaming_tail(@streaming)) do %>
-              <% {:text, tail} -> %>
-                <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;" data-gutter-text>{tail}<span class="text-dim">▌</span></div>
-              <% {:component, kind, prose} -> %>
-                <div
-                  :if={String.trim(prose) != ""}
-                  class="text-sm"
-                  style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
-                  data-gutter-text
-                >{prose}</div>
-                <.skeleton kind={kind} />
+            <%!-- Display cap breached (charter D131): the live preview froze at the
+                  last stable block; the still-forming tail is dropped and an honest
+                  marker stands in. The full response arrives untruncated on completion. --%>
+            <div
+              :if={@streaming[:capped]}
+              class="text-xs text-dim"
+              style="padding: 4px 0; font-style: italic;"
+              data-streaming-capped
+            >
+              live preview truncated — the full response arrives on completion
+            </div>
+            <%= if !@streaming[:capped] do %>
+              <%= case StreamTail.classify(@streaming) do %>
+                <% {:text, tail} -> %>
+                  <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;" data-gutter-text>{tail}<span class="text-dim">▌</span></div>
+                <% {:component, kind, prose} -> %>
+                  <div
+                    :if={String.trim(prose) != ""}
+                    class="text-sm"
+                    style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
+                    data-gutter-text
+                  >{prose}</div>
+                  <.skeleton kind={kind} />
+              <% end %>
             <% end %>
           </div>
 
@@ -2733,7 +3049,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
               re-probes and unlocks the composer in place. The bp-lane states
               render as a banner BELOW the live composer instead (the chat
               itself still works; only its task hands are offline). --%>
-        <.chat_readiness_card :if={composer_locked?(@readiness)} readiness={@readiness} />
+        <.chat_readiness_card
+          :if={composer_locked?(@readiness)}
+          readiness={@readiness}
+          provider={@provider}
+        />
         <div :if={not composer_locked?(@readiness)} style="display: contents;">
         <form
           id="chat-composer-form"
@@ -2849,24 +3169,101 @@ defmodule BarkparkWeb.Studio.ChatLive do
               the attach <label>'s `for` reaches the hidden input by id. --%>
         <div style="display: flex; align-items: center; gap: 10px; padding: 4px 12px 10px;">
             <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
-              <form phx-change="set-mode" style="display: inline-flex; align-items: center;">
-                <span class="bp-select bp-select-chip">
-                <select
-                  name="mode"
-                  aria-label="Permission mode"
-                >
-                  <%!-- The retired middle mode surfaces ONLY while THIS session still
-                        carries it (charter D48) — a legacy row keeps spawning it
-                        verbatim, but it is never an offered choice for a fresh pick. --%>
-                  <option :if={@mode == "default"} value="default" selected>
-                    <%= mode_label("default") %>
-                  </option>
-                  <option :for={m <- ClaudeChat.modes()} value={m} selected={m == @mode}>
-                    <%= mode_label(m) %>
-                  </option>
-                </select>
+              <form
+              :if={is_nil(@store_session_id)}
+                phx-change="set-provider"
+                style="display: inline-flex; align-items: center;"
+              >
+                <span class="bp-select bp-select-strong">
+                  <select name="provider" aria-label="Provider">
+                    <option :for={p <- StudioChat.Session.providers()} value={p} selected={p == @provider}>
+                      <%= String.capitalize(p) %>
+                    </option>
+                  </select>
                 </span>
               </form>
+              <form
+                :if={is_nil(@store_session_id) and @execution_target == "registered_host"}
+                phx-change="set-execution-host"
+                style="display: inline-flex; align-items: center;"
+              >
+                <span class="bp-select">
+                  <select name="execution_host_id" aria-label="Registered host">
+                    <option value="">Choose local hardware…</option>
+                    <option
+                      :for={host <- @execution_hosts}
+                      value={host.id}
+                      selected={host.id == @execution_host_id}
+                    >
+                      <%= host.name %><%= if host.online, do: " · online", else: " · offline" %>
+                    </option>
+                  </select>
+                </span>
+              </form>
+              <form
+                :if={is_nil(@store_session_id)}
+                phx-change="set-execution-target"
+                style="display: inline-flex; align-items: center;"
+              >
+                <span class="bp-select">
+                  <select name="execution_target" aria-label="Execution target">
+                    <option value="managed" selected={@execution_target == "managed"}>Managed</option>
+                    <option value="registered_host" selected={@execution_target == "registered_host"}>
+                      Registered host
+                    </option>
+                  </select>
+                </span>
+              </form>
+              <%!-- Session mode: a two-state projection over the raw permission
+                    modes — ◇ Plan (plan + discuss, read-only) ⇄ ▶ Autopilot
+                    ("auto"). An odd raw mode (a resumed acceptEdits/manual/…
+                    row, or an armed bypass) surfaces honestly as a transient
+                    third segment until the user picks a side; the bypass arm
+                    ceremony itself is reachable via /bypass (charter D48 — the
+                    toggle never offers it). --%>
+              <%!-- Map.get, not strict access: test/fake provider capability
+                    maps may omit :mode_switch — an absent key means no toggle,
+                    never a render crash. --%>
+              <div
+                :if={Map.get(Runtime.capabilities(@provider), :mode_switch, false)}
+                class="mode-toggle"
+                role="tablist"
+                aria-label="Session mode"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={to_string(mode_segment(@mode) == :plan)}
+                  class={["mode-tab mode-tab-plan", mode_segment(@mode) == :plan && "active"]}
+                  phx-click="set-mode"
+                  phx-value-mode="plan"
+                >
+                  ◇ Plan
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={to_string(mode_segment(@mode) == :autopilot)}
+                  class={["mode-tab mode-tab-autopilot", mode_segment(@mode) == :autopilot && "active"]}
+                  phx-click="set-mode"
+                  phx-value-mode="auto"
+                >
+                  ▶ Autopilot
+                </button>
+                <button
+                  :if={mode_segment(@mode) in [:other, :bypass]}
+                  type="button"
+                  role="tab"
+                  aria-selected="true"
+                  disabled
+                  class={[
+                    "mode-tab active",
+                    (mode_segment(@mode) == :bypass && "mode-tab-bypass") || "mode-tab-other"
+                  ]}
+                >
+                  <%= mode_label(@mode) %>
+                </button>
+              </div>
               <%!-- Model picker (wave 5): the choice is intent — it rides the next
                     spawn as `--model` and steers a live session via the set_model
                     control frame; the dim mono suffix is FACT (the answering model
@@ -2880,7 +3277,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   <option value="default" selected={@model_choice == "default"}>
                     Model
                   </option>
-                  <option :for={m <- ClaudeChat.models()} value={m} selected={m == @model_choice}>
+                  <option :for={m <- Runtime.capabilities(@provider).models} value={m} selected={m == @model_choice}>
                     <%= model_label(m) %>
                   </option>
                 </select>
@@ -2908,7 +3305,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   <option value="default" selected={@effort_choice == "default"}>
                     Effort
                   </option>
-                  <option :for={e <- ClaudeChat.efforts()} value={e} selected={e == @effort_choice}>
+                  <option :for={e <- Runtime.capabilities(@provider).efforts} value={e} selected={e == @effort_choice}>
                     <%= effort_label(e) %>
                   </option>
                 </select>
@@ -2989,13 +3386,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           style="display: flex; align-items: center; gap: 8px; padding: 0 14px 10px; font-family: var(--font-mono); opacity: 0.75;"
         >
           <span class="bp-chat-spinner" aria-hidden="true"></span>
-          <span>checking Claude readiness…</span>
+          <span>checking <%= String.capitalize(@provider) %> readiness…</span>
         </div>
         <%!-- bp-lane banner: task hands offline, chat still live (charter D2 —
               named state + next step, never a silent Logger line). --%>
         <.chat_readiness_card
           :if={@readiness in [:no_task_hands, :task_token_expired]}
           readiness={@readiness}
+          provider={@provider}
         />
         </div>
         </div>
@@ -3085,7 +3483,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
               row expands (per-tab) into its phase→agent tree with breathing state
               glyphs, models, and token counts. Hydrated from `rail_snapshot` on
               reopen; a dead "running" entry reads "interrupted", never a spinner. --%>
-        <.agents_rail :if={map_size(@rail) > 0} rail={@rail} rail_expanded={@rail_expanded} />
+        <.agents_rail
+          :if={map_size(@rail) > 0}
+          rail={@rail}
+          rail_expanded={@rail_expanded}
+          agent_detail_expanded={@agent_detail_expanded}
+        />
       </div>
       </div>
     </div>
@@ -3097,6 +3500,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Every state carries its exact next step and a Re-check button that
   # re-probes and unlocks the composer in place — the chat never dead-ends.
   attr :readiness, :atom, required: true
+  attr :provider, :string, required: true
 
   defp chat_readiness_card(assigns) do
     ~H"""
@@ -3108,17 +3512,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
     >
       <span class="text-sm" style="font-weight: 600; display: flex; align-items: center; gap: 8px;">
         <.icon name="alert-triangle" size={15} />
-        <%= readiness_title(@readiness) %>
+        <%= readiness_title(@readiness, @provider) %>
       </span>
       <p class="text-sm text-dim" style="margin: 0; max-width: 60ch;">
-        <%= readiness_body(@readiness) %>
+        <%= readiness_body(@readiness, @provider) %>
       </p>
       <code
-        :if={readiness_step(@readiness)}
+        :if={readiness_step(@readiness, @provider)}
         class="text-xs"
         style="font-family: var(--font-mono); background: var(--bg); border: 1px solid var(--border-muted); border-radius: 6px; padding: 4px 8px; align-self: flex-start;"
       >
-        <%= readiness_step(@readiness) %>
+        <%= readiness_step(@readiness, @provider) %>
       </code>
       <div>
         <button
@@ -3135,42 +3539,66 @@ defmodule BarkparkWeb.Studio.ChatLive do
     """
   end
 
-  defp readiness_title(:no_binary), do: "Claude Code isn't installed on this host"
-  defp readiness_title(:not_logged_in), do: "Claude Code isn't logged in on this host"
-  defp readiness_title(:no_task_hands), do: "Task hands are offline"
-  defp readiness_title(:task_token_expired), do: "The chat's task credential expired"
-  defp readiness_title(_), do: "Checking readiness"
+  defp readiness_title(:no_binary, "claude"), do: "Claude Code isn't installed on this host"
+  defp readiness_title(:no_binary, provider), do: "#{provider_name(provider)} isn't installed"
+
+  defp readiness_title(:not_logged_in, "claude"),
+    do: "Claude Code isn't logged in on this host"
+
+  defp readiness_title(:not_logged_in, provider),
+    do: "#{provider_name(provider)} isn't logged in on this execution host"
+
+  defp readiness_title(:no_task_hands, _provider), do: "Task hands are offline"
+
+  defp readiness_title(:task_token_expired, _provider),
+    do: "The chat's task credential expired"
+
+  defp readiness_title(_, _provider), do: "Checking readiness"
 
   # :no_binary reuses the spawn-error copy VERBATIM (the card is that copy's
   # first live surface — it was dead code until this slice).
-  defp readiness_body(:no_binary), do: spawn_error_text(:binary_not_found)
+  defp readiness_body(:no_binary, "claude"), do: spawn_error_text(:binary_not_found)
 
-  defp readiness_body(:not_logged_in),
+  defp readiness_body(:no_binary, provider),
+    do: "The #{provider_name(provider)} runtime is not available on the selected execution host."
+
+  defp readiness_body(:not_logged_in, "claude"),
     do:
       "The `claude` binary is installed, but it has no credentials. " <>
         "Log in on this host, then Re-check — the composer unlocks in place, no reload."
 
-  defp readiness_body(:no_task_hands),
+  defp readiness_body(:not_logged_in, provider),
+    do:
+      "#{provider_name(provider)} is installed but has no usable local credentials. " <>
+        "Authenticate on the execution host, then Re-check."
+
+  defp readiness_body(:no_task_hands, _provider),
     do:
       "Barkpark refused to mint this session's task credential — the agent can chat, " <>
         "but its bp task tools are offline. Check that your admin token has write " <>
         "access to this workspace, then Re-check."
 
-  defp readiness_body(:task_token_expired),
+  defp readiness_body(:task_token_expired, _provider),
     do:
       "This session's minted Barkpark task token has expired, so task tools stopped " <>
         "working. Re-check, then your next send mints a fresh credential."
 
-  defp readiness_body(_), do: "Checking Claude readiness…"
+  defp readiness_body(_, provider), do: "Checking #{provider_name(provider)} readiness…"
 
-  defp readiness_step(:not_logged_in), do: "claude auth login"
-  defp readiness_step(_), do: nil
+  defp readiness_step(:not_logged_in, "claude"), do: "claude auth login"
+  defp readiness_step(:not_logged_in, "codex"), do: "codex login"
+  defp readiness_step(_, _provider), do: nil
+
+  defp provider_name("claude"), do: "Claude Code"
+  defp provider_name("codex"), do: "Codex"
+  defp provider_name(provider), do: String.capitalize(provider)
 
   # The agents rail (charter D47) — mission control below the composer. Distinct
   # from the D45/D46 transcript spawn rows BY DESIGN (this is live state, that is
   # history); no dedup. All chrome via emitted tokens.
   attr :rail, :map, required: true
   attr :rail_expanded, :map, required: true
+  attr :agent_detail_expanded, :map, required: true
 
   defp agents_rail(assigns) do
     ~H"""
@@ -3187,6 +3615,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         :for={entry <- rail_rows(@rail)}
         entry={entry}
         open={rail_open?(@rail_expanded, entry)}
+        agent_detail_expanded={@agent_detail_expanded}
       />
     </div>
     """
@@ -3200,6 +3629,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # simple one-line render.
   attr :entry, :map, required: true
   attr :open, :boolean, required: true
+  attr :agent_detail_expanded, :map, required: true
 
   defp rail_entry(assigns) do
     journey = StudioChat.workflow_journey(assigns.entry)
@@ -3253,7 +3683,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
             cycle defaults collapsed to the one summary line above; the per-tab
             toggle overrides both ways, charter D61). --%>
       <div :if={@open and @workflow?} style="padding-left: 16px; margin-top: 2px;">
-        <.rail_phase :for={phase <- @journey.phases} phase={phase} entry={@entry} />
+        <.rail_phase
+          :for={phase <- @journey.phases}
+          phase={phase}
+          entry={@entry}
+          agent_detail_expanded={@agent_detail_expanded}
+        />
       </div>
     </div>
     """
@@ -3263,6 +3698,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # (or interrupted-frontier) phase heads its nested agent rows.
   attr :phase, :map, required: true
   attr :entry, :map, required: true
+  attr :agent_detail_expanded, :map, required: true
 
   defp rail_phase(assigns) do
     ~H"""
@@ -3295,7 +3731,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
         :if={@phase.status in [:active, :interrupted]}
         style="padding-left: 16px; margin-top: 1px;"
       >
-        <.rail_agent :for={node <- @phase.agents} node={node} entry={@entry} />
+        <.rail_agent
+          :for={node <- @phase.agents}
+          node={node}
+          entry={@entry}
+          agent_detail_expanded={@agent_detail_expanded}
+        />
       </div>
     </div>
     """
@@ -3306,39 +3747,152 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # (interrupted) entry's non-terminal agents never spin (no fake spinners law).
   attr :node, :map, required: true
   attr :entry, :map, required: true
+  attr :agent_detail_expanded, :map, required: true
 
   defp rail_agent(assigns) do
+    detail = StudioChat.workflow_agent_node_detail(assigns.node)
+    agent_id = assigns.node["agentId"]
+    # The affordance is gated on DETAIL, never origin (wsc-ad D27): a node with no
+    # brief/tool/result/attempt (or no id to key the toggle) simply carries no
+    # drill-down — a background/codex row stays one quiet line.
+    has_detail? = detail != %{} and is_binary(agent_id)
+
+    assigns =
+      assign(assigns,
+        detail: detail,
+        agent_id: agent_id,
+        has_detail?: has_detail?,
+        detail_open?: has_detail? and agent_detail_open?(assigns.agent_detail_expanded, agent_id)
+      )
+
     ~H"""
-    <div
-      data-rail-node="workflow_agent"
-      class="text-xs"
-      style="display: flex; align-items: baseline; gap: 6px; padding: 1px 0; overflow-wrap: anywhere;"
-    >
-      <span
-        aria-hidden="true"
-        class={rail_node_running?(@entry, @node) && "bp-chat-agent-run"}
-        title={@node["error"]}
-        style={"flex: none; color: #{rail_agent_color(@entry, @node)};"}
+    <div data-rail-node="workflow_agent">
+      <div
+        class="text-xs"
+        style="display: flex; align-items: baseline; gap: 6px; padding: 1px 0; overflow-wrap: anywhere;"
       >
-        <%= rail_agent_glyph(@node) %>
-      </span>
-      <span style="min-width: 0; flex: 1;">
-        <%= case StudioChat.workflow_label_parts(@node["label"]) do %>
-          <% {:pair, kind, rest} -> %>
-            <span class="text-dim" style="opacity: 0.7;"><%= kind %>:</span><span style="font-weight: 600;"><%= rest %></span>
-          <% {:bare, label} -> %>
-            <span><%= label || "agent" %></span>
-        <% end %>
-        <span :if={@node["model"]} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
-          <%= StudioChat.model_family(@node["model"]) %>
+        <span
+          aria-hidden="true"
+          class={rail_node_running?(@entry, @node) && "bp-chat-agent-run"}
+          title={@node["error"]}
+          style={"flex: none; color: #{rail_agent_color(@entry, @node)};"}
+        >
+          <%= rail_agent_glyph(@node) %>
         </span>
-        <span :if={rail_node_tokens(@node)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
-          · <%= StudioChat.format_tokens(rail_node_tokens(@node)) %> tok
+        <span style="min-width: 0; flex: 1;">
+          <%= case StudioChat.workflow_label_parts(@node["label"]) do %>
+            <% {:pair, kind, rest} -> %>
+              <span class="text-dim" style="opacity: 0.7;"><%= kind %>:</span><span style="font-weight: 600;"><%= rest %></span>
+            <% {:bare, label} -> %>
+              <span><%= label || "agent" %></span>
+          <% end %>
+          <span :if={@node["model"]} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+            <%= StudioChat.model_family(@node["model"]) %>
+          </span>
+          <span :if={rail_node_tokens(@node)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+            · <%= StudioChat.format_tokens(rail_node_tokens(@node)) %> tok
+          </span>
         </span>
-      </span>
+        <button
+          :if={@has_detail?}
+          type="button"
+          class="btn text-xs"
+          phx-click="rail-agent-toggle"
+          phx-value-id={@agent_id}
+          aria-expanded={to_string(@detail_open?)}
+          style="flex: none; padding: 0 6px; opacity: 0.7;"
+        >
+          <%= if @detail_open?, do: "hide", else: "detail" %>
+        </button>
+      </div>
+
+      <.rail_agent_detail :if={@detail_open?} detail={@detail} />
     </div>
     """
   end
+
+  # The expanded per-agent detail (wsc-ad): ABOUT — the brief; NOW — the live tool
+  # line + progress age while the agent is non-terminal; DONE — the settled result
+  # (capped) once terminal; and an attempt>1 retry chip. Every field is read
+  # VERBATIM off the normalized detail map — absent fields simply do not render.
+  # HONESTY: thinking text never rides the wire (encrypted signature only), so
+  # NOTHING here is labeled "thinking" — the brief + tool line + result ARE the
+  # honest window into what the agent is about.
+  attr :detail, :map, required: true
+
+  defp rail_agent_detail(assigns) do
+    ~H"""
+    <div
+      class="text-xs"
+      style="padding: 1px 0 4px 20px; display: flex; flex-direction: column; gap: 3px;"
+    >
+      <div :if={@detail["attempt"] && @detail["attempt"] > 1}>
+        <span
+          class="text-xs"
+          style="display: inline-block; padding: 0 6px; border-radius: 8px; background: var(--warn-soft); color: var(--warn);"
+        >
+          attempt <%= @detail["attempt"] %>
+        </span>
+      </div>
+
+      <div
+        :if={@detail["promptPreview"]}
+        class="text-dim"
+        style="opacity: 0.85; white-space: pre-wrap; overflow-wrap: anywhere;"
+      >
+        <span style="font-weight: 600; opacity: 0.7;">about</span>
+        <%= @detail["promptPreview"] %>
+      </div>
+
+      <div
+        :if={not @detail["terminal"] and (@detail["lastToolName"] || @detail["lastToolSummary"])}
+        style="overflow-wrap: anywhere;"
+      >
+        <span aria-hidden="true">▸</span>
+        <span :if={@detail["lastToolName"]} style="font-weight: 600;"><%= @detail["lastToolName"] %></span>
+        <span :if={@detail["lastToolSummary"]} class="text-dim" style="opacity: 0.85;">
+          · <%= @detail["lastToolSummary"] %>
+        </span>
+        <span
+          :if={agent_progress_age(@detail["lastProgressAt"])}
+          class="text-dim"
+          style="opacity: 0.6;"
+        >
+          · <%= agent_progress_age(@detail["lastProgressAt"]) %>
+        </span>
+      </div>
+
+      <div
+        :if={@detail["terminal"] and @detail["resultPreview"]}
+        class="text-dim"
+        style="opacity: 0.85; white-space: pre-wrap; overflow-wrap: anywhere;"
+      >
+        <span style="font-weight: 600; opacity: 0.7;">done</span>
+        <%= agent_result_preview(@detail["resultPreview"]) %>
+      </div>
+    </div>
+    """
+  end
+
+  # Cap the settled result at 300 opaque chars (wsc-ad) — it is NOT re-parsed and
+  # NOT run through `summary_preview` (that is for a different, JSON-aware path);
+  # it is verbatim text with an ellipsis when clipped.
+  defp agent_result_preview(text) when is_binary(text) do
+    if String.length(text) > 300, do: String.slice(text, 0, 300) <> "…", else: text
+  end
+
+  defp agent_result_preview(_), do: nil
+
+  # Coarse age of the last progress tick (epoch-ms), for the live NOW line only.
+  # A wall-clock read — deliberately confined to non-terminal agent rows, which
+  # never appear in any byte-locked/determinism-guarded region (the golden folds a
+  # COMPLETED run, whose phases collapse their agents). Reuses `age_words/1`.
+  defp agent_progress_age(ms) when is_integer(ms) do
+    diff = System.system_time(:millisecond) - ms
+    if diff >= 0, do: age_words(div(diff, 1000)), else: nil
+  end
+
+  defp agent_progress_age(_), do: nil
 
   # A dedicated shimmering placeholder per forming component — the reader sees
   # WHAT is coming (a chart, a diagram, a table…) instead of raw source noise.
@@ -3354,7 +3908,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         class="text-xs text-dim"
         style="font-family: var(--font-mono); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;"
       >
-        <span class="bp-skel-dot"></span> rendering <%= skeleton_label(@kind) %>…
+        <span class="bp-skel-dot"></span> rendering <%= StreamTail.skeleton_label(@kind) %>…
       </div>
       <%= case @kind do %>
         <% "chart" -> %>
@@ -3432,25 +3986,50 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # a store row already exists (store_session_id set by replay) — spawn with
   # `--resume` to rehydrate the CLI's memory. Never eager-respawn; never scrape
   # ids off hook_* frames (D8).
-  defp ensure_session(%{assigns: %{session: session}} = socket) when is_pid(session), do: socket
+  defp ensure_session(%{assigns: %{session: session}} = socket) when not is_nil(session),
+    do: socket
 
   defp ensure_session(socket) do
     case socket.assigns.store_session_id do
       nil ->
         id = Ecto.UUID.generate()
 
+        # Every session BELONGS to the workspace it is created in — managed and
+        # registered-host alike (herd charter D43h: `BlockedSweeper` is
+        # fail-closed on NULL owners, so a `nil`-owned session can never fire
+        # `chat_blocked`). Stamp the resolved scope workspace, falling back to
+        # the seeded Default Workspace; `:global` (a `nil`-owned session) is
+        # reserved for a pre-tenancy instance with no Default Workspace.
+        scope =
+          case socket.assigns[:current_workspace] do
+            %{id: ws_id} when is_binary(ws_id) ->
+              {:workspace, ws_id}
+
+            _ ->
+              case Barkpark.Tenancy.get_default_workspace() do
+                %{id: ws_id} -> {:workspace, ws_id}
+                nil -> :global
+              end
+          end
+
         # De-fanged strict match (charter D24): a create failure must NOT crash
         # the LiveView (a crashed tab restores nothing). Post an honest line and
         # go offline; the caller withdraws the echo and hands the words back.
-        case StudioChat.create_session(%{
-               id: id,
-               cwd: ClaudeChat.cwd(),
-               mode: socket.assigns.mode
-             }) do
+        case StudioChat.create_session(
+               %{
+                 id: id,
+                 provider: socket.assigns.provider,
+                 execution_target: socket.assigns.execution_target,
+                 execution_host_id: socket.assigns.execution_host_id,
+                 cwd: Runtime.cwd(socket.assigns.provider),
+                 mode: socket.assigns.mode
+               },
+               scope
+             ) do
           {:ok, _} ->
             socket
             |> assign(store_session_id: id, session_id: id, status: :working)
-            |> push_patch(to: chat_patch_to("/studio/chat/#{id}", socket))
+            |> push_patch(to: chat_patch_to("#{socket.assigns.chat_base_path}/#{id}", socket))
             |> spawn_session(id, false)
 
           {:error, reason} ->
@@ -3477,13 +4056,37 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # running; a spawn error stays honest — the composer never lies about a
   # session that isn't there.
   defp spawn_session(socket, store_id, resume?) do
+    # The turn's workspace identity is the SESSION's persisted
+    # owner_workspace_id (connectors D206 — mirror chat_controller.ex's
+    # `session.owner_workspace_id`), NEVER the ambient current_workspace
+    # assign: on the flat /studio/chat route StudioChrome pins that assign to
+    # the seeded Default workspace, so a genuinely-:global session would
+    # silently inherit the Default workspace's execution profile (D205).
+    store_session = StudioChat.get_session(store_id, :global)
+
     with {:ok, recorder} <-
            Recorder.ensure(%{
              session_id: store_id,
+             provider: socket.assigns.provider,
+             provider_session_id: socket.assigns[:provider_session_id],
+             execution_target: socket.assigns.execution_target,
+             execution_host_id: socket.assigns.execution_host_id,
+             workspace_id: store_session && store_session.owner_workspace_id,
+             cwd: Runtime.cwd(socket.assigns.provider),
              mode: socket.assigns.mode,
              resume: resume?,
-             model: ClaudeChat.normalize_model(socket.assigns[:model_choice]),
-             effort: ClaudeChat.normalize_effort(socket.assigns[:effort_choice]),
+             model:
+               Runtime.normalize_choice(
+                 socket.assigns.provider,
+                 :models,
+                 socket.assigns[:model_choice]
+               ),
+             effort:
+               Runtime.normalize_choice(
+                 socket.assigns.provider,
+                 :efforts,
+                 socket.assigns[:effort_choice]
+               ),
              # The chat admin's principal (charter D63): the Session mints its
              # loopback bp-mcp credential from this — never exceeding the
              # human's own rights; absent ⇒ no hands, chat unchanged.
@@ -3598,9 +4201,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp kick_readiness_probe(socket) do
     socket = assign(socket, readiness: :checking)
+    provider = socket.assigns.provider
 
     if connected?(socket) do
-      start_async(socket, :readiness_probe, fn -> compute_readiness(nil) end)
+      start_async(socket, :readiness_probe, fn -> compute_readiness(provider, nil) end)
     else
       socket
     end
@@ -3611,20 +4215,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `{:static, state}` or a 0-arity fun; absent ⇒ the real provider-neutral
   # probe. Runs INSIDE the start_async task, never on the LiveView process
   # (the claude auth shell-out costs ~1–2s, charter Verified ground).
-  defp compute_readiness(session) do
+  defp compute_readiness(provider, session) do
     case Application.get_env(:barkpark, :studio_chat_readiness_probe) do
       {:static, state} when is_atom(state) -> state
       fun when is_function(fun, 0) -> fun.()
-      _ -> with(:ready <- claude_readiness(), do: hands_readiness(session))
+      _ -> with(:ready <- provider_readiness(provider), do: hands_readiness(provider, session))
     end
   end
 
-  defp claude_readiness do
-    probe = Barkpark.StudioChat.Probe.probe(:claude)
+  defp provider_readiness(provider) do
+    probe = Runtime.readiness(provider)
+    probe = if match?({:ok, _}, probe), do: elem(probe, 1), else: probe
 
     cond do
-      probe.binary != true -> :no_binary
-      probe.authed? != true -> :not_logged_in
+      not is_map(probe) -> :no_binary
+      Map.get(probe, :binary) != true -> :no_binary
+      Map.get(probe, :authed?) != true -> :not_logged_in
       true -> :ready
     end
   end
@@ -3633,25 +4239,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # there is nothing to ask — the mint happens AT spawn (charter decision 2) —
   # so a nil session reads :ready and observe_hands_state/2 covers the spawn
   # moment. The default reads the spawn-env slice's queryable mint state
-  # (`ClaudeChat.task_hands/1`: :minted | :mint_refused | :not_attempted |
+  # (provider `task_hands/1`: :minted | :mint_refused | :not_attempted |
   # :unknown); the config seam injects a verdict for deterministic tests.
   # `:task_token_expired` is reachable only through the seam today —
   # mid-session TTL expiry detection is backlogged (task-cth-bl-token-renewal);
   # the card state is ready for it.
-  defp hands_readiness(session) do
-    case hands_state(session) do
+  defp hands_readiness(provider, session) do
+    case hands_state(provider, session) do
       state when state in [:refused, :mint_refused] -> :no_task_hands
       :expired -> :task_token_expired
       _ -> :ready
     end
   end
 
-  defp hands_state(nil), do: :ok
+  defp hands_state(_provider, nil), do: :ok
 
-  defp hands_state(session) do
+  defp hands_state(provider, session) do
     case Application.get_env(:barkpark, :studio_chat_hands_state) do
       fun when is_function(fun, 1) -> fun.(session)
-      _ -> ClaudeChat.task_hands(session)
+      _ -> Runtime.task_hands(provider, session)
     end
   catch
     # A session that died between spawn and query is not a hands verdict.
@@ -3659,7 +4265,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp observe_hands_state(socket, session) do
-    case hands_readiness(session) do
+    case hands_readiness(socket.assigns.provider, session) do
       :ready -> socket
       state -> assign(socket, readiness: state)
     end
@@ -3709,13 +4315,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # D28): its Recorder owns the runtime; we only stop listening to it.
     socket = socket |> unsubscribe_session() |> subscribe_session(session.id)
 
-    # Arriving stamps last_visited_at (wave 12): opening a session clears it
-    # from the needs-you strip's finished-while-away state — you are looking at
-    # it now. The refresh_sessions at the tail re-reads the stamped row.
-    StudioChat.mark_visited(session.id)
-
     {session_pid, status, live?} =
-      case live_runtime(session.id) do
+      case live_runtime(session) do
         nil ->
           # No live runtime: a still-"pending" approval can never be answered,
           # so persist its cancellation BEFORE replay — the store then agrees
@@ -3739,6 +4340,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       session: session_pid,
       store_session_id: session.id,
       session_id: session.id,
+      provider: session.provider || "claude",
+      execution_target: session.execution_target || "managed",
+      execution_host_id: session.execution_host_id,
+      provider_session_id: session.provider_session_id,
       mode: session.mode || "plan",
       model_choice: session.model_choice || "default",
       effort_choice: session.effort_choice || "default",
@@ -3807,6 +4412,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       rail: session.rail_snapshot || %{},
       rail_sig: StudioChat.rail_signature(session.rail_snapshot || %{}),
       rail_expanded: %{},
+      # Per-agent drill-down overrides reset on reopen (wsc-ad, rail_expanded
+      # precedent): a replayed rail starts every agent detail collapsed.
+      agent_detail_expanded: %{},
       # The reopened session's own sticky draft is restored above (charter D36c);
       # only the in-flight echo of the session we LEFT is stale here.
       pending_echo_id: nil,
@@ -3844,11 +4452,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # whose runtime is still running keeps its pending approvals answerable
   # instead of cancelling them. A recorder that dies between lookup and the
   # session_pid call is treated as no runtime.
-  defp live_runtime(session_id) do
-    with recorder when is_pid(recorder) <- Recorder.whereis(session_id),
-         {:ok, session_pid} <- Recorder.session_pid(recorder),
-         true <- Process.alive?(session_pid) do
-      session_pid
+  defp live_runtime(session) do
+    with recorder when is_pid(recorder) <- Recorder.whereis(session.id),
+         {:ok, runtime_ref} <- Recorder.session_pid(recorder),
+         true <- Runtime.alive?(runtime_ref) do
+      runtime_ref
     else
       _ -> nil
     end
@@ -3878,6 +4486,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       hand_tasks: %{},
       task_picker: nil,
       mode: "plan",
+      provider: "claude",
+      execution_target: "managed",
+      execution_host_id: nil,
+      provider_session_id: nil,
       # Sticky model default (charter D36d): a new chat inherits the last
       # non-default model you picked, via a DEDICATED query (list_sessions omits
       # model_choice — seeding off it reads nil forever). nil → "default".
@@ -3915,6 +4527,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       rail: %{},
       rail_sig: [],
       rail_expanded: %{},
+      agent_detail_expanded: %{},
       composer_draft: "",
       pending_echo_id: nil,
       question_forms: %{}
@@ -3922,7 +4535,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp refresh_sessions(socket) do
-    sessions = StudioChat.list_sessions(archived: socket.assigns[:show_archived] == true)
+    sessions =
+      StudioChat.list_sessions([archived: socket.assigns[:show_archived] == true], :global)
+
+    # Cold workflow truth (wsc charter D7): the select-widened rail_snapshot
+    # folds to the compact D3 summary HERE, and the snapshot itself never
+    # rides an assign (stripped below). Plain sessions (nil summary) pay zero.
+    workflow_summaries =
+      for s <- sessions, summary = StudioChat.workflow_summary(s.rail_snapshot), into: %{} do
+        {s.id, summary}
+      end
+
+    # The epic-goal line (wsc charter D9): computed ONLY for workflow rows —
+    # a sidebar of plain chats never queries the ledger.
+    epic_goals =
+      for s <- sessions, Map.has_key?(workflow_summaries, s.id), into: %{} do
+        {s.id, StudioChat.epic_goal(s.provider, s.id)}
+      end
+
+    sessions = Enum.map(sessions, &%{&1 | rail_snapshot: nil})
 
     # The needs-you strip's store-truth half (wave 12): the pending ask ROLES of
     # every listed session whose denormalised counter says the agent needs the
@@ -3933,8 +4564,28 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     assign(socket,
       sessions: sessions,
+      workflow_summaries: workflow_summaries,
+      epic_goals: epic_goals,
       pending_ask_roles: StudioChat.pending_ask_roles(pending_ids)
     )
+  end
+
+  # Re-read the epic-goal lines for every workflow row (cold ∪ live overlay) —
+  # the sibling document_changed step (wsc charter D9) lands here when the epic
+  # parent's heartbeat moves.
+  defp refresh_epic_goals(socket) do
+    ids =
+      MapSet.union(
+        MapSet.new(Map.keys(socket.assigns.workflow_summaries)),
+        MapSet.new(Map.keys(socket.assigns.workflow))
+      )
+
+    goals =
+      for s <- socket.assigns.sessions, MapSet.member?(ids, s.id), into: %{} do
+        {s.id, StudioChat.epic_goal(s.provider, s.id)}
+      end
+
+    assign(socket, epic_goals: goals)
   end
 
   # A row-level archive/delete. Always refresh the sidebar; when the mutated row
@@ -3947,7 +4598,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     socket = socket |> assign(open_menu_session: nil) |> refresh_sessions()
 
     if socket.assigns.store_session_id == id do
-      push_patch(socket, to: chat_patch_to("/studio/chat", socket))
+      push_patch(socket, to: chat_patch_to(socket.assigns.chat_base_path, socket))
     else
       socket
     end
@@ -4029,13 +4680,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # carry the post-plan mode. Skipped while a user-initiated switch is in flight
   # (its ack owns the mode, charter D17/D23) and for any unknown/echoed-same
   # value, so a routine init never churns the selector.
-  # Adopt the mode the CLI actually reports off an init frame. `default` STAYS
-  # adoptable here (charter D34: approving a plan flips the CLI's OWN mode plan →
-  # default — observe reflects that REALITY, and a persisted `default` spawns
-  # verbatim). Only bypassPermissions is excluded — the fail-closed law (D48):
-  # an echoed frame is an untrusted string and must never arm dangerous bypass.
+  # Adopt the mode the CLI actually reports off an init frame. `default` is NOT
+  # handled here anymore: the post-plan flip (plan → default, charter D34/D52)
+  # is now the Recorder's seam — it observes the same init frame, engages
+  # Autopilot (steer + persist), and broadcasts `{:studio_chat_mode_adopted, …}`
+  # which this LiveView renders. Only bypassPermissions stays excluded — the
+  # fail-closed law (D48): an echoed frame is an untrusted string and must
+  # never arm dangerous bypass.
   defp observe_permission_mode(socket, mode)
-       when is_binary(mode) and mode in ~w(plan default acceptEdits auto dontAsk manual) do
+       when is_binary(mode) and mode in ~w(plan acceptEdits auto dontAsk manual) do
     cond do
       mode == socket.assigns.mode or not is_nil(socket.assigns[:pending_mode]) ->
         socket
@@ -4046,7 +4699,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Stay quiet and — critically — do NOT adopt/persist it: the stored
       # bypassPermissions row is what keeps the re-arm affordance alive on the
       # next reopen (D55's honest disarmed panel).
-      mode == ClaudeChat.normalize_mode(socket.assigns.mode) ->
+      mode == Runtime.normalize_mode(socket.assigns.provider, socket.assigns.mode) ->
         socket
 
       true ->
@@ -4067,6 +4720,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  # The CLI's own post-plan flip: inert HERE — the Recorder owns this seam
+  # (engage Autopilot + `{:studio_chat_mode_adopted, …}` broadcast); adopting it
+  # locally too would double-persist and race the steer.
+  defp observe_permission_mode(socket, "default"), do: socket
+
   # A permissionMode OUTSIDE the six-value guard (a future/unknown CLI mode) is
   # NOT silently adopted (charter D52): the stored mode is left ALONE (never
   # widen the guard to admit an untrusted string), but the divergence is surfaced
@@ -4086,12 +4744,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp observe_permission_mode(socket, _mode), do: socket
 
-  # The proven ExitPlanMode signature (plan → default, charter D52) gets the
-  # specific story; any other CLI-side divergence is narrated without inventing
-  # a cause — "after plan approval" on a flip that wasn't one would be a lie.
-  defp observed_mode_line("plan", "default"),
-    do: "Permission mode is now #{mode_label("default")} after plan approval."
-
+  # A CLI-side divergence is narrated without inventing a cause. (The proven
+  # ExitPlanMode signature — plan → default, charter D52 — no longer lands
+  # here: the Recorder adopts it into Autopilot and its broadcast carries the
+  # story.)
   defp observed_mode_line(_from, mode),
     do: "Permission mode is now #{mode_label(mode)} (reported by the agent)."
 
@@ -4253,7 +4909,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Recording here too would double-sum the lifetime token totals.
   defp record_result(socket, _ev) do
     with store_id when is_binary(store_id) <- socket.assigns.store_session_id,
-         %{} = session <- StudioChat.get_session(store_id) do
+         %{} = session <- StudioChat.get_session(store_id, :global) do
       assign(socket, ring: ring_from_session(session))
     else
       _ -> socket
@@ -4269,8 +4925,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # the full durable history, so nothing is lost — only the on-screen window is
   # bounded. `assign_messages/2` keeps it bounded across subsequent live appends.
   defp replay_messages(session_id, live?) do
-    session_id
-    |> StudioChat.list_messages(@transcript_window)
+    StudioChat.list_messages(session_id, @transcript_window, :global)
     |> Enum.map(&replay_message(&1, live?))
   end
 
@@ -4403,7 +5058,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp replay_message(%{role: "thinking", seq: seq, source_markdown: md, metadata: meta}, _live?) do
     tokens = Map.get(meta || %{}, "tokens")
     text = if is_integer(tokens), do: thinking_label(tokens), else: md || "thought"
-    %{id: seq, role: :thinking, text: text, html: nil}
+    # `tokens` (when present) routes the render through the `chat-thinking` block
+    # (D25); a legacy row with no count keeps `tokens: nil` and its plain ✻ text.
+    %{id: seq, role: :thinking, text: text, html: nil, tokens: tokens}
   end
 
   defp replay_message(m, _live?) do
@@ -4459,6 +5116,48 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp replay_init(_), do: nil
 
+  # Honest failure copy for a codex runtime failure event (protocol_error /
+  # error / process_failed). Names the failure class, then the scrubbed reason
+  # from protocol.ex's `error` map (message/detail, with the machine code in
+  # parens) when one is present.
+  defp codex_failure_line(kind, error) do
+    label =
+      case kind do
+        :process_failed -> "The codex process exited unexpectedly"
+        :protocol_error -> "The codex stream hit a protocol error"
+        _ -> "The codex turn ended with an error"
+      end
+
+    case codex_error_detail(error) do
+      "" -> label <> "."
+      detail -> label <> " — " <> detail <> "."
+    end
+  end
+
+  defp codex_error_detail(error) when is_map(error) do
+    reason =
+      [error["message"], error["detail"]]
+      |> Enum.map(&codex_error_text/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+      |> Enum.join(" — ")
+
+    code = codex_error_text(error["code"])
+
+    cond do
+      reason != "" and code != "" -> reason <> " (" <> code <> ")"
+      reason != "" -> reason
+      code != "" -> code
+      true -> ""
+    end
+  end
+
+  defp codex_error_detail(_), do: ""
+
+  defp codex_error_text(value) when is_binary(value), do: String.trim(value)
+  defp codex_error_text(value) when is_integer(value), do: Integer.to_string(value)
+  defp codex_error_text(_), do: ""
+
   defp append_message(socket, role, text, opts \\ []) do
     id = socket.assigns.next_id
     message = Map.merge(%{id: id, role: role, text: text, html: nil}, Map.new(opts))
@@ -4484,7 +5183,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     case socket.assigns[:thinking_pulse] do
       %{tokens: n} when is_integer(n) and n > 0 ->
         socket
-        |> append_message(:thinking, thinking_label(n))
+        |> append_message(:thinking, thinking_label(n), tokens: n)
         |> assign(thinking_pulse: nil)
 
       _ ->
@@ -4526,7 +5225,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     do: assign(socket, hand_tasks: %{})
 
   defp hydrate_hand_tasks(socket) do
-    worker = ClaudeChat.worker_id(socket.assigns.store_session_id)
+    worker = Runtime.worker_id(socket.assigns.provider, socket.assigns.store_session_id)
 
     rows =
       Tasks.prime([worker: worker, limit: 10] ++ hand_task_scope())
@@ -4545,12 +5244,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
       title: title || content["title"] || "untitled task",
       now: get_in(content, ["claim", "now"]),
       met: Enum.count(criteria, fn c -> is_map(c) and c["met"] == true end),
-      total: length(criteria)
+      total: length(criteria),
+      # The one-hop epic pointer (wsc charter D9): both feeding paths (ledger
+      # hydrate + document broadcast) already hold the full content, so this
+      # is a pure projection — it keys the sibling document_changed step.
+      parent_id: content["parent_id"]
     }
   end
 
   defp hand_task_row(title, _content),
-    do: %{title: title || "untitled task", now: nil, met: 0, total: 0}
+    do: %{title: title || "untitled task", now: nil, met: 0, total: 0, parent_id: nil}
 
   # A ready-queue Document as a lean picker row.
   defp hand_ready_row(doc) do
@@ -4663,7 +5366,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
       )
 
     if pending? and socket.assigns.session do
-      ClaudeChat.respond_permission(socket.assigns.session, request_id, decision)
+      Runtime.answer_approval(
+        socket.assigns.provider,
+        socket.assigns.session,
+        request_id,
+        decision
+      )
 
       status =
         case decision do
@@ -5126,116 +5834,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp plan_outcome_label(_), do: "✗ kept planning"
 
   # ── progressive streaming render ────────────────────────────────────────
-  # Blocks render the moment they complete, not when the whole message ends:
-  # the accumulated stream is split at the last block boundary ("\n\n") whose
-  # prefix has BALANCED code fences (never split inside a streaming ```mermaid
-  # or ```portabledoc fence — a half fence would render as a broken block).
-  # The stable prefix renders through the paper engine once per boundary
-  # advance; only the still-forming tail re-renders as plain text per delta.
-
-  defp advance_streaming(nil, delta),
-    do: advance_streaming(%{text: "", stable_html: nil, stable_len: 0}, delta)
-
-  defp advance_streaming(state, delta) do
-    text = state.text <> delta
-    state = %{state | text: text}
-    boundary = stable_boundary(text)
-
-    if boundary > state.stable_len do
-      prefix = binary_part(text, 0, boundary)
-      %{state | stable_len: boundary, stable_html: render_paper_html(prefix)}
-    else
-      state
-    end
-  end
-
-  defp streaming_tail(%{text: text, stable_len: stable_len}) do
-    binary_part(text, stable_len, byte_size(text) - stable_len)
-  end
-
-  # ── forming-component classification (streaming skeletons) ──────────────
-  # The tail after the last balanced-fence boundary is a SINGLE forming block
-  # (a "\n\n" with balanced fences would have advanced the boundary), so a
-  # cheap look at how it starts tells us what component is being built. The
-  # raw source of a forming component reads as noise — render a dedicated
-  # skeleton in the component's shape instead; prose keeps streaming as text.
-  #
-  # Returns `{:text, tail}` or `{:component, kind, prose_before_component}`.
-  defp classify_tail(tail) do
-    fence_count = length(:binary.matches(tail, "```"))
-
-    cond do
-      rem(fence_count, 2) == 1 ->
-        {pos, _} = List.last(:binary.matches(tail, "```"))
-        prose = binary_part(tail, 0, pos)
-        fence = binary_part(tail, pos, byte_size(tail) - pos)
-        {:component, fence_kind(fence), prose}
-
-      forming_table?(tail) ->
-        {:component, "table", ""}
-
-      String.starts_with?(String.trim_leading(tail), ">") ->
-        {:component, "callout", ""}
-
-      true ->
-        {:text, tail}
-    end
-  end
-
-  defp fence_kind("```" <> rest) do
-    case rest |> String.split("\n", parts: 2) |> hd() |> String.trim() do
-      "mermaid" -> "diagram"
-      "portabledoc" -> portabledoc_kind(rest)
-      _ -> "code"
-    end
-  end
-
-  defp fence_kind(_), do: "code"
-
-  # Sniff the first "type" in the (partial) JSON to pick the skeleton shape.
-  defp portabledoc_kind(fence_rest) do
-    case Regex.run(~r/"type"\s*:\s*"([\w-]+)"/, fence_rest) do
-      [_, "chart"] -> "chart"
-      [_, "heatmap"] -> "chart"
-      [_, t] when t in ["stat", "stats"] -> "stats"
-      [_, "table"] -> "table"
-      [_, "callout"] -> "callout"
-      [_, "divider"] -> "code"
-      [_, _other] -> "block"
-      _ -> "block"
-    end
-  end
-
-  defp forming_table?(tail) do
-    tail |> String.trim_leading() |> String.starts_with?("|")
-  end
-
-  defp skeleton_label("diagram"), do: "diagram"
-  defp skeleton_label("chart"), do: "chart"
-  defp skeleton_label("stats"), do: "stats"
-  defp skeleton_label("table"), do: "table"
-  defp skeleton_label("callout"), do: "callout"
-  defp skeleton_label("code"), do: "code"
-  defp skeleton_label(_), do: "block"
-
-  defp stable_boundary(text) do
-    case :binary.matches(text, "\n\n") do
-      [] ->
-        0
-
-      matches ->
-        matches
-        |> Enum.reverse()
-        |> Enum.find_value(0, fn {pos, len} ->
-          boundary = pos + len
-          if balanced_fences?(binary_part(text, 0, boundary)), do: boundary, else: nil
-        end)
-    end
-  end
-
-  defp balanced_fences?(prefix) do
-    rem(length(:binary.matches(prefix, "```")), 2) == 0
-  end
+  # Blocks render the moment they complete, not when the whole message ends.
+  # The boundary law, the fold that computes it, the display cap and the
+  # forming-component classification all live in `Barkpark.StudioChat.StreamTail`
+  # (charter D58/D62/D68) so an SSE producer can compute the SAME prefix. The
+  # renderer is injected — `render_paper_html/1` stays HERE because HTML is
+  # web-only and it has three non-streaming callers.
+  defp advance_streaming(state, delta),
+    do: StreamTail.advance(state, delta, &render_paper_html/1)
 
   # Assistant markdown -> PortableDoc blocks -> the SAME article renderer the
   # paper reader uses. The renderer escapes all text at walk time, so the
@@ -5247,6 +5853,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> Render.render_blocks(%{style: :article})
   rescue
     _ -> nil
+  end
+
+  # ── chat tool/todo/thinking rows → the SAME PortableDoc block path (D25) ─────
+  #
+  # A tool diff / todo card / thinking bout is a first-class PortableDoc BLOCK
+  # (`chat-tool-diff` | `chat-todo` | `chat-thinking`), rendered through the exact
+  # compose_block :article → Components emitter path the assistant reply body uses
+  # (D8) and the Go TUI decodes — closing the Law-1 parallel-render fork. The
+  # block is built by `Render.Components.chat_*_block/1` (which REUSES the pure
+  # `TextDiff` / `parse_todos` / token derivations), so live-append and replay
+  # reach an identical row. Fail-soft: a crash degrades to "" (never a 500).
+
+  defp chat_tool_diff_html(input) do
+    case Render.Components.chat_tool_diff_block(input) do
+      nil -> ""
+      block -> render_chat_block(block)
+    end
+  end
+
+  defp chat_todo_html(todos), do: render_chat_block(Render.Components.chat_todo_block(todos))
+
+  defp chat_thinking_html(tokens) when is_integer(tokens),
+    do: render_chat_block(Render.Components.chat_thinking_block(tokens))
+
+  defp chat_thinking_html(_), do: ""
+
+  defp render_chat_block(block) do
+    Render.render_blocks([block], %{style: :article})
+  rescue
+    _ -> ""
   end
 
   # Extract {tool_use_id, output_string} pairs from a wire user-frame. The
@@ -5432,6 +6068,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
       :error -> entry["status"] != "completed"
     end
   end
+
+  # The effective expand state of ONE rail agent's detail (wsc-ad): default
+  # CLOSED, the per-tab override (keyed by agentId) wins. Unlike rail rows there
+  # is no status-aware default — the drill-down is always opt-in, so a busy rail
+  # never buries the fleet under exploded detail.
+  defp agent_detail_open?(overrides, agent_id), do: Map.get(overrides, agent_id, false)
 
   # A sub-agent is running only while its task_status says so — a terminal (or
   # interrupted, D45) block shows its report, never a spinner.
@@ -5677,15 +6319,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp model_label("fable"), do: "Fable"
   defp model_label(m), do: m
 
-  defp mode_label("plan"), do: "plan (read-only)"
+  # The two toggle states carry their product names; the rest keep their raw
+  # stories (they still label odd resumed sessions and transcript lines).
+  defp mode_label("plan"), do: "Plan"
   defp mode_label("acceptEdits"), do: "accept edits"
-  defp mode_label("auto"), do: "auto-run"
+  defp mode_label("auto"), do: "Autopilot"
   defp mode_label("dontAsk"), do: "don't ask"
   defp mode_label("manual"), do: "manual approve"
   defp mode_label("bypassPermissions"), do: "bypass · dangerous"
   # The retired middle mode: shown ONLY while a legacy session still carries it.
   defp mode_label("default"), do: "ask (legacy)"
   defp mode_label(other), do: other
+
+  # Which toggle segment a raw permission mode lights up (the presentation
+  # projection — the raw vocabulary/wire/DB stay untouched): plan ⇒ Plan,
+  # auto ⇒ Autopilot, armed bypass ⇒ the danger segment, anything else (a
+  # resumed acceptEdits/manual/dontAsk/legacy-default row) ⇒ the transient
+  # third segment until the user picks a side.
+  defp mode_segment("plan"), do: :plan
+  defp mode_segment("auto"), do: :autopilot
+  defp mode_segment("bypassPermissions"), do: :bypass
+  defp mode_segment(_), do: :other
 
   # Effort tiers render verbatim in the picker (charter D48 — "Fable · high").
   defp effort_label(nil), do: "default"
@@ -5744,18 +6398,30 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # ── slash-command menu (charter D36a/D36b) ──────────────────────────────
 
   # The builtin floor — always offered, even with no live runtime. `builtin:
-  # true` marks the three that route to a control path on submit (the JS just
+  # true` marks the ones that route to a control path on submit (the JS just
   # inserts their text; `handle_event("send")` does the routing).
   @slash_builtins [
     %{
       "name" => "/plan",
-      "description" => "Plan mode — read-only; the agent proposes before acting",
+      "description" => "Plan mode — read-only; discuss and propose before acting",
+      "argumentHint" => nil,
+      "builtin" => true
+    },
+    %{
+      "name" => "/autopilot",
+      "description" => "Autopilot — the agent runs without asking (auto-run)",
       "argumentHint" => nil,
       "builtin" => true
     },
     # The /default builtin is RETIRED (charter D48) — `default` is no longer an
-    # offered mode; the picker's six modes + the armed bypass ceremony are the
-    # surface. /plan is the only mode builtin left.
+    # offered mode. The toggle surfaces Plan ⇄ Autopilot; /bypass is the armed
+    # ceremony's only entry point now that the raw six-mode select is gone.
+    %{
+      "name" => "/bypass",
+      "description" => "Open the bypass arm ceremony (dangerous — skips permissions)",
+      "argumentHint" => nil,
+      "builtin" => true
+    },
     %{
       "name" => "/model",
       "description" => "Switch the model for this session",
@@ -5827,39 +6493,86 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # Strip kind → badge class (existing tokenized chat badges — warn for every
-  # needs-you kind, working tone for a running turn, the ok/idle tone for an
-  # unseen finish) and → imperative label. Copy is deliberately DISTINCT from
-  # the session-row pill texts ("needs you"/"working"/…) so the two surfaces
-  # never read as duplicates.
+  # needs-you kind, working tone for a running turn) and → imperative label.
+  # Copy is deliberately DISTINCT from the session-row pill texts ("needs
+  # you"/"working"/…) so the two surfaces never read as duplicates.
   defp strip_badge(:working), do: "badge-chat-working"
-  defp strip_badge(:finished_while_away), do: "badge-chat-idle"
   defp strip_badge(_needs_you_kind), do: "badge-chat-approval"
 
   defp strip_label(:pending_approval), do: "approve"
   defp strip_label(:awaiting_input), do: "answer"
   defp strip_label(:plan_ready), do: "plan ready"
   defp strip_label(:working), do: "running"
-  defp strip_label(:finished_while_away), do: "done"
 
-  # Session → tokenized pill. Precedence (charter D14): PendingApproval > Working
-  # > Exited > Idle. A session with a persisted pending approval outranks every
-  # status — it is the one row that needs the admin RIGHT NOW, so it wears the
-  # warn-toned "needs you" pill even mid-turn.
-  # The live overlay wins over the stored row (wave 5): a Recorder that says
-  # "working" right now beats a store status that flips only on frame writes.
+  # Session → tokenized pill. The live overlay wins over the stored row (wave
+  # 5): a Recorder that says "working" right now beats a row the sidebar has
+  # not re-read yet. The cold half reads `session.agent_state` (herd wave 1) —
+  # see session_pill/1 below.
+  # ── wave-session-card lines (wsc charter D8/D11) ──────────────────────────
+  # One tick per D3 `ticks` status, straight off the journey truth table (D1 —
+  # never re-derived positionally): done settles evergreen (--life-done), the
+  # active phase breathes on the EXISTING bp-skel-pulse keyframes
+  # (bp-chat-live-dot), an interrupted frontier reads --life-blocked and never
+  # breathes (no fake spinners law), and future/skipped/unreached are a dim
+  # border-token outline — a skipped Perfect phase stays honestly un-filled
+  # instead of faking 7/7. All colors are emitted tokens (charter D60).
+
+  defp workflow_tick_class(:active), do: "bp-chat-live-dot"
+  defp workflow_tick_class(_tick), do: nil
+
+  defp workflow_tick_style(tick) do
+    base = "width: 5px; height: 5px; border-radius: 50%; flex: none;"
+
+    case tick do
+      :done ->
+        base <> " background: var(--life-done);"
+
+      :active ->
+        base <> " background: var(--life-in_progress);"
+
+      :interrupted ->
+        base <> " background: var(--life-blocked);"
+
+      _future_skipped_unreached ->
+        base <>
+          " background: transparent; border: 1px solid var(--border-muted); box-sizing: border-box;"
+    end
+  end
+
+  # The phase word + settled/total agent counter (D2: settled = done + failed,
+  # the Claude-Code 13/17). A terminal wave settles to "complete · n/n"; an
+  # interrupted one names its dead frontier honestly; a live one wears the
+  # active phase word. Nothing here is invented — every number is the D3
+  # summary's (`outcome` is the journey's entry lifecycle).
+  defp workflow_card_line(%{outcome: :completed} = ws),
+    do: "complete · #{ws.agents_done}/#{ws.agents_total}"
+
+  defp workflow_card_line(%{outcome: :interrupted} = ws) do
+    where = if ws.phase, do: "interrupted in #{ws.phase}", else: "interrupted"
+    "#{where} · #{ws.agents_done}/#{ws.agents_total}"
+  end
+
+  defp workflow_card_line(ws) do
+    "#{ws.phase || "starting"} · #{ws.agents_done}/#{ws.agents_total} agents"
+  end
+
   defp session_pill(_s, %{state: :working}), do: {"badge-chat-working", "working"}
   defp session_pill(_s, %{state: :needs_you}), do: {"badge-chat-approval", "needs you"}
   defp session_pill(_s, %{state: :offline}), do: {"badge-chat-offline", "offline"}
   defp session_pill(s, _act), do: session_pill(s)
 
-  defp session_pill(%{pending_approvals: n}) when is_integer(n) and n > 0,
-    do: {"badge-chat-approval", "needs you"}
+  # The COLD half reads the persisted herd column (herd wave 1, charter
+  # D38/D40): `agent_state` is the four-state truth the Recorder writes at
+  # every flip, so the pill, the needs-you strip, and the fleet wire agree by
+  # construction — the old parallel derivation (pending_approvals + status) is
+  # gone. `blocked` wears the warn-toned "needs you"; a mid-turn death reads
+  # `unknown` and wears "offline"; everything else is honestly idle.
+  defp session_pill(%{agent_state: agent_state}), do: session_pill_by_state(agent_state)
 
-  defp session_pill(%{status: status}), do: session_pill_by_status(status)
-
-  defp session_pill_by_status("working"), do: {"badge-chat-working", "working"}
-  defp session_pill_by_status("exited"), do: {"badge-chat-offline", "offline"}
-  defp session_pill_by_status(_), do: {"badge-chat-idle", "idle"}
+  defp session_pill_by_state("working"), do: {"badge-chat-working", "working"}
+  defp session_pill_by_state("blocked"), do: {"badge-chat-approval", "needs you"}
+  defp session_pill_by_state("unknown"), do: {"badge-chat-offline", "offline"}
+  defp session_pill_by_state(_idle), do: {"badge-chat-idle", "idle"}
 
   # The active row wears the evergreen accent; the rest are transparent (hover
   # tint lives in the render <style>). All colours are emitted tokens.

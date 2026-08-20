@@ -1,10 +1,13 @@
 package taskboard
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -96,14 +99,82 @@ func TestApplySnapshotConnStates(t2 *testing.T) {
 		t2.Fatalf("board not swapped: %d orphans, want 1", len(m.board.Orphans))
 	}
 
-	// A failed refetch → ConnOffline, board preserved.
+	// A failed refetch → ConnOffline, board preserved, and the strip says WHY
+	// (a silently dark board reads as "no tasks" — the 8 MiB cap incident).
 	good := m.board
 	m, _ = m.applySnapshot(snapshotMsg{err: errors.New("dial tcp: refused")})
 	if m.ui.Conn != ConnOffline {
 		t2.Fatalf("failed refetch conn = %v, want ConnOffline", m.ui.Conn)
 	}
+	if m.ui.ConnProblem != "offline" {
+		t2.Fatalf("transport failure label = %q, want offline", m.ui.ConnProblem)
+	}
 	if len(m.board.Orphans) != len(good.Orphans) {
 		t2.Fatal("failed refetch clobbered the last good board")
+	}
+
+	// Recovery clears the stale failure reason as well as the degraded state.
+	m.lastLiveEvent = clk.now()
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{Tasks: []Task{t("b")}, FetchedAt: clk.now()}})
+	if m.ui.ConnProblem != "" {
+		t2.Fatalf("successful recovery retained stale problem %q", m.ui.ConnProblem)
+	}
+}
+
+// timeoutErr is a minimal net.Error-shaped timeout — the shape http.Client.Do
+// wraps inside *url.Error when a request deadline (client Timeout or context)
+// fires. Its Error() text deliberately avoids the word "timeout"/"deadline" so
+// the tests below can only pass through the TYPED classification, never a
+// string match.
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "await response: budget blown" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+// snapshotTimeoutError builds a client-timeout error wrapped exactly as
+// getJSONCtx wraps transport errors ("GET %s: %w" around http.Client.Do's
+// *url.Error) — the shape applySnapshot actually receives from a slow fetch.
+func snapshotTimeoutError() error {
+	return fmt.Errorf("GET %s: %w", "/v1/tasks?limit=1000",
+		&url.Error{Op: "Get", URL: "http://x/v1/tasks?limit=1000", Err: timeoutErr{}})
+}
+
+// snapshotRefusedError builds a genuine-unreachability transport error (dial
+// tcp connection refused) in the same typed *url.Error wrapping — a real dead
+// server, which must STAY in the offline class.
+func snapshotRefusedError() error {
+	return fmt.Errorf("GET %s: %w", "/v1/tasks?limit=1000",
+		&url.Error{Op: "Get", URL: "http://x/v1/tasks?limit=1000",
+			Err: errors.New("dial tcp 127.0.0.1:4000: connect: connection refused")})
+}
+
+func TestSnapshotErrorLabelsAreTruthful(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"cap", errors.New("response exceeds 33554432 bytes"), "snapshot too large"},
+		{"401", errors.New("GET /v1/tasks: status 401"), "unauthorized"},
+		{"403", errors.New("GET /v1/tasks: status 403"), "forbidden"},
+		{"404", errors.New("GET /v1/tasks: status 404"), "snapshot unavailable"},
+		{"decode", errors.New("decode tasks list: invalid character"), "invalid snapshot"},
+		{"5xx", errors.New("GET /v1/tasks: status 503"), "server error"},
+		{"dial-tcp string", errors.New("dial tcp: connection refused"), "offline"},
+		// The timeout class is TYPED (errors.As + url.Error.Timeout / errors.Is
+		// context.DeadlineExceeded) — the *url.Error row's text contains no
+		// "timeout"/"deadline" word at all, so only the typed path can label it.
+		{"typed client timeout", snapshotTimeoutError(), labelServerTimeout},
+		{"mid-body context deadline", fmt.Errorf("GET %s: %w", "/v1/tasks/prime?limit=100", context.DeadlineExceeded), labelServerTimeout},
+		// A typed *url.Error that is NOT a timeout (connection refused,
+		// Timeout()==false) keeps the honest offline class — dial-tcp stays ✗.
+		{"typed dial refused", snapshotRefusedError(), "offline"},
+	}
+	for _, tc := range cases {
+		if got := snapshotErrorLabel(tc.err); got != tc.want {
+			t.Errorf("%s: snapshotErrorLabel(%q) = %q, want %q", tc.name, tc.err, got, tc.want)
+		}
 	}
 }
 
@@ -277,7 +348,7 @@ func TestSSEEventDrivesRefetchAndSwap(t2 *testing.T) {
 		default:
 		}
 	}
-	go c.StartSSE("")
+	go c.StartSSE(context.Background(), "")
 
 	select {
 	case <-fired:
@@ -448,16 +519,29 @@ func TestPulseUpgradesPollingToLiveWithoutRefetch(t2 *testing.T) {
 	}
 }
 
-// A pulse must NOT clear ✗ ConnOffline — offline means the DATA path (refetch)
-// failed, and a live stream with unreachable reads is still a broken board.
-// The pulse still bumps lastLiveEvent, so the moment a refetch succeeds,
-// applySnapshot derives ● ConnLive directly (no polling limbo on recovery).
+// GENUINE unreachability is the sticky class: a refetch that died with a typed
+// dial-tcp connection refused (Timeout()==false — the server is GONE, not slow)
+// reads ✗ ConnOffline, and a pulse must NOT clear it — offline means the DATA
+// path failed, and a live stream with unreachable reads is still a broken
+// board. Only a refetch that actually SUCCEEDS lifts it; the pulse still bumps
+// lastLiveEvent, so that recovery lands straight on ● ConnLive (no polling
+// limbo). This is the honesty guard's half of the timeout split — the lift for
+// the timeout class lives in TestPulseLiftsTimeoutDegradedState.
 func TestPulsePreservesOfflineUntilRefetchSucceeds(t2 *testing.T) {
 	clk := &fakeClock{t: time.Unix(3000, 0)}
 	m := newModel(nil, "", Config{})
 	m.now = clk.now
 	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board { return Board{Orphans: s.Tasks} }
-	m.ui.Conn = ConnOffline
+
+	// Arrive at offline through the real classification path, not by fiat: a
+	// typed connection-refused transport error is genuine unreachability.
+	m, _ = m.applySnapshot(snapshotMsg{err: snapshotRefusedError()})
+	if m.ui.Conn != ConnOffline {
+		t2.Fatalf("conn after refused refetch = %v, want ConnOffline (the server is gone)", m.ui.Conn)
+	}
+	if m.ui.ConnProblem != "offline" {
+		t2.Fatalf("refused refetch label = %q, want offline", m.ui.ConnProblem)
+	}
 
 	m, _ = m.handlePulse()
 	if m.ui.Conn != ConnOffline {
@@ -469,6 +553,82 @@ func TestPulsePreservesOfflineUntilRefetchSucceeds(t2 *testing.T) {
 	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{FetchedAt: clk.now()}})
 	if m.ui.Conn != ConnLive {
 		t2.Fatalf("conn after recovery refetch = %v, want ConnLive (a pulse was seen %v ago)", m.ui.Conn, 5*time.Second)
+	}
+	if m.ui.ConnProblem != "" {
+		t2.Fatalf("recovery retained stale problem %q", m.ui.ConnProblem)
+	}
+}
+
+// The timeout class is NOT offline: a snapshot fetch that blew its budget
+// degrades to ◐ + "server timeout" (KEEPING the last good board), and SSE
+// proof-of-life lifts exactly that state back to ● — the pipe proving itself
+// alive contradicts "gone", never "slow". The label stays until a snapshot
+// actually LANDS: the pulse proves the stream, not the data path.
+func TestPulseLiftsTimeoutDegradedState(t2 *testing.T) {
+	clk := &fakeClock{t: time.Unix(4000, 0)}
+	m := newModel(nil, "", Config{})
+	m.now = clk.now
+	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board { return Board{Orphans: s.Tasks} }
+
+	// Seed a good board so the timeout's board-preservation is observable.
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{Tasks: []Task{t("a")}, FetchedAt: clk.now()}})
+
+	// A slow fetch times out with NO recent live frame → honest ◐ degraded,
+	// never ✗ offline, board kept.
+	clk.add(time.Minute)
+	m, _ = m.applySnapshot(snapshotMsg{err: snapshotTimeoutError()})
+	if m.ui.Conn == ConnOffline {
+		t2.Fatal("a client timeout read ✗ ConnOffline — the conn dot called a slow fetch offline")
+	}
+	if m.ui.Conn != ConnPolling {
+		t2.Fatalf("timeout with stale stream conn = %v, want ConnPolling", m.ui.Conn)
+	}
+	if m.ui.ConnProblem != labelServerTimeout {
+		t2.Fatalf("timeout label = %q, want %q", m.ui.ConnProblem, labelServerTimeout)
+	}
+	if len(m.board.Orphans) != 1 {
+		t2.Fatal("timeout clobbered the last good board")
+	}
+
+	// SSE proof-of-life lifts the timeout-class dot to ● — but the label stays:
+	// the data on screen is still stale, and only a landed snapshot may say the
+	// fetch path recovered.
+	m, _ = m.handlePulse()
+	if m.ui.Conn != ConnLive {
+		t2.Fatalf("conn after pulse over timeout class = %v, want ConnLive (the stream proved the pipe)", m.ui.Conn)
+	}
+	if m.ui.ConnProblem != labelServerTimeout {
+		t2.Fatalf("pulse cleared the timeout label (got %q) — only a landed snapshot may", m.ui.ConnProblem)
+	}
+
+	// The landed snapshot clears the label.
+	clk.add(time.Second)
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{Tasks: []Task{t("a")}, FetchedAt: clk.now()}})
+	if m.ui.ConnProblem != "" {
+		t2.Fatalf("landed snapshot retained stale problem %q", m.ui.ConnProblem)
+	}
+	if m.ui.Conn != ConnLive {
+		t2.Fatalf("conn after landed snapshot = %v, want ConnLive", m.ui.Conn)
+	}
+}
+
+// A timeout while the SSE stream is FRESH holds ● outright — the dot must not
+// flap ● → ◐ → ● across one slow fetch when the pipe is verifiably alive the
+// whole time. The "server timeout" label still surfaces the degraded data path.
+func TestTimeoutWithFreshStreamHoldsLive(t2 *testing.T) {
+	clk := &fakeClock{t: time.Unix(4500, 0)}
+	m := newModel(nil, "", Config{})
+	m.now = clk.now
+	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board { return Board{Orphans: s.Tasks} }
+	m.lastLiveEvent = clk.now()
+	m.ui.Conn = ConnLive
+
+	m, _ = m.applySnapshot(snapshotMsg{err: snapshotTimeoutError()})
+	if m.ui.Conn != ConnLive {
+		t2.Fatalf("timeout with fresh stream conn = %v, want ConnLive (no flap through ◐)", m.ui.Conn)
+	}
+	if m.ui.ConnProblem != labelServerTimeout {
+		t2.Fatalf("timeout label = %q, want %q", m.ui.ConnProblem, labelServerTimeout)
 	}
 }
 
@@ -541,5 +701,74 @@ func TestApplySnapshotResetsFrameWhenGoingStill(t2 *testing.T) {
 	}
 	if len(m.ui.Flashes) != 0 {
 		t2.Fatalf("decayed flashes survived the snapshot: %v (stale entries would leak for the session)", m.ui.Flashes)
+	}
+}
+
+// ── snapshot transport budget (D114) ─────────────────────────────────────────
+
+// A REAL transport deadline classifies typed end-to-end: getJSONCtx against a
+// stalling server, the context deadline fires mid-request, and the wrapped
+// error lands in the timeout class — never the default "offline" bucket the
+// pre-fix path fell into.
+func TestSnapshotFetchDeadlineClassifiesAsTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err := getJSONCtx(ctx, newClient(srv.URL), "/v1/tasks?limit=1000")
+	if err == nil {
+		t.Fatal("a 30ms deadline against a 300ms server did not error")
+	}
+	if !isSnapshotTimeout(err) {
+		t.Fatalf("deadline error %q did not classify as the timeout class", err)
+	}
+	if got := snapshotErrorLabel(err); got != labelServerTimeout {
+		t.Fatalf("deadline error labeled %q, want %q", got, labelServerTimeout)
+	}
+}
+
+// The snapshot budget is SCOPED: FetchSnapshotFull succeeds against a server
+// slower than the shared apiclient's interactive timeout, because the snapshot
+// path carries its own per-request deadline (snapshotFetchTimeout) instead of
+// inheriting the client's. The first half proves the guard can fail — the SAME
+// client's own transport really does die on this server — so a regression that
+// routes the snapshot back through the interactive client reds this test.
+func TestSnapshotBudgetIndependentOfInteractiveClientTimeout(t *testing.T) {
+	listBody, primeBody := fixtureParts(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(120 * time.Millisecond) // slower than the interactive budget below
+		switch r.URL.Path {
+		case "/v1/tasks":
+			_, _ = w.Write(listBody)
+		case "/v1/tasks/prime":
+			_, _ = w.Write(primeBody)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	// The one shared apiclient keeps a deliberately TINY interactive timeout —
+	// the pre-fix 5s inheritance scaled down so the test runs in milliseconds.
+	c := apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "test-token", Timeout: 20 * time.Millisecond})
+
+	// Mutation guard: the interactive transport really would kill this fetch.
+	if _, err := c.GetConditionalBounded(srv.URL+"/v1/tasks?limit=1000", "", maxBoardFetchBytes); err == nil {
+		t.Fatal("the interactive client outlived its own 20ms timeout — this guard is vacuous")
+	}
+
+	// The snapshot path rides its own budget, so the same slow server completes.
+	snap, details, err := FetchSnapshotFull(c)
+	if err != nil {
+		t.Fatalf("FetchSnapshotFull under a 20ms interactive client timeout: %v (the snapshot budget leaked into the shared client, or vice versa)", err)
+	}
+	if len(snap.Tasks) == 0 {
+		t.Fatal("snapshot fetched under the scoped budget carried no tasks")
+	}
+	if len(details) == 0 {
+		t.Fatal("snapshot fetched under the scoped budget carried no detail index")
 	}
 }

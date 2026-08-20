@@ -158,6 +158,40 @@ func TestGaugeListSharePercent(t *testing.T) {
 	}
 }
 
+// TestGaugeListPreservesLongLabelsAndNotes locks the reader doctrine for data
+// visualisations: width pressure may add rows, but it must not replace authored
+// label or note text with renderer ellipses.
+func TestGaugeListPreservesLongLabelsAndNotes(t *testing.T) {
+	label := "S-tier blocks locked OUT (equation incl.)"
+	note := "the deliberately long explanatory door note"
+	out := gaugeRender(map[string]any{
+		"mode": "share",
+		"max":  75,
+		"rows": []any{
+			map[string]any{"label": label, "value": 12.0, "note": note},
+			map[string]any{"label": "reachable from the insert palette", "value": 33.0},
+		},
+	}, 40)
+
+	if strings.Contains(out, "…") {
+		t.Fatalf("gauge-list introduced an ellipsis:\n%s", out)
+	}
+	compact := semanticCompact(out)
+	for _, authored := range []string{label, note} {
+		for _, word := range strings.Fields(authored) {
+			word = semanticCompact(word)
+			if len(word) <= 10 && !strings.Contains(compact, word) {
+				t.Errorf("missing authored word %q from %q:\n%s", word, authored, out)
+			}
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if ansi.StringWidth(line) > 40 {
+			t.Errorf("line width %d exceeds 40: %q", ansi.StringWidth(line), line)
+		}
+	}
+}
+
 // TestGaugeListDegrades pins the honest degrade paths: an absent data key →
 // `[gauge-list — unresolved]`; groupBy "epic" → a dim resolver note (NEVER faked
 // from a parent); and `query` is never read as data.

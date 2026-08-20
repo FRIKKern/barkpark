@@ -15,6 +15,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -221,7 +223,9 @@ func TestHetznerServerCreate(t *testing.T) {
 }
 
 // TestHetznerServerPoweroff asserts the action verb path: name resolution,
-// POST …/actions/poweroff, and the poll of the still-running action.
+// POST …/actions/poweroff, the poll of the still-running action, and the
+// POST-CONDITION read-back — the receipt names the state it observed, not the
+// pre-action object it was handed.
 func TestHetznerServerPoweroff(t *testing.T) {
 	f := newFakeHzAPI(t)
 	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +243,12 @@ func TestHetznerServerPoweroff(t *testing.T) {
 		}
 		hzWriteJSON(w, 200, `{"actions":[{"id":21,"status":"success","progress":100}]}`)
 	})
+	// Shape B is a BOUNDED POLL: the box reports the transient `stopping`
+	// before it reports `off`, so a single read-back would false-red it.
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(
+		`{"id":42,"name":"web-1","status":"stopping"}`,
+		`{"id":42,"name":"web-1","status":"off"}`,
+	))
 
 	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", "poweroff", "web-1")
 	if code != exitOK {
@@ -250,8 +260,706 @@ func TestHetznerServerPoweroff(t *testing.T) {
 	if f.count("GET", "/actions") == 0 {
 		t.Error("poweroff never polled the running action — fire-and-forget")
 	}
+	if n := f.count("GET", "/servers/42"); n < 2 {
+		t.Errorf("poweroff read the server back %d time(s); want a bounded POLL through the transient `stopping`", n)
+	}
 	if !strings.Contains(stdout, "✓ poweroff — server web-1 (id 42)") {
 		t.Errorf("poweroff output = %q, want the ✓ receipt line", stdout)
+	}
+	if !strings.Contains(stdout, "status: off") {
+		t.Errorf("poweroff output = %q, want the OBSERVED post-condition (status: off) — "+
+			"a receipt carrying only id/name says nothing an action could have changed", stdout)
+	}
+}
+
+// hzServerStates serves a `GET /servers/<id>` that walks a script of server
+// bodies, repeating the last one forever. That is how the transient states
+// (`starting`, `stopping`) that make a single read-back a lie get into a test.
+func hzServerStates(bodies ...string) http.HandlerFunc {
+	var mu sync.Mutex
+	i := 0
+	return func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		body := bodies[i]
+		if i < len(bodies)-1 {
+			i++
+		}
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"server":`+body+`}`)
+	}
+}
+
+// hzReceiptSite is one derived completed-verb receipt: the verb it names, the
+// file and line that emits it, and — the part the gate turns on — the CALL
+// SHAPE, because the shape is what decides whether the verb's post-condition
+// is EXECUTED or merely DECLARED.
+type hzReceiptSite struct {
+	verb  string
+	file  string
+	line  int
+	shape hzReceiptShape
+}
+
+type hzReceiptShape string
+
+const (
+	// hzShapeExecutor — runHetznerServerAction, which READS
+	// hzServerPostConditions and re-reads the server through hzReadBack.
+	hzShapeExecutor hzReceiptShape = "runHetznerServerAction"
+	// hzShapeFlagVerb — hzFlagVerbDone, which reads the SAME table through
+	// hzBoundPost and re-reads through hzReadBack.
+	hzShapeFlagVerb hzReceiptShape = "hzFlagVerbDone"
+	// hzShapeLiteral — a bare hzDone("verb", …). This shape reaches NEITHER
+	// consumer of hzServerPostConditions, so a table entry for a verb whose
+	// only receipt is this shape is a declaration nothing runs.
+	hzShapeLiteral hzReceiptShape = "hzDone"
+)
+
+// hzReceiptSourceFiles is the population the derivation scans: every non-test
+// hetzner_*.go in this package. It is a GLOB, deliberately — the file list is
+// derived from the tree, so a tenth hetzner_*.go added tomorrow is scanned the
+// day it lands instead of the day someone remembers to add it here.
+func hzReceiptSourceFiles(t *testing.T) []string {
+	t.Helper()
+	all, err := filepath.Glob(filepath.Join(".", "hetzner_*.go"))
+	if err != nil {
+		t.Fatalf("glob hetzner_*.go: %v", err)
+	}
+	var srcs []string
+	for _, p := range all {
+		if strings.HasSuffix(p, "_test.go") {
+			continue
+		}
+		srcs = append(srcs, p)
+	}
+	sort.Strings(srcs)
+	if len(srcs) < 2 {
+		t.Fatalf("globbed %d hetzner sources (%v) — the scan is measuring itself, not the package", len(srcs), srcs)
+	}
+	return srcs
+}
+
+// hzReceiptSitesFromSource DERIVES, at test time, every verb in the package's
+// hetzner sources that reaches a completed-verb receipt for a server. Three
+// shapes reach one:
+//
+//  1. the runHetznerServerAction call sites — the verb is the enclosing `case`
+//  2. the flag verbs' hzFlagVerbDone sites — the verb is the first quoted token
+//  3. the LITERAL-verb receipts (bare hzDone with a quoted verb)
+//
+// Shapes 2 and 3 are why this scan was widened once (PDS-D366): the older read
+// saw only shape 1, so the five flag verbs were structurally invisible to the
+// gate that exists to catch exactly them. It is widened AGAIN here (PDS wave
+// 27) across FILES: it read one hard-coded hetzner_cmd.go, so the four
+// `instance` verbs whose receipts live in hetzner_instance_cmd.go — archive,
+// resurrect, adopt, eject — were invisible for exactly the same reason one file
+// over. The gate exists at all because a charter (PDS-D344) said six and the
+// source said nine: a list transcribed by hand is a claim, and this file's
+// whole subject is claims nobody re-read. So the population is COUNTED —
+// glob + scan — and never quoted.
+func hzReceiptSitesFromSource(t *testing.T) []hzReceiptSite {
+	t.Helper()
+	quoted := regexp.MustCompile(`"([^"]+)"`)
+	literalReceipt := regexp.MustCompile(`\b(hzDone|hzFlagVerbDone)\([^)]*"`)
+	var sites []hzReceiptSite
+	for _, path := range hzReceiptSourceFiles(t) {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var pending []string
+		for i, raw := range strings.Split(string(src), "\n") {
+			line := strings.TrimSpace(raw)
+			switch {
+			case strings.HasPrefix(line, "//"):
+				// A comment quoting a call shape is prose, not a call site.
+			case strings.HasPrefix(line, `case "`):
+				pending = nil
+				for _, m := range quoted.FindAllStringSubmatch(line, -1) {
+					pending = append(pending, m[1])
+				}
+			case strings.Contains(line, "runHetznerServerAction(out") && !strings.HasPrefix(line, "func "):
+				for _, v := range pending {
+					sites = append(sites, hzReceiptSite{verb: v, file: path, line: i + 1, shape: hzShapeExecutor})
+				}
+				pending = nil
+			case literalReceipt.MatchString(line) && !strings.HasPrefix(line, "func "):
+				if m := quoted.FindStringSubmatch(line); m != nil {
+					shape := hzShapeLiteral
+					if strings.Contains(line, "hzFlagVerbDone(") {
+						shape = hzShapeFlagVerb
+					}
+					sites = append(sites, hzReceiptSite{verb: m[1], file: path, line: i + 1, shape: shape})
+				}
+				pending = nil
+			}
+		}
+	}
+	return sites
+}
+
+// hzReceiptVerbsFromSource is the verb list the anti-undercount gate reads —
+// the derived sites with their shapes dropped.
+func hzReceiptVerbsFromSource(t *testing.T) []string {
+	t.Helper()
+	var verbs []string
+	for _, s := range hzReceiptSitesFromSource(t) {
+		verbs = append(verbs, s.verb)
+	}
+	return verbs
+}
+
+// TestHetznerActionVerbsAllDeclareAPostCondition is the anti-undercount gate:
+// EVERY verb that reports a completed-verb receipt in ANY of this package's
+// hetzner sources must declare what it re-reads — or declare, IN WORDS, why it
+// has nothing to re-read — and neither map may carry entries for verbs that no
+// longer exist. A verb added tomorrow, in any hetzner_*.go, fails here instead
+// of silently shipping a receipt that asserts nothing.
+func TestHetznerActionVerbsAllDeclareAPostCondition(t *testing.T) {
+	sites := hzReceiptSitesFromSource(t)
+	verbs := hzReceiptVerbsFromSource(t)
+	// The census, printed under -v: what was DERIVED, from which files, in
+	// which shape — the evidence that the population was counted and not
+	// transcribed from a charter.
+	t.Logf("derived %d receipt sites across %v:", len(sites), hzReceiptSourceFiles(t))
+	for _, s := range sites {
+		class := "BARE (neither keyed nor exempt)"
+		if _, keyed := hzServerPostConditions[s.verb]; keyed {
+			class = "keyed"
+		}
+		if _, exempt := hzServerPostConditionExemptions[s.verb]; exempt {
+			class = "exempt"
+		}
+		t.Logf("  %-14s %-22s %s:%d — %s", s.verb, s.shape, s.file, s.line, class)
+	}
+	// The floor is a self-measurement guard, not a census: it only has to be
+	// high enough that a scan which silently stopped finding call sites (a
+	// renamed helper, a moved file) fails loudly instead of passing vacuously.
+	// It is deliberately BELOW the measured count so adding a verb never has to
+	// touch it — the keyed/exempt requirement below is what covers new verbs.
+	const receiptFloor = 18
+	if len(verbs) < receiptFloor {
+		t.Fatalf("derived %d receipt verbs (%v) across %v — below the floor of %d. The scan measured 20 when it was "+
+			"widened (9 through runHetznerServerAction, 4 through hzFlagVerbDone, 7 bare hzDone), so a count this "+
+			"low means the SCAN stopped finding call sites — a renamed helper, a moved file, a changed call shape — "+
+			"not that verbs were deleted. Re-derive before trusting anything below",
+			len(verbs), verbs, hzReceiptSourceFiles(t), receiptFloor)
+	}
+	for _, verb := range verbs {
+		post, keyed := hzServerPostConditions[verb]
+		reason, exempt := hzServerPostConditionExemptions[verb]
+		switch {
+		case exempt && keyed:
+			t.Errorf("`server %s` is BOTH keyed in hzServerPostConditions and exempt — one of the two is a lie "+
+				"about what the receipt is built from", verb)
+		case exempt:
+			if strings.TrimSpace(reason) == "" {
+				t.Errorf("`server %s` takes a post-condition exemption with an empty reason — "+
+					"an exemption without an argument is just an omission wearing a map key", verb)
+			}
+		case !keyed:
+			// TRUTH IN REFUSAL. These verbs do not share one receipt shape, so
+			// the refusal may not claim they do: only the bare-hzDone sites
+			// necessarily report a PRE-action server, while a verb whose srv is
+			// itself a post-action read-back (resurrect, adopt) is guilty of
+			// something narrower — asserting state nobody named. Say which.
+			t.Errorf("`%s` reports a completed-verb receipt (%s) but declares neither a post-condition nor an "+
+				"exemption — nothing states what its receipt is built from, so nobody can tell whether it "+
+				"reports an OBSERVED state or the object resolved before the action fired", verb, hzShapesOf(sites, verb))
+		}
+		if !keyed {
+			continue
+		}
+		if post.observe == nil {
+			t.Errorf("`server %s` declares a post-condition with no observe() — the receipt would carry "+
+				"only id and name, the two fields an action cannot change", verb)
+		}
+		if post.holds != nil && post.bindHolds != nil {
+			t.Errorf("`server %s` declares both a static holds and a bindHolds — hzBoundPost would silently "+
+				"overwrite one of them, so which predicate ran is unknowable", verb)
+		}
+		if post.holds != nil && post.unmet == nil {
+			t.Errorf("`server %s` can fail its post-condition but has no sentence for saying so", verb)
+		}
+		if post.bindHolds != nil {
+			holds, unmet := post.bindHolds("probe-ref")
+			if holds == nil || unmet == nil {
+				t.Errorf("`server %s` binds its post-condition to the requested ref but bindHolds returned "+
+					"holds=%v unmet=%v — a bound predicate that can fail needs both", verb, holds != nil, unmet != nil)
+			}
+		}
+	}
+	declared := map[string]bool{}
+	for _, v := range verbs {
+		declared[v] = true
+	}
+	for verb := range hzServerPostConditions {
+		if !declared[verb] {
+			t.Errorf("hzServerPostConditions declares %q, which reports no verb receipt in any of %v — "+
+				"a stale entry makes the map look more complete than it is", verb, hzReceiptSourceFiles(t))
+		}
+	}
+	for verb := range hzServerPostConditionExemptions {
+		if !declared[verb] {
+			t.Errorf("hzServerPostConditionExemptions excuses %q, which reports no verb receipt in any of %v — "+
+				"a stale exemption excuses nothing and hides the next verb that needs one", verb, hzReceiptSourceFiles(t))
+		}
+	}
+}
+
+// hzShapesOf names the receipt shapes one verb emits, for refusal messages that
+// have to be true about THAT verb rather than about the majority of verbs.
+func hzShapesOf(sites []hzReceiptSite, verb string) string {
+	seen := map[hzReceiptShape]bool{}
+	var shapes []string
+	for _, s := range sites {
+		if s.verb == verb && !seen[s.shape] {
+			seen[s.shape] = true
+			shapes = append(shapes, string(s.shape))
+		}
+	}
+	sort.Strings(shapes)
+	return strings.Join(shapes, "+")
+}
+
+// TestHetznerPostConditionsAreExecutedNotJustDeclared is the anti-DISARM gate,
+// and it is the half that makes the widening above worth shipping. The gate
+// over the maps certifies MAP MEMBERSHIP: a verb passes it by acquiring a table
+// entry, and the table is reached through exactly two receipt SHAPES —
+// runHetznerServerAction and hzFlagVerbDone (three index expressions: those two
+// plus hzActionObserved, a helper both of them call and nothing else does; the
+// premise guard below counts the expressions, not the shapes, because an index
+// added anywhere is what would invalidate this classification). A verb whose
+// only receipt is a
+// bare hzDone reaches NEITHER, so four table entries added without touching a
+// single code path would turn the widened gate green while the four receipts
+// stayed exactly as unverified as before.
+//
+// So: a keyed verb must emit its receipt through a shape that READS the table.
+// A verb that re-reads on its own terms (archive's image read-back, resurrect's
+// running+IPv4 poll) belongs in the exemptions map with that reason stated,
+// where a reviewer can refuse the argument — never in the table, which would
+// claim an execution path it does not take.
+func TestHetznerPostConditionsAreExecutedNotJustDeclared(t *testing.T) {
+	sites := hzReceiptSitesFromSource(t)
+	consumers := map[hzReceiptShape]bool{hzShapeExecutor: true, hzShapeFlagVerb: true}
+
+	// Guard the guard: the two consumers named above must still be the ONLY
+	// readers of the table, or this test's premise has quietly expired.
+	src, err := os.ReadFile(filepath.Join(".", "hetzner_cmd.go"))
+	if err != nil {
+		t.Fatalf("read hetzner_cmd.go: %v", err)
+	}
+	reads := 0
+	for _, raw := range strings.Split(string(src), "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "var hzServerPostConditions") {
+			continue
+		}
+		if strings.Contains(line, "hzServerPostConditions[") {
+			reads++
+		}
+	}
+	if reads != 3 {
+		t.Errorf("hzServerPostConditions is indexed at %d sites, not the 3 this gate knows about "+
+			"(runHetznerServerAction, hzBoundPost via hzFlagVerbDone, hzActionObserved) — re-derive which shapes "+
+			"EXECUTE a post-condition before trusting the shape classification below", reads)
+	}
+
+	byVerb := map[string][]hzReceiptShape{}
+	for _, s := range sites {
+		byVerb[s.verb] = append(byVerb[s.verb], s.shape)
+	}
+	for verb := range hzServerPostConditions {
+		shapes, seen := byVerb[verb]
+		if !seen {
+			continue // the stale-entry arm of the gate above owns this case.
+		}
+		for _, shape := range shapes {
+			if consumers[shape] {
+				continue
+			}
+			t.Errorf("`%s` is keyed in hzServerPostConditions but reports its receipt through %s, which reads "+
+				"neither hzServerPostConditions nor hzBoundPost — the post-condition is DECLARED and never RUN, "+
+				"so the receipt asserts exactly what it asserted before the entry was added. Either route the verb "+
+				"through runHetznerServerAction/hzFlagVerbDone, or state its own read-back in "+
+				"hzServerPostConditionExemptions where the argument can be refused", verb, shape)
+		}
+	}
+}
+
+// hzActionFake stands up the common wire for one action verb: name resolution,
+// the action POST, and the action poll. The caller adds the read-back.
+func hzActionFake(t *testing.T, verb string) *fakeHzAPI {
+	t.Helper()
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"servers":[{"id":42,"name":"web-1","status":"running","public_net":{"ipv4":{"ip":"192.0.2.10"}}}]}`)
+	})
+	f.mux.HandleFunc("POST /servers/42/actions/"+verb, func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":21,"status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":21,"status":"success","progress":100}]}`)
+	})
+	return f
+}
+
+// TestHetznerServerPoweronPollsToRunning covers shape A: `starting` is
+// transient, so the verb polls, and the receipt carries the state it saw.
+func TestHetznerServerPoweronPollsToRunning(t *testing.T) {
+	f := hzActionFake(t, "poweron")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(
+		`{"id":42,"name":"web-1","status":"starting"}`,
+		`{"id":42,"name":"web-1","status":"starting"}`,
+		`{"id":42,"name":"web-1","status":"running"}`,
+	))
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "server", "poweron", "web-1")
+	if code != exitOK {
+		t.Fatalf("poweron exited %d, stderr: %s", code, stderr)
+	}
+	if n := f.count("GET", "/servers/42"); n < 3 {
+		t.Errorf("poweron read the server back %d time(s); want a poll through the transient `starting`", n)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("poweron -o json emitted invalid JSON: %v\n%s", err, stdout)
+	}
+	if payload["status"] != "running" {
+		t.Errorf("poweron receipt status = %v, want the observed `running`", payload["status"])
+	}
+}
+
+// TestHetznerServerPoweronReportsAStateItNeverReached is the core anti-lie
+// assertion: the action succeeds, the box never comes up, and the verb must NOT
+// print the same ✓ it prints when the box does come up.
+func TestHetznerServerPoweronReportsAStateItNeverReached(t *testing.T) {
+	f := hzActionFake(t, "poweron")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"off"}`))
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", "poweron", "web-1")
+	if code == exitOK {
+		t.Fatalf("poweron exited 0 with the server still off — the receipt claims a state it never re-read; stdout: %s", stdout)
+	}
+	if strings.Contains(stdout, "✓") {
+		t.Errorf("stdout = %q carries a checkmark for a server that never came up", stdout)
+	}
+	if !strings.Contains(stderr, "still reports") || !strings.Contains(stderr, "off") {
+		t.Errorf("stderr = %q, want the OBSERVED state named", stderr)
+	}
+	if n := f.count("GET", "/servers/42"); n < 2 {
+		t.Errorf("poweron gave up after %d read(s) — the bound must be a poll, not a single shot", n)
+	}
+}
+
+// TestHetznerServerShutdownIsAnHonestPartialOnTimeout covers shape D. ACPI needs
+// the guest to react; a guest that has not reacted inside the window is a slow
+// guest, not a failed verb. So: exit 0, no ✓, and a receipt that says exactly
+// what was sent and what was observed.
+func TestHetznerServerShutdownIsAnHonestPartialOnTimeout(t *testing.T) {
+	f := hzActionFake(t, "shutdown")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"running"}`))
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", "shutdown", "web-1")
+	if code != exitOK {
+		t.Fatalf("shutdown exited %d on a guest that simply had not reacted yet — a slow ACPI guest is not a failed verb; stderr: %s", code, stderr)
+	}
+	if strings.Contains(stdout, "✓") {
+		t.Errorf("stdout = %q claims completion for a server still running", stdout)
+	}
+	for _, want := range []string{"signal sent", "has not powered off", "status: running"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, want the honest partial to contain %q", stdout, want)
+		}
+	}
+	if n := f.count("GET", "/servers/42"); n < 2 {
+		t.Errorf("shutdown read back %d time(s) — a SINGLE GetByID false-reds a healthy ACPI shutdown", n)
+	}
+
+	// …and the machine shape says so too.
+	f2 := hzActionFake(t, "shutdown")
+	f2.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"running"}`))
+	jsonOut, _, code2 := runHzCLI(t, "json", "hetzner", "server", "shutdown", "web-1")
+	if code2 != exitOK {
+		t.Fatalf("shutdown -o json exited %d", code2)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("shutdown -o json emitted invalid JSON: %v\n%s", err, jsonOut)
+	}
+	if payload["complete"] != false {
+		t.Errorf("shutdown partial receipt complete = %v, want false", payload["complete"])
+	}
+}
+
+// TestHetznerServerShutdownConfirmsOff is the same verb's happy path: the guest
+// reacts and the receipt is a real ✓ carrying the observed `off`.
+func TestHetznerServerShutdownConfirmsOff(t *testing.T) {
+	f := hzActionFake(t, "shutdown")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(
+		`{"id":42,"name":"web-1","status":"running"}`,
+		`{"id":42,"name":"web-1","status":"off"}`,
+	))
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", "shutdown", "web-1")
+	if code != exitOK {
+		t.Fatalf("shutdown exited %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "✓ shutdown") || !strings.Contains(stdout, "status: off") {
+		t.Errorf("stdout = %q, want a ✓ carrying the observed `off`", stdout)
+	}
+}
+
+// TestHetznerServerRebootNarrowsItsClaim covers shape C. hcloud.Server carries
+// no boot time, so nothing distinguishes "rebooted" from "never went down" —
+// the receipt must SAY that rather than assert a restart, and it must still move
+// when the observed state moves (otherwise "✓ reboot" is vacuous again).
+func TestHetznerServerRebootNarrowsItsClaim(t *testing.T) {
+	up := hzActionFake(t, "reboot")
+	up.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"running"}`))
+	cameUp, _, code := runHzCLI(t, "table", "hetzner", "server", "reboot", "web-1")
+	if code != exitOK {
+		t.Fatalf("reboot exited %d on a running server", code)
+	}
+	if !strings.Contains(cameUp, "does not confirm the OS restarted") {
+		t.Errorf("reboot receipt = %q — it must name what it CANNOT confirm; there is no boot-time field to key on", cameUp)
+	}
+
+	down := hzActionFake(t, "reboot")
+	down.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"off"}`))
+	stayedDown, _, code := runHzCLI(t, "table", "hetzner", "server", "reboot", "web-1")
+	if code != exitOK {
+		t.Fatalf("reboot exited %d — shape C has no discriminator, so it must not INVENT a failure either", code)
+	}
+	if cameUp == stayedDown {
+		t.Fatalf("reboot printed BYTE-IDENTICAL output whether the machine came up or stayed down — "+
+			"that is the defect this slice exists to kill.\ncame up:     %q\nstayed down: %q", cameUp, stayedDown)
+	}
+	if !strings.Contains(stayedDown, "status: off") {
+		t.Errorf("reboot receipt for a machine that stayed down = %q, want the observed `off`", stayedDown)
+	}
+}
+
+// TestHetznerServerMetadataVerbsReadTheFlipBack covers shape E: one read is
+// enough, and enable-backup's window is information the owner cannot get any
+// other way (the SDK's window argument is deprecated and ignored, so the SERVER
+// picks it).
+func TestHetznerServerMetadataVerbsReadTheFlipBack(t *testing.T) {
+	for _, tc := range []struct {
+		verb    string
+		path    string
+		readsAs string
+		want    []string
+	}{
+		{"enable-backup", "enable_backup", `{"id":42,"name":"web-1","status":"running","backup_window":"22-02"}`,
+			[]string{"backups_enabled: true", "backup_window: 22-02"}},
+		{"disable-backup", "disable_backup", `{"id":42,"name":"web-1","status":"running"}`,
+			[]string{"backups_enabled: false"}},
+		{"disable-rescue", "disable_rescue", `{"id":42,"name":"web-1","status":"running","rescue_enabled":false}`,
+			[]string{"rescue_enabled: false"}},
+		{"detach-iso", "detach_iso", `{"id":42,"name":"web-1","status":"running"}`,
+			[]string{"iso_attached: false"}},
+	} {
+		t.Run(tc.verb, func(t *testing.T) {
+			f := hzActionFake(t, tc.path)
+			f.mux.HandleFunc("GET /servers/42", hzServerStates(tc.readsAs))
+			stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", tc.verb, "web-1")
+			if code != exitOK {
+				t.Fatalf("%s exited %d, stderr: %s", tc.verb, code, stderr)
+			}
+			if f.count("GET", "/servers/42") != 1 {
+				t.Errorf("%s issued %d read-backs; a settled metadata flip needs exactly one", tc.verb, f.count("GET", "/servers/42"))
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(stdout, want) {
+					t.Errorf("%s receipt = %q, want %q", tc.verb, stdout, want)
+				}
+			}
+		})
+	}
+}
+
+// TestHetznerServerMetadataFlipNotAppliedFails is the other half of shape E: the
+// action reported success but the field did not move, so the verb must not ✓.
+func TestHetznerServerMetadataFlipNotAppliedFails(t *testing.T) {
+	f := hzActionFake(t, "detach_iso")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(
+		`{"id":42,"name":"web-1","status":"running","iso":{"id":5,"name":"virtio-win"}}`))
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", "detach-iso", "web-1")
+	if code == exitOK {
+		t.Fatalf("detach-iso exited 0 with the ISO still attached; stdout: %s", stdout)
+	}
+	if !strings.Contains(stderr, "still reports an ISO attached") {
+		t.Errorf("stderr = %q, want the unmet post-condition named", stderr)
+	}
+}
+
+// hzFlagVerbCase is one flag verb's whole conversation: the CLI args, the
+// action the fake must answer, and the two read-backs that decide the receipt —
+// one that AGREES with what was asked for and one that DISAGREES.
+type hzFlagVerbCase struct {
+	verb      string
+	args      []string
+	action    string
+	agrees    string
+	disagrees string
+	want      []string // substrings the agreeing receipt must carry
+	unwanted  []string // substrings it must NOT carry (request echoes)
+	unmet     string   // the sentence the disagreeing run must print
+}
+
+func hzFlagVerbCases() []hzFlagVerbCase {
+	return []hzFlagVerbCase{
+		{
+			verb:      "rebuild",
+			args:      []string{"rebuild", "web-1", "--image", "ubuntu-24.04", "--yes"},
+			action:    "rebuild",
+			agrees:    `{"id":42,"name":"web-1","status":"running","image":{"id":7,"name":"ubuntu-24.04","description":"Ubuntu 24.04"}}`,
+			disagrees: `{"id":42,"name":"web-1","status":"running","image":{"id":3,"name":"debian-12","description":"Debian 12"}}`,
+			want:      []string{"image: ubuntu-24.04", "image_id: 7", "image_observed: true"},
+			unmet:     `reports image "debian-12", not the requested "ubuntu-24.04"`,
+		},
+		{
+			verb:      "resize",
+			args:      []string{"resize", "web-1", "--type", "cpx21", "--upgrade-disk"},
+			action:    "change_type",
+			agrees:    `{"id":42,"name":"web-1","status":"running","server_type":{"id":22,"name":"cpx21"},"primary_disk_size":80}`,
+			disagrees: `{"id":42,"name":"web-1","status":"running","server_type":{"id":11,"name":"cpx11"},"primary_disk_size":40}`,
+			want:      []string{"server_type: cpx21", "server_type_id: 22", "primary_disk_size: 80"},
+			// `--upgrade-disk` used to ride the receipt as a pure request echo.
+			unwanted: []string{"upgrade_disk", "upgraded"},
+			unmet:    `reports type "cpx11", not the requested "cpx21"`,
+		},
+		{
+			verb:      "enable-rescue",
+			args:      []string{"enable-rescue", "web-1"},
+			action:    "enable_rescue",
+			agrees:    `{"id":42,"name":"web-1","status":"running","rescue_enabled":true}`,
+			disagrees: `{"id":42,"name":"web-1","status":"running","rescue_enabled":false}`,
+			want:      []string{"rescue_enabled: true"},
+			unmet:     "does not report rescue mode enabled",
+		},
+		{
+			verb:      "attach-iso",
+			args:      []string{"attach-iso", "web-1", "virtio-win"},
+			action:    "attach_iso",
+			agrees:    `{"id":42,"name":"web-1","status":"running","iso":{"id":5,"name":"virtio-win"}}`,
+			disagrees: `{"id":42,"name":"web-1","status":"running"}`,
+			want:      []string{"iso_attached: true", "iso: virtio-win"},
+			unmet:     "reports no ISO attached",
+		},
+	}
+}
+
+// TestHetznerFlagVerbsReportTheServerTheyReadBack is the BEHAVIOURAL proof for
+// the four flag verbs (PDS-D366) — a green post-condition map only proves a key
+// exists. Each verb ran against a fake whose post-action GET AGREES with the
+// request: the receipt must carry what that GET said, and the request echoes it
+// used to print must be gone.
+func TestHetznerFlagVerbsReportTheServerTheyReadBack(t *testing.T) {
+	for _, tc := range hzFlagVerbCases() {
+		t.Run(tc.verb, func(t *testing.T) {
+			f := hzActionFake(t, tc.action)
+			f.mux.HandleFunc("GET /servers/42", hzServerStates(tc.agrees))
+
+			stdout, stderr, code := runHzCLI(t, "table", append([]string{"hetzner", "server"}, tc.args...)...)
+			if code != exitOK {
+				t.Fatalf("%s exited %d, stderr: %s", tc.verb, code, stderr)
+			}
+			if n := f.count("GET", "/servers/42"); n != 1 {
+				t.Errorf("%s issued %d read-backs; a settled flag verb needs exactly one", tc.verb, n)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(stdout, want) {
+					t.Errorf("%s receipt = %q, want %q read off the POST-action server", tc.verb, stdout, want)
+				}
+			}
+			for _, never := range tc.unwanted {
+				if strings.Contains(stdout, never) {
+					t.Errorf("%s receipt = %q, still carries the request echo %q", tc.verb, stdout, never)
+				}
+			}
+		})
+	}
+}
+
+// TestHetznerFlagVerbsFailWhenTheReadBackDisagrees is the other half: the same
+// verb, the same action success, a post-action GET that DISAGREES with what was
+// asked for — the receipt must differ, and it must not be a ✓.
+func TestHetznerFlagVerbsFailWhenTheReadBackDisagrees(t *testing.T) {
+	for _, tc := range hzFlagVerbCases() {
+		t.Run(tc.verb, func(t *testing.T) {
+			f := hzActionFake(t, tc.action)
+			f.mux.HandleFunc("GET /servers/42", hzServerStates(tc.disagrees))
+
+			stdout, stderr, code := runHzCLI(t, "table", append([]string{"hetzner", "server"}, tc.args...)...)
+			if code == exitOK {
+				t.Fatalf("%s exited 0 against a server that disagrees with the request; stdout: %s", tc.verb, stdout)
+			}
+			if !strings.Contains(stderr, tc.unmet) {
+				t.Errorf("%s stderr = %q, want the unmet post-condition named (%q)", tc.verb, stderr, tc.unmet)
+			}
+			if strings.Contains(stdout, "✓") {
+				t.Errorf("%s printed a ✓ (%q) while its post-condition did not hold", tc.verb, stdout)
+			}
+		})
+	}
+}
+
+// TestHetznerServerRebuildUnreadableImageIsConfirmationUnavailable pins the
+// asymmetry rebuild adds: a server that comes back with NO image is a
+// confirmation we could not make, never a rebuild that failed. Exit 0, and the
+// receipt says so instead of claiming an image.
+func TestHetznerServerRebuildUnreadableImageIsConfirmationUnavailable(t *testing.T) {
+	f := hzActionFake(t, "rebuild")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"running"}`))
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "server", "rebuild", "web-1", "--image", "ubuntu-24.04", "--yes")
+	if code != exitOK {
+		t.Fatalf("rebuild exited %d because the image could not be READ — the action itself succeeded; stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("rebuild -o json emitted invalid JSON: %v\n%s", err, stdout)
+	}
+	if payload["confirmation"] != "unavailable" {
+		t.Errorf("receipt confirmation = %v, want \"unavailable\"", payload["confirmation"])
+	}
+	if _, claimed := payload["image"]; claimed {
+		t.Errorf("receipt claims image %v it never read back", payload["image"])
+	}
+}
+
+// TestHetznerServerReadBackErrorIsConfirmationUnavailable pins the hazard the
+// fix introduces. Every post-condition read is a NEW way for a verb to fail
+// where it previously could not: a rate-limited or otherwise erroring GetByID
+// after a SUCCESSFUL reboot must never tell the owner the reboot failed. That is
+// the same lie pointing the other way.
+func TestHetznerServerReadBackErrorIsConfirmationUnavailable(t *testing.T) {
+	f := hzActionFake(t, "reboot")
+	f.mux.HandleFunc("GET /servers/42", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 403, `{"error":{"code":"forbidden","message":"token is read-only"}}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "server", "reboot", "web-1")
+	if code != exitOK {
+		t.Fatalf("reboot exited %d because the CONFIRMING read failed — the action itself succeeded and was waited to success; stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("reboot -o json emitted invalid JSON: %v\n%s", err, stdout)
+	}
+	if payload["confirmation"] != "unavailable" {
+		t.Errorf("receipt confirmation = %v, want \"unavailable\" — the receipt must distinguish "+
+			"'action succeeded, could not confirm' from 'post-condition not met'", payload["confirmation"])
+	}
+	if msg, _ := payload["confirmation_error"].(string); !strings.Contains(msg, "read-only") {
+		t.Errorf("receipt confirmation_error = %v, want the read failure surfaced", payload["confirmation_error"])
+	}
+	if _, claimed := payload["status"]; claimed {
+		t.Errorf("receipt carries an observed status (%v) it never successfully read", payload["status"])
 	}
 }
 

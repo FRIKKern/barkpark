@@ -102,14 +102,24 @@ const (
 // RunOnceResurrect reports through the existing succeed/fail machinery.
 const resurrectClaimPath = "/v1/internal/resurrect-jobs/claim"
 
+// supportClaimPath is the provision_support queue's claim endpoint (Personal
+// Dev Fleet MVP-0, PDF-D83). Like resurrect, it is its OWN claim route
+// (kind-filtered server-side) while the succeed/fail/step/console TRANSITIONS
+// reuse the generic provision-jobs endpoints, so RunOnceSupport reports through
+// the existing succeed/fail machinery with the claimed Job.ID.
+const supportClaimPath = "/v1/internal/support-jobs/claim"
+
 // AttachDomainSpec is one claimed attach-domain job as the control plane hands
 // it back — the EXACT JSON the Elixir attach-domain claim endpoint returns on
 // 200 (a 204 means no pending job). ip is the box the instance lives on (the
-// barkpark's host), custom_host the full platform-zone host to attach
-// (gyldendal.barkpark.cloud), dns_label/dns_zone the A record's halves, and
-// app_port the local Phoenix port the new Caddy vhost proxies to. The worker
-// re-validates ALL of it defensively (validateAttachDomainSpec) before any side
-// effect — the claim payload is never trusted blindly.
+// barkpark's host), custom_host the full host to attach — a platform-zone host
+// (gyldendal.barkpark.cloud) or, V2, an arbitrary external customer FQDN
+// (barkpark.jarl.no) — and app_port the local Phoenix port the new Caddy vhost
+// proxies to. dns_label/dns_zone are the platform A record's halves for a
+// platform host and EMPTY (null) for an external host, whose DNS the customer
+// owns. The worker re-validates ALL of it defensively
+// (validateAttachDomainSpec) before any side effect — the claim payload is
+// never trusted blindly.
 type AttachDomainSpec struct {
 	JobID string `json:"job_id"`
 	// ClaimToken (claim-fence bp-c55) is the per-claim token the control plane
@@ -162,8 +172,11 @@ type JobSpec struct {
 	Template string `json:"template,omitempty"`
 	// AgentToken (charter Decision 33) is the per-instance monitoring token the
 	// control plane mints at CLAIM time (scope "report") and threads in plaintext
-	// here — the same sanctioned crossing as env/credentials, over the worker-token
-	// internal channel. The configure step writes it to /etc/barkpark/agent.token
+	// here — the same sanctioned crossing as Credentials above, over the worker-token
+	// internal channel. (It is NOT "the same crossing as env": JobSpec declares no
+	// env field at all, and every claim decode below is a bare json.Unmarshal, so an
+	// `env` key in the claim payload is silently DROPPED and never reaches the box.)
+	// The configure step writes it to /etc/barkpark/agent.token
 	// (0600) and enables barkpark-agent.service so the box reports its health +
 	// vitals home. Present for BOTH providers; only its hash is stored server-side.
 	// Empty when an OLD control plane omits the key → the worker skips the agent
@@ -305,6 +318,12 @@ type Worker struct {
 	// Provision. nil → the worker skips the resurrect queue (like Deprovision/
 	// AttachDomain). A missing-env error fails the JOB honestly; the drain survives.
 	Resurrect ResurrectDepsFunc
+	// SupportProvision runs one claimed provision_support job — the server-side
+	// support bring-up chain (MVP-0, PDF-D83: create/configure/content/verify/
+	// ready from claim-payload credentials). nil → the worker skips the support
+	// queue (like Deprovision/AttachDomain/Resurrect). Injected like Provision;
+	// tests bind it to fakes via DefaultSupportProvision(SupportSeams{…}).
+	SupportProvision SupportProvisionFunc
 	// ProvisionTimeout bounds a single Provision call. Zero means
 	// DefaultProvisionTimeout. When it fires, the job's ctx is cancelled — a
 	// well-behaved Provision returns a (deadline-exceeded) error, which RunOnce
@@ -903,6 +922,38 @@ func (w *Worker) succeed(ctx context.Context, jobID, claimToken, ip, adminToken 
 	return w.postJSON(ctx, fmt.Sprintf(succeedPathFmt, jobID), claimBody(body, claimToken))
 }
 
+// succeedSupport reports a provisioned SUPPORT box's IP and, when the chain
+// minted one, the OPAQUE id of the support's ledger token as `token_id`
+// (task-5866ec745efcd7f7). The CP persists it as the row's fleet_token_id —
+// the SOLE durable token-id holder (PDF-D68), which `bp cloud support remove`
+// later revokes. ADDITIVE contract, tolerant both ways: the key is sent ONLY
+// when non-empty (the ip-only body is byte-identical to before for a mint
+// response that carried no id), and an OLD control plane simply ignores it.
+// The ledger-token VALUE never rides here — only its opaque, non-secret id.
+//
+// `admin_token` is the box's own minted per-instance admin bearer — the SAME
+// key mains' succeed sends (the CP's role-agnostic succeed_job encrypts it at
+// rest), so mint_studio_link works against the support's reserved url. Sent
+// ONLY when non-empty; part of the request body and NEVER written to a log.
+func (w *Worker) succeedSupport(ctx context.Context, jobID, claimToken, ip, tokenID, adminToken string) error {
+	body := map[string]any{"ip": ip}
+	if tokenID != "" {
+		body["token_id"] = tokenID
+	}
+	if adminToken != "" {
+		body["admin_token"] = adminToken
+	}
+	return w.postJSON(ctx, fmt.Sprintf(succeedPathFmt, jobID), claimBody(body, claimToken))
+}
+
+// succeedSupportWithRetry is succeedSupport through the shared transient-retry
+// loop (mirrors succeedWithRetry: 5xx/transport retries, 4xx stops).
+func (w *Worker) succeedSupportWithRetry(ctx context.Context, jobID, claimToken, ip, tokenID, adminToken string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error {
+		return w.succeedSupport(ctx, jobID, claimToken, ip, tokenID, adminToken)
+	})
+}
+
 // fail reports a provision failure; the barkpark stays provisioning for retry.
 func (w *Worker) fail(ctx context.Context, jobID, claimToken, errMsg string) error {
 	return w.postJSON(ctx, fmt.Sprintf(failPathFmt, jobID), claimBody(map[string]any{"error": errMsg}, claimToken))
@@ -1384,6 +1435,174 @@ func (w *Worker) claimResurrect(ctx context.Context) (resurrectClaimSpec, bool, 
 	}
 	if strings.TrimSpace(spec.BundleRef) == "" {
 		return resurrectClaimSpec{}, false, fmt.Errorf("resurrect claim response missing bundle_ref: %s", truncate(string(data), 200))
+	}
+	return spec, true, nil
+}
+
+func (w *Worker) RunSupport(ctx context.Context) error {
+	return w.RunSupportWith(ctx, nil)
+}
+
+// RunSupportWith is the 5th drain loop (Personal Dev Fleet MVP-0, PDF-D83) —
+// the provision_support queue, run in its own goroutine like Deprovision/
+// AttachDomain/Resurrect (mirroring RunResurrectWith). It claims support jobs
+// from supportClaimPath and runs each through the injected SupportProvision
+// (the server-side create/configure/content/verify/ready chain).
+func (w *Worker) RunSupportWith(ctx context.Context, onCycle func(claimed bool, err error)) error {
+	interval := w.Interval
+	if interval <= 0 {
+		interval = DefaultInterval
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		claimed, err := w.RunOnceSupport(ctx)
+		if onCycle != nil {
+			onCycle(claimed, err)
+		}
+
+		if !claimed {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(interval):
+			}
+		}
+	}
+}
+
+// RunOnceSupport claims one provision_support job, runs the support chain, and
+// reports succeed/fail through the generic provision-jobs endpoints (PDF-D83).
+// It mirrors RunOnceResurrect's ORPHAN-TEARDOWN branch, not deprovision's
+// simpler one: a provisioned support is a live, BILLED box, so a dropped
+// succeed-report must tear it down rather than orphan it. Like the other
+// concurrent drains it does NOT participate in the graceful-shutdown
+// claim-release coordination (setInflight is the primary provision loop's
+// exclusive mechanism); a support job that outruns shutdown is recovered by
+// the control-plane stale-claim reaper.
+func (w *Worker) RunOnceSupport(ctx context.Context) (claimed bool, err error) {
+	if w.SupportProvision == nil {
+		return false, nil // the support queue is not wired.
+	}
+
+	spec, ok, err := w.claimSupport(ctx)
+	if err != nil {
+		return false, fmt.Errorf("support claim: %w", err)
+	}
+	if !ok {
+		return false, nil // 204 — nothing pending.
+	}
+
+	// Bound the chain so one hung step (a wedged SSH, a never-answering roster)
+	// fails the job instead of pinning this loop forever. The support default is
+	// WIDER than a provision's (configure + the ~10-min verify budget serialize).
+	pto := w.ProvisionTimeout
+	if pto <= 0 {
+		pto = DefaultSupportProvisionTimeout
+	}
+	provCtx, cancel := context.WithTimeout(ctx, pto)
+	ip, tokenID, adminToken, teardown, provErr := w.SupportProvision(provCtx, spec)
+	cancel()
+
+	if provErr != nil {
+		// The chain already tore down any half-built box (teardown nil on
+		// failure — see SupportProvisionWith.failStep). Report so the control
+		// plane records the honest terminal state (PDF-D10/D89: stuck-provisioning
+		// renders honestly, never fakes online, never bills).
+		if rerr := w.failWithRetry(ctx, spec.Job.ID, spec.Job.ClaimToken, provErr.Error()); rerr != nil {
+			return false, fmt.Errorf("report support fail for job %s (job error %v): %w", spec.Job.ID, provErr, rerr)
+		}
+		return true, nil
+	}
+
+	// Chain SUCCEEDED: a paid box is live but the control plane does not yet
+	// know (its succeed POST is the only signal). Retry transient report
+	// failures; on a report that never lands, tear the box down so no BILLED
+	// box is orphaned — the RunOnce money-edge, applied to a support. The
+	// minted ledger token's opaque id rides along (task-5866ec745efcd7f7) so
+	// the CP row's fleet_token_id is set and remove can revoke the token, and
+	// the box's minted admin token rides as `admin_token` (same key as mains)
+	// so the CP stores it encrypted and Open Studio works on the support.
+	if rerr := w.succeedSupportWithRetry(ctx, spec.Job.ID, spec.Job.ClaimToken, ip, tokenID, adminToken); rerr != nil {
+		if teardown != nil {
+			if cerr := teardown(ctx); cerr != nil {
+				return false, fmt.Errorf("report support succeed for job %s failed (%v) AND orphan teardown failed: %w", spec.Job.ID, rerr, cerr)
+			}
+		}
+		return false, fmt.Errorf("report support succeed for job %s (box torn down to avoid an orphan, job left for retry): %w", spec.Job.ID, rerr)
+	}
+	return true, nil
+}
+
+// claimSupport POSTs the support claim endpoint. A 200 decodes into the pinned
+// SupportJobSpec envelope ({job:{id,claim_token},barkpark:{…},support:{…}} —
+// PDF-D83); a 204 is the empty-queue signal. Any other status is an error.
+// Only job.id is asserted here — every other field is fenced by
+// validateSupportSpec INSIDE the chain, so a malformed claim fails the JOB
+// honestly (reported to /fail) rather than erroring the drain.
+func (w *Worker) claimSupport(ctx context.Context) (SupportJobSpec, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.url(supportClaimPath), nil)
+	if err != nil {
+		return SupportJobSpec{}, false, err
+	}
+	w.authorize(req)
+
+	resp, err := w.httpClient().Do(req)
+	if err != nil {
+		return SupportJobSpec{}, false, err
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	switch {
+	case resp.StatusCode == http.StatusNoContent:
+		return SupportJobSpec{}, false, nil
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		return SupportJobSpec{}, false, fmt.Errorf("POST %s: status %d: %s", supportClaimPath, resp.StatusCode, truncate(string(data), 200))
+	}
+
+	var spec SupportJobSpec
+	if len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &spec); err != nil {
+			return SupportJobSpec{}, false, fmt.Errorf("decode support claim response: %w", err)
+		}
+	}
+	if strings.TrimSpace(spec.Job.ID) == "" {
+		// TOLERATED DIALECT: the CP's support_provision_claim_json reuses the FLAT
+		// claim_json envelope (job_id/claim_token/name/slug/region/server_type at
+		// the top level, `support` nested) — the resurrect precedent's shape —
+		// while the PDF-D83 pin nests them under job/barkpark. Accept both so the
+		// two halves meet regardless of which dialect the merged CP speaks; the
+		// `support` map decodes identically either way.
+		var flat struct {
+			JobID      string `json:"job_id"`
+			ClaimToken string `json:"claim_token"`
+			Name       string `json:"name"`
+			Slug       string `json:"slug"`
+			Region     string `json:"region"`
+			ServerType string `json:"server_type"`
+		}
+		if err := json.Unmarshal(data, &flat); err == nil && strings.TrimSpace(flat.JobID) != "" {
+			spec.Job.ID = flat.JobID
+			spec.Job.ClaimToken = flat.ClaimToken
+			if spec.Barkpark.Name == "" {
+				spec.Barkpark.Name = flat.Name
+				spec.Barkpark.Slug = flat.Slug
+				spec.Barkpark.Region = flat.Region
+				spec.Barkpark.ServerType = flat.ServerType
+			}
+		}
+	}
+	if strings.TrimSpace(spec.Job.ID) == "" {
+		// CUSTODY: never echo the claim body here — a 200 payload carries
+		// support.parent_admin_token, and this error lands in the worker journal.
+		return SupportJobSpec{}, false, fmt.Errorf("support claim response missing job.id (body withheld — it carries credentials)")
 	}
 	return spec, true, nil
 }

@@ -1,0 +1,77 @@
+{
+  "cell": "add-oban-worker--C--1",
+  "chore": "add-oban-worker",
+  "arm": "C",
+  "rep": "1",
+  "cap_usd": 0.0,
+  "worktree": "/private/tmp/scaffy-duel-add-oban-worker--C--1",
+  "duration_ms": 22000,
+  "warm_ms": 82000,
+  "meter": {
+    "total_cost_usd": 0.0,
+    "usage": null,
+    "source": "engine"
+  },
+  "score": {
+    "gates_green": true,
+    "asserts": [
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "defmodule Barkpark.Workers.DuelSmokeReaper do"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "assert :ok = DuelSmokeReaper.perform"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "MARK:oban-cron-duel-smoke-reaper"
+      },
+      {
+        "kind": "cmd",
+        "tier": "ci",
+        "status": "deferred",
+        "text": "cd api && mix test test/barkpark/workers/duel_smoke_reaper_test.exs"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "defmodule Barkpark.Workers.DuelSmokeSweeper do"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "assert :ok = DuelSmokeSweeper.perform"
+      },
+      {
+        "kind": "file-contains",
+        "tier": null,
+        "status": "pass",
+        "text": "MARK:oban-cron-duel-smoke-sweeper"
+      },
+      {
+        "kind": "cmd",
+        "tier": "ci",
+        "status": "deferred",
+        "text": "cd api && mix test test/barkpark/workers/duel_smoke_sweeper_test.exs"
+      }
+    ],
+    "tier_ci_forced": [
+      {
+        "cmd": "cd api && CC=/usr/bin/clang mix test test/barkpark/workers",
+        "rc": 0
+      }
+    ],
+    "agent_gate": [],
+    "diff_sha256": "f614a3d4b67b283d9ad0303dfac7c1de9149be9a5311095fb823e59b08f4fc4f",
+    "reversible": true
+  }
+}

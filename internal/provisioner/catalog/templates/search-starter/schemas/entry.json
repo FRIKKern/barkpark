@@ -1,0 +1,28 @@
+{
+  "name": "entry",
+  "title": "Entry",
+  "icon": "compass",
+  "visibility": "public",
+  "fields": [
+    { "name": "title", "title": "Title", "type": "string", "surface": "body" },
+    { "name": "body", "title": "Body", "type": "portableDocument", "surface": "body" },
+    { "name": "slug", "title": "Slug", "type": "string", "surface": "sidebar" },
+    { "name": "summary", "title": "Summary", "type": "text", "surface": "sidebar" },
+    { "name": "kind", "title": "Kind", "type": "string", "surface": "sidebar" },
+    {
+      "name": "related",
+      "title": "Related",
+      "type": "reference",
+      "refType": "entry",
+      "surface": "sidebar"
+    },
+    {
+      "name": "links",
+      "title": "Links",
+      "type": "arrayOf",
+      "ordered": false,
+      "surface": "sidebar",
+      "of": { "type": "reference", "refType": "entry" }
+    }
+  ]
+}

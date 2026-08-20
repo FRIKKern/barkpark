@@ -28,6 +28,8 @@ export { getDoc } from './doc'
 export type { GetDocOptions, DocResult } from './doc'
 export { searchDocuments, getSearchSuggestions } from './search'
 export { getBacklinks } from './backlinks'
+export { getRelated } from './related'
+export { listTags, getTagDocs, normalizeTags } from './tags'
 export { getGraph, getOrphans, getDangling } from './graph'
 export { getHistory, getRevision, restoreRevision } from './history'
 export {
@@ -217,6 +219,17 @@ export type {
   CollectionShare,
   Backlink,
   BacklinksResult,
+  SharedTag,
+  RelatedEntry,
+  RelatedResult,
+  RelatedOptions,
+  TagRegistryEntry,
+  ListTagsResult,
+  ListTagsOptions,
+  TagDoc,
+  TagDocsResult,
+  TagDocsOptions,
+  WeightedTag,
   GraphNode,
   GraphEdge,
   GraphResult,

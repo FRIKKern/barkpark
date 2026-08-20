@@ -327,6 +327,55 @@ func TestAzureAuditOfflineSkipsArchives(t *testing.T) {
 	}
 }
 
+func TestAzureAuditDNSZoneNotFoundHintsSeparateToken(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+	t.Setenv("HCLOUD_TOKEN", "compute-secret")
+	azFake := cloud.NewFakeProvider()
+	oldBuilder := azureProviderBuilder
+	azureProviderBuilder = func(map[string]string) (cloud.CloudProvider, error) { return azFake, nil }
+	t.Cleanup(func() { azureProviderBuilder = oldBuilder })
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, http.StatusNotFound, `{"error":{"code":"not_found","message":"Zone not found"}}`)
+	})
+
+	_, stderr, code := runHzCLI(t, "table", "instance", "audit", "--provider", "azure")
+	if code != exitNotFound {
+		t.Fatalf("azure audit zone lookup exited %d, want %d; stderr: %s", code, exitNotFound, stderr)
+	}
+	for _, want := range []string{"BARKPARK_DNS_HCLOUD_TOKEN", "cloud/postfix/README.md", "Zone not found"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("azure audit error missing %q hint context: %s", want, stderr)
+		}
+	}
+	if strings.Contains(stderr, "compute-secret") {
+		t.Errorf("azure audit error exposed compute token: %s", stderr)
+	}
+}
+
+func TestAzureAuditDNSZoneNotFoundWithEnvTokenDoesNotHint(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+	t.Setenv("BARKPARK_DNS_HCLOUD_TOKEN", "dns-secret")
+	azFake := cloud.NewFakeProvider()
+	oldBuilder := azureProviderBuilder
+	azureProviderBuilder = func(map[string]string) (cloud.CloudProvider, error) { return azFake, nil }
+	t.Cleanup(func() { azureProviderBuilder = oldBuilder })
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, http.StatusNotFound, `{"error":{"code":"not_found","message":"Zone not found"}}`)
+	})
+
+	_, stderr, code := runHzCLI(t, "table", "instance", "audit", "--provider", "azure")
+	if code != exitNotFound {
+		t.Fatalf("azure audit zone lookup exited %d, want %d; stderr: %s", code, exitNotFound, stderr)
+	}
+	for _, absent := range []string{"BARKPARK_DNS_HCLOUD_TOKEN", "cloud/postfix/README.md", "dns-secret"} {
+		if strings.Contains(stderr, absent) {
+			t.Errorf("azure audit error unexpectedly contains %q: %s", absent, stderr)
+		}
+	}
+}
+
 // TestAzureAuditFlagsResidue proves the cross-check actually bites: a DNS record
 // with no managed VM and no registry row surfaces as a finding and a non-zero exit.
 func TestAzureAuditFlagsResidue(t *testing.T) {

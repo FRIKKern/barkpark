@@ -11,16 +11,15 @@ defmodule Barkpark.Media.Delivery.Retriever do
   @spec build_text_filter(String.t(), map(), map(), keyword()) :: Ecto.Query.t() | nil
   def build_text_filter(dataset, parsed, config, opts \\ []) do
     relaxed = Keyword.get(opts, :relaxed, false)
-    terms = expanded_terms(dataset, parsed)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+    terms = expanded_terms(dataset, parsed, workspace_id)
 
     if terms == [] and Map.get(parsed, :excludes, []) == [] do
       nil
     else
       include_dyn = include_dynamic(terms, config, relaxed)
       exclude_dyn = exclude_dynamic(Map.get(parsed, :excludes, []), relaxed)
-
-      workspace_id = Keyword.get(opts, :workspace_id)
-      project_id = Keyword.get(opts, :project_id)
 
       base =
         MediaFile
@@ -107,12 +106,12 @@ defmodule Barkpark.Media.Delivery.Retriever do
     )
   end
 
-  defp expanded_terms(dataset, parsed) do
+  defp expanded_terms(dataset, parsed, workspace_id) do
     raw = Map.get(parsed, :raw, "")
 
     synonym_terms =
       if raw != "" do
-        Synonyms.search_terms("media", dataset, raw)
+        Synonyms.search_terms("media", dataset, raw, workspace_id)
       else
         []
       end
@@ -132,6 +131,21 @@ defmodule Barkpark.Media.Delivery.Retriever do
     Enum.reduce(terms, nil, fn term, dyn ->
       pattern = like_pattern(term)
 
+      # WHY-LEFT (authoring-excellence D49 — do NOT `%`-rewrite these
+      # `similarity()` arms or add a media-files trgm index expecting a win).
+      # This clause is a CROSS-TABLE OR spanning `media_files` (m.*) UNION
+      # `documents` (d.*, reached via the LEFT JOIN in build_text_filter/4). A
+      # BitmapOr can only be built from branches over ONE relation; because the
+      # disjunction also references d.title / d.content (the joined table), the
+      # planner must materialize the join first and evaluate the OR as a filter —
+      # a trgm index on m.original_name is unreachable. PROVEN live: rewriting to
+      # `%` AND adding a real `gin(original_name gin_trgm_ops)` index yields a
+      # BYTE-IDENTICAL plan (the new index never appears; under enable_seqscan=off
+      # it falls to a pkey scan, 3032 buffers vs 122). The inverse guard in
+      # test/barkpark/media/delivery/similarity_not_indexable_test.exs pins this
+      # (red-if-someone-adds-a-real-index). Reaching the index needs a pre-join
+      # EXISTS/UNION restructure so media_files is trgm-scanned BEFORE the join
+      # (backlog ae-search-or-arm-restructure). See D49(e).
       clause =
         dynamic(
           [m, d],
@@ -156,6 +170,13 @@ defmodule Barkpark.Media.Delivery.Retriever do
     Enum.reduce(excludes, nil, fn term, dyn ->
       pattern = like_pattern(term)
 
+      # WHY-LEFT (authoring-excellence D49 — do NOT `%`-rewrite this arm). Two
+      # compounding disqualifiers: (1) it is the SAME cross-table OR over
+      # media_files ∪ documents as include_dynamic/3 above (join defeats the
+      # trgm index), and (2) the whole clause is NEGATED at build_text_filter/4
+      # via `not(^exclude_dyn)` — a trgm GIN lists MATCHES, never the
+      # complement. A `%` rewrite plans byte-identically to a Seq/pkey scan
+      # either way. See D49(b)/(e).
       clause =
         dynamic(
           [m, d],

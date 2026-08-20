@@ -1,0 +1,37 @@
+{
+  "run_id": "grip-20260721T224221Z",
+  "recipes": [
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get hq-bridge-binding-gc -o json | jq -r '.doc.content.parent_id // .doc.parent_id, .doc.lifecycle_status'",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T22:42:21Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get hg-bl-quiz-bridge-sandbox-cascade -o json | jq -r '.doc.content.parent_id // .doc.parent_id, .doc.lifecycle_status'",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T22:42:21Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:task",
+      "rerun": "bp task get connectors-tickets-keys-workspace-blind-idor -o json | jq -r '.doc.content.parent_id // .doc.parent_id, .doc.lifecycle_status, .doc.claim.epoch, .doc.claim.expired_at'",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T22:42:21Z"
+    },
+    {
+      "subject": "cmd:gh",
+      "quantity": "gh:pr",
+      "rerun": "gh pr view 5545 --json headRefName,state | jq -r '.headRefName, .state' && gh pr view 5550 --json headRefName,state | jq -r '.headRefName, .state'",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-21T22:42:21Z"
+    }
+  ]
+}

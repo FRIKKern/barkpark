@@ -4,8 +4,10 @@ import (
 	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // statusHandler returns a handler that answers `code` for any path NOT in
@@ -434,6 +436,58 @@ func TestRunHealthGate(t *testing.T) {
 		fails := report.Failures()
 		if len(fails) != 2 {
 			t.Fatalf("expected 2 failures (agent+backup), got %v", fails)
+		}
+	})
+}
+
+// --- PinnedIP: dial the box, not the resolver --------------------------------
+
+// TestRunHealthGate_PinnedIP proves the resolver-bypass fix for the support
+// chain (2026-07-26): with PinnedIP set, every probe against BaseURL's
+// hostname dials PinnedIP:<port> while the hostname keeps driving Host header,
+// SNI, and cert verification. The harness makes the proof airtight: BaseURL is
+// https://example.com:<port> — a name whose REAL resolution can never reach
+// the httptest server (random port, and the test never touches the resolver's
+// answer) — and the httptest cert is valid for exactly example.com/127.0.0.1,
+// so the gate can only go green if (a) the dial was rewritten to 127.0.0.1 AND
+// (b) TLS still verified against the example.com hostname.
+func TestRunHealthGate_PinnedIP(t *testing.T) {
+	srv := httptest.NewTLSServer(statusHandler(http.StatusOK, allGreenOverrides()))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "https://example.com:" + u.Port()
+
+	// A SECOND server on a different host:port proves probe URLs that do NOT
+	// share BaseURL's host dial normally — only the base hostname is pinned.
+	other := httptest.NewServer(statusHandler(http.StatusOK, nil))
+	defer other.Close()
+
+	t.Run("pinned gate passes against an unreachable-by-name base", func(t *testing.T) {
+		report, gerr := RunHealthGate(base, "tok", HealthGate{
+			RootCAs:          poolFor(srv),
+			PinnedIP:         "127.0.0.1",
+			PostgresProbeURL: base + "/w/default/p/default/v1/data/query/production/post",
+			AgentStatusURL:   base + "/agent",
+			BackupStatusURL:  other.URL + "/backup", // off-base host: un-pinned dial
+			Timeout:          3 * time.Second,
+		})
+		if gerr != nil {
+			t.Fatalf("pinned gate must pass — the dial was not rewritten to the pinned IP (or SNI/cert broke): %v\n%s", gerr, report)
+		}
+		if !report.OK {
+			t.Fatalf("report.OK must be true under the pin: %s", report)
+		}
+	})
+
+	t.Run("without the pin the same base cannot reach the server", func(t *testing.T) {
+		// The negative control: the pass above is due to the pin, not to
+		// example.com accidentally resolving to the test server.
+		g := HealthGate{BaseURL: base, RootCAs: poolFor(srv), Timeout: 2 * time.Second}
+		if res := g.checkCapabilities(); res.Pass {
+			t.Fatalf("un-pinned probe against %s must fail (nothing real listens there): %s", base, res.Detail)
 		}
 	})
 }

@@ -21,6 +21,98 @@ defmodule BarkparkWeb.StudioComponents.PanesTest do
     end
   end
 
+  # ── spd-w5 / charter D79 ──────────────────────────────────────────────────
+  # The collapsed strip shipped with a hardcoded `aria-expanded="false"` and no
+  # `aria-controls`. Measured live on the authenticated desk:
+  # `document.querySelectorAll('[aria-expanded="true"]').length` was 0 across
+  # the WHOLE document before and after activation, so the attribute had no
+  # referent and no truth — decoration. It is structural: the strip IS the pane
+  # collapsed (same id, one control in two states) and activating it DESTROYS
+  # it, so no element survives to carry the true state. It is removed here, and
+  # `aria-controls` names the region the control actually replaces.
+  describe "pane_column/1 collapsed strip – ARIA (spd-w5)" do
+    defp strip(extra \\ %{}) do
+      render_component(
+        &Panes.pane_column/1,
+        Map.merge(
+          %{
+            title: "Post",
+            collapsed: true,
+            phx_click: "expand-pane",
+            phx_value_idx: "1",
+            id: "pane-post",
+            inner_block: [%{inner_block: fn _, _ -> "hidden body" end}]
+          },
+          extra
+        )
+      )
+    end
+
+    test "claims no expanded state it cannot keep" do
+      refute strip() =~ "aria-expanded"
+    end
+
+    test "the labelled affordances spd-s6 shipped survive the removal" do
+      html = strip()
+
+      assert html =~ ~s(<button type="button")
+      assert html =~ ~s(aria-label="Back to Post")
+      assert html =~ ~s(title="Back to Post")
+      assert html =~ ~s(class="pane-column pane-column--collapsed")
+    end
+
+    test "aria-controls renders the caller's region id verbatim" do
+      assert strip(%{controls: "studio-panes"}) =~ ~s(aria-controls="studio-panes")
+    end
+
+    test "no controls given renders no aria-controls at all (legacy call sites)" do
+      # A referent that does not resolve is the decoration this replaced, so an
+      # absent region must produce an absent attribute — never an empty one.
+      html = strip()
+
+      refute html =~ "aria-controls"
+    end
+  end
+
+  # The other half of D79: after Enter, `document.activeElement` was BODY. The
+  # strip is destroyed by its own activation, so the browser has nowhere to put
+  # focus; the re-opened pane takes it via LiveView's own `phx-mounted` +
+  # `JS.focus()` — declarative, not an imperative focus grab.
+  describe "pane_column/1 expanded column – focus return (spd-w5)" do
+    defp column(extra \\ %{}) do
+      render_component(
+        &Panes.pane_column/1,
+        Map.merge(
+          %{title: "Posts", id: "pane-posts", inner_block: [%{inner_block: fn _, _ -> "b" end}]},
+          extra
+        )
+      )
+    end
+
+    test "focus_on_mount renders a programmatic focus target and JS.focus()" do
+      html = column(%{focus_on_mount: true})
+
+      assert html =~ ~s(tabindex="-1")
+      assert html =~ "phx-mounted"
+      assert html =~ "focus"
+    end
+
+    test "the default renders neither — an initial page load must not steal focus" do
+      html = column()
+
+      refute html =~ "tabindex"
+      refute html =~ "phx-mounted"
+    end
+
+    test "the focus target never lands on a collapsed strip" do
+      # The strip is gone by the time focus moves; only the expanded column can
+      # receive it, and `focus_on_mount` must not leak into the strip branch.
+      html = strip(%{focus_on_mount: true})
+
+      refute html =~ "phx-mounted"
+    end
+  end
+
   describe "pane_doc_item/1 – selectable / checked (bulk-publish feature)" do
     defp base_assigns do
       %{

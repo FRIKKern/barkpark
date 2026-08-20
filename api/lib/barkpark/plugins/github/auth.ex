@@ -154,6 +154,10 @@ defmodule Barkpark.Plugins.Github.Auth do
           {"user-agent", user_agent()}
         ],
         receive_timeout: 30_000,
+        # Route the installation-token fetch onto the dedicated auth-outbound
+        # Finch pool (Felix W10) so a slow GitHub App API cannot borrow from the
+        # global default pool shared with webhook/CDN traffic.
+        finch: Barkpark.Auth.Finch,
         retry: false
       )
 

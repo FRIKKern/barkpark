@@ -27,11 +27,38 @@ defmodule BarkparkCloud.Web.StaticAllowlistTest do
             "/app.css",
             "/index.html",
             "/styleguide.html",
+            "/robots.txt",
             "/fonts/Inter-var.woff2"
           ] do
         conn = get(path)
         assert conn.status == 200, "expected #{path} to be served (200), got #{conn.status}"
       end
+    end
+
+    test "/robots.txt is Disallow-all, byte-for-byte, and actually reachable" do
+      # THREE things have to be true at once for the console's crawl policy to
+      # exist, and until this test each of them could fail silently:
+      #   1. cloud/priv/static/robots.txt is on disk,
+      #   2. `robots.txt` is in the `only:` allowlist above (without it the
+      #      request falls through Plug.Static to `match _` and answers a JSON
+      #      404 — a robots.txt that no crawler ever sees),
+      #   3. the bytes say Disallow-all.
+      # The 200 loop above catches (1) and (2); the body assertion catches (3).
+      # Asserting against the file on disk rather than a re-typed literal is
+      # deliberate — a copy in the test would drift from the shipped file and
+      # pin nothing.
+      expected = File.read!(Path.join(:code.priv_dir(:barkpark_cloud), "static/robots.txt"))
+
+      conn = get("/robots.txt")
+
+      assert conn.status == 200
+      assert conn.resp_body == expected
+      assert conn.resp_body =~ "User-agent: *"
+      assert conn.resp_body =~ "Disallow: /"
+
+      # The console is a control plane: nothing here may be Allow-ed. A stray
+      # `Allow:` line would open a crawl surface the moment it landed.
+      refute conn.resp_body =~ "Allow:"
     end
 
     test "the __preview__ harness is NOT served (dev-only, never shipped)" do

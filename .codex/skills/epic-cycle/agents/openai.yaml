@@ -1,0 +1,4 @@
+interface:
+  display_name: "Epic Cycle"
+  short_description: "Run evidence-gated Barkpark epic waves"
+  default_prompt: "Use $epic-cycle to run the next evidence-gated wave for this Barkpark epic."

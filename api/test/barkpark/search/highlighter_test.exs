@@ -200,6 +200,169 @@ defmodule Barkpark.Search.HighlighterTest do
     end
   end
 
+  # AXI R3: brief-card snippets — a bounded plain-text window around the first
+  # match, sealed through the SAME visibility path as highlights
+  # (visible_highlight_fields → Envelope.field_readable?/3).
+  describe "snippet_documents/5 (AXI R3 brief snippets)" do
+    test "a readable description yields a bounded window around the first match" do
+      filler = String.duplicate("lorem ipsum dolor sit amet consectetur ", 30)
+      text = filler <> "the alphabeacon signal fires here " <> filler
+
+      doc = %FakeDoc{
+        doc_id: "d1",
+        type: "post",
+        title: "No needle in this title",
+        content: %{"description" => text}
+      }
+
+      parsed = %{terms: ["alphabeacon"], phrases: [], prefixes: []}
+      # Schema declares `description` with no visibility flags ⇒ public.
+      schema = %{"fields" => [%{"name" => "description"}]}
+      schema_fun = fn "post" -> schema end
+
+      result =
+        Highlighter.snippet_documents([doc], parsed, %{}, CallerContext.anonymous(), schema_fun)
+
+      snippet = result["d1"]
+      assert is_binary(snippet)
+      assert snippet =~ "alphabeacon"
+      # Both sides were cut, so both carry an ellipsis; the window is bounded.
+      assert String.starts_with?(snippet, "…")
+      assert String.ends_with?(snippet, "…")
+      assert String.length(snippet) <= 162
+    end
+
+    test "title is the first snippet field and needs no schema" do
+      doc = %FakeDoc{doc_id: "d1", type: "post", title: "Alphabeacon guide", content: %{}}
+      parsed = %{terms: ["alphabeacon"], phrases: [], prefixes: []}
+
+      result = Highlighter.snippet_documents([doc], parsed, %{})
+
+      # Short text ⇒ the whole (original-case) title, no ellipses, no <mark>.
+      assert result["d1"] == "Alphabeacon guide"
+    end
+
+    test "a schema-PRIVATE field never contributes a snippet — nil caller fails closed" do
+      doc = %FakeDoc{
+        doc_id: "d1",
+        type: "post",
+        title: "Plain title",
+        content: %{"description" => "the alphabeacon secret payload"}
+      }
+
+      parsed = %{terms: ["alphabeacon"], phrases: [], prefixes: []}
+      schema = %{"fields" => [%{"name" => "description", "private" => true}]}
+      schema_fun = fn "post" -> schema end
+
+      for caller <- [nil, CallerContext.anonymous(), CallerContext.from_user("u1")] do
+        result = Highlighter.snippet_documents([doc], parsed, %{}, caller, schema_fun)
+        assert result["d1"] == nil
+      end
+    end
+
+    test "no schema ⇒ content.* snippet dropped (fail-closed); admin bypasses" do
+      doc = %FakeDoc{
+        doc_id: "d1",
+        type: "post",
+        title: "Plain title",
+        content: %{"description" => "the alphabeacon hidden text"}
+      }
+
+      parsed = %{terms: ["alphabeacon"], phrases: [], prefixes: []}
+
+      # No schema resolver ⇒ visibility unknown ⇒ no content.* snippet.
+      assert Highlighter.snippet_documents([doc], parsed, %{}, CallerContext.anonymous())["d1"] ==
+               nil
+
+      admin = %CallerContext{principal_type: :api_token, is_admin: true}
+      assert Highlighter.snippet_documents([doc], parsed, %{}, admin)["d1"] =~ "alphabeacon"
+    end
+
+    test "non-binary content values (blocks/maps) are skipped, never crash" do
+      doc = %FakeDoc{
+        doc_id: "d1",
+        type: "post",
+        title: "Plain title",
+        content: %{"body" => [%{"type" => "paragraph", "text" => "alphabeacon"}]}
+      }
+
+      parsed = %{terms: ["alphabeacon"], phrases: [], prefixes: []}
+      admin = %CallerContext{principal_type: :api_token, is_admin: true}
+
+      assert Highlighter.snippet_documents([doc], parsed, %{}, admin)["d1"] == nil
+    end
+
+    test "no needles ⇒ nil snippet" do
+      doc = %FakeDoc{doc_id: "d1", type: "post", title: "Anything", content: %{}}
+
+      assert Highlighter.snippet_documents([doc], %{terms: [], phrases: [], prefixes: []}, %{})[
+               "d1"
+             ] == nil
+    end
+  end
+
+  # AXI b3: brief hit cards reuse the sealed highlights map, but highlight_text
+  # marks up the ENTIRE field — a schema-configured `content.body` highlight
+  # would echo a full field per hit. clamp_brief_highlights/1 windows each
+  # already-sealed highlight so a brief card can never re-inflate.
+  describe "clamp_brief_highlights/1 (brief re-inflation guard)" do
+    test "windows a heavyweight marked field around the first match, keeping <mark>" do
+      lead = String.duplicate("x", 5000)
+      tail = String.duplicate("y", 5000)
+      doc = %FakeDoc{doc_id: "d1", title: "t", content: %{"slug" => lead <> " needle " <> tail}}
+      parsed = %{terms: ["needle"], phrases: [], prefixes: []}
+      admin = %CallerContext{principal_type: :api_token, is_admin: true}
+      config = %{"highlight_fields" => ["content.slug"]}
+
+      full = Highlighter.highlight_documents([doc], parsed, config, admin)["d1"]
+      assert byte_size(full["content.slug"]) > 10_000
+
+      val = Highlighter.clamp_brief_highlights(full)["content.slug"]
+      assert val =~ "<mark>needle</mark>"
+      assert byte_size(val) <= 256
+      assert String.starts_with?(val, "…")
+      assert String.ends_with?(val, "…")
+    end
+
+    test "a window ending inside a long match stays balanced (appends </mark>)" do
+      marked = "<mark>" <> String.duplicate("z", 400) <> "</mark>"
+      val = Highlighter.clamp_brief_highlights(%{"content.body" => marked})["content.body"]
+
+      assert String.starts_with?(val, "<mark>")
+      assert String.contains?(val, "</mark>")
+      assert String.ends_with?(val, "…")
+      assert byte_size(val) <= 256
+    end
+
+    test "HTML entities are never split by the window cut" do
+      amps = String.duplicate("&", 400)
+      doc = %FakeDoc{doc_id: "d1", title: "t", content: %{"slug" => amps <> " needle"}}
+      parsed = %{terms: ["needle"], phrases: [], prefixes: []}
+      admin = %CallerContext{principal_type: :api_token, is_admin: true}
+      config = %{"highlight_fields" => ["content.slug"]}
+
+      full = Highlighter.highlight_documents([doc], parsed, config, admin)["d1"]
+      val = Highlighter.clamp_brief_highlights(full)["content.slug"]
+
+      # Every `&` in the window is a whole `&amp;` entity — no dangling `&am`.
+      assert Regex.run(~r/&(?!amp;|lt;|gt;|quot;|#39;)/, val) == nil
+      # Bounded: the window is ~160 VISIBLE units; entities are multi-byte so the
+      # byte size is larger than a plain window, but still can't re-inflate to the
+      # full field (400 entities ≈ 2 KB) — a comfortable per-field cap.
+      assert byte_size(val) <= 1024
+      assert byte_size(val) < byte_size(full["content.slug"])
+    end
+
+    test "a short marked field passes through unchanged (no ellipsis)" do
+      assert Highlighter.clamp_brief_highlights(%{"title" => "<mark>hi</mark> there"}) ==
+               %{"title" => "<mark>hi</mark> there"}
+    end
+
+    test "an empty highlights map clamps to an empty map" do
+      assert Highlighter.clamp_brief_highlights(%{}) == %{}
+    end
+  end
+
   describe "highlight_media/4" do
     test "highlights filename when it contains the needle" do
       file = %FakeFile{id: 42, original_name: "photo.jpg", filename: "elixir-logo.png"}

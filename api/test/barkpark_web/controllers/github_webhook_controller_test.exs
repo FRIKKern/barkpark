@@ -26,6 +26,7 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
     on_exit(fn ->
       Application.delete_env(:barkpark, :github_webhook_intake_fun)
       Application.delete_env(:barkpark, :github_webhook_inbound_fun)
+      Application.delete_env(:barkpark, :github_webhook_merge_events_fun)
     end)
 
     :ok
@@ -49,6 +50,17 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
 
     Application.put_env(:barkpark, :github_webhook_inbound_fun, fn payload, opts ->
       send(test, {:inbound_called, payload, opts})
+      result
+    end)
+  end
+
+  # Inject a stub MergeEvents handler (the pull_request merge-reconcile path)
+  # mirroring the Intake/InboundEvents seams. Records its call.
+  defp stub_merge_events(result) do
+    test = self()
+
+    Application.put_env(:barkpark, :github_webhook_merge_events_fun, fn payload, opts ->
+      send(test, {:merge_events_called, payload, opts})
       result
     end)
   end
@@ -285,6 +297,64 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
 
       assert %{"ok" => true, "ignored" => "event"} = json_response(conn, 202)
       refute_received {:intake_called, _payload, _opts}
+    end
+  end
+
+  describe "pull_request event → MergeEvents merge-reconcile dispatch" do
+    @merged_pr %{
+      "action" => "closed",
+      "pull_request" => %{
+        "number" => 4621,
+        "merged" => true,
+        "merge_commit_sha" => "abc1234",
+        "body" => "Task: ledger-merge-criterion-autostamp"
+      }
+    }
+
+    test "a merged PR forwards to MergeEvents and answers 200 stamped" do
+      stub_merge_events({:ok, :stamped, "ledger-merge-criterion-autostamp", [4]})
+
+      conn = deliver("pull_request", @merged_pr)
+
+      assert %{"ok" => true, "stamped" => true, "task" => "ledger-merge-criterion-autostamp"} =
+               json_response(conn, 200)
+
+      assert_received {:merge_events_called, payload, opts}
+      assert payload == @merged_pr
+      assert Keyword.get(opts, :dataset) == "production"
+    end
+
+    test "a named idempotent outcome (:already_stamped) answers 200 reconciled" do
+      stub_merge_events({:ok, :already_stamped, "some-task"})
+
+      conn = deliver("pull_request", @merged_pr)
+
+      assert %{"ok" => true, "reconciled" => "already_stamped"} = json_response(conn, 200)
+    end
+
+    test "an unknown-task outcome answers 202 (accepted no-op, never a retry)" do
+      stub_merge_events({:unknown_task, "ghost"})
+
+      conn = deliver("pull_request", @merged_pr)
+
+      assert %{"ok" => true, "ignored" => "unknown_task"} = json_response(conn, 202)
+    end
+
+    test "a non-merge close (:ignored) answers 202 without stamping" do
+      stub_merge_events(:ignored)
+
+      conn = deliver("pull_request", @merged_pr)
+
+      assert %{"ok" => true, "ignored" => "ignored"} = json_response(conn, 202)
+      assert_received {:merge_events_called, _payload, _opts}
+    end
+
+    test "a genuine ledger write failure answers 500 (retryable, replay-safe)" do
+      stub_merge_events({:error, :stale_rev})
+
+      conn = deliver("pull_request", @merged_pr)
+
+      assert %{"error" => %{"code" => "merge_reconcile_failed"}} = json_response(conn, 500)
     end
   end
 end

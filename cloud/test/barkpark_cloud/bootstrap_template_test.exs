@@ -132,8 +132,10 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
       assert body["error"] == "unknown_template"
 
       assert body["known_templates"] == [
+               "astro-search-starter",
                "blog-starter",
                "place-directory",
+               "search-starter",
                "website-starter"
              ]
 
@@ -184,7 +186,7 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
       assert conn.status == 200
 
       reloaded = Registry.get_barkpark(bp.id)
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
       assert reloaded.bootstrap_workspace == "acme"
       assert reloaded.bootstrap_project == "default"
       assert reloaded.bootstrap_dataset == "production"
@@ -275,6 +277,31 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
       assert body["url"] == bp.url
     end
 
+    test "a SUSPENDED box owned by the caller's team → 409 suspended, no read_token/env leaked (cch-idor-s3)" do
+      {owner, team} = user_with_team()
+      {:ok, owner_token} = Accounts.create_user_session_token(owner)
+      bp = bootstrapped_barkpark(team)
+
+      # Suspend through the REAL producer both billing paths call, not a
+      # hand-set column — the state a lapsing team actually lands in.
+      {:ok, 1} = Registry.suspend_team_barkparks(team, "billing_lapsed")
+      assert Registry.get_barkpark(bp.id).suspended
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/bootstrap", nil, owner_token)
+
+      # 409 suspended, mirroring /credentials, /studio-link, /app-token — the
+      # bootstrap secrets are not revealed while access is revoked.
+      assert conn.status == 409
+      body = json_body(conn)
+      assert body["error"] == "suspended"
+
+      # The clause sits ABOVE the reveal, so Registry.reveal_bootstrap is never
+      # reached: the read token, env map, and webhook HMAC never travel.
+      refute Map.has_key?(body, "read_token")
+      refute Map.has_key?(body, "env")
+      refute conn.resp_body =~ "bp_read_supersecret"
+    end
+
     test "no bootstrap stored → 404 no_bootstrap (template-less launch)" do
       {owner, team} = user_with_team()
       {:ok, owner_token} = Accounts.create_user_session_token(owner)
@@ -328,9 +355,16 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
   ## Catalog mirror
 
   test "known_templates/0 mirrors the Go worker's embedded catalog (sorted)" do
-    # The Go side locks the same list in TestCatalogCarriesTheThreeTemplates
+    # The Go side locks the same list in TestCatalogCarriesTheShippedTemplates
     # (internal/provisioner/catalog) — change BOTH together.
-    assert Registry.known_templates() == ["blog-starter", "place-directory", "website-starter"]
+    assert Registry.known_templates() == [
+             "astro-search-starter",
+             "blog-starter",
+             "place-directory",
+             "search-starter",
+             "website-starter"
+           ]
+
     assert Registry.known_template?("place-directory")
     refute Registry.known_template?("wordpress")
     refute Registry.known_template?(nil)

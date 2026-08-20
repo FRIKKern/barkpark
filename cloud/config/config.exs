@@ -9,6 +9,30 @@ config :barkpark_cloud,
   ecto_repos: [BarkparkCloud.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
+# site-spawner W5 (charter D45): the control plane's OWN public origin — the host a
+# co-located box POSTs a content-publish webhook back to (guerrilla →
+# barkpark.cloud). Used to build the per-site receiver URL registered on the box.
+# Prod overrides from PUBLIC_URL / CONTROL_PLANE_URL in runtime.exs; this default
+# is the prod API host so an unset env still points at a real receiver.
+config :barkpark_cloud, :public_url, "https://api.barkpark.cloud"
+
+# cch-w1-peer-ip-pin: the peers whose X-Forwarded-For may move conn.remote_ip
+# (Web.Router.trusted_peer?/1). Loopback is ALWAYS trusted in code; this list is
+# the extra front-door peers on top of it.
+#
+# The default is the docker bridge gateway, because Caddy runs as a HOST service
+# proxying to localhost:4100 and Docker's hairpin NAT rewrites the source the
+# container sees to the gateway — so in prod the peer is the gateway, never
+# 127.0.0.1. This value is PINNED to a single address, never a CIDR range: with
+# a 172.16/12 widening, peer {172,18,0,77} was measured forging 203.0.113.5, and
+# cloud-postfix-1 sits on 172.18.0.2 publishing 0.0.0.0:587 to the internet.
+#
+# It MUST agree with the `networks.default.ipam` subnet pinned in
+# cloud/docker-compose.yml; runtime.exs overrides it from TRUSTED_PROXY_PEERS so
+# an operator who moves the bridge changes both in one place. Entries are :inet
+# address tuples.
+config :barkpark_cloud, :trusted_proxy_peers, [{172, 18, 0, 1}]
+
 # Configure Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
@@ -154,6 +178,25 @@ config :barkpark_cloud, BarkparkCloud.ArchiveStore,
   bucket: nil,
   location: "fsn1"
 
+# push relay (mobile charter D15): how one notification's adapter is chosen.
+#
+# `:auto` = resolve PER PLATFORM at send time (BarkparkCloud.Push.adapter_for/1):
+# apns → Adapters.APNS iff its credentials are configured, fcm → Adapters.FCM
+# iff its service-account key is, otherwise Adapters.NotConfigured (honest
+# terminal cancel — never retried, never faked). No APNs/FCM credentials exist
+# in any environment yet, so today every send still cancels; the relay turns
+# itself on when a credential appears, with no flag to flip. The exact
+# credentials a human must supply are in the Adapters.NotConfigured moduledoc.
+#
+# Setting a MODULE here instead overrides the resolution for every platform —
+# that is how config/test.exs pins BarkparkCloud.PushFakeAdapter.
+config :barkpark_cloud, :push_adapter, :auto
+
+# The push relay's HTTP boundary (BarkparkCloud.Push.HTTP) — the one seam the
+# real APNs/FCM adapters put bytes through, and the one the adapter tests fake.
+# Mint, not :httpc, because the APNs provider API is HTTP/2-only.
+config :barkpark_cloud, :push_http_client, BarkparkCloud.Push.HTTP.Mint
+
 # oban-substrate: the cloud control plane's job + cron engine. Postgres-backed
 # on BarkparkCloud.Repo (no Redis). A near-verbatim port of the proven api/ Oban
 # setup (api/config/config.exs:81-118), trimmed to what the control plane needs
@@ -174,9 +217,45 @@ config :barkpark_cloud, Oban,
   repo: BarkparkCloud.Repo,
   queues: [
     default: 10,
-    maintenance: 2
+    maintenance: 2,
+    # site-spawner W5 (charter D44): the publish-to-live auto-rebuild queue.
+    # Concurrency 1 so the debounced auto-deploy enqueue+start step is serial per
+    # box — the trailing rebuild after an in-flight build never races it (the box
+    # additionally flock-serializes the build itself). AutoDeployWorker names this
+    # queue via `use Oban.Worker, queue: :site_deploy`.
+    site_deploy: 1
   ],
+  # dr-w8-s7: how long the BEAM waits for :executing jobs to finish before it
+  # tears the queues down. Oban's UNSET default is 15_000ms — and the all-time
+  # MAX completed AutoDeployWorker duration measured on prod (13,287 jobs) is
+  # 15.017s, i.e. the observed distribution is CLIPPED exactly at that boundary:
+  # the healthy tail beyond it is unobservable from completed rows alone, because
+  # anything longer was killed, not completed. 60s gives the real tail room and
+  # PREVENTS most orphans in the first place — a blue/green container replacement
+  # that used to strand an :executing row now usually lets it finish.
+  shutdown_grace_period: :timer.seconds(60),
   plugins: [
+    # dr-w8-s7: rescue jobs orphaned by a dead node. Without this, an :executing
+    # row whose BEAM died is stranded FOREVER — Pruner only reaps
+    # completed/cancelled/discarded, so it never touches :executing — and the
+    # ledger goes on claiming the job has been running for ten days. Eight rows
+    # sat that way (five AutoDeployWorker, oldest 2026-07-28), each attempted_by
+    # a different, now-dead node: blue/green container replacements.
+    #
+    # 5 minutes is deliberately FAR above the healthy runtime, not near it:
+    # AutoDeployWorker.perform/1 only enqueues + SPAWNS the supervised driver and
+    # returns (the 2-4 minute build runs outside the job), measured p50 0.329s /
+    # p99 5.771s / max 15.017s over 13,287 completed jobs, ZERO over 30s. It is
+    # also comfortably above the 60s AUTODEPLOY_DEBOUNCE_S window. Never set this
+    # below 60s: see the clipping note on shutdown_grace_period above — the max
+    # is an artifact of the old grace boundary, so the true tail is unknown.
+    #
+    # Rescue vs discard is Engine.rescue_jobs/3's split, pinned by a test in
+    # test/barkpark_cloud/sites/auto_deploy_worker_test.exs: attempt <
+    # max_attempts → back to "available" (re-runs), attempt >= max_attempts →
+    # "discarded" (never re-runs). Leader-gated (Peer.leader?/1), so only one
+    # node rescues during a blue/green overlap.
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(5)},
     # Reap finished/discarded job rows after 7 days so oban_jobs never grows
     # unbounded (same retention api/ uses — control-plane volume is far lower, so
     # 7 days is harmless and keeps a useful audit window).
@@ -191,6 +270,29 @@ config :barkpark_cloud, Oban,
        # `bp login` flows). Pure hygiene — expiry is enforced in-band by every
        # DeviceAuth query — so it rides the cheap :maintenance queue.
        {"* * * * *", BarkparkCloud.Workers.DeviceAuthReaper},
+       # cch-w2: the same sweep for abandoned OAuth `state` nonces. Both oauth
+       # GET legs insert a row per hit on an UNAUTHENTICATED route and only the
+       # REDEEMED row was ever deleted, so every bounced consent screen leaked a
+       # tombstone. Expiry is enforced in-band by verify_state/consume_state —
+       # pure hygiene, so it rides :maintenance beside its twin above.
+       {"* * * * *", BarkparkCloud.Workers.OAuthStateReaper},
+       # cch-w3: the third of the same sweep, for burned/expired `"sse"` stream
+       # tickets. The mint inserts one user_tokens row per call and the burn is a
+       # soft `revoked_at` stamp, never a DELETE, so a console tab's reconnect
+       # loop accreted a row per connect forever. A mint THROTTLE was rejected —
+       # the mint is non-superseding on purpose (two-tab eviction storm), so a
+       # per-user limit would 429 a legitimate second tab. Pure hygiene, so it
+       # rides :maintenance beside its twins above.
+       {"* * * * *", BarkparkCloud.Workers.SseTicketReaper},
+       # cch-w10: the fourth of the same sweep, for burned/expired
+       # `"oauth_exchange"` codes — the one-time code the OAuth callback now puts
+       # on the `location` header in place of a live 30-day session token. Filed
+       # WITH the mint rather than after it: `oauth_states` and `"sse"` above were
+       # both discovered as accretion later, and this mint has the identical shape
+       # (bare Repo.insert, soft `revoked_at` burn, never a DELETE). Expiry is
+       # enforced in-band by consume_oauth_exchange_code/1 — pure hygiene, so it
+       # rides :maintenance beside its three twins.
+       {"* * * * *", BarkparkCloud.Workers.OAuthExchangeReaper},
        # deploy-queue twin of the reaper above: recover deployments wedged in
        # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
        # crashed worker never strands a site's deploys behind an eternal spinner.
@@ -229,7 +331,19 @@ config :barkpark_cloud, Oban,
        # fleet has seen (curator judgment → a human inbox). Runs at 06:00 (quiet,
        # off every on-the-hour + off-peak sweep). max_attempts: 1 + unique daily —
        # a missed tick is harmless and a double-enqueue must not double-send.
-       {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker}
+       {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker},
+       # stw9 (charter D57b): the hourly TEMPLATE-freshness sweep — re-enqueue an
+       # UNFORCED "template-auto" build for every deployed content-bound site, so
+       # a merged template change reaches live sites with no human in the loop.
+       # Unforced means an unchanged site collapses to the (site_id, build_id)
+       # no-op, so a quiet fleet costs one analytics read per site per hour; the
+       # worker additionally SKIPS any site whose content_rev it cannot read (the
+       # fail-open would otherwise mint a fresh build every tick — a build storm
+       # on a 2-core box). Offset to :41 so it never stampedes the :00 / :17 / :07
+       # sweeps, and it rides :site_deploy (concurrency 1) rather than
+       # :maintenance — a sweep that starts builds belongs behind the same serial
+       # gate the debounced auto-deploy uses.
+       {"41 * * * *", BarkparkCloud.Sites.TemplateFreshnessWorker}
      ]}
   ]
 

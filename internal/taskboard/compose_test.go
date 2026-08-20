@@ -17,7 +17,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 // composeSubjectID is the fixture's drilled-into task.
@@ -78,7 +80,7 @@ func composeFixture() Model {
 			OrphansFocusSet: focusOf(composeSubjectID, "sse-decode", "sse-debounce", "sse-conn-dot"),
 			Counts:          map[string]int{"in_progress": 2, "done": 1},
 		},
-		ui:      UIState{Conn: ConnLive, LastSync: at("2026-07-04T17:28:00Z"), CollapsedEpics: map[string]bool{}},
+		ui:      UIState{Conn: ConnLive, LastSync: at("2026-07-04T17:28:00Z"), CollapsedEpics: map[string]bool{}, HoverStop: -1},
 		details: details,
 		tasks:   tasks,
 		papers: map[string]PaperState{
@@ -89,8 +91,9 @@ func composeFixture() Model {
 				BlocksRaw: []byte(fixtureBlocks),
 			},
 		},
-		now:   func() time.Time { return detailNow },
-		stack: []Frame{{Kind: FrameBoard, Title: "tasks"}},
+		now:           func() time.Time { return detailNow },
+		stack:         []Frame{{Kind: FrameBoard, Title: "tasks"}},
+		wideBoardCols: boardPaneWidth,
 	}
 }
 
@@ -159,9 +162,55 @@ func TestComposeWideGolden(t *testing.T) {
 	composeGolden(t, "compose_wide_120.txt", got)
 }
 
+// WIDE two-pane at 120 with a DRAGGED divider: a persisted non-default
+// DetailsPaneRatio (0.4444, as if the user had dragged the split wider), driving
+// the layout through boardPaneCols' ratio path instead of the fixture's fixed
+// 46-col wideBoardCols. The board pane widens past its default third, so the
+// resize handle lands well right of compose_wide_120's. TestComposeWideGolden
+// pins ONLY the default split; without this the drag's ratio→column geometry had
+// no frame baseline, so a regression there would ship silently.
+func TestComposeWideDraggedGolden(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	m.ui.Cursor = 1     // the subject task — same target as the default-split golden
+	m.wideBoardCols = 0 // drop the fixture's fixed split so the ratio drives the layout
+	m.wideDetailsRatio = 0.4444
+	got := ansi.Strip(Compose(m))
+	assertWidthSafe(t, got, 120)
+	composeGolden(t, "compose_wide_dragged_120.txt", got)
+
+	// The point of a dragged baseline: its divider sits at a DIFFERENT column than
+	// the default-third split, proving the ratio actually moved the panes (and that
+	// this golden is not a stale copy of compose_wide_120).
+	def := composeFixture()
+	def.width, def.height, def.wide = 120, 40, true
+	def.ui.Cursor = 1
+	defCol := dividerCol(t, ansi.Strip(Compose(def)))
+	dragCol := dividerCol(t, got)
+	if dragCol <= defCol {
+		t.Fatalf("a wider board pane must push the divider RIGHT of the default split: dragged col %d, default col %d",
+			dragCol, defCol)
+	}
+}
+
+// dividerCol returns the rune column of the wide resize handle (↔) — painted once,
+// on the identity row at the pane boundary — so a test can compare where the split
+// fell across two frames without re-deriving the pane geometry.
+func dividerCol(t *testing.T, frame string) int {
+	t.Helper()
+	for _, ln := range strings.Split(frame, "\n") {
+		if i := strings.IndexRune(ln, '↔'); i >= 0 {
+			return len([]rune(ln[:i]))
+		}
+	}
+	t.Fatalf("no ↔ resize handle in the wide frame:\n%s", frame)
+	return -1
+}
+
 // TestEnterChecksOpenTaskRow — the picker vocabulary: entering a task CHECKS
-// its radio. While a FrameTask is on the navigation stack its board row wears
-// the ● checked glyph (in place of the lifecycle glyph, same color), and
+// its reader marker. While a FrameTask is on the navigation stack its board row
+// wears ◆ (in place of the lifecycle glyph, same color), and
 // popping the frame (esc) reverts it. Exercised in WIDE mode, where the board
 // stays pinned beside the reading frame so the check is actually visible.
 func TestEnterChecksOpenTaskRow(t *testing.T) {
@@ -171,13 +220,12 @@ func TestEnterChecksOpenTaskRow(t *testing.T) {
 	m.ui.Cursor = 1 // the subject task
 
 	// subjectRow finds the subject task's BOARD-PANE row: the match must sit in
-	// the left 46 columns (the pinned board), and the breadcrumb (the first two
-	// output lines: the Compose blank + the crumb, which also carries the title
-	// once a frame is pushed) is skipped.
+	// the left 46 columns (the pinned board); only the Compose blank row is
+	// skipped (the breadcrumb row was retired).
 	subjectRow := func(frame string) string {
 		t.Helper()
 		for i, ln := range strings.Split(frame, "\n") {
-			if i < 2 {
+			if i < 1 {
 				continue
 			}
 			r := []rune(ln)
@@ -193,19 +241,19 @@ func TestEnterChecksOpenTaskRow(t *testing.T) {
 	}
 
 	before := subjectRow(ansi.Strip(Compose(m)))
-	if strings.Contains(before, "●") {
+	if strings.Contains(before, "◆") {
 		t.Fatalf("subject row is checked before enter: %q", before)
 	}
 
 	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "Wire the SSE live bridge"})
 	during := subjectRow(ansi.Strip(Compose(m)))
-	if !strings.Contains(during, "●") {
+	if !strings.Contains(during, "◆") {
 		t.Fatalf("entered task's board row is not checked: %q", during)
 	}
 
 	(&m).popFrame()
 	after := subjectRow(ansi.Strip(Compose(m)))
-	if strings.Contains(after, "●") {
+	if strings.Contains(after, "◆") {
 		t.Fatalf("escaped task's board row is still checked: %q", after)
 	}
 }
@@ -285,32 +333,6 @@ func TestPopAtRootIsNoOp(t *testing.T) {
 	(&m).popFrame()
 	if len(m.stack) != 1 || m.topFrame().Kind != FrameBoard {
 		t.Fatalf("pop at root changed the stack: depth %d", len(m.stack))
-	}
-}
-
-// ── Breadcrumb (charter D18) ─────────────────────────────────────────────────
-
-// The first (root) and last (where you are) segments always survive the
-// middle-truncation, even on a deep stack in a narrow pane.
-func TestBreadcrumbKeepsFirstAndLast(t *testing.T) {
-	stack := []Frame{
-		{Kind: FrameBoard, Title: "tasks"},
-		{Kind: FrameTask, Ref: "a", Title: "Wire the SSE live bridge to the pane"},
-		{Kind: FramePaper, Ref: "p", Title: "Task-TUI wave 5 charter document"},
-		{Kind: FrameTask, Ref: "c", Title: "Debounce the refetch at 750ms exactly"},
-	}
-	crumb := ansi.Strip(Breadcrumb(stack, 40))
-	if disp(crumb) > 40 {
-		t.Fatalf("breadcrumb over width: %d cols %q", disp(crumb), crumb)
-	}
-	if !strings.HasPrefix(crumb, "tasks") {
-		t.Errorf("lost the root segment: %q", crumb)
-	}
-	if !strings.Contains(crumb, "Debounce") {
-		t.Errorf("lost the current (last) segment: %q", crumb)
-	}
-	if !strings.Contains(crumb, "…") && !strings.Contains(crumb, "›") {
-		t.Errorf("no elision/separator in a truncated trail: %q", crumb)
 	}
 }
 
@@ -430,9 +452,9 @@ func paintedBodyWindow(t *testing.T, m Model) int {
 		t.Fatalf("compose produced too few lines to hold a window: %d", len(lines))
 	}
 	if m.wide {
-		return len(lines) - 2 // leading blank + spanning breadcrumb
+		return len(lines) - 2 // leading blank + the sheet's ─ top edge
 	}
-	return len(lines) - 3 // leading blank + breadcrumb + footer
+	return len(lines) - 3 // leading blank + top edge + footer
 }
 
 // readingViewportHeight() must equal the body-window Compose paints, at EVERY
@@ -623,11 +645,9 @@ func wideWheel(x, y int, up bool) tea.MouseMsg {
 	return tea.MouseMsg{X: x + 1, Y: y + 1, Button: b, Action: tea.MouseActionPress}
 }
 
-// A left click on a board row selects it — the SAME cursor arrowing to it would
-// land on (charter/wish: "click a task row to select it, same effect as arrowing
-// to it"), and the FULL row is the target (the X is deep in the row, not on the
-// glyph).
-func TestWideMouseBoardRowClickSelects(t *testing.T) {
+// A left click on a board task moves the cursor there and activates it in one
+// gesture — exactly the state reached by moving there and pressing Enter.
+func TestWideMouseBoardRowClickMatchesEnter(t *testing.T) {
 	withChrome(t)
 	m := composeFixture()
 	m.width, m.height, m.wide = 120, 40, true
@@ -642,23 +662,18 @@ func TestWideMouseBoardRowClickSelects(t *testing.T) {
 	if want < 0 {
 		t.Fatal("subject is not a visible board row")
 	}
-	// composeAt Y = pl+1 (row 0 is the breadcrumb); X=20 is deep in the 46-col row.
-	m2, cmd := m.handleWideMouse(wideClick(20, pl+1))
+	// composeAt Y == pane line (the crumb row was retired); X=20 is deep in the 46-col row.
+	m2, cmd := m.handleWideMouse(wideClick(20, pl))
 	nm := m2
 	if cmd != nil {
-		t.Errorf("a board select fired a command: %v", cmd)
+		t.Errorf("a board click fired a command: %v", cmd)
 	}
 	if nm.ui.Cursor != want {
 		t.Fatalf("board click selected cursor %d, want %d (the subject)", nm.ui.Cursor, want)
 	}
-
-	// A second click on the now-selected row ACTIVATES it — the narrow board's
-	// select-then-activate grammar (wish: "click again / double-click to expand"):
-	// a task row descends into its FrameTask.
-	m3, _ := nm.handleWideMouse(wideClick(20, pl+1))
-	if len(m3.stack) != 2 || m3.topFrame().Kind != FrameTask || m3.topFrame().Ref != composeSubjectID {
-		t.Fatalf("second click on the selected task row did not descend: depth=%d kind=%v ref=%q",
-			len(m3.stack), m3.topFrame().Kind, m3.topFrame().Ref)
+	if len(nm.stack) != 2 || nm.topFrame().Kind != FrameTask || nm.topFrame().Ref != composeSubjectID {
+		t.Fatalf("single click did not match Enter: depth=%d kind=%v ref=%q",
+			len(nm.stack), nm.topFrame().Kind, nm.topFrame().Ref)
 	}
 }
 
@@ -677,10 +692,8 @@ func TestWideMouseInertRegionsNoOp(t *testing.T) {
 		name string
 		ev   tea.MouseMsg
 	}{
-		{"identity-strip", wideClick(20, 1)},          // composeAt Y=1 → board pane line 0 (identity top)
-		{"dead-gutter", wideClick(boardPaneWidth, 3)}, // x=46 → the 2-col gutter
-		{"crumb-row", wideClick(20, 0)},               // composeAt Y=0 → the breadcrumb
-		{"below-frame", wideClick(20, inner+5)},       // past the last pane row
+		{"identity-strip", wideClick(20, 0)},    // composeAt Y=0 → board pane line 0 (identity top)
+		{"below-frame", wideClick(20, inner+5)}, // past the last pane row
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -709,35 +722,153 @@ func TestWideMouseBoardWheelStepsCursor(t *testing.T) {
 	}
 }
 
-// At depth 0 the right pane is a non-interactive preview — clicks AND wheel
-// no-op honestly (cursor unmoved, stack unchanged, no command).
-func TestWideMouseDepth0PreviewInert(t *testing.T) {
+// At depth 0 the wheel over the right pane scrolls INSIDE the preview — the
+// viewport offset moves (clamped at the top), while the board cursor and the
+// stack stay untouched, so scrolling the info pane never re-selects a row.
+func TestWideMouseDepth0PreviewWheelScrolls(t *testing.T) {
 	withChrome(t)
 	m := composeFixture()
-	m.width, m.height, m.wide = 120, 40, true
-	m.ui.Cursor = 1
-	rightX := boardPaneWidth + paneGutter2 + 4 // deep in the right preview pane
-	for _, ev := range []tea.MouseMsg{
-		wideClick(rightX, 3),
-		wideWheel(rightX, 3, false),
-		wideWheel(rightX, 3, true),
-	} {
-		m2, cmd := m.handleWideMouse(ev)
-		if m2.ui.Cursor != 1 || len(m2.stack) != 1 || cmd != nil {
-			t.Fatalf("preview event %v was not inert: cursor=%d depth=%d cmd=%v",
-				ev, m2.ui.Cursor, len(m2.stack), cmd)
-		}
+	m.width, m.height, m.wide = 120, 16, true // short pane so the preview overflows
+	m.ui.Cursor = visibleRowIndex(m, composeSubjectID)
+	if m.ui.Cursor < 0 {
+		t.Fatal("subject is not a visible board row")
+	}
+	rightX := boardPaneWidth + paneGutter2 + 4
+	m2, cmd := m.handleWideMouse(wideWheel(rightX, 3, false))
+	if cmd != nil {
+		t.Errorf("a preview scroll fired a command: %v", cmd)
+	}
+	if m2.previewScroll != 1 || m2.previewRef != composeSubjectID {
+		t.Fatalf("wheel-down scrolled preview to (%q, %d), want (%q, 1)",
+			m2.previewRef, m2.previewScroll, composeSubjectID)
+	}
+	if m2.wideFocus != wideFocusReader {
+		t.Fatal("wheel inside preview did not focus the right pane")
+	}
+	keyed, _ := m2.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if got := keyed.(Model).previewScroll; got != 2 {
+		t.Fatalf("focused preview did not own keyboard scroll: got %d, want 2", got)
+	}
+	if m2.ui.Cursor != m.ui.Cursor || len(m2.stack) != 1 {
+		t.Fatalf("preview scroll moved the board: cursor=%d depth=%d", m2.ui.Cursor, len(m2.stack))
+	}
+	// Wheel-up returns to the top and clamps there — never negative.
+	m3, _ := m2.handleWideMouse(wideWheel(rightX, 3, true))
+	m4, _ := m3.handleWideMouse(wideWheel(rightX, 3, true))
+	if m4.previewScroll != 0 {
+		t.Fatalf("wheel-up clamped preview to %d, want 0", m4.previewScroll)
+	}
+	// The painted pane follows the offset: a scrolled preview shows the ↑ marker.
+	frame := ansi.Strip(composeAt(m2, 116, 15))
+	if !strings.Contains(frame, "more above") {
+		t.Errorf("scrolled preview shows no ↑ more-above marker:\n%s", frame)
 	}
 }
 
-// Depth>0: a click on a rail stop in the right pane selects that stop (the frame
-// cursor moves, viewport follows) — resolved via Stop.Line + the painted window
-// offset, the FULL row a target.
-func TestWideMouseRightRailClickSelectsStop(t *testing.T) {
+// At depth 0 a click on the right preview pane ENTERS the previewed task — the
+// same single-open descent as activating its board row.
+func TestWideMouseDepth0PreviewClickEnters(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	m.ui.Cursor = visibleRowIndex(m, composeSubjectID)
+	if m.ui.Cursor < 0 {
+		t.Fatal("subject is not a visible board row")
+	}
+	rightX := boardPaneWidth + paneGutter2 + 4
+	// The activation click also transfers focus to the right column.
+	m2, cmd := m.handleWideMouse(wideClick(rightX, 3))
+	if cmd != nil {
+		t.Errorf("a preview click fired a command: %v", cmd)
+	}
+	if m2.wideFocus != wideFocusReader {
+		t.Fatalf("preview click did not focus the reader: focus=%v", m2.wideFocus)
+	}
+	if len(m2.stack) != 2 || m2.topFrame().Kind != FrameTask || m2.topFrame().Ref != composeSubjectID {
+		t.Fatalf("preview click did not enter the previewed task: depth=%d kind=%v ref=%q",
+			len(m2.stack), m2.topFrame().Kind, m2.topFrame().Ref)
+	}
+}
+
+// rightPaneOf extracts the wide right pane's text from a composeAt frame: each
+// row's columns past the board pane + gutter, ansi-stripped and joined — so an
+// assertion on the preview can never be satisfied by the LEFT board pane's own
+// row text.
+func rightPaneOf(frame string) string {
+	var sb strings.Builder
+	for _, ln := range strings.Split(ansi.Strip(frame), "\n") {
+		r := []rune(ln)
+		if len(r) > boardPaneWidth+paneGutter2 {
+			sb.WriteString(string(r[boardPaneWidth+paneGutter2:]))
+		}
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
+// Hovering a board row previews THAT task in the wide right pane, exactly as
+// entering it would — and the pane reverts when the hover clears (pointer left
+// the board pane). The cursor is parked on the section HEADER (no preview
+// target of its own), so the hovered task's detail is attributable to the
+// hover alone.
+func TestWideHoverPreviewsHoveredRow(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	m.ui.Cursor = 0 // the orphan-section header — previews nothing itself
+	_, innerW, _ := m.wideGeom()
+
+	m.ui.HoverTarget = "sse-conn-dot"
+	right := rightPaneOf(composeAt(m, innerW, m.height-1))
+	if !strings.Contains(right, "Honest connection dot states") {
+		t.Fatalf("hover did not preview the hovered task in the right pane:\n%s", right)
+	}
+
+	m.ui.HoverTarget = ""
+	right = rightPaneOf(composeAt(m, innerW, m.height-1))
+	if strings.Contains(right, "Honest connection dot states") {
+		t.Fatalf("clearing the hover did not revert the preview:\n%s", right)
+	}
+	if !strings.Contains(right, "no task selected") {
+		t.Fatalf("header cursor + no hover should preview nothing:\n%s", right)
+	}
+}
+
+// Entering a task from the board while ANOTHER task frame is open REPLACES it
+// (single-open): the stack never accumulates board-entered FrameTasks, and the
+// reader-open ◆ marks exactly one row — the deepest open task.
+func TestSingleOpenTaskEntry(t *testing.T) {
+	m := composeFixture()
+	m = m.enterTask("a")
+	m = m.enterTask("b")
+	if len(m.stack) != 2 || m.topFrame().Ref != "b" {
+		t.Fatalf("second entry did not replace the first: depth=%d top=%q", len(m.stack), m.topFrame().Ref)
+	}
+	if refs := openTaskRefs(m.stack); len(refs) != 1 || !refs["b"] {
+		t.Fatalf("openTaskRefs after replace = %v, want exactly {b}", refs)
+	}
+	// A deep trail (task → paper → child task) still checks ONLY the deepest task.
+	(&m).pushFrame(Frame{Kind: FramePaper, Ref: "p", Title: "p"})
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: "c", Title: "c"})
+	if refs := openTaskRefs(m.stack); len(refs) != 1 || !refs["c"] {
+		t.Fatalf("openTaskRefs on a deep trail = %v, want exactly {c}", refs)
+	}
+	// Re-entering a task already on the trail takes the cycle-guard path: pop
+	// back to its existing frame, never a fresh duplicate.
+	m = m.enterTask("b")
+	if len(m.stack) != 2 || m.topFrame().Ref != "b" {
+		t.Fatalf("re-entry did not pop back to the open frame: depth=%d top=%q", len(m.stack), m.topFrame().Ref)
+	}
+}
+
+// Depth>0: a click on a rail stop selects and descends in one gesture, matching
+// moving the stop cursor there and pressing Enter.
+func TestWideMouseRightRailClickMatchesEnter(t *testing.T) {
 	withChrome(t)
 	m := composeFixture()
 	m.width, m.height, m.wide = 120, 60, true // tall enough that the detail body fits
 	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	m.wideFocus = wideFocusReader
 	_, _, inner := m.wideGeom()
 	rightW := 120 - 1 - 3 - boardPaneWidth - paneGutter2
 	body, stops := m.frameContent(m.topFrame(), rightW, m.now())
@@ -749,21 +880,71 @@ func TestWideMouseRightRailClickSelectsStop(t *testing.T) {
 	}
 	// Click stop index 1 (a fresh frame opens on cursor 0, so 1 proves movement).
 	target := stops[1]
-	// composeAt Y = pane line + 1; the body fits so pane line == body line.
+	// composeAt Y == body line + 1 (the sheet's ─ top edge); the body fits the pane.
 	m2, cmd := m.handleWideMouse(wideClick(boardPaneWidth+paneGutter2+3, target.Line+1))
 	if cmd != nil {
 		t.Errorf("a rail select fired a command: %v", cmd)
 	}
-	if got := m2.topFrame().Cursor; got != 1 {
-		t.Fatalf("rail click selected stop %d, want 1", got)
+	if len(m2.stack) != 3 || m2.topFrame().Ref != target.Ref {
+		t.Fatalf("single rail click did not match Enter: depth=%d ref=%q want ref=%q",
+			len(m2.stack), m2.topFrame().Ref, target.Ref)
 	}
+}
 
-	// A second click on the now-selected stop DESCENDS onto it, exactly like
-	// enter — the narrow reading grammar (select, then click-again opens).
-	m3, _ := m2.handleWideMouse(wideClick(boardPaneWidth+paneGutter2+3, target.Line+1))
-	if len(m3.stack) != 3 || m3.topFrame().Ref != target.Ref {
-		t.Fatalf("second click on the selected stop did not descend: depth=%d ref=%q want ref=%q",
-			len(m3.stack), m3.topFrame().Ref, target.Ref)
+func TestWideDividerIsVisibleAndDraggable(t *testing.T) {
+	withChrome(t)
+	oldProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldProfile) })
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	restStyled := Compose(m)
+	frame := ansi.Strip(restStyled)
+	if !strings.Contains(frame, "↔") || !strings.Contains(frame, "│") {
+		t.Fatalf("wide frame has no visible resize rail:\n%s", frame)
+	}
+	if !strings.Contains(restStyled, dividerRestStyle.Render("↔ ")) {
+		t.Fatal("divider at rest did not use the low-emphasis style")
+	}
+	hover := tea.MouseMsg{X: boardPaneWidth + 1, Y: 4, Action: tea.MouseActionMotion}
+	mHover, _ := m.handleWideMouse(hover)
+	if !mHover.wideDividerHover || mHover.wideDragging {
+		t.Fatalf("divider hover state = hover %v, dragging %v; want true, false", mHover.wideDividerHover, mHover.wideDragging)
+	}
+	if styled := Compose(mHover); !strings.Contains(styled, dividerHoverStyle.Render("↔ ")) {
+		t.Fatal("hovered divider did not use the brighter hover style")
+	}
+	press := tea.MouseMsg{X: boardPaneWidth + 1, Y: 4, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}
+	m2, _ := mHover.handleWideMouse(press)
+	if !m2.wideDragging {
+		t.Fatal("divider press did not begin a drag")
+	}
+	if styled := Compose(m2); !strings.Contains(styled, dividerGrabbedStyle.Render("↔↔")) {
+		t.Fatal("grabbed divider did not use the strongest accent style")
+	}
+	motion := tea.MouseMsg{X: 61, Y: 4, Action: tea.MouseActionMotion}
+	m3, _ := m2.handleWideMouse(motion)
+	if got := m3.boardPaneCols(m3.wideInnerWidth()); got != 60 {
+		t.Fatalf("divider drag resized board pane to %d, want 60", got)
+	}
+	release := tea.MouseMsg{X: 61, Y: 4, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease}
+	m4, _ := m3.handleWideMouse(release)
+	if m4.wideDragging {
+		t.Fatal("divider release left drag armed")
+	}
+	if !m4.wideDividerHover {
+		t.Fatal("divider release over the rail did not return to hover state")
+	}
+	away := tea.MouseMsg{X: 10, Y: 4, Action: tea.MouseActionMotion}
+	m5, _ := m4.handleWideMouse(away)
+	if m5.wideDividerHover {
+		t.Fatal("divider hover remained active after the pointer left the rail")
+	}
+	if dividerRestStyle.GetForeground() == dividerHoverStyle.GetForeground() || dividerHoverStyle.GetForeground() == dividerGrabbedStyle.GetForeground() {
+		t.Fatal("divider rest, hover, and grabbed states must use distinct brightness roles")
+	}
+	if !dividerGrabbedStyle.GetBold() {
+		t.Fatal("grabbed divider must add bold emphasis")
 	}
 }
 
@@ -790,9 +971,9 @@ func TestWideMouseRightWheelFreeScrolls(t *testing.T) {
 	}
 }
 
-// The Y hit-map addresses EXACTLY the painted composeAt rows — the crumb plus one
-// per pane line, no more — so a click can never resolve to a row that was never
-// drawn (length parity, including the crumb row).
+// The Y hit-map addresses EXACTLY the painted composeAt rows — one per pane
+// line, no more (the breadcrumb row was retired) — so a click can never resolve
+// to a row that was never drawn (length parity).
 func TestWideMouseHitMapParity(t *testing.T) {
 	withChrome(t)
 	for _, wh := range [][2]int{{120, 40}, {160, 24}, {110, 50}} {
@@ -805,8 +986,8 @@ func TestWideMouseHitMapParity(t *testing.T) {
 			t.Fatalf("%dx%d: hit-map length %d != painted composeAt rows %d",
 				wh[0], wh[1], len(rowmap), len(lines))
 		}
-		if rowmap[0] != rowCrumb {
-			t.Fatalf("%dx%d: row 0 is not the breadcrumb", wh[0], wh[1])
+		if rowmap[0] != rowPanes {
+			t.Fatalf("%dx%d: row 0 is not a pane row", wh[0], wh[1])
 		}
 	}
 }
@@ -828,5 +1009,365 @@ func TestPaperActResolvesCursorStop(t *testing.T) {
 	got, ok := m.readingSubjectTask()
 	if !ok || got.DocID != stops[0].Ref {
 		t.Fatalf("paper act resolved %+v (ok=%v), want the cursor stop %q", got, ok, stops[0].Ref)
+	}
+}
+
+// ── Reading-frame rail-stop hover (charter D99) ──────────────────────────────
+
+// probeHoverOpen returns the live SGR open sequence hoverStyle emits under the
+// active color profile, so a test can assert a line wears the accent hover
+// restyle without hard-coding escape bytes.
+func probeHoverOpen(t *testing.T) string {
+	t.Helper()
+	rendered := hoverStyle.Render("\x00\x00")
+	i := strings.Index(rendered, "\x00\x00")
+	if i <= 0 {
+		t.Fatalf("hoverStyle rendered no open sequence under this profile: %q", rendered)
+	}
+	return rendered[:i]
+}
+
+// Depth>0: a Motion over a right-pane rail stop PAINTS that stop's body line in
+// the accent foreground (hoverStyle) — the SAME grammar as the board hover,
+// distinct from the cursor stop's ▎ bar. Mirrors TestWideMouseRightRailClickSelectsStop
+// (the click twin). withChrome + a truecolor profile are mandatory: the default
+// profile emits no SGR, so the paint would be the identity and prove nothing.
+func TestWideRailHoverPaintsStop(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+	withChrome(t)
+
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 60, true // tall enough that the detail body fits
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	_, innerW, inner := m.wideGeom()
+	rightW := innerW - boardPaneWidth - paneGutter2
+	body, stops := m.frameContent(m.topFrame(), rightW, m.now())
+	if len(body) > inner {
+		t.Fatalf("fixture body (%d) must fit the pane (%d) so stops are on-screen", len(body), inner)
+	}
+	if len(stops) < 2 {
+		t.Fatalf("need >=2 rail stops to prove the paint tracks the pointer, got %d", len(stops))
+	}
+
+	// Baseline: no pointer (HoverStop -1) paints nothing.
+	m.ui.HoverStop = -1
+	before := composeAt(m, innerW, m.height-1)
+
+	// Drive a hover Motion over stop 1's body line (body fits ⇒ composeAt row ==
+	// body line + 1: the sheet's ─ top edge).
+	target := stops[1]
+	m2, _ := m.wideMouseMotion(boardPaneWidth+paneGutter2, target.Line+1, innerW, inner, m.now())
+	if m2.ui.HoverStop != 1 {
+		t.Fatalf("motion over stop 1 set HoverStop %d, want 1", m2.ui.HoverStop)
+	}
+	after := composeAt(m2, innerW, m.height-1)
+
+	if after == before {
+		t.Fatal("a hovered rail stop produced NO visible change in the styled frame")
+	}
+	hoverOpen := probeHoverOpen(t)
+	bl, al := strings.Split(before, "\n"), strings.Split(after, "\n")
+	if len(bl) != len(al) {
+		t.Fatalf("hover changed the line count: %d vs %d", len(bl), len(al))
+	}
+	changed, changedIdx := 0, -1
+	for i := range al {
+		if ansi.Strip(al[i]) != ansi.Strip(bl[i]) {
+			t.Errorf("line %d: hover changed the VISIBLE text (styling only expected)\n got: %q\nwant: %q",
+				i, ansi.Strip(al[i]), ansi.Strip(bl[i]))
+		}
+		if al[i] == bl[i] {
+			continue
+		}
+		changed, changedIdx = changed+1, i
+		if !strings.Contains(al[i], hoverOpen) {
+			t.Errorf("line %d changed without the accent hover restyle:\n%q", i, al[i])
+		}
+	}
+	if changed != 1 {
+		t.Fatalf("hover restyled %d lines, want exactly 1 (only the hovered stop)", changed)
+	}
+	if changedIdx != target.Line+1 {
+		t.Fatalf("hover painted composeAt row %d, want %d (the stop's pane row)", changedIdx, target.Line+1)
+	}
+	// The painted change lands in the RIGHT pane, never the left board pane.
+	r := []rune(ansi.Strip(al[changedIdx]))
+	if len(r) <= boardPaneWidth+paneGutter2 || strings.TrimSpace(string(r[:boardPaneWidth])) != strings.TrimSpace(string([]rune(ansi.Strip(bl[changedIdx]))[:boardPaneWidth])) {
+		t.Fatalf("hover altered the LEFT board pane, want the right reading pane only:\n%q", al[changedIdx])
+	}
+}
+
+// The change guard IS the debounce (charter D95): a second Motion onto the SAME
+// stop returns an unchanged model — no re-render, no flicker.
+func TestWideRailHoverFlickerGuard(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 60, true
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	_, innerW, inner := m.wideGeom()
+	rightW := innerW - boardPaneWidth - paneGutter2
+	_, stops := m.frameContent(m.topFrame(), rightW, m.now())
+	if len(stops) < 1 {
+		t.Fatalf("need >=1 rail stop, got %d", len(stops))
+	}
+	x, y := boardPaneWidth+paneGutter2, stops[0].Line+1
+
+	m2, _ := m.wideMouseMotion(x, y, innerW, inner, m.now())
+	if m2.ui.HoverStop != 0 {
+		t.Fatalf("first motion set HoverStop %d, want 0", m2.ui.HoverStop)
+	}
+	// setHoverStop reports change=false on the repeat — the direct debounce proof.
+	if _, changed := setHoverStop(m2.ui, 0); changed {
+		t.Fatal("setHoverStop reported a change for the SAME stop (debounce broken)")
+	}
+	before := composeAt(m2, innerW, m2.height-1)
+	m3, _ := m2.wideMouseMotion(x, y, innerW, inner, m2.now())
+	if m3.ui.HoverStop != 0 {
+		t.Fatalf("second motion onto the same stop moved HoverStop to %d, want 0", m3.ui.HoverStop)
+	}
+	if got := composeAt(m3, innerW, m3.height-1); got != before {
+		t.Fatal("a re-hover of the same stop changed the frame (flicker)")
+	}
+}
+
+// A Motion off the rail stops — the dead inter-pane gutter, or a prose body line
+// with no stop — CLEARS HoverStop back to -1 (the tint yields the moment the
+// pointer leaves a stop, exactly as leaving a board row clears HoverTarget).
+func TestWideRailHoverClearsOffStop(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 60, true
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	_, innerW, inner := m.wideGeom()
+	rightW := innerW - boardPaneWidth - paneGutter2
+	body, stops := m.frameContent(m.topFrame(), rightW, m.now())
+	if len(body) > inner || len(stops) < 1 {
+		t.Fatalf("fixture must fit the pane with >=1 stop (body %d/pane %d, stops %d)", len(body), inner, len(stops))
+	}
+	x := boardPaneWidth + paneGutter2
+
+	// Hover a stop, then slide into the dead gutter → cleared.
+	hov, _ := m.wideMouseMotion(x, stops[0].Line+1, innerW, inner, m.now())
+	if hov.ui.HoverStop != 0 {
+		t.Fatalf("hover a stop set HoverStop %d, want 0", hov.ui.HoverStop)
+	}
+	gutter, _ := hov.wideMouseMotion(boardPaneWidth, stops[0].Line+1, innerW, inner, hov.now())
+	if gutter.ui.HoverStop != -1 {
+		t.Fatalf("motion into the dead gutter kept HoverStop %d, want -1", gutter.ui.HoverStop)
+	}
+
+	// Slide onto a prose body line (no stop sits there) → cleared.
+	stopLine := map[int]bool{}
+	for _, s := range stops {
+		stopLine[s.Line] = true
+	}
+	prose := -1
+	for ln := 0; ln < len(body); ln++ {
+		if !stopLine[ln] && strings.TrimSpace(ansi.Strip(body[ln])) != "" {
+			prose = ln
+			break
+		}
+	}
+	if prose < 0 {
+		t.Fatal("fixture body has no non-stop prose line to prove the clear")
+	}
+	onProse, _ := hov.wideMouseMotion(x, prose+1, innerW, inner, hov.now())
+	if onProse.ui.HoverStop != -1 {
+		t.Fatalf("motion onto a prose line kept HoverStop %d, want -1", onProse.ui.HoverStop)
+	}
+}
+
+// NEGATIVE (the scoping law, #4240): a wide DEPTH-0 preview has no stops, so a
+// right-pane Motion resolves to -1 for every pane row and a stale HoverStop never
+// paints there — depth-0 hover is #4240's, not this slice's.
+func TestWideRailHoverDepth0HasNoStop(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 60, true
+	m.ui.Cursor = 1 // preview the subject; the stack is still just the board (depth 0)
+	_, innerW, inner := m.wideGeom()
+
+	for pl := 0; pl < inner; pl++ {
+		if idx := m.rightPaneStopAt(pl, innerW, inner, m.now()); idx != -1 {
+			t.Fatalf("depth-0 rightPaneStopAt(%d) = %d, want -1 (the preview has no stops)", pl, idx)
+		}
+	}
+	// A right-pane Motion at depth 0 clears any stale HoverStop to -1.
+	m.ui.HoverStop = 5
+	m2, _ := m.wideMouseMotion(boardPaneWidth+paneGutter2, 3, innerW, inner, m.now())
+	if m2.ui.HoverStop != -1 {
+		t.Fatalf("depth-0 right-pane hover set HoverStop %d, want -1", m2.ui.HoverStop)
+	}
+	// The paint is byte-identical whether HoverStop is a stale 5 or a clean -1 —
+	// previewLines hard-wires stops=nil/hoverStop=-1, so nothing can paint.
+	clean, stale := m, m
+	clean.ui.HoverStop, stale.ui.HoverStop = -1, 5
+	if composeAt(clean, innerW, m.height-1) != composeAt(stale, innerW, m.height-1) {
+		t.Fatal("depth-0 preview painted a hover stop (it has none — #4240 owns depth-0 hover)")
+	}
+}
+
+// ── Narrow-mode reading-frame rail-stop hover paint (charter D99 close-out / D105) ──
+
+// TestNarrowRailHoverPaintsStop: a Motion over a NARROW reading-frame rail stop
+// PAINTS that stop's body line in the accent foreground (hoverStyle) via the
+// compose.go:148 HoverStop wiring — the mirror of TestWideRailHoverPaintsStop.
+// The truecolor profile is mandatory (D105d): the default profile emits no SGR,
+// so the paint would be the identity and prove nothing (vacuous green). withChrome
+// alone only swaps the branding fixture. Compose lines index 1:1 with
+// ComposeHitMap, so the painted line must land on the stop's hit-map row.
+func TestNarrowRailHoverPaintsStop(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+	withChrome(t)
+
+	m := narrowReadingFixture(3)
+	m.width, m.height = 44, 40 // tall enough that the whole body fits ⇒ stops on-screen
+	width, height := m.composeInner()
+	body, stops := m.frameContent(m.topFrame(), width, m.now())
+	if len(body) > height-2 {
+		t.Fatalf("fixture body (%d) must fit the pane (%d) so stops are on-screen", len(body), height-2)
+	}
+	if len(stops) < 2 {
+		t.Fatalf("need >=2 rail stops to prove the paint tracks the pointer, got %d", len(stops))
+	}
+
+	const stop = 1
+	y := firstStopY(m.ComposeHitMap(), stop)
+	if y < 0 {
+		t.Fatalf("no hit-map line for rail stop %d", stop)
+	}
+	before := strings.Split(Compose(m), "\n")
+
+	tm, _ := m.mouseMotion(5, y)
+	m2 := tm.(Model)
+	if m2.ui.HoverStop != stop {
+		t.Fatalf("motion over stop %d set HoverStop %d, want %d", stop, m2.ui.HoverStop, stop)
+	}
+	after := strings.Split(Compose(m2), "\n")
+
+	if len(after) != len(before) {
+		t.Fatalf("hover changed the line count: %d vs %d", len(before), len(after))
+	}
+	hoverOpen := probeHoverOpen(t)
+	changed, changedIdx := 0, -1
+	for i := range after {
+		if ansi.Strip(after[i]) != ansi.Strip(before[i]) {
+			t.Errorf("line %d: hover changed the VISIBLE text (styling only expected)\n got: %q\nwant: %q",
+				i, ansi.Strip(after[i]), ansi.Strip(before[i]))
+		}
+		if after[i] == before[i] {
+			continue
+		}
+		changed, changedIdx = changed+1, i
+		if !strings.Contains(after[i], hoverOpen) {
+			t.Errorf("line %d changed without the accent hover restyle:\n%q", i, after[i])
+		}
+	}
+	if changed != 1 {
+		t.Fatalf("hover restyled %d lines, want exactly 1 (only the hovered stop)", changed)
+	}
+	if changedIdx != y {
+		t.Fatalf("hover painted Compose row %d, want %d (the stop's hit-map row)", changedIdx, y)
+	}
+}
+
+// TestNarrowRailHoverAtCursorCollapsesColorOnly (charter D105e): when the pointer
+// hovers the SAME stop the cursor sits on, the ▎ (U+258E) selection bar SURVIVES
+// — the stripped text is byte-identical — and only the color collapses to the
+// hover accent. Proves the hover restyle composes over the cursor bar rather than
+// erasing the row's structure.
+func TestNarrowRailHoverAtCursorCollapsesColorOnly(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+	withChrome(t)
+
+	m := narrowReadingFixture(3)
+	m.width, m.height = 44, 40
+	const cur = 1
+	m.stack[len(m.stack)-1].Cursor = cur // the cursor bar sits on stop `cur`
+
+	y := firstStopY(m.ComposeHitMap(), cur)
+	if y < 0 {
+		t.Fatalf("no hit-map line for cursor stop %d", cur)
+	}
+	before := strings.Split(Compose(m), "\n")
+	if !strings.Contains(ansi.Strip(before[y]), "▎") {
+		t.Fatalf("cursor row %d carries no ▎ bar before hover: %q", y, ansi.Strip(before[y]))
+	}
+
+	m.ui.HoverStop = cur // hover the cursor's own stop
+	after := strings.Split(Compose(m), "\n")
+
+	if after[y] == before[y] {
+		t.Fatal("hovering the cursor stop produced no styling change (color should collapse to hover accent)")
+	}
+	if ansi.Strip(after[y]) != ansi.Strip(before[y]) {
+		t.Fatalf("hover changed the visible text on the cursor row (▎ must survive)\n got: %q\nwant: %q",
+			ansi.Strip(after[y]), ansi.Strip(before[y]))
+	}
+	if !strings.Contains(ansi.Strip(after[y]), "▎") {
+		t.Fatalf("the ▎ bar did not survive the hover restyle: %q", ansi.Strip(after[y]))
+	}
+	if !strings.Contains(after[y], probeHoverOpen(t)) {
+		t.Fatalf("cursor-row hover did not apply the accent hover restyle:\n%q", after[y])
+	}
+}
+
+// ── Centered document column (paper 100-col standard) ────────────────────────
+
+// On an ultrawide pane the reading document renders as a centered SHEET: a ─
+// top edge, │ edges left and right the full pane height, the text at the
+// maxDocWidth measure between them. Mutating docLayout to left-pinned or
+// uncapped, or dropping an edge, MUST fail this test.
+func TestWideReadingDocumentCenteredAtCap(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 200, 40, true
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	_, innerW, inner := m.wideGeom()
+	rightW := innerW - m.boardPaneCols(innerW) - paneGutter2
+	if rightW <= maxDocWidth+docFrameExtra {
+		t.Fatalf("fixture pane too narrow to exercise the cap: rightW=%d", rightW)
+	}
+	docW, pad := docLayout(rightW)
+	if docW != maxDocWidth || pad != (rightW-maxDocWidth-docFrameExtra)/2 {
+		t.Fatalf("docLayout(%d) = (%d, %d), want (%d, %d)",
+			rightW, docW, pad, maxDocWidth, (rightW-maxDocWidth-docFrameExtra)/2)
+	}
+	lines := strings.Split(ansi.Strip(composeAt(m, innerW, m.height-1)), "\n")
+	if len(lines) != inner {
+		t.Fatalf("wide composeAt painted %d rows, want inner=%d", len(lines), inner)
+	}
+	paneStart := m.boardPaneCols(innerW) + paneGutter2
+	leftEdgeCol := paneStart + pad
+	rightEdgeCol := leftEdgeCol + docW + docFrameExtra - 1
+	for i, ln := range lines {
+		r := []rune(ln)
+		if len(r) <= paneStart {
+			t.Fatalf("row %d: no right pane painted", i)
+		}
+		right := r[paneStart:]
+		if i == 0 {
+			top := strings.TrimSpace(string(right))
+			if top == "" || strings.Trim(top, "─") != "" {
+				t.Fatalf("row 0 is not the ─ top edge: %q", string(right))
+			}
+			continue
+		}
+		if len(r) <= rightEdgeCol {
+			t.Fatalf("row %d: shorter than the right edge column %d: %q", i, rightEdgeCol, ln)
+		}
+		if r[leftEdgeCol] != '│' || r[rightEdgeCol] != '│' {
+			t.Fatalf("row %d: expected │ edges at cols %d and %d, got %q / %q in %q",
+				i, leftEdgeCol, rightEdgeCol, string(r[leftEdgeCol]), string(r[rightEdgeCol]), string(right))
+		}
+		if inner := strings.TrimRight(string(r[rightEdgeCol+1:]), " "); inner != "" {
+			t.Fatalf("row %d: content leaks past the right edge: %q", i, inner)
+		}
 	}
 }

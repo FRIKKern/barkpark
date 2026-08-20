@@ -25,6 +25,22 @@ defmodule Barkpark.Tasks.Similarity do
 
   Scoring mirrors the calibrated generator exactly:
   `0.7 * Jaccard(title+description tokens) + 0.3 * Jaccard(labels)`.
+
+  ## Cost: the new task is tokenized ONCE per assessment
+
+  `assess/3` tokenizes the NEW task once (`probe/1`) and reuses that token set
+  for every candidate, so the work is `O(N + |new|)`, not `O(N × |new|)`. It used
+  to recompute `tokens(new_task)` inside the per-candidate loop, which made a
+  single `bp task create` cost proportional to the DISTINCT TOKEN COUNT of its
+  description times the whole backlog — measured 2026-07-30 as a fixed 20–30 s
+  stall that lost the race against the 15 s DB-checkout budget and handed the
+  owner `internal_error / "unknown error"`.
+
+  That is a perf claim, so it is gated by counting the work rather than the
+  clock: every `tokens/1` call emits `[:barkpark, :tasks, :similarity, :tokenize]`,
+  and `similarity_test.exs` asserts an `assess/3` over N candidates tokenizes
+  exactly `N + 1` times. Wall-clock assertions on a shared host measure the load,
+  not the code.
   """
 
   # Calibrated thresholds (tob-w1-judge-calibration). @refuse is deliberately
@@ -98,10 +114,13 @@ defmodule Barkpark.Tasks.Similarity do
 
     new_nid = norm_id(field(new_task, :id))
 
+    # Tokenize the new task ONCE, outside the loop — see @moduledoc "Cost".
+    probe = probe(new_task)
+
     matches =
       candidates
       |> Enum.reject(fn c -> norm_id(field(c, :id)) == new_nid end)
-      |> Enum.map(fn c -> score(new_task, c, parent_index, distinct, refuse_at, advise_at) end)
+      |> Enum.map(fn c -> score(probe, c, parent_index, distinct, refuse_at, advise_at) end)
       |> Enum.reject(&is_nil/1)
 
     grouped = Enum.group_by(matches, & &1.verdict)
@@ -115,11 +134,20 @@ defmodule Barkpark.Tasks.Similarity do
 
   # ── scoring one candidate ──────────────────────────────────────────────────
 
-  defp score(new_task, cand, parent_index, distinct, refuse_at, advise_at) do
-    ta = tokens("#{field(new_task, :title)} #{field(new_task, :description)}")
+  # The loop-invariant half of a scoring pass: the new task's token and label
+  # sets, computed once and carried across every candidate.
+  defp probe(new_task) do
+    %{
+      task: new_task,
+      tokens: tokens("#{field(new_task, :title)} #{field(new_task, :description)}"),
+      labels: MapSet.new(field(new_task, :labels) || [])
+    }
+  end
+
+  defp score(probe, cand, parent_index, distinct, refuse_at, advise_at) do
+    %{task: new_task, tokens: ta, labels: la} = probe
     tb = tokens("#{field(cand, :title)} #{field(cand, :description)}")
     shared = MapSet.size(MapSet.intersection(ta, tb))
-    la = MapSet.new(field(new_task, :labels) || [])
     lb = MapSet.new(field(cand, :labels) || [])
     sim = @title_weight * jaccard(ta, tb) + @label_weight * jaccard(la, lb)
 
@@ -172,8 +200,17 @@ defmodule Barkpark.Tasks.Similarity do
     @title_weight * jaccard(ta, tb) + @label_weight * jaccard(la, lb)
   end
 
-  @doc false
+  @doc """
+  The token set of a blob of text (downcased, ≤2-char and stopword tokens dropped).
+
+  Emits `[:barkpark, :tasks, :similarity, :tokenize]` with `%{count: 1}` on every
+  call. This is the dedup gate's unit of work: it is what made a create cost
+  `O(candidates × |description|)`, so the fix is gated by counting these events
+  rather than by timing the call.
+  """
   def tokens(text) do
+    :telemetry.execute([:barkpark, :tasks, :similarity, :tokenize], %{count: 1}, %{})
+
     (text || "")
     |> String.downcase()
     |> then(&Regex.scan(~r/[a-z0-9]+/, &1))

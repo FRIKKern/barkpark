@@ -282,10 +282,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # alias of `stats` (compose.ex); both are enumerated.
   #
   # MUST stay in LOCKSTEP with run-convert.js CANVAS_DATAVIZ_TYPES and
-  # shared/paper.ex @dataviz_render_types (5 kinds in every one). D4: these kinds are
+  # shared/paper.ex @dataviz_render_types (7 kinds in every one). D4: these kinds are
   # deliberately ABSENT from slash-insert.js CANVAS_SLASH_TYPES (data-bearing,
   # API-authored — an empty slash insert is meaningless).
-  @canvas_dataviz_types ~w(stat stats stat-grid heatmap chart)
+  @canvas_dataviz_types ~w(stat stats stat-grid heatmap chart duel lineage)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
@@ -582,6 +582,77 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # above (non-binary → dropped) rather than raising.
   defp label_name(%{"tag" => name}), do: name
   defp label_name(other), do: other
+
+  @doc """
+  Rich Labels entries for the sidebar — `content["tags"]` WITH the weight the
+  publish wall enforces (authoring-excellence D76): each entry is
+  `%{name, strength, rationale, main?}`. Dual-shape: a weighted map carries
+  its strength/rationale; a legacy flat string reads as its name with nil
+  strength and nil rationale. `main?` marks the entry whose name equals the
+  stamped `content["main_tag"]`, case-insensitive. Entries sort strength DESC
+  with nil-strength (legacy) LAST; the sort is stable, so document order holds
+  within ties. A non-numeric strength (an unwalled type's content is
+  untrusted — D21's crash-safety precedent) degrades to the legacy shape
+  rather than raising. `paper_labels/1` above stays the names-only reader in
+  document order. Pure.
+  """
+  @spec paper_label_entries(term()) :: [
+          %{
+            name: String.t(),
+            strength: number() | nil,
+            rationale: String.t() | nil,
+            main?: boolean()
+          }
+        ]
+  def paper_label_entries(%{content: %{"tags" => tags} = content}) when is_list(tags) do
+    main = Map.get(content, "main_tag")
+
+    tags
+    |> Enum.map(&label_entry(&1, main))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sort_by(fn
+      %{strength: s} when is_number(s) -> {0, -s}
+      _ -> {1, 0}
+    end)
+  end
+
+  def paper_label_entries(_), do: []
+
+  defp label_entry(%{"tag" => name} = entry, main) when is_binary(name) do
+    label_entry_for(
+      name,
+      numeric_or_nil(Map.get(entry, "strength")),
+      string_or_nil(Map.get(entry, "rationale")),
+      main
+    )
+  end
+
+  defp label_entry(name, main) when is_binary(name), do: label_entry_for(name, nil, nil, main)
+  defp label_entry(_, _), do: nil
+
+  defp label_entry_for(name, strength, rationale, main) do
+    case String.trim(name) do
+      "" -> nil
+      _ -> %{name: name, strength: strength, rationale: rationale, main?: main_tag?(name, main)}
+    end
+  end
+
+  defp main_tag?(name, main) when is_binary(main),
+    do: String.downcase(String.trim(name)) == String.downcase(String.trim(main))
+
+  defp main_tag?(_name, _main), do: false
+
+  defp numeric_or_nil(v) when is_number(v), do: v
+  defp numeric_or_nil(_), do: nil
+
+  defp string_or_nil(v) when is_binary(v) do
+    case String.trim(v) do
+      "" -> nil
+      _ -> v
+    end
+  end
+
+  defp string_or_nil(_), do: nil
 
   @doc """
   Outbound relations for the sidebar Relations section: each `field-reference`

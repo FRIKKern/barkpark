@@ -1,0 +1,25 @@
+{
+  "run_id": "grip-20260722T121500Z",
+  "recipes": [
+    {
+      "subject": "commit:8aa6f3a50",
+      "quantity": "git:tree-identity-vs-main",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git fetch origin --quiet && for f in api/lib/barkpark/tenancy/workspace_bundle.ex api/lib/barkpark/tenancy/workspace_bundle/archive.ex api/lib/barkpark_web/controllers/workspace_controller.ex; do o=$(git diff 8aa6f3a50:$f origin/main:$f); [ -z \"$o\" ] && echo \"IDENTICAL $f\" || echo \"DIFFERS $f\"; done",
+      "derived_level": "L1",
+      "deps": [
+        "api/lib/barkpark/tenancy/workspace_bundle.ex",
+        "api/lib/barkpark/tenancy/workspace_bundle/archive.ex",
+        "api/lib/barkpark_web/controllers/workspace_controller.ex"
+      ],
+      "observed_at": "2026-07-22T12:15:00Z"
+    },
+    {
+      "subject": "commit:87c9995f6",
+      "quantity": "git:landing-commit-in-main",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git merge-base --is-ancestor 87c9995f6 origin/main; echo in_main=$?; git log --oneline -1 87c9995f6",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-22T12:15:00Z"
+    }
+  ]
+}

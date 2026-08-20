@@ -18,6 +18,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   use BarkparkWeb, :html
 
   import BarkparkWeb.StudioComponents.Controls, only: [bp_select: 1]
+  # sup-w5 — reuse the classic editor's server-truth halt banner (charter D5/D6:
+  # the editor never authors halt copy, it mirrors the server reason verbatim).
+  import BarkparkWeb.StudioComponents.Editor, only: [paper_halt_banner: 1]
 
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
@@ -91,6 +94,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # streamed surface; this editor reads from `paper_doc.content["blocks"]`.
   attr(:slug, :string, required: true)
   attr(:blocks, :list, required: true)
+  # spd-w18 — the document's REAL type. This editor is opened by every blocks-doc
+  # type (paper today, session too), and the empty-body sentence below used to
+  # tell a session's author "This paper has no body blocks yet". Default "paper"
+  # keeps the Beta document-editor call site (which passes none) unchanged.
+  attr(:doc_type, :string, default: "paper")
   attr(:paper_rev, :integer, default: 0)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
@@ -118,6 +126,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # TaskResolver.preview/2), display-only rows the flag-ON boundary widgets
   # paint via task_block_preview/1. The flag-OFF list render never reads it.
   attr(:task_previews, :map, default: %{})
+  # sup-w5 — the socket-owned save mirror (Shared.Paper computes both on every
+  # write). `save_status` drives the footer echo; `paper_halt` (a server reason
+  # string or nil) raises the shared halt banner near the top of the editor.
+  # Both default calm so the Beta document-editor call site (which passes
+  # neither) keeps the quiet, unhalted footer.
+  attr(:save_status, :string, default: "")
+  attr(:paper_halt, :string, default: nil)
 
   def paper_block_editor(assigns) do
     # Gate the bound/free split on having descriptors: only the Beta editor (with
@@ -172,6 +187,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-test-id="studio-paper-block-editor"
       phx-hook="BarkparkPaperSortable"
     >
+      <%!-- sup-w5 — server-truth write-halt mirror. `@paper_halt` is nil on a
+            clean edit (nothing renders); a `{:error, {:halted, reason}}` write
+            stashes the reason and this banner shows it VERBATIM (charter D5/D6),
+            the same component the classic editor raises. --%>
+      <.paper_halt_banner reason={@paper_halt} />
+
       <%!-- EX2 — expectation-aware slash menu carrier. A stable, LiveView-driven
             element (NOT inside any phx-update="ignore" wrapper) holding the
             JSON list of expected fields STILL recommendable for the current
@@ -208,8 +229,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         api_token_raw={@api_token_raw}
       />
 
+      <%!-- spd-w18 — an honest empty state names WHICH document is empty and
+            WHAT it is. It used to read "This paper has no body blocks yet" to
+            someone editing a SESSION (sessions take this identical path), with
+            no id to tell one empty document from another, painted in the same
+            faint grey the owner read as inert chrome (contrast raised in
+            root.html.heex). --%>
       <p :if={@free_blocks == []} class="bp-paper-editor-empty">
-        This paper has no body blocks yet. Add one below.
+        This {@doc_type} (<code>{@slug}</code>) has no body blocks yet. Add one below.
       </p>
 
       <%= if @canvas_on? do %>
@@ -368,11 +395,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <span><%= @doc_stats.words %> words</span>
         <span class="bp-paper-footer-sep">·</span>
         <span><%= @doc_stats.blocks %> blocks</span>
-        <span class="bp-paper-footer-save">✓ Auto-saved</span>
+        <%!-- sup-w5 — the save affordance now ECHOES the socket-owned
+              @save_status instead of a hardcoded "✓ Auto-saved" that lied
+              through "Save failed"/plugin halts. role=status + aria-live=polite
+              so assistive tech announces each state change (accessibility parity
+              with the classic editor's save-status region). The ✓ affix is kept
+              ONLY for the calm "Auto-saved" token; every other state (incl. the
+              empty pre-write open) shows the raw server text. --%>
+        <span
+          class="bp-paper-footer-save"
+          role="status"
+          aria-live="polite"
+          data-test-id="bp-paper-footer-save"
+        ><%= save_status_label(@save_status) %></span>
       </footer>
     </div>
     """
   end
+
+  # sup-w5 — footer save label. The calm token keeps its premium ✓ affix; every
+  # other server state ("Save failed", the empty pre-write open, …) is echoed
+  # VERBATIM so the footer can never lie about a failed or vetoed write.
+  defp save_status_label("Auto-saved"), do: "✓ Auto-saved"
+  defp save_status_label(status) when is_binary(status), do: status
+  defp save_status_label(_), do: ""
 
   # The `+ Add block` menu, grouped by optgroup so the (long) list of creatable
   # portable-doc block types stays scannable. Each value resolves to

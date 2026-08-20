@@ -3,6 +3,7 @@ package cli
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,12 @@ import (
 // releases/latest (the npm pipeline creates no GitHub Releases — see
 // .github/workflows/cli-release.yml).
 const defaultReleaseRepo = "https://github.com/FRIKKern/barkpark"
+
+// Stable release components are bounded to uint32 so the Go resolver and the
+// jq-based doctor can validate and order them identically on every platform.
+// Real CLI versions are tiny; the bound exists to reject hostile/accidental
+// numeric overflow rather than silently coercing it during comparison.
+const maxStableVersionComponent = 1<<32 - 1
 
 // installerOneLiner is printed when the install dir is not writable. Never
 // escalate from inside the binary — the user re-runs the installer with sudo.
@@ -50,12 +57,88 @@ var upgradeExecutable = func() (string, error) {
 	return filepath.EvalSymlinks(p)
 }
 
-// latestReleaseVersion resolves the newest released CLI version WITHOUT the
-// GitHub API (no rate-limit JSON, no auth): GET <base>/releases/latest and
+// latestReleaseVersion resolves the newest released CLI version. It prefers
+// the GitHub Releases API (which lists every tag, so a cli-v* is always
+// findable) and falls back to the /releases/latest redirect only when the API
+// call fails. The API is preferred because this repo ALSO cuts build-<sha>
+// server-artifact releases that carry no bp assets — one of those can own the
+// releases/latest slot and 404 every unpinned resolve. install-cli.sh:27-38
+// learned the same lesson; this mirrors it so `bp upgrade` and the installer
+// resolve the same version.
+func latestReleaseVersion(base string) (string, error) {
+	if ver, err := latestReleaseVersionAPI(base); err == nil {
+		return ver, nil
+	}
+	return latestReleaseVersionRedirect(base)
+}
+
+// releaseAPIURL maps the release-tree root to its GitHub Releases API list
+// endpoint: github.com/OWNER/REPO → api.github.com/repos/OWNER/REPO/releases.
+// Any other host (a test server, a mirror) is asked for /releases?per_page=30
+// directly, so the API code path stays exercisable without api.github.com.
+func releaseAPIURL(base string) string {
+	if u, err := url.Parse(base); err == nil && u.Host == "github.com" {
+		return "https://api.github.com/repos" + strings.TrimRight(u.Path, "/") + "/releases?per_page=30"
+	}
+	return strings.TrimRight(base, "/") + "/releases?per_page=30"
+}
+
+// latestReleaseVersionAPI lists the newest releases and returns the highest
+// cli-v* version, skipping drafts, prereleases (cli-v1.2.0-rc.1), and non-cli
+// tags (build-<sha> server artifacts) — matching the public installer feed.
+func latestReleaseVersionAPI(base string) (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(releaseAPIURL(base))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("releases API returned HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	var releases []struct {
+		TagName    string `json:"tag_name"`
+		Draft      bool   `json:"draft"`
+		Prerelease bool   `json:"prerelease"`
+	}
+	if err := json.Unmarshal(body, &releases); err != nil {
+		return "", err
+	}
+	best := ""
+	var bestParts []uint64
+	for _, r := range releases {
+		if r.Draft || r.Prerelease {
+			continue
+		}
+		ver, ok := strings.CutPrefix(r.TagName, "cli-v")
+		if !ok {
+			continue
+		}
+		parts, ok := parseStableVersion(ver)
+		if !ok { // skip prerelease, malformed, and overflowing cli-v* tags
+			continue
+		}
+		if best == "" || compareStableVersions(parts, bestParts) > 0 {
+			best = ver
+			bestParts = parts
+		}
+	}
+	if best == "" {
+		return "", fmt.Errorf("releases API listed no cli-v* release")
+	}
+	return best, nil
+}
+
+// latestReleaseVersionRedirect resolves the newest released CLI version WITHOUT
+// the GitHub API (no rate-limit JSON, no auth): GET <base>/releases/latest and
 // read the redirect Location — its final path segment is the tag
 // (cli-v1.0.1). Prereleases never win because GitHub's latest endpoint
-// skips them.
-func latestReleaseVersion(base string) (string, error) {
+// skips them. Used as the fallback when the API path fails.
+func latestReleaseVersionRedirect(base string) (string, error) {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -80,10 +163,61 @@ func latestReleaseVersion(base string) (string, error) {
 	}
 	tag := path.Base(u.Path)
 	ver, ok := strings.CutPrefix(tag, "cli-v")
-	if !ok || ver == "" {
+	if !ok {
 		return "", fmt.Errorf("latest release tag %q is not a cli-v* tag", tag)
 	}
+	if _, ok := parseStableVersion(ver); !ok {
+		return "", fmt.Errorf("latest release tag %q is not a numeric dotted stable cli-v* tag", tag)
+	}
 	return ver, nil
+}
+
+// parseStableVersion accepts the same release grammar as doctor.sh:
+// one or more dot-separated decimal components, with no prerelease/build
+// suffixes and every component fitting in uint32. The explicit bound keeps
+// ordering portable and prevents malformed overflow from masking a real
+// published stable release.
+func parseStableVersion(version string) ([]uint64, bool) {
+	if version == "" {
+		return nil, false
+	}
+	parts := strings.Split(version, ".")
+	parsed := make([]uint64, len(parts))
+	for i, part := range parts {
+		if part == "" {
+			return nil, false
+		}
+		for _, ch := range part {
+			if ch < '0' || ch > '9' {
+				return nil, false
+			}
+		}
+		n, err := strconv.ParseUint(part, 10, 32)
+		if err != nil || n > maxStableVersionComponent {
+			return nil, false
+		}
+		parsed[i] = n
+	}
+	return parsed, true
+}
+
+func compareStableVersions(a, b []uint64) int {
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var na, nb uint64
+		if i < len(a) {
+			na = a[i]
+		}
+		if i < len(b) {
+			nb = b[i]
+		}
+		if na < nb {
+			return -1
+		}
+		if na > nb {
+			return 1
+		}
+	}
+	return 0
 }
 
 // compareVersions orders two semver-ish strings: -1 when a < b, 0 when
@@ -147,6 +281,111 @@ func compareVersions(a, b string) int {
 		return 1
 	}
 	return 0
+}
+
+// releaseCacheFile is the on-disk cache of the newest resolved cli-v* release,
+// living beside config.json in the config dir. It is refreshed by the
+// network-bearing `bp doctor --onboarding` and read — NETWORK-FREE — by
+// `bp whoami`, which must never make an HTTP call on its always-run hot path.
+const releaseCacheFile = "cli-release-cache.json"
+
+// releaseCacheTTL bounds how long a cached release reading stays trustworthy. A
+// reading older than this is treated as ABSENT (a cold cache), so whoami reports
+// an honest "unreported" rather than comparing against a day-stale latest.
+const releaseCacheTTL = 24 * time.Hour
+
+// releaseCache is the tiny on-disk record whoami reads instead of the network.
+type releaseCache struct {
+	// Latest is the newest resolved cli-v* version (no leading v), e.g. "1.15.0".
+	Latest string `json:"latest"`
+	// CheckedAt is when the network resolve that produced Latest ran (RFC3339).
+	CheckedAt time.Time `json:"checked_at"`
+}
+
+// releaseCachePath is the absolute path to the release cache file.
+func releaseCachePath() (string, error) {
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, releaseCacheFile), nil
+}
+
+// writeReleaseCache atomically records the newest resolved release version, so a
+// later network-free whoami can render the freshness verdict. It mkdir -p's the
+// 0700 config dir and writes the file 0600 via a same-dir temp + rename, exactly
+// like SaveConfig — a crash or a concurrent reader never sees a half-written
+// cache. Best-effort: a write failure never sinks the caller (doctor still
+// renders its live reading), so callers may ignore the error.
+func writeReleaseCache(latest string) error {
+	latest = strings.TrimSpace(latest)
+	if latest == "" {
+		return fmt.Errorf("refusing to cache an empty release version")
+	}
+	dir, err := configDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("mkdir config dir %s: %w", dir, err)
+	}
+	raw, err := json.MarshalIndent(releaseCache{Latest: latest, CheckedAt: time.Now().UTC()}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal release cache: %w", err)
+	}
+	raw = append(raw, '\n')
+	tmp, err := os.CreateTemp(dir, "cli-release-*.json")
+	if err != nil {
+		return fmt.Errorf("create temp release cache in %s: %w", dir, err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return fmt.Errorf("write temp release cache %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return fmt.Errorf("chmod temp release cache %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("close temp release cache %s: %w", tmp.Name(), err)
+	}
+	path := filepath.Join(dir, releaseCacheFile)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("rename release cache %s: %w", path, err)
+	}
+	return nil
+}
+
+// readReleaseCache returns the cached release reading and whether it is FRESH:
+// present on disk, non-empty, and written within releaseCacheTTL. It NEVER
+// touches the network — a missing, unreadable, malformed, empty, or stale cache
+// all read as (zero, false), which whoami renders as an honest "unreported". A
+// future CheckedAt (clock skew) is also treated as stale, never as fresh.
+func readReleaseCache() (releaseCache, bool) {
+	path, err := releaseCachePath()
+	if err != nil {
+		return releaseCache{}, false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return releaseCache{}, false
+	}
+	var rc releaseCache
+	if err := json.Unmarshal(raw, &rc); err != nil {
+		return releaseCache{}, false
+	}
+	if strings.TrimSpace(rc.Latest) == "" || rc.CheckedAt.IsZero() {
+		return releaseCache{}, false
+	}
+	age := time.Since(rc.CheckedAt)
+	if age < 0 || age > releaseCacheTTL {
+		return releaseCache{}, false
+	}
+	return rc, true
 }
 
 // fetchToFile downloads url into dst (creating it 0600). Returns the HTTP
@@ -251,10 +490,29 @@ func performUpgrade(base, latest, exePath string) error {
 	return nil
 }
 
+// upgradeDevBuildRefusal is the dev-build refusal for the MUTATING path.
+//
+// It names onbCLIDevRemedy — the SAME command the doctor's unreported leg names.
+// It used to say `make cli-build`, which is a different target: cli-build writes
+// dist/bp and nothing else, so a user who followed it re-ran an unchanged `bp`
+// off PATH and saw the identical refusal. `make cli-install` is the target that
+// builds AND installs onto PATH (Makefile:171). Two surfaces answering one fact
+// must not hand out two different remedies, one of which does not work — that is
+// the exact contradiction this slice exists to remove.
+const upgradeDevBuildRefusal = "bp upgrade: this is a dev build (go build); upgrade with `" + onbCLIDevRemedy + "`"
+
 // runUpgrade is the `bp upgrade` builtin: self-update from the cli-v*
 // GitHub Releases. --check reports current vs latest without touching the
 // binary (exit 1 when behind). Refuses on dev builds (no release to compare
 // against). Honors BARKPARK_CLI_RELEASE_BASE (release-tree root).
+//
+// The two dev-build paths answer two DIFFERENT questions and must not be
+// conflated. Bare `bp upgrade` asks "replace this binary" — impossible for a dev
+// build, so it refuses at exitUsage. `bp upgrade --check` asks "how fresh am I?"
+// — the honest answer is that no reading can be taken, which is exactly what
+// `bp doctor --onboarding` now reports (Status onbCLIUnreported, ok unchanged,
+// exit 0). An unknown is not a failure, so --check reports it and exits 0 too:
+// the same fact must not produce contradicting verdicts on two surfaces.
 func runUpgrade(out *writer, g globals, args []string) int {
 	check := false
 	for _, a := range args {
@@ -273,11 +531,26 @@ func runUpgrade(out *writer, g globals, args []string) int {
 		out.outf("usage: bp upgrade [--check] [-o json|yaml]")
 		out.outf("  self-update bp from the latest cli-v* GitHub release")
 		out.outf("  --check   print current vs latest only; exit 1 when behind")
+		out.outf("            a dev build reports status=unreported and exits 0 —")
+		out.outf("            it cannot be compared, so no verdict is claimed")
 		return exitOK
 	}
 
 	if cliVersion == "dev" {
-		out.errf("bp upgrade: this is a dev build (go build); upgrade via git pull + make cli-build")
+		if check {
+			// Freshness is UNREPORTED, not "up to date" and not "behind" — the
+			// same tri-state the onboarding receipt renders for this binary.
+			if !out.emitStructured(map[string]any{
+				"current": cliVersion,
+				"latest":  "",
+				"behind":  nil,
+				"status":  onbCLIUnreported,
+			}) {
+				out.outf("bp %s — freshness UNREPORTED: a dev build (go build) has no release to compare against; refresh it with `%s`", cliVersion, onbCLIDevRemedy)
+			}
+			return exitOK
+		}
+		out.errf("%s", upgradeDevBuildRefusal)
 		return exitUsage
 	}
 
@@ -287,10 +560,21 @@ func runUpgrade(out *writer, g globals, args []string) int {
 		out.errf("bp upgrade: %v", err)
 		return exitGeneric
 	}
+	// This resolve is network-bearing, so refresh the on-disk cache a later
+	// network-free whoami reads its freshness verdict from — covers both bare
+	// `bp upgrade` and `bp upgrade --check`. A failed resolve returns above and
+	// writes nothing. Best-effort: a cache-write failure never sinks the upgrade.
+	_ = writeReleaseCache(latest)
 	behind := compareVersions(cliVersion, latest) < 0
 
 	if check {
-		if !out.emitStructured(map[string]any{"current": cliVersion, "latest": latest, "behind": behind}) {
+		// `status` carries the same vocabulary the onboarding receipt uses, so a
+		// reader gets one word meaning one thing on both surfaces.
+		status := onbCLIUpToDate
+		if behind {
+			status = onbCLIBehind
+		}
+		if !out.emitStructured(map[string]any{"current": cliVersion, "latest": latest, "behind": behind, "status": status}) {
 			if behind {
 				out.outf("bp %s — latest is %s (run 'bp upgrade')", cliVersion, latest)
 			} else {

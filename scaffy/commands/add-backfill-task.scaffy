@@ -1,0 +1,213 @@
+COMMAND "Add a Backfill Mix Task" DESCRIPTION "Scaffold a safe-by-default one-shot backfill Mix.Task — a bare run is a DRY RUN that streams the target rows, counts them, and writes nothing; `--apply` performs the mutation. Ends the copy-paste idiom shared byte-for-byte by 8+ existing barkpark.*.backfill tasks: the same @switches, the same negation guard, the same house 'Safe by default' moduledoc. Ships a paired pure-helper test that pins the flag logic without booting the app." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "scaffold", "ecto", "testing" CONCEPT "backfill-task" VARIANT "dry-run-apply" DIRECTION "add" VARIABLES
+  VARIABLE 1 "TaskName" TITLE "Name your backfill task" DESCRIPTION "The Mix task's name, PascalCase and single-segment — end it in 'Backfill' by house convention. This is the A1 casing showcase: ONE declaration spells the PascalCase module suffix (Mix.Tasks.Barkpark.{{.TaskName}}), the snake_case file suffix and mix invocation ({{.task_name}} → barkpark.{{.task_name}}), guaranteed in agreement. Mix derives the task name from the module by underscoring each segment, so `EdgesBackfill` answers to `mix barkpark.edges_backfill` and lives in barkpark.edges_backfill.ex — pick a name whose underscored form reads well." EXAMPLES "EdgesBackfill", "PreviewBackfill", "InventoryStatusBackfill"
+  VARIABLE 2 "Summary" OPAQUE TITLE "One-line operator summary (moduledoc + @shortdoc)" DESCRIPTION "What the backfill sweeps and why, one sentence. Shown at the top of `mix help {{.task_name}}` and in the moduledoc. OPAQUE: never re-cased, one spelling per file, plain prose with no braces." EXAMPLES "Backfill body-walk content edges for pre-existing papers.", "Stamp content[preview] onto legacy published papers.", "Rehydrate embedded sheet snapshots that predate the extractor."
+
+# ===========================================================================
+# add-backfill-task — the DECLARATIVE form of the byte-identical idiom every
+# `barkpark.*.backfill` Mix task hand-copies.
+#
+# PRIOR ART & EVIDENCE. `api/lib/mix/tasks/` carries a family of one-shot
+# backfill tasks — barkpark.edges.backfill, barkpark.media.backfill,
+# barkpark.preview.backfill, barkpark.paper.backfill_block_ids,
+# barkpark.paper.doctrine_backfill — each independently re-typing the SAME
+# safe-by-default skeleton: `use Mix.Task`, `@switches [dry_run:, apply:,
+# dataset:]`, the parse-and-raise-on-invalid preamble, and the load-bearing
+# negation guard that makes a bare invocation a dry run. The canonical guard
+# is `api/lib/mix/tasks/barkpark.edges.backfill.ex:51` — this command mirrors
+# that exact expression VERBATIM (it is the payload-derived ASSERT FILE guard
+# below), so a task authored here is byte-faithful to the exemplar the whole
+# corpus already agrees on.
+#
+# ALL-CREATE, ZERO INJECTION. Like add-plugin and add-migration, this command
+# touches NO accretion file — a Mix task is DISCOVERED, never registered:
+# `Mix.Task.load_all/0` walks the `Mix.Tasks.*` module namespace at invocation
+# time, so dropping a module under `lib/mix/tasks/` on the `elixirc_paths` tree
+# IS the registration. There is no router, barrel, registry, or config map to
+# inject into, so every op below is a whole-file `CREATE FILE IF ABSENT` and
+# there are zero `MARK` ops (MARK anchors a marker INSIDE a host file; this
+# command has no host file). Idempotency and reversibility are therefore
+# structural: IF ABSENT is the guard (a second run writes nothing), and the two
+# created file paths are the remove handles (Wave-3 `remove` deletes exactly
+# this set, leaving the tree byte-clean).
+#
+# COMPILES AS-IS, MUTATION IS A FENCED TODO. The created task compiles and RUNS
+# today: the dry-run path streams the corpus, counts candidate rows, and reports
+# — writing nothing. The actual write is a clearly fenced TODO region inside the
+# single `unless dry_run?` block, so the safe default can never write and the
+# author fills in only the mutation. The four-way flag truth table is factored
+# into a PURE `dry_run?/1` so the paired test pins it WITHOUT booting the app or
+# touching the DB (LOCAL-safe warm `mix test`, A2's scoped-single-file gate).
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 1/2 ● Task module — lib/mix/tasks/barkpark.<task>.ex
+#     Mirrors barkpark.edges.backfill.ex: the house moduledoc with the "Safe by
+#     default" section, @shortdoc, @switches, the parse-and-raise preamble, the
+#     byte-exact negation guard (factored into the pure dry_run?/1), and a
+#     Repo.stream sweep whose write is a fenced TODO. Lives on the elixirc_paths
+#     tree so `mix` discovers it — no registration edit exists to plant.
+# ---------------------------------------------------------------------------
+CREATE FILE IF ABSENT "api/lib/mix/tasks/barkpark.{{.task_name}}.ex"
+WITH
+::: {{.task_name}} task module :::
+defmodule Mix.Tasks.Barkpark.{{.TaskName}} do
+  @moduledoc """
+  {{.Summary}}
+
+  ## Safe by default
+
+  A bare invocation is a DRY RUN — it streams the target rows, counts the ones
+  that still need the backfill, and reports what WOULD change without writing.
+  Pass `--apply` to actually perform the mutation.
+
+      # report only (writes nothing) — the safe default
+      mix barkpark.{{.task_name}}
+      mix barkpark.{{.task_name}} --dry-run
+
+      # perform the backfill
+      mix barkpark.{{.task_name}} --apply
+
+      # narrow to one dataset
+      mix barkpark.{{.task_name}} --apply --dataset production
+  """
+  @shortdoc "{{.Summary}}"
+
+  use Mix.Task
+
+  import Ecto.Query, only: [from: 2]
+
+  alias Barkpark.Content.Document
+  alias Barkpark.Repo
+
+  @switches [dry_run: :boolean, apply: :boolean, dataset: :string]
+
+  @impl Mix.Task
+  def run(args) do
+    Mix.Task.run("app.start")
+
+    {opts, _argv, invalid} = OptionParser.parse(args, strict: @switches)
+
+    if invalid != [] do
+      Mix.raise("Unknown arguments: #{inspect(invalid)}")
+    end
+
+    dry_run? = dry_run?(opts)
+    dataset = Keyword.get(opts, :dataset, "production")
+
+    {:ok, {scanned, changed}} =
+      Repo.transaction(fn ->
+        dataset
+        |> base_query()
+        |> Repo.stream()
+        |> Enum.reduce({0, 0}, fn row, {scanned, changed} ->
+          if needs_backfill?(row) do
+            unless dry_run? do
+              # -- TODO: PERFORM THE MUTATION --------------------------------
+              # Replace this block with the real write for `row`, e.g.
+              #
+              #     row
+              #     |> Document.changeset(patch_for(row))
+              #     |> Repo.update!()
+              #
+              # Keep every write INSIDE this `unless dry_run?` so the safe
+              # default can never write; the dry-run path already counted it.
+              # --------------------------------------------------------------
+              :ok
+            end
+
+            {scanned + 1, changed + 1}
+          else
+            {scanned + 1, changed}
+          end
+        end)
+      end)
+
+    Mix.shell().info("scanned #{scanned} row(s) in #{dataset}; #{changed} need backfill")
+
+    if dry_run? do
+      Mix.shell().info("\nDry run — nothing was written. Re-run with --apply to write.")
+    end
+  end
+
+  @doc """
+  Safe-default flag logic — write ONLY when `--apply` is explicitly given and
+  not negated by `--dry-run`. Any other combination is a dry run. Pure and
+  side-effect-free (no app boot, no DB) so it is unit-tested directly. This
+  expression is byte-identical to the corpus exemplar
+  `barkpark.edges.backfill.ex:51`.
+  """
+  def dry_run?(opts) do
+    not (Keyword.get(opts, :apply, false) and not Keyword.get(opts, :dry_run, false))
+  end
+
+  # The rows still awaiting the backfill. Narrow this to the real predicate
+  # (a NULL column, a missing content key, a stale version) so the sweep only
+  # touches what it must.
+  defp base_query(dataset) do
+    from(d in Document, where: d.dataset == ^dataset)
+  end
+
+  # TODO: return true only for rows that still need the backfill. Left total
+  # (false) so a fresh task is a safe no-op until you fill in the predicate.
+  defp needs_backfill?(_row), do: false
+end
+::: {{.task_name}} task module :::
+
+# ---------------------------------------------------------------------------
+# 2/2 ● Task test — test/mix/tasks/barkpark.<task>_test.exs
+#     Mirrors the api/test/mix/tasks/ convention (barkpark.plugin.new_test.exs,
+#     barkpark.preview.backfill_test.exs). Pins the pure dry_run?/1 truth table
+#     — the safe-default contract — WITHOUT app.start or a DB, so it is a
+#     LOCAL-safe scoped `mix test` (A2 warm-build gate), not a CI-only sweep.
+# ---------------------------------------------------------------------------
+CREATE FILE IF ABSENT "api/test/mix/tasks/barkpark.{{.task_name}}_test.exs"
+WITH
+::: {{.task_name}} task test :::
+defmodule Mix.Tasks.Barkpark.{{.TaskName}}Test do
+  # Pins the safe-default flag contract of `mix barkpark.{{.task_name}}`. Pure:
+  # exercises `dry_run?/1` directly, so it needs neither app.start nor the Repo
+  # — a LOCAL-safe scoped `mix test` (A2). Add DataCase-backed --apply coverage
+  # once the mutation TODO in the task module is filled in.
+  use ExUnit.Case, async: true
+
+  alias Mix.Tasks.Barkpark.{{.TaskName}}
+
+  describe "dry_run?/1 — safe by default" do
+    test "no flags is a dry run" do
+      assert {{.TaskName}}.dry_run?([])
+    end
+
+    test "--dry-run is a dry run" do
+      assert {{.TaskName}}.dry_run?(dry_run: true)
+    end
+
+    test "--apply writes (not a dry run)" do
+      refute {{.TaskName}}.dry_run?(apply: true)
+    end
+
+    test "--apply --dry-run is a dry run (dry-run wins)" do
+      assert {{.TaskName}}.dry_run?(apply: true, dry_run: true)
+    end
+  end
+end
+::: {{.task_name}} task test :::
+
+# ===========================================================================
+# Post-conditions — assert both files landed with the load-bearing content.
+# Guards are ASCII substrings of what the ops above write (payload-derived),
+# and brace-safe (every `}}` is a variable token followed by a space, `)`, `,`
+# or `]`, never a literal `}`).
+# ===========================================================================
+ASSERT FILE "api/lib/mix/tasks/barkpark.{{.task_name}}.ex" CONTAINS "defmodule Mix.Tasks.Barkpark.{{.TaskName}} do"
+ASSERT FILE "api/lib/mix/tasks/barkpark.{{.task_name}}.ex" CONTAINS "@switches [dry_run: :boolean, apply: :boolean, dataset: :string]"
+ASSERT FILE "api/lib/mix/tasks/barkpark.{{.task_name}}.ex" CONTAINS "not (Keyword.get(opts, :apply, false) and not Keyword.get(opts, :dry_run, false))"
+ASSERT FILE "api/lib/mix/tasks/barkpark.{{.task_name}}.ex" CONTAINS "Re-run with --apply to write."
+ASSERT FILE "api/test/mix/tasks/barkpark.{{.task_name}}_test.exs" CONTAINS "defmodule Mix.Tasks.Barkpark.{{.TaskName}}Test do"
+ASSERT FILE "api/test/mix/tasks/barkpark.{{.task_name}}_test.exs" CONTAINS "refute {{.TaskName}}.dry_run?(apply: true)"
+
+# Run gate — the paired pure-helper test. LOCAL (no TIER ci): a scoped
+# single-file `mix test` is proven LOCAL-safe on a warm `api/_build` (A2,
+# 2026-07-16); `CC=/usr/bin/clang` pins the real compiler past the shadowing
+# `cc` wrapper. Full DataCase --apply coverage is deferred to CI with the rest
+# of the suite once the mutation TODO is filled in.
+ASSERT CMD "cd api && CC=/usr/bin/clang mix test test/mix/tasks/barkpark.{{.task_name}}_test.exs"

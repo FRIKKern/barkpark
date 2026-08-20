@@ -12,13 +12,47 @@ defmodule BarkparkWeb.ChatControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.TenancyFixtures
+
   alias Barkpark.Auth
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.BlockedSweeper
+  alias Barkpark.StudioChat.Message
   alias Barkpark.StudioChat.Recorder
+  alias Barkpark.Webhooks
   alias BarkparkWeb.ChatController
   alias BarkparkWeb.Studio.ClaudeChat
 
   @dataset "production"
+
+  defmodule FakeCodexAdapter do
+    @moduledoc false
+
+    def capabilities do
+      %{modes: ["default", "read-only"], models: ["gpt-5.6"], efforts: ["high"]}
+    end
+
+    def cwd, do: "/tmp/codex-managed"
+
+    # A codex-style NON-:ok delivery: the double-answer race returns
+    # {:error, :unknown_approval}. chat_controller.approval/2 must swallow this
+    # (soft-match) and still flip the status + 204, never MatchError → 500.
+    def answer_approval(_ref, _request_id, _decision), do: {:error, :unknown_approval}
+  end
+
+  defmodule SweepEcho do
+    @moduledoc false
+    # Webhook HTTP adapter that echoes each delivery to the test pid — makes a
+    # BlockedSweeper fire observable (blocked_sweeper_test's PidEcho twin).
+    def post(url, body, _headers) do
+      case Application.get_env(:barkpark, :chat_owner_stamp_test_pid) do
+        pid when is_pid(pid) -> send(pid, {:sweep_delivered, url, body})
+        _ -> :ok
+      end
+
+      {:ok, 200}
+    end
+  end
 
   setup do
     # A valid `cat` echo-server fake CLI so send/interrupt/approval can bring up a
@@ -26,8 +60,15 @@ defmodule BarkparkWeb.ChatControllerTest do
     # test config (which fail-closes enabled?/0), so both must flip.
     prev = Application.get_env(:barkpark, :claude_chat)
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
+    prev_adapters = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
     Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"cat", []})
     Application.put_env(:barkpark, :public_demo_studio, false)
+
+    Application.put_env(
+      :barkpark,
+      :studio_chat_runtime_adapters,
+      Map.put(prev_adapters || %{}, :codex, FakeCodexAdapter)
+    )
 
     on_exit(fn ->
       # Reap any spawned runtimes so a live subprocess never leaks into the next test.
@@ -46,6 +87,10 @@ defmodule BarkparkWeb.ChatControllerTest do
         else: Application.delete_env(:barkpark, :claude_chat)
 
       Application.put_env(:barkpark, :public_demo_studio, prev_demo)
+
+      if prev_adapters,
+        do: Application.put_env(:barkpark, :studio_chat_runtime_adapters, prev_adapters),
+        else: Application.delete_env(:barkpark, :studio_chat_runtime_adapters)
     end)
 
     admin = "chat-admin-#{System.unique_integer([:positive])}"
@@ -69,7 +114,64 @@ defmodule BarkparkWeb.ChatControllerTest do
 
   defp json_conn(raw), do: as(build_conn(), raw)
 
-  # ── A. eight-route auth matrix (16 negative-auth assertions) ────────────────
+  # ── wave-session-card wire fixtures (wsc charter D3/D6/D9) ────────────────
+
+  # A live 2-phase workflow rail: Explore settled, Build 1 done + 1 running.
+  defp workflow_rail do
+    %{
+      "wf" => %{
+        "status" => "running",
+        "seq" => 1,
+        "row" => %{"task_type" => "local_workflow", "description" => "wave 1"},
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"},
+          %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "build:a",
+            "state" => "done",
+            "startedAt" => 100,
+            "tokens" => 10
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "build:b",
+            "state" => "progress",
+            "startedAt" => 200
+          }
+        ]
+      }
+    }
+  end
+
+  defp sidebar_entry(admin, sid) do
+    entry =
+      json_conn(admin)
+      |> get("/v1/chat/sessions")
+      |> json_response(200)
+      |> Map.fetch!("sessions")
+      |> Enum.find(&(&1["id"] == sid))
+
+    assert entry, "expected the session in the active list"
+    entry
+  end
+
+  # epic_goal reads the published documents table directly — insert the lean
+  # ledger rows, no claim machinery (the READ path is under test).
+  defp insert_ledger_task!(doc_id, title, content) do
+    Barkpark.Repo.insert!(%Barkpark.Content.Document{
+      doc_id: doc_id,
+      type: "task",
+      title: title,
+      status: "published",
+      content: content,
+      rev: Ecto.UUID.generate()
+    })
+  end
+
+  # ── A. ten-route auth matrix (20 negative-auth assertions) ──────────────────
 
   describe "auth matrix — auth runs BEFORE any UUID/store/runtime work (obligation A)" do
     setup %{sid: sid} do
@@ -82,6 +184,8 @@ defmodule BarkparkWeb.ChatControllerTest do
           {:post, "/v1/chat/sessions/#{sid}/messages"},
           {:post, "/v1/chat/sessions/#{sid}/interrupt"},
           {:post, "/v1/chat/sessions/#{sid}/approval"},
+          {:post, "/v1/chat/sessions/#{sid}/archive"},
+          {:post, "/v1/chat/sessions/#{sid}/unarchive"},
           {:get, "/v1/chat/sessions/#{sid}/events"}
         ]
       }
@@ -148,6 +252,99 @@ defmodule BarkparkWeb.ChatControllerTest do
     end
   end
 
+  # ── B'. cross-tenant isolation — a workspace Connector is confined to its own
+  #        tenant (Connectors D18/D19a) ────────────────────────────────────────
+
+  describe "cross-tenant isolation — a workspace connector cannot reach another tenant's session" do
+    setup do
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+
+      conn_a_raw = "chat-conn-a-#{System.unique_integer([:positive])}"
+      conn_b_raw = "chat-conn-b-#{System.unique_integer([:positive])}"
+
+      # Workspace-bound Connector tokens: NOT global admin — they carry `chat` and
+      # resolve to `{:workspace, ws}` in RequireChatAccess.
+      {:ok, _} = Auth.create_token(conn_a_raw, "conn-a", @dataset, ["read", "chat"], ws_a.id)
+      {:ok, _} = Auth.create_token(conn_b_raw, "conn-b", @dataset, ["read", "chat"], ws_b.id)
+
+      %{ws_a: ws_a, ws_b: ws_b, conn_a: conn_a_raw, conn_b: conn_b_raw}
+    end
+
+    test "a ws-B connector hits the not-found oracle on a session it does not own across every id route, while a :global admin reads it",
+         %{admin: admin, conn_a: conn_a, conn_b: conn_b, sid: sid} do
+      # Each id-bearing route carries a VALID body so the tenant check (not a 400)
+      # is what produces the 404 — proving the wrong-tenant read is
+      # indistinguishable from a missing id (never a distinct 403).
+      not_found_calls = [
+        fn -> json_conn(conn_b) |> get("/v1/chat/sessions/#{sid}") end,
+        fn ->
+          json_conn(conn_b) |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{draft: "x"}))
+        end,
+        fn ->
+          json_conn(conn_b)
+          |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "x"}))
+        end,
+        fn -> json_conn(conn_b) |> post("/v1/chat/sessions/#{sid}/interrupt", "") end,
+        fn -> json_conn(conn_b) |> post("/v1/chat/sessions/#{sid}/archive", "") end,
+        fn -> json_conn(conn_b) |> post("/v1/chat/sessions/#{sid}/unarchive", "") end,
+        fn ->
+          json_conn(conn_b)
+          |> post(
+            "/v1/chat/sessions/#{sid}/approval",
+            Jason.encode!(%{request_id: "r", decision: "allow"})
+          )
+        end,
+        fn -> json_conn(conn_b) |> get("/v1/chat/sessions/#{sid}/events") end
+      ]
+
+      for call <- not_found_calls do
+        conn = call.()
+        body = json_response(conn, 404)
+
+        assert body["error"]["code"] == "not_found",
+               "cross-tenant read must join the not-found oracle, not a distinct 403"
+      end
+
+      # index: ws-B's list never surfaces a session it does not own.
+      listed = json_conn(conn_b) |> get("/v1/chat/sessions") |> json_response(200)
+
+      refute Enum.any?(listed["sessions"], &(&1["id"] == sid)),
+             "ws-B leaked another tenant's session"
+
+      # The 404s above are ISOLATION, not a dead token: the SAME ws-B connector is
+      # authorized through the plug and can create its OWN session.
+      own =
+        json_conn(conn_b) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
+
+      assert {:ok, _} = Ecto.UUID.cast(own["id"])
+
+      # A :global admin retains instance-wide authority (D21 unchanged) — it reads
+      # the very session ws-B was 404'd on.
+      assert json_conn(admin) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+
+      # POSITIVE isolation leg (Connectors D19a) — the owner reads back what it
+      # created. ws-A's connector creates a session (must be stamped
+      # owner_workspace_id = ws_a from the create scope), then reads it (200) and
+      # sees it in its own list; ws-B is 404'd on that same fresh id. Without the
+      # create-scope stamp the session would be nil-owned and its OWNING connector
+      # would 404 on it — this leg pins that the stamp lands (charter D17/D18).
+      a_own =
+        json_conn(conn_a) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
+
+      a_id = a_own["id"]
+
+      assert json_conn(conn_a) |> get("/v1/chat/sessions/#{a_id}") |> json_response(200),
+             "ws-A must read back the session it just created (owner stamp lands)"
+
+      a_listed = json_conn(conn_a) |> get("/v1/chat/sessions") |> json_response(200)
+      assert Enum.any?(a_listed["sessions"], &(&1["id"] == a_id)), "ws-A must see its OWN session"
+
+      nf = json_conn(conn_b) |> get("/v1/chat/sessions/#{a_id}") |> json_response(404)
+      assert nf["error"]["code"] == "not_found", "ws-B must be 404'd on ws-A's fresh session"
+    end
+  end
+
   # ── C. UUID / not-found oracle safety (obligation C) ────────────────────────
 
   describe "UUID / not-found oracle (obligation C)" do
@@ -206,6 +403,65 @@ defmodule BarkparkWeb.ChatControllerTest do
     test "an absent mode defaults to plan", %{admin: a1} do
       body = json_conn(a1) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
       assert body["mode"] == "plan"
+      assert body["provider"] == "claude"
+      assert body["execution_target"] == "managed"
+      assert body["execution_host_id"] == nil
+      assert body["provider_session_id"] == body["id"]
+    end
+
+    test "persists and projects explicit provider and registered-host identity", %{admin: a1} do
+      host_id = Ecto.UUID.generate()
+
+      body =
+        json_conn(a1)
+        |> post(
+          "/v1/chat/sessions",
+          Jason.encode!(%{
+            provider: "codex",
+            execution_target: "registered_host",
+            execution_host_id: host_id,
+            mode: "read-only",
+            model: "gpt-5.6",
+            effort: "high"
+          })
+        )
+        |> json_response(201)
+
+      assert body["provider"] == "codex"
+      assert body["execution_target"] == "registered_host"
+      assert body["execution_host_id"] == host_id
+      assert body["provider_session_id"] == nil
+      assert body["mode"] == "read-only"
+      assert body["model_choice"] == "gpt-5.6"
+      assert body["effort_choice"] == "high"
+
+      stored = StudioChat.get_session(body["id"])
+      assert stored.provider == "codex"
+      assert stored.execution_target == "registered_host"
+      assert stored.execution_host_id == host_id
+      assert stored.provider_session_id == nil
+    end
+
+    test "rejects invalid provider/target/host combinations before writing", %{admin: a1} do
+      before = length(StudioChat.list_sessions())
+      host_id = Ecto.UUID.generate()
+
+      for invalid <- [
+            %{provider: "other"},
+            %{execution_target: "other"},
+            %{execution_target: "managed", execution_host_id: host_id},
+            %{execution_target: "registered_host"},
+            %{execution_target: "registered_host", execution_host_id: "not-a-uuid"}
+          ] do
+        response =
+          json_conn(a1)
+          |> post("/v1/chat/sessions", Jason.encode!(invalid))
+          |> json_response(400)
+
+        assert response["error"]["code"] == "invalid_request", inspect(invalid)
+      end
+
+      assert length(StudioChat.list_sessions()) == before
     end
 
     test "every launcher control / unknown key is rejected 400 with ZERO store write",
@@ -246,6 +502,106 @@ defmodule BarkparkWeb.ChatControllerTest do
     end
   end
 
+  # ── create: owner_workspace_id stamp (herd charter D43h seal) ───────────────
+
+  describe "POST /sessions — owner_workspace_id stamp feeds BlockedSweeper (D43h)" do
+    # `BlockedSweeper` is deliberately fail-closed on NULL owners: a `nil`-owned
+    # session can NEVER fire `chat_blocked`. The live-proof on guerrilla found
+    # EVERY real session NULL-owned — created by admin (`:global`) tokens, which
+    # used to stamp NULL. These tests pin the fix at the wire: an admin-created
+    # session carries a real owner AND the fail-closed sweeper actually fires
+    # for it. Breaking the create-scope stamp (reverting `create_scope/1` to
+    # `scope/1`) reds BOTH assertions — the sweep returns 0 again.
+
+    setup do
+      prev = Application.get_env(:barkpark, :webhook_http_adapter)
+      Application.put_env(:barkpark, :webhook_http_adapter, SweepEcho)
+      Application.put_env(:barkpark, :chat_owner_stamp_test_pid, self())
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :webhook_http_adapter, prev),
+          else: Application.delete_env(:barkpark, :webhook_http_adapter)
+
+        Application.delete_env(:barkpark, :chat_owner_stamp_test_pid)
+      end)
+
+      :ok
+    end
+
+    test "a workspace-bound admin stamps its workspace — and BlockedSweeper fires for the session" do
+      ws = create_workspace!()
+      raw = "chat-admin-ws-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(raw, "chat-admin-ws", @dataset, ["read", "write", "admin"], ws.id)
+
+      body = json_conn(raw) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
+      session = StudioChat.get_session(body["id"])
+
+      assert session.owner_workspace_id == ws.id,
+             "a wire-created admin session must carry a non-NULL owner " <>
+               "(BlockedSweeper is fail-closed on NULL, D43h)"
+
+      # The stamp is what makes the session VISIBLE to the fail-closed sweeper:
+      # a chat_blocked webhook + one over-threshold pending ask ⇒ EXACTLY one
+      # fire, carrying this session id and the stamped workspace.
+      {:ok, _wh} =
+        Webhooks.create_webhook(
+          %{
+            "name" => "cb-#{System.unique_integer([:positive])}",
+            "url" => "https://sink.example/blocked",
+            "secret" => "sek",
+            "blocked_threshold_s" => 300
+          },
+          workspace_id: ws.id
+        )
+
+      {:ok, _ask} =
+        %Message{}
+        |> Message.changeset(%{
+          session_id: session.id,
+          seq: System.unique_integer([:positive]),
+          role: "approval",
+          metadata: %{"approval_status" => "pending"}
+        })
+        |> Barkpark.Repo.insert()
+
+      assert BlockedSweeper.sweep(DateTime.add(DateTime.utc_now(), 360, :second)) == 1,
+             "the sweeper must pick up the wire-created session via its stamped owner"
+
+      assert_received {:sweep_delivered, "https://sink.example/blocked", delivered}
+      payload = Jason.decode!(delivered)
+      assert payload["session_id"] == session.id
+      assert payload["workspace_id"] == ws.id
+    end
+
+    test "a pre-tenancy (unbound) admin token falls back to the seeded Default Workspace" do
+      {default_ws, _project} = ensure_default_scope!()
+
+      # Insert the token row DIRECTLY: `Auth.create_token/5` always binds to the
+      # Default Workspace when one exists, but guerrilla's real admin token is
+      # pre-tenancy — `workspace_id` NULL. That shape must exercise the
+      # create-time fallback arm, not stamp NULL.
+      raw = "chat-admin-unbound-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        %Auth.ApiToken{}
+        |> Auth.ApiToken.changeset(%{
+          token_hash: Auth.ApiToken.hash_token(raw),
+          label: "pre-tenancy-admin",
+          dataset: @dataset,
+          permissions: ["read", "write", "admin"]
+        })
+        |> Barkpark.Repo.insert()
+
+      body = json_conn(raw) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
+
+      assert StudioChat.get_session(body["id"]).owner_workspace_id == default_ws.id,
+             "an unbound admin's session must fall back to the seeded Default Workspace"
+    end
+  end
+
   # ── list (obligation B sidebar shape + D14 vacuous-green trap) ──────────────
 
   describe "GET /sessions — sidebar shape, archived filter" do
@@ -266,6 +622,122 @@ defmodule BarkparkWeb.ChatControllerTest do
       refute Map.has_key?(entry, "draft")
       refute Map.has_key?(entry, "model_choice")
       refute Map.has_key?(entry, "rail_snapshot")
+    end
+
+    # ── herd cold-mount widen (herd charter D50h) ────────────────────────────
+
+    test "carries agent_state/agent_state_at so the herd home cold-mounts (D50h)",
+         %{admin: a1, sid: sid} do
+      # a fresh session wears the column default honestly
+      entry = sidebar_entry(a1, sid)
+      assert entry["agent_state"] == "idle"
+      assert Map.has_key?(entry, "agent_state_at")
+
+      # a persisted flip rides the same projection, timestamp included
+      now = DateTime.utc_now()
+      StudioChat.set_agent_state(sid, "working", :derived, now)
+      entry = sidebar_entry(a1, sid)
+      assert entry["agent_state"] == "working"
+
+      assert {:ok, at, 0} = DateTime.from_iso8601(entry["agent_state_at"])
+
+      assert DateTime.compare(DateTime.truncate(at, :second), DateTime.truncate(now, :second)) in [
+               :eq,
+               :gt
+             ]
+
+      # the wave-12 read-tracking stamp is retired (herd — no read receipts)
+      refute Map.has_key?(entry, "last_visited_at")
+    end
+
+    # ── wave-session-card compact wire (wsc charter D3/D6 — amends D14) ──────
+
+    test "a workflow rail earns the compact `workflow` key; the raw rail stays off the wire",
+         %{admin: a1, sid: sid} do
+      {:ok, _} = StudioChat.set_rail_snapshot(sid, workflow_rail())
+
+      entry = sidebar_entry(a1, sid)
+      workflow = entry["workflow"]
+
+      # the D3 PINNED key set, string-keyed on the wire — S4's Go mirror
+      # renders these fields verbatim (D13); the terminal flag serialises as
+      # the Elixir atom `terminal?` verbatim
+      assert workflow |> Map.keys() |> Enum.sort() ==
+               ~w(agents_done agents_total ended_at label outcome phase phase_index phases_total running started_at terminal? ticks tokens)
+
+      assert workflow["outcome"] == "live"
+      assert workflow["terminal?"] == false
+      # Explore carries no agents while the run lives → :future; Build breathes
+      assert workflow["ticks"] == ["future", "active"]
+      assert workflow["phase"] == "Build"
+      assert workflow["phase_index"] == 2
+      assert workflow["phases_total"] == 2
+      assert workflow["agents_done"] == 1
+      assert workflow["agents_total"] == 2
+      assert workflow["running"] == 1
+      assert workflow["started_at"] == 100
+      assert workflow["ended_at"] == nil
+      assert workflow["label"] == "wave 1"
+
+      # D14's law is NOT amended away: the raw snapshot never rides the list
+      refute Map.has_key?(entry, "rail_snapshot")
+    end
+
+    test "a plain session carries NO workflow/epic keys (Ecto-doctrine omission mirror of draft/effort_choice)",
+         %{admin: a1, sid: sid} do
+      # even a rail WITHOUT workflow nodes is a plain row on the wire — the
+      # compact key exists only for workflow sessions (vacuous-green trap: the
+      # key must be ABSENT, not null)
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(sid, %{
+          "bg" => %{
+            "status" => "running",
+            "seq" => 1,
+            "row" => %{"task_type" => "local_shell", "description" => "npm test"}
+          }
+        })
+
+      entry = sidebar_entry(a1, sid)
+      refute Map.has_key?(entry, "workflow")
+      refute Map.has_key?(entry, "epic")
+      refute Map.has_key?(entry, "rail_snapshot")
+    end
+
+    test "the epic-goal map rides only when the ledger resolves the one-hop chain (wsc D9)",
+         %{admin: a1, sid: sid} do
+      {:ok, _} = StudioChat.set_rail_snapshot(sid, workflow_rail())
+
+      # no held claim → workflow present, epic absent (never invented)
+      entry = sidebar_entry(a1, sid)
+      assert Map.has_key?(entry, "workflow")
+      refute Map.has_key?(entry, "epic")
+
+      worker = ClaudeChat.worker_id(sid)
+
+      insert_ledger_task!("task-wsc-wire-epic", "Wire Epic", %{
+        "lifecycle_status" => "in_progress",
+        "wave_status" => "wave: building"
+      })
+
+      insert_ledger_task!("task-wsc-wire-held", "Held slice", %{
+        "lifecycle_status" => "in_progress",
+        "parent_id" => "task-wsc-wire-epic",
+        "claim" => %{"worker" => worker}
+      })
+
+      insert_ledger_task!("task-wsc-wire-done", "Done slice", %{
+        "lifecycle_status" => "done",
+        "parent_id" => "task-wsc-wire-epic"
+      })
+
+      epic = sidebar_entry(a1, sid)["epic"]
+      assert epic["id"] == "task-wsc-wire-epic"
+      assert epic["title"] == "Wire Epic"
+      assert epic["slices_done"] == 1
+      assert epic["slices_total"] == 2
+      assert epic["wave_status"] == "wave: building"
+      # "PRs open" has no data source (wsc D8) — no such key, ever
+      refute Map.has_key?(epic, "prs_open")
     end
 
     test "?archived= filters the shelf; a malformed value is 400", %{admin: a1, sid: sid} do
@@ -334,6 +806,31 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert json_conn(a1) |> get("/v1/chat/sessions/#{sid}?since=abc") |> json_response(400)
       assert json_conn(a1) |> get("/v1/chat/sessions/#{sid}?since=1.5") |> json_response(400)
     end
+
+    # ── herd show-widen (herd charter D65h) ──────────────────────────────────
+
+    test "carries agent_state/agent_state_at — a single-session poller needs no sidebar (D65h)",
+         %{admin: a1, sid: sid} do
+      # a fresh session wears the column default honestly
+      body = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+      assert body["agent_state"] == "idle"
+      assert Map.has_key?(body, "agent_state_at")
+
+      # MUTATION-PROVEN: a persisted flip changes the SHOW read, timestamp too
+      now = DateTime.utc_now()
+      StudioChat.set_agent_state(sid, "working", :derived, now)
+      body = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+      assert body["agent_state"] == "working"
+      assert {:ok, at, 0} = DateTime.from_iso8601(body["agent_state_at"])
+
+      assert DateTime.compare(DateTime.truncate(at, :second), DateTime.truncate(now, :second)) in [
+               :eq,
+               :gt
+             ]
+
+      # the wave-12 read-tracking stamp is retired (herd — no read receipts)
+      refute Map.has_key?(body, "last_visited_at")
+    end
   end
 
   # ── PATCH: exact allowlist, bounds, StudioChat.rename (obligation D) ────────
@@ -363,12 +860,55 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert body["title_source"] == "human"
     end
 
+    test "a mode PATCH with a LIVE runtime steers it best-effort and persists",
+         %{admin: a1, sid: sid} do
+      prev = Application.get_env(:barkpark, :claude_chat)
+      Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"cat", []})
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :claude_chat, prev),
+          else: Application.delete_env(:barkpark, :claude_chat)
+      end)
+
+      {:ok, recorder} =
+        Barkpark.StudioChat.Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      body =
+        json_conn(a1)
+        |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{mode: "auto"}))
+        |> json_response(200)
+
+      assert body["mode"] == "auto"
+      # The steer is fire-and-forget into the live session (the TUI toggle's
+      # mid-session effect); the runtime must survive it — a lost steer
+      # self-heals off the next init frame's observation.
+      assert Process.alive?(recorder)
+
+      DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, recorder)
+    end
+
     test "rejects bypassPermissions, unknown keys, and archived (list-only, not a write)",
          %{admin: a1, sid: sid} do
-      for body <- [%{mode: "bypassPermissions"}, %{archived: true}, %{foo: 1}, %{title: "  "}] do
+      for body <- [
+            %{mode: "bypassPermissions"},
+            %{archived: true},
+            %{foo: 1},
+            %{title: "  "},
+            %{provider: "codex"},
+            %{execution_target: "registered_host"},
+            %{execution_host_id: Ecto.UUID.generate()},
+            %{provider_session_id: "native-thread"}
+          ] do
         conn = json_conn(a1) |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(body))
         assert json_response(conn, 400)["error"]["code"] == "invalid_request", inspect(body)
       end
+
+      stored = StudioChat.get_session(sid)
+      assert stored.provider == "claude"
+      assert stored.execution_target == "managed"
+      assert stored.execution_host_id == nil
+      assert stored.provider_session_id == sid
     end
 
     test "title and draft honor the exact 256-byte / 64-KiB boundaries", %{admin: a1, sid: sid} do
@@ -398,6 +938,170 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert json_conn(a1)
              |> patch("/v1/chat/sessions/#{Ecto.UUID.generate()}", Jason.encode!(%{draft: "x"}))
              |> json_response(404)
+    end
+
+    test "PIN: unknown session + BAD body is 404, not 400 (fetch-before-validate precedence)",
+         %{admin: a1} do
+      # The provider-aware validators need the session row first, so the
+      # not-found oracle now outranks body shape. A tenant probing with garbage
+      # bodies learns nothing it wouldn't learn from a valid one.
+      for body <- [%{mode: "not-a-mode"}, %{bogus: 1}, %{draft: 123}] do
+        conn =
+          json_conn(a1)
+          |> patch("/v1/chat/sessions/#{Ecto.UUID.generate()}", Jason.encode!(body))
+
+        assert json_response(conn, 404)["error"]["code"] == "not_found", inspect(body)
+      end
+    end
+
+    test "mode/model/effort validators consult the SESSION's provider, not hardcoded claude",
+         %{admin: a1} do
+      # A codex session (FakeCodexAdapter caps: modes default/read-only, models
+      # gpt-5.6, efforts high) accepts its own vocabulary and rejects claude's.
+      body =
+        json_conn(a1)
+        |> post("/v1/chat/sessions", Jason.encode!(%{provider: "codex"}))
+        |> json_response(201)
+
+      codex_sid = body["id"]
+
+      # codex's own vocabulary validates (model_choice "gpt-5.6" was a 400
+      # under the old hardcoded-claude validator) and persists. The mode axis
+      # uses "default" — the value both FakeCodex advertises and the store
+      # persists (Session.persistable_modes/0 gates persistence separately).
+      ok =
+        json_conn(a1)
+        |> patch(
+          "/v1/chat/sessions/#{codex_sid}",
+          Jason.encode!(%{mode: "default", model_choice: "gpt-5.6", effort_choice: "high"})
+        )
+        |> json_response(200)
+
+      assert ok["mode"] == "default"
+      assert ok["model_choice"] == "gpt-5.6"
+      assert ok["effort_choice"] == "high"
+
+      # claude vocabulary is INVALID on a codex session…
+      for body <- [%{mode: "acceptEdits"}, %{model_choice: "sonnet"}, %{effort_choice: "max"}] do
+        conn = json_conn(a1) |> patch("/v1/chat/sessions/#{codex_sid}", Jason.encode!(body))
+        assert json_response(conn, 400)["error"]["code"] == "invalid_request", inspect(body)
+      end
+    end
+
+    test "codex vocabulary stays invalid on a claude session", %{admin: a1, sid: sid} do
+      for body <- [%{mode: "read-only"}, %{model_choice: "gpt-5.6"}] do
+        conn = json_conn(a1) |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(body))
+        assert json_response(conn, 400)["error"]["code"] == "invalid_request", inspect(body)
+      end
+    end
+
+    test "a model_choice PATCH with a LIVE runtime steers set_model on CHANGE only (steer parity)",
+         %{admin: a1, sid: sid} do
+      {:ok, recorder} =
+        Barkpark.StudioChat.Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      # The cat fake echoes our outbound set_model control_request straight
+      # back; ClaudeChat answers the echo with an error control_response whose
+      # request_id matches the one we minted, so the ack surfaces on the topic
+      # as a typed {:claude_chat_control, :set_model, …} — observable proof the
+      # steer actually went out over the wire.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      assert json_conn(a1)
+             |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{model_choice: "sonnet"}))
+             |> json_response(200)
+
+      assert_receive {:claude_chat_control, :set_model, _rid, _resp}, 2_000
+
+      # The echo PATCH (same value — the TUI leave-PATCH shape): change-guard
+      # suppresses the steer entirely.
+      assert json_conn(a1)
+             |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{model_choice: "sonnet"}))
+             |> json_response(200)
+
+      refute_receive {:claude_chat_control, :set_model, _rid, _resp}, 300
+
+      assert Process.alive?(recorder)
+      DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, recorder)
+    end
+
+    test "an effort_choice PATCH with a LIVE runtime persists and the runtime survives the steer",
+         %{admin: a1, sid: sid} do
+      # claude's adapter has no effort steer axis ({:error, {:unsupported_steer,
+      # _}} — swallowed); the honest bar here is the mode-steer test's: persisted
+      # choice + a runtime that survives the attempt.
+      {:ok, recorder} =
+        Barkpark.StudioChat.Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      body =
+        json_conn(a1)
+        |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{effort_choice: "high"}))
+        |> json_response(200)
+
+      assert body["effort_choice"] == "high"
+      assert Process.alive?(recorder)
+      DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, recorder)
+    end
+
+    test "model_choice/effort_choice PATCH with NO live Recorder is fail-soft — persist only",
+         %{admin: a1, sid: sid} do
+      assert Barkpark.StudioChat.Recorder.whereis(sid) == nil
+
+      body =
+        json_conn(a1)
+        |> patch(
+          "/v1/chat/sessions/#{sid}",
+          Jason.encode!(%{model_choice: "opus", effort_choice: "low"})
+        )
+        |> json_response(200)
+
+      assert body["model_choice"] == "opus"
+      assert body["effort_choice"] == "low"
+    end
+  end
+
+  # ── archive/unarchive: the shelf flips (charter D28) ────────────────────────
+
+  describe "POST /sessions/:id/{archive,unarchive} — archive shelf flips (D28)" do
+    test "archive → 200 {session} with archived_at; unarchive clears it; both idempotent",
+         %{admin: a1, sid: sid} do
+      body = json_conn(a1) |> post("/v1/chat/sessions/#{sid}/archive", "") |> json_response(200)
+      assert body["id"] == sid
+      assert body["archived_at"] != nil
+
+      # Idempotent: re-archiving is a 200 (the stamp refreshes), never an error.
+      again = json_conn(a1) |> post("/v1/chat/sessions/#{sid}/archive", "") |> json_response(200)
+      assert again["archived_at"] != nil
+
+      back = json_conn(a1) |> post("/v1/chat/sessions/#{sid}/unarchive", "") |> json_response(200)
+      assert back["id"] == sid
+      assert back["archived_at"] == nil
+
+      # Idempotent the other way too.
+      still =
+        json_conn(a1) |> post("/v1/chat/sessions/#{sid}/unarchive", "") |> json_response(200)
+
+      assert still["archived_at"] == nil
+    end
+
+    test "archiving moves the session between the two list sides", %{admin: a1, sid: sid} do
+      json_conn(a1) |> post("/v1/chat/sessions/#{sid}/archive", "") |> json_response(200)
+
+      active = json_conn(a1) |> get("/v1/chat/sessions") |> json_response(200)
+      refute sid in Enum.map(active["sessions"], & &1["id"])
+
+      shelf = json_conn(a1) |> get("/v1/chat/sessions?archived=true") |> json_response(200)
+      assert sid in Enum.map(shelf["sessions"], & &1["id"])
+    end
+
+    test "a missing/non-UUID id joins the not-found oracle on both verbs", %{admin: a1} do
+      for verb <- ["archive", "unarchive"] do
+        conn = json_conn(a1) |> post("/v1/chat/sessions/#{Ecto.UUID.generate()}/#{verb}", "")
+        assert json_response(conn, 404)["error"]["code"] == "not_found", verb
+
+        conn2 = json_conn(a1) |> post("/v1/chat/sessions/not-a-uuid/#{verb}", "")
+        assert json_response(conn2, 404)["error"]["code"] == "not_found", verb
+      end
     end
   end
 
@@ -450,6 +1154,251 @@ defmodule BarkparkWeb.ChatControllerTest do
              )
              |> json_response(404)
     end
+
+    # D140 — the API path persists the caller's OWN turn as an organic role:"user"
+    # row (the LiveView composer does its own; the API path had zero append sites,
+    # leaving channel/bridge sessions with assistant-only replay history).
+    test "a send persists an organic role:\"user\" row with the submitted content (zero pre-seeding)",
+         %{admin: a1, sid: sid} do
+      # A genuinely fresh session — no manual pre-seeding (contrast :470/:503/:955).
+      assert StudioChat.list_messages(sid) == []
+      assert StudioChat.get_session(sid).message_count == 0
+
+      json_conn(a1)
+      |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "organic hello"}))
+      |> json_response(202)
+
+      user_rows = for m <- StudioChat.list_messages(sid), m.role == "user", do: m
+      assert [row] = user_rows, "exactly one organic user row (no double-write)"
+      assert row.source_markdown == "organic hello"
+      assert row.metadata["origin"] == "api"
+    end
+
+    test "turn 1 on a fresh session dispatches resume?=false — the append lands AFTER derivation",
+         %{admin: a1, sid: sid} do
+      # ensure_and_send derives `resume? = (session.message_count || 0) > 0` from the
+      # struct captured at controller entry. On a fresh session that count is 0, so
+      # turn 1 is resume?=false. The user-row append runs strictly AFTER dispatch, so
+      # it cannot retroactively flip turn 1 — but it DOES advance message_count to 1,
+      # which is exactly the resume-state a subsequent turn 2 would (correctly) read.
+      assert StudioChat.get_session(sid).message_count == 0, "precondition: fresh ⇒ resume-false"
+
+      json_conn(a1)
+      |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "turn one"}))
+      |> json_response(202)
+
+      # The append advanced the count to exactly 1 — proving it ran (post-dispatch),
+      # once, without pre-empting turn-1's zero-valued derivation.
+      assert StudioChat.get_session(sid).message_count == 1
+      assert [%{role: "user", source_markdown: "turn one"}] = StudioChat.list_messages(sid)
+    end
+  end
+
+  # ── D26: the send-failure reason split ──────────────────────────────────────
+
+  defmodule NilSessionRecorderStub do
+    @moduledoc false
+    # Claims a session's Recorder registry name and answers :session_pid with
+    # {:ok, nil} — the exact reply a Recorder whose provider runtime is gone
+    # gives (session_pid/1 has NO failure branch). ensure/1 resolves to this
+    # stub via its {:already_started, pid} branch, so the controller walks the
+    # REAL path into the nil-session guard.
+    use GenServer
+
+    def start_link(sid) do
+      GenServer.start_link(__MODULE__, nil,
+        name: {:via, Registry, {Barkpark.StudioChat.RecorderRegistry, sid}}
+      )
+    end
+
+    @impl true
+    def init(_), do: {:ok, nil}
+
+    @impl true
+    def handle_call(:session_pid, _from, state), do: {:reply, {:ok, nil}, state}
+  end
+
+  # The classification seam (ChatController.send_failure_response/2 — public
+  # per the exit-reason-mapping convention): one assertion per allowlist leg.
+  defp split(reason) do
+    conn = ChatController.send_failure_response(build_conn(), reason)
+
+    {conn.status, Jason.decode!(conn.resp_body)["error"],
+     Plug.Conn.get_resp_header(conn, "retry-after")}
+  end
+
+  describe "send failures split by reason (charter D26)" do
+    test "capacity leg: 503 runtime_capacity + Retry-After" do
+      for reason <- [{:managed_runtime_capacity, 3}, :admission_registration_conflict] do
+        {status, error, retry_after} = split(reason)
+        assert status == 503, inspect(reason)
+        assert error["code"] == "runtime_capacity", inspect(reason)
+        assert [seconds] = retry_after
+        assert String.to_integer(seconds) > 0
+      end
+    end
+
+    test "unavailable leg: 503 runtime_unavailable, no Retry-After" do
+      for reason <- [
+            {:not_running, :noproc},
+            :port_closed,
+            :no_port,
+            {:app_server_exit, 1},
+            :runtime_session_missing
+          ] do
+        {status, error, retry_after} = split(reason)
+        assert status == 503, inspect(reason)
+        assert error["code"] == "runtime_unavailable", inspect(reason)
+        assert retry_after == [], inspect(reason)
+      end
+    end
+
+    test "unsupported leg: 422 chat_unsupported (permanent — a 503 would retry forever)" do
+      for reason <- [
+            {:provider_not_ready, "codex"},
+            {:provider_protocol_incompatible, "codex"},
+            {:unsupported_runtime_operation, :steer},
+            {:missing_runtime_contract, :port}
+          ] do
+        {status, error, _} = split(reason)
+        assert status == 422, inspect(reason)
+        assert error["code"] == "chat_unsupported", inspect(reason)
+      end
+    end
+
+    test "opaque fallback: an unknown reason (raw exception struct) is 503 with NO interpolation" do
+      # safe_command's rescue leg can surface raw exception structs — the wire
+      # message must never echo them (information leak).
+      leaky = %RuntimeError{message: "SECRET-/opt/barkpark/private-path"}
+      {status, error, _} = split({:unexpected, leaky})
+
+      assert status == 503
+      assert error["code"] == "runtime_unavailable"
+      refute error["message"] =~ "SECRET"
+      refute inspect(error) =~ "SECRET"
+    end
+
+    test "E2E capacity: a full admission pool answers 503 runtime_capacity + Retry-After",
+         %{admin: a1, sid: sid} do
+      prev = Application.get_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission)
+
+      Application.put_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission,
+        max_managed_runtimes: 1
+      )
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission, prev),
+          else: Application.delete_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission)
+      end)
+
+      # Fill the single slot with a live cat runtime on another session…
+      {:ok, other} =
+        StudioChat.create_session(%{
+          id: Ecto.UUID.generate(),
+          cwd: ClaudeChat.cwd(),
+          mode: "plan"
+        })
+
+      {:ok, recorder} =
+        Barkpark.StudioChat.Recorder.ensure(%{session_id: other.id, mode: "plan", resume: false})
+
+      # …then a send on OUR session has no slot: deterministic backpressure.
+      conn =
+        json_conn(a1)
+        |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "hello"}))
+
+      body = json_response(conn, 503)
+      assert body["error"]["code"] == "runtime_capacity"
+      assert [_seconds] = Plug.Conn.get_resp_header(conn, "retry-after")
+
+      DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, recorder)
+    end
+
+    test "E2E unavailable: a spawn failure is an OPAQUE 503 runtime_unavailable",
+         %{admin: a1, sid: sid} do
+      prev = Application.get_env(:barkpark, :claude_chat)
+
+      Application.put_env(:barkpark, :claude_chat,
+        enabled: true,
+        command: {"/nonexistent-bp-e2e", []}
+      )
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :claude_chat, prev),
+          else: Application.delete_env(:barkpark, :claude_chat)
+      end)
+
+      conn =
+        json_conn(a1)
+        |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "hello"}))
+
+      body = json_response(conn, 503)
+      assert body["error"]["code"] == "runtime_unavailable"
+      # Opacity: the internal reason term never reaches the wire.
+      refute inspect(body) =~ "nonexistent-bp-e2e"
+      refute inspect(body) =~ "binary_not_found"
+    end
+
+    test "E2E nil-session guard: a Recorder with NO live runtime session is 503, never 500",
+         %{admin: a1, sid: sid} do
+      # Claim sid's Recorder name with the stub; ensure/1 adopts it via
+      # {:already_started, pid} and session_pid/1 answers {:ok, nil} — the
+      # runtime-gone shape that used to FunctionClauseError → 500 in the
+      # is_pid-guarded adapter send.
+      {:ok, stub} = NilSessionRecorderStub.start_link(sid)
+
+      conn =
+        json_conn(a1)
+        |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "hello"}))
+
+      body = json_response(conn, 503)
+      assert body["error"]["code"] == "runtime_unavailable"
+
+      GenServer.stop(stub)
+    end
+
+    test "PATCH steer nil-session guard: a runtime-gone Recorder is fail-soft persist-only, never 500",
+         %{admin: a1, sid: sid} do
+      # Same runtime-gone shape as above, but on the PATCH steer path: the
+      # three steer blocks (mode/model_choice/effort_choice) must treat
+      # {:ok, nil} from session_pid/1 like an absent Recorder — persist the
+      # choice, skip the steer. Unguarded, nil flowed into the is_pid-guarded
+      # adapter (ClaudeChat.set_model/set_permission_mode) → FunctionClauseError
+      # → 500 while the persisted value had ALREADY landed.
+      {:ok, stub} = NilSessionRecorderStub.start_link(sid)
+
+      body =
+        json_conn(a1)
+        |> patch(
+          "/v1/chat/sessions/#{sid}",
+          Jason.encode!(%{mode: "acceptEdits", model_choice: "opus", effort_choice: "low"})
+        )
+        |> json_response(200)
+
+      assert body["mode"] == "acceptEdits"
+      assert body["model_choice"] == "opus"
+      assert body["effort_choice"] == "low"
+
+      GenServer.stop(stub)
+    end
+
+    test "create-failure code is distinct: chat_unavailable is fully retired from the wire" do
+      # The two legacy chat_unavailable emitters are gone (grep-proven in the
+      # slice evidence): the create branch now answers chat_create_failed and
+      # the send branch answers the D26 split codes. Pin the send seam never
+      # re-grows the legacy code for any allowlisted reason.
+      for reason <- [
+            {:managed_runtime_capacity, 3},
+            :port_closed,
+            {:provider_not_ready, "codex"},
+            :some_unknown_reason
+          ] do
+        {_status, error, _} = split(reason)
+        refute error["code"] == "chat_unavailable", inspect(reason)
+      end
+    end
   end
 
   # ── interrupt (D11) ─────────────────────────────────────────────────────────
@@ -483,7 +1432,26 @@ defmodule BarkparkWeb.ChatControllerTest do
   # ── approval (D22 — allow/deny only, never caller updatedInput) ─────────────
 
   describe "POST /sessions/:id/approval (D22)" do
-    test "a valid allow/deny answers => 204", %{admin: a1, sid: sid} do
+    defp pending_approval(sid, request_id) do
+      {:ok, _} =
+        StudioChat.append_message(StudioChat.get_session(sid), %{
+          role: "approval",
+          source_markdown: "Allow Write /tmp/example?",
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => "Write",
+            "input" => %{"file_path" => "/tmp/example"},
+            "approval_status" => "pending"
+          }
+        })
+    end
+
+    test "a delivered allow/deny persists terminal metadata visible on refetch", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_approval(sid, "req-1")
+      pending_approval(sid, "req-2")
       {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
 
       assert json_conn(a1)
@@ -499,6 +1467,56 @@ defmodule BarkparkWeb.ChatControllerTest do
                Jason.encode!(%{request_id: "req-2", decision: "deny"})
              )
              |> response(204)
+
+      refetched = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+
+      statuses =
+        Map.new(refetched["messages"], fn message ->
+          {message["metadata"]["request_id"], message["metadata"]["approval_status"]}
+        end)
+
+      assert statuses == %{"req-1" => "allowed", "req-2" => "denied"}
+      assert refetched["pending_approvals"] == 0
+    end
+
+    test "without a live runtime the request is a 204 no-op and stays pending", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_approval(sid, "req-pending")
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/approval",
+               Jason.encode!(%{request_id: "req-pending", decision: "allow"})
+             )
+             |> response(204)
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.metadata["approval_status"] == "pending"
+      assert StudioChat.get_session(sid).pending_approvals == 1
+    end
+
+    test "a missing or terminal request is a 204 no-op after runtime delivery", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_approval(sid, "req-terminal")
+      assert {:ok, _} = StudioChat.update_approval_status(sid, "req-terminal", "allowed")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      for {request_id, decision} <- [{"req-terminal", "deny"}, {"missing", "allow"}] do
+        assert json_conn(a1)
+               |> post(
+                 "/v1/chat/sessions/#{sid}/approval",
+                 Jason.encode!(%{request_id: request_id, decision: decision})
+               )
+               |> response(204)
+      end
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.metadata["approval_status"] == "allowed"
+      assert StudioChat.get_session(sid).pending_approvals == 0
     end
 
     test "rejects a bad decision, a missing request_id, and a caller-supplied updatedInput",
@@ -524,6 +1542,92 @@ defmodule BarkparkWeb.ChatControllerTest do
                Jason.encode!(%{request_id: "r", decision: "allow"})
              )
              |> json_response(404)
+    end
+
+    # A pending needs-you row of ANY role (approval | question | plan). The
+    # controller flip (StudioChat.update_approval_status) is role-agnostic across
+    # @needs_you_roles, so a POST /approval must resolve a question/plan card exactly
+    # like a tool approval (charter D31).
+    defp pending_needs_you(sid, request_id, role) do
+      {:ok, _} =
+        StudioChat.append_message(StudioChat.get_session(sid), %{
+          role: role,
+          source_markdown: "Needs you: #{role} #{request_id}",
+          metadata: %{
+            "request_id" => request_id,
+            "approval_status" => "pending"
+          }
+        })
+    end
+
+    test "a QUESTION-role card flips pending->allowed on a delivered allow (D31)", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_needs_you(sid, "q-1", "question")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/approval",
+               Jason.encode!(%{request_id: "q-1", decision: "allow"})
+             )
+             |> response(204)
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.role == "question"
+      assert message.metadata["approval_status"] == "allowed"
+      assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+
+    test "a PLAN-role card flips pending->denied on a delivered deny (D31)", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_needs_you(sid, "p-1", "plan")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/approval",
+               Jason.encode!(%{request_id: "p-1", decision: "deny"})
+             )
+             |> response(204)
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.role == "plan"
+      assert message.metadata["approval_status"] == "denied"
+      assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+
+    test "a non-:ok answer_approval (codex double-answer race) still 204s and flips — the seal is non-vacuous",
+         %{admin: a1} do
+      # DB provider is codex → FakeCodexAdapter.answer_approval/3 returns
+      # {:error, :unknown_approval}. Before the soft-match this MatchError'd → 500;
+      # the runtime ref is a live claude `cat` Recorder so the controller actually
+      # reaches answer_approval (a no-live-runtime path would 204 vacuously).
+      {:ok, session} =
+        StudioChat.create_session(%{
+          id: Ecto.UUID.generate(),
+          cwd: ClaudeChat.cwd(),
+          mode: "plan",
+          provider: "codex"
+        })
+
+      sid = session.id
+      pending_approval(sid, "req-codex")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/approval",
+               Jason.encode!(%{request_id: "req-codex", decision: "allow"})
+             )
+             |> response(204)
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.metadata["approval_status"] == "allowed"
+      assert StudioChat.get_session(sid).pending_approvals == 0
     end
   end
 
@@ -583,6 +1687,31 @@ defmodule BarkparkWeb.ChatControllerTest do
         |> Jason.decode!()
 
       assert data == %{"type" => "assistant", "text" => "hi"}
+    end
+
+    test "workflow frame is the compact summary JSON with NO id (live delta, D23)" do
+      # The COMPACT workflow_summary map, byte-identical to the list wire; a live
+      # delta like chat/permission/exit — unreplayable, so NO `id:` seq.
+      summary = %{label: "run", agents_done: 1, agents_total: 3, running: 2, terminal?: false}
+      frame = ChatController.sse_workflow_frame(summary)
+      assert String.starts_with?(frame, "event: workflow\ndata: ")
+      assert String.ends_with?(frame, "\n\n")
+      refute frame =~ "id:"
+
+      data =
+        frame
+        |> String.split("data: ", parts: 2)
+        |> List.last()
+        |> String.trim()
+        |> Jason.decode!()
+
+      assert data == %{
+               "label" => "run",
+               "agents_done" => 1,
+               "agents_total" => 3,
+               "running" => 2,
+               "terminal?" => false
+             }
     end
 
     test "permission + keepalive frames" do
@@ -658,6 +1787,66 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert json_conn(a1)
              |> get("/v1/chat/sessions/#{Ecto.UUID.generate()}/events")
              |> json_response(404)
+    end
+  end
+
+  # ── J. GET /v1/chat/rollup — the workspace fleet rollup (herd D64h) ─────────
+
+  describe "GET /v1/chat/rollup" do
+    test "auth runs first: missing bearer 401, non-admin reader 403", %{reader: reader} do
+      assert build_conn() |> get("/v1/chat/rollup") |> json_response(401)
+      assert json_conn(reader) |> get("/v1/chat/rollup") |> json_response(403)
+    end
+
+    test "admin sees the four-key counts + precedence shape over the whole herd",
+         %{admin: admin} do
+      body = json_conn(admin) |> get("/v1/chat/rollup") |> json_response(200)
+
+      assert %{"counts" => counts, "precedence" => precedence} = body
+      assert Map.keys(counts) |> Enum.sort() == ["blocked", "idle", "unknown", "working"]
+      assert precedence in ["blocked", "working", "idle", "unknown"]
+      # The setup session (default agent_state "idle") is in the :global herd.
+      assert counts["idle"] >= 1
+    end
+
+    test "a workspace connector's rollup is DB-scoped — another tenant's blocked session never leaks",
+         %{admin: admin} do
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+      conn_a_raw = "chat-rollup-a-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(conn_a_raw, "rollup-a", @dataset, ["read", "chat"], ws_a.id)
+
+      # ws-A owns one working session; ws-B owns one BLOCKED session. If the
+      # scope filter leaked, ws-A's precedence would flip to "blocked".
+      {:ok, a_sess} =
+        StudioChat.create_session(%{id: Ecto.UUID.generate()}, {:workspace, ws_a.id})
+
+      {:ok, b_sess} =
+        StudioChat.create_session(%{id: Ecto.UUID.generate()}, {:workspace, ws_b.id})
+
+      StudioChat.set_agent_state(a_sess.id, "working", :derived)
+
+      # D80h: the blocked flip carries its :ask corroboration — a real pending
+      # ask row for ws-B's session first, then the guarded write.
+      {:ok, _} =
+        StudioChat.append_message(b_sess.id, %{
+          role: "approval",
+          metadata: %{"request_id" => "ru-b-1", "approval_status" => "pending"}
+        })
+
+      {1, _} = StudioChat.set_agent_state(b_sess.id, "blocked", :ask)
+
+      body = json_conn(conn_a_raw) |> get("/v1/chat/rollup") |> json_response(200)
+
+      assert body == %{
+               "counts" => %{"working" => 1, "blocked" => 0, "idle" => 0, "unknown" => 0},
+               "precedence" => "working"
+             }
+
+      # The :global admin still sees both tenants' rows (D21 authority unchanged).
+      global = json_conn(admin) |> get("/v1/chat/rollup") |> json_response(200)
+      assert global["counts"]["blocked"] >= 1
+      assert global["precedence"] == "blocked"
     end
   end
 

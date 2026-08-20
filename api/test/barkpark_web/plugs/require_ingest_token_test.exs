@@ -3,7 +3,7 @@ defmodule BarkparkWeb.Plugs.RequireIngestTokenTest do
   Unit tests for the ingest-tier auth plug. Verifies the two accept paths
   (shared secret + valid admin api_token) and the 401 reject shape.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Plug.Test
   import Plug.Conn

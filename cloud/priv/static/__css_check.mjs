@@ -9,6 +9,8 @@
 //       consumed token must be part of the contract).
 //   E2  a class name emitted by index.html or an app.js template string /
 //       classList call / className assignment that has no rule in app.css.
+//       LITERAL CLASS TOKENS ONLY — attribute-driven state is out of scope by
+//       technique; the boundary and its ruling are declared in full below.
 //   E3  a dynamic class composition site in app.js (e.g. 'dot ' + kind) whose
 //       static head is not explicitly allowlisted below — dynamic names cannot
 //       be statically resolved, so every such site must be a conscious entry.
@@ -40,6 +42,129 @@
 //       the property is DECLARED, so such an alias freezes the LIGHT value in
 //       any subtree that scopes [data-theme="dark"] onto a non-root element
 //       (the styleguide panes). Re-declare the alias in the dark block.
+//   E9  swallowed declaration (parse-completeness, regression #4251): a `--x:`
+//       the FLAT token scan trusts but the browser's `;`-delimited declaration
+//       parse rejects inside a token block. A `*/` embedded in comment TEXT
+//       (`… --ok*/ …`) ends the comment early, so the browser eats the garbage
+//       that follows as one malformed declaration up to the next `;` — silently
+//       dropping the real declaration that `;` belonged to (there,
+//       `--btn-bg: var(--primary);`). The flat scan still "saw" `--btn-bg:`, so
+//       the contract missed it. Fixture: __css_check.fixture.css; targeted run:
+//       `node __css_check.mjs --swallow-check __css_check.fixture.css` (exit 1).
+//   E10 orphan comment terminator (regression #4592/GR74): a `*/` reached while
+//       NOT inside a comment. Its cause is always the same — a `/*` was lost, so
+//       every line above the orphan is parsed as raw CSS, and CSS error recovery
+//       discards tokens until the next `{…}` block, silently SWALLOWING the next
+//       whole rule. Live case: app.css's GR63 modal comment lost the `/*` on its
+//       REVIEW ADDENDUM paragraph, so `.modal-root { position: fixed; … }` never
+//       reached the CSSOM and every modal in the console rendered in document
+//       flow under a fixed backdrop. E9 could not see it (E9 is scoped to `--x:`
+//       inside the three token blocks) and the app.test.mjs source-text
+//       assertions could not either (they regex app.css as TEXT). The mirror
+//       case — EOF reached while still inside a comment — is the same defect
+//       from the other end and is reported too.
+//       COVERAGE BOUNDARY (charter D40 — a check states what it does NOT own):
+//       E10 owns the COMMENT-nesting class only. Unclosed `{` and stray `}` are
+//       a DIFFERENT class and are NOT E10's: measured by mutation on app.css,
+//       appending an unclosed `{` or a bare `}` leaves this whole file at exit
+//       0 while the brace-depth walk in __app.test.mjs ("app.css is
+//       BRACE-BALANCED") goes red; appending an orphan `*/` does the reverse.
+//       The two instruments are therefore a DELIBERATE SPLIT, not a duplicate
+//       — deleting either reopens a shipped defect class. Fixture:
+//       __css_check.orphan.fixture.css; targeted run:
+//       `node __css_check.mjs --orphan-check __css_check.orphan.fixture.css`
+//       (exit 1). Both fixture proofs are executed by __app.test.mjs.
+//   E11 banned source line-number citation (charter D41; bp-honest-gates D5):
+//       any scanned SPA / preview-harness / STYLESHEET file (top-level
+//       *.js|*.mjs|*.css + __preview__/*) citing `app.js:<line>` (also
+//       `app.js ~<line>` or an `app.js:<a>-<b>` range). THE RULING is a BAN,
+//       not a resolver: three separate blocks in one wave cited line numbers
+//       that were wrong on arrival or wrong the moment a sibling slice shifted
+//       the file +39 lines, so every live occurrence was ALREADY stale — there
+//       is nothing correct for a line-resolving verifier to preserve, and that
+//       verifier's own anchor heuristic would rot in turn (bp-honest-gates D5:
+//       "ban the SHAPE, do not enumerate"). Re-anchor to the enclosing FUNCTION
+//       name plus a grep. Cross-language `router.ex:<line>` cites are OUT — the
+//       boundary is stated in full on bannedSourceCitationErrors below (filed
+//       follow-up cch-bl-citation-drift-cross-language).
+//   E12 translucent focus indicator (WCAG SC 1.4.11): a `:focus`/`:focus-visible`
+//       rule whose SOLE indicator band — the outermost box-shadow layer, or the
+//       painted `outline` — resolves to alpha < 1 in any theme state. E5 asserts
+//       TOKEN pairs and cannot see which token a RULE consumes, so before this
+//       check 19 focus rules painted a 1.19–1.52:1 band while E5 was green. A
+//       rule carrying an opaque border-color is compliant (that border IS the
+//       indicator); full predicate on focusIndicatorErrors below.
+//   E13 an unpainted deployment status: a status in DEPLOY_STATUSES with no
+//       `.dep-<status>` rule in app.css. The `dep-pill dep-` E3 allowlist waives
+//       the whole dynamic head, so the emitted VALUE SPACE was unchecked and
+//       `cancelled` shipped ruleless — falling through to the .dep-pill base,
+//       which is byte-identical to .dep-queued, so an aborted deploy painted as
+//       one still waiting. Full boundary on DEPLOY_STATUSES below.
+//   E14 wrap-recipe DIVERGENCE (charter D220). THE INVARIANT, verbatim:
+//
+//         A rule whose selector is WRAPPER-SCOPED onto the pill
+//         (`<wrapper> .status-pill` — one or more descendant/child steps then
+//         `.status-pill`, and nothing after it) AND which declares AT LEAST ONE
+//         of the five CORE properties must declare ALL FIVE, at the canonical
+//         value: white-space: normal | height: auto | min-height: 24px |
+//         padding-top: 2px | padding-bottom: 2px.
+//
+//       WHY AN INSTRUMENT AND NOT AN EXTRACTION. This epic hand-built the same
+//       five-declaration wrap three times (`.detail-rail`, `.fleet-status`,
+//       `.instance-card-head`). D210 ruled the third copy deliberate and made
+//       THE FOURTH HOST the extraction trigger. Wave 19 reached the fourth host
+//       and REFUSED the trigger, because driving it showed the axis was wrong:
+//       the five-declaration recipe applied to `.op-gate` does NOT fix it (every
+//       clipped cell stays clipped — it hides the symptom and leaves the label
+//       unreadable), while ONE declaration, `.op-gate .status-pill { flex: 0 0
+//       auto }`, is 64/64 at every width. Host COUNT is not the sin. DIVERGENCE
+//       between the copies is, and nothing measured it. E14 measures it, so a
+//       fourth copy that drifts from the shared core stops being possible.
+//       THREE DESIGN CHOICES ARE LOAD-BEARING — each proven by a driven leg in
+//       __app.test.mjs; do not "simplify" any of them:
+//         1. TRIGGER ON DECLARATION, NOT ON SELECTOR. "every wrapper-scoped
+//            `.status-pill` rule must carry the core" would false-red a future
+//            `.foo .status-pill { margin-left: 4px }`. Triggering on
+//            declares-any-core-property makes the rule SELF-SCOPING: start the
+//            recipe and you must finish it; don't start it and E14 is silent.
+//         2. DO NOT ASSERT THE JACKET. `align-items: flex-start` (2 of 3
+//            copies), the `-dot`/`-detail`/`-label` sibling rules and the
+//            wrapper's own `flex-wrap` are per-HOST. `.detail-rail` carries no
+//            `align-items` and no `-dot`/`-detail` rules and must GREEN; a
+//            jacketless synthetic fourth host must GREEN.
+//         3. PIN THE CORE AS A LITERAL (WRAP_CORE below), never derive it as
+//            the intersection of what the copies happen to declare — that is
+//            self-fulfilling: a fourth copy dropping `min-height` would shrink
+//            the intersection and pass.
+//       THE BASE `.status-pill` IS EXCLUDED BY SELECTOR SHAPE, NOT BY AN
+//       ALLOWLIST: it declares `height: 24px` and `white-space: nowrap` — core
+//       PROPERTIES at non-core VALUES, by design. Requiring at least one
+//       descendant/child combinator excludes it structurally, so the exclusion
+//       cannot go stale when the base rule is renamed or moved.
+//       TWO ANTI-VACUITY GUARDS, because a scan that stops seeing the copies
+//       would otherwise report clean: zero wrapper-scoped copies is itself an
+//       error, and the three known survivor selectors are PINNED as
+//       required-present (same-file pins under pin-your-own/derive-foreign),
+//       which closes the PARTIAL blindness the zero-guard misses.
+//       COVERAGE BOUNDARY (charter D40 — a check states what it does NOT own):
+//       E14 is STATIC and owns the DECLARATION-PARITY class ONLY.
+//         • It cannot see whether a copy actually WRAPS when rendered. The host
+//           needs `flex-wrap: wrap` on the WRAPPER; a copy with all five core
+//           declarations inside a non-wrapping host is GREEN here and broken on
+//           screen. The complement is overflow-guard.mjs's rendered legs — a
+//           DELIBERATE SPLIT, not a duplicate.
+//         • It cannot see a host that SHOULD have copied the recipe and did
+//           not. Nothing static knows which wrappers hold a long-labelled pill.
+//         • It asserts nothing about the base `.status-pill`, and nothing about
+//           the jacket (see choice 2).
+//         • It reads LONGHAND declarations only: a `padding: 2px 11px`
+//           shorthand neither triggers E14 nor satisfies `padding-top`. The
+//           three live copies are longhand and the canonical recipe is stated
+//           in longhand; a shorthand copy is a shape this check does not see.
+//       Fixture: __css_check.wrapparity.fixture.css; targeted run:
+//       `node __css_check.mjs --wrap-parity-check
+//       __css_check.wrapparity.fixture.css` (exit 1). Executed, both
+//       directions, by __app.test.mjs.
 //
 // REPORTS (printed, never exit-affecting):
 //   R2  tokens defined in app.css that nothing consumes yet.
@@ -47,6 +172,74 @@
 //       (app.js is owned by another slice — leave, don't touch).
 //   R4  raw px font-sizes in app.css rules outside the token blocks — the
 //       type-scale migration backlog for the decision-24 sweep.
+//
+// ── E2 COVERAGE BOUNDARY (charter D40/D49) ──────────────────────────────────
+// Declared because a gate that cannot see a whole class of defect must SAY so:
+// an UNDECLARED boundary reads as coverage, and a reader who assumes "the class
+// checker checks what the SPA puts on elements" is wrong in a way this file
+// never told them.
+//
+//   WHAT E2 SEES. Exactly two extractors, both over double-quoted LITERALS:
+//     /\.className\s*=\s*"([^"]*)"(\s*\+)?/g
+//     /classList\.(?:add|remove|toggle)\(\s*"([^"]+)"/g
+//   A class token has to be written out in the source to be checked at all.
+//
+//   WHAT E2 CANNOT SEE. `el.setAttribute("data-x", someVar)` — the attribute
+//   NAME is a literal but the VALUE is a variable, and no regex over the call
+//   site can enumerate what that variable holds. `el.dataset.x = v` is the same
+//   defect in property form. So `[data-x="…"]` rules in app.css are, to E2,
+//   neither emitted nor dead: they are invisible.
+//
+//   THE MEASURED POPULATION (five attribute-state writes, NOT the "three"
+//   earlier recon claimed) — anchored to the enclosing FUNCTION, never a line
+//   number (grep to re-derive: `grep -n 'setAttribute("data-' app.js`):
+//     applyTheme()           documentElement.setAttribute("data-theme", t)
+//     applyBpTheme()         documentElement.setAttribute("data-bp-theme", t)
+//     coherenceStampTheme()  root.setAttribute("data-theme", theme)
+//     coherenceStampTheme()  root.dataset.theme = theme   — same fn, DOM fallback
+//     renderLivenessChip()   chip.setAttribute("data-state", state)
+//   FOUR of the five are data-theme / data-bp-theme and are NOT an E2 gap —
+//   E5 owns them. The contrast engine parses the `[data-theme="dark"]` and
+//   `html[data-bp-theme="…"]` blocks straight out of app.css (parseTokenBlocks
+//   and the identity-ramp scan below) and fans every theme x identity pair
+//   through WCAG. Do not fold them into E2; that would double-own them.
+//   ONE is genuinely E2-blind: `data-state` on the liveness chip, whose value
+//   comes from liveDotState(). __preview__/cssom-parity.mjs does not cover it
+//   either (`grep -c data-state __preview__/cssom-parity.mjs` → 0) and could
+//   not in principle — it diffs authored CSS against the browser CSSOM and
+//   never reads app.js.
+//
+//   THE RULING — E2 IS NOT EXTENDED TO ATTRIBUTE VALUES. Reaching a variable
+//   attribute value is not a generalization of E2's technique: literal
+//   extraction has no path there, so an attribute check added HERE would be a
+//   parallel bolt-on with its own fragile function-body regex, carrying E2's
+//   name without E2's method. The cheaper and stronger shape asserts over the
+//   EMITTING FUNCTION instead, and it is already on main (#5377):
+//     git show origin/main:cloud/priv/static/__app.test.mjs \
+//       | grep -n 'carries a paint rule for EVERY chip state'
+//     4713:test("liveness chip: app.css carries a paint rule for EVERY chip state", …
+//   That test loops the REAL liveDotState return set against app.css, and its
+//   sibling ("liveDotState: the return set is a CLOSED enum of exactly four
+//   states") pins the set itself, so a fifth state cannot slip past unpainted.
+//   Hence no check is added here and no second test is added there — that pair
+//   would be duplicate coverage of the identical liveDotState/app.css seam.
+//
+//   KNOWN GRANULARITY LIMIT — CLOSED (D41/D66). The original HEAD fence proved
+//   SELECTOR-PREFIX PRESENCE in app.css TEXT, not per-property survival: deleting
+//   ONLY `.live-chip[data-state="stale"] .live-dot { background: … }` (app.css:3470)
+//   while the same-prefix `.live-chip-label` rule on :3471 survived red NEITHER
+//   check, so a state could lose its DOT colour — its one severity signal —
+//   silently. That gap is now closed by a PER-DECLARATION probe in __app.test.mjs:
+//   the test `every state's .live-dot rule DECLARES a background (per-declaration
+//   fence)` loops hooks.liveDotStates, isolates each state's OWN `.live-dot {…}`
+//   block (first-occurrence indexOf over the ` .live-dot {` marker, which skips the
+//   `.live-dot.is-ping::after` decoy and the @media duplicate), and asserts a
+//   `background:` declaration survives INSIDE it — so a background-ONLY deletion
+//   reds as well as a whole-rule deletion. Mutation-proved: deleting app.css:3470
+//   reds it with `no .live-dot paint rule for the "stale" state … falls back to
+//   var(--dim)` while the prefix fence stayed green. __css_check itself is
+//   UNCHANGED and still never reads data-state — that E2 boundary declared above
+//   stands; the closure lives in the app.js/app.css-paired test, not here.
 //
 // Zero dependencies. Run: node __css_check.mjs
 
@@ -66,9 +259,9 @@ const ALLOW_PREFIXES = [
   "toast toast-",      // showToast(): kind ∈ success | error | info
   "choice-ico ",       // provider picker tile: + p.cls (brand-hetzner | brand-do | brand-aws | brand-vultr)
   "choice-ico sm ",    // provider row mini-tile: + m.cls (same brand-* set)
-  "fleet-row token-row", // token row: + (revoked ? " is-revoked" : "")
+  "token-row",         // token row (GR33 lean line item, no longer a .fleet-row): + (revoked ? " is-revoked" : "")
   "dot ",              // badge(): + esc(kind) (up | down | unknown | online | offline | warn)
-  "dep-pill dep-",     // deployment status pill: + esc(st) (live | failed | building | pushing | queued)
+  "dep-pill dep-",     // deployment status pill: + esc(st) — the value space is NOT this comment's; it is DEPLOY_STATUSES below, and E13 checks it
   "deploy-fail",       // deploy-fail row: + (failureTone === "blocked" ? " deploy-fail--blocked" : "")
   "deploy-console",    // + (open ? "" : " is-collapsed")
   "tier",              // + " tier-current" / " tier-free" conditionals
@@ -84,7 +277,83 @@ const ALLOW_PREFIXES = [
   "tlv-badge tlv-badge--",      // tlvRowHtml(): + variant (event | verify | verify-fail | audit)
   "vf-chip vf-chip--",          // verifyChipHtml(): + role (pass | fail | unknown)
   "usage-card usage-card--",    // usageMeterHtml(): + rowTone (warn | over)
+  // gr-w1 (cloud GUI remake): dynamic sites whose composed classes all have
+  // rules in app.css today — verified via `.<family>` grep before allowing.
+  "inst-life-pill ",            // instanceLifecyclePill(): + model.pill.cls (.inst-life-pill rule)
+  "inst-life-note",             // + (retry ? " inst-life-note--warn" : "") (.inst-life-note[--warn])
+  "notice",                     // fleetRolloutBannerHtml(): + NOTICE_TONE_CLASS[tone] (.notice / .notice-ok|warn|error)
+  "deploy-rail-status deploy-rail-status--", // + esc(st.tone) (.deploy-rail-status-- rules)
+  "dep-current",                // + (rolledBack ? " dep-current--restored" : "") (.dep-current[--restored])
+  "prov-overall",               // + state (.prov-overall rules)
+  "usage-bar usage-bar--",      // + d.bar.tone (.usage-bar-- rules)
+  "metric-card metric--",       // + esc(m.role) (.metric-card / .metric-- rules)
+  "cmdk-row",                   // + (active ? " is-active" : "") (.cmdk-row / .is-active)
+  // gr-w3 (v4 shell): the sidebar instance-morph section links (paintInstanceSections)
+  "nav-link nav-sub",           // + (on ? " is-active" : "") (.sidebar .nav-link / .nav-sub / .is-active)
+  // gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview's composed classes, each with
+  // a rule in app.css (verified via `.<family>` grep).
+  "instance-card instance-card--", // instanceCardHtml(): + statusOf role (.instance-card / .instance-card-- rules)
+  "instance-card-spark spark--",   // + statusOf role (.instance-card-spark / .spark-- rules)
+  "instance-card-stat-v",          // + (warn ? " is-warn" : "") (.instance-card-stat-v / .is-warn)
+  "runway-step",                   // runwayCardHtml(): + (done ? " is-done" : "") (.runway-step / .is-done)
+  // gr-p3 SITE DETAIL (E-02): the v4 domain-checklist rung pill.
+  "dom-rung dom-rung--",           // domainRungChip(): + role (ok | failed | active | pending | proxied) (.dom-rung / .dom-rung-- rules)
+  // gr-p5r5-css-families: the three var-then-concat sites rewritten to inline
+  // concat, so the walker finally reads a literal head instead of "". These were
+  // never missing CSS — every composed class below has had a rule all along; the
+  // `var cls = …` form simply hid the site from the static walker.
+  "set-matrix-cell",               // notifMatrixCellHtml(): + (isDefault ? " set-matrix-cell--default" : "")
+  "fresh-badge fresh-badge--",     // freshnessBadge(): + m.dot (up | down | deploy | rebuild) + optional " is-rebuilding"
+  "usage-bar-quota",               // usageMeterHtml(): + (tone === "ok" ? " dim" : "") (.usage-bar-quota / .dim)
+  // cch-w26-s5: promoted OUT of KNOWN_GAPS. The demotion's stated reason —
+  // "the suffix set comes from fixture text" — is REFUTED by the emitter.
+  // coherenceFixtureToHtml() (grep -n 'function coherenceFixtureToHtml' app.js)
+  // replaces on `/\b(info|warn|ok|danger)\b/g`: a CLOSED four-way alternation
+  // written in CODE. The fixture only chooses among the four the regex already
+  // names; it cannot introduce a fifth. `bp-lc-hex` is a SEPARATE literal head
+  // in the same function, not a capture. All five composable classes have rules
+  // (grep -n 'bp-lc' app.css). So this head is MORE bounded than most entries
+  // above, whose closed sets live only in a trailing comment. The closed-ness
+  // itself is pinned by a leg that can lose in __app.test.mjs (role-adjacent
+  // words outside the set emit no bp-lc- span) — widening the alternation reds
+  // that test, which an allowlist entry alone could never do.
+  "bp-lc-",                        // coherenceFixtureToHtml(): + captured role word (info | warn | ok | danger) — closed alternation in code
 ];
+
+// ── E13: the .dep-* VALUE SPACE, derived instead of described ───────────────
+// The `dep-pill dep-` entry above is an E3 allowlist: it waives the whole
+// dynamic head, so before this list existed NOTHING checked which suffixes the
+// head can actually take. The comment on that entry claimed five statuses and
+// the server has six — `cancelled` shipped with no rule at all and fell through
+// to the .dep-pill base, which is byte-identical to .dep-queued, so a terminal
+// abort painted as "still waiting". A comment cannot fail; this list can.
+//
+// THE SOURCE OF TRUTH is Ecto: BarkparkCloud.Registry.Deployment's @statuses
+// (grep: `grep -n '@statuses' cloud/lib/barkpark_cloud/registry/deployment.ex`
+// — verified at review; the module and path both resolve, which is the point of
+// citing them at all).
+// It is COMMITTED here rather than parsed out of the .ex file on purpose — this
+// checker is a zero-dependency static reader of three static assets and must not
+// grow a cross-language parser (E11's cross-language boundary, same reasoning).
+// The cost of the copy is that a SEVENTH server status lands here unnoticed; the
+// mitigation is that adding a status to the Ecto enum without adding it here is
+// the same review that must add the CSS rule anyway, and app.js emits
+// `dep-` + esc(st) for whatever the server sends, so the omission is visible the
+// first time that status renders.
+//
+// WHAT E13 OWNS: every status in this list has SOME rule in app.css whose
+// selector names `.dep-<status>` (grouped selectors count — `.dep-building,
+// .dep-pushing {…}` satisfies both). WHAT IT DOES NOT OWN: whether that rule
+// says anything DISTINCT. A rule that only re-states the base would pass here;
+// what stops that is CONTRAST_PAIRS plus the driven computed-style proof in the
+// slice's evidence, not this check.
+// cch-w64-s6: "deferred" added — the enum this list claims to mirror
+// (registry/deployment.ex) carries SEVEN values, and the missing word is why the
+// check called `.dep-deferred`'s total ABSENCE of a rule green while the raw
+// status rode into the DOM. The word alone REDS origin/main (E13, naming
+// `.dep-deferred`), so it co-merges with the rule in the same commit — a
+// deliberate guard+fix co-merge, not a guard weakened to fit.
+const DEPLOY_STATUSES = ["queued", "building", "pushing", "live", "failed", "cancelled", "deferred"];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
 // (selector targets, event delegation markers), not visual classes. Each is
@@ -105,15 +374,44 @@ const ALLOW_HOOK_CLASSES = [
   "launch-catalog-retry",    // querySelector(".launch-catalog-retry") — retry button, styled by .btn; S7 click hook
 ];
 
-// R3 — violations we know about that live in app.js (another slice owns app.js
-// this wave). Keep entries until the owning slice lands the fix.
-const REPORT_ONLY = [];
+// R3 / KNOWN_GAPS — genuine E2/E3 violations that live in app.js and index.html,
+// NOT in this epic's owned files. This checker is CI-wired by gr-w1-styleguide-port
+// (console-harness.yml) and MUST exit 0; app.js/index.html are owned by other
+// slices ("leave, don't touch"), and their real fix — author the CSS or remove the
+// emission — is tracked by task gr-backlog-css-check-missing-classes. Each entry
+// DEMOTES its exact hard-fail to an R3 report line so the gate stays green while
+// the gap stays visible on every run. Keyed by {file, cls} (E2) or {file, head}
+// (E3) — line-INDEPENDENT so app.js churn never re-reds the gate; a genuinely NEW
+// missing class (different name) or dynamic head still hard-fails. An entry that
+// matches nothing prints `stale` (prune it — the owning slice fixed it). NOTHING
+// in styleguide.html or the app.css token blocks may be listed here: this epic
+// owns those, so their drift MUST hard-fail.
+const KNOWN_GAPS = [
+  // gr-p5r5-css-families retired EIGHT of the nine entries that stood here: the
+  // six family E2s (all six now have authored rules in app.css), the phantom
+  // "notice-" E2 (fleetRolloutBannerHtml now emits whole class names), and the
+  // E3 head:"" entry (all THREE var-then-concat sites — notifMatrixCellHtml,
+  // freshnessBadge and usageMeterHtml's quota trailer — are inline-concat now).
+  // cch-w26-s5 retired the LAST entry — the E3 `bp-lc-` head. It was demoted on
+  // the stated reason that "the composed suffix is a REGEX CAPTURE from an
+  // arbitrary committed fixture file, so the closed role set is an assumption
+  // about that file's contents rather than a property of this code." That reason
+  // is false against the emitter: coherenceFixtureToHtml() in app.js replaces on
+  // a CLOSED four-way alternation `/\b(info|warn|ok|danger)\b/g` written in code
+  // (grep -n 'function coherenceFixtureToHtml' app.js), so the fixture selects
+  // among four and cannot introduce a fifth. It is now an ALLOW_PREFIXES member,
+  // with the closed-ness pinned by a test that reds if the alternation widens.
+  //
+  // THE LIST IS NOW EMPTY, AND THAT IS THE POINT: the checker no longer exits 0
+  // by having been told to ignore a row it attributes to an open backlog task.
+  // Whatever lands here next must carry an owner and a way out, not a waiver.
+];
 
 // E6 — the conscious raw-color exceptions (decision 28). EXACT trimmed line
 // text as it appears in app.css (comments stripped); each entry carries its
 // reason and is printed on every run. Editing the line invalidates the entry.
 const ALLOW_RAW_COLORS = [
-  { line: ".modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }", why: "scrim — theme-invariant by design" },
+  { line: ".modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }", why: "scrim — theme-invariant by design (GR63: fixed, so it stays over the viewport while a tall modal scrolls)" },
   { line: "color: #fff; font-weight: 700; font-size: 13px;", why: "white initials on the fixed provider brand tiles" },
   // .brand-hetzner + .brand-azure now tint from --provider-* tokens (S7) — no raw literal to allow.
   { line: ".brand-do { background: #0080ff; }", why: "DigitalOcean brand colour" },
@@ -141,16 +439,21 @@ const CONTRAST_PAIRS = [
   { fg: "--muted-text", bg: "--surface", min: 4.5, why: "secondary copy on cards" },
   { fg: "--dim", bg: "--bg", min: 4.5, why: "tertiary copy (.dim)" },
   { fg: "--dim", bg: "--muted-surface", min: 4.5, why: "tertiary copy on muted" },
+  { fg: "--dim", bg: "--surface", min: 4.5, why: ".dep-cancelled pill text — the chip is hollow (background: transparent), so its label composites straight onto the .deploys card" },
   { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "avatar label / step dots" },
   { fg: "--btn-fg", bg: "--btn-bg", min: 4.5, why: ".btn-primary label" },
   { fg: "--btn-danger-fg", bg: "--btn-danger-bg", min: 4.5, why: ".btn-danger label" },
   { fg: "--primary", bg: "--bg", min: 4.5, why: "links" },
   { fg: "--primary", bg: "--surface", min: 4.5, why: "links on cards" },
   { fg: "--ok", bg: "--surface", min: 4.5, why: "success text (.plan-rec, .new-eyebrow.ok)" },
-  { fg: "--ok", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".runway-sub trial chip" },
+  { fg: "--ok-strong", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".runway-sub trial chip (green=accent: strong text voice on the soft tint, GR6)" },
   { fg: "--danger", bg: "--surface", min: 4.5, why: "error text (.deploy-fail, .wh-del-err)" },
   { fg: "--danger", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".dep-failed pill text" },
   { fg: "--warn-strong", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".dep-building pill text" },
+  // cch-w64-s6: `.dep-deferred` keeps the warn hue but gives up the filled chip
+  // (it no longer holds a build slot), so its ground is the CARD itself — the
+  // one pair the tinted variant would not have owed.
+  { fg: "--warn-strong", bg: "--surface", min: 4.5, why: ".dep-deferred pill text on an open chip" },
   { fg: "--text", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".notice-ok copy" },
   { fg: "--text", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".notice-warn copy" },
   { fg: "--text", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".notice-error copy" },
@@ -160,8 +463,19 @@ const CONTRAST_PAIRS = [
   { fg: "--warn", bg: "--muted-surface", min: 3, why: "warn status dot on badge" },
   { fg: "--danger", bg: "--muted-surface", min: 3, why: "danger status dot" },
   { fg: "--info", bg: "--surface", min: 3, why: "active-step ring / probe dot" },
-  { fg: "--accent", bg: "--surface", min: 3, why: "branch-preview accent border" },
-  { fg: "--ring", bg: "--bg", min: 3, why: "focus-ring visibility" },
+  { fg: "--cc-amber", bg: "--surface", min: 3, why: "branch-preview amber edge (--accent retired, reads --cc-amber directly)" },
+  // The focus ring (SC 1.4.11, min 3:1) against EVERY backdrop a focusable
+  // control actually sits on — --bg alone was the wrong backdrop for seven
+  // consumers: the three sidebar controls (.ws-switch/.nav-find/.nav-account)
+  // spacer against --cc-bg-side, and the card-embedded ones (.copy-btn,
+  // .site-inst-link, .site-open, .actfilter-chip) paint straight onto the
+  // card / hover-row / modal with no opaque spacer at all. These fan over all
+  // theme states; E12 below is what ties them to the rules that consume them.
+  { fg: "--ring", bg: "--bg", min: 3, why: "focus ring on the page backdrop (.btn, .scope-switch spacer)" },
+  { fg: "--ring", bg: "--surface", min: 3, why: "focus ring on cards (.copy-btn, .site-inst-link, .site-open)" },
+  { fg: "--ring", bg: "--muted-surface", min: 3, why: "focus ring on muted/hover rows (.actfilter-chip)" },
+  { fg: "--ring", bg: "--cc-bg-side", min: 3, why: "focus ring in the sidebar (.ws-switch, .nav-find, .nav-account spacer)" },
+  { fg: "--ring", bg: "--cc-modal", min: 3, why: "focus ring inside modals (.modal-x, .btn in modal footers)" },
   { fg: "--primary-fg", bg: "--ok", min: 4.5, why: ".badge-current text / toast-success glyph / done step-dot" },
   { fg: "--primary-fg", bg: "--danger", min: 4.5, why: "toast-error glyph / failed step-dot" },
   { fg: "--primary-fg", bg: "--muted-text", min: 3, why: "toast-info icon glyph" },
@@ -172,6 +486,23 @@ const CONTRAST_PAIRS = [
   { fg: "--warn", bg: "--surface", min: 3, why: ".bp-inst--degraded glyph tone" },
   { fg: "--provider-hetzner", bg: "--surface", min: 3, why: "Hetzner identity mark / chip border" },
   { fg: "--provider-azure", bg: "--surface", min: 3, why: "Azure identity mark / chip border" },
+  // ── The living styleguide's cloudChrome text/UI pairs (gr-w1-styleguide-port).
+  // These mirror the agency spec's own 17-row contrast table (section 03), now
+  // machine-computed here instead of at render time. The cloudChrome family is
+  // identity-INVARIANT (GR2), so these resolve identically across all theme
+  // states, but they pin the raw designer hexes the swatch grid renders. fg4 is
+  // the meta-only token duty-capped at 3:1 (GR6: --dim maps to fg3, never fg4 as
+  // text). The accent pairs (--primary) fan per identity — the styleguide's
+  // section 03 spells them out; the base link/label pairs above already gate them.
+  { fg: "--cc-fg", bg: "--cc-bg", min: 4.5, why: "styleguide 03: primary text (fg on bg)" },
+  { fg: "--cc-fg2", bg: "--cc-card", min: 4.5, why: "styleguide 03: row text on cards (fg2 on card)" },
+  { fg: "--cc-fg3", bg: "--cc-bg", min: 4.5, why: "styleguide 03: secondary copy (fg3 on bg)" },
+  { fg: "--cc-fg4", bg: "--cc-bg", min: 3, why: "styleguide 03: meta only — fg4 on bg, duty-capped ≥3:1 (GR6)" },
+  { fg: "--cc-blue", bg: "--cc-bg", min: 4.5, why: "styleguide 03: links (blue on bg)" },
+  { fg: "--cc-amber", bg: "--cc-bg", min: 4.5, why: "styleguide 03: warning text (amber on bg)" },
+  { fg: "--cc-red", bg: "--cc-bg", min: 4.5, why: "styleguide 03: danger text (red on bg)" },
+  { fg: "--primary", bg: "--cc-bg", min: 3, why: "styleguide 03: accent badge/UI (primary on bg) — fans per identity" },
+  { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "styleguide 03: button label on the accent (primary-fg on primary)" },
 ];
 
 // ── Read the tree ────────────────────────────────────────────────────────────
@@ -186,10 +517,377 @@ const css = stripCssComments(cssRaw);
 
 const lineOf = (src, index) => src.slice(0, index).split("\n").length;
 
+// ── E9: parse-completeness guard (swallowed declarations, regression #4251) ──
+// definedTokens (below) scans the comment-stripped text with a FLAT `--x:`
+// regex, so a declaration the BROWSER dropped can still register as "defined".
+// #4251: a `*/` inside comment TEXT (`… --ok*/ …`) ended the GR7 comment early;
+// the parser then consumed garbage up to the next `;`, swallowing the real
+// `--btn-bg: var(--primary);` — every light .btn-primary rendered invisible, yet
+// the checker was green. This guard compares the FLAT view against a proper
+// `;`-delimited declaration parse (what the browser actually keeps): a `--x:`
+// the flat scan sees but the declaration parse rejects = swallowed = E9.
+// stripCssComments blanks comments to SPACES (byte-preserving), so a legitimate
+// `--x:` written inside a comment vanishes here and never false-fires.
+// `label` names the file actually scanned. It defaults to "app.css" (the main
+// run's only subject) but MUST be passed by --swallow-check: a diagnostic that
+// cites a file it never read is the very thing this checker exists to catch.
+export function swallowedTokenErrors(cssRawText, label = "app.css") {
+  const stripped = stripCssComments(cssRawText);
+  const lineAt = (i) => stripped.slice(0, i).split("\n").length;
+  // Bare token blocks only — :root, [data-theme="dark"], and the identity ramps
+  // html[data-bp-theme="X"](…[data-theme="dark"]) — carry `--x:` custom-property
+  // declarations at column 0. Component rules deeper in the file set real CSS
+  // properties, not the custom props this swallow analysis is about.
+  const BLOCK_RES = [
+    /^:root\s*\{([\s\S]*?)\}/gm,
+    /^\[data-theme="dark"\]\s*\{([\s\S]*?)\}/gm,
+    /^html\[data-bp-theme="[a-z0-9-]+"\](?:\[data-theme="dark"\])?\s*\{([\s\S]*?)\}/gm,
+  ];
+  const errs = [];
+  const seen = new Set(); // one E9 per (token, line) across the three regexes
+  for (const re of BLOCK_RES) {
+    for (const m of stripped.matchAll(re)) {
+      const body = m[1];
+      const bodyStart = m.index + m[0].indexOf("{") + 1;
+      // VALIDATED — the browser's view: a `;` segment is a real custom property
+      // only when the text before its first `:` is exactly `--name`.
+      const validated = new Set();
+      for (const seg of body.split(";")) {
+        const c = seg.indexOf(":");
+        if (c === -1) continue;
+        const lhs = seg.slice(0, c);
+        if (/^\s*--[A-Za-z0-9_-]+\s*$/.test(lhs)) validated.add(lhs.trim());
+      }
+      // FLAT — definedTokens' view: every `--x:` the flat regex would trust.
+      for (const d of body.matchAll(/(?:^|[{;\s])(--[A-Za-z0-9_-]+)\s*:/g)) {
+        const tok = d[1];
+        if (validated.has(tok)) continue;
+        const ln = lineAt(bodyStart + d.index);
+        const key = `${tok}@${ln}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        errs.push(
+          `E9 ${label}:${ln}  ${tok}: reads as a declaration to the flat token scan but the ` +
+            `browser's ;-delimited parse rejects it — an early-terminated comment ` +
+            `(a '*/' inside comment text, e.g. '… --ok*/ …') likely swallowed it (#4251)`,
+        );
+      }
+    }
+  }
+  return errs;
+}
+
+// ── E10: orphan comment terminator (rule-swallow guard, regression #4592) ────
+// E9 answers "did a mis-closed comment eat a custom property inside a token
+// block?". E10 answers the strictly larger question the browser actually asks
+// first: "is this file's comment nesting even coherent?". A `*/` met outside a
+// comment proves a `/*` went missing above it; the browser then parsed that
+// prose as CSS and, per error recovery, threw tokens away until the next `{…}`
+// — i.e. it ATE the following rule whole. That is invisible to every
+// source-text check, because the bytes are all still there.
+//
+// Deliberately NOT a "does this prelude look like a selector?" heuristic: that
+// was prototyped and measured 15 false positives on a clean app.css (descendant
+// selectors ending in ` a`, keyframe `50%` stops). Comment-state is exact.
+//
+// The walk is a single state machine over {code, comment, string} because that
+// is what a CSS tokenizer is: quotes are inert inside a comment (`browser's`
+// must not open a string) and comment markers are inert inside a string
+// (`content: "*/"` is text, not a terminator). A newline ends an unterminated
+// string, matching the tokenizer's bad-string recovery.
+export function orphanCommentErrors(cssRawText, file = "app.css") {
+  const errs = [];
+  let line = 1;
+  let commentStart = 0; // line the open `/*` sits on, 0 when not in a comment
+  let quote = ""; // "" outside a string, else the opening quote character
+  for (let i = 0; i < cssRawText.length; i++) {
+    const c = cssRawText[i];
+    if (c === "\n") {
+      line++;
+      quote = ""; // CSS: a newline terminates a bad string
+      continue;
+    }
+    if (quote) {
+      // An escaped char is consumed whole. CSS permits a backslash-escaped
+      // NEWLINE as a string continuation, so count it or every line number
+      // below such a string drifts.
+      if (c === "\\") {
+        if (cssRawText[i + 1] === "\n") line++;
+        i++;
+      } else if (c === quote) quote = "";
+      continue;
+    }
+    if (commentStart) {
+      if (c === "*" && cssRawText[i + 1] === "/") {
+        commentStart = 0;
+        i++;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === "/" && cssRawText[i + 1] === "*") {
+      commentStart = line;
+      i++;
+    } else if (c === "*" && cssRawText[i + 1] === "/") {
+      errs.push(
+        `E10 ${file}:${line}  orphan '*/' outside any comment — the matching '/*' is ` +
+          `missing, so every line above this was parsed as raw CSS and error recovery ` +
+          `discarded tokens up to the next '{…}', swallowing the rule that follows (#4592)`,
+      );
+      i++;
+    }
+  }
+  if (commentStart) {
+    errs.push(
+      `E10 ${file}:${commentStart}  comment opened here is never closed — EOF reached ` +
+        `inside it, so every rule below this line is invisible to the browser`,
+    );
+  }
+  return errs;
+}
+
+// ── E14: wrap-recipe declaration parity (charter D220) ───────────────────────
+// The full ruling, the three load-bearing design choices and the coverage
+// boundary are stated in the E14 entry of this file's header. What follows is
+// the executable form of that invariant — the durable artifact.
+//
+// THE CORE, PINNED AS A LITERAL (design choice 3). Deriving it from the copies
+// would let a fourth copy dropping a property redefine the contract.
+const WRAP_CORE = [
+  ["white-space", "normal"],
+  ["height", "auto"],
+  ["min-height", "24px"],
+  ["padding-top", "2px"],
+  ["padding-bottom", "2px"],
+];
+// The three copies that survived wave 18, pinned as REQUIRED-PRESENT. A
+// same-file pin is the correct form here (pin-your-own, derive-foreign): it
+// closes the PARTIAL-blindness case the zero-copies guard cannot see — a scan
+// that degrades to finding 1 of 3 still reports "clean" without this.
+// W20-S6 added `.attention-row` as the FOURTH copy and it is pinned here in the
+// same commit. Without this line the fourth copy was COUNTED but not
+// REQUIRED — a scan degrading to 3-of-4 that lost exactly the attention
+// queue's copy would still have reported clean, which is the partial
+// blindness these pins exist to close.
+const WRAP_REQUIRED_HOSTS = [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"];
+// WRAPPER-SCOPED: one or more descendant/child steps, then `.status-pill`, and
+// NOTHING after it. The trailing anchor keeps `.detail-rail .status-pill-label`
+// and `.status-pill--ok .status-pill-dot` out; requiring a leading step keeps
+// the BASE `.status-pill` out structurally rather than by allowlist.
+const WRAPPER_SCOPED_PILL = /^\s*(\S[^{}]*?)[\s>]+\.status-pill\s*$/;
+
+export function wrapParityErrors(cssRawText, file = "app.css") {
+  const stripped = stripCssComments(cssRawText);
+  const errs = [];
+  const copies = []; // { selector, host, line, declared: Map }
+  // Innermost `{…}` blocks only: a prelude cannot contain a brace, so an
+  // `@media` wrapper never matches as a selector and its inner rules do.
+  for (const m of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const prelude = m[1];
+    const body = m[2];
+    const declared = new Map();
+    for (const seg of body.split(";")) {
+      const c = seg.indexOf(":");
+      if (c === -1) continue;
+      const prop = seg.slice(0, c).trim().toLowerCase();
+      if (!/^[a-z-]+$/.test(prop)) continue;
+      declared.set(prop, seg.slice(c + 1).trim().replace(/\s*!important$/, ""));
+    }
+    // DESIGN CHOICE 1 — the trigger is the DECLARATION, not the selector. A
+    // wrapper-scoped rule that touches none of the five is not a wrap copy and
+    // is not even counted.
+    if (!WRAP_CORE.some(([p]) => declared.has(p))) continue;
+    for (const part of prelude.split(",")) {
+      const hit = part.match(WRAPPER_SCOPED_PILL);
+      if (!hit) continue;
+      const selector = part.trim().replace(/\s+/g, " ");
+      const line = lineOf(stripped, m.index + prelude.indexOf(part.replace(/^\s+/, "")));
+      copies.push({ selector, host: hit[1].trim().replace(/\s+/g, " "), line, declared });
+      const missing = WRAP_CORE.filter(([p, v]) => declared.get(p) !== v).map(
+        ([p, v]) => `${p}: ${v} (${declared.has(p) ? `declared "${declared.get(p)}"` : "not declared"})`,
+      );
+      if (missing.length) {
+        errs.push(
+          `E14 ${file}:${line}  ${selector} declares ${WRAP_CORE.filter(([p]) => declared.has(p))
+            .map(([p]) => p)
+            .join(", ")} — starting the wrap recipe — but DIVERGES from the shared core: ` +
+            `${missing.join("; ")}. A wrapper-scoped .status-pill rule that declares ANY of the five ` +
+            `must declare ALL five at the canonical value (white-space: normal; height: auto; ` +
+            `min-height: 24px; padding-top: 2px; padding-bottom: 2px) — charter D220. The jacket ` +
+            `(align-items, the -dot/-detail rules, the wrapper's flex-wrap) is per-host and is NOT asserted.`,
+        );
+      }
+    }
+  }
+  // ANTI-VACUITY 1 — zero copies is a broken scan, not a clean stylesheet.
+  if (!copies.length) {
+    errs.push(
+      `E14 ${file}  ZERO wrapper-scoped .status-pill wrap copies found — a vacuous green. ` +
+        `This check exists because three such copies ship; seeing none means the scan stopped ` +
+        `seeing them (a selector shape changed, a parse broke), not that they agree.`,
+    );
+  }
+  // ANTI-VACUITY 2 — a scan degrading to 1-of-3 also reports clean without this.
+  for (const host of WRAP_REQUIRED_HOSTS) {
+    if (!copies.some((c) => c.host === host)) {
+      errs.push(
+        `E14 ${file}  the pinned wrap copy \`${host} .status-pill\` is MISSING — either the copy ` +
+          `was deleted (a shipped wrap regression) or the scan can no longer see it (partial ` +
+          `blindness). Re-derive by grep before editing this pin.`,
+      );
+    }
+  }
+  return { errors: errs, copies };
+}
+
+// ── E11: banned source line-number citation (charter D41; bp-honest-gates D5) ─
+// THE RULING — a BAN, not a resolver. Argued from maintenance cost and from the
+// three measured occurrences, not taste: (a) every live `app.js:<line>` was
+// ALREADY stale (a +39-line sibling shift moved all five in the block above onto
+// unrelated code), so a line-resolving verifier has nothing correct to preserve
+// and would ship green over the exact drift it exists to catch; (b) such a
+// verifier needs an "does the cited line still look right?" anchor heuristic
+// that itself rots — negative maintenance; (c) the ban is one regex with zero
+// per-citation upkeep (bp-honest-gates D5: "ban the SHAPE, do not enumerate").
+// The re-anchor convention it enforces — enclosing FUNCTION name + a grep —
+// survives any sibling shift a line number cannot.
+//
+// SCANS THE WHOLE SOURCE TEXT, not a comment subset. A comment-only walk was
+// prototyped and REJECTED: a {string, //, /* */} state machine over 893 KB of
+// app.js (template literals, regex literals) desyncs and MISSES real citations
+// — a false-negative in a tripwire, the exact disease this epic removes. Full
+// text cannot desync and cannot miss a citation that migrates into a string.
+// The shape `app.js:<digits>` is citation-specific: measured on this tree every
+// one of the seven live occurrences is a comment citation, zero are in code, so
+// full-text scanning is both robust AND false-positive-free today.
+//
+//   COVERAGE BOUNDARY (charter D40 — an enforcement mechanism states its limits):
+//     • CROSS-LANGUAGE `router.ex:<line>` cites are OUT. Re-anchoring a JS
+//       comment that points at Elixir source means grepping the .ex file — a
+//       distinct move filed as cch-bl-citation-drift-cross-language. E11 flags
+//       only the same-repo `app.js:` shape; `router.ex:<line>` stays UNFLAGGED
+//       here by design (live on this tree: __app.test.mjs + two app.js comments).
+//     • SHAPE-SCOPED. Only `app.js:<digits>` (also `app.js ~<n>` / a range) is a
+//       citation to E11. A prose reference like "the app.js file" is untouched;
+//       a NON-numeric anchor (a function name + grep) is exactly what it asks
+//       for. It cannot judge whether a cited function name is itself correct —
+//       that is a semantic claim no regex owns.
+export function bannedSourceCitationErrors(src, file) {
+  const errs = [];
+  const CITATION = /\bapp\.js[:~ ]+~?\d{2,}(?:-\d{2,})?/g;
+  for (const m of src.matchAll(CITATION)) {
+    const line = src.slice(0, m.index).split("\n").length;
+    errs.push(
+      `E11 ${file}:${line}  banned source line citation ${JSON.stringify(m[0].trim())} — ` +
+        `line numbers rot on any sibling shift (charter D41 / bp-honest-gates D5). ` +
+        `Re-anchor to the enclosing FUNCTION name + a grep that re-derives it ` +
+        `(e.g. renderLivenessChip() with grep -n 'function renderLivenessChip'). ` +
+        `Cross-language router.ex cites are OUT (cch-bl-citation-drift-cross-language).`,
+    );
+  }
+  return errs;
+}
+
+// The files E11 scans: every top-level *.js|*.mjs|*.css plus __preview__/* of
+// the same extensions. Read from the directory (never a hardcoded list) so a
+// NEW harness file is covered the moment it lands — a fixed list is the
+// enumerate-don't-ban shape bp-honest-gates D5 forbids.
+//
+// WHY .css IS IN THE SET, AND WHY THE REGEX IS NOT THE LEVER (charter D292).
+// This scan read `/\.m?js$/` only — 15 files, and app.css was not one of them —
+// while app.css carried THREE live `app.js:<n>` citations and the gate reported
+// `0 error(s)`. The guard was green over a violation of the rule it enforces.
+// The defect was REACH, not SHAPE: an `app.js:<n>` inside a stylesheet is
+// unreachable at ANY regex width, so widening the CITATION pattern could not
+// have found it. Paired mutation that pins the diagnosis: the identical string
+// pasted into a scanned .mjs reds by name, and removed returns exit 0 — same
+// string, one file away, opposite outcomes.
+//
+// THE OTHER HALF IS DELIBERATELY NOT HERE. Widening the CITATION alternation
+// (cross-file `<name>.<ext>:<line>` shapes) surfaces 72 findings across the
+// existing scan set; shipping a tripwire together with 72 repairs reds the
+// fail-before gate, so that half stays on its own row,
+// cch-w16-s7-citation-anchors-e11-widening. This function widens the FILE SET
+// only, which surfaced exactly three — all repaired in the same commit that
+// widened it, which is why the widened guard is green here rather than vacuous.
+//
+// SCOPE OF THE EXTENSION, stated so the next reader does not have to measure:
+// the .css members of this set are app.css plus the three __css_check fixture
+// stylesheets. The fixtures are deliberately malformed CSS, but E11 is a
+// full-TEXT regex and never parses, so their content cannot destabilise it —
+// they are scanned for citations exactly like everything else. Re-derive the
+// membership with: ls cloud/priv/static/*.css cloud/priv/static/__preview__/
+function citationScanFiles() {
+  const out = [];
+  const scanned = (f) => /\.(m?js|css)$/.test(f);
+  for (const f of fs.readdirSync(dir)) if (scanned(f)) out.push(f);
+  const pv = path.join(dir, "__preview__");
+  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (scanned(f)) out.push(path.join("__preview__", f));
+  return out.sort();
+}
+
+// Targeted fixture mode: `node __css_check.mjs --swallow-check <file.css>` runs
+// ONLY the E9 parse-completeness guard against one file and exits non-zero if it
+// fires — the committed #4251 regression proof (see __css_check.fixture.css).
+{
+  const i = process.argv.indexOf("--swallow-check");
+  if (i !== -1) {
+    const f = process.argv[i + 1];
+    const errs = swallowedTokenErrors(fs.readFileSync(f, "utf8"), path.basename(f));
+    for (const e of errs) console.error("FAIL  " + e);
+    console.log(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
+    process.exit(errs.length ? 1 : 0);
+  }
+}
+
+// Targeted fixture mode: `node __css_check.mjs --orphan-check <file.css>` runs
+// ONLY the E10 comment-nesting walk against one file and exits non-zero if it
+// fires — the committed #4592/GR74 regression proof (see
+// __css_check.orphan.fixture.css). Symmetric with --swallow-check above and
+// added for the same reason: orphanCommentErrors had no fixture and no way to
+// be run against one, so its green on app.css was unfalsified. Both fixture
+// proofs are executed by __app.test.mjs, which console-harness already runs —
+// a regression fixture nobody runs is an instrument that cannot fail.
+{
+  const i = process.argv.indexOf("--orphan-check");
+  if (i !== -1) {
+    const f = process.argv[i + 1];
+    const errs = orphanCommentErrors(fs.readFileSync(f, "utf8"), path.basename(f));
+    for (const e of errs) console.error("FAIL  " + e);
+    console.log(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
+    process.exit(errs.length ? 1 : 0);
+  }
+}
+
+// Targeted fixture mode: `node __css_check.mjs --wrap-parity-check <file.css>`
+// runs ONLY the E14 wrap-recipe parity scan against one file and exits non-zero
+// if it fires — the committed D220 proof (see __css_check.wrapparity.fixture.css).
+// Symmetric with --swallow-check and --orphan-check above, and added for the
+// same reason they were: an instrument with no way to be run against a known-bad
+// input is an instrument that cannot fail. Per E9's own lesson, every diagnostic
+// below cites the file it ACTUALLY read, never a hard-coded app.css.
+{
+  const i = process.argv.indexOf("--wrap-parity-check");
+  if (i !== -1) {
+    const f = process.argv[i + 1];
+    const { errors: errs, copies } = wrapParityErrors(fs.readFileSync(f, "utf8"), path.basename(f));
+    for (const e of errs) console.error("FAIL  " + e);
+    console.log(
+      `__css_check --wrap-parity-check ${f}: ${copies.length} wrapper-scoped wrap copy(ies) ` +
+        `[${copies.map((c) => `${c.selector}:${c.line}`).join(", ")}], ${errs.length} E14 error(s)`,
+    );
+    process.exit(errs.length ? 1 : 0);
+  }
+}
+
 // ── app.css: defined tokens, consumed tokens, defined classes ───────────────
 
 const definedTokens = new Set();
 for (const m of css.matchAll(/(?:^|[{;\s])(--[A-Za-z0-9_-]+)\s*:/g)) definedTokens.add(m[1]);
+// @property --x { … } registers a custom property just as a `--x:` declaration
+// does (the animated conic-ring fill --p at app.css:1717). The name is followed
+// by `{`, not `:`, so the declaration scan above misses it — register it here.
+for (const m of css.matchAll(/@property\s+(--[A-Za-z0-9_-]+)/g)) definedTokens.add(m[1]);
 
 /** var(--x) consumption sites across all three files. */
 function consumedTokens(src, file) {
@@ -203,6 +901,27 @@ function consumedTokens(src, file) {
 // (checked below); everything else it consumes must come from app.css.
 const sgLocalTokens = new Set();
 for (const m of styleguideRaw.matchAll(/(?:^|[{;\s])(--[A-Za-z0-9_-]+)\s*:/g)) sgLocalTokens.add(m[1]);
+
+// styleguide.html also DEFINES page-local .sg-* chrome classes in its own <style>
+// (layout scaffolding for the spec — the not-yet-shipped grammars like the stage
+// ladder, coalesced rows and domain rungs render on these, not on app.css
+// component classes). Collect them the same way app.css classes are collected so
+// the E2 pass can exempt them while still checking every SHIPPED-component class
+// the styleguide demonstrates (.btn/.status-pill/.notice/.toast/…) against
+// app.css — that is the drift value of folding styleguide.html into E2.
+const sgStyle = (styleguideRaw.match(/<style>([\s\S]*?)<\/style>/) || [, ""])[1];
+const sgLocalClasses = new Set();
+{
+  const sgCss = stripCssComments(sgStyle);
+  let buf = "";
+  for (const c of sgCss) {
+    if (c === "{") {
+      for (const m of buf.matchAll(/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/g)) sgLocalClasses.add(m[1]);
+      buf = "";
+    } else if (c === "}" || c === ";") buf = "";
+    else buf += c;
+  }
+}
 
 const consumed = [
   ...consumedTokens(css, "app.css"),
@@ -244,6 +963,17 @@ for (const m of htmlRaw.matchAll(/class="([^"]*)"/g)) {
   const line = lineOf(htmlRaw, m.index);
   for (const t of m[1].split(/\s+/).filter(Boolean)) {
     emitToken(t, "index.html", line);
+  }
+}
+
+/** styleguide.html static class="..." attributes — the living spec renders the
+ *  shipped components, so every class it names must have a rule in app.css (drift
+ *  gate) EXCEPT its own page-local .sg-* chrome (sgLocalClasses, exempted in the
+ *  E2 loop below — the styleguide analog of the --sg-* token carve-out). */
+for (const m of styleguideRaw.matchAll(/class="([^"]*)"/g)) {
+  const line = lineOf(styleguideRaw, m.index);
+  for (const t of m[1].split(/\s+/).filter(Boolean)) {
+    emitToken(t, "styleguide.html", line);
   }
 }
 
@@ -389,6 +1119,46 @@ const lightTokens = parseTokenBlocks(/^:root\s*\{([\s\S]*?)\}/gm);
 const darkOverrides = parseTokenBlocks(/^\[data-theme="dark"\]\s*\{([\s\S]*?)\}/gm);
 const darkTokens = { ...lightTokens, ...darkOverrides };
 
+// Identity ramps (charter GR5): each `html[data-bp-theme="X"] { … }` block is a
+// full accent+surface token set; its `[data-theme="dark"]` sibling is the dark
+// variant. Per CSS specificity `html[data-bp-theme="X"]` (0,1,1) overrides the
+// base dark block (0,1,0), and `html[data-bp-theme="X"][data-theme="dark"]`
+// (0,2,1) overrides everything — so a dark identity state is
+// base-light ∪ base-dark ∪ identity-light ∪ identity-dark, later spread wins.
+// DISCOVERED from the CSS, never hardcoded: a new identity (iris is landing in
+// this same wave) must join the contrast fanout the moment its block exists —
+// a fixed list would silently re-create the checked-subset dishonesty this
+// detector exists to cure.
+const IDENTITY_RAMPS = [
+  ...new Set([...css.matchAll(/^html\[data-bp-theme="([a-z0-9-]+)"\]\s*\{/gm)].map((m) => m[1])),
+];
+const identityTokens = {}; // id -> { light, dark }
+for (const id of IDENTITY_RAMPS) {
+  identityTokens[id] = {
+    light: parseTokenBlocks(new RegExp(`^html\\[data-bp-theme="${id}"\\]\\s*\\{([\\s\\S]*?)\\}`, "gm")),
+    dark: parseTokenBlocks(new RegExp(`^html\\[data-bp-theme="${id}"\\]\\[data-theme="dark"\\]\\s*\\{([\\s\\S]*?)\\}`, "gm")),
+  };
+}
+
+// EVERY theme state the SPA actually renders (charter GR5): base light/dark
+// plus each discovered identity's light/dark. Every CONTRAST_PAIRS entry is
+// resolved against all of them — the fanout is base light/dark + 2 states per
+// discovered identity, and the run's own summary line reports the live counts
+// (states × CONTRAST_PAIRS) rather than a number pinned in this comment, which
+// went stale the moment a 5th identity landed. A new ramp fans the manifest
+// automatically, so it cannot ship an unreadable pairing unseen.
+const THEME_STATES = [
+  ["base-light", lightTokens],
+  ["base-dark", darkTokens],
+];
+for (const id of IDENTITY_RAMPS) {
+  THEME_STATES.push([`${id}-light`, { ...lightTokens, ...identityTokens[id].light }]);
+  THEME_STATES.push([
+    `${id}-dark`,
+    { ...lightTokens, ...darkOverrides, ...identityTokens[id].light, ...identityTokens[id].dark },
+  ]);
+}
+
 /** Substitute var(--x) references until the value is literal. */
 function resolveValue(name, map, seen = new Set()) {
   if (seen.has(name)) throw new Error(`token cycle at ${name}`);
@@ -460,7 +1230,7 @@ function resolveColor(token, map, theme, errs) {
 
 const contrastResults = []; // { theme, fg, bg, ratio, min, why }
 function runContrast(errs) {
-  for (const [theme, map] of [["light", lightTokens], ["dark", darkTokens]]) {
+  for (const [theme, map] of THEME_STATES) {
     for (const p of CONTRAST_PAIRS) {
       const fg = resolveColor(p.fg, map, theme, errs);
       let bg = resolveColor(p.bg, map, theme, errs);
@@ -483,6 +1253,131 @@ function runContrast(errs) {
       }
     }
   }
+}
+
+// ── Focus-indicator opacity (E12) ────────────────────────────────────────────
+// WHY THIS EXISTS, and why CONTRAST_PAIRS alone is not enough: the pairs assert
+// TOKENS ("--ring clears 3:1 over --surface"). They cannot see which token a
+// RULE consumes. Measured on the pre-fix tree: with all five --ring pairs
+// present this file exited 0 while 19 focus rules still painted a
+// --ring-soft band at 1.19–1.52:1. A token ratchet that the rules can walk away
+// from is a vacuous green, so E12 closes the loop at the RULE level.
+//
+// THE PREDICATE: a `:focus` / `:focus-visible` rule's indicator band — the
+// OUTERMOST box-shadow layer (inner layers are the opaque spacer that lifts the
+// ring off the control), or the `outline` colour when one is painted — must
+// resolve to alpha 1 in every theme state. An α<1 tint is an ARITHMETIC ceiling:
+// over ANY opaque backdrop α=0.15 tops out at 1.617:1 and α=0.20 at 1.918:1, so
+// no accent value can ever lift it to the 3:1 SC 1.4.11 floor.
+//
+// THE ESCAPE: a rule that ALSO carries an opaque `border-color` / `outline-color`
+// is compliant — its indicator is that border, and the translucent shadow is a
+// decorative halo around it (.fleet-row[data-id]:focus-visible and
+// .site-row[data-id]:focus-visible are exactly this shape and must stay green).
+// A rule that paints no band at all is out of scope: it is styling something
+// else on focus and inherits the shared ring block.
+
+/** Substitute var() in an arbitrary declaration value until it is literal. */
+function resolveLiteralValue(value, map) {
+  let v = String(value).trim();
+  for (let i = 0; i < 10 && /var\(/.test(v); i++) {
+    v = v.replace(/var\(\s*(--[A-Za-z0-9_-]+)\s*\)/g, (_, t) => {
+      const r = resolveValue(t, map);
+      return r === undefined ? "UNRESOLVED" : r;
+    });
+  }
+  return v;
+}
+
+// Colour functions FIRST so `hsl(var(--x) / 0.15)` is taken whole rather than
+// as the bare var() nested inside it.
+const COLOR_ATOM = /hsla?\([^()]*(?:\([^()]*\)[^()]*)*\)|rgba?\([^()]*(?:\([^()]*\)[^()]*)*\)|color-mix\([^()]*(?:\([^()]*\)[^()]*)*\)|#[0-9a-fA-F]{3,8}\b|var\(\s*--[A-Za-z0-9_-]+\s*\)/g;
+
+/** The colour of a shadow layer / outline value: the last colour atom in it. */
+function colorAtomOf(value) {
+  const atoms = String(value).match(COLOR_ATOM);
+  return atoms ? atoms[atoms.length - 1] : null;
+}
+
+/** Split a value on TOP-LEVEL commas (box-shadow layers). */
+function splitLayers(value) {
+  const out = [];
+  let depth = 0, cur = "";
+  for (const ch of value) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    if (ch === "," && depth === 0) { out.push(cur); cur = ""; } else cur += ch;
+  }
+  if (cur.trim()) out.push(cur);
+  return out;
+}
+
+/** Lowest alpha this colour atom takes across every theme state; null = unparseable. */
+function minAlphaAcrossThemes(atom) {
+  let min = null;
+  for (const [, map] of THEME_STATES) {
+    const col = parseColor(resolveLiteralValue(atom, map));
+    if (!col) continue;
+    min = min === null ? col.a : Math.min(min, col.a);
+  }
+  return min;
+}
+
+export function focusIndicatorErrors() {
+  const errs = [];
+  for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selector = m[1].trim();
+    if (!/:focus\b|:focus-visible\b/.test(selector)) continue;
+    const body = m[2];
+
+    const decls = {};
+    for (const d of body.split(";")) {
+      const i = d.indexOf(":");
+      if (i < 0) continue;
+      const prop = d.slice(0, i).trim().toLowerCase();
+      if (prop.startsWith("--")) continue;
+      decls[prop] = d.slice(i + 1).trim(); // last declaration wins, as in the cascade
+    }
+
+    // The band: the outermost box-shadow layer, else the outline colour.
+    let band = null, bandProp = null;
+    const shadow = decls["box-shadow"];
+    if (shadow && !/^none\b/i.test(shadow)) {
+      const layers = splitLayers(shadow);
+      band = colorAtomOf(layers[layers.length - 1]);
+      bandProp = "box-shadow";
+    }
+    if (!band) {
+      const outline = decls["outline"] || decls["outline-color"];
+      if (outline && !/^(none|0)\b/i.test(outline)) {
+        band = colorAtomOf(outline);
+        bandProp = decls["outline-color"] ? "outline-color" : "outline";
+      }
+    }
+    if (!band) continue; // paints no indicator band — inherits the shared ring
+
+    const alpha = minAlphaAcrossThemes(band);
+    if (alpha === null || alpha >= 1) continue;
+
+    // The escape: an opaque border/outline colour IS the indicator.
+    const escape = ["border-color", "outline-color", "border"]
+      .map((p) => decls[p] && colorAtomOf(decls[p]))
+      .filter(Boolean)
+      .some((atom) => {
+        const a = minAlphaAcrossThemes(atom);
+        return a !== null && a >= 1;
+      });
+    if (escape) continue;
+
+    errs.push(
+      `E12 app.css:${lineOf(css, m.index)}  focus rule ${JSON.stringify(selector.replace(/\s+/g, " "))} paints its ` +
+        `SOLE indicator band from ${band} (${bandProp}), which resolves to alpha ${alpha} — ` +
+        `a translucent band can never reach the 3:1 SC 1.4.11 floor over an opaque backdrop ` +
+        `(alpha 0.15 ceils at 1.62:1). Point the band at an OPAQUE token (--ring), or give the ` +
+        `rule an opaque border-color and keep the tint as a decorative halo`,
+    );
+  }
+  return errs;
 }
 
 // ── External-host lint (E7) ──────────────────────────────────────────────────
@@ -517,11 +1412,24 @@ for (const c of consumed) {
 }
 
 const hookHits = [];
+const gapHits = [];             // KNOWN_GAPS-demoted E2/E3 → printed as R3, not fatal
+const matchedGaps = new Set();  // which KNOWN_GAPS entries fired (staleness check)
+const gapKey = (g) => `${g.file}|${"cls" in g ? "E2:" + g.cls : "E3:" + g.head}`;
 const seenMissing = new Set();
 for (const e of emitted) {
   if (cssClasses.has(e.cls)) continue;
+  // page-local .sg-* chrome defined in styleguide.html's own <style> (the
+  // class analog of the --sg-* token carve-out).
+  if (e.file === "styleguide.html" && sgLocalClasses.has(e.cls)) continue;
   if (ALLOW_HOOK_CLASSES.includes(e.cls)) {
     hookHits.push(e);
+    continue;
+  }
+  const gap = KNOWN_GAPS.find((g) => "cls" in g && g.file === e.file && g.cls === e.cls);
+  if (gap) {
+    matchedGaps.add(gapKey(gap));
+    const key = `${e.cls}@${e.file}`;
+    if (!seenMissing.has(key)) { seenMissing.add(key); gapHits.push({ code: "E2", file: e.file, what: `class "${e.cls}"`, why: gap.why }); }
     continue;
   }
   const key = `${e.cls}@${e.file}:${e.line}`;
@@ -530,9 +1438,21 @@ for (const e of emitted) {
   errors.push(`E2 ${e.file}:${e.line}  class "${e.cls}" is emitted but has no rule in app.css`);
 }
 
+const seenGapHeads = new Set();
 for (const d of dynamicSites) {
+  const gap = KNOWN_GAPS.find((g) => "head" in g && g.file === d.file && g.head === d.head);
+  if (gap) {
+    matchedGaps.add(gapKey(gap));
+    const key = `${d.head}@${d.file}`;
+    if (!seenGapHeads.has(key)) { seenGapHeads.add(key); gapHits.push({ code: "E3", file: d.file, what: `dynamic head "${d.head}"`, why: gap.why }); }
+    continue;
+  }
   errors.push(`E3 ${d.file}:${d.line}  dynamic class composition with head "${d.head}" is not in ALLOW_PREFIXES`);
 }
+
+// KNOWN_GAPS entries that fired nothing this run — the owning slice fixed the gap,
+// so prune the entry (mirrors staleRawAllows). Reported below, never fatal.
+const staleGaps = KNOWN_GAPS.filter((g) => !matchedGaps.has(gapKey(g)));
 
 for (const b of badTokens) {
   errors.push(
@@ -541,8 +1461,50 @@ for (const b of badTokens) {
   );
 }
 
+// E13 — every server-side deployment status is painted. Derived from
+// DEPLOY_STATUSES (the Ecto @statuses enum), never from the E3 allowlist's
+// prose. `css` is comment-stripped, so a selector that survives only inside a
+// comment does NOT count.
+for (const st of DEPLOY_STATUSES) {
+  if (cssClasses.has(`dep-${st}`)) continue;
+  errors.push(
+    `E13 app.css  deployment status "${st}" has no .dep-${st} rule — the ` +
+      `dep-pill dep- head emits it, so it falls through to the .dep-pill base ` +
+      `and paints as an untouched/queued deployment. Add a rule next to the ` +
+      `other .dep-* rules in the DEPLOYMENTS section.`,
+  );
+}
+
 // E5 — the contrast manifest, both themes.
 runContrast(errors);
+
+// E12 — rule-level focus-indicator opacity. E5 asserts TOKENS; this asserts
+// which token each focus RULE actually consumes, so the ratchet cannot be
+// walked away from (measured: 19 rules at 1.19–1.52:1 with E5 green).
+for (const e of focusIndicatorErrors()) errors.push(e);
+
+// E9 — parse-completeness: declarations a comment mis-close swallowed (#4251).
+for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
+
+// E10 — comment nesting coherence: an orphan `*/` swallows the next whole rule
+// (#4592 — the modal root). Runs alongside E9, which sees only token blocks.
+for (const e of orphanCommentErrors(cssRaw)) errors.push(e);
+
+// E14 — wrap-recipe declaration parity (charter D220): the three hand-built
+// copies share a byte-identical five-declaration core wearing three different
+// jackets, and nothing asserted that the core still agrees. The copy inventory
+// is printed below so the count is the SCAN's claim, never a comment's.
+const wrapParity = wrapParityErrors(cssRaw);
+for (const e of wrapParity.errors) errors.push(e);
+
+// E11 — banned source line-number citation (charter D41 / bp-honest-gates D5):
+// `app.js:<line>` in a comment of any scanned SPA / harness file. The shape is
+// banned outright; router.ex cross-language cites are OUT (see the boundary on
+// bannedSourceCitationErrors). Scans this file too, so its own citations cannot
+// go stale unseen.
+for (const rel of citationScanFiles()) {
+  for (const e of bannedSourceCitationErrors(read(rel), rel)) errors.push(e);
+}
 
 // E8 — scoped-theme alias integrity. var() inside a custom property substitutes
 // where the property is DECLARED, so a :root-only alias whose value references
@@ -576,8 +1538,14 @@ const pxFontSizes = []; // R4
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // Anchored: `[data-theme="dark"] .foo {` is a scoped RULE, not a token
-    // block — only the bare block selectors mark token territory.
-    if (depth === 0 && /^\s*(?::root|\[data-theme="dark"\])\s*\{\s*$/.test(line)) inTokenBlock = true;
+    // block — only the bare block selectors mark token territory. The identity
+    // ramps `html[data-bp-theme="X"] {` and `…[data-theme="dark"] {` (charter
+    // GR5) are token blocks too, so their raw ramp values are contract, not E6.
+    if (
+      depth === 0 &&
+      /^\s*(?::root|\[data-theme="dark"\]|html\[data-bp-theme="[a-z0-9-]+"\](?:\[data-theme="dark"\])?)\s*\{\s*$/.test(line)
+    )
+      inTokenBlock = true;
     for (const ch of line) {
       if (ch === "{") depth++;
       else if (ch === "}") {
@@ -641,8 +1609,10 @@ for (const s of staleRawAllows) {
   console.log(`stale  ALLOW_RAW_COLORS entry no longer matches any line — prune it: ${s}`);
 }
 
-// E5 summary: worst pair per theme, so drift toward the threshold is visible.
-for (const theme of ["light", "dark"]) {
+// E5 summary: worst pair per theme state, so drift toward the threshold is
+// visible across every discovered state (base + each identity × light/dark) —
+// one line per state, so the count is the output's, never this comment's.
+for (const [theme] of THEME_STATES) {
   const rows = contrastResults.filter((r) => r.theme === theme);
   if (!rows.length) continue;
   const worst = rows.reduce((a, b) => (a.ratio / a.min < b.ratio / b.min ? a : b));
@@ -660,12 +1630,29 @@ if (process.env.CSS_CHECK_VERBOSE) {
   }
 }
 
+// E14 inventory: the copies the scan actually SAW, with their true line
+// numbers. Printed unconditionally so a scan degrading to fewer copies is
+// visible in the log even before the pins turn it red.
+console.log(
+  `\nE14 ${wrapParity.copies.length} wrapper-scoped .status-pill wrap copy(ies): ` +
+    `${wrapParity.copies.map((c) => `${c.selector} (app.css:${c.line})`).join(", ")}`,
+);
+
 if (unconsumed.length) {
   console.log(`\nR2  defined but not yet consumed: ${unconsumed.join(", ")}`);
 }
-if (REPORT_ONLY.length) {
-  console.log(`\nR3  REPORT-ONLY (fix requires app.js — owned by another slice):`);
-  for (const r of REPORT_ONLY) console.log(`      ${r}`);
+if (gapHits.length) {
+  console.log(
+    `\nR3  ${gapHits.length} known gap(s) in app.js/index.html demoted (owned by ` +
+      `gr-backlog-css-check-missing-classes — author the CSS or remove the emission):`,
+  );
+  for (const g of gapHits) console.log(`      ${g.code} ${g.file}  ${g.what} — ${g.why}`);
+}
+for (const g of staleGaps) {
+  console.log(
+    `stale  KNOWN_GAPS entry no longer matches any emission — prune it (the owning slice fixed it): ` +
+      `${g.file} ${"cls" in g ? `class "${g.cls}"` : `head "${g.head}"`}`,
+  );
 }
 if (pxFontSizes.length) {
   console.log(
@@ -680,7 +1667,7 @@ if (pxFontSizes.length) {
 console.log(
   `\n__css_check: ${uniqEmitted.size} classes checked, ${uniqConsumed.size} tokens checked, ` +
     `${contrastResults.length} contrast pairs, ${allowlistedHits.length + hookHits.length + rawAllowed.length} allowlisted, ` +
-    `${errors.length} error(s)`,
+    `${gapHits.length} known gap(s) demoted (R3), ${errors.length} error(s)`,
 );
 
 if (errors.length) {

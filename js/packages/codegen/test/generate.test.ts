@@ -229,6 +229,33 @@ describe('generateTypes — non-identifier field names', () => {
     expect(out).not.toMatch(/'a'\s*\|\s*'b'\s*\|\s*'c'/)
   })
 
+  it('select whose `options` is the old guerrilla object shape {list:[...]} falls back to `string`, not a leaked union (ticket.status precedent)', async () => {
+    // The pre-fix guerrilla `ticket.status` field shipped `type:"string"` with
+    // `options: {list:['open','closed']}` — an OBJECT, not the array the mapper
+    // models. That exact shape is the string-shape guard's structural sibling:
+    // `Array.isArray(field.options)` (#865, generate.ts) degrades a non-array
+    // `options` to `[]`, so `status` emits plain `string` with no throw and no
+    // leaked union or `'list'` literal. This is the JS mirror of Go's
+    // `TestLoadSchemasTolerantOptions` — the strict-shape decode class that took
+    // down apiclient schema loading (the ticket.status outage, charter §9/§22).
+    const env = {
+      datasetSchemaHash: 'deadbeef',
+      schemas: [
+        {
+          name: 'ticket',
+          title: 'Ticket',
+          fields: [{ name: 'status', type: 'select', options: { list: ['open', 'closed'] } }],
+        },
+      ],
+    } as unknown as BarkparkSchemaJson
+
+    const out = await generateTypes(env, { dataset: 'production' })
+
+    expect(out).toMatch(/status\?:\s*string/)
+    expect(out).not.toMatch(/'open'\s*\|\s*'closed'/)
+    expect(out).not.toMatch(/'list'/)
+  })
+
   it('sanitizes a non-identifier schema name into a valid interface name + quoted map key', async () => {
     const env = {
       datasetSchemaHash: 'deadbeef',

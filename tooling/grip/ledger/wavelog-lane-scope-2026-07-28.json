@@ -1,0 +1,59 @@
+{
+  "run_id": "grip-20260728T2130Z-wavelog-lane-scope",
+  "recipes": [
+    {
+      "subject": "epic parent auth-totp-tests-are-time-boundary-flaky claim clock",
+      "quantity": "ledger:claim.expired_at",
+      "rerun": "curl -s https://guerrilla.barkpark.cloud/v1/data/doc/production/task/auth-totp-tests-are-time-boundary-flaky | python3 -c \"import json,sys;r=json.load(sys.stdin)['result'];print(r.get('lifecycle_status'), json.dumps(r.get('claim')))\"",
+      "derived_level": "L1",
+      "deps": ["guerrilla ledger"],
+      "observed_at": "2026-07-28T21:26:47Z",
+      "observed": "lifecycle=open, claim.worker=null, previous_worker=lead-land, expired_at=2026-07-28T15:57:00.343937Z, epoch=8"
+    },
+    {
+      "subject": "pr-task-gate verdict for a wave-5 charter PR opened now",
+      "quantity": "script:exit+message",
+      "rerun": "TASK_ID=auth-totp-tests-are-time-boundary-flaky PR_OPENED_AT=$(date -u +%FT%TZ) bash scripts/pr-task-gate.sh; echo exit=$?",
+      "derived_level": "L2",
+      "deps": ["scripts/pr-task-gate.sh", "guerrilla ledger"],
+      "observed_at": "2026-07-28T21:31:00Z",
+      "observed": "FAIL exit=1 — claim by 'lead-land' had ALREADY lapsed 19979s before this PR was opened"
+    },
+    {
+      "subject": "the 6h grace no longer exists on origin/main",
+      "quantity": "grep:absence",
+      "rerun": "git show origin/main:scripts/pr-task-gate.sh | grep -c 'LAPSE_GRACE_SECONDS\\|21600'",
+      "derived_level": "L3",
+      "deps": ["scripts/pr-task-gate.sh@origin/main"],
+      "observed_at": "2026-07-28T21:35:00Z",
+      "observed": "0 — replaced by P4 (charter D58): open_lead = claim.expired_at - pull_request.created_at >= 0"
+    },
+    {
+      "subject": "bp task pulse cannot renew a lapsed claim",
+      "quantity": "code:guard",
+      "rerun": "sed -n '126,136p' api/lib/barkpark/tasks/pulse.ex",
+      "derived_level": "L3",
+      "deps": ["api/lib/barkpark/tasks/pulse.ex"],
+      "observed_at": "2026-07-28T21:33:00Z",
+      "observed": "check_live/1: lifecycle_status must be in_progress, else {:error, :not_holder}"
+    },
+    {
+      "subject": "charter PR carries the EPIC parent task id, and the wave log rides that same PR",
+      "quantity": "grep:-n",
+      "rerun": "grep -n 'Task: ${EPIC_TASK_ID' .claude/workflows/bp-epic-cycle.workflow.js; sed -n '832p' .claude/workflows/bp-epic-cycle.workflow.js",
+      "derived_level": "L3",
+      "deps": [".claude/workflows/bp-epic-cycle.workflow.js"],
+      "observed_at": "2026-07-28T21:34:00Z",
+      "observed": "line 734 hard-codes the trailer on the CHARTER PR; line 832 routes Review's wave-log append onto the charter PR's branch"
+    },
+    {
+      "subject": "claim lease TTL",
+      "quantity": "code:constant",
+      "rerun": "grep -n '@default_ttl_seconds' api/lib/barkpark/tasks/ttl_sweeper.ex",
+      "derived_level": "L3",
+      "deps": ["api/lib/barkpark/tasks/ttl_sweeper.ex"],
+      "observed_at": "2026-07-28T21:36:00Z",
+      "observed": "2700 (45 min)"
+    }
+  ]
+}

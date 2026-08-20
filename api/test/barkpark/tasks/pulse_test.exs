@@ -27,7 +27,7 @@ defmodule Barkpark.Tasks.PulseTest do
        (bp task pulse rides generic dispatch — zero new Go).
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query, only: [from: 2]
 

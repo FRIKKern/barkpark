@@ -1,0 +1,57 @@
+{
+  "$schema": "../barkpark.template.schema.json",
+  "manifestVersion": "1",
+  "name": "search-starter",
+  "title": "Search Starter",
+  "description": "The flagship search site: instant live search with misspellings widened server-side by Postgres trigram, an interactive corpus graph, and canonical PortableDoc document pages — over any Barkpark dataset.",
+  "framework": "nextjs",
+  "dataset": "production",
+  "demoContent": true,
+  "theme": "evergreen",
+  "schemas": ["schemas/entry.json"],
+  "seed": {
+    "path": "seed.json",
+    "format": "mutations",
+    "publish": true,
+    "publishType": "entry"
+  },
+  "env": [
+    {
+      "key": "BARKPARK_API_URL",
+      "role": "server",
+      "source": "api_url",
+      "description": "Barkpark API base — a BARE origin (the graph rides the flat /v1/graph route). Server-side only."
+    },
+    {
+      "key": "BARKPARK_TOKEN",
+      "role": "server",
+      "source": "read_token",
+      "description": "Read-only, workspace-bound token minted at bootstrap. Server-only — never NEXT_PUBLIC_."
+    },
+    {
+      "key": "BARKPARK_DATASET",
+      "role": "server",
+      "source": "dataset",
+      "description": "Dataset the finder, reader and graph read from."
+    },
+    {
+      "key": "BARKPARK_WORKSPACE",
+      "role": "server",
+      "source": "workspace",
+      "description": "Workspace slug for the scoped search/read routes."
+    },
+    {
+      "key": "BARKPARK_PROJECT",
+      "role": "server",
+      "source": "project",
+      "description": "Project slug for the scoped search/read routes."
+    },
+    {
+      "key": "BARKPARK_DOC_TYPE",
+      "role": "server",
+      "source": "literal",
+      "value": "entry",
+      "description": "The content type the finder surfaces — the seeded reference-rich `entry` corpus."
+    }
+  ]
+}

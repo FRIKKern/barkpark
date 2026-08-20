@@ -181,8 +181,8 @@ func TestStatusLegendGoldenParity(t *testing.T) {
 	if proj.ContainerRole != "legend" {
 		t.Fatalf("container_role = %q, want legend", proj.ContainerRole)
 	}
-	if len(proj.Rows) != 6 {
-		t.Fatalf("projection floor: %d rungs, want 6 (the white ladder)", len(proj.Rows))
+	if len(proj.Rows) != 8 {
+		t.Fatalf("projection floor: %d rungs, want 8 (the white ladder + the two thought states)", len(proj.Rows))
 	}
 
 	out := renderComponent(t, fx.Input)

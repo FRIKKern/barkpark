@@ -19,10 +19,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os/exec"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,6 +44,7 @@ const (
 	pendingPath        = "/v1/agent/pending"
 	claimPath          = "/v1/agent/deployments/claim"
 	transitionPathFmt  = "/v1/agent/deployments/%s/transition"
+	siteEnvPathFmt     = "/v1/agent/sites/%s/env"
 	defaultPortMin     = 7001
 	defaultPortMax     = 7999
 	containerInnerPort = 3000
@@ -108,6 +113,43 @@ type InlineSite struct {
 	ScaleMode   string   `json:"scale_mode,omitempty"`
 	PreviewSlug string   `json:"preview_slug,omitempty"`
 	PreviewHost string   `json:"preview_host,omitempty"`
+
+	// ServingMode is the control plane's per-site instruction for how the box
+	// terminates TLS: ServingModeDirect (default) issues a cert on demand;
+	// ServingModeCFProxied renders `tls internal` so a Cloudflare-proxied origin
+	// never runs on-demand ACME (whose challenge cannot complete through the
+	// proxy → error 526). The empty string is the zero value and means direct,
+	// so a claim from a control plane that does not yet send serving_mode keeps
+	// rendering today's on-demand block byte-for-byte. The CP→box channel that
+	// populates this is a separate concern (cf-agent-sites-tls-channel backlog);
+	// the field is threaded here so the derivation is ready the moment it lands.
+	ServingMode string `json:"serving_mode,omitempty"`
+}
+
+// Serving modes carried on InlineSite.ServingMode — the control plane's per-site
+// TLS-termination instruction. Direct sites resolve straight to the box and
+// issue their own cert on demand; CF-proxied sites sit behind Cloudflare's
+// orange cloud and must present a self-signed cert instead of running ACME.
+const (
+	// ServingModeDirect — the domain resolves straight to the box (grey cloud /
+	// no proxy). On-demand ACME is correct. This is the zero-value default.
+	ServingModeDirect = "direct"
+	// ServingModeCFProxied — the domain is proxied through Cloudflare (orange
+	// cloud). On-demand ACME cannot complete through the proxy, so the box must
+	// render `tls internal` (self-signed) to avoid Cloudflare error 526.
+	ServingModeCFProxied = "cf_proxied"
+)
+
+// tlsModeForServing maps a site's serving_mode to the caddyfile TLS mode the
+// renderer needs: cf_proxied → internal (self-signed, no ACME — 526-safe behind
+// the Cloudflare proxy); everything else (direct, empty, or any unknown value)
+// → on_demand, the direct-to-box default. On-demand is the fail-safe default so
+// an unrecognized mode never silently produces a `tls internal` origin.
+func tlsModeForServing(mode string) string {
+	if mode == ServingModeCFProxied {
+		return caddyfile.TLSModeInternal
+	}
+	return caddyfile.TLSModeOnDemand
 }
 
 // CommandRunner runs a subprocess, streaming combined stdout+stderr to w.
@@ -156,15 +198,46 @@ func (DefaultPortAllocator) Allocate(inUse map[int]bool) (int, error) {
 
 // State carries the across-cycle facts the executor needs: which ports are
 // already serving live sites (so the next blue/green green never collides),
-// and the slug+port+domains of each live site (so the rendered Caddyfile
+// and the slug+port+domains of each live site (so the rewritten Caddyfile
 // reflects all sites, not just the one being deployed). Tests build State by
-// hand; the production path fetches it from /v1/agent/sites (TBD) or just
-// from the disk Caddyfile parse (P3 followup).
-//
-// For the MVP, the executor accepts State explicitly — the loop's caller
-// (cmd/barkpark-runtime) constructs it from disk + control plane.
+// hand; the production path (cmd/barkpark-runtime) reconstructs it fresh
+// before every cycle via StateFromDisk — parsing the on-box Caddyfile, the
+// source of truth for what Caddy is actually serving.
 type State struct {
+	// LiveSites are the runtime-managed sites recovered from the Caddyfile's
+	// marker-carrying blocks (slug, domains, upstream port, kind, TLS mode).
 	LiveSites []caddyfile.Site
+
+	// ReservedPorts are loopback upstream ports claimed by Caddyfile vhosts
+	// the runtime does NOT manage — e.g. the instance API/Studio vhost
+	// proxying 127.0.0.1:4000, or an attach-domain vhost the provisioner
+	// appended. The port allocator must never hand one of these to a new
+	// container.
+	ReservedPorts map[int]bool
+}
+
+// StateFromDisk reconstructs State by parsing the Caddyfile at CaddyfilePath:
+// every marker-carrying managed block comes back as a live Site, and every
+// loopback port claimed by a foreign block is reserved. A missing file is an
+// empty box, not an error; any other read failure surfaces so a cycle never
+// proceeds on guessed-empty state (which is exactly the MVP bug this
+// replaces: empty state made the rewrite delete every foreign vhost and the
+// allocator re-issue a port a live container still bound).
+//
+// The signature matches Run's buildState, so the cmd wrapper passes the
+// method directly — state is re-parsed before EVERY cycle, never cached, so a
+// long-running executor cannot go stale against a file that the provisioner,
+// attach-domain, or an operator edits underneath it.
+func (e *Executor) StateFromDisk(context.Context) (State, error) {
+	buf, err := e.fs().ReadFile(e.CaddyfilePath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return State{}, nil
+		}
+		return State{}, fmt.Errorf("read caddyfile %s: %w", e.CaddyfilePath, err)
+	}
+	p := caddyfile.Parse(buf)
+	return State{LiveSites: p.Sites, ReservedPorts: p.ForeignPorts}, nil
 }
 
 // RunOnce runs a single pending-claim → execute → transition cycle. Returns:
@@ -195,10 +268,16 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	// We have a healthy new container on `port`. Render Caddyfile with the
 	// updated site list (replace this site's existing entry), reload Caddy,
 	// then drain the old (blue) container if any.
+	// Derive the TLS mode from the site's serving_mode so a Cloudflare-proxied
+	// site renders `tls internal` (526-safe) and a direct site keeps on-demand.
+	// serving_mode is zero-valued until the CP→box channel populates it
+	// (cf-agent-sites-tls-channel backlog), so today every site resolves to
+	// on_demand and the rendered block is byte-identical to before.
 	updated := mergeSite(state.LiveSites, caddyfile.Site{
 		Slug:    slug,
 		Domains: domains,
 		Port:    port,
+		TLSMode: tlsModeForServing(d.Site.ServingMode),
 	})
 
 	if err := e.writeCaddyfile(updated); err != nil {
@@ -319,6 +398,22 @@ func (e *Executor) transition(ctx context.Context, id string, body map[string]an
 	return statusError(resp)
 }
 
+// safeImageTag is the fail-closed allowlist for d.ImageTag before it is used to
+// build the docker-load tar path AND the docker-run image ref. The producer
+// mints tags as `site-<hex8>-<hex8>` (builder.go), so a strict charset is
+// lossless for every legitimate tag while refusing the whole path-escape /
+// arbitrary-tar-load class defense-in-depth on top of the #12308 shell-RCE fix.
+//
+// CRITICAL — the two rules must not drift: this charset rejects '/', and it is
+// the '/' rejection (not a '..' rule) that neutralizes a bare `..`. A tag of
+// exactly ".." passes the charset (dot and hyphen are allowed) but is inert:
+// `<CacheDir>/...tar` is a single filename under CacheDir, not a parent-dir
+// traversal. Traversal needs a separator — `../x` or `a/../..` — and every one
+// of those carries a '/', which this pattern refuses. Do NOT relax '/' on the
+// theory that '..' is separately handled; there is no separate '..' handling,
+// and there must not be, because '/' rejection IS the containment.
+var safeImageTag = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
 // executeDeploy walks a claimed deployment from pushing → running container:
 // docker load → docker run on a fresh port → health-check. Returns:
 //
@@ -330,18 +425,42 @@ func (e *Executor) executeDeploy(
 	d *claimed,
 	state State,
 ) (string, string, []string, int, int, error) {
+	// 0. Fail closed on a hostile image tag BEFORE it reaches either docker sink.
+	// This one guard at function entry dominates BOTH uses of d.ImageTag below:
+	// the docker-load tar path (step 1) and the docker-run image ref (step 4).
+	// d.ImageTag is decoded RAW from the control-plane claim JSON; a tag bearing
+	// '/' or '..' would let `docker load -i <CacheDir>/<tag>.tar` read an
+	// attacker-chosen tar OUTSIDE CacheDir. See safeImageTag for why '/' rejection
+	// (not a '..' rule) is what provides containment — the two must not drift.
+	if !safeImageTag.MatchString(d.ImageTag) {
+		return "", "", nil, 0, 0, fmt.Errorf("refusing unsafe image tag %q: must match %s", d.ImageTag, safeImageTag.String())
+	}
+
 	slug, domains, livePort := e.resolveSite(d, state)
 	site := d.SiteID
 
-	// 1. Load the image from the builder's cache.
+	// 1. Load the image from the builder's cache. Fixed argv straight through
+	// execve (ExecRunner.Run is exec.CommandContext — NO shell): imageTar embeds
+	// d.ImageTag, decoded raw from the control-plane claim JSON, so a malicious
+	// tag like `$(...)`/backticks must land as one literal filename argument, not
+	// a command the shell expands. A prior `sh -c "docker load -i %q"` was a real
+	// RCE — Go's %q does NOT neutralize `$(...)`/backticks inside a shell.
 	imageTar := fmt.Sprintf("%s/%s.tar", strings.TrimRight(e.CacheDir, "/"), d.ImageTag)
 	if err := e.runner().Run(ctx, devNull{},
-		"sh", "-c", fmt.Sprintf("docker load -i %q", imageTar)); err != nil {
+		"docker", "load", "-i", imageTar); err != nil {
 		return "", "", nil, 0, 0, fmt.Errorf("docker load %s: %w", imageTar, err)
 	}
 
-	// 2. Pick the new (green) port — avoiding any live ports.
+	// 2. Pick the new (green) port — avoiding every port already spoken for:
+	// live managed sites, AND ports claimed by foreign Caddyfile vhosts the
+	// runtime doesn't manage (the instance API vhost proxies 127.0.0.1:4000 —
+	// handing that to a container would break the box's own control surface).
 	inUse := map[int]bool{}
+	for p, used := range state.ReservedPorts {
+		if used {
+			inUse[p] = true
+		}
+	}
 	for _, s := range state.LiveSites {
 		if s.Port > 0 {
 			inUse[s.Port] = true
@@ -355,23 +474,57 @@ func (e *Executor) executeDeploy(
 		return "", "", nil, 0, 0, fmt.Errorf("port allocate: %w", err)
 	}
 
-	// 3. Run the new container.
+	// 3. Fetch the site's env (site-env-injection): the DECRYPTED blob the user
+	// set via `bp sites env set`, injected as `-e KEY=VAL` pairs so the RUNNING
+	// container (not just the build) sees it. A missing blob — or a control
+	// plane predating the route (404 either way) — runs env-less; any other
+	// error fails the deploy rather than silently starting a container without
+	// the env its site was configured with.
+	//
+	// Leak posture: `-e` pairs over an --env-file. The values land in the
+	// container's config either way (`docker inspect`, root-only), the runner
+	// exec's docker DIRECTLY (no shell, output to devNull — nothing reaches the
+	// journal or any log writer), and an on-disk env-file would add a real
+	// leak: a crash between write and cleanup strands the secrets in a file
+	// forever. The argv is visible in /proc only for the docker CLI's lifetime
+	// on a single-tenant root-owned box.
+	env, err := e.fetchSiteEnv(ctx, d.SiteID)
+	if err != nil {
+		return "", "", nil, 0, 0, fmt.Errorf("site env: %w", err)
+	}
+
+	// 4. Run the new container. Site env rides FIRST and the platform pairs
+	// (HOSTNAME/PORT) LAST — with docker the last `-e` wins, so a site env that
+	// names PORT can never repoint the container off the port Caddy proxies to.
 	containerName := fmt.Sprintf("site-%s-%s", slug, short(d.ID))
+
+	// Belt and braces: a previous failed cycle can leave a Created-but-never-
+	// started container squatting this exact name (seen in production —
+	// deployment 2f92055a left site-jarl-website-2f92055a in Created, and the
+	// retry's `docker run` failed with "name already in use", exit 125).
+	// Best-effort removal; an absent name just errors quietly.
+	_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName)
+
 	args := []string{
 		"run", "-d",
 		"--name", containerName,
 		"--restart", "unless-stopped",
 		"--memory=512m", "--cpus=1",
+	}
+	for _, k := range sortedKeys(env) {
+		args = append(args, "-e", k+"="+env[k])
+	}
+	args = append(args,
 		"-e", fmt.Sprintf("HOSTNAME=0.0.0.0"),
 		"-e", fmt.Sprintf("PORT=%d", containerInnerPort),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, containerInnerPort),
 		d.ImageTag,
-	}
+	)
 	if err := e.runner().Run(ctx, devNull{}, "docker", args...); err != nil {
 		return "", "", nil, 0, 0, fmt.Errorf("docker run: %w", err)
 	}
 
-	// 4. Health-check the container until /` answers (any non-5xx).
+	// 5. Health-check the container until /` answers (any non-5xx).
 	if err := e.healthCheck(ctx, port); err != nil {
 		// Tear down the failed container before bailing.
 		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName)
@@ -379,6 +532,56 @@ func (e *Executor) executeDeploy(
 	}
 
 	return site, slug, domains, port, livePort, nil
+}
+
+// fetchSiteEnv GETs the site's decrypted env from the agent surface of the
+// control plane (box-scoped by the agent token). Returns:
+//   - (map, nil) on 200 — the KEY=VAL pairs to inject (`{}` when no blob set).
+//   - (nil, nil) on 404 — tolerated: a control plane predating the route (or a
+//     site racing a delete) must not brick every deploy; it runs env-less.
+//   - (nil, err) on anything else — the caller fails the deploy rather than
+//     silently running without the env the site was configured with.
+func (e *Executor) fetchSiteEnv(ctx context.Context, siteID string) (map[string]string, error) {
+	url := strings.TrimRight(e.ControlURL, "/") + fmt.Sprintf(siteEnvPathFmt, siteID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	e.attachAuth(req)
+
+	resp, err := e.http().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var out struct {
+			Env map[string]string `json:"env"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return nil, fmt.Errorf("decode site env: %w", err)
+		}
+		return out.Env, nil
+
+	case http.StatusNotFound:
+		return nil, nil
+
+	default:
+		return nil, statusError(resp)
+	}
+}
+
+// sortedKeys returns env's keys sorted — a deterministic `-e` order, so two
+// deploys of the same site produce identical docker invocations.
+func sortedKeys(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // resolveSite returns (slug, domains, livePort) for the deployment. The
@@ -445,13 +648,29 @@ func (e *Executor) healthCheck(ctx context.Context, port int) error {
 	}
 }
 
+// writeCaddyfile rewrites the on-box Caddyfile so it serves sites while
+// preserving, byte-identical, every vhost the runtime does not manage (no
+// "# Managed by barkpark-runtime" marker): the instance API/Studio vhost, the
+// provisioner's attach-domain blocks, anything an operator added by hand. The
+// previous MVP re-rendered the whole file from (always-empty) state, which
+// deleted every foreign vhost on the box — on the jarl box that took down
+// jarl.barkpark.cloud and barkpark.jarl.no until an operator repaired them.
 func (e *Executor) writeCaddyfile(sites []caddyfile.Site) error {
-	text := caddyfile.Render(caddyfile.Box{
+	prev, err := e.fs().ReadFile(e.CaddyfilePath)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			// An unreadable existing file must fail the deploy — rewriting
+			// from scratch here would clobber every vhost we couldn't read.
+			return fmt.Errorf("read existing: %w", err)
+		}
+		prev = nil
+	}
+	text := caddyfile.Rewrite(prev, caddyfile.Box{
 		AskGateURL:     e.AskGateURL,
 		StudioUpstream: e.StudioUpstream,
 		Sites:          sites,
 	})
-	return e.fs().WriteFile(e.CaddyfilePath, []byte(text), 0o644)
+	return e.fs().WriteFile(e.CaddyfilePath, text, 0o644)
 }
 
 func (e *Executor) reloadCaddy(ctx context.Context) error {
@@ -505,11 +724,14 @@ func (e *Executor) Run(ctx context.Context, buildState func(context.Context) (St
 	}
 }
 
+// http returns the injected client, or a Timeout-bearing fallback (30s) so a
+// hung control-plane connection can't freeze the claim/transition loop with
+// no crash and no log — http.DefaultClient has Timeout 0 (no deadline).
 func (e *Executor) http() *http.Client {
 	if e.HTTPClient != nil {
 		return e.HTTPClient
 	}
-	return http.DefaultClient
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 func (e *Executor) runner() CommandRunner {
@@ -560,7 +782,11 @@ func statusError(resp *http.Response) error {
 }
 
 // mergeSite replaces or appends s by slug in sites — pure function, returns a
-// new slice (input untouched, safe to call with shared state).
+// new slice (input untouched, safe to call with shared state). It operates on
+// whole caddyfile.Site values, so every field — including a static site's
+// Kind/Root (charter D9) — rides through untouched: a KindStatic entry already
+// in state.LiveSites survives a reverse_proxy deploy of a different slug, and
+// the container path here keeps constructing Kind-empty (reverse_proxy) sites.
 func mergeSite(sites []caddyfile.Site, s caddyfile.Site) []caddyfile.Site {
 	out := make([]caddyfile.Site, 0, len(sites)+1)
 	replaced := false

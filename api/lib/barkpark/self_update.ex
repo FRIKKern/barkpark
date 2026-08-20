@@ -73,11 +73,28 @@ defmodule Barkpark.SelfUpdate do
     end
   end
 
-  # :check_now runs up to two 10s-budget HTTP requests inline — the call
-  # timeout must cover the client's own worst case or a merely-slow upstream
-  # masquerades as :unknown while the fresh result is thrown away.
-  defp call_timeout(:check_now), do: 30_000
-  defp call_timeout(_msg), do: 5_000
+  # :check_now runs run_check/0 inline, which on the fork-mode :behind path
+  # makes FOUR sequential HTTP requests — latest_release(repo),
+  # fork_advice -> latest_release(canonical), release_notes, digest — each
+  # bounded by the client's per-request receive timeout. The call timeout is
+  # DERIVED from that worst-case budget (+ a scheduling/JSON-decode margin) so
+  # a merely-slow upstream returns a fresh result instead of exiting the
+  # caller :timeout, which would masquerade as :unknown and discard the check.
+  @check_now_timeout_margin_ms 5_000
+
+  @doc false
+  @spec check_now_timeout_ms() :: pos_integer()
+  def check_now_timeout_ms,
+    do: Checker.worst_case_http_budget_ms() + @check_now_timeout_margin_ms
+
+  # Public (`@doc false`) so the check-timeout test asserts on the value the
+  # `GenServer.call/3` above ACTUALLY dispatches with — not just the derivation
+  # helper. Without that, reverting this `:check_now` clause to a hand-tuned
+  # literal stays green (the test only saw `check_now_timeout_ms/0`).
+  @doc false
+  @spec call_timeout(atom()) :: pos_integer()
+  def call_timeout(:check_now), do: check_now_timeout_ms()
+  def call_timeout(_msg), do: 5_000
 
   # Baseline status map — the shape every status/0 / check_now/0 result has.
   # Shared with the Checker so the disabled/unknown fallbacks and the real

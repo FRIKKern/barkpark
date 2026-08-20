@@ -1,0 +1,50 @@
+{
+  "kind": "grip-rederivation-ledger",
+  "wave": "felix-pristine-w18-2026-07-23",
+  "arm": "E (E4) — Fable-architected + Fable-graded, lean base",
+  "role": "verifier (last explorer before Decide) — S3 anchor refresh + green baseline",
+  "created_utc": "2026-07-22T23:11:32Z",
+  "facts": [
+    {
+      "id": "board-ex-current-anchors",
+      "claim": "On origin/main (1765b128c), api/lib/barkpark/tasks/board.ex: snapshot/1 at line 156 (per-doc to_card call at line 165-166); to_card/3 defp header at line 195, body ends line 222 — projects doc_id/title/priority/parent_id/labels/worker/lifecycle_status/criteria/github/github_synced/blocker_statuses/next_criterion/description_excerpt/design_doc/criteria_list/created_at/updated_at straight off `doc.content`, zero visibility gate. family_walk/4 first (guard) clause at line 833, second clause at line 835, row map built lines 841-855 (desc/crits fields). Zero occurrences of 'Envelope' or 'field_readable' anywhere in the file. The task brief's ~L904/977/998 anchors are stale (do not correspond to to_card/family_walk/anything at those lines today).",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:api/lib/barkpark/tasks/board.ex | grep -n '^  def to_card\\|^  defp to_card\\|^  defp family_walk\\|^  def snapshot' && git show origin/main:api/lib/barkpark/tasks/board.ex | grep -n 'Envelope\\|field_readable'"
+    },
+    {
+      "id": "board-live-ex-current-anchors",
+      "claim": "On origin/main, api/lib/barkpark/plugins/tasks/web/board_live.ex (NOT api/lib/barkpark_web/live/ — the plugin owns it): load_peek/2 defp at line 650, peek_schema/0 at line 728, peek_field_readable?/2 at line 738 (calls Envelope.field_readable?/3 with CallerContext.anonymous()), peek_criteria/1 at line 767. Card render sites: data-role=\"card-desc\" at line 2895, data-role=\"card-criteria\" at line 2910 (renders card.criteria_list text, unsealed), data-role=\"gantt-criteria\" at line 3017 and data-role=\"gantt-criterion\" at line 3026 (also named in the open task's brief but not in the wish's explicit list). gantt_data/1 defp at line 3197 (reads card[:criteria_list] into the root row's `crits` key, unsealed). focus_of/1 defp at line 3373 reads card[:next_criterion] into the rendered 'now' focus line.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:api/lib/barkpark/plugins/tasks/web/board_live.ex | grep -n '^  defp load_peek\\|^  defp peek_schema\\|^  defp peek_field_readable?\\|^  defp peek_criteria\\|^  defp gantt_data\\|^  defp focus_of\\|card-desc\\|card-criteria\\|gantt-criteria\\|gantt-criterion'"
+    },
+    {
+      "id": "worktree-files-identical-to-origin-main",
+      "claim": "This worktree's HEAD (7a7a542ee) is 9 commits behind origin/main, but board.ex and board_live.ex are byte-identical between HEAD and origin/main (empty diff both files) — so the anchors above are valid for local test runs too, and the local checkout is not stale ON THESE TWO FILES specifically.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && diff <(git show HEAD:api/lib/barkpark/tasks/board.ex) <(git show origin/main:api/lib/barkpark/tasks/board.ex); diff <(git show HEAD:api/lib/barkpark/plugins/tasks/web/board_live.ex) <(git show origin/main:api/lib/barkpark/plugins/tasks/web/board_live.ex)"
+    },
+    {
+      "id": "criteria-field-is-derived-count-only",
+      "claim": "The card's `criteria` field (Barkpark.Tasks.Board.to_card, board.ex:216) is `Tasks.criteria_progress(content)` -> defdelegate to Barkpark.Tasks.Criteria.progress/1 (api/lib/barkpark/tasks/criteria.ex:33-41), which computes ONLY %{met: integer, total: integer} by counting entries in content.acceptance_criteria — it never reads or returns any criterion TEXT. This field does NOT need Envelope gating for content (a count is not the protected text), though the existing peek deliberately gates it as a whole unit anyway for consistency (see next fact).",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:api/lib/barkpark/tasks/criteria.ex | sed -n '25,55p'"
+    },
+    {
+      "id": "next-criterion-and-criteria-list-read-raw-text",
+      "claim": "board.ex's next_criterion/1 (defp, ~line 270) and criteria_list/1 (defp, ~line 226-232ish near 'criteria_list' — see criteria_list_cap block right after to_card) BOTH read content['acceptance_criteria'] directly and return the literal 'criterion' TEXT string(s) of entries (next_criterion: first unmet entry's text; criteria_list: up to 8 entries' {text, met}). These ARE task-content fields Envelope.field_readable? would gate — mirroring the merged peek seal, which explicitly guards the equivalent peek_criteria/1 behind readable?.(\"acceptance_criteria\") (board_live.ex:767-773, gated at line 655 via readable?.(\"acceptance_criteria\")) and documents in its own comment (board_live.ex:765-766) that peek_criteria carries 'the data the card's n/m can only count' — i.e. the peek author already drew this exact count-vs-text distinction. So S3's seal must gate BOTH next_criterion and criteria_list (2 field groups off one acceptance_criteria read), and separately gate description_excerpt/design_doc (2 more groups) — NOT the bare `criteria` count. Net: the card projection has (at minimum) description, design_doc, and acceptance_criteria(->criteria_list+next_criterion) as gate-worthy groups; `criteria` (the count) and `labels`/`priority`/`parent_id` mirror the peek's own list of gated fields if parity with the peek is the goal.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:api/lib/barkpark/tasks/board.ex | sed -n '195,232p' && git show origin/main:api/lib/barkpark/tasks/board.ex | grep -n 'defp next_criterion' -A20 | head -25 && git show origin/main:api/lib/barkpark/plugins/tasks/web/board_live.ex | sed -n '650,665p;760,790p'"
+    },
+    {
+      "id": "board-test-green-baseline",
+      "claim": "GREEN BASELINE PROVEN (local Postgres up, pg_isready OK). Only two real board test files exist (a substring-match false positive on 'dashboard_live_test.exs' contains 0 Board references, confirmed excluded): test/barkpark/plugins/tasks/web/board_live_test.exs -> 93 tests, 0 failures, 3.9s; test/barkpark/tasks/board_theme_parity_test.exs -> 4 tests, 0 failures, 0.03s. NO dedicated unit-test file for board.ex itself exists (Barkpark.Tasks.Board is only exercised indirectly through board_live_test.exs and board_theme_parity_test.exs) — the open task's DoD line 'board_test.exs' does not exist yet and the builder will likely need to create one, or extend board_live_test.exs, for a card-level (non-LiveView) mutation-proof of to_card/family_walk.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && CC=clang mix test test/barkpark/plugins/tasks/web/board_live_test.exs test/barkpark/tasks/board_theme_parity_test.exs 2>&1 | tail -10"
+    },
+    {
+      "id": "no-board-ex-unit-test-file",
+      "claim": "grep -rl 'Barkpark.Tasks.Board\\b' test/ returns only board_live_test.exs and board_theme_parity_test.exs — confirms no test/barkpark/tasks/board_test.exs exists on this checkout (byte-identical to origin/main for the two source files, and no untracked board_test.exs was found either).",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && grep -rl 'Barkpark.Tasks.Board\\b' test | sort -u && find test -iname '*board*' | sort -u"
+    },
+    {
+      "id": "peek-seal-task-done-and-github-issue-mismatch",
+      "claim": "The sibling peek seal task (task-felix-w13-boardlive-envelope-fieldvis-seal) is lifecycle_status=done, confirming the #5470 template referenced in the wish is real and merged; its own bp record's github field is null (not 5470) so #5470 is only traceable via the PR history, not the task doc's github mirror.",
+      "rerun": "bp task get task-felix-w13-boardlive-envelope-fieldvis-seal | python3 -c \"import json,sys; d=json.load(sys.stdin)['doc']; print(d['lifecycle_status'], d.get('github'))\""
+    }
+  ],
+  "verdict_note": "Anchors re-derived and RUN-PROVEN green baseline exists (97 tests total, 0 failures, both files). criteria (count) is safe/derived; next_criterion + criteria_list carry raw acceptance_criteria TEXT and must be gated (matches peek's own precedent). Open task's stale line anchors (~L904/977/998) replaced with the current ones listed above. No board.ex-specific unit test file exists yet — builder brief should flag this as a possible new-file need, not assume board_live_test.exs alone suffices for a to_card/family_walk-level mutation proof."
+}

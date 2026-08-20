@@ -108,7 +108,7 @@ defmodule Barkpark.PortableDoc.Render.ThemeResolveTest do
 
   describe "TokensGen theme-keying + Resolve (generated file)" do
     test "the committed theme set, default first" do
-      assert TokensGen.themes() == [:evergreen, :charple, :ember, :fjord]
+      assert TokensGen.themes() == [:evergreen, :charple, :ember, :fjord, :iris]
     end
 
     test "colour accessors default to evergreen and fold unknown → evergreen" do

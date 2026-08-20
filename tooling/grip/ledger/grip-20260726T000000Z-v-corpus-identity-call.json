@@ -1,0 +1,53 @@
+{
+  "run_id": "grip-20260726T000000Z-v-corpus-identity-call",
+  "recipes": [
+    {
+      "subject": "cloud/lib/barkpark_cloud/web/router.ex",
+      "quantity": "site PATCH mutable fields = theme, doc_type ONLY (dataset/name/slug immutable post-create)",
+      "rerun": "awk '/patch \"\\/v1\\/sites\\/:id\"/,/^  end/' cloud/lib/barkpark_cloud/web/router.ex | grep 'Map.take'",
+      "derived_level": "L3",
+      "deps": ["cloud/lib/barkpark_cloud/web/router.ex"],
+      "observed_at": "2026-07-26T00:00:00Z"
+    },
+    {
+      "subject": "internal/cli/cloud_site_cmd.go",
+      "quantity": "bp cloud site delete verb EXISTS on origin/main (case delete/rm); no --slug flag; --template + --theme parsed on create",
+      "rerun": "git show origin/main:internal/cli/cloud_site_cmd.go | grep -n 'case \"delete\", \"rm\"\\|\"template\", \"theme\"\\|parseHzArgs'",
+      "derived_level": "L4",
+      "deps": ["internal/cli/cloud_site_cmd.go"],
+      "observed_at": "2026-07-26T00:00:00Z"
+    },
+    {
+      "subject": "guerrilla /v1/graph",
+      "quantity": "dataset= param honored (bogus dataset -> 0 nodes); nodes carry per-node type; production = 1803 nodes, paper-paper edges = 4 of 987",
+      "rerun": "curl -s -H \"Authorization: Bearer $BARKPARK_TOKEN\" 'https://guerrilla.barkpark.cloud/v1/graph?dataset=production' | python3 -c 'import json,sys;d=json.load(sys.stdin);ns=d[\"nodes\"];es=d[\"edges\"];t={n[\"id\"]:n.get(\"type\") for n in ns};print(len(ns),len(es),sum(1 for e in es if t.get(e[\"from_id\"])==\"paper\" and t.get(e[\"to_id\"])==\"paper\"))'",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark_web/controllers/tasks_controller.ex"],
+      "observed_at": "2026-07-26T00:00:00Z"
+    },
+    {
+      "subject": "api/lib/barkpark/search/intelligence.ex",
+      "quantity": "suggestion chips keyed (surface='documents', scope=dataset string, workspace_id) — production pool is dev exhaust live",
+      "rerun": "curl -s -H \"Authorization: Bearer $BARKPARK_TOKEN\" 'https://guerrilla.barkpark.cloud/v1/data/search/production/suggestions?limit=10' | python3 -c 'import json,sys;r=json.load(sys.stdin)[\"result\"];print([p[\"query\"] for p in r[\"popular\"]])'",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/search/intelligence.ex", "api/lib/barkpark/content/search_intelligence.ex", "api/lib/barkpark_web/controllers/search_controller.ex"],
+      "observed_at": "2026-07-26T00:00:00Z"
+    },
+    {
+      "subject": "cloud/lib/barkpark_cloud/registry.ex",
+      "quantity": "content webhook is DATASET-scoped (/v1/webhooks/<dataset>) and minted only for kind=static — curated dataset isolates auto-deploy from production churn",
+      "rerun": "grep -n 'kind == \"static\"\\|/v1/webhooks/#{URI.encode(dataset)}' cloud/lib/barkpark_cloud/registry.ex",
+      "derived_level": "L3",
+      "deps": ["cloud/lib/barkpark_cloud/registry.ex"],
+      "observed_at": "2026-07-26T00:00:00Z"
+    },
+    {
+      "subject": "templates/search-starter",
+      "quantity": "graph fetch passes ?dataset=<DATASET> from bare origin; detail route is dynamic /d/[type]/[slug] (SSR, multi-type capable)",
+      "rerun": "grep -n 'v1/graph?dataset' templates/search-starter/lib/graph.ts; ls templates/search-starter/app/'(finder)'/d",
+      "derived_level": "L3",
+      "deps": ["templates/search-starter/lib/graph.ts", "templates/search-starter/app/(finder)/d/[type]/[slug]/page.tsx"],
+      "observed_at": "2026-07-26T00:00:00Z"
+    }
+  ]
+}

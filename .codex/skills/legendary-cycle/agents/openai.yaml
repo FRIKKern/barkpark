@@ -1,0 +1,4 @@
+interface:
+  display_name: "Legendary Cycle"
+  short_description: "Run five-scale experimental Barkpark swarms"
+  default_prompt: "Use $legendary-cycle to run a builder-heavy, experiment-gated Barkpark legendary wave."

@@ -1,7 +1,14 @@
 defmodule Barkpark.Auth.ApiTokenTest do
-  use ExUnit.Case, async: true
+  # DataCase (not the bare ExUnit.Case) so the FK-abort describe below can hit a
+  # real Repo; async: false because a Postgres FK violation aborts the sandbox
+  # transaction (matches the MediaFile/Document FK sibling tests).
+  use Barkpark.DataCase, async: false
+
+  import Barkpark.AccountsFixtures
+  import Barkpark.TenancyFixtures
 
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.Repo
 
   describe "hash_token/1" do
     test "returns a lowercase hex SHA-256 digest (64 chars)" do
@@ -58,6 +65,43 @@ defmodule Barkpark.Auth.ApiTokenTest do
 
       assert cs.valid?
       assert Ecto.Changeset.get_change(cs, :permissions) == ["read", "admin"]
+    end
+  end
+
+  # FK-abort containment (Felix W18). `api_tokens.workspace_id` and
+  # `api_tokens.owner_user_id` are real Postgres FKs (default names
+  # `api_tokens_<col>_fkey`). Each bad-FK insert lives in its OWN test: a
+  # violation aborts the sandbox transaction, so nothing may run after it.
+  describe "changeset/2 FK-abort containment" do
+    defp insert(overrides) do
+      attrs =
+        Map.merge(
+          %{token_hash: ApiToken.hash_token("fk-#{System.unique_integer([:positive])}")},
+          overrides
+        )
+
+      %ApiToken{} |> ApiToken.changeset(attrs) |> Repo.insert()
+    end
+
+    test "non-existent workspace_id returns {:error, changeset}, never a raise" do
+      assert {:error, %Ecto.Changeset{} = cs} = insert(%{workspace_id: Ecto.UUID.generate()})
+      assert {"does not exist", _} = cs.errors[:workspace_id]
+    end
+
+    test "non-existent owner_user_id returns {:error, changeset}, never a raise" do
+      assert {:error, %Ecto.Changeset{} = cs} = insert(%{owner_user_id: Ecto.UUID.generate()})
+      assert {"does not exist", _} = cs.errors[:owner_user_id]
+    end
+
+    test "live workspace + owner_user references still insert" do
+      ws = create_workspace!()
+      user = register_user("fk-owner-#{System.unique_integer([:positive])}@example.com")
+
+      assert {:ok, %ApiToken{} = token} =
+               insert(%{workspace_id: ws.id, owner_user_id: user.id})
+
+      assert token.workspace_id == ws.id
+      assert token.owner_user_id == user.id
     end
   end
 end

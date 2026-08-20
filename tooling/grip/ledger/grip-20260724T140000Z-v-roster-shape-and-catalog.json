@@ -1,0 +1,50 @@
+{
+  "grip_id": "v-roster-shape-and-catalog-2026-07-24",
+  "verifier": "v-roster-shape-and-catalog",
+  "wave": "personal-dev-fleet-wave-mvp0-2026-07-24",
+  "assignment": "Extract the exact GET /v1/fleet/roster JSON contract (fields, status vocabulary, capacity map shape) from api/lib/barkpark/tasks/fleet.ex + the Go structs, as the fleet card's data spec; and check whether cloud/test/barkpark_cloud/web/instance_api_proxy_test.exs already anticipates non-webhook capabilities.",
+  "verdict": "GREEN on the contract extraction, ORANGE on the catalog question. Roster row shape is exactly 7 keys: worker, agent, scope, status, capacity, last_seen, ttl_s (plus a read-time-joined 'task' key = the worker's current in_progress doc_id or null) -- pinned by fleet_test.exs:112 (`field_names == ~w(worker agent scope status capacity last_seen ttl_s)`) and fleet.ex:183-197 (`to_row/3`). Status vocabulary is 5 values, NOT 'online': self-declared {idle, working, blocked} (fleet.ex:67), provisioner-written {provisioning} (fleet.ex:68, PDF-D23 -- a beat can never self-declare it), and read-time-derived {offline} (never stored). There is no literal 'online' string anywhere in the contract -- the wish's 'ONLINE flips on first heartbeat' means 'status reads anything-but-offline', not a stored enum member. Capacity is a discriminated union at the JSON level (fleet.ex:293-321): (a) a validated object {size_class: light|standard|heavy|xl, slots_total?, slots_free?, budget?} -- REFUSED at write time on any vocab/bounds violation (no silent-drop), (b) a JSON-object STRING that decodes+validates into the same shape (the CLI's --capacity path, since Go ships it as a query string), or (c) any other plain string, stored verbatim as a legacy free-form hint. A GUI fleet card must render capacity as 'object OR string', not assume one shape. On the Go side there is NO typed Roster/RosterRow struct anywhere in the repo (grep across internal/ found only cloud_support_cmd.go, which consumes the envelope as bare `map[string]any` (line 1509-1510) and does a manual `d[\"worker\"].(string)` match) -- this is deliberate per PDF-D21 ('the documents envelope key every installed bp binary renders as a real table'), i.e. the roster is designed to be read generically, not through a typed client model; a new fleet-card SPA slice should follow the same untyped-JSON posture rather than inventing a Go struct that doesn't exist to mirror. On the catalog question: instance_api_proxy_test.exs (679 lines) is 100% webhook-scoped -- every describe block, every assertion, is webhook.* -- and grep for resource/capability/task/fleet inside it and inside instance_api_catalog_test.exs (214 lines) returns zero non-webhook hits. Worse than 'not anticipated': the PROXY ROUTER ITSELF hardcodes the envelope, not just the tests -- `json(conn, status, %{ok: true, resource: \"webhook\", data: ...})` at router.ex:8834 is a LITERAL STRING, not derived from `entry.capability` (the InstanceApiCatalog entry struct has no `resource` field at all -- only capability/method/path/tier/params). Two more hardcodings ride the same seam: the 404-degrades-to-capability_unavailable guard (router.ex:8845-8850) pattern-matches an explicit list of 4 webhook.* atoms with no fallback, and `instance_mutation_action/1` (router.ex:8948-8957) is a closed set of 6 webhook.* clauses with NO catch-all -- a new :mutate-tier capability (e.g. a hypothetical task.claim) would raise FunctionClauseError on its first successful write unless a clause is added. fleet.roster is :read-tier so it skips the audit-action function entirely, but still needs `resource: \"webhook\"` fixed or every fleet-card response will lie about its own resource type. CONCLUSION: existing test infra requires generalizing BOTH the envelope's resource string and (if any :mutate task capability ships) the audit-action total function before fleet.roster/task.get can slot in as new catalog rows -- this is source-level work, not test-only.",
+  "environment_note": "MIX_ENV toolchain (mix/elixir/erl) is absent on this Mac -- confirmed via `command -v mix elixir erl` -> NONE, consistent with the same-wave grip grip-20260724T000000Z-v-main-admin-token-scope.json's identical finding. The MUST-RUN `CC=clang mix test ...` could not execute; this verdict rests on verbatim source + the already-compiled-in test-file assertions (fleet_test.exs's own `assert field_names == ...` IS the pinned contract, read not run) plus live grep/read proofs below.",
+  "recipes": [
+    {
+      "claim": "mix/elixir/erl are absent from this Mac -- MUST-RUN test execution is impossible here; command not found for `mix`",
+      "rerun": "command -v mix elixir erl || echo NONE"
+    },
+    {
+      "claim": "Roster row field set is EXACTLY worker/agent/scope/status/capacity/last_seen/ttl_s, pinned by an existing passing-when-run test assertion (not executed here, read verbatim)",
+      "rerun": "grep -n 'field_names ==' /Users/frikkjarl/Documents/GitHub/barkpark/api/test/barkpark/tasks/fleet_test.exs"
+    },
+    {
+      "claim": "to_row/3 in fleet.ex builds exactly those 7 keys plus a read-time-joined 'task' key (worker's current in_progress doc_id or nil) -- 8 keys total on the wire",
+      "rerun": "sed -n '183,197p' /Users/frikkjarl/Documents/GitHub/barkpark/api/lib/barkpark/tasks/fleet.ex"
+    },
+    {
+      "claim": "Status vocabulary: self-declared {idle,working,blocked}; provisioner-only {provisioning}; derived-never-stored {offline}. No 'online' string exists in the contract",
+      "rerun": "sed -n '62,72p' /Users/frikkjarl/Documents/GitHub/barkpark/api/lib/barkpark/tasks/fleet.ex; grep -n '\"offline\"\\|\"provisioning\"\\|\"idle\"\\|\"working\"\\|\"blocked\"' /Users/frikkjarl/Documents/GitHub/barkpark/api/test/barkpark/tasks/fleet_test.exs"
+    },
+    {
+      "claim": "Capacity is a 3-way union at the write path: validated object | JSON-object string (decoded+validated) | legacy free-form string, with a REFUSAL (not silent drop) on any vocab/bounds violation",
+      "rerun": "sed -n '293,355p' /Users/frikkjarl/Documents/GitHub/barkpark/api/lib/barkpark/tasks/fleet.ex"
+    },
+    {
+      "claim": "No typed Go Roster/RosterRow struct exists anywhere in internal/ -- the only Go consumer parses the envelope as bare map[string]any",
+      "rerun": "grep -rln 'Roster' /Users/frikkjarl/Documents/GitHub/barkpark/internal 2>/dev/null; sed -n '1498,1521p' /Users/frikkjarl/Documents/GitHub/barkpark/internal/cli/cloud_support_cmd.go"
+    },
+    {
+      "claim": "instance_api_proxy_test.exs (679 lines) is exclusively webhook.* -- zero fleet/task/roster references",
+      "rerun": "wc -l /Users/frikkjarl/Documents/GitHub/barkpark/cloud/test/barkpark_cloud/web/instance_api_proxy_test.exs; grep -n 'resource.*webhook\\|capability' /Users/frikkjarl/Documents/GitHub/barkpark/cloud/test/barkpark_cloud/web/instance_api_proxy_test.exs | head -15; grep -c 'task\\.\\|fleet\\.' /Users/frikkjarl/Documents/GitHub/barkpark/cloud/test/barkpark_cloud/web/instance_api_proxy_test.exs /Users/frikkjarl/Documents/GitHub/barkpark/cloud/test/barkpark_cloud/instance_api_catalog_test.exs"
+    },
+    {
+      "claim": "The proxy router hardcodes resource: \"webhook\" as a literal string on the success envelope, NOT derived from the catalog entry (InstanceApiCatalog.entry has no resource field)",
+      "rerun": "sed -n '8823,8834p' /Users/frikkjarl/Documents/GitHub/barkpark/cloud/lib/barkpark_cloud/web/router.ex; grep -n '@type entry' -A6 /Users/frikkjarl/Documents/GitHub/barkpark/cloud/lib/barkpark_cloud/registry/instance_api_catalog.ex"
+    },
+    {
+      "claim": "instance_mutation_action/1 is a closed 6-clause function over webhook.* atoms with NO catch-all -- a new :mutate capability would FunctionClauseError on its first audited write unless a clause is added",
+      "rerun": "sed -n '8917,8957p' /Users/frikkjarl/Documents/GitHub/barkpark/cloud/lib/barkpark_cloud/web/router.ex"
+    },
+    {
+      "claim": "GET /v1/fleet/roster and POST /v1/fleet/beat are plugin-declared routes (auth: :token_root -- any valid Bearer token via [:api, :require_token], NOT admin-only), NOT hand-registered in router.ex -- confirmed by the plugin route spec, not a router.ex grep miss",
+      "rerun": "grep -n 'fleet/beat\\|fleet/roster' /Users/frikkjarl/Documents/GitHub/barkpark/api/lib/barkpark/plugins/tasks.ex"
+    }
+  ]
+}

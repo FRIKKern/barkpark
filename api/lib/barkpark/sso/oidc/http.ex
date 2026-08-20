@@ -17,7 +17,11 @@ defmodule Barkpark.Sso.Oidc.HTTP do
 
     @impl true
     def post_form(url, params) do
-      case Req.post(url, form: params) do
+      # Login-path outbound: isolate onto Barkpark.Auth.Finch and cap the wait
+      # for the IdP token endpoint at an explicit, tunable 10s (a hung IdP must
+      # never stall the login path indefinitely). receive_timeout is a top-level
+      # Req option — NEVER connect_options, which Req rejects alongside :finch.
+      case Req.post(url, form: params, finch: Barkpark.Auth.Finch, receive_timeout: 10_000) do
         {:ok, %{status: s, body: body}} when s in 200..299 and is_map(body) -> {:ok, body}
         {:ok, %{status: s}} -> {:error, {:http_status, s}}
         {:error, e} -> {:error, e}
@@ -26,7 +30,8 @@ defmodule Barkpark.Sso.Oidc.HTTP do
 
     @impl true
     def get_json(url) do
-      case Req.get(url) do
+      # Same isolation + explicit 10s cap for the JWKS fetch (see post_form/2).
+      case Req.get(url, finch: Barkpark.Auth.Finch, receive_timeout: 10_000) do
         {:ok, %{status: s, body: body}} when s in 200..299 and is_map(body) -> {:ok, body}
         {:ok, %{status: s}} -> {:error, {:http_status, s}}
         {:error, e} -> {:error, e}

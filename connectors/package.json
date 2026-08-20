@@ -1,0 +1,44 @@
+{
+  "name": "@barkpark/connectors",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Barkpark Connectors \u2014 the provider-agnostic bridge between chat channels and a Barkpark Session. A standalone Node/TypeScript service on Vercel's Chat SDK: write bot logic once, deploy everywhere. Client of the /v1/chat HTTP+SSE API; the BEAM stays the engine.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "rewrap": "tsx scripts/rewrap.ts",
+    "smoke:telegram": "tsx scripts/smoke-telegram.ts",
+    "smoke:teams": "tsx scripts/smoke-teams.ts",
+    "smoke:discord": "tsx scripts/smoke-discord.ts",
+    "smoke:whatsapp": "tsx scripts/smoke-whatsapp.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@chat-adapter/discord": "4.34.0",
+    "@chat-adapter/slack": "4.34.0",
+    "@chat-adapter/state-memory": "4.34.0",
+    "@chat-adapter/state-pg": "4.34.0",
+    "@chat-adapter/teams": "4.34.0",
+    "@chat-adapter/telegram": "4.34.0",
+    "@chat-adapter/whatsapp": "4.34.0",
+    "chat": "4.34.0",
+    "chat-adapter-imessage": "1.1.0",
+    "pg": "^8.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/pg": "^8",
+    "msw": "^2.6",
+    "prettier": "^3.3",
+    "tsx": "^4.19",
+    "typescript": "^5.6",
+    "vitest": "^4.1.10"
+  }
+}

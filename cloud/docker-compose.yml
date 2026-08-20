@@ -56,6 +56,15 @@ x-control-plane: &control_plane
     # cloud/.env to activate; VERCEL_TEAM_ID only for a team-scoped token.
     - VERCEL_PLATFORM_TOKEN
     - VERCEL_TEAM_ID
+    # Platform-operator allowlist (isu-w5 / GR60): comma-separated emails of
+    # REGISTERED accounts. Passthrough-only and optional — unset means `[]`,
+    # which fails CLOSED in BOTH directions: /v1/me reports
+    # platform_operator:false for everyone (the Operator console link hides and
+    # all /v1/operator/* routes 403), and the daily fleet digest stays a logged
+    # no-op. Without this bare line compose passes NOTHING (see the rule at the
+    # top of this file), so setting it in .env alone would set it on the HOST
+    # and leave the CONTAINER blind.
+    - PLATFORM_ADMIN_EMAILS
     # Mail (notifications-email): defaults point at the bundled `postfix`
     # sidecar below (self-hosted, no third-party provider). SMTP_USERNAME/
     # PASSWORD are passthrough-only, shared with the postfix service's own
@@ -68,6 +77,95 @@ x-control-plane: &control_plane
     - SMTP_VERIFY_PEER=${SMTP_VERIFY_PEER:-false}
     - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-noreply@barkpark.cloud}
     - MAIL_FROM_NAME=${MAIL_FROM_NAME:-Barkpark Cloud}
+    # cch-w1-peer-ip-pin: the peers whose X-Forwarded-For may move
+    # conn.remote_ip. Caddy runs as a HOST service proxying to localhost:4100,
+    # and Docker's hairpin NAT rewrites the source the container sees to the
+    # bridge GATEWAY — so in prod the peer is the gateway, never 127.0.0.1, and
+    # without this every session recorded 172.18.0.1 (measured: 48 of 49 rows)
+    # and the device-auth rate bucket collapsed into one global bucket.
+    #
+    # The default is the .1 gateway of the subnet PINNED under `networks:` at
+    # the bottom of this file — these two values MUST move together. Individual
+    # addresses only, never a CIDR range: the `postfix` service below publishes
+    # 0.0.0.0:587 to the internet from this same network, so trusting the whole
+    # subnet would let it forge any client's IP.
+    - TRUSTED_PROXY_PEERS=${TRUSTED_PROXY_PEERS:-172.18.0.1}
+    # Serving sha (dr-w20-s1): the commit this slot is running, surfaced by
+    # BarkparkCloud.Health.serving/0 on GET /health. Passthrough-only and
+    # deliberately WITHOUT a default — absent means git_sha: null, an honest
+    # "this box predates the reader", never an invented value. deploy/cp-deploy.sh
+    # exports it from the sha it just checked out, AFTER sourcing cloud/.env, so
+    # a stale .env value cannot win. Without this bare line compose passes
+    # NOTHING (see the rule at the top of this file) and the container reports
+    # null forever while looking built.
+    - BARKPARK_GIT_SHA
+    # ── Census widening (self-host-blessing W1/S1b) ────────────────────────
+    # Everything below is read by cloud/config/runtime.exs or cloud/lib and was
+    # NOT passed through: the container fell back to the code-side default (or
+    # to "feature off") no matter what the operator put in cloud/.env, because
+    # compose passes NOTHING it is not told to pass. The set is derived, not
+    # hand-listed — `python3 scripts/env-census.py --root cloud` re-derives it
+    # and FAILS if this list drifts from what the code reads.
+    #
+    # All BARE. A `${NAME:-default}` here would turn "unset" into "set to
+    # something", which is a different server-side meaning; the code already
+    # owns its own defaults (charter D24).
+
+    # Plan instance limits (runtime.exs:82-85). Unset → 1/1/3/10.
+    - LIMIT_FREE
+    - LIMIT_TRIAL
+    - LIMIT_SUPPORTER
+    - LIMIT_SUPPORT_PLUS
+
+    # Stripe Checkout/Portal redirect targets (runtime.exs:125-130). Unset →
+    # Stripe falls back to its dashboard-configured URLs.
+    - STRIPE_SUCCESS_URL
+    - STRIPE_CANCEL_URL
+    - STRIPE_PORTAL_RETURN_URL
+
+    # GitHub App (runtime.exs:143-166). Unset → the App integration is off.
+    - GITHUB_APP_ID
+    - GITHUB_APP_PRIVATE_KEY
+    - GITHUB_APP_WEBHOOK_SECRET
+    - GITHUB_APP_SLUG
+
+    # Bundle object storage on Hetzner (runtime.exs:206-209). Unset → bundle
+    # upload is not configured; BARKPARK_BUNDLE_LOCATION defaults to fsn1.
+    - HETZNER_S3_ACCESS_KEY
+    - HETZNER_S3_SECRET_KEY
+    - BARKPARK_BUNDLE_BUCKET
+    - BARKPARK_BUNDLE_LOCATION
+
+    # Push relay (runtime.exs:228-237) — the human gate documented in
+    # .env.example. Unset → Push.Adapters.NotConfigured, every send cancels
+    # terminally. APNS_ENV defaults to "sandbox" code-side.
+    - APNS_KEY_P8
+    - APNS_KEY_ID
+    - APNS_TEAM_ID
+    - APNS_BUNDLE_ID
+    - APNS_ENV
+    - FCM_SERVICE_ACCOUNT_JSON
+
+    # Public URLs (runtime.exs:381-388). PUBLIC_URL wins over
+    # CONTROL_PLANE_URL; DASHBOARD_URL is the SPA origin.
+    - PUBLIC_URL
+    - CONTROL_PLANE_URL
+    - DASHBOARD_URL
+
+    # Ops knobs. AUDIT_RETENTION_DAYS (runtime.exs:43) prunes the audit log;
+    # OBAN_QUEUES_DISABLED (runtime.exs:270) parks background queues;
+    # AUTODEPLOY_DEBOUNCE_S (sites/auto_deploy_worker.ex:124) throttles
+    # auto-deploy. All optional, all code-defaulted when unset.
+    - AUDIT_RETENTION_DAYS
+    - OBAN_QUEUES_DISABLED
+    - AUTODEPLOY_DEBOUNCE_S
+
+    # Plugin kill switch. The control plane does not load Barkpark plugins
+    # today, so this is passthrough parity with the root compose rather than a
+    # live knob — present so that the day it IS read, the value an operator
+    # sets actually arrives. NEVER `${BARKPARK_PLUGINS:-}`: an empty string
+    # means "load NO plugins", which is not what "unset" means (charter D24).
+    - BARKPARK_PLUGINS
   restart: unless-stopped
 
 services:
@@ -125,6 +223,42 @@ services:
       - postfix_queue:/var/spool/postfix
       - postfix_tls:/etc/postfix/tls
     restart: unless-stopped
+
+# cch-w1-peer-ip-pin (charter D6). This block did not exist before: the network
+# was auto-created and its subnet AUTO-ALLOCATED, landing on 172.18.0.0/16 only
+# because a pre-existing default bridge had taken 172.17.0.0/16.
+#
+# That mattered because the control plane trusts the bridge GATEWAY's
+# X-Forwarded-For (see TRUSTED_PROXY_PEERS above): with an allocation-order
+# subnet, the very next `docker compose down && up` on a differently-populated
+# host silently moves the gateway, and the trust check degrades back into the
+# permanent no-op it was — while its tests keep passing. Pinning the subnet is
+# what makes the pinned peer a fact instead of a coincidence.
+#
+# If you change this subnet, change TRUSTED_PROXY_PEERS to match its .1 gateway
+# in the SAME commit.
+#
+# DEPLOY NOTE — READ BEFORE MERGING THIS TO A LIVE BOX. The stack's network
+# ALREADY EXISTS on prod, created without an explicit `ipam` block. Compose
+# compares the declared network against the live one and refuses `up` with
+# "network ... needs to be recreated" when they differ, EVEN IF the subnet value
+# is identical, because the live network carries no ipam config to match. That
+# aborts deploy/cp-deploy.sh at the slot boot (exit 13) — which is the SAFE
+# failure (the active slot keeps serving and git resets), but the deploy will
+# not land until an operator recreates the network ONCE:
+#
+#     docker compose -f cloud/docker-compose.yml --profile blue --profile green down
+#     docker compose -f cloud/docker-compose.yml --profile blue up -d
+#
+# That down/up is the only brief interruption; every subsequent deploy is a
+# normal hot-swap again. Verified structurally only — this repo's build hosts
+# have no `docker compose` subcommand, so it was never executed against a live
+# network.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
 
 volumes:
   cloud_pgdata:

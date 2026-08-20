@@ -184,25 +184,50 @@ defmodule BarkparkCloud.ArchiveStore do
 
   # ── manifest GET + parse ────────────────────────────────────────────────────
 
+  # Failures are collected across the WHOLE key list and logged as one summary
+  # (see `log_manifest_failures/2`) instead of one Logger.warning per key — a
+  # store outage during a listing walk can touch dozens of keys, and per-key
+  # logging would flood the log with near-identical lines for a single event.
   defp fetch_manifests(cfg, keys) do
-    keys
-    |> Enum.map(&fetch_manifest(cfg, &1))
-    |> Enum.reject(&is_nil/1)
+    total = length(keys)
+
+    {manifests, failures} =
+      keys
+      |> Enum.map(&fetch_manifest(cfg, &1))
+      |> Enum.reduce({[], []}, fn
+        {:ok, manifest}, {oks, errs} -> {[manifest | oks], errs}
+        {:error, reason}, {oks, errs} -> {oks, [reason | errs]}
+      end)
+
+    log_manifest_failures(Enum.reverse(failures), total)
+
+    Enum.reverse(manifests)
   end
 
-  # A single manifest that fails to fetch or parse is DROPPED (logged), never
-  # fatal to the whole listing — one corrupt bundle can't hide the rest.
+  # ONE Logger.warning per listing call, however many keys failed: "N/M
+  # manifests failed to fetch/parse: <first reason>". The first failure is
+  # kept as a representative sample; the rest are counted, not repeated.
+  defp log_manifest_failures([], _total), do: :ok
+
+  defp log_manifest_failures(failures, total) do
+    failed = length(failures)
+    first_reason = hd(failures)
+
+    Logger.warning(
+      "archive_store: #{failed}/#{total} manifests failed to fetch/parse: #{first_reason}"
+    )
+  end
+
+  # A single manifest that fails to fetch or parse is DROPPED, never fatal to
+  # the whole listing — one corrupt bundle can't hide the rest. The caller
+  # aggregates failures into one summary warning per listing call.
   defp fetch_manifest(cfg, key) do
     case signed_get(cfg, "/" <> encode_key_path(key), []) do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
         parse_manifest(key, body)
 
       other ->
-        Logger.warning(
-          "archive_store: manifest fetch failed for #{inspect(key)}: #{inspect(other)}"
-        )
-
-        nil
+        {:error, "manifest fetch failed for #{inspect(key)}: #{inspect(other)}"}
     end
   end
 
@@ -211,21 +236,21 @@ defmodule BarkparkCloud.ArchiveStore do
       {:ok, %{} = m} ->
         spec = if is_map(m["spec"]), do: m["spec"], else: %{}
 
-        %{
-          fqdn: string_or(m["fqdn"], ""),
-          slug: string_or(m["slug"], slug_from_key(key)),
-          source_provider: string_or(m["source_provider"], ""),
-          created_at: string_or(m["created_at"], nil),
-          bundle_ref: string_or(m["bundle_ref"], bundle_prefix(key)),
-          spec: %{
-            region: string_or(spec["region"], nil),
-            server_type: string_or(spec["server_type"], nil)
-          }
-        }
+        {:ok,
+         %{
+           fqdn: string_or(m["fqdn"], ""),
+           slug: string_or(m["slug"], slug_from_key(key)),
+           source_provider: string_or(m["source_provider"], ""),
+           created_at: string_or(m["created_at"], nil),
+           bundle_ref: string_or(m["bundle_ref"], bundle_prefix(key)),
+           spec: %{
+             region: string_or(spec["region"], nil),
+             server_type: string_or(spec["server_type"], nil)
+           }
+         }}
 
       _ ->
-        Logger.warning("archive_store: manifest #{inspect(key)} is not valid JSON")
-        nil
+        {:error, "manifest #{inspect(key)} is not valid JSON"}
     end
   end
 

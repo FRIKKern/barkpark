@@ -51,6 +51,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
     |> assign(
       nav_section: :structure,
       page_title: "Studio",
+      # ── Responsive width bucket (studio-space-priority-desk spd-s2) ─────
+      # Which viewport width band the desk is rendering for: "wide" (the
+      # zero-change desktop default), "standard", "narrow", or "phone". The
+      # `width-bucket` handle_event updates it once a client hook reports the
+      # measured band (attached in spd-s4). Seeded "wide" because first paint
+      # is CSS-owned and connect_params is nil on the static render — the
+      # assign only ever narrows the desk once the live socket learns better.
+      width_bucket: "wide",
+      # ── Inspector summon flag (spd-b39, the Tier-2 ladder) ──────────────
+      # Whether the user ASKED for the Document inspector, as opposed to it
+      # being open because the bucket defaults it open. `sidebar_assigns/1`
+      # in shared/paper.ex owns the per-document reseed, but it is reached
+      # ONLY from `setup_paper_view` — so before this seed the key was
+      # measurably ABSENT on a fresh mount for sheet, graph, field form and
+      # desk root (present for paper alone, 7/7 views probed). The pane
+      # comprehension in components.ex reads it as `@sidebar_user_opened`,
+      # and an absent assign there does not degrade, it DIES:
+      # `** (KeyError) key :sidebar_user_opened not found` raised through
+      # `Phoenix.LiveView.Diff.process_keyed/5` in 5 of 7 views. Seeding it
+      # here — rather than `Map.get(assigns, :sidebar_user_opened, false)`
+      # at the read site — is deliberate: the defaulting read compiles and
+      # goes green while silently pinning every non-paper desk to false,
+      # which is the same hole wearing a passing test.
+      sidebar_user_opened: false,
       presence_topic: nil,
       subscribed_doc: nil,
       image_picker_field: nil,

@@ -59,4 +59,55 @@ defmodule BarkparkWeb.QueryControllerFilterTest do
       assert invalid(%{"price" => %{"gt" => %{"x" => 1}}}) == {"price", "gt"}
     end
   end
+
+  defp normalize(s), do: QueryController.normalize_filter_map_for_test(s)
+
+  describe "normalize_filter_map/1 — flat hasStrong grammar (D75)" do
+    test "field hasStrong tag:min parses to the canonical nested op" do
+      assert normalize("tags hasStrong epic:50") == %{"tags" => %{"hasStrong" => "epic:50"}}
+    end
+
+    test "the keyword is case-insensitive; the emitted op stays canonical" do
+      assert normalize("tags hasstrong epic:50") == %{"tags" => %{"hasStrong" => "epic:50"}}
+    end
+
+    test "one pair of surrounding quotes is stripped from the value" do
+      assert normalize(~s(tags hasStrong "epic:50")) == %{"tags" => %{"hasStrong" => "epic:50"}}
+    end
+
+    test "a colon-carrying tag rides through intact to the shared last-colon value parser" do
+      assert normalize("tags hasStrong ns:sub:50") == %{"tags" => %{"hasStrong" => "ns:sub:50"}}
+    end
+
+    test "a malformed hasStrong VALUE still parses to the op the fail-closed guard rejects" do
+      # Grammar and value validation are separate layers: the flat parser emits
+      # the canonical op; invalid_filter_op/1 (via parse_has_strong) rejects it.
+      assert normalize("tags hasStrong wired") == %{"tags" => %{"hasStrong" => "wired"}}
+      assert invalid(%{"tags" => %{"hasStrong" => "wired"}}) == {"tags", "hasStrong"}
+    end
+  end
+
+  describe "normalize_filter_map/1 — sealed empty-map passthrough (D75)" do
+    test "an unparseable non-empty string is an error sentinel, NEVER %{}" do
+      # Mutation-proof: revert the seal (`|| %{}` fall-through) and this reds.
+      assert normalize("total garbage!!!") ==
+               {:error, {:invalid_flat_filter, "total garbage!!!"}}
+    end
+
+    test "a value-less hasStrong is an error sentinel too" do
+      assert normalize("tags hasStrong") == {:error, {:invalid_flat_filter, "tags hasStrong"}}
+    end
+
+    test "empty / whitespace-only stays a no-filter no-op, like an absent param" do
+      assert normalize("") == %{}
+      assert normalize("   ") == %{}
+    end
+
+    test "the existing grammars still parse (the seal didn't over-reject)" do
+      assert normalize("status=published") == %{"status" => "published"}
+      assert normalize("title in a,b") == %{"title" => %{"in" => ["a", "b"]}}
+      assert normalize("category is null") == %{"category" => %{"is" => "null"}}
+      assert normalize("price>=10") == %{"price" => %{"gte" => "10"}}
+    end
+  end
 end

@@ -173,7 +173,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   def seed_new_doc_content("task"), do: %{"kind" => "task", "lifecycle_status" => "open"}
-  def seed_new_doc_content(_type), do: %{}
+
+  # A blocks-doc is born with an EXPLICIT EMPTY block list — not `%{}`, and not a
+  # hand-rolled paragraph. The empty list is the signal
+  # `Papers.Template.maybe_seed/3` reads as "a new blank document" (via
+  # `Writer.maybe_apply_paper_template/2`), which is what produces the locked
+  # `tpl-title` heading, the empty `tpl-body` paragraph to type into, and
+  # `style: "article"`. `%{}` leaves `blocks` nil — the HTML-ingest path — so the
+  # human got a document with nothing to click and nowhere to type (spd-w17).
+  # Hand-rolling a paragraph here would bypass the template and lose all of it.
+  def seed_new_doc_content(type) do
+    if Content.blocks_type?(type), do: %{"blocks" => []}, else: %{}
+  end
 
   @doc false
   defdelegate paper_op(socket, op), to: Paper
@@ -357,6 +368,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           {:noreply,
            put_flash(socket, :error, "Publish blocked: #{format_wall_details(details)}")}
 
+        # The E3 tag-registry wall (authoring-excellence D80): an unknown-tag
+        # rejection names each unregistered tag with its nearest suggestion, so
+        # the fix is one flash away — never the content-free "Action failed".
+        {:error, {:unknown_tag, payload}} ->
+          {:noreply,
+           put_flash(socket, :error, "Publish blocked: #{format_wall_details(payload)}")}
+
+        # The E4 dedup wall (authoring-excellence D80/D81): a near-duplicate
+        # rejection surfaces the incumbent's published id plus the fix, so the
+        # author can extend that document instead of re-publishing a twin.
+        {:error, {:duplicate_of, payload}} ->
+          {:noreply,
+           put_flash(socket, :error, "Publish blocked: #{format_wall_details(payload)}")}
+
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Action failed")}
       end
@@ -374,6 +399,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   """
   def format_wall_details(details) when is_list(details) do
     details |> Enum.map(&format_wall_details/1) |> Enum.join(" · ")
+  end
+
+  # The E3 tag-registry rejection (authoring-excellence D80/D81): each
+  # unregistered tag names itself with its best-first trgm suggestions — "unknown
+  # tag 'serach' — did you mean 'search'?". Bounded upstream (≤12 names via the
+  # label-spine `@max_tags`, ≤3 suggestions/name via `@suggestion_limit`), so no
+  # truncation is needed here. Ordered BEFORE the generic `%{}` clause below —
+  # this payload has no field/rule/fix, so it must not fall through to it.
+  def format_wall_details(%{unknown: unknown, suggestions: suggestions})
+      when is_list(unknown) and is_map(suggestions) do
+    unknown
+    |> Enum.map(fn name ->
+      case Map.get(suggestions, name, []) do
+        [] ->
+          "unknown tag '#{name}'"
+
+        names ->
+          "unknown tag '#{name}' — did you mean #{Enum.map_join(names, ", ", &"'#{&1}'")}?"
+      end
+    end)
+    |> Enum.join(" · ")
+  end
+
+  # The E4 dedup rejection (authoring-excellence D81): the payload's `:message`
+  # is FIXED generic prose that lacks the one actionable datum — the incumbent's
+  # published id lives in `:duplicate_of`. So the flash composes fresh from that
+  # id plus guidance consistent with the wall's @hints prose. `:similar`/`:advise`
+  # are UNCAPPED upstream and deliberately NOT rendered here — only the incumbent
+  # id. Ordered BEFORE the generic `%{}` clause below.
+  def format_wall_details(%{duplicate_of: incumbent}) when is_binary(incumbent) do
+    "duplicate of #{incumbent} — extend that document, or differentiate this one's title/tags"
   end
 
   def format_wall_details(%{} = detail) do
@@ -445,6 +501,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
             {:error, {:label_spine, details}} ->
               {ok, halted, err, walled + 1, wall_detail || format_wall_details(details)}
+
+            # The E3/E4 wall shapes (authoring-excellence D80): an unknown-tag or
+            # near-duplicate rejection is a WALL block, not a generic failure —
+            # fold both into the `walled` accumulator (first-wall_detail idiom) so
+            # the batch flash attributes them to the wall with a concrete fix.
+            {:error, {:unknown_tag, payload}} ->
+              {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
+
+            {:error, {:duplicate_of, payload}} ->
+              {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
 
             _ ->
               {ok, halted, err + 1, walled, wall_detail}
@@ -737,8 +803,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     {editor_blocks, editor_blocks_synth?} =
       Content.resolve_blocks_for_edit(editor_doc, editor_type, socket.assigns.dataset)
 
+    same_doc? = same_editor_doc?(socket.assigns[:editor_doc], editor_doc)
+
+    # spd-w19 — the third seam. When the walk produced NO editor, the shell used
+    # to shrug ("Select a document to edit") no matter which of the nine
+    # nil-editor producers fired. They are indistinguishable at the shell's
+    # attrs (all return a bare nil), but they ARE distinguishable from
+    # (panes, nav_path) — so the reason is derived HERE, once, and carried as a
+    # single new assign the shell's `<:empty_state>` renders.
+    editor_empty =
+      if editor_doc,
+        do: nil,
+        else: empty_editor_state(panes, socket.assigns.nav_path)
+
     editor_mode =
-      if same_editor_doc?(socket.assigns[:editor_doc], editor_doc),
+      if same_doc?,
         do: socket.assigns[:editor_mode] || :classic,
         else: :classic
 
@@ -754,8 +833,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_mode: editor_mode,
         editor_blocks: editor_blocks,
         editor_blocks_synth?: editor_blocks_synth?,
+        editor_empty: editor_empty,
         save_status:
-          if(same_editor_doc?(socket.assigns[:editor_doc], editor_doc),
+          if(same_doc?,
             do: socket.assigns[:save_status] || "",
             else: ""
           ),
@@ -775,6 +855,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             editor_doc != nil && is_draft && has_published
       )
       |> maybe_refresh_content_preview()
+      |> clear_secondary_on_doc_change(same_doc?)
 
     case editor && editor[:view] do
       :paper ->
@@ -813,6 +894,97 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         |> assign(editor_view: :form, media_kind_filter: "all")
     end
   end
+
+  @doc """
+  Name WHY the editor is empty, from the two things that survive a nil editor:
+  the pane stack and the nav path. Returns
+  `%{reason: atom, doc_id: String.t() | nil, doc_type: String.t() | nil}`.
+
+  `PaneBuilder` has nine distinct nil-editor producers and every one of them
+  returns a bare `nil`, so `not_found == unknown_node == no_schema ==
+  nothing_selected` by the time the shell renders (charter D260). The shapes,
+  however, are distinct — this is the derivation charter D222 asked for:
+
+    * `:nothing_selected` — no document was NAMED: either `nav_path == []`, or the
+                            path drilled to a list pane and selected nothing in
+                            it. Nothing went wrong, so this state does not shout.
+    * `:unknown_node`     — the walk never advanced past the root pane while the
+                            root pane had a selection: the first segment names
+                            no node in this desk (stale link, disabled plugin).
+    * `:not_found`        — the walk reached a document-list pane (it carries a
+                            `type_name`), so the type is real and installed; the
+                            id is simply not there.
+    * `:no_schema`        — the walk reached a plain `:list` pane (no
+                            `type_name`) — the …Rest column — and stopped: the
+                            segment named a type that degraded to a
+                            non-drillable `:document` node because it has no
+                            installed schema.
+
+  Deliberately NOT a reason: `unrenderable_content`. A document that RESOLVES
+  and cannot render is the OTHER arm, owned by
+  `StudioLive.Components.unrenderable_document_notice/1` (#7897). Also deliberately absent:
+  `draft_only` — D220's draft-first fetch resolves a never-published document,
+  so that reason can never fire (charter D259).
+  """
+  @spec empty_editor_state([map()], [String.t()]) :: %{
+          reason: atom(),
+          doc_id: String.t() | nil,
+          doc_type: String.t() | nil
+        }
+  def empty_editor_state(panes, nav_path) do
+    last = List.last(panes || [])
+    nav_path = nav_path || []
+
+    cond do
+      nav_path == [] ->
+        %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
+
+      match?(%{role: :nav}, last) and Map.get(last, :selected) != nil ->
+        %{
+          reason: :unknown_node,
+          doc_id: List.last(nav_path),
+          doc_type: List.first(nav_path)
+        }
+
+      # A list pane with NO selection means the human drilled to the list and
+      # picked nothing — no document was named, so there is nothing to report as
+      # missing. Reporting `:not_found` here would invent an id out of the type
+      # segment and accuse the desk of losing a document nobody asked for.
+      match?(%{role: :list}, last) and Map.get(last, :selected) == nil ->
+        %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
+
+      match?(%{role: :list}, last) and Map.get(last, :type_name) != nil ->
+        %{
+          reason: :not_found,
+          doc_id: Map.get(last, :selected),
+          doc_type: Map.get(last, :type_name)
+        }
+
+      match?(%{role: :list}, last) ->
+        %{
+          reason: :no_schema,
+          doc_id: List.last(nav_path),
+          doc_type: Map.get(last, :selected)
+        }
+
+      true ->
+        %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
+    end
+  end
+
+  # The secondary (split-view) pane belongs to the PRIMARY document it was
+  # opened beside, so it clears on an ACTUAL primary-document identity change
+  # only. rebuild_panes runs on every nav AND on same-document Save/reload
+  # (the `_ ->` branch reaches clear_paper_view/1 either way), so the clear
+  # must be gated here on the identity result — an unconditional clear inside
+  # clear_paper_view/1 or setup_paper_view/2 wipes a live .bp-secondary-pane
+  # on the very next same-doc save (D199). Left uncleaned, a surviving
+  # secondary pane shrinks .editor-panel below the 860px scrim threshold at
+  # standard/1024 and paints a scrim over live prose (D175/D187).
+  defp clear_secondary_on_doc_change(socket, true), do: socket
+
+  defp clear_secondary_on_doc_change(socket, false),
+    do: assign(socket, secondary_doc: nil, secondary_schema: nil, secondary_type: nil)
 
   @doc false
   def setup_sheet_view(socket, %{} = doc) do

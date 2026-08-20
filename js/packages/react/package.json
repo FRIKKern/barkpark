@@ -29,6 +29,17 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./client": {
+      "import": {
+        "types": "./dist/client.d.mts",
+        "default": "./dist/client.mjs"
+      },
+      "require": {
+        "types": "./dist/client.d.ts",
+        "default": "./dist/client.cjs"
+      }
+    },
+    "./paper-surface.css": "./dist/paper-surface.css",
     "./package.json": "./package.json"
   },
   "files": [
@@ -67,6 +78,8 @@
     "@testing-library/react": "^16.1.0",
     "happy-dom": "^20.0.0",
     "size-limit": "^11.1.0",
-    "@size-limit/preset-small-lib": "^11.1.0"
+    "@size-limit/preset-small-lib": "^11.1.0",
+    "mermaid": "^11.0.0",
+    "asciinema-player": "^3.8.0"
   }
 }

@@ -24,7 +24,19 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                      "/v1/plugins/bulldocs/papers/:slug/ops",
                      "/v1/plugins/bulldocs/papers/:slug/proposals",
                      "/v1/plugins/bulldocs/intents",
-                     "/v1/plugins/bulldocs/intents/:id/processed"
+                     "/v1/plugins/bulldocs/intents/:id/processed",
+                     # Task 6 (session-handoff): the `session` verb group's routes —
+                     # four on the bulldocs ingest surface (tasks 3-4), plus
+                     # `session.link-task`'s route on the Tasks plugin's own mount
+                     # (task 5) — declared here too since all five verb maps live
+                     # in Bulldocs.cli_commands/0 (per the task-6 brief).
+                     "/v1/plugins/bulldocs/sessions",
+                     "/v1/plugins/bulldocs/sessions/:slug",
+                     "/v1/plugins/bulldocs/sessions/:slug/events",
+                     # session-conversations slice: the harness-conversation
+                     # registry touch route (session.touch).
+                     "/v1/plugins/bulldocs/sessions/:slug/conversations",
+                     "/v1/tasks/:doc_id/sessions"
                    ])
 
   @onixedit_routes MapSet.new(["/v1/plugins/onixedit/export/:dataset/:id"])
@@ -43,9 +55,14 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id",
                  "/v1/tasks/:doc_id/claim",
                  "/v1/tasks/:doc_id/close",
+                 "/v1/tasks/:doc_id/release",
                  "/v1/tasks/:doc_id/stamp",
                  "/v1/tasks/:doc_id/pulse",
-                 "/v1/tasks/:doc_id/move"
+                 "/v1/tasks/:doc_id/move",
+                 "/v1/tasks/:doc_id/stage",
+                 # #5627 listener presence — the fleet pair rides the Tasks plugin.
+                 "/v1/fleet/roster",
+                 "/v1/fleet/beat"
                ])
 
   defp atomize_for_manifest(cmds) do
@@ -57,8 +74,23 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     end)
   end
 
+  test "public document reads retain a published default and advertise non-published perspectives" do
+    commands =
+      Capabilities.manifest("admin", project: false)["commands"]
+      |> Map.new(&{&1["id"], &1})
+
+    for id <- ~w(doc.get doc.ls doc.query) do
+      command = Map.fetch!(commands, id)
+      assert command["auth_tier"] == "none"
+
+      perspective = Enum.find(command["flags"], &(&1["name"] == "perspective"))
+      assert perspective["default"] == "published"
+      assert perspective["type"] == "string"
+    end
+  end
+
   describe "Bulldocs.cli_commands/0" do
-    test "declares six verbs, all ingest-tier, all grounded in a real route" do
+    test "declares five paper verbs, all ingest-tier, all grounded in a real route" do
       cmds = Bulldocs.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -68,8 +100,12 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "bulldocs.intents" in ids
       assert "bulldocs.intent-processed" in ids
 
-      # Every bulldocs command sits behind the ingest highway bucket.
-      assert Enum.all?(cmds, &(&1.auth_tier == "ingest"))
+      # The five `bulldocs.*` paper verbs all sit behind the ingest highway
+      # bucket (the `session.*` group added in task 6 is NOT all-ingest —
+      # see the dedicated describe block below).
+      paper_cmds = Enum.filter(cmds, &(&1.noun == "bulldocs"))
+      assert length(paper_cmds) == 5
+      assert Enum.all?(paper_cmds, &(&1.auth_tier == "ingest"))
 
       # Every path_template is a route the plugin actually mounts — no invented
       # endpoints.
@@ -83,10 +119,101 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert patch.writes
       assert Enum.any?(patch.flags, &(&1.name == "if-rev"))
     end
+
+    test "declares the six session.* verbs (task 6 + session-conversations), grounded in real routes" do
+      cmds = Bulldocs.cli_commands()
+      by_id = Map.new(cmds, &{&1.id, &1})
+
+      for id <-
+            ~w(session.open session.log session.publish session.view session.link-task session.touch) do
+        assert Map.has_key?(by_id, id), "missing #{id}"
+      end
+
+      session_cmds = Enum.filter(cmds, &(&1.noun == "session"))
+      assert length(session_cmds) == 6
+      assert Enum.all?(session_cmds, &(&1.verb in ~w(open log publish view link-task touch)))
+
+      # Every session verb is grounded in a route the plugin (or, for
+      # link-task, the Tasks plugin's own /v1/tasks mount, task 5) actually
+      # registers.
+      assert Enum.all?(session_cmds, fn c ->
+               MapSet.member?(@bulldocs_routes, c.http.path_template)
+             end)
+
+      # session.open/publish/view/log are ingest-tier (the bulldocs ingest
+      # token bucket); session.link-task is read-tier (the /v1/tasks bearer
+      # scope) — the ONE exception to "all bulldocs commands are ingest".
+      open = by_id["session.open"]
+      log = by_id["session.log"]
+      publish = by_id["session.publish"]
+      view = by_id["session.view"]
+      link_task = by_id["session.link-task"]
+      touch = by_id["session.touch"]
+
+      assert open.auth_tier == "ingest"
+      assert log.auth_tier == "ingest"
+      assert publish.auth_tier == "ingest"
+      assert view.auth_tier == "ingest"
+      assert link_task.auth_tier == "read"
+      assert touch.auth_tier == "ingest"
+
+      assert open.http == %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions"}
+      assert publish.http == %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions"}
+
+      assert log.http == %{
+               method: "POST",
+               path_template: "/v1/plugins/bulldocs/sessions/:slug/events"
+             }
+
+      assert view.http == %{method: "GET", path_template: "/v1/plugins/bulldocs/sessions/:slug"}
+
+      assert link_task.http == %{method: "POST", path_template: "/v1/tasks/:doc_id/sessions"}
+
+      assert touch.http == %{
+               method: "POST",
+               path_template: "/v1/plugins/bulldocs/sessions/:slug/conversations"
+             }
+
+      touch_flags = Map.new(touch.flags, &{&1.name, &1})
+      assert touch_flags["conversation"].type == "string"
+      assert touch_flags["harness"].type == "string"
+      assert touch_flags["account"].type == "string"
+      assert touch_flags["machine"].type == "string"
+      assert touch_flags["cwd"].type == "string"
+      refute touch.batch
+      assert touch.writes
+
+      # session.log carries the three event-shape flags (kind/ref/note) — the
+      # server reads them off conn.params, which Phoenix merges from the query
+      # string for a non-batch write (commandFlagBelongsInBody only routes
+      # BATCH writes to the JSON body; see internal/cli/run.go), exactly like
+      # the existing task.stamp precedent.
+      log_flags = Map.new(log.flags, &{&1.name, &1})
+      assert log_flags["kind"].type == "string"
+      assert log_flags["ref"].type == "string"
+      assert log_flags["note"].type == "string"
+      # session-conversations slice review fix: session.log must declare
+      # --conversation, or the manifest-driven CLI hard-errors (unknown flag,
+      # run.go:474) on the documented `bp session log ... --conversation`
+      # provenance invocation — the event-provenance half was unreachable.
+      assert log_flags["conversation"].type == "string"
+      refute log.batch
+
+      # session.link-task's --add flag reaches TasksController.sessions/2's
+      # Params.string_list(params["add"]) — which accepts a bare string OR a
+      # list, so a single --add value (landing as a scalar query param) works.
+      add_flag = Enum.find(link_task.flags, &(&1.name == "add"))
+      assert add_flag.type == "string"
+      refute link_task.batch
+
+      # view is a read (GET), the rest write.
+      refute view.writes
+      assert Enum.all?([open, log, publish, link_task, touch], & &1.writes)
+    end
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the eleven task verbs, all read-tier, grounded in a real /v1/tasks route" do
+    test "declares the thirteen task verbs, all read-tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -97,32 +224,63 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "task.get" in ids
       assert "task.claim" in ids
       assert "task.close" in ids
+      assert "task.release" in ids
       assert "task.stamp" in ids
       assert "task.pulse" in ids
       assert "task.next" in ids
       assert "task.move" in ids
+      assert "task.stage" in ids
       # The content-graph read verbs are NOT on the Tasks plugin — they moved
       # to CORE (Goal ges/graph-edge-seam) so the kill switch can't drop them.
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
-      assert length(cmds) == 11
+      # #5627 (listener presence) added the two fleet verbs to this plugin —
+      # 13 task.* + fleet.roster/fleet.beat = 15.
+      assert "fleet.roster" in ids
+      assert "fleet.beat" in ids
+      assert length(cmds) == 15
+
+      {fleet_cmds, task_cmds} = Enum.split_with(cmds, &(&1.noun == "fleet"))
 
       # task is no longer a core noun — the verbs moved verbatim onto the Tasks
       # plugin; auth_tier stays "read" (the /v1/tasks scope is bearer-gated, not
       # admin).
-      assert Enum.all?(cmds, &(&1.noun == "task"))
-      assert Enum.all?(cmds, &(&1.auth_tier == "read"))
+      assert Enum.all?(task_cmds, &(&1.noun == "task"))
+      assert Enum.all?(task_cmds, &(&1.auth_tier == "read"))
+
+      # The fleet pair: roster is a read; beat is the one write-tier verb
+      # (listener presence heartbeat) — pinned so a tier drift is caught here.
+      assert Enum.map(fleet_cmds, & &1.id) |> Enum.sort() == ["fleet.beat", "fleet.roster"]
+      assert Enum.find(fleet_cmds, &(&1.id == "fleet.roster")).auth_tier == "read"
+      assert Enum.find(fleet_cmds, &(&1.id == "fleet.beat")).auth_tier == "write"
 
       # Every path_template is a route the plugin actually mounts.
       assert Enum.all?(cmds, fn c -> MapSet.member?(@tasks_paths, c.http.path_template) end)
 
-      # claim/close are the writing workflow ops.
+      # claim/close/release are the writing workflow ops.
       claim = Enum.find(cmds, &(&1.id == "task.claim"))
       close = Enum.find(cmds, &(&1.id == "task.close"))
+      release = Enum.find(cmds, &(&1.id == "task.release"))
       assert claim.writes
       assert close.writes
+      assert release.writes
       assert claim.default_output == "minimal"
+      assert release.default_output == "minimal"
+
+      assert release.http == %{
+               method: "POST",
+               path_template: "/v1/tasks/:doc_id/release"
+             }
+
+      assert Enum.map(release.args, &{&1.name, &1.type, &1.required}) == [
+               {"doc_id", "string", true},
+               {"worker_id", "string", true},
+               {"observed_epoch", "int", true}
+             ]
+
+      assert release.auth_tier == "read"
+      assert release.flags == []
 
       # task.claim declares required worker_id body arg (server requires it).
       claim_arg_names = Enum.map(claim.args, & &1.name)
@@ -204,6 +362,12 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert next_worker.required
       refute next_phase.required
       refute Enum.any?(next.args, &(&1.name == "doc_id"))
+
+      for command <- [Enum.find(cmds, &(&1.id == "task.ready")), next] do
+        order = Enum.find(command.flags, &(&1.name == "order"))
+        assert order.type == "string"
+        refute Map.has_key?(order, :default)
+      end
     end
 
     test "manifest declares every noun its cli verbs use → provenance resolves to plugin:tasks" do
@@ -283,6 +447,51 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "graph.tasks" in read_ids
       assert "graph.orphans" in read_ids
       assert "graph.dangling" in read_ids
+    end
+  end
+
+  describe "core document write verbs" do
+    test "doc.create declares JSON file input alongside repeatable set overrides" do
+      command =
+        Capabilities.manifest("admin", project: false)["commands"]
+        |> Enum.find(&(&1["id"] == "doc.create"))
+
+      assert command
+      flags = Map.new(command["flags"], &{&1["name"], &1})
+
+      assert flags["file"]["type"] == "file"
+      refute flags["file"]["repeatable"]
+      assert flags["file"]["summary"] =~ "JSON object"
+      assert flags["file"]["summary"] =~ "stdin"
+
+      assert flags["set"]["type"] == "string"
+      assert flags["set"]["repeatable"]
+    end
+
+    test "doc.create-or-replace and doc.create-if-not-exists both accept the --file flag" do
+      commands =
+        Capabilities.manifest("admin", project: false)["commands"]
+        |> Map.new(&{&1["id"], &1})
+
+      # The generic Writes help (usage.go) advertises --file for every write verb;
+      # these two upsert verbs used to declare only --set, so a `--file x.json`
+      # exited 2 "unknown flag --file". Both must carry the file flag, mirroring
+      # doc.create.
+      for id <- ~w(doc.create-or-replace doc.create-if-not-exists) do
+        command = Map.fetch!(commands, id)
+        flags = Map.new(command["flags"], &{&1["name"], &1})
+
+        file_flag = flags["file"]
+        assert file_flag, "#{id} must declare a --file flag"
+        assert file_flag["type"] == "file"
+        refute file_flag["repeatable"]
+        assert file_flag["summary"] =~ "JSON object"
+        assert file_flag["summary"] =~ "stdin"
+
+        # --set survives alongside --file.
+        assert flags["set"]["type"] == "string"
+        assert flags["set"]["repeatable"]
+      end
     end
   end
 
@@ -405,7 +614,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     @auth_none ~w(auth.register auth.login auth.verify-email auth.request-reset auth.reset)
     @auth_read ~w(auth.me auth.logout auth.mfa-enroll auth.mfa-verify)
 
-    test "all 9 auth verbs are CORE under the `auth` noun, route-matched, write-free" do
+    test "all 9 auth verbs are CORE under the `auth` noun, route-matched, side-effect honest" do
       manifest = Capabilities.manifest("admin", project: false)
       cmds = manifest["commands"]
 
@@ -415,10 +624,17 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       for c <- auth_cmds do
         assert c["source"] == "core"
         assert c["noun"] == "auth"
-        refute c["writes"]
         {method, path} = Map.fetch!(@auth_routes, c["id"])
         assert c["http"]["method"] == method
         assert c["http"]["path_template"] == path
+
+        # PDS-D302 REVERSED the original "write-free" claim here. `writes` means
+        # "has side effects", and internal/cli/mcp_bridge.go turns it straight
+        # into ReadOnlyHint — so advertising auth.register / auth.mfa-enroll as
+        # read-only told an MCP client they were safe to call unprompted. Only
+        # the GET is genuinely read-only.
+        assert c["writes"] == (method != "GET"),
+               "#{c["id"]} (#{method}) advertises writes == #{inspect(c["writes"])}"
       end
 
       # tier split: 5 public "none", 4 session-gated "read".

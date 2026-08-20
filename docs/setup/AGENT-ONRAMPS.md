@@ -86,19 +86,38 @@ bp seed note --count 1
 bp doc ls note --perspective raw
 
 # 3. A task — a claimable, dependency-aware work item.
-# `tags` are weighted labels [{tag, strength 1–100, rationale}] — mandatory on
-# publish, and every `tag` must already be a registered tag doc (`bp doc ls tag`)
-# or the publish 422s `unknown_tag`. Strengths must be distinct; the max is the
-# main tag. `docs` and `search` below are registered examples.
+# The publish WALL applies to `task` and `paper` docs (authoring-excellence): a
+# published one needs a `description` (≥20 chars) AND weighted `tags`
+# [{tag, strength 1–100, rationale}] whose every `tag` is already a registered
+# tag doc — else 422 `label_spine` (missing description/tags) or 422
+# `unknown_tag`. Strengths must be distinct (the max is the main tag); each
+# `rationale` is ≥20 chars. A FRESH instance registers NO tags, so register the
+# ones you'll use first — a tag is registered by publishing a `type:tag` doc
+# whose id is the tag string (tag docs are not walled):
+bp doc create tag --yes --set _id=docs --set title="Docs"
+bp doc publish tag docs --yes
+bp doc create tag --yes --set _id=search --set title="Search"
+bp doc publish tag search --yes
+bp doc ls tag                                    # both now registered
+
 bp task create "Draft the launch note" --publish \
   --set 'priority:=1' \
+  --set description="Write and publish the product launch note as a first agent-authored task." \
   --set 'tags:=[{"tag":"docs","strength":80,"rationale":"launch-note authoring is documentation work"},{"tag":"search","strength":40,"rationale":"the note should be findable via FTS once published"}]' \
   --set 'acceptance_criteria:=[{"criterion":"note published","met":false,"evidence":""}]'
 bp task ready
 
-# 4. A paper — Barkpark's block document, read anywhere.
+# 4. A paper — Barkpark's block document, read anywhere. Papers hit the SAME
+# wall, so the ingest payload carries a `description` and weighted `tags`
+# (`bp bulldocs publish --file` forwards the file's top-level `tags`/`description`
+# into the ingest params the wall reads). The tags must already be registered
+# (step 3 did that).
 cat > paper.json <<'JSON'
-{"slug":"hello","blocks":[
+{"slug":"hello",
+ "description":"My first Barkpark paper, authored end-to-end by an agent.",
+ "tags":[{"tag":"docs","strength":80,"rationale":"a hello-world paper is documentation content"},
+         {"tag":"search","strength":40,"rationale":"the paper should surface in full-text search"}],
+ "blocks":[
   {"id":"t1","type":"heading","level":1,"text":"Hello"},
   {"id":"p1","type":"paragraph","content":[{"type":"text","value":"My first paper, from an agent."}]}
 ]}

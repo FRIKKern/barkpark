@@ -58,10 +58,12 @@ var detailRegistry = pdrender.DefaultRegistry(pdrender.DarkTheme())
 // two reasons: (1) it upholds the epic's "color = state, never decoration" law
 // (prose carries no state, so it wears no hue; block headings/body still take
 // the DarkTheme lipgloss styling, which rides the global lipgloss profile, not
-// this one); (2) pdrender's COLORED chroma path collapses a multi-line fenced
-// code block onto a single line (verified: only the NoColor path re-splits the
-// source correctly), and charter law forbids editing pdrender to fix it here.
-// NoColor keeps fenced code honestly multi-line and readable.
+// this one). The color=state law is the WHOLE reason: an earlier note here
+// claimed pdrender's colored chroma path collapsed a multi-line fenced code
+// block onto one line, but that defect was fixed by #1592 (92d7879362) and W20
+// verify proved ANSI256 splits fenced code identically to NoColor — so NoColor
+// no longer rests on a rendering bug, it rests on "prose carries no state, so
+// it wears no hue" alone.
 const detailProfile = pdrender.NoColor
 
 // measure is the SINGLE pure reading-measure helper (charter D24) both the
@@ -151,20 +153,28 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 	// lives here (and in the timeline's life story) only.
 	b.add(detailMetaLine(d, width, now))
 
-	// (3) Hybrid timestamps — one line when they fit, stacked when narrow.
+	// (3) The executable contract leads every substantive section.
+	b.emitCriteria(d, width, now)
+
+	// (4) Purpose and proof explain placement, impact, and endgame before the
+	// reader reaches chronology or narrative. Missing authored values are
+	// explicitly labeled derived by taskPurposeView.
+	b.emitPurpose(d, children, width)
+
+	// (5) Hybrid timestamps — one line when they fit, stacked when narrow.
 	if stamps := detailStampLines(d, width, now); len(stamps) > 0 {
 		b.blank()
 		b.lines = append(b.lines, stamps...)
 	}
 
-	// (4) Derived status timeline (D13f) — the task's life story in one dim
+	// (6) Derived status timeline (D13f) — the task's life story in one dim
 	// horizontal strip, wrapping gracefully at narrow widths.
 	if segs := timelineSegments(d, now); len(segs) > 0 {
 		b.blank()
 		b.lines = append(b.lines, timelineLines(segs, width)...)
 	}
 
-	// (5) Canonical PortableDoc brief, with the legacy Markdown description as
+	// (7) Canonical PortableDoc brief, with the legacy Markdown description as
 	// a compatibility fallback. Both paths converge on the paper renderer.
 	if prose := portableDocLines(d.BriefRaw, width); len(prose) > 0 {
 		b.blank()
@@ -179,10 +189,7 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 		b.lines = append(b.lines, prose...)
 	}
 
-	// (6) Acceptance-criteria checklist.
-	b.emitCriteria(d, width)
-
-	// (7)+(8) Labels + deps — flat dim facts, one line each.
+	// (8)+(9) Labels + deps — flat dim facts, one line each.
 	b.emitFacts(d, width)
 
 	// (9) Claim block.
@@ -192,6 +199,11 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 	b.emitStrip("blocked", d.BlockedReason, warnStyle, width)
 	b.emitStrip("closed", d.CloseReason, dimStyle, width)
 	b.emitStrip("resolution", d.ResolutionNote, dimStyle, width)
+	b.emitStrip(dispositionLabel(d.Disposition), d.DispositionReason, dispositionStyle(d.Disposition), width)
+	// The trigger sits directly under the reason it qualifies. The server
+	// refuses a park without one, so a parked row showing a reason and no
+	// trigger means the row predates that refusal — worth seeing, not hiding.
+	b.emitStrip("reopens when", d.ReopenTrigger, dispositionStyle(d.Disposition), width)
 	b.emitCodeRefs(d, width)
 	if d.TwinOf != "" {
 		partner := d.TwinTitle
@@ -208,6 +220,73 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 	b.emitPapersRail(d.PaperRefs(), cursor, width)
 
 	return b.lines, b.stops
+}
+
+func (b *detailBuilder) emitPurpose(d TaskDetail, children []Task, width int) {
+	v := taskPurposeView(d, children)
+	b.blank()
+	heading := "purpose"
+	headingLine := infoStyle.Bold(true).Render(heading)
+	if !v.Authored {
+		headingLine += dimStyle.Render(" · derived")
+	}
+	b.add(headingLine)
+	b.emitPurposeFact("part of", v.PartOf, width)
+	b.emitPurposeFact("impact", v.Impact, width)
+	b.emitPurposeFact("does", v.Statement, width)
+	b.emitPurposeFact("why", v.Why, width)
+	b.emitPurposeFact("endgame", v.Endgame, width)
+	b.emitPurposeFact("important", fmt.Sprintf("%d/100 — %s", v.Importance.Score, v.Importance.Reason), width)
+	b.emitPurposeFact("relevant", fmt.Sprintf("%d/100 — %s", v.Relevance.Score, v.Relevance.Reason), width)
+	for _, p := range v.Proof {
+		text := strings.TrimSpace(strings.Join(nonEmptyStrings(p.Claim, p.Evidence, p.Source), " — "))
+		b.emitPurposeFact("proof", text, width)
+	}
+	if !v.Authored {
+		b.add(dimStyle.Render(truncate("  derived from recorded task facts · add authored purpose to override", width)))
+	}
+}
+
+func (b *detailBuilder) emitPurposeFact(label, value string, width int) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	prefix := fmt.Sprintf("  %-9s ", label)
+	continuation := strings.Repeat(" ", disp(prefix))
+	labelStyle, valueStyle := purposeFactStyles(label)
+	for i, line := range detailWrap(value, width-disp(prefix)) {
+		if i == 0 {
+			b.add(labelStyle.Render(prefix) + valueStyle.Render(line))
+		} else {
+			b.add(continuation + valueStyle.Render(line))
+		}
+	}
+}
+
+func purposeFactStyles(label string) (lipgloss.Style, lipgloss.Style) {
+	switch label {
+	case "impact", "important":
+		return warnStyle.Bold(true), neutralStyle
+	case "proof":
+		return doneStyle.Bold(true), neutralStyle
+	case "part of", "endgame", "relevant":
+		return infoStyle.Bold(true), neutralStyle
+	case "does":
+		return titleStyle, titleStyle
+	default:
+		return readyStyle.Bold(true), neutralStyle
+	}
+}
+
+func nonEmptyStrings(values ...string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 // detailMetaLine is section (2): glyph + dim `lifecycle · P<n> · kind · worker`.
@@ -418,25 +497,28 @@ func portableDocLines(raw []byte, width int) []string {
 	return out
 }
 
-// emitCriteria is section (6): a `criteria met/total` header plus a ✓/○
-// checklist with per-item evidence. When only the {met,total} counter
-// survived decoding (no items), the header alone renders — never emptier
-// than the wire was honest about.
-func (b *detailBuilder) emitCriteria(d TaskDetail, width int) {
+// emitCriteria is the leading contract section: a `criteria met/total` header plus a ✓/○
+// checklist with per-item evidence and the ordered honest-miss attempts trail.
+// When only the {met,total} counter survived decoding (no items), the header
+// alone renders — never emptier than the wire was honest about.
+func (b *detailBuilder) emitCriteria(d TaskDetail, width int, now time.Time) {
 	items := d.CriteriaItems
 	hasCounter := d.Criteria != nil && d.Criteria.Total > 0
 	if len(items) == 0 && !hasCounter {
+		b.blank()
+		b.add(warnStyle.Bold(true).Render("criteria · missing"))
+		b.add(warnStyle.Render(truncate("  ! No acceptance criteria recorded — completion cannot be verified.", width)))
 		return
 	}
 	met, total := detailCriteriaFraction(d)
 	b.blank()
-	b.add(dimStyle.Render(fmt.Sprintf("criteria %d/%d", met, total)))
+	b.add(doneStyle.Bold(true).Render(fmt.Sprintf("criteria %d/%d", met, total)))
 	for i, it := range items {
 		glyph, gStyle := "○", dimStyle
 		tStyle := lipgloss.NewStyle()
 		if it.Met {
 			glyph, gStyle = "✓", doneStyle // teal check — the spec's completion hue
-			tStyle = dimStyle              // landed work recedes; the ✓ already said it
+			tStyle = neutralStyle          // landed work recedes slightly, but remains readable
 		}
 		if it.Criterion == "" {
 			// Malformed entry: keep its slot as a bare glyph — honest that an
@@ -453,6 +535,28 @@ func (b *detailBuilder) emitCriteria(d TaskDetail, width int) {
 		}
 		if i < len(d.Evidence) && d.Evidence[i] != "" {
 			b.add(dimStyle.Render(truncate("    ↳ "+d.Evidence[i], width)))
+		}
+		for _, attempt := range it.Attempts {
+			var parts []string
+			if note := strings.TrimSpace(attempt.Note); note != "" {
+				parts = append(parts, note)
+			}
+			if stamp := hybridStamp(attempt.At, now); stamp != "" {
+				parts = append(parts, stamp)
+			}
+			if worker := strings.TrimSpace(attempt.Worker); worker != "" {
+				parts = append(parts, worker)
+			}
+			if len(parts) == 0 {
+				continue
+			}
+			for j, line := range detailWrap(strings.Join(parts, " · "), width-6) {
+				prefix := "      "
+				if j == 0 {
+					prefix = "    ↳ "
+				}
+				b.add(dimStyle.Render(prefix + line))
+			}
 		}
 	}
 }
@@ -502,11 +606,11 @@ func pluralTask(n int) string {
 	return "tasks"
 }
 
-// emitClaim is section (9): worker · epoch · ticking claimed age, the lease
-// expiry (warn tint when leaning, danger when spent), and the previous
-// worker. A TERMINAL task keeps the who-did-it facts but never a lease
-// alarm — finished work cannot have an expiring lease (mirrors staleRole's
-// terminal-neutral rule).
+// emitClaim is section (9): worker · epoch · ticking claimed age, the shared
+// pulseLine now-line, the lease expiry (warn tint when leaning, danger when
+// spent), and the previous worker. A TERMINAL task keeps the who-did-it facts
+// but never a lease alarm — finished work cannot have an expiring lease
+// (mirrors staleRole's terminal-neutral rule).
 func (b *detailBuilder) emitClaim(d TaskDetail, width int, now time.Time) {
 	if d.Claim == nil || d.Claim.Worker == "" {
 		return
@@ -517,6 +621,9 @@ func (b *detailBuilder) emitClaim(d TaskDetail, width int, now time.Time) {
 		parts = append(parts, "claimed "+s)
 	}
 	b.add(dimStyle.Render(truncate("claim  "+strings.Join(parts, " · "), width)))
+	if d.Claim.Now != nil && strings.TrimSpace(d.Claim.Now.Text) != "" {
+		b.add("       " + pulseLine(d.Task, d.Claim.Now, 0, width-7, now))
+	}
 
 	terminal := d.Lifecycle == "done" || d.Lifecycle == "closed" || d.Lifecycle == "cancelled"
 	if !d.ClaimExpiredAt.IsZero() && !terminal {
@@ -563,6 +670,26 @@ func (b *detailBuilder) emitStrip(label, text string, style lipgloss.Style, widt
 	for _, w := range detailWrap(label+" — "+text, width-2) {
 		b.add(style.Render("▍ " + w))
 	}
+}
+
+// dispositionLabel names the durable-adjudication strip after the disposition
+// itself, so a row disposed OPEN is never mislabelled "parked". The label stays
+// prefixed with "disposition" because a bare "closed" would be indistinguishable
+// from the close_reason strip directly above it.
+func dispositionLabel(disposition string) string {
+	if d := strings.ToLower(strings.TrimSpace(disposition)); d != "" {
+		return "disposition " + d
+	}
+	return "disposition"
+}
+
+// dispositionStyle tints a PARKED row's reason as a warning — a park is a
+// deferral its owner should be able to spot — and every other disposition dim.
+func dispositionStyle(disposition string) lipgloss.Style {
+	if strings.EqualFold(strings.TrimSpace(disposition), "parked") {
+		return warnStyle
+	}
+	return dimStyle
 }
 
 // emitCodeRefs renders the dim code_refs list, capped honestly.

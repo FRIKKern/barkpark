@@ -1,4 +1,5 @@
 import "server-only";
+import { paperTags, type PaperTag } from "./paper-tags";
 
 /**
  * The data layer for Hundesteder.no — every page's source of places.
@@ -110,10 +111,11 @@ function normalizePlace(raw: unknown): Place | null {
   };
   const hasAddress = address.street || address.postalCode || address.country;
 
-  const tagsRaw = r.tags;
-  const tags = Array.isArray(tagsRaw)
-    ? tagsRaw.filter((t): t is string => typeof t === "string")
-    : [];
+  // Paper surfaces carry weighted tags (charter D8–D10): a flat-string-only
+  // filter here silently drops any `{tag,strength,rationale}` object, so lean
+  // on the shared `paperTags` normaliser instead (ported from
+  // `web/lib/paper-tags.ts`, which fixed the identical bug in listings.ts).
+  const tags = paperTags(r.tags as PaperTag[] | undefined);
 
   return {
     id,

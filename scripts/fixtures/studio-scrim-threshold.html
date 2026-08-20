@@ -1,0 +1,122 @@
+<!doctype html>
+<!--
+  studio-scrim-threshold.html — the scrim cascade, isolated.
+
+  A STANDALONE, OFFLINE reproduction of the four CSS rules that decide whether
+  the Studio desk paints an overlay scrim over the document, plus the DOM
+  nesting they key on. It exists so `scripts/studio-scrim-threshold-control.mjs`
+  can force `.editor-panel` across the 860px container threshold and read the
+  computed `::after` content without a deployed build, an ssh key, or a network.
+
+  THE FOUR RULES BELOW ARE COPIED VERBATIM from
+  `api/lib/barkpark_web/layouts/root.html.heex` on origin/main:
+
+    - the GENERATOR   at :1389, inside `@container panel (max-width: 860px)`
+    - suppressor A    at :2029  (below-wide AND never-asked-for)
+    - suppressor B    at :2067  (wide, unconditional — charter D170)
+    - suppressor C    at :2141-2142 (the summoned destination at narrow/phone)
+
+  SOURCE ORDER IS PART OF THE CONTRACT. In root.html.heex the generator is at
+  :1389 and every suppressor is at :2029 or later, so the suppressors win ties
+  on order as well as on specificity. This fixture preserves that ordering; do
+  not reshuffle the blocks.
+
+  THE GENERATOR IS FENCED between the SCRIM-GENERATOR-BEGIN/END markers below.
+  The control's self-test deletes exactly that fenced region to produce a
+  generator-less copy of this file, and asserts the truthful cell goes dark.
+  The markers are load-bearing — renaming them breaks the ability to fail.
+
+  DOM NESTING mirrors `studio_live/components.ex`:
+    div.editor-panel[data-role="content"]        (:126 — the `panel` container)
+      div.editor-with-preview                    (:178 — the scrim's subject)
+        div.editor-body.editor-panel-main.bp-paper-body   (:197)
+        aside.bp-doc-sidebar.is-open[data-user-opened]    (:394, via
+                                                    .paper_metadata_sidebar)
+
+  `data-width-bucket` on <html> is left UNSET here on purpose: the control
+  stamps it per cell, and an unstamped run is a state the server never ships.
+  See the FALSE-GREEN TRAP note in the control script.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Studio scrim threshold — forced-container control fixture</title>
+    <style>
+      /* Only the custom property the generator dereferences. Its value is
+         irrelevant to this control (we read `content`, never `background`) but
+         an undefined var would make the declaration invalid-at-computed-value
+         and that is a difference from production we do not want. */
+      :root { --bp-scrim-hsl: 222 24% 8%; --bp-shadow-hsl: 222 24% 8%; }
+
+      html, body { margin: 0; height: 100%; }
+
+      /* VERBATIM from root.html.heex:1829-1833 — this is what makes the
+         861/860 threshold a CONTAINER question rather than a viewport one.
+         `position: relative` is what the scrim's `inset: 0` anchors to. */
+      .editor-panel {
+        flex: 1; display: flex; flex-direction: column; background: var(--bg); overflow: hidden;
+        position: relative; min-width: 560px;
+        container-type: inline-size; container-name: panel;
+      }
+
+      /* Enough layout for the boxes to exist. Not from production — the
+         cascade under test does not read any of it. */
+      .editor-with-preview { position: relative; flex: 1; display: flex; min-height: 240px; }
+      .editor-body { flex: 1; min-width: 0; }
+      .bp-doc-sidebar { width: 300px; }
+      .bp-doc-sidebar.is-collapsed { width: 44px; }
+
+      /* ───────── SCRIM-GENERATOR-BEGIN ─────────
+         VERBATIM from root.html.heex:1388-1396 (the rule at :1389), inside the
+         `@container panel (max-width: 860px)` block opened at :1367. Deleting
+         everything between these markers is how the control proves it can fail. */
+      @container panel (max-width: 860px) {
+        .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          z-index: 4;
+          background: hsl(var(--bp-scrim-hsl) / 0.55);
+          pointer-events: none;
+        }
+      }
+      /* ───────── SCRIM-GENERATOR-END ───────── */
+
+      /* SUPPRESSOR A — VERBATIM from root.html.heex:2029-2032.
+         "below wide AND never asked for". */
+      html:not([data-width-bucket="wide"])
+        .editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after {
+        content: none;
+      }
+
+      /* SUPPRESSOR B — VERBATIM from root.html.heex:2067-2070 (charter D170).
+         UNCONDITIONAL at wide: no `[data-user-opened]` qualifier. This is the
+         rule that makes D170's own "verified at both 1280 and 1440" claim
+         unrunnable — see the control script's VIEWPORT IS IRRELEVANT note. */
+      html[data-width-bucket="wide"]
+        .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
+        content: none;
+      }
+
+      /* SUPPRESSOR C — VERBATIM from root.html.heex:2141-2144.
+         The summoned destination: an opaque inset:0 panel needs no scrim. */
+      html[data-width-bucket="narrow"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after,
+      html[data-width-bucket="phone"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
+        content: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="editor-panel" data-role="content" data-test-id="studio-paper-editor">
+      <div class="editor-with-preview">
+        <div class="editor-body editor-panel-main bp-paper-body"></div>
+        <aside
+          class="bp-doc-sidebar is-open"
+          data-user-opened=""
+          data-role="inspector"
+          data-test-id="paper-metadata-sidebar"
+        ></aside>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+# build output
+dist/
+# astro type generation
+.astro/
+# deps
+node_modules/
+# local env — NEVER commit real tokens
+.env
+.env.local
+.env.*.local
+# os / editor
+.DS_Store

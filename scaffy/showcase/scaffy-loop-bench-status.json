@@ -1,0 +1,794 @@
+{
+  "slug": "scaffy-loop-bench-status",
+  "style": "article",
+  "blocks": [
+    {
+      "id": "sls-001",
+      "text": "Scaffy \u00b7 Loop Bench Status",
+      "type": "eyebrow"
+    },
+    {
+      "id": "sls-002",
+      "level": 1,
+      "text": "The Perfecting Loop \u2014 Status & Bench",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "One /loop prompt, one day. The catalog went 14 \u2192 21 commands with every vein evidence-ruled, the benchmark got measured and published, the grammar grew twice by corruption-shaped need, pattern-detection became a 2-second native verb that audits its own signal, and the catalog-first reminder is wired into memory, docs, and the workflow machine itself. All numbers below are measured, not estimated."
+        }
+      ],
+      "id": "sls-003",
+      "type": "ingress"
+    },
+    {
+      "id": "sls-004",
+      "items": [
+        {
+          "label": "commands served",
+          "spark": [
+            7,
+            14,
+            16,
+            17,
+            18,
+            19,
+            21
+          ],
+          "value": "21"
+        },
+        {
+          "label": "PRs merged (loop)",
+          "value": "20+"
+        },
+        {
+          "label": "duel cells run",
+          "value": "32/32"
+        },
+        {
+          "label": "seed parity",
+          "value": "21/21"
+        },
+        {
+          "label": "author : cut rulings",
+          "value": "6 : 6"
+        },
+        {
+          "label": "grammar primitives grown",
+          "value": "2"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "id": "sls-005",
+      "type": "divider"
+    },
+    {
+      "id": "sls-006",
+      "level": 2,
+      "text": "Catalog growth \u2014 the loop era",
+      "type": "heading"
+    },
+    {
+      "axes": {
+        "min": 0,
+        "xLabels": [
+          "W1",
+          "W5",
+          "sdk",
+          "zones",
+          "router",
+          "bucket",
+          "route",
+          "cloud"
+        ]
+      },
+      "caption": "Commands served on guerrilla, by wave/tick (W1 \u2192 loop end)",
+      "id": "sls-007",
+      "kind": "line",
+      "series": [
+        {
+          "label": "served commands",
+          "points": [
+            7,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            21
+          ]
+        },
+        {
+          "label": "cut rulings (cum.)",
+          "points": [
+            0,
+            4,
+            4,
+            6,
+            8,
+            8,
+            9,
+            12
+          ]
+        }
+      ],
+      "type": "chart"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Every step is an author-or-cut ruling backed by mined frequency evidence \u2014 the catalog grew only where the repo provably repeats, and the cut curve is the bloat that never shipped."
+        }
+      ],
+      "id": "sls-008",
+      "type": "paragraph"
+    },
+    {
+      "id": "sls-009",
+      "type": "divider"
+    },
+    {
+      "id": "sls-010",
+      "level": 2,
+      "text": "The duel bench \u2014 measured, 32 cells, $16.54",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "chore"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "engine (C)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "catalog-told (A)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "untold (A\u2032)"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "bare hands (B)"
+          }
+        ]
+      ],
+      "id": "sls-011",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-error-shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$0 \u00b7 8s \u00b7 rev \u2713"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$0.56 \u00b7 56s \u00b7 ==C bytes \u00b7 rev \u2713"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$0.52 \u00b7 drifted \u00b7 rev \u2717"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$0.55 \u00b7 2 shas \u00b7 rev \u2717"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ensure-cli-noun"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$0 \u00b7 12s \u00b7 rev \u2713"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$1.08 \u00b7 185s (coverage tax \u2014 since FIXED #3973)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "\u2014"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$1.53 \u00b7 218s \u00b7 3 shas"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "add-oban-worker \u00d72"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$0 \u00b7 22s \u00b7 rev \u2713"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$0.46 \u00b7 65s \u00b7 ==C bytes \u00b7 rev \u2713"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "\u2014"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$0.47 \u00b7 94s \u00b7 \u2260C"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "flagship block-type"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$0 \u00b7 29s \u00b7 rev \u2713"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "$0.37 \u00b7 88s \u00b7 ==C bytes"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "\u2014"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(W1-era: whole agent session)"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "axes": {
+        "min": 0,
+        "xLabels": [
+          "error-shape",
+          "cli-noun",
+          "oban",
+          "flagship"
+        ]
+      },
+      "caption": "Median output tokens per arm (add-error-shape / ensure-cli-noun / oban / flagship)",
+      "id": "sls-012",
+      "kind": "line",
+      "series": [
+        {
+          "label": "engine",
+          "points": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "label": "catalog-told agent",
+          "points": [
+            1478,
+            10178,
+            1788,
+            2696
+          ]
+        },
+        {
+          "label": "bare agent",
+          "points": [
+            2121,
+            12788,
+            2743,
+            15000
+          ]
+        }
+      ],
+      "type": "chart"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Wherever the catalog fully covers a chore, a catalog-told agent produces bytes IDENTICAL to the engine (3/3 chores) at ~30% fewer output tokens than bare hands \u2014 and the raw engine does it for $0 in seconds with zero variance and byte-clean reversibility. Untold agents (A\u2032) hand-edited 2/2 with the tool on disk: the reminder IS the mechanism, so it is now wired into the epic-cycle builder prompts themselves (1860a7097)."
+        }
+      ],
+      "id": "sls-013",
+      "title": "The headline, measured",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Dollar separation is cache-dominated (~$0.55 spawn floor) on small chores; partial coverage taxes users into hand-top-ups (measured on ensure-cli-noun, fixed structurally the same day); the boundary chore leaked its staging and P4 is inconclusive as registered. Full detail: /papers/scaffy-benchmark."
+        }
+      ],
+      "id": "sls-014",
+      "title": "The honest boundaries",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "id": "sls-015",
+      "type": "divider"
+    },
+    {
+      "id": "sls-016",
+      "level": 2,
+      "text": "Vein rulings \u2014 the frontier is fully ruled",
+      "type": "heading"
+    },
+    {
+      "cells": [
+        [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      ],
+      "colLabels": [
+        "sdk",
+        "root-heex",
+        "router",
+        "bucket",
+        "route",
+        "console",
+        "studio_live",
+        "content.ex",
+        "cloud-rtr",
+        "registry",
+        "app.css",
+        "api-flat"
+      ],
+      "id": "sls-017",
+      "max": 1,
+      "rowLabels": [
+        "authored/zoned",
+        "cut w/ evidence"
+      ],
+      "type": "heatmap"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Six served (incl. two zone-plantings on files twice ruled un-anchorable \u2014 the plant-the-contract law), six cut (two ghosts caught by the new DECOMPOSED flag, one generated surface, three noun-local/heterogeneous). Discover's visible 12-month territory holds no unruled vein."
+        }
+      ],
+      "id": "sls-018",
+      "type": "paragraph"
+    },
+    {
+      "id": "sls-019",
+      "type": "divider"
+    },
+    {
+      "id": "sls-020",
+      "level": 2,
+      "text": "What the loop built beyond commands",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Artifact"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "State"
+          }
+        ]
+      ],
+      "id": "sls-021",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp scaffy discover"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "native verb, 1.7s, RECENT + DECOMPOSED signal-honesty flags"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "seed --check"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "drift tripwire, fail-loud, 21/21 MATCH"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "INSERT BEFORE primitive"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ratified by experiment \u2014 the deferral hid silent corruption"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "diff + filetree blocks"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "born via bp scaffy run, live on all surfaces, self-demonstrated"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "catalog-first doctrine"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "memory + cli.md + CLAUDE.md router + epic-cycle prompts"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "papers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "benchmark \u00b7 code-story \u00b7 reversibility-proof \u00b7 showcase rev 6 (all live)"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "caption": "The loop machine, closed",
+      "id": "sls-022",
+      "source": "flowchart LR\n  D[bp scaffy discover] --> S[survey: author-or-cut]\n  S --> V[validate/fmt law]\n  V --> E[run/remove engine]\n  E --> C[served catalog 21]\n  C --> P[papers + doctrine]\n  P --> A[agents reach catalog-first]\n  A --> D",
+      "type": "diagram"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "classify-block-type v2 (killing the last documented same-tier hand-edit) is building now. After it: the loop is audit-shaped \u2014 seed --check, showcase currency, fresh discover runs as the repo grows new repetition. Value-capture stays deferred until its fixture fattens (the law that has kept the corpus at zero bloat through twelve rulings)."
+        }
+      ],
+      "id": "sls-023",
+      "title": "In flight + next",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "sls-x01",
+      "type": "divider"
+    },
+    {
+      "id": "sls-x02",
+      "type": "heading",
+      "level": 2,
+      "text": "Addendum \u2014 the advanced-component duel (kpi-grid)"
+    },
+    {
+      "id": "sls-x03",
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "value": "Same frozen spec, same model, parallel isolated worktrees: an advanced block type (delta semantics, column clamp, width-aware degrade) built WITH Scaffy (scaffold+classify then grow) vs WITHOUT (bare hands, scaffy forbidden). Both arms required to prove WORKING: all gates green plus verbatim rendered output on TUI and web for the same fixture."
+        }
+      ]
+    },
+    {
+      "id": "sls-x04",
+      "type": "table",
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "measure"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "with Scaffy"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "bare hands"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "\u0394"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "wall-clock"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "566 s"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "706 s"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "\u221220%"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "tokens"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "122,672"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "154,053"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "\u221220.4%"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "tool calls"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "55"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "80"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "\u221231%"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "gates"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all green (263 vitest, 49/49 parity)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all green (263 vitest, 49/49 parity)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tie"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "rendered proof"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "TUI + HTML, delta classes \u2713"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "TUI + HTML, delta classes \u2713"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "both WORK"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "sls-x05",
+      "type": "callout",
+      "tone": "success",
+      "title": "The crossover law, confirmed at the hard end",
+      "content": [
+        {
+          "type": "text",
+          "value": "An advanced component is mostly judgment work; Scaffy's win concentrates in the mechanical fraction \u2014 the 8-site registration web (registry, dispatch, CASES, count pins, typekeyed partition, golden mirrors, completeness, tier) which the bare arm hunted by hand. That fraction \u224820% of the job, and Scaffy saved almost exactly that: \u221220% time, \u221220% tokens, correctness equal \u2014 with determinism and amortization the single run can't show. The duel also surfaced the SIXTH count-sync site (toPlainText typekeyed pins), banked on the flagship's amendment task."
+        }
+      ]
+    }
+  ],
+  "description": "Bench-status of the Scaffy perfecting loop: catalog 14\u219221 with author-or-cut evidence, the 32-cell duel scoreboard visualized, the frontier fully ruled (ghosts flagged by discover's new signal-honesty), the grammar grown twice by need, and the catalog-first doctrine wired into every layer down to the epic-cycle builder prompts. Native chart/heatmap/diagram blocks throughout.",
+  "tags": [
+    {
+      "rationale": "The loop's own bench-status report, measured numbers only.",
+      "strength": 90,
+      "tag": "scaffy"
+    },
+    {
+      "rationale": "Visualizes the 32-cell duel scoreboard and catalog growth.",
+      "strength": 60,
+      "tag": "benchmark"
+    },
+    {
+      "rationale": "All figures from the registered meter and live catalog audits.",
+      "strength": 40,
+      "tag": "measurement"
+    }
+  ]
+}

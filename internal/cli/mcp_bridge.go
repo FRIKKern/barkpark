@@ -62,14 +62,29 @@ import (
 // design (Cursor hard-caps 40 MCP tools), so the default surface omitting the
 // access tools is intentional, not a gap. TestBridgeAccessParity pins both facts
 // so a future shadow-set edit or verb rename reds the guard.
+// Never-double-expose extends to chat (herd charter D75h): the curated chat
+// session tools (mcp_chat.go — hardcoded, NOT manifest-backed, because chat.*
+// is existence-hidden at write tier) cover three chat verbs under hand-tuned
+// names, so a manifest that DOES carry them (a future admin-tier projection, or
+// the D36 tier remap) must not generate bp_chat_* twins:
+//
+//   - chat.create_session → curated chat_spawn_session
+//   - chat.send_message   → curated chat_send
+//   - chat.get_session    → curated chat_read_tail
+//
+// chat_wait_for_state composes over the fleet SSE — no manifest twin exists, so
+// it has no shadow entry.
 var bridgeShadowedIDs = map[string]bool{
-	"task.ready": true,
-	"task.next":  true,
-	"task.get":   true,
-	"task.close": true,
-	"task.prime": true,
-	"task.stamp": true,
-	"task.pulse": true,
+	"task.ready":          true,
+	"task.next":           true,
+	"task.get":            true,
+	"task.close":          true,
+	"task.prime":          true,
+	"task.stamp":          true,
+	"task.pulse":          true,
+	"chat.create_session": true,
+	"chat.send_message":   true,
+	"chat.get_session":    true,
 }
 
 // registerBridgeTools walks m.Commands and registers one MCP tool per command
@@ -78,9 +93,31 @@ var bridgeShadowedIDs = map[string]bool{
 // an MCP tool with zero code change here. g and ctx are captured by each tool's
 // handler and forwarded to execManifestCommand at call time.
 func registerBridgeTools(srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest) error {
+	return registerBridgeToolsFiltered(srv, g, ctx, m, nil)
+}
+
+// registerBridgeToolsFiltered is registerBridgeTools with an optional noun
+// allowlist — the `--tools <noun,noun>` subset surface (D24 knob 3, Go half). A
+// nil/empty `nouns` means NO filter (the full `--tools all` surface); a non-empty
+// `nouns` restricts registration to commands whose Command.Noun is in the set,
+// skipping every other noun with a second `continue` BESIDE the curated-shadowed
+// skip. Both skips stay live under a subset: the shadow skip is inert for a
+// connector noun (no curated twin exists) but keeps `never-double-expose` honest
+// for a task-noun subset (`--tools task` whose verbs are all curated → zero). An
+// unknown noun matches nothing → zero tools, the honest 0-install surface.
+//
+// This filters whatever nouns the target MANIFEST declares. github/linear are
+// Catalog connector providers, not bp manifest nouns — this flag is NOT itself
+// the transport by which a cloud agent reaches those services (that is the
+// in-sandbox MCP wiring); it only scopes which manifest nouns the bridge exposes.
+func registerBridgeToolsFiltered(srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest, nouns []string) error {
+	allow := nounAllowSet(nouns)
 	for i := range m.Commands {
 		cmd := m.Commands[i] // capture by value per iteration for the closure
 		if bridgeShadowedIDs[cmd.ID] {
+			continue
+		}
+		if allow != nil && !allow[cmd.Noun] {
 			continue
 		}
 		schema, err := json.Marshal(bridgeInputSchema(cmd))
@@ -98,10 +135,30 @@ func registerBridgeTools(srv *mcp.Server, g globals, ctx manifest.Context, m *ma
 				return mcpArgError(err), nil
 			}
 			tail := buildCommandTail(cmd, args)
-			return mcpRun(execManifestCommand(g, ctx, m, cmd, tail)), nil
+			// Bridge tools inherit the manifest's agent-default view generically
+			// (agentViewGlobals, run.go): a command declaring
+			// views.default_for_agents gets ?view= with zero per-tool code here —
+			// the manifest stays the moat.
+			return mcpRun(execManifestCommand(agentViewGlobals(g, cmd), ctx, m, cmd, tail)), nil
 		})
 	}
 	return nil
+}
+
+// nounAllowSet turns a noun subset into a lookup set, or nil when the subset is
+// empty — the distinction registerBridgeToolsFiltered reads as "no filter" (nil)
+// vs "only these nouns" (a non-nil set). parseToolsSelector never yields an empty
+// subset (it rejects empty tokens and requires at least one noun), so a non-nil
+// set always carries at least one entry.
+func nounAllowSet(nouns []string) map[string]bool {
+	if len(nouns) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(nouns))
+	for _, n := range nouns {
+		set[n] = true
+	}
+	return set
 }
 
 // bridgeAnnotations derives the MCP behaviour hints for a generated tool

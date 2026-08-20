@@ -3,16 +3,38 @@ defmodule Barkpark.Search.SurfaceConfigs do
   Per-surface search tuning (Phase 6). Cached in a bounded, named ETS table
   (60s logical TTL).
 
-  `get/2` is on the hot search read path (documents + media), keyed by
-  `{surface, scope}` where `scope` is the caller-supplied dataset segment of
-  anonymous-reachable search endpoints. ETS (not `:persistent_term`) because
-  every distinct scope string mints a key and each `:persistent_term.put/2`
+  `get/3` is on the hot search read path (documents + media), keyed by
+  `{workspace_id, surface, scope}` where `scope` is the caller-supplied dataset
+  segment of anonymous-reachable search endpoints. ETS (not `:persistent_term`)
+  because every distinct scope string mints a key and each `:persistent_term.put/2`
   triggers a BEAM-wide global GC (registry.ex:42 documents the same rule).
   ETS reads are lock-free and writes are GC-local; the table is clear-on-full
   bounded (`@max_cached_configs`) so an unauthenticated caller cannot grow it
   without limit. An evicted entry is re-derived on the next miss via the same
   cold path — behaviour-preserving.
+
+  ## Per-workspace attribution (charter D45/D49)
+
+  The physical row is keyed on `(workspace_id, surface, scope)`. `workspace_id`
+  is OPTIONAL and defaults to `nil`:
+
+    * `nil` → the workspace-agnostic global default row (what `seed_defaults!/0`
+      writes, what the anonymous search read path reads). Preserves the
+      pre-tenancy behaviour of every caller that does not resolve a workspace.
+    * a real `workspace_id` → that tenant's own config. The admin
+      GET/PUT controllers pass `conn.assigns.current_workspace.id`, so workspace
+      A's write can no longer overwrite workspace B's config on a shared dataset
+      slug (the LIVE cross-tenant bleed this closes). On a miss it FALLS THROUGH
+      to the nil-workspace global row (the operator's admin-tuned default) before
+      the hardcoded code default — see `load_or_default/3` (charter D64/D65).
+
+  The scoped search READ path resolves this per-caller: `QueryPipeline.search/4`
+  threads `Keyword.get(opts, :workspace_id)` (from `scope_opts/1`) into `get/3`,
+  so a per-workspace admin's tuning actually reaches results rather than being
+  attributed on write yet resolved workspace-blind on read (charter D63).
   """
+
+  import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Search.SurfaceConfig
   alias Barkpark.Repo
@@ -63,9 +85,9 @@ defmodule Barkpark.Search.SurfaceConfigs do
     "highlight_fields" => ["title", "original_name", "filename"]
   }
 
-  @spec get(String.t(), String.t()) :: map()
-  def get(surface, scope) when is_binary(surface) and is_binary(scope) do
-    cache_key = {surface, scope}
+  @spec get(String.t(), String.t(), binary() | nil) :: map()
+  def get(surface, scope, workspace_id \\ nil) when is_binary(surface) and is_binary(scope) do
+    cache_key = {workspace_id, surface, scope}
     ensure_cache()
 
     case :ets.lookup(@cache, cache_key) do
@@ -75,16 +97,16 @@ defmodule Barkpark.Search.SurfaceConfigs do
         if expires_at > now do
           config
         else
-          cache_put(cache_key, surface, scope)
+          cache_put(cache_key, surface, scope, workspace_id)
         end
 
       _ ->
-        cache_put(cache_key, surface, scope)
+        cache_put(cache_key, surface, scope, workspace_id)
     end
   end
 
-  defp cache_put(cache_key, surface, scope) do
-    config = load_or_default(surface, scope)
+  defp cache_put(cache_key, surface, scope, workspace_id) do
+    config = load_or_default(surface, scope, workspace_id)
     store_config(cache_key, config)
   end
 
@@ -115,8 +137,10 @@ defmodule Barkpark.Search.SurfaceConfigs do
     end
   end
 
-  @spec upsert(String.t(), String.t(), map()) :: {:ok, map()} | {:error, Ecto.Changeset.t()}
-  def upsert(surface, scope, attrs) when is_binary(surface) and is_binary(scope) do
+  @spec upsert(String.t(), String.t(), map(), binary() | nil) ::
+          {:ok, map()} | {:error, Ecto.Changeset.t()}
+  def upsert(surface, scope, attrs, workspace_id \\ nil)
+      when is_binary(surface) and is_binary(scope) do
     defaults = default_for(surface)
 
     merged = %{
@@ -133,9 +157,9 @@ defmodule Barkpark.Search.SurfaceConfigs do
           defaults["highlight_fields"]
     }
 
-    case Repo.get_by(SurfaceConfig, surface: surface, scope: scope) do
+    case get_row(surface, scope, workspace_id) do
       nil ->
-        insert_config(surface, scope, merged)
+        insert_config(surface, scope, merged, workspace_id)
 
       row ->
         row
@@ -144,7 +168,7 @@ defmodule Barkpark.Search.SurfaceConfigs do
     end
     |> case do
       {:ok, row} ->
-        invalidate(surface, scope)
+        invalidate(surface, scope, workspace_id)
         {:ok, payload(row)}
 
       error ->
@@ -152,35 +176,75 @@ defmodule Barkpark.Search.SurfaceConfigs do
     end
   end
 
-  # Concurrency-safe first-config insert. NAMED FAILURE MODE without on_conflict:
-  # two concurrent PUTs for a (surface, scope) with no row yet both have get_by
-  # return nil, both take this branch; the losing racer's plain `Repo.insert/1`
-  # violates search_surface_config_surface_scope_idx and raises an uncaught
-  # Ecto.ConstraintError → HTTP 500. `on_conflict: {:replace_all_except, …}` +
-  # `conflict_target: [:surface, :scope]` turns that INSERT into an idempotent
-  # ON CONFLICT DO UPDATE, so the loser cleanly upserts instead of crashing.
-  # Mirrors Plugins.Settings.put/3 and Secrets.put/3. `:id` and `:inserted_at`
-  # are excluded so the winner's primary key and creation timestamp survive.
-  defp insert_config(surface, scope, merged) do
-    %SurfaceConfig{surface: surface, scope: scope}
-    |> SurfaceConfig.changeset(merged)
-    |> Repo.insert(
-      on_conflict: {:replace_all_except, [:id, :surface, :scope, :inserted_at]},
-      conflict_target: [:surface, :scope]
+  # Scoped single-row read. MUST filter on workspace_id (including nil →
+  # `WHERE workspace_id IS NULL`) — a bare `get_by(surface, scope)` would raise
+  # "expected at most one result" once a (surface, scope) has both a global
+  # default row and one or more per-workspace rows. Ecto forbids `== nil`, so the
+  # nil (global-default) case uses `is_nil/1`.
+  defp get_row(surface, scope, nil) do
+    Repo.one(
+      from(c in SurfaceConfig,
+        where: c.surface == ^surface and c.scope == ^scope and is_nil(c.workspace_id)
+      )
     )
   end
 
+  defp get_row(surface, scope, workspace_id) do
+    Repo.get_by(SurfaceConfig, surface: surface, scope: scope, workspace_id: workspace_id)
+  end
+
+  # Concurrency-safe first-config insert. NAMED FAILURE MODE without on_conflict:
+  # two concurrent PUTs for a (workspace_id, surface, scope) with no row yet both
+  # have get_by return nil, both take this branch; the losing racer's plain
+  # `Repo.insert/1` violates the unique index and raises an uncaught
+  # Ecto.ConstraintError → HTTP 500. `on_conflict: {:replace_all_except, …}` +
+  # a matching `conflict_target` turns that INSERT into an idempotent ON CONFLICT
+  # DO UPDATE, so the loser cleanly upserts instead of crashing. Mirrors
+  # Plugins.Settings.put/3 and Secrets.put/3. `:id`, `:workspace_id`, `:surface`,
+  # `:scope`, `:inserted_at` are excluded so the winner's key columns and creation
+  # timestamp survive the update.
+  #
+  # The conflict_target differs by domain (two partial indexes, charter D57):
+  #   * nil workspace → the `(surface, scope) WHERE workspace_id IS NULL` partial
+  #     index — targeted via an unsafe fragment carrying the predicate (Postgres
+  #     cannot infer a partial index from a bare column list).
+  #   * real workspace → the full `(workspace_id, surface, scope)` index, matched
+  #     by the plain column list.
+  @replace_except [:id, :workspace_id, :surface, :scope, :inserted_at]
+
+  defp insert_config(surface, scope, merged, nil) do
+    %SurfaceConfig{surface: surface, scope: scope, workspace_id: nil}
+    |> SurfaceConfig.changeset(merged)
+    |> Repo.insert(
+      on_conflict: {:replace_all_except, @replace_except},
+      conflict_target: {:unsafe_fragment, ~s|("surface", "scope") WHERE workspace_id IS NULL|}
+    )
+  end
+
+  defp insert_config(surface, scope, merged, workspace_id) do
+    %SurfaceConfig{surface: surface, scope: scope, workspace_id: workspace_id}
+    |> SurfaceConfig.changeset(merged)
+    |> Repo.insert(
+      on_conflict: {:replace_all_except, @replace_except},
+      conflict_target: [:workspace_id, :surface, :scope]
+    )
+  end
+
+  # Workspace-agnostic global defaults (workspace_id = nil). The anonymous search
+  # read path reads these; per-workspace rows are an overlay written by the admin
+  # settings controllers.
   @spec seed_defaults!() :: :ok
   def seed_defaults! do
     for {surface, scope} <- [{"documents", "production"}, {"media", "production"}] do
       defaults = default_for(surface)
 
-      case Repo.get_by(SurfaceConfig, surface: surface, scope: scope) do
+      case get_row(surface, scope, nil) do
         nil ->
           %SurfaceConfig{}
           |> Ecto.Changeset.change(%{
             surface: surface,
             scope: scope,
+            workspace_id: nil,
             searchable_fields: defaults["searchable_fields"],
             typo_policy: defaults["typo_policy"],
             zero_hit_strategy: defaults["zero_hit_strategy"],
@@ -201,9 +265,25 @@ defmodule Barkpark.Search.SurfaceConfigs do
   def default_for("media"), do: @default_media
   def default_for(_), do: @default_documents
 
-  defp load_or_default(surface, scope) do
-    case Repo.get_by(SurfaceConfig, surface: surface, scope: scope) do
+  # Two-tier resolution (charter D64). A per-workspace read that misses falls
+  # through to the nil-workspace GLOBAL row — the operator's admin-tuned default
+  # — BEFORE the hardcoded code default, so a tenant that has not customised a
+  # surface still inherits the instance-wide tuning (and an anonymous flat-route
+  # caller, which resolves the seeded Default workspace's REAL id, reaches it the
+  # same way — charter D65). The fallthrough MUST call the `is_nil` get_row/3
+  # clause, never `Repo.get_by(workspace_id: nil)`: the latter raises "expected
+  # at most one result" once a (surface, scope) has both a nil-global row and one
+  # or more per-workspace rows.
+  defp load_or_default(surface, scope, nil) do
+    case get_row(surface, scope, nil) do
       nil -> default_for(surface)
+      row -> payload(row)
+    end
+  end
+
+  defp load_or_default(surface, scope, workspace_id) do
+    case get_row(surface, scope, workspace_id) do
+      nil -> load_or_default(surface, scope, nil)
       row -> payload(row)
     end
   end
@@ -222,17 +302,35 @@ defmodule Barkpark.Search.SurfaceConfigs do
   defp normalize_fields(fields) when is_list(fields), do: fields
   defp normalize_fields(_), do: []
 
-  defp invalidate(surface, scope) do
+  # A per-workspace upsert only touches its OWN key.
+  defp invalidate(surface, scope, workspace_id) when not is_nil(workspace_id) do
     ensure_cache()
-    :ets.delete(@cache, {surface, scope})
+    :ets.delete(@cache, {workspace_id, surface, scope})
+    :ok
+  end
+
+  # A nil-workspace (global-default) upsert retunes the row that EVERY untuned
+  # workspace inherits via the D64 fallthrough (`load_or_default/3` caches the
+  # inherited payload under the per-workspace key `{workspace_id, surface,
+  # scope}`). Deleting only `{nil, surface, scope}` would leave those inherited
+  # copies stale for up to the 60s ETS TTL — an untuned workspace would serve the
+  # OLD global config. So evict every `{*, surface, scope}` entry (any workspace
+  # key for this surface/scope may hold the fallthrough copy). `match_delete`
+  # keeps unrelated surfaces/scopes cached; the evicted keys re-derive on the next
+  # miss via the same cold path (behaviour-preserving, mirrors the clear-on-full
+  # bound in `store_config/2`).
+  defp invalidate(surface, scope, nil) do
+    ensure_cache()
+    :ets.match_delete(@cache, {{:_, surface, scope}, :_})
     :ok
   end
 
   @doc false
-  # Test seam: insert a config under the given key using the real store_config
-  # path (clear-on-full bound included), without touching the DB loader.
+  # Test seam: insert a config under the given (nil-workspace) key using the real
+  # store_config path (clear-on-full bound included), without touching the DB
+  # loader.
   def __store_config_for_test__(surface, scope, config),
-    do: store_config({surface, scope}, config)
+    do: store_config({nil, surface, scope}, config)
 
   @doc false
   # Test seam: current cache size (ensures the table exists first).
@@ -245,8 +343,8 @@ defmodule Barkpark.Search.SurfaceConfigs do
   # Test seam: run the REAL first-config insert branch (on_conflict + real opts)
   # directly, so a protective test can reproduce the losing racer deterministically
   # — its get_by already returned nil, so it hits an existing (surface, scope) row.
-  def __insert_config_for_test__(surface, scope, merged),
-    do: insert_config(surface, scope, merged)
+  def __insert_config_for_test__(surface, scope, merged, workspace_id \\ nil),
+    do: insert_config(surface, scope, merged, workspace_id)
 
   @doc false
   # Test seam: drop all cached entries so a test starts from an empty table.

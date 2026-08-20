@@ -61,6 +61,33 @@ defmodule BarkparkCloud.Billing.HttpClientTest do
       assert header_cls == [{~c"Authorization", ~c"Bearer sk_test_x"}]
     end
 
+    test "a PATCH maps to the 4-tuple form (D59 — Cloudflare's proxied flip)" do
+      # ensure_zone_proxied emits a :patch request; without this clause to_httpc/1
+      # would FunctionClauseError-crash (there is no catch-all). Drive the exact CF
+      # proxied-flip shape through it and assert the :httpc 4-tuple.
+      req = %{
+        method: :patch,
+        url: "https://api.cloudflare.com/client/v4/zones/z1/dns_records/rec_9",
+        headers: [
+          {"Authorization", "Bearer cf_tok"},
+          {"Content-Type", "application/json"}
+        ],
+        body: ~s({"proxied":true})
+      }
+
+      {{url_cl, header_cls, content_type_cl, body}, http_opts, opts} = HttpClient.to_httpc(req)
+
+      assert url_cl == ~c"https://api.cloudflare.com/client/v4/zones/z1/dns_records/rec_9"
+      # Content-Type is pulled OUT into its own arg (as with POST/PUT).
+      assert content_type_cl == ~c"application/json"
+      refute Enum.any?(header_cls, fn {k, _v} -> k == ~c"Content-Type" end)
+      assert {~c"Authorization", ~c"Bearer cf_tok"} in header_cls
+      # JSON body preserved verbatim; verified TLS + binary body ride along.
+      assert body == ~s({"proxied":true})
+      assert Keyword.fetch!(http_opts, :ssl)[:verify] == :verify_peer
+      assert Keyword.fetch!(opts, :body_format) == :binary
+    end
+
     test "a GET uses the {url, headers} 2-tuple form" do
       req = %{
         method: :get,

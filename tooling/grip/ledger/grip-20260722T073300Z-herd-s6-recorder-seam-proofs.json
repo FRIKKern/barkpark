@@ -1,0 +1,62 @@
+{
+  "run_id": "grip-20260722T073300Z",
+  "subject_epic": "herd-layer-epic",
+  "slice": "herd-s6-recorder-seam-proofs",
+  "verifier": "recorder-seam-proofs",
+  "recipes": [
+    {
+      "subject": "recorder.ex + recorder_test.exs + studio_chat_test.exs in this worktree (HEAD 450fa0284, docs-diverged from origin/main 8306bc36b) are BYTE-IDENTICAL to origin/main — the divergence is tlv/docs commits only, none touch these files, so every seam proof below is meaningful for origin/main",
+      "quantity": "three-way-diff-identity",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt/api && for f in lib/barkpark/studio_chat/recorder.ex test/barkpark/studio_chat/recorder_test.exs test/barkpark/studio_chat_test.exs; do diff <(git show origin/main:api/$f) $f >/dev/null && echo \"$f IDENTICAL\" || echo \"$f DIFFERS\"; done",
+      "expect": "all three print IDENTICAL",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/studio_chat/recorder.ex", "api/test/barkpark/studio_chat/recorder_test.exs", "api/test/barkpark/studio_chat_test.exs"],
+      "observed_at": "2026-07-22T07:33:00Z"
+    },
+    {
+      "subject": "freeze-hazard line anchors on origin/main: flips-only cache gate `if mapped == state.agent_state` at recorder.ex:1552 (defp persist_agent_state at 1549); cache-keyed heartbeat `StudioChat.touch_agent_state_at(state.session_id, ts)` at recorder.ex:686 (survey said ~683, off by 3)",
+      "quantity": "grep-line-anchors",
+      "rerun": "git show origin/main:api/lib/barkpark/studio_chat/recorder.ex | grep -n 'touch_agent_state_at\\|if mapped == state.agent_state\\|defp persist_agent_state'",
+      "expect": "686:      StudioChat.touch_agent_state_at(state.session_id, ts) ; 1549:  defp persist_agent_state(state, activity) do ; 1552:    if mapped == state.agent_state do",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/studio_chat/recorder.ex"],
+      "observed_at": "2026-07-22T07:33:00Z"
+    },
+    {
+      "subject": "full recorder_test.exs suite is GREEN on this tree (89 tests, 0 failures); the Postgrex/DBConnection disconnect log lines are benign sandbox-ownership drain noise, not failures",
+      "quantity": "mix-test-full-file",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt/api && CC=/usr/bin/clang mix test test/barkpark/studio_chat/recorder_test.exs 2>&1 | tail -3",
+      "expect": "Finished in ~3.7 seconds / 89 tests, 0 failures",
+      "derived_level": "L1",
+      "deps": ["api/test/barkpark/studio_chat/recorder_test.exs"],
+      "observed_at": "2026-07-22T07:33:00Z"
+    },
+    {
+      "subject": "the five seam-critical tests pass individually with --trace (proving they RAN, not excluded): (a) flips-only cache gate recorder_test.exs:1769; (b) double-guarded blocked->working at :1888 and pending==0 hold at :1918; (c) two D56h codex ask tests at :1836 (body includes line 1848) and :1974",
+      "quantity": "mix-test-targeted-trace",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt/api && CC=/usr/bin/clang mix test test/barkpark/studio_chat/recorder_test.exs:1769 test/barkpark/studio_chat/recorder_test.exs:1888 test/barkpark/studio_chat/recorder_test.exs:1918 test/barkpark/studio_chat/recorder_test.exs:1836 test/barkpark/studio_chat/recorder_test.exs:1974 --trace 2>&1 | grep -vE 'Postgrex|DBConnection' | tail -8",
+      "expect": "5 tests, 0 failures (84 excluded); each named test shows a ms timing (78.1/134.3/158.7/21.7/30.1ms), none marked (excluded)",
+      "derived_level": "L1",
+      "deps": ["api/test/barkpark/studio_chat/recorder_test.exs"],
+      "observed_at": "2026-07-22T07:33:00Z"
+    },
+    {
+      "subject": "17 test-side call sites of StudioChat.set_agent_state a source-arg signature widening must mechanically touch, across 4 files: studio_chat_test.exs=14, chat_controller_test.exs=1 (the only arity-3 call, uses trailing `now`), chat_fleet_events_test.exs=1, chat_live_test.exs=1. Impl is set_agent_state/2-3 (studio_chat.ex:597, `now \\\\ DateTime.utc_now()`). Recorder_test.exs:1787/1969 are COMMENT refs (not calls); studio_chat_test.exs:2848 is a test-NAME string (not a call).",
+      "quantity": "grep-callsite-census",
+      "rerun": "grep -rn '\\.set_agent_state(' api/test --include='*.exs' | awk -F: '{print $1}' | sort | uniq -c",
+      "expect": "14 studio_chat_test.exs, 1 chat_controller_test.exs, 1 chat_fleet_events_test.exs, 1 chat_live_test.exs (17 total)",
+      "derived_level": "L1",
+      "deps": ["api/test/barkpark/studio_chat_test.exs", "api/test/barkpark_web/controllers/chat_controller_test.exs", "api/test/barkpark_web/controllers/chat_fleet_events_test.exs", "api/test/barkpark_web/live/studio/chat_live_test.exs", "api/lib/barkpark/studio_chat.ex"],
+      "observed_at": "2026-07-22T07:33:00Z"
+    },
+    {
+      "subject": "the assignment-named sweeper test path test/barkpark/studio_chat/agent_state_sweeper_test.exs DOES NOT EXIST; the agent_state_sweeper impl (lib/barkpark/studio_chat/agent_state_sweeper.ex) is exercised by recorder_test.exs:2173/2185 (green above) plus a separate blocked_sweeper_test.exs (7 tests, 0 failures)",
+      "quantity": "path-absence-plus-substitute-run",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/.claude/worktrees/spill-janitor-wt/api && ls test/barkpark/studio_chat/agent_state_sweeper_test.exs 2>&1; CC=/usr/bin/clang mix test test/barkpark/studio_chat/blocked_sweeper_test.exs 2>&1 | tail -3",
+      "expect": "ls: No such file or directory; blocked_sweeper_test.exs = 7 tests, 0 failures",
+      "derived_level": "L1",
+      "deps": ["api/lib/barkpark/studio_chat/agent_state_sweeper.ex", "api/test/barkpark/studio_chat/blocked_sweeper_test.exs"],
+      "observed_at": "2026-07-22T07:33:00Z"
+    }
+  ]
+}

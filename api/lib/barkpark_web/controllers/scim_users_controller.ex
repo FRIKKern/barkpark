@@ -74,8 +74,11 @@ defmodule BarkparkWeb.ScimUsersController do
       user ->
         with_precondition(conn, user, fn conn ->
           if deactivating?(params) do
-            {:ok, _} = Scim.deprovision_user(org, user)
-            json(conn, render_user(conn, user, false))
+            {:ok, _summary} = Scim.deprovision_user(org, user)
+            # READ THE ANSWER BACK. `active` was a literal `false` chosen by this
+            # clause, so the body was byte-identical whether the deprovision took
+            # or matched nothing (PDS-D503). Re-derive it from the stored rows.
+            json(conn, render_user(conn, user, Scim.org_user_active?(org, user)))
           else
             conn
             |> ScimResponse.with_etag(ScimResponse.version(user.updated_at))
@@ -141,7 +144,10 @@ defmodule BarkparkWeb.ScimUsersController do
 
   defp deactivating?(%{"Operations" => ops}) when is_list(ops) do
     Enum.any?(ops, fn op ->
-      String.downcase(to_string(op["op"] || "")) == "replace" and
+      # `is_list(ops)` proves the container, not the elements: `op["op"]` is
+      # `Access.get/3` and raises FunctionClauseError on a scalar Operation.
+      is_map(op) and
+        String.downcase(to_string(op["op"] || "")) == "replace" and
         String.downcase(to_string(op["path"] || "")) == "active" and
         op["value"] in [false, "false"]
     end)
@@ -158,4 +164,8 @@ defmodule BarkparkWeb.ScimUsersController do
       _ -> nil
     end
   end
+
+  # Catch-all: a list param (`?filter[]=x` → Plug parses to `["x"]`) or any other
+  # non-scalar falls back to no-filter instead of raising FunctionClauseError → 500.
+  defp parse_username_filter(_), do: nil
 end

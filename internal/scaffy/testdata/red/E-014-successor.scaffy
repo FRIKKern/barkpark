@@ -1,0 +1,6 @@
+# expect: E-014 4
+DIRECTION "add"
+VARIABLE 1 "CountBefore" OPAQUE TITLE "t" DESCRIPTION "d" EXAMPLES "42"
+VARIABLE 2 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "t2" DESCRIPTION "d2" EXAMPLES "44"
+ASSERT FILE "js/widgets/widgets.test.ts" CONTAINS "toHaveLength({{.CountAfter}})"
+ASSERT FILE "js/widgets/widgets.test.ts" DONT CONTAIN "toHaveLength({{.CountBefore}})"

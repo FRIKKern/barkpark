@@ -1,6 +1,6 @@
 defmodule Barkpark.TenancyRbacTest do
   @moduledoc "era-w1-custom-rbac Stage A — data-driven USER roles at the authorize/3 chokepoint."
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Accounts
   alias Barkpark.Repo

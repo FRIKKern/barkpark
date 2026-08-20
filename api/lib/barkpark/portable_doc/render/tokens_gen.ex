@@ -25,7 +25,7 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
 
   # Known theme ids (evergreen only this wave). resolve/1 folds an unknown /
   # empty / binary theme onto :evergreen so every accessor is total.
-  @themes [:evergreen, :charple, :ember, :fjord]
+  @themes [:evergreen, :charple, :ember, :fjord, :iris]
   @doc "Known theme ids (evergreen this wave)."
   def themes, do: @themes
   defp resolve(theme) when theme in @themes, do: theme
@@ -36,14 +36,26 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
   defp resolve(_), do: :evergreen
 
   # Semantic status tones (design/tokens.json color.status, light theme → hex).
-  @status %{evergreen: %{ok: "#137236", info: "#3b82f6", warn: "#ba7008", danger: "#b42222"}, charple: %{ok: "#08883e", info: "#406bcd", warn: "#986600", danger: "#c43732"}, ember: %{ok: "#2c8647", info: "#486ec0", warn: "#986600", danger: "#ba453d"}, fjord: %{ok: "#32854a", info: "#4a6ebc", warn: "#986600", danger: "#b74941"}}
+  @status %{
+    evergreen: %{ok: "#137236", info: "#3b82f6", warn: "#ba7008", danger: "#b42222"},
+    charple: %{ok: "#31854a", info: "#4a6ebd", warn: "#986600", danger: "#b74840"},
+    ember: %{ok: "#36844c", info: "#4c6fb9", warn: "#986600", danger: "#b54b43"},
+    fjord: %{ok: "#4d7f58", info: "#5871a5", warn: "#91692d", danger: "#a35a52"},
+    iris: %{ok: "#05893e", info: "#406bce", warn: "#986600", danger: "#c53732"}
+  }
   def tone_ok(theme \\ :evergreen), do: @status[resolve(theme)].ok
   def tone_info(theme \\ :evergreen), do: @status[resolve(theme)].info
   def tone_warn(theme \\ :evergreen), do: @status[resolve(theme)].warn
   def tone_danger(theme \\ :evergreen), do: @status[resolve(theme)].danger
 
   # Warm reading accent — the paper terracotta, tokenized.
-  @reading_accent %{evergreen: "#a23925", charple: "#218bc4", ember: "#bf321d", fjord: "#0f8299"}
+  @reading_accent %{
+    evergreen: "#a23925",
+    charple: "#302ba5",
+    ember: "#bf321d",
+    fjord: "#0f8299",
+    iris: "#3692e6"
+  }
   def reading_accent(theme \\ :evergreen), do: @reading_accent[resolve(theme)]
 
   # Reading type (design/tokens.json font.reading / type.reading). Theme-INVARIANT.
@@ -65,17 +77,17 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
       code_bg: "#eaf1ee"
     },
     charple: %{
-      brand: "#3431b4",
+      brand: "#7b3a96",
       brand_text: "#ffffff",
-      rule: "#dcdee2",
-      page_bg: "#ebedf5",
+      rule: "#e0dde1",
+      page_bg: "#f0ecf3",
       paper: "#f8f8fc",
-      text: "#1d202a",
-      muted: "#50525c",
-      code_bg: "#ebedf5"
+      text: "#241e27",
+      muted: "#565059",
+      code_bg: "#f0ecf3"
     },
     ember: %{
-      brand: "#c34e13",
+      brand: "#b34e1e",
       brand_text: "#ffffff",
       rule: "#e2dcda",
       page_bg: "#f4ece9",
@@ -85,14 +97,24 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
       code_bg: "#f4ece9"
     },
     fjord: %{
-      brand: "#2f56b1",
+      brand: "#0e6e85",
       brand_text: "#ffffff",
-      rule: "#dbdee2",
-      page_bg: "#eaeef5",
+      rule: "#d9dfe1",
+      page_bg: "#e7f0f2",
       paper: "#fcfcfd",
-      text: "#1c202a",
-      muted: "#4e535c",
-      code_bg: "#eaeef5"
+      text: "#162327",
+      muted: "#495559",
+      code_bg: "#e7f0f2"
+    },
+    iris: %{
+      brand: "#5b46d6",
+      brand_text: "#ffffff",
+      rule: "#dddee2",
+      page_bg: "#ecedf5",
+      paper: "#ffffff",
+      text: "#1f1f2a",
+      muted: "#51525b",
+      code_bg: "#ecedf5"
     }
   }
   @doc "The whole per-theme email skin map (palettes.ex / data_viz.ex read it in one shot)."
@@ -116,25 +138,32 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
       neutral: %{bg: "#edf0ee", fg: "#4a544f"}
     },
     charple: %{
-      success: %{bg: "#daf8df", fg: "#106630"},
-      warning: %{bg: "#ffecd2", fg: "#734c00"},
-      danger: %{bg: "#ffe9e6", fg: "#8a3630"},
-      info: %{bg: "#e7efff", fg: "#335295"},
-      neutral: %{bg: "#eeeff0", fg: "#545558"}
+      success: %{bg: "#def6e2", fg: "#276438"},
+      warning: %{bg: "#feecd4", fg: "#734c00"},
+      danger: %{bg: "#ffe9e6", fg: "#823e38"},
+      info: %{bg: "#e7efff", fg: "#3a538a"},
+      neutral: %{bg: "#efeef0", fg: "#565457"}
     },
     ember: %{
-      success: %{bg: "#ddf7e1", fg: "#236436"},
-      warning: %{bg: "#ffecd3", fg: "#734c00"},
-      danger: %{bg: "#ffe9e6", fg: "#843d36"},
-      info: %{bg: "#e7efff", fg: "#38538c"},
+      success: %{bg: "#dff6e3", fg: "#2a6339"},
+      warning: %{bg: "#fdecd5", fg: "#724d0a"},
+      danger: %{bg: "#ffe9e6", fg: "#803f39"},
+      info: %{bg: "#e7efff", fg: "#3b5487"},
       neutral: %{bg: "#f0eeee", fg: "#585453"}
     },
     fjord: %{
-      success: %{bg: "#def6e2", fg: "#286438"},
-      warning: %{bg: "#feecd4", fg: "#734c02"},
-      danger: %{bg: "#ffe9e6", fg: "#823e38"},
-      info: %{bg: "#e7efff", fg: "#3a5389"},
-      neutral: %{bg: "#eeeff0", fg: "#545558"}
+      success: %{bg: "#e4f4e6", fg: "#3b5f42"},
+      warning: %{bg: "#f9eddd", fg: "#6a502b"},
+      danger: %{bg: "#ffe9e6", fg: "#754742"},
+      info: %{bg: "#e7efff", fg: "#435579"},
+      neutral: %{bg: "#edeff0", fg: "#525657"}
+    },
+    iris: %{
+      success: %{bg: "#daf8df", fg: "#0f662f"},
+      warning: %{bg: "#ffecd2", fg: "#734c00"},
+      danger: %{bg: "#ffe9e6", fg: "#8b3630"},
+      info: %{bg: "#e7efff", fg: "#335296"},
+      neutral: %{bg: "#eeeff0", fg: "#555558"}
     }
   }
   def callout(tone, theme \\ :evergreen)

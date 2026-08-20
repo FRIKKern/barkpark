@@ -1,5 +1,5 @@
 defmodule Barkpark.AuditTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Audit
   alias Barkpark.Audit.{Chain, Event}

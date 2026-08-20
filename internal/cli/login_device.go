@@ -16,6 +16,7 @@ package cli
 // out.errf, so `-o json` still emits nothing but the final envelope on stdout.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -54,6 +55,18 @@ var deviceTTYCheck = func() bool {
 type deviceAuthError struct{ msg string }
 
 func (e *deviceAuthError) Error() string { return e.msg }
+
+// devicePersistError marks a failure AFTER the control plane approved: the
+// session minted but could not be persisted locally (SaveConfig failed). The
+// interactive retry loop must NOT treat this as a transient poll error — the
+// device code is single-use and now burned, so a re-poll would answer
+// expired_or_invalid and bury the honest local cause (a disk/permission
+// problem) under a misleading "denied or expired" refusal. It aborts the loop
+// immediately, surfacing the save error verbatim (→ exitGeneric).
+type devicePersistError struct{ err error }
+
+func (e *devicePersistError) Error() string { return e.err.Error() }
+func (e *devicePersistError) Unwrap() error { return e.err }
 
 // deviceEmailFallback is the always-present escape hatch line: the device flow
 // is the friendly default, but email+password is one flag away for headless / CI
@@ -125,23 +138,44 @@ func runDeviceLoginFlow(out *writer, cfg *Config, base, clientName string) error
 
 	out.errf("Waiting for you to approve in the browser…")
 	for i := 0; i < devicePollMax; i++ {
-		res, perr := client.DevicePoll(cloudCtx(), ds.DeviceCode)
+		status, perr := devicePollStep(out, cfg, client, base, ds.DeviceCode)
 		if perr != nil {
-			return classifyDevicePollError(perr)
-		}
-		switch res.Status {
-		case cloudclient.DevicePollApproved:
-			cfg.CloudURL = base
-			cfg.CloudToken = res.Login.Token
-			cfg.CloudTeam = res.Login.TeamID
-			if serr := SaveConfig(cfg); serr != nil {
-				return fmt.Errorf("save config: %w", serr)
+			// Only a TRUE refusal aborts. classifyDevicePollError (inside the step)
+			// already draws the terminal line: a *deviceAuthError is the user's
+			// decision — they denied it or the code expired — and there is nothing to
+			// wait for, so we return immediately with zero further polls. Anything
+			// else is a TRANSIENT transport blip (a 500, a dropped connection); the
+			// human is still at the browser and their approval has not been consulted,
+			// so we back off and keep waiting — identical to how the one-shot
+			// --device-poll maps the same error to a retryable exitGeneric. The
+			// devicePollMax cap bounds the retries: an all-error server still
+			// terminates via the timeout below, never spinning forever.
+			if asDeviceAuthError(perr) {
+				return perr
 			}
-			emitDeviceLoginSuccess(out, base, res.Login.TeamID)
+			// A post-approval persistence failure is TERMINAL too: the code is
+			// burned, a re-poll can only answer expired_or_invalid and would bury
+			// the honest local cause. Surface the save error verbatim.
+			var persistErr *devicePersistError
+			if errors.As(perr, &persistErr) {
+				return perr
+			}
+			interval += devicePoll // widen the cadence on a transient failure
+			if out.isTTY {
+				fmt.Fprint(out.stderr, ".") // keep the heartbeat alive while we retry
+			}
+			deviceSleep(interval)
+			continue
+		}
+		switch status {
+		case cloudclient.DevicePollApproved:
+			// devicePollStep persisted the session and emitted the success
+			// surface — the flow is done.
 			return nil
 		case cloudclient.DevicePollSlowDown:
 			// The control plane asked us to back off — widen the interval so a
-			// too-eager loop stops tripping the poll rate-limit.
+			// too-eager loop stops tripping the poll rate-limit. Interval widening
+			// lives HERE (the interactive caller owns cadence), not in the step.
 			interval += devicePoll
 		case cloudclient.DevicePollPending:
 			// No decision yet — keep waiting.
@@ -157,29 +191,211 @@ func runDeviceLoginFlow(out *writer, cfg *Config, base, clientName string) error
 	return &deviceAuthError{msg: "timed out waiting for browser approval — run `bp login` again, or " + deviceEmailFallback}
 }
 
+// devicePollStep performs EXACTLY ONE device-poll against the control plane and,
+// on approval, persists the session and emits the success surface. It is
+// STATELESS — the caller owns the poll cadence (interval widening, heartbeat
+// dots, the retry loop) — so BOTH the interactive runDeviceLoginFlow loop and the
+// non-interactive `bp login --device-poll` one-shot drive a single poll from one
+// body. It returns the DevicePollStatus on a non-terminal outcome (Pending /
+// SlowDown / Approved) so the caller can act on it; a transport or terminal-
+// refusal error is mapped through classifyDevicePollError (→ *deviceAuthError on a
+// refusal). On DevicePollApproved it writes CloudURL/CloudToken/CloudTeam, saves
+// config 0600 (byte-identical to the password path), and calls emitDeviceLoginSuccess
+// BEFORE returning — the success surface stays INSIDE the step so the interactive
+// caller's stored-token contract is unchanged.
+func devicePollStep(out *writer, cfg *Config, client *cloudclient.Client, base, deviceCode string) (cloudclient.DevicePollStatus, error) {
+	res, perr := client.DevicePoll(cloudCtx(), deviceCode)
+	if perr != nil {
+		return 0, classifyDevicePollError(perr)
+	}
+	if res.Status == cloudclient.DevicePollApproved {
+		cfg.CloudURL = base
+		cfg.CloudToken = res.Login.Token
+		cfg.CloudTeam = res.Login.TeamID
+		if serr := SaveConfig(cfg); serr != nil {
+			// Post-approval local failure: wrap so the interactive loop aborts
+			// honestly instead of re-polling the now-burned code. The one-shot
+			// path is unaffected (same Error() string, still not a deviceAuthError
+			// → still exitGeneric).
+			return 0, &devicePersistError{err: fmt.Errorf("save config: %w", serr)}
+		}
+		// Config is saved, so cfg.CloudClient() now carries the just-minted token
+		// (config.go ResolveCloudToken picks it up): best-effort name WHICH account
+		// the approval actually bound. Never fatal — a wrong-account browser approval
+		// must be VISIBLE in the receipt, but an unreachable /v1/me must not turn a
+		// stored session into a failed login.
+		emitDeviceLoginSuccess(out, base, res.Login.TeamID, deviceLoginAccount(cfg))
+	}
+	return res.Status, nil
+}
+
+// runDeviceStartStep is the non-interactive FIRST leg of the split device login
+// (`bp login --device-start`, BP-ONB-13). It mints ONE device-authorization code
+// pair via DeviceStart and emits it as a single JSON envelope — device_code,
+// user_code, verification_uri, verification_uri_complete, interval, expires_in —
+// then returns exitOK WITHOUT polling. No box, no browser open, no blocking loop:
+// a headless / agent wrapper surfaces the URL + code to the human itself and then
+// drives approval with repeated `--device-poll`, owning the whole cadence.
+func runDeviceStartStep(out *writer, base string) int {
+	client := &cloudclient.Client{BaseURL: base}
+	ds, err := client.DeviceStart(cloudCtx(), deviceClientName())
+	if err != nil {
+		return useError(out, "failed", "could not start browser login: "+err.Error(), exitGeneric)
+	}
+	emitDeviceEnvelope(out, map[string]any{
+		"device_code":               ds.DeviceCode,
+		"user_code":                 ds.UserCode,
+		"verification_uri":          ds.VerificationURI,
+		"verification_uri_complete": ds.VerificationURIComplete,
+		"interval":                  ds.Interval,
+		"expires_in":                ds.ExpiresIn,
+	})
+	return exitOK
+}
+
+// runDevicePollStep is the non-interactive SECOND leg (`bp login --device-poll
+// <device_code>`, BP-ONB-13): it drives devicePollStep EXACTLY ONCE and returns —
+// never a blocking 15-minute loop. The script owns the cadence (typically a shell
+// `until bp login --device-poll $code; do sleep 5; done`), so the exit code is the
+// contract: exitOK ONLY on approval (the loop terminates), a non-zero on pending /
+// slow_down / error (the loop keeps polling). A single JSON envelope is ALWAYS
+// emitted so a script that parses stdout has a faithful outcome:
+//
+//	approved   → devicePollStep already emitted {ok,cloud_url,team_id}; exitOK
+//	pending    → {"status":"pending"}                                 ; exitGeneric
+//	slow_down  → {"status":"slow_down"}                               ; exitGeneric
+//	error      → {"status":"error","error":<msg>}                     ; exitAuth on a
+//	             refusal (denied/expired), else exitGeneric
+func runDevicePollStep(out *writer, cfg *Config, base, deviceCode string) int {
+	client := &cloudclient.Client{BaseURL: base}
+	status, err := devicePollStep(out, cfg, client, base, deviceCode)
+	if err != nil {
+		// A terminal refusal or a transport blip — devicePollStep did NOT persist
+		// or emit success. Surface an error envelope and map the exit.
+		exit := exitGeneric
+		if asDeviceAuthError(err) {
+			exit = exitAuth
+		}
+		emitDeviceEnvelope(out, map[string]any{"status": "error", "error": err.Error()})
+		return exit
+	}
+	switch status {
+	case cloudclient.DevicePollApproved:
+		// devicePollStep already persisted the session and emitted its success
+		// envelope/line — a single clean stdout doc — so we only return the exitOK
+		// that terminates the caller's `until` loop.
+		return exitOK
+	case cloudclient.DevicePollSlowDown:
+		emitDeviceEnvelope(out, map[string]any{"status": "slow_down"})
+		return exitGeneric
+	default: // DevicePollPending
+		emitDeviceEnvelope(out, map[string]any{"status": "pending"})
+		return exitGeneric
+	}
+}
+
+// emitDeviceEnvelope writes payload as the single machine envelope the split
+// device-login steps hand a script. It honours -o json / -o yaml via emitStructured
+// and, on the human/table path, still renders JSON so the envelope is ALWAYS
+// present on stdout (these steps have no meaningful human surface — they exist to
+// be driven).
+func emitDeviceEnvelope(out *writer, payload map[string]any) {
+	if !out.emitStructured(payload) {
+		out.renderJSON(payload)
+	}
+}
+
+// deviceAccount is the best-effort identity the success receipt names after a
+// device login: WHICH account the browser approval actually bound. account is
+// the bound account email (empty when /v1/me could not be reached or answered no
+// email); team is the human team label (Name, else Slug) when the control plane
+// named a current team; verified is false whenever the Me() probe failed, which
+// drives the honest "unverified" degrade in the receipt.
+type deviceAccount struct {
+	account  string
+	team     string
+	verified bool
+}
+
+// deviceLoginAccount best-effort resolves who the just-minted token belongs to
+// via a client-side GET /v1/me. It MUST be called AFTER SaveConfig so
+// cfg.CloudClient() carries the fresh token (config.go ResolveCloudToken reads
+// the persisted CloudToken). ANY failure — transport, 401, decode, timeout, or a
+// success with no email — degrades to an unverified receipt; login never fails on
+// it. The 10s ceiling bounds a hung control plane: cloudCtx() is context.Background
+// with no deadline (the 30s http floor only applies when the client's http.Client
+// is nil), so the receipt path pins its own bound here.
+//
+// Edge: BARKPARK_CLOUD_TOKEN shadows the minted token in ResolveCloudToken, so on
+// a machine where that env var is set Me() answers whatever identity the env token
+// belongs to, not the freshly-minted one. That is acceptable — the receipt still
+// names a real bound account — and is asserted in the test suite.
+func deviceLoginAccount(cfg *Config) deviceAccount {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	me, err := cfg.CloudClient().Me(ctx)
+	if err != nil || strings.TrimSpace(me.User.Email) == "" {
+		return deviceAccount{} // honest degrade — unverified, no panic on a nil Team
+	}
+	team := ""
+	if me.Team != nil { // nil when the account is teamless — must not panic
+		team = strings.TrimSpace(me.Team.Name)
+		if team == "" {
+			team = strings.TrimSpace(me.Team.Slug)
+		}
+	}
+	return deviceAccount{account: strings.TrimSpace(me.User.Email), team: team, verified: true}
+}
+
 // emitDeviceLoginSuccess writes the SAME success surface a password login does:
 // the {ok, cloud_url, team_id} envelope for machine consumers, else the human
-// confirmation lines on stdout (runLoginCloud's tail, verbatim).
+// confirmation lines on stdout (runLoginCloud's tail, verbatim) — now widened to
+// name WHICH account the approval bound (charter D37: a wrong-account browser
+// approval must be visible). On a verified acct the receipt names the account
+// email and the team by Name/Slug; on the honest degrade it prints
+// "account: unverified (run 'bp whoami')" and json carries account:null +
+// identity:"unverified" — ok:true and the exit code never change either way.
 //
 // It stops at the "logged in" confirmation and NO LONGER prints a next-step hint:
 // the caller (runLoginCloud) drives finishLoginConnect right after, which
 // auto-registers the fleet and lands the user in a working surface — the former
 // dead-end "run 'bp barkparks'" line is gone (bp-login-ux W2). The wizard's
 // cloudSetupDeviceLogin reuse is unaffected: it continues into cloudFleetPick.
-func emitDeviceLoginSuccess(out *writer, base, teamID string) {
+func emitDeviceLoginSuccess(out *writer, base, teamID string, acct deviceAccount) {
 	if out.isTTY {
 		out.errf("") // close the heartbeat dots line before the confirmation
 	}
-	if out.emitStructured(map[string]any{
+	// Widen the machine envelope with the account identity BEFORE the structured
+	// early-return so json/yaml consumers see it too.
+	payload := map[string]any{
 		"ok":        true,
 		"cloud_url": base,
 		"team_id":   teamID,
-	}) {
+	}
+	if acct.verified {
+		payload["account"] = acct.account
+		payload["identity"] = "verified"
+	} else {
+		payload["account"] = nil
+		payload["identity"] = "unverified"
+	}
+	if out.emitStructured(payload) {
 		return
 	}
 	out.outf("✓ logged in to %s", base)
-	if teamID != "" {
-		out.outf("  team: %s", teamID)
+	if acct.verified {
+		out.outf("  account: %s", acct.account)
+	} else {
+		out.outf("  account: unverified (run 'bp whoami')")
+	}
+	// Prefer the human team label when Me() named one; fall back to the raw id the
+	// token exchange returned so the team line never disappears.
+	teamLabel := teamID
+	if acct.team != "" {
+		teamLabel = acct.team
+	}
+	if teamLabel != "" {
+		out.outf("  team: %s", teamLabel)
 	}
 }
 

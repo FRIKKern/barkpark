@@ -45,6 +45,14 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     manifest["commands"] |> Enum.find(&(&1["id"] == id))
   end
 
+  # Raw request → the conn, so a test can read both the decoded body and the
+  # `etag` response header / raw bytes off the same response.
+  defp caps_conn(conn, query \\ "") do
+    conn
+    |> put_req_header("authorization", "Bearer #{@token}")
+    |> get("/v1/capabilities" <> query)
+  end
+
   describe "doc.query manifest contract (BUG 1)" do
     test "doc.query flag is named 'filter', not 'query'", %{conn: conn} do
       manifest = capabilities(conn)
@@ -89,6 +97,26 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       types_flag = Enum.find(cmd["flags"], &(&1["name"] == "types"))
       assert types_flag["type"] == "string"
+    end
+
+    test "search declares the `fields` projection flag (controller already threads it)",
+         %{conn: conn} do
+      # The search controller (search/2 + search_local/2) already projects each
+      # hit through `params["fields"]`, but the flag was undeclared — an agent
+      # reading the manifest could not discover the token-thrifty projection.
+      # This closes that pure declaration gap.
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "search.query")
+
+      assert cmd != nil, "search.query command not found in manifest"
+
+      fields_flag = Enum.find(cmd["flags"], &(&1["name"] == "fields"))
+
+      assert fields_flag != nil,
+             "search.query must declare a `fields` flag; got: " <>
+               "#{inspect(Enum.map(cmd["flags"], & &1["name"]))}"
+
+      assert fields_flag["type"] == "string"
     end
   end
 
@@ -460,6 +488,22 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd["writes"] == true
       assert "id" in Enum.map(cmd["args"], & &1["name"])
     end
+
+    # router.ex mounts POST /v1/webhooks/:dataset/:id/reenable
+    # (webhook_controller.ex) alongside deliveries/replay/rotate above, but the
+    # manifest carried its three siblings and not this one — undiscoverable by
+    # `bp`/the cloud SPA. This pins the fourth C5 entry to the same shape.
+    test "webhook.reenable is POST /v1/webhooks/:dataset/:id/reenable (admin, writes, id arg)",
+         %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "webhook.reenable")
+
+      assert cmd != nil, "webhook.reenable not found in manifest"
+      assert cmd["http"]["method"] == "POST"
+      assert cmd["http"]["path_template"] == "/v1/webhooks/:dataset/:id/reenable"
+      assert cmd["auth_tier"] == "admin"
+      assert cmd["writes"] == true
+      assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
   end
 
   describe "media collection commands" do
@@ -651,6 +695,657 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert cmd["http"]["path_template"] == "/v1/media/:dataset/collections/:id/share"
       assert cmd["auth_tier"] == "write"
       assert "id" in Enum.map(cmd["args"], & &1["name"])
+    end
+  end
+
+  describe "chat transport commands (charter bp-chat-tui, ct-bl-manifest-commands)" do
+    # bp chat was invisible to the capabilities manifest — the MCP bridge
+    # (--tools all), SDK codegen, and headless harnesses could not discover it.
+    # These pin the `chat` noun + the nine non-streaming admin verbs mapped to
+    # the already-shipped /v1/chat routes (the eighth, SSE events, is a builtin
+    # carve-out with no manifest verb). StudioChat is core-embedded, NOT a
+    # Barkpark.Plugin, so the noun is declared in core_nouns/0, not plugin_nouns/2.
+    @chat_commands ~w(
+      chat.create_session chat.list_sessions chat.get_session chat.update_session
+      chat.send_message chat.interrupt chat.approve chat.archive chat.unarchive
+    )
+
+    test "the `chat` noun is declared and names the SSE streaming carve-out", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      noun = Enum.find(manifest["nouns"], &(&1["name"] == "chat"))
+      assert noun != nil, "manifest declares no `chat` noun"
+      # StudioChat is core-embedded — the noun carries no plugin provenance.
+      assert noun["plugin"] == nil
+
+      # The events route is manifest-absent but must be discoverable via the
+      # summary so a reading agent knows streaming exists via `bp chat`.
+      assert noun["summary"] =~ ~r/stream/i,
+             "chat noun summary must name the SSE streaming carve-out; got: #{inspect(noun["summary"])}"
+    end
+
+    test "exactly the nine non-streaming chat verbs are registered (events stays absent)",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+
+      chat_ids =
+        manifest["commands"]
+        |> Enum.filter(&(&1["noun"] == "chat"))
+        |> Enum.map(& &1["id"])
+        |> Enum.sort()
+
+      assert chat_ids == Enum.sort(@chat_commands),
+             "chat verb set drifted; got: #{inspect(chat_ids)}"
+
+      # The SSE events route is a builtin carve-out — never a manifest verb.
+      refute Enum.any?(manifest["commands"], &(&1["id"] == "chat.events"))
+    end
+
+    test "every chat command is admin-tier (existence-hidden from anon/lower callers)",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+
+      for id <- @chat_commands do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} not found in manifest"
+
+        assert cmd["auth_tier"] == "admin",
+               "#{id} must be admin-tier; got: #{inspect(cmd["auth_tier"])}"
+
+        assert cmd["source"] == "core",
+               "#{id} must be a core command; got: #{inspect(cmd["source"])}"
+      end
+    end
+
+    test "chat verbs map to the shipped /v1/chat routes (method + path)", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      expected = %{
+        "chat.create_session" => {"POST", "/v1/chat/sessions"},
+        "chat.list_sessions" => {"GET", "/v1/chat/sessions"},
+        "chat.get_session" => {"GET", "/v1/chat/sessions/:id"},
+        "chat.update_session" => {"PATCH", "/v1/chat/sessions/:id"},
+        "chat.send_message" => {"POST", "/v1/chat/sessions/:id/messages"},
+        "chat.interrupt" => {"POST", "/v1/chat/sessions/:id/interrupt"},
+        "chat.approve" => {"POST", "/v1/chat/sessions/:id/approval"},
+        "chat.archive" => {"POST", "/v1/chat/sessions/:id/archive"},
+        "chat.unarchive" => {"POST", "/v1/chat/sessions/:id/unarchive"}
+      }
+
+      for {id, {method, path}} <- expected do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} not found in manifest"
+        assert cmd["http"]["method"] == method, "#{id} method"
+        assert cmd["http"]["path_template"] == path, "#{id} path"
+        # Instance-global admin (D21): no per-doc scoped mirror.
+        refute Map.has_key?(cmd, "scoped_prefix"),
+               "#{id} must have no scoped_prefix (D21 instance-global)"
+      end
+    end
+
+    test "session-scoped chat verbs carry the `id` path arg + their body args", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      get_session = find_cmd(manifest, "chat.get_session")
+      assert "id" in Enum.map(get_session["args"], & &1["name"])
+
+      send = find_cmd(manifest, "chat.send_message")
+      send_args = Enum.map(send["args"], & &1["name"])
+      assert "id" in send_args
+      assert "content" in send_args
+
+      approve = find_cmd(manifest, "chat.approve")
+      approve_args = Enum.map(approve["args"], & &1["name"])
+      assert "id" in approve_args
+      assert "request_id" in approve_args
+      assert "decision" in approve_args
+    end
+
+    test "chat commands are hidden from an anonymous (tier none) caller", %{conn: conn} do
+      # Existence-hiding: an anon manifest must learn zero chat verb NAMES and
+      # not the `chat` noun name — exactly like the other admin-only nouns.
+      anon = conn |> get("/v1/capabilities") |> json_response(200)
+
+      assert anon["auth_tier"] == "none"
+
+      refute Enum.any?(anon["commands"], &(&1["noun"] == "chat")),
+             "anon manifest leaked a chat command"
+
+      refute Enum.any?(anon["nouns"], &(&1["name"] == "chat")),
+             "anon manifest leaked the chat noun name"
+    end
+
+    # D36 CLOSED (charter D16): `chat` is an ORTHOGONAL capability, not a rank.
+    # RequireChatAccess.chat_scope/1 authorizes a workspace-bound
+    # `permissions: ["chat"]` Connector token at `/v1/chat/*` (resolves to
+    # `{:workspace, ws}`), and tier_for_token/1 now mirrors that grant: the
+    # token's base tier stays "none" (chat lifts no rank), but a `+chat`
+    # capability rides alongside so project/2's chat_visible?/2 side-branch
+    # projects the `chat` noun + its seven verbs — and ONLY the chat noun.
+    test "a workspace token carrying only `chat` sees the chat noun WITHOUT any rank lift (D36 orthogonal)",
+         %{conn: conn} do
+      ws = Barkpark.TenancyFixtures.create_workspace!()
+      raw_token = "chat-only-#{System.unique_integer([:positive])}"
+      {:ok, _} = Barkpark.Auth.create_token(raw_token, "chat-only", "test", ["chat"], ws.id)
+
+      manifest =
+        conn
+        |> put_req_header("authorization", "Bearer #{raw_token}")
+        |> get("/v1/capabilities")
+        |> json_response(200)
+
+      # Orthogonal, not a rank: the echoed tier stays "none" — chat grants
+      # discovery of its own noun, never a doc/task rank.
+      assert manifest["auth_tier"] == "none",
+             "chat is orthogonal — a chat-only token must still echo base tier \"none\"; " <>
+               "got: #{inspect(manifest["auth_tier"])}"
+
+      # The whole chat noun + its seven verbs are now discoverable by their
+      # own token.
+      assert Enum.any?(manifest["nouns"], &(&1["name"] == "chat")),
+             "chat-capability workspace token must discover the chat noun"
+
+      chat_ids =
+        manifest["commands"]
+        |> Enum.filter(&(&1["noun"] == "chat"))
+        |> Enum.map(& &1["id"])
+        |> Enum.sort()
+
+      assert chat_ids == Enum.sort(@chat_commands),
+             "chat-capability token must see exactly the seven chat verbs; got: #{inspect(chat_ids)}"
+
+      # GUARD — chat lifts NO other noun's tier. The base tier stays "none", so
+      # the chat-only token must see EXACTLY the anonymous (tier-none) noun set
+      # PLUS the chat noun — nothing from a higher rank leaks in. The delta
+      # against the anon baseline is precisely {"chat"}.
+      anon = conn |> get("/v1/capabilities") |> json_response(200)
+      anon_nouns = anon["nouns"] |> Enum.map(& &1["name"]) |> MapSet.new()
+      chat_only_nouns = manifest["nouns"] |> Enum.map(& &1["name"]) |> MapSet.new()
+
+      assert MapSet.difference(chat_only_nouns, anon_nouns) == MapSet.new(["chat"]),
+             "chat capability must add ONLY the chat noun over the anon baseline; delta: " <>
+               "#{inspect(MapSet.difference(chat_only_nouns, anon_nouns) |> MapSet.to_list())}"
+
+      # And the reverse: the chat token loses none of the anon-visible nouns.
+      assert MapSet.subset?(anon_nouns, chat_only_nouns),
+             "chat capability must not drop any anon-visible noun"
+    end
+
+    # GUARD — the orthogonal grant is chat-ONLY: a plain [read, write] token
+    # (no chat permission) still gets the whole chat noun existence-hidden.
+    test "a [read, write] token (no chat permission) still gets chat stripped", %{conn: conn} do
+      ws = Barkpark.TenancyFixtures.create_workspace!()
+      raw_token = "rw-nochat-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Barkpark.Auth.create_token(raw_token, "rw-nochat", "test", ["read", "write"], ws.id)
+
+      manifest =
+        conn
+        |> put_req_header("authorization", "Bearer #{raw_token}")
+        |> get("/v1/capabilities")
+        |> json_response(200)
+
+      assert manifest["auth_tier"] == "write"
+
+      refute Enum.any?(manifest["commands"], &(&1["noun"] == "chat")),
+             "a [read, write] token must not see any chat command"
+
+      refute Enum.any?(manifest["nouns"], &(&1["name"] == "chat")),
+             "a [read, write] token must not see the chat noun"
+    end
+  end
+
+  describe "scoped run-secrets commands (connectors D200)" do
+    # The per-workspace tier of the run-secrets store gets four DEDICATED
+    # verbs whose workspace/project slugs are BAKED into path_template — NOT
+    # the scoped_prefix mechanism (ctx.ScopedMirror is never set in any
+    # production Go path; the flat-template+scoped_prefix shape 404s, proven
+    # live on token.create / #3197). The flat secret.* entries stay the
+    # instance-GLOBAL tier, byte-identical.
+    @scoped_secret_expected %{
+      "secret.scoped-ls" => {"GET", "/w/:workspace_slug/p/:project_slug/v1/secrets", false},
+      "secret.scoped-get" =>
+        {"GET", "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", false},
+      "secret.scoped-set" => {"PUT", "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", true},
+      "secret.scoped-rm" =>
+        {"DELETE", "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", true}
+    }
+
+    test "the four scoped verbs are scoped_admin with slugs BAKED into path_template, no scoped_prefix",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+
+      for {id, {method, path, writes}} <- @scoped_secret_expected do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} not found in manifest"
+        assert cmd["http"]["method"] == method, "#{id} method"
+        assert cmd["http"]["path_template"] == path, "#{id} path_template"
+        assert cmd["auth_tier"] == "scoped_admin", "#{id} must be scoped_admin tier"
+        assert cmd["writes"] == writes, "#{id} writes flag"
+
+        refute Map.has_key?(cmd, "scoped_prefix"),
+               "#{id} must NOT carry scoped_prefix (that shape is proven broken — #3197)"
+      end
+    end
+
+    test "name/value args ride the scoped verbs exactly like their flat siblings", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      assert Enum.map(find_cmd(manifest, "secret.scoped-get")["args"], & &1["name"]) == ["name"]
+      assert Enum.map(find_cmd(manifest, "secret.scoped-rm")["args"], & &1["name"]) == ["name"]
+
+      set_args = Enum.map(find_cmd(manifest, "secret.scoped-set")["args"], & &1["name"])
+      assert set_args == ["name", "value"]
+
+      ls = find_cmd(manifest, "secret.scoped-ls")
+      assert ls["args"] == []
+    end
+
+    test "the FLAT secret.* entries stay byte-identical global-tier admin", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      flat_expected = %{
+        "secret.ls" => {"GET", "/v1/secrets", false},
+        "secret.get" => {"GET", "/v1/secrets/:name", false},
+        "secret.set" => {"PUT", "/v1/secrets/:name", true},
+        "secret.rm" => {"DELETE", "/v1/secrets/:name", true}
+      }
+
+      for {id, {method, path, writes}} <- flat_expected do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} not found in manifest"
+        assert cmd["http"]["method"] == method, "#{id} method"
+        assert cmd["http"]["path_template"] == path, "#{id} path_template drifted"
+        assert cmd["auth_tier"] == "admin", "#{id} must STAY blanket admin (global tier)"
+        assert cmd["writes"] == writes, "#{id} writes flag"
+        refute Map.has_key?(cmd, "scoped_prefix"), "#{id} must not grow a scoped_prefix"
+      end
+    end
+
+    test "the scoped route the templates point at exists (not a route-miss 404)", %{conn: conn} do
+      # Grounds path_template against the real router: an ANONYMOUS call into
+      # the scoped block hits the membership gate (401/403/404-not_found from
+      # ResolveWorkspace on an unknown slug) — never a bare NoRouteError. The
+      # full auth/tenant matrix lives in scoped_secret_controller_test.exs.
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/w/no-such-workspace/p/default/v1/secrets")
+
+      assert resp.status in [401, 403, 404]
+      assert %{"error" => %{"code" => _}} = Jason.decode!(resp.resp_body)
+    end
+  end
+
+  describe "server.base_url derives from the caller's request Host (D4 server-side)" do
+    # A custom instance hostname and the canonical FQDN each dial the same
+    # instance behind Caddy; the manifest must echo the host the caller
+    # ACTUALLY reached, not the frozen boot-time PHX_HOST scalar — so the CLI
+    # records one instance with alias URLs, never a phantom "-2" second server.
+    @server_keys ~w(api_version base_url min_cli name version)
+
+    test "base_url reflects a custom Host + x-forwarded-proto:https", %{conn: conn} do
+      # conn.host is set directly: Plug rejects put_req_header("host", …), and
+      # the controller reads conn.host (Caddy preserves it; no x-forwarded-host).
+      manifest =
+        %{conn | host: "custom.example"}
+        |> put_req_header("x-forwarded-proto", "https")
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities")
+        |> json_response(200)
+
+      server = manifest["server"]
+
+      assert server["base_url"] == "https://custom.example",
+             "base_url must derive from the request Host, got: #{inspect(server["base_url"])}"
+
+      # base_url MUST stay a URL string (run.go isProd() substring-matches it).
+      assert is_binary(server["base_url"])
+    end
+
+    test "the server envelope keeps EXACTLY its current keys — no field added", %{conn: conn} do
+      # additionalProperties:false + Go DisallowUnknownFields: a NEW server key
+      # is a whole-CLI parse outage for every older bp. VALUE-only override.
+      manifest =
+        %{conn | host: "other.example"}
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities")
+        |> json_response(200)
+
+      assert manifest["server"] |> Map.keys() |> Enum.sort() == @server_keys,
+             "server envelope keys drifted: #{inspect(Map.keys(manifest["server"]))}"
+    end
+  end
+
+  describe "command-level `views` descriptor (wave axi-brief-views, ?views=1 opt-in)" do
+    # The commands that support the brief/full projection.
+    @views_commands ~w(task.ready task.prime search.query)
+    @frozen_views %{
+      "supported" => ["brief", "full"],
+      "default" => "full",
+      "default_for_agents" => "brief"
+    }
+
+    # Opt-in by contract, exactly like ?build=1: released bp binaries
+    # strict-decode the manifest with DisallowUnknownFields, which recurses
+    # into each Command — so the DEFAULT response must NEVER grow a new
+    # command-level key. ?views=1 is the escape hatch new clients use.
+    test "default manifest declares NO `views` key on ANY command (old-CLI compatibility)",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+
+      leaked =
+        manifest["commands"]
+        |> Enum.filter(&Map.has_key?(&1, "views"))
+        |> Enum.map(& &1["id"])
+
+      assert leaked == [],
+             "default manifest leaked a command-level `views` key on: #{inspect(leaked)} — " <>
+               "it must be withheld unless ?views=1 is sent"
+    end
+
+    test "?views=1 declares the frozen `views` descriptor on exactly the three brief-capable commands",
+         %{conn: conn} do
+      manifest =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities?views=1")
+        |> json_response(200)
+
+      for id <- @views_commands do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} not found in manifest"
+
+        assert cmd["views"] == @frozen_views,
+               "#{id} views descriptor drifted from the frozen shape; got: #{inspect(cmd["views"])}"
+      end
+
+      # No OTHER command grows a views key — the three are the whole set.
+      declaring =
+        manifest["commands"]
+        |> Enum.filter(&Map.has_key?(&1, "views"))
+        |> Enum.map(& &1["id"])
+        |> Enum.sort()
+
+      assert declaring == Enum.sort(@views_commands),
+             "views key appeared on unexpected commands: #{inspect(declaring)}"
+    end
+
+    test "task.get NEVER declares `views` — it is the full-only escape hatch", %{conn: conn} do
+      # Both with and without the opt-in, task.get must stay views-free.
+      default = capabilities(conn)
+
+      opted =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities?views=1")
+        |> json_response(200)
+
+      for manifest <- [default, opted] do
+        cmd = find_cmd(manifest, "task.get")
+        assert cmd != nil, "task.get not found in manifest"
+        refute Map.has_key?(cmd, "views"), "task.get must never declare a views key"
+      end
+    end
+
+    test "views and non-views bodies get DISTINCT etags (no 304 cross-contamination)",
+         %{conn: conn} do
+      plain = caps_conn(conn)
+      with_views = caps_conn(conn, "?views=1")
+
+      plain_etag = plain |> get_resp_header("etag") |> List.first()
+      views_etag = with_views |> get_resp_header("etag") |> List.first()
+
+      assert is_binary(plain_etag) and plain_etag != ""
+      assert is_binary(views_etag) and views_etag != ""
+
+      assert plain_etag != views_etag,
+             "views and non-views manifests must have distinct etags (content-addressed body)"
+
+      # The body echoes the same etag the header carries.
+      assert json_response(plain, 200)["etag"] == plain_etag
+      assert json_response(with_views, 200)["etag"] == views_etag
+    end
+
+    test "manifest.schema.json wires `views` as an ADDITIVE optional command-level $def", %{
+      conn: conn
+    } do
+      # The CLI manifest schema is JSON-Schema draft 2020-12, which the pinned
+      # ex_json_schema (draft 4/6/7 only) cannot resolve — so this grounds the
+      # contract STRUCTURALLY: the additive `views` $def exists with the frozen
+      # required keys, the `command` object references it as a property, and it
+      # is NOT in the command required[] (so a views-ABSENT manifest still
+      # validates while a views-PRESENT one is modeled).
+      schema_path =
+        Path.expand(Path.join([File.cwd!(), "..", "docs", "cli", "manifest.schema.json"]))
+
+      schema = schema_path |> File.read!() |> Jason.decode!()
+
+      views_def = get_in(schema, ["$defs", "views"])
+      assert is_map(views_def), "manifest.schema.json is missing the $defs.views definition"
+      assert views_def["additionalProperties"] == false, "views $def must be strict"
+
+      assert Enum.sort(views_def["required"]) == ["default", "default_for_agents", "supported"],
+             "views $def required keys drifted: #{inspect(views_def["required"])}"
+
+      command = get_in(schema, ["$defs", "command"])
+
+      assert get_in(command, ["properties", "views", "$ref"]) == "#/$defs/views",
+             "command object must reference #/$defs/views as a property"
+
+      refute "views" in command["required"],
+             "`views` must NOT be in command.required[] — it is opt-in additive"
+
+      # Runtime cross-check: a views-PRESENT command matches the $def's frozen
+      # required-key set exactly (strict additionalProperties:false).
+      with_views =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> get("/v1/capabilities?views=1")
+        |> json_response(200)
+
+      views = find_cmd(with_views, "task.ready")["views"]
+      assert Enum.sort(Map.keys(views)) == ["default", "default_for_agents", "supported"]
+    end
+
+    test "an If-None-Match with the NON-views etag does NOT 304 the ?views=1 body", %{conn: conn} do
+      plain_etag = caps_conn(conn) |> get_resp_header("etag") |> List.first()
+
+      # Presenting the plain etag against the views request must re-render (200),
+      # never short-circuit to 304 — the bodies differ.
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", plain_etag)
+        |> get("/v1/capabilities?views=1")
+
+      assert resp.status == 200,
+             "the non-views etag must not 304 the views body; got status #{resp.status}"
+    end
+  end
+
+  describe "root `chat` discovery block (charter D27, ?chat=1 opt-in)" do
+    # Opt-in by contract, exactly like ?build=1/?views=1: released bp binaries
+    # strict-decode the manifest ROOT with DisallowUnknownFields, so the
+    # DEFAULT response must NEVER grow a new root key. There is no
+    # whole-manifest root-key freeze elsewhere — these negative tests ARE the
+    # guard.
+    test "default manifest carries NO root chat key — byte-identical incl etag",
+         %{conn: conn} do
+      plain = caps_conn(conn)
+      body = json_response(plain, 200)
+
+      refute Map.has_key?(body, "chat"),
+             "default manifest leaked the root chat key — it must be withheld unless ?chat=1"
+
+      # The default body and its etag must be exactly what a chat-oblivious
+      # request gets — the chat gate must not perturb the ungated pipeline.
+      # etag is content-addressed off the final map (generated_at excluded), so
+      # etag equality IS body identity minus the per-request timestamp.
+      twin = caps_conn(build_conn())
+      twin_body = json_response(twin, 200)
+
+      assert Map.delete(body, "generated_at") == Map.delete(twin_body, "generated_at")
+      assert get_resp_header(plain, "etag") == get_resp_header(twin, "etag")
+    end
+
+    test "?chat=1 carries claude caps and empty-array codex (the degrade signal)",
+         %{conn: conn} do
+      body = caps_conn(conn, "?chat=1") |> json_response(200)
+
+      assert %{"providers" => providers} = body["chat"]
+
+      # claude: the transport-ACCEPTED vocabulary — Runtime.capabilities/1
+      # minus the danger mode (bypassPermissions is categorically rejected on
+      # /v1/chat, D22; advertising it would bait a guaranteed 400).
+      claude = providers["claude"]
+      caps = Barkpark.StudioChat.Runtime.capabilities("claude")
+
+      assert claude["modes"] == caps.modes -- [caps.danger_mode]
+      refute "bypassPermissions" in claude["modes"]
+      assert claude["models"] == caps.models
+      assert claude["efforts"] == caps.efforts
+
+      # codex ships all-empty TODAY — pickers must degrade, never invent.
+      assert providers["codex"] == %{"modes" => [], "models" => [], "efforts" => []}
+    end
+
+    test "anonymous ?chat=1 gets nothing (tier none — mirrors the build gate)", %{conn: conn} do
+      body =
+        conn
+        |> get("/v1/capabilities?chat=1")
+        |> json_response(200)
+
+      assert body["auth_tier"] == "none"
+
+      refute Map.has_key?(body, "chat"),
+             "an anonymous caller must not discover the chat surface via ?chat=1"
+    end
+
+    test "chat and non-chat bodies get DISTINCT etags; the plain etag does NOT 304 ?chat=1",
+         %{conn: conn} do
+      plain = caps_conn(conn)
+      with_chat = caps_conn(build_conn(), "?chat=1")
+
+      plain_etag = plain |> get_resp_header("etag") |> List.first()
+      chat_etag = with_chat |> get_resp_header("etag") |> List.first()
+
+      assert is_binary(plain_etag) and plain_etag != ""
+      assert is_binary(chat_etag) and chat_etag != ""
+
+      assert plain_etag != chat_etag,
+             "chat and non-chat manifests must have distinct etags (maybe_gate_chat sits BEFORE etag_for)"
+
+      # The body echoes the same etag the header carries.
+      assert json_response(with_chat, 200)["etag"] == chat_etag
+
+      # Presenting the plain etag against the chat request must re-render (200).
+      resp =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", plain_etag)
+        |> get("/v1/capabilities?chat=1")
+
+      assert resp.status == 200,
+             "the non-chat etag must not 304 the chat body; got status #{resp.status}"
+    end
+  end
+
+  describe "`writes` honesty: no core mutator is advertised read-only (PDS-D302)" do
+    # `writes` is the ONE side-effect signal the MCP bridge sees:
+    # internal/cli/mcp_bridge.go derives `ReadOnlyHint` straight from it. It used
+    # to default to `false` at the builder (`Keyword.get(opts, :writes, false)`),
+    # and 16 non-GET core commands never passed it — so an MCP client was told
+    # `chat.send_message` and `auth.mfa-disable` were safe read-only calls. The
+    # builder now takes `Keyword.fetch!(opts, :writes)`, which can only catch a
+    # MISSING bit; a wrong `false` is caught here and nowhere else.
+    #
+    # Deliberately anchored on the SERVED manifest, not the source: what an MCP
+    # client is told is what matters.
+    @previously_mislabelled ~w(
+      auth.register auth.login auth.verify-email auth.request-reset auth.reset
+      auth.logout auth.mfa-enroll auth.mfa-verify auth.mfa-disable
+      chat.create_session chat.update_session chat.send_message chat.interrupt
+      chat.approve chat.archive chat.unarchive
+    )
+
+    test "every core command whose HTTP method is not GET carries writes == true",
+         %{conn: conn} do
+      liars =
+        capabilities(conn)["commands"]
+        |> Enum.filter(&(&1["source"] == "core"))
+        |> Enum.filter(&(&1["http"]["method"] != "GET"))
+        |> Enum.reject(&(&1["writes"] == true))
+        |> Enum.map(&{&1["id"], &1["http"]["method"], &1["writes"]})
+        |> Enum.sort()
+
+      assert liars == [],
+             """
+             These core commands mutate over a non-GET method but are advertised
+             read-only — an MCP client reads `writes` as ReadOnlyHint and will call
+             them without confirmation:
+
+                 #{inspect(liars, pretty: true)}
+             """
+    end
+
+    test "the 16 commands that shipped mislabelled are present and now honest",
+         %{conn: conn} do
+      commands = capabilities(conn)["commands"]
+
+      for id <- @previously_mislabelled do
+        cmd = Enum.find(commands, &(&1["id"] == id))
+        assert cmd != nil, "#{id} is missing from the manifest (admin token sees every tier)"
+        refute cmd["http"]["method"] == "GET", "#{id} is expected to be a non-GET mutator"
+
+        assert cmd["writes"] == true,
+               "#{id} is still advertised writes == #{inspect(cmd["writes"])}"
+      end
+    end
+
+    test "a GET command still reports writes == false (the flag stayed a signal)",
+         %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "doc.get")
+
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["writes"] == false
+    end
+  end
+
+  describe "root `bpml` vocabulary block (BPML masterplan W0, ?bpml=1 opt-in)" do
+    test "default manifest carries NO root bpml key", %{conn: conn} do
+      body = caps_conn(conn) |> json_response(200)
+
+      refute Map.has_key?(body, "bpml"),
+             "default manifest leaked the root bpml key — it must be withheld unless ?bpml=1"
+    end
+
+    test "?bpml=1 serves the grammar with a derived digest", %{conn: conn} do
+      body = caps_conn(conn, "?bpml=1") |> json_response(200)
+
+      assert %{"blocks" => blocks, "inline" => inline, "formats" => formats, "digest" => digest} =
+               body["bpml"]
+
+      # the attribute contract agents generate types from
+      assert blocks["callout"] == ["id", "tone", "title"]
+      assert blocks["stat"] == ["label", "value", "denom"]
+      assert blocks["paper"] == ["slug", "title"]
+      # aliases ride the table — <strong> teaches nothing new
+      assert inline["b"] == "strong"
+      assert inline["strong"] == "strong"
+      assert formats == ["json", "bpml"]
+      # derived, stable, prefixed — clients echo it to detect stale types
+      assert String.starts_with?(digest, "bpml-")
+      assert body["bpml"]["digest"] == Barkpark.PortableDoc.Bpml.vocabulary()["digest"]
+    end
+
+    test "anonymous ?bpml=1 STILL gets the vocabulary (public format, not a capability)",
+         %{conn: conn} do
+      body = conn |> get("/v1/capabilities?bpml=1") |> json_response(200)
+
+      assert body["auth_tier"] == "none"
+      assert %{"digest" => "bpml-" <> _} = body["bpml"]
     end
   end
 end

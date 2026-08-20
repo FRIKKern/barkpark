@@ -1,0 +1,20 @@
+{
+  "accepted_capture": false,
+  "block_reason": "NO_DEPLOYED_E16_PROVENANCE_MARKER",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_materialized": false,
+  "candidate_source_sha256": "589dc927de5a084533926ca096135b5b1d4a9c369fc7c6adccbc8c0bf59a07e9",
+  "capture_sha256": null,
+  "evidence_boundary": "REAL_SURFACE_ATTEMPT_ONLY_NOT_A_CAPTURE",
+  "fixture_id": "adv-long-token",
+  "observation": {
+    "body_bytes": 21,
+    "body_sha256": "d2dfdc9511fbeaa0701d1f8730f4989313b062ca1b61a2bd8bed8f4f5d654b5d",
+    "content_type": "application/json; charset=utf-8",
+    "final_url": "https://api.barkpark.cloud/papers/candidate-lossless-semantic-tree--adv-long-token",
+    "http_status": 404
+  },
+  "schema_version": "legendary-e17-real-surface-attempt/v1",
+  "surface": "public_reader",
+  "target": "https://api.barkpark.cloud/papers/candidate-lossless-semantic-tree--adv-long-token"
+}

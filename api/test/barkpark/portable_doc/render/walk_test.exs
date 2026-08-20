@@ -4,6 +4,7 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
 
   alias Barkpark.PortableDoc.Render.Walk
   alias Barkpark.PortableDoc.Render.Palettes
+  alias Barkpark.PortableDoc.Render.StatusVocab
 
   @email Palettes.email_palette()
   @article Palettes.article_palette()
@@ -99,6 +100,22 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       html = Walk.render_body(node, @width, @email)
       assert html =~ "&lt;script&gt;"
       refute html =~ "<script>"
+    end
+  end
+
+  describe "render_body/3 — PdParagraph reader boundary" do
+    test "an empty scaffold emits no public or email HTML" do
+      node = %{"kind" => "PdParagraph", "children" => []}
+
+      assert Walk.render_body(node, @width, @article) == ""
+      assert Walk.render_body(node, @width, @email) == ""
+    end
+
+    test "an authored paragraph remains byte-faithful" do
+      node = %{"kind" => "PdParagraph", "children" => ["Some prose"]}
+
+      assert Walk.render_body(node, @width, @article) == "<p>Some prose</p>"
+      assert Walk.render_body(node, @width, @email) == "<p>Some prose</p>"
     end
   end
 
@@ -308,11 +325,16 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
 
     test "status glyphs cover the lifecycle; unknown gets the neutral pointer" do
+      # Human-readable pin of the ladder as the chip actually renders it (charter
+      # D5 / D114): the `in_progress` spinner degrades to the ⠿ still-frame, and
+      # `blocked`/`done` carry the manifest glyphs ! / ✓. open (○), cancelled (✕)
+      # and the unknown sentinel (▸) are unchanged. This table is the readable
+      # twin of the manifest-derived delegation test below.
       for {status, glyph} <- [
             {"open", "○"},
-            {"in_progress", "◐"},
-            {"blocked", "⊘"},
-            {"done", "●"},
+            {"in_progress", "⠿"},
+            {"blocked", "!"},
+            {"done", "✓"},
             {"cancelled", "✕"},
             {"someday", "▸"}
           ] do
@@ -321,6 +343,36 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
         node = %{"kind" => "PdWikilink", "target" => "T", "children" => ["T"]}
         assert Walk.render_body(node, @width, pal) =~ "#{glyph} #{status}"
       end
+    end
+
+    test "task_glyph DELEGATES to the StatusVocab manifest — glyphs derived, spinner degraded to ⠿" do
+      # Expected glyphs are DERIVED from design/status-manifest.json via
+      # StatusVocab, never hardcoded here — the chip cannot silently drift from
+      # the one source of truth. The single deliberate transform is charter D5:
+      # the `progress` (in_progress) spinner role renders the ⠿ still-frame on
+      # this Elixir surface, matching the sibling emitter fleet_email.ex and
+      # DELIBERATELY unlike Go pdrender's terminal ⠋ frame — a per-surface
+      # consistency choice, not drift.
+      for {status, role} <- StatusVocab.statuses() do
+        expected =
+          if StatusVocab.spinner?(role), do: "⠿", else: StatusVocab.glyph_for_role(role)
+
+        hit = %{@task_hit | status: status, criteria: nil, priority: nil}
+        pal = Map.put(@email, :wikilinks, %{"T" => hit})
+        node = %{"kind" => "PdWikilink", "target" => "T", "children" => ["T"]}
+
+        assert Walk.render_body(node, @width, pal) =~ "#{expected} #{status}",
+               "chip drifted from the manifest for status #{inspect(status)} (role #{inspect(role)})"
+      end
+
+      # The spinner role specifically resolves to the ⠿ still-frame — NOT the raw
+      # manifest glyph (which is "" for the animated role) and NOT Go's ⠋ frame.
+      hit = %{@task_hit | status: "in_progress", criteria: nil, priority: nil}
+      pal = Map.put(@email, :wikilinks, %{"T" => hit})
+      node = %{"kind" => "PdWikilink", "target" => "T", "children" => ["T"]}
+      html = Walk.render_body(node, @width, pal)
+      assert html =~ "⠿ in_progress"
+      refute html =~ "⠋"
     end
 
     test "chip escapes hostile resolver strings (title/status/id)" do
@@ -548,6 +600,53 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
   end
 
+  describe "render_body/3 — PdParagraph (Reader-Owned Spacing Doctrine)" do
+    # /papers/mechanical-spacing-doctrine (flipped 2026-07-31): published
+    # readers emit only visible semantic groups — an empty PdParagraph scaffold
+    # (Enter, Enter) renders NOTHING, never `<p></p>`. Compose keeps the
+    # scaffold in the Pd-tree (invariant 1); the walker skips it (invariant 2).
+    test "an exact empty paragraph (children []) renders NOTHING — no element at all" do
+      assert Walk.render_body(%{"kind" => "PdParagraph", "children" => []}, @width, @article) ==
+               ""
+
+      assert Walk.render_body(%{"kind" => "PdParagraph"}, @width, @article) == ""
+    end
+
+    test "a whitespace-only paragraph is scaffold, not layout — renders NOTHING" do
+      node = %{"kind" => "PdParagraph", "children" => ["   ", " \n\t "]}
+      assert Walk.render_body(node, @width, @article) == ""
+    end
+
+    test "the skip is style-independent: email emits no empty <p> either" do
+      assert Walk.render_body(%{"kind" => "PdParagraph", "children" => []}, @width, @email) == ""
+    end
+
+    test "suppression is exact and narrow (invariant 4): any composed inline node keeps its <p>" do
+      # A PdText wrapper (a marked run) is authored content, even around blanks.
+      marked = %{
+        "kind" => "PdParagraph",
+        "children" => [%{"kind" => "PdText", "weight" => "bold", "children" => [" "]}]
+      }
+
+      assert Walk.render_body(marked, @width, @article) =~ "<p"
+
+      # Non-empty prose stays byte-faithful.
+      prose = %{"kind" => "PdParagraph", "children" => ["Store meaning; render rhythm."]}
+      assert Walk.render_body(prose, @width, @article) == "<p>Store meaning; render rhythm.</p>"
+    end
+
+    test "skipped scaffolds contribute nothing between the remaining blocks (invariant 3)" do
+      blocks = [
+        %{"kind" => "PdParagraph", "children" => ["One."]},
+        %{"kind" => "PdParagraph", "children" => []},
+        %{"kind" => "PdParagraph", "children" => ["Two."]}
+      ]
+
+      html = blocks |> Enum.map(&Walk.render_body(&1, @width, @article)) |> Enum.join("")
+      assert html == "<p>One.</p><p>Two.</p>"
+    end
+  end
+
   describe "render_body/3 — unhandled kind degrades" do
     # PROCESS RULE: this test used to assert the old `raise ArgumentError` crash
     # contract. A schemaless paper can persist a Pd-node kind the walker has no
@@ -748,10 +847,9 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
 
     test "@email palette keeps the pre-Stage-2 self-styled list byte-frozen" do
-      # Email COMPOSE never emits PdList (its list clause builds the "• " PdBox
-      # scaffold), but a raw PdList under a stylesheet-less palette must stay
-      # self-styled — Decision 1: every :email emission is byte-frozen, locked
-      # by the golden corpus (which covers every Pd kind). Exact pre-Stage-2 bytes.
+      # A PdList under a stylesheet-less palette stays self-styled — email
+      # clients may strip stylesheets, so semantic list structure carries its
+      # spacing inline. Exact pre-Stage-2 walker bytes.
       node = %{
         "kind" => "PdList",
         "children" => [

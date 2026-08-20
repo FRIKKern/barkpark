@@ -37,10 +37,30 @@ defmodule BarkparkWeb.Studio.TokensGen do
   # NOT a CSS role. partial_outage is an out-of-model tone between warn-amber
   # (degraded) and danger-red (major_outage): the severity distinction must
   # survive, so it is NOT recolored onto --warn/--danger.
-  def status_health, do: %{operational: "#16a34a", degraded: "#d97706", partial_outage: "#ea580c", major_outage: "#dc2626"}
+  def status_health,
+    do: %{
+      operational: "#16a34a",
+      degraded: "#d97706",
+      partial_outage: "#ea580c",
+      major_outage: "#dc2626"
+    }
 
   # Neutral gray fallback for an unrecognised / missing status.
   def status_health_unknown, do: "#6b7280"
+
+  # Personal Dev Fleet listener-status DATA tones (fleet_live.ex @pills dot +
+  # track tint at /admin/fleet) — the PDF-D23 vocabulary as inline-style hex,
+  # categorical listener-liveness DATA, not a CSS role. STRING keys: the
+  # consumer keys by the runtime status string; an unrecognised status falls
+  # back to "idle" in FleetLive.pill/1.
+  def fleet_status,
+    do: %{
+      "working" => "#16a34a",
+      "idle" => "#64748b",
+      "blocked" => "#dc2626",
+      "provisioning" => "#7c3aed",
+      "offline" => "#94a3b8"
+    }
 
   # Lifecycle mirror — one row per state, canonical emission order. glyph +
   # ascii are text CONTENT; light/dark are the adaptive hue LABELS (the applied
@@ -54,7 +74,9 @@ defmodule BarkparkWeb.Studio.TokensGen do
       %{state: "closed", glyph: "✓", ascii: "v", light: "#0d9488", dark: "#2dd4bf"},
       %{state: "cancelled", glyph: "✕", ascii: "x", light: "#a1a1aa", dark: "#71717a"},
       %{state: "ready", glyph: "○", ascii: "o", light: "#18181b", dark: "#e7edf2"},
-      %{state: "open", glyph: "○", ascii: ".", light: "#71717a", dark: "#5f6b78"}
+      %{state: "open", glyph: "○", ascii: ".", light: "#71717a", dark: "#5f6b78"},
+      %{state: "considering", glyph: "◌", ascii: "?", light: "#a1a1aa", dark: "#71717a"},
+      %{state: "researching", glyph: "◎", ascii: "R", light: "#7c3aed", dark: "#a78bfa"}
     ]
   end
 

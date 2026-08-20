@@ -1,0 +1,158 @@
+# required-checks-drift — the required-check toolchain's own gate, in two halves.
+#
+# Live protection, the committed .github/required-checks.json, and the check-run
+# names a real PR head actually renders must agree. This workflow fails when they
+# do not, and — the part that matters — it fails when it cannot SEE one of them.
+#
+# TWO JOBS, SPLIT ON WHETHER THEY NEED A CREDENTIAL (wave 10)
+#
+#   `Required-check spec gate`          Hermetic: no network, no token, no
+#                                       writes. Runs the mutation suite with
+#                                       --hermetic (166 assertions, ~40s).
+#   `Required-check spec drift (advisory)`  ADVISORY. Everything that reads the
+#                                       GitHub API on a BREAKGLASS credential.
+#
+# WHAT THE SPEC GATE'S RED ACTUALLY DOES — AND THE HEADER USED TO OVERSTATE IT
+#
+# Until wave 53 this header labelled the spec-gate job BLOCKING. It is not, and
+# saying so here was the epic's own defect class in the epic's own workflow.
+# `.github/required-checks.json` holds the context out under `S7 EXCLUDED BY
+# DECISION` (replacement trigger: cch-w36-bl-register-spec-gate-after-census-
+# green), and docs/ops/merge-gates.md already states the truth this header now
+# matches rather than inventing a third phrasing: the job "is in no required
+# aggregator's `needs:` and carries no required name, so it cannot block a
+# merge." Its red is a signal a human must read, not a stop.
+#
+# Wave 10 did split the workflow on the credential boundary, and that split is
+# what makes the hermetic half REGISTRABLE at all — but registering it is a
+# branch-protection change and a lead call, not something this comment can
+# assert into being.
+#
+# THE WORKFLOW IS DELIBERATELY UNFILTERED — THAT IS THE PAYMENT, AND IT IS THE
+# PART THAT MATTERS MORE THAN WHETHER THE JOB IS REGISTERED
+#
+# There is no `on:.paths` key on either trigger, and adding one back would undo
+# this change. A paths-filtered workflow emits NO check run on a PR that misses
+# the paths, and an absent required context routes to `is expected.` forever —
+# i.e. registering a filtered job's name deadlocks main. The filter also bought
+# nothing here: the catch-all detector is a whole-directory scan of the REAL
+# workflow tree that never consults the diff, so a name poisoned by an unrelated
+# PR is invisible to any path glob. #8093 is the measured case — it DID trigger
+# drift (`.github/workflows/**` had been in the glob list since 43fab05c9) and
+# drift concluded success on both its head and its merge commit. It missed the
+# poisoning because the detector did not exist yet, not because of a filter.
+#
+# Same precedent, same words as elixir.yml's `path-escape` job: it costs a few
+# seconds of bash, and the alternative is a gate with a hole in it.
+#
+# WHY THE DRIFT JOB STAYS ADVISORY — AND THE REASON IS NOT "API BLIPS"
+#
+# The old header argued that "an API blip would stall the fleet." That is
+# REFUTED by measurement: 67 of 67 non-cancelled runs concluded success on all
+# three steps. Flakiness is not why this job cannot block.
+#
+# The real reason is CREDENTIAL LIFETIME AND SCOPE.
+# `GET /repos/:o/:r/branches/:b/protection` requires ADMIN, and `administration`
+# is not a scope a workflow `permissions:` block can grant to `github.token` —
+# the key does not exist — so the runner's own token returns 403 there no matter
+# what is listed below. The job therefore runs on `BREAKGLASS_TOKEN`, which is a
+# broad `gh` OAuth USER token (`repo`, `workflow`): it belongs to a person, it
+# rotates whenever that person re-logs in, and it can be revoked out from under
+# CI without anyone touching this repo. A required context whose green depends on
+# one human's session cookie is a gate that reds for a reason no PR author caused
+# and no PR author can fix — which is the same disease, wearing the other mask.
+# It is also far more scope than `administration: read` in a PUBLIC repository;
+# secrets are not exposed to fork PRs, but any workflow change merged to main can
+# read it. The fix is a fine-grained PAT scoped to this repo with
+# Administration: Read-only and nothing else, mintable only in the web UI —
+# filed as the human gate `hg-breakglass-token-fine-grained`. When that lands,
+# the lifetime/scope argument expires and this job becomes registrable.
+#
+# `required-checks-verify.sh` hard-fails on a protection read it cannot make,
+# deliberately: an unreadable input is a failure and never a skip. The
+# `|| github.token` fallback keeps the job RUNNABLE if the secret is ever
+# removed; it will then red on the protection read, which is the honest outcome
+# and not a silent skip.
+#
+# `.github/required-checks.json` names the advisory job in its own exclusions,
+# and that is enforced by the generator rather than by convention: a
+# continue-on-error job cannot enter the required set (stage S2).
+
+name: required-checks-drift
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+concurrency:
+  group: required-checks-drift-${{ github.ref }}
+  # Mirror elixir.yml: cancel superseded PR runs, never cancel main.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # ── the hermetic half (see the header: not a required context today) ────────
+  # Unmatrixed (one job, one rendered name — no `(27.0, 1.18.1)` tuple to pin),
+  # path-unfiltered, and it depends on NO dispatcher job: a `needs:` on a
+  # dispatch job would reintroduce exactly the conditional-absence shape the
+  # paths filter had. It renders on every PR, always, and its name is stable.
+  spec-gate:
+    name: Required-check spec gate
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout is REQUIRED, not incidental: §13's prose ratchet runs
+      # `git ls-files` from the repo root and §3c/§3d scan the real workflow
+      # tree. Without a git index §13 produces a spurious FAIL.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # The whole hermetic suite: the poison filter's five rejections each
+      # disarmed and watched failing to fire, the catch-all job-name refusal
+      # (the #8093 specimen) asserted against a COPY of the real workflow tree
+      # with one poison planted, the deadlock detector, the superset floor, and
+      # verify's own 16 mutation clauses via §9. No network, no token.
+      - name: Prove the toolchain by mutation (hermetic)
+        run: bash scripts/required-checks.test.sh --hermetic
+
+  # ── the advisory half ───────────────────────────────────────────────────────
+  required-checks-drift:
+    name: Required-check spec drift (advisory)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The API stage, §10 and §11: the committed spec's `enforced` flag against
+      # whether the branch is REALLY protected, and full-mode verify against live
+      # protection — including the phantom-context mutation, which now has to
+      # NAME the phantom rather than merely exit non-zero. (The bare run is the
+      # hermetic suite PLUS these; there is no third home for --selftest, which
+      # §9 runs internally.)
+      - name: Prove the toolchain against the live API (§10, §11)
+        env:
+          GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
+        run: bash scripts/required-checks.test.sh
+
+      - name: Three-way drift check (spec ↔ live protection ↔ rendered names)
+        env:
+          GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          rc=0
+          # No --sha: the guard picks a SETTLED head (a recently merged PR) on
+          # purpose. This PR's own head is mid-flight, and a required context
+          # that has not reported YET is not a deadlock.
+          bash scripts/required-checks-verify.sh --ci || rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::error::DEADLOCK — the committed spec requires a context this head never rendered. Merging with protection on would brick the branch."
+            exit 1
+          fi
+          exit "$rc"

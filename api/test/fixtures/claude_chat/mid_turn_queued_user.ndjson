@@ -1,0 +1,8 @@
+{"type":"fixture_provenance","fixture":"mid_turn_queued_user.ndjson","captured_with":"claude 2.1.207 (Claude Code)","captured_at":"2026-07-12","source":"barkpark-chat-tui-wave-2026-07-12 v-interrupt-wire","sanitized":"volatile identifiers and prose replaced; frame types and turn ordering preserved","charter":"D12/D43/D62"}
+{"type":"system","subtype":"init","session_id":"fixture-session","uuid":"turn-1-init"}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"turn one"}},"session_id":"fixture-session","uuid":"turn-1-delta"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"queued question"}]},"session_id":"fixture-session","uuid":"queued-user"}
+{"type":"result","subtype":"success","is_error":false,"terminal_reason":"completed","result":"turn one","session_id":"fixture-session","uuid":"turn-1-result"}
+{"type":"system","subtype":"init","session_id":"fixture-session","uuid":"turn-2-init"}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"turn two"}},"session_id":"fixture-session","uuid":"turn-2-delta"}
+{"type":"result","subtype":"success","is_error":false,"terminal_reason":"completed","result":"turn two","session_id":"fixture-session","uuid":"turn-2-result"}

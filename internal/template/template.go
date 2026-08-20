@@ -23,10 +23,25 @@ import (
 	"strings"
 )
 
-// FrameworkNextJS is the only deployable-app framework v1 targets. The enum
-// exists so the schema can grow without a struct change and so Validate rejects
-// a typo'd framework loudly.
-const FrameworkNextJS = "nextjs"
+// Framework enum — the deployable-app frameworks a manifest may declare. The
+// enum exists so the schema can grow without a struct change and so Validate
+// rejects a typo'd framework loudly. v1 shipped nextjs-only; astro (the static
+// symlink-swap deploy target) and phoenix (the papers-reader surface) joined
+// with the search-template epic (W2).
+const (
+	FrameworkNextJS  = "nextjs"
+	FrameworkAstro   = "astro"
+	FrameworkPhoenix = "phoenix"
+)
+
+// Themes a manifest may pin via the optional `theme` field — the shipped
+// Barkpark palettes (design/themes/<name>.json). Empty = template default.
+var knownThemes = map[string]bool{
+	"evergreen": true,
+	"ember":     true,
+	"fjord":     true,
+	"charple":   true,
+}
 
 // EnvRole is the browser-exposure class of an env var. "server" = server-only
 // (never shipped to the browser — secrets, tokens, API base); "public" = safe
@@ -81,6 +96,10 @@ type Template struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Framework   string `json:"framework"`
+
+	// Theme optionally pins a shipped Barkpark palette for this deploy of the
+	// template (surfaces as data-bp-theme at runtime). Empty = template default.
+	Theme string `json:"theme,omitempty"`
 
 	// Repo is the git URL of the deployable app (optional — a template that
 	// lives in this monorepo can omit it; the deploy UI falls back to the
@@ -185,11 +204,18 @@ func (t *Template) Validate() error {
 		return fmt.Errorf("description is required")
 	}
 	switch t.Framework {
-	case FrameworkNextJS:
+	case FrameworkNextJS, FrameworkAstro, FrameworkPhoenix:
 	case "":
 		return fmt.Errorf("framework is required")
 	default:
-		return fmt.Errorf("unsupported framework %q (expected %q)", t.Framework, FrameworkNextJS)
+		return fmt.Errorf(
+			"unsupported framework %q (expected one of %q, %q, %q)",
+			t.Framework, FrameworkNextJS, FrameworkAstro, FrameworkPhoenix,
+		)
+	}
+
+	if t.Theme != "" && !knownThemes[t.Theme] {
+		return fmt.Errorf("unknown theme %q (shipped palettes: charple, ember, evergreen, fjord)", t.Theme)
 	}
 
 	if len(t.Schemas) == 0 {

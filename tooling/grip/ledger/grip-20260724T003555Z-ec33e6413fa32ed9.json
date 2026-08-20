@@ -1,0 +1,33 @@
+{
+  "run_id": "grip-20260724T003555Z",
+  "recipes": [
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:secret",
+      "rerun": "bp secret get ingest_token",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-24T00:35:55Z"
+    },
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:secret",
+      "rerun": "bp secret ls",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-24T00:35:55Z"
+    },
+    {
+      "subject": "tooling/scaffy-duels/run-cell.sh",
+      "quantity": "grep:-n:output-format\\|max-budget\\|session-persi",
+      "rerun": "grep -n \"output-format\\|max-budget\\|session-persistence\" tooling/scaffy-duels/run-cell.sh tooling/scaffy-duels/README.md tooling/scaffy-duels/METER.md",
+      "derived_level": "L3",
+      "deps": [
+        "tooling/scaffy-duels/run-cell.sh",
+        "tooling/scaffy-duels/README.md",
+        "tooling/scaffy-duels/METER.md"
+      ],
+      "observed_at": "2026-07-24T00:35:55Z"
+    }
+  ]
+}

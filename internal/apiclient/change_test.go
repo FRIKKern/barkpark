@@ -1,9 +1,11 @@
 package apiclient
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // The internal change-detection listener must fire OnChange for a mutation
@@ -23,7 +25,7 @@ func TestListenSSENotifiesOnSpacelessMutation(t *testing.T) {
 	var changes int
 	c.OnChange = func() { changes++ }
 
-	if err := c.listenSSE(""); err != nil {
+	if err := c.listenSSE(context.Background(), ""); err != nil {
 		t.Fatalf("listenSSE returned error: %v", err)
 	}
 	if changes != 1 {
@@ -46,7 +48,7 @@ func TestListenSSENotifiesOnSpacedMutation(t *testing.T) {
 	var changes int
 	c.OnChange = func() { changes++ }
 
-	if err := c.listenSSE(""); err != nil {
+	if err := c.listenSSE(context.Background(), ""); err != nil {
 		t.Fatalf("listenSSE returned error: %v", err)
 	}
 	if changes != 1 {
@@ -69,7 +71,7 @@ func TestListenSSEIgnoresNonMutation(t *testing.T) {
 	var changes int
 	c.OnChange = func() { changes++ }
 
-	if err := c.listenSSE(""); err != nil {
+	if err := c.listenSSE(context.Background(), ""); err != nil {
 		t.Fatalf("listenSSE returned error: %v", err)
 	}
 	if changes != 0 {
@@ -173,7 +175,7 @@ func TestListenSSEFiresOnChangeNotFallback(t *testing.T) {
 	c.OnChange = func() { live++ }
 	c.OnChangeFallback = func() { fallback++ }
 
-	if err := c.listenSSE(""); err != nil {
+	if err := c.listenSSE(context.Background(), ""); err != nil {
 		t.Fatalf("listenSSE returned error: %v", err)
 	}
 	if live != 1 {
@@ -206,7 +208,7 @@ func TestListenSSEPulsesOnEveryStreamFrame(t *testing.T) {
 	c.OnChange = func() { live++ }
 	c.OnChangeFallback = func() { fallback++ }
 
-	if err := c.listenSSE(""); err != nil {
+	if err := c.listenSSE(context.Background(), ""); err != nil {
 		t.Fatalf("listenSSE returned error: %v", err)
 	}
 	if pulses != 3 {
@@ -244,5 +246,47 @@ func TestPollOnceNeverPulses(t *testing.T) {
 	}
 	if pulses != 0 {
 		t.Fatalf("OnLivePulse fired %d times from the poll fallback, want 0", pulses)
+	}
+}
+
+// A stalled SSE connection (the server accepts and answers 200 but never
+// writes another byte) used to block listenSSE's read forever: it dispatched
+// via a plain http.NewRequest and &http.Client{Timeout: 0}, with no context to
+// cancel the read. That leaked the goroutine spawned by StartSSE for the
+// process lifetime (cmd/barkpark/main.go and internal/taskboard/live.go both
+// fire it via `go ...StartSSE(...)` and never observed it again). This test
+// fails (times out/hangs) on that pre-fix code; it passes once listenSSE
+// dispatches via http.NewRequestWithContext and a cancelled ctx unblocks the
+// stalled read, mirroring Listen in listen.go.
+func TestListenSSERespectsContextCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// Accept the connection, answer 200, then never write another byte and
+		// never return — the stalled-stream shape the fix targets. Block until
+		// the client disconnects (ctx cancellation) so the handler itself
+		// doesn't leak past the test.
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Dataset: "production"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- c.listenSSE(ctx, "")
+	}()
+
+	// Give the server a moment to accept the connection and answer 200 before
+	// cancelling, so this exercises a cancel mid-stream, not a cancel-before-dial.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// listenSSE returned — ctx cancellation unblocked the stalled read.
+	case <-time.After(2 * time.Second):
+		t.Fatal("listenSSE did not return within 2s of context cancellation on a stalled stream")
 	}
 }

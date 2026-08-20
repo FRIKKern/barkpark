@@ -4,18 +4,47 @@ defmodule Barkpark.Tasks.Close do
   # facade (which defdelegates close/3 here). Fencing-epoch CAS, the
   # already-terminal guard, and the dependent-unblock walk all live together so
   # the close contract is one cohesive unit.
+  #
+  # THE CLOSE HONESTY GATES (PDS-D288/D289/D290) — READ THIS BEFORE CHANGING THEM.
+  # Three checks ride the same in-lock `with` chain as the epoch fence:
+  #
+  #   * HOLDER — the closer must be (or have been) the lease holder. A foreign
+  #     close is not refused outright forever: it is refused UNTIL the caller
+  #     passes `:holder_override` with a reason, which is written into the doc as
+  #     `close_override.holder` (actor + held_by + reason + ts). That shape is
+  #     deliberate: 76 of 2,064 recorded closes are foreign and EVERY foreign
+  #     closer is a LEAD sealing a merge-gated task, so a hard refusal would
+  #     break the epic-cycle seal ritual. What changes is that the deliberate
+  #     ones are now LOUD and the accidental ones stop.
+  #   * CRITERIA — a `done` close over unmet acceptance criteria needs
+  #     `:criteria_override` with a reason, recorded as `close_override.criteria`
+  #     (actor + the unmet rows + reason + ts). `cancelled` and `blocked` are
+  #     EXEMPT BY NAME — abandoning criteria is the point of cancelling. There is
+  #     no third criterion state: this is accept-unmet-with-a-recorded-reason.
+  #   * WORKER ID — sentinel ids (`""`, `None`, `null`, `nil`, `-`) are refused.
+  #
+  # NONE OF THIS IS AUTHORIZATION. `worker_id` arrives as a client-supplied body
+  # param (`tasks_controller.ex` close/2), never from the api_token, so a caller
+  # who wants to close someone else's task can simply claim to be them. These
+  # gates stop ACCIDENTS and make deliberate foreign/unproven closes AUDITABLE
+  # for the first time; they are not an access-control boundary and must never
+  # be described as one.
 
   import Ecto.Query, only: [from: 2]
 
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       insert_mutation_event!: 3,
       insert_mutation_event!: 5,
       caller_stamp: 1,
       merge_criteria: 2,
       task_broadcast: 4,
-      emit_broadcasts: 1
+      emit_broadcasts: 1,
+      close_holder: 2,
+      unmet_criteria: 1,
+      check_worker_id: 1
     ]
 
   alias Barkpark.Content.{Document, Scope}
@@ -25,6 +54,9 @@ defmodule Barkpark.Tasks.Close do
 
   @closed_lifecycle_statuses ~w(done cancelled blocked)
   @event_task_closed "task.closed"
+  # Merge-event reconcile emits a criterion-level event (same kind Stamp emits),
+  # so the reconciliation shows up in the events feed without a lifecycle flip.
+  @event_task_criterion "task.criterion"
   @event_task_mutated "task.mutated"
   # Advisory cross-task notice (task-obsession layer 4): a task closed with a
   # land digest whose files overlap another in-progress task's claimed scope.
@@ -44,10 +76,21 @@ defmodule Barkpark.Tasks.Close do
     # Audit stamp: the api_token id that drove this close (nil for internal
     # callers), threaded into the task.closed mutation_event's document map.
     caller_token_id = Keyword.get(opts, :caller_token_id)
+    # The two LOUD overrides (PDS-D288/D289). Each is a non-empty reason string;
+    # absent (or blank) means "no override", and the corresponding gate refuses.
+    overrides = %{
+      holder: override_reason(Keyword.get(opts, :holder_override)),
+      criteria: override_reason(Keyword.get(opts, :criteria_override))
+    }
 
     cond do
       new_status not in @closed_lifecycle_statuses ->
         {:error, {:invalid_lifecycle, new_status}}
+
+      # Sentinel worker ids die before the DB — a close attributed to "None" is
+      # a missing value wearing a worker's clothes (PDS-D290).
+      match?({:error, _}, check_worker_id(worker_id)) ->
+        check_worker_id(worker_id)
 
       true ->
         do_close_txn(
@@ -59,9 +102,179 @@ defmodule Barkpark.Tasks.Close do
           reason,
           criteria,
           landed,
-          caller_token_id
+          caller_token_id,
+          overrides
         )
     end
+  end
+
+  # A reason only overrides when it has words. `nil`, `""`, whitespace and
+  # non-strings are NOT an override — an unexplained override is exactly the
+  # silent foreign close this gate exists to end.
+  defp override_reason(reason) when is_binary(reason) do
+    case String.trim(reason) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp override_reason(_), do: nil
+
+  @doc """
+  Merge-event bridge (ledger-merge-criterion-autostamp): auto-stamp a task's
+  explicit `"merge_gate" => true` acceptance criterion when its PR merges, WITHOUT
+  a human issuing the landed close. This is the initiator PR #3039 left missing —
+  #3039 shipped the safe close-time autostamp seam (`autostamp_merge_gate/6`) but
+  nothing fired it on a GitHub merge. This reuses the SAME marker semantics + the
+  SAME `merge_criteria` rev-CAS write, so it is not a second mutation path.
+
+  `task_id` is `documents.id` (a resolved UUID — the caller maps the PR's
+  `Task: <doc_id>` trailer through `Content.get_document/4` first). `landed` names
+  the merge artifact, `%{"prs" => [<number>], "commit" => <merge_sha>}`.
+
+  Deliberately STAMP-ONLY — it never flips `lifecycle_status`. A close hides
+  every other unmet criterion under a terminal lifecycle and (unlike a stamp)
+  is fenced to the live claim epoch the merge event does not hold; leaving the
+  lifecycle untouched preserves partial acceptance truth (a half-proven task
+  reads as merge-gate-met but still `in_progress`, never fully done) and lets the
+  lead keep close/3's judgment + claim/epoch semantics. The `merge_gate` marker
+  itself is the authorization — the write can touch NOTHING else.
+
+  Idempotent, named outcomes (never a silent no-op or double evidence):
+
+    * `{:ok, :stamped, [index]}`   — one or more merge-gate criteria flipped met,
+      evidence naming the PR, merge commit, and trigger source.
+    * `{:ok, :already_stamped}`    — every merge-gate criterion is already met
+      (a replayed/duplicate merge event, or a lead already closed). No write.
+    * `{:ok, :no_marker}`          — the task carries NO `merge_gate:true`
+      criterion. The absence is NAMED (loud), never a text/position fallback, so
+      an unmarked legacy gate is detectable rather than silently guessed.
+    * `{:ok, :no_guardable_marker}`— an unmet merge-gate criterion exists but has
+      no wording to CAS against (D56). Left for a human, close is never faked.
+    * `{:error, :unknown_task}`    — no document at `task_id`.
+    * `{:error, :stale_rev}`       — lost a concurrent rev-CAS race; the caller
+      may retry (the merge event is replay-safe via `:already_stamped`).
+  """
+  @spec reconcile_merge_gate(String.t(), map(), keyword()) ::
+          {:ok, :stamped, [non_neg_integer()]}
+          | {:ok, :already_stamped | :no_marker | :no_guardable_marker}
+          | {:error, :unknown_task | :stale_rev | term()}
+  def reconcile_merge_gate(task_id, landed, opts \\ [])
+      when is_binary(task_id) and is_map(landed) do
+    worker_id = Keyword.get(opts, :worker_id, "github-merge")
+    ts_iso = Keyword.get(opts, :ts_iso) || DateTime.to_iso8601(DateTime.utc_now())
+
+    result =
+      Repo.transaction(fn ->
+        _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
+
+        # global-read: task-close by-PK — task_id IS the Document PK; tenancy is resolved by the caller's CAS claim (worker+epoch) inside this per-task advisory-locked txn, not a workspace_id thread (internal-worker posture).
+        case Repo.get(Document, task_id) do
+          nil ->
+            {:error, :unknown_task}
+
+          %Document{} = doc ->
+            reconcile_locked(doc, worker_id, landed, ts_iso)
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, :stamped, indices, _updated, broadcasts}} ->
+        :ok = emit_broadcasts(broadcasts)
+        {:ok, :stamped, indices}
+
+      {:ok, other} ->
+        other
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # In-lock reconciliation over the freshly-read doc. Classifies the merge-gate
+  # criteria BEFORE writing so `:no_marker` (never marked) is distinguishable
+  # from `:already_stamped` (marked + met) — criterion-4 named idempotency.
+  defp reconcile_locked(%Document{} = doc, worker_id, landed, ts_iso) do
+    gates =
+      doc.content
+      |> merge_gate_criteria_list()
+      |> Enum.with_index()
+      |> Enum.filter(fn {entry, _i} -> is_map(entry) and Map.get(entry, "merge_gate") == true end)
+
+    cond do
+      gates == [] ->
+        {:ok, :no_marker}
+
+      Enum.all?(gates, fn {entry, _i} -> Map.get(entry, "met") == true end) ->
+        {:ok, :already_stamped}
+
+      true ->
+        evidence = compose_reconcile_evidence(worker_id, landed, ts_iso)
+        synthetic = merge_gate_synthetics(doc.content, evidence, MapSet.new())
+
+        if synthetic == [] do
+          # Unmet merge-gate criteria exist but none carry guardable text — the
+          # D56 fail-closed guard has nothing to CAS against, so a human must
+          # stamp them. Never faked through the hole.
+          {:ok, :no_guardable_marker}
+        else
+          write_reconcile(doc, synthetic, worker_id, landed, ts_iso)
+        end
+    end
+  end
+
+  # The stamp write: fold the synthetic met-flips through the SHARED
+  # `merge_criteria` rev-CAS (the same D56-guarded merge close uses) and update
+  # ONLY the criteria + rev + the autostamp provenance record —
+  # `lifecycle_status` is deliberately never touched. A durable `task.criterion`
+  # mutation_event records the reconciliation.
+  #
+  # The provenance record rides this write for the SAME reason it rides the
+  # close write (see `@autostamp_key`): a reader must be able to tell an
+  # autostamped criterion from a hand-proven one WITHOUT parsing evidence prose.
+  # This is the VERIFIED half — a real merge event was observed — so it lands
+  # under "merge_event" with `verified: true`, next to (never on top of) any
+  # earlier unverified close-time assertion.
+  defp write_reconcile(%Document{} = doc, synthetic, worker_id, landed, ts_iso) do
+    observed_rev = doc.rev
+    new_rev = generate_rev()
+    indices = Enum.map(synthetic, &Map.get(&1, "index"))
+
+    with {:ok, new_content} <- merge_criteria(doc.content, synthetic) do
+      new_content =
+        merge_autostamp_record(new_content, "merge_event", %{
+          "verified" => true,
+          "source" => "github_merge_event",
+          "indices" => indices,
+          "asserted_worker" => worker_id,
+          "landed" => landed_summary(landed),
+          "ts" => ts_iso
+        })
+
+      case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+        {:ok, updated} ->
+          ev =
+            insert_mutation_event!(
+              updated,
+              @event_task_criterion,
+              observed_rev,
+              "github-merge",
+              %{"merge_reconcile" => %{"indices" => indices, "worker" => worker_id}}
+            )
+
+          {:ok, :stamped, indices, updated,
+           [task_broadcast(updated, @event_task_criterion, ev, observed_rev)]}
+
+        :stale ->
+          {:error, :stale_rev}
+      end
+    end
+  end
+
+  # Reconcile evidence names the PR, the merge commit, and the trigger source
+  # (`worker_id`, e.g. "github-merge") — no live claim, so no epoch to cite.
+  defp compose_reconcile_evidence(worker_id, landed, ts_iso) do
+    "auto: merge-reconciled by #{worker_id} — landed #{landed_summary(landed)} at #{ts_iso}"
   end
 
   defp do_close_txn(
@@ -73,7 +286,8 @@ defmodule Barkpark.Tasks.Close do
          reason,
          criteria,
          landed,
-         caller_token_id
+         caller_token_id,
+         overrides
        ) do
     result =
       Repo.transaction(fn ->
@@ -82,6 +296,7 @@ defmodule Barkpark.Tasks.Close do
         #    bigint and auto-releases at COMMIT/ROLLBACK.
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
 
+        # global-read: task-close by-PK — task_id IS the Document PK; tenancy is resolved by the caller's CAS claim (worker+epoch) inside this per-task advisory-locked txn, not a workspace_id thread (internal-worker posture).
         case Repo.get(Document, task_id) do
           nil ->
             {:error, :not_found}
@@ -103,8 +318,23 @@ defmodule Barkpark.Tasks.Close do
                 {:error, :stale_claim}
 
               true ->
+                # The honesty gates sit HERE, on the `doc` read at the top of
+                # this txn under the per-task advisory lock — the only place
+                # where the PRE-close state is visible, the read is serialized,
+                # and a refusal aborts before any content is written. Anywhere
+                # downstream of `merge_criteria` (which runs inside
+                # `apply_close_update`'s single rev-CAS write) is decorative by
+                # construction: a closer that flips its own criteria in the
+                # closing command would gate against its own claim.
                 with :ok <- check_fencing(doc, observed_epoch),
+                     {:ok, holder_record} <- check_close_holder(doc, worker_id, overrides.holder),
+                     # The work-digest fence stays AHEAD of the criteria gate:
+                     # if the brief itself moved under the claim, "your criteria
+                     # are unmet" is the wrong thing to say — re-read first.
                      :ok <- check_work_digest(doc, observed_rev_opt),
+                     :ok <- check_criteria_payload(doc, criteria),
+                     {:ok, criteria_record} <-
+                       check_criteria_proven(doc, new_status, landed, overrides.criteria),
                      {:ok, updated} <-
                        apply_close_update(
                          doc,
@@ -113,7 +343,9 @@ defmodule Barkpark.Tasks.Close do
                          new_status,
                          reason,
                          criteria,
-                         landed
+                         landed,
+                         compose_override_record(holder_record, criteria_record, worker_id),
+                         caller_token_id
                        ) do
                   ev =
                     insert_mutation_event!(
@@ -163,6 +395,110 @@ defmodule Barkpark.Tasks.Close do
     end
   end
 
+  # HOLDER GATE (PDS-D288). `check_fencing/2` above proves the caller observed
+  # the CURRENT epoch; it never once compares WHO is closing, so worker-B closing
+  # worker-A's task on A's epoch has always been `{:ok, doc}` with
+  # `claim.worker = "worker-A", claim.closed_by = "worker-B"` — a ledger row that
+  # reads like A finished the work. `Internal.close_holder/2` carries the three
+  # allow-arms (unclaimed / holder / self-resume). A foreign close is refused
+  # UNLESS the caller passes an explicit reason, in which case it succeeds and
+  # the reason + both identities are written into the close. Refusal is the
+  # DEFAULT, the override is the escape hatch — never the other way round.
+  defp check_close_holder(%Document{} = doc, worker_id, override_reason) do
+    case close_holder(doc, worker_id) do
+      {:ok, _arm} ->
+        {:ok, nil}
+
+      {:error, {:not_holder, held}} when is_nil(override_reason) ->
+        {:error, {:not_holder, held}}
+
+      {:error, {:not_holder, held}} ->
+        {:ok, %{"held_by" => held, "reason" => override_reason}}
+    end
+  end
+
+  # A malformed criteria payload keeps its OWN error, ahead of the unmet gate.
+  # `merge_criteria/2` is pure over the content map, so running it here as a
+  # dry-run costs one map walk and buys precedence: a caller whose index is out
+  # of range, whose text guard is stale, or whose met-flip carries no text hears
+  # about THAT (`:criteria_index_out_of_range` / `:criteria_mismatch` /
+  # `:criterion_text_required`) rather than a confusing "criteria unmet". The
+  # real write still runs the same merge inside `apply_close_update/8` — this
+  # discards its result and only propagates the error.
+  defp check_criteria_payload(_doc, []), do: :ok
+
+  defp check_criteria_payload(%Document{content: content}, criteria) do
+    case merge_criteria(content, criteria) do
+      {:ok, _dry_run} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # CRITERIA GATE (PDS-D289). Scoped to `done` ONLY: `cancelled` and `blocked`
+  # are exempt BY NAME below — abandoning acceptance criteria is precisely what
+  # cancelling a task MEANS, and a blocked close is an honest partial. Unmet is
+  # measured on the doc AS READ, so the closing command's own criteria payload
+  # cannot satisfy the gate it is being measured against.
+  #
+  # ONE deduction: criteria the merge-gate auto-stamp is about to prove ON ITS
+  # OWN AUTHORITY (an explicit `"merge_gate" => true` marker plus a land digest
+  # riding this close — `autostamp_merge_gate/6`) are not counted. Those are not
+  # a closer asserting its own proof; the marker + the merge artifact ARE the
+  # proof, and counting them would refuse every lead seal close and re-break the
+  # exact ritual D288 protects.
+  defp check_criteria_proven(%Document{} = doc, "done", landed, override_reason) do
+    case unmet_after_autostamp(doc, landed) do
+      [] ->
+        {:ok, nil}
+
+      unmet when is_nil(override_reason) ->
+        {:error, {:criteria_unmet, Enum.map(unmet, &Map.get(&1, "index"))}}
+
+      unmet ->
+        {:ok, %{"unmet" => unmet, "reason" => override_reason}}
+    end
+  end
+
+  # Exempt BY NAME — not by falling through a catch-all.
+  defp check_criteria_proven(%Document{}, status, _landed, _override)
+       when status in ~w(cancelled blocked),
+       do: {:ok, nil}
+
+  defp unmet_after_autostamp(%Document{content: content}, landed) do
+    autostamped =
+      if is_map(landed) and map_size(landed) > 0 do
+        content
+        |> merge_gate_synthetics("", MapSet.new())
+        |> MapSet.new(&Map.get(&1, "index"))
+      else
+        MapSet.new()
+      end
+
+    content
+    |> unmet_criteria()
+    |> Enum.reject(&MapSet.member?(autostamped, Map.get(&1, "index")))
+  end
+
+  # The durable override record, or nil when neither gate was overridden. ONE
+  # `close_override` map so a re-read of the closed doc answers "was this close
+  # honest?" in a single key — `actor` is who closed, `held_by` is who the ledger
+  # thought held the lease, `reason` is why they overrode it anyway.
+  defp compose_override_record(nil, nil, _worker_id), do: nil
+
+  defp compose_override_record(holder_record, criteria_record, worker_id) do
+    ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    %{}
+    |> maybe_put_override("holder", holder_record, worker_id, ts_iso)
+    |> maybe_put_override("criteria", criteria_record, worker_id, ts_iso)
+  end
+
+  defp maybe_put_override(acc, _key, nil, _worker_id, _ts_iso), do: acc
+
+  defp maybe_put_override(acc, key, record, worker_id, ts_iso) do
+    Map.put(acc, key, Map.merge(record, %{"actor" => worker_id, "ts" => ts_iso}))
+  end
+
   # "Edited-under-you becomes a 409, never a silent close." When the caller did
   # NOT pin an explicit observed_rev AND the claim carries a work_digest, the
   # doc's current work-defining fields (title/brief/description/acceptance_criteria —
@@ -206,7 +542,9 @@ defmodule Barkpark.Tasks.Close do
          new_status,
          reason,
          criteria,
-         landed
+         landed,
+         override_record,
+         caller_token_id
        ) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -243,6 +581,10 @@ defmodule Barkpark.Tasks.Close do
     # a CI backfill can add it later without erasing a prior write).
     new_content = merge_landed(new_content, landed)
 
+    # The loud override record rides the SAME rev-CAS write as the lifecycle
+    # flip — an overridden close and its confession land together or not at all.
+    new_content = merge_override_record(new_content, override_record)
+
     # Expectation close-out (living-values §8/§9 — "task proves paper"):
     # acceptance-criteria met/evidence updates ride the SAME rev-CAS write as
     # the lifecycle flip, following the close_reason precedent above. A
@@ -255,16 +597,35 @@ defmodule Barkpark.Tasks.Close do
     # matches) aborts the whole close with a CAS-flavoured error so the
     # caller re-reads and retries — deliberate race handling, not silent
     # partial state.
-    with {:ok, new_content} <- merge_criteria(new_content, criteria) do
-      {rows, _} =
-        from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-        |> Repo.update_all(
-          set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-        )
+    #
+    # Merge-gate auto-stamp (Felix wave-9): the LEAD's merge close synthesizes
+    # a met=true update for any acceptance criterion carrying an explicit
+    # "merge_gate":true marker so no reviewer hand-patches it. See
+    # `autostamp_merge_gate/6` for the conservative guards — it only fires on a
+    # terminal `done` close that carries a land digest, and never touches an
+    # index the caller already targeted, so a builder's pre-merge close (no
+    # landed) is untouched. Runs through the SAME merge_criteria rev-CAS write.
+    #
+    # NOTHING HERE OBSERVES A MERGE (cch-w66-s2). The whole trigger is the
+    # caller's own `landed` bytes, so the synthetics are computed ONCE and used
+    # twice: once as criteria updates, and once as the provenance record that
+    # names them as caller-asserted rather than verified. Both ride this single
+    # rev-CAS write, so an autostamp and its confession land together or not at
+    # all — the same discipline `close_override` already follows.
+    autostamps = autostamp_merge_gate(doc, criteria, worker_id, new_status, landed, ts_iso)
+    criteria = if is_list(criteria), do: criteria ++ autostamps, else: criteria
 
-      case rows do
-        1 -> {:ok, %{doc | content: new_content, rev: new_rev}}
-        0 -> {:error, :stale_claim}
+    new_content =
+      merge_autostamp_record(
+        new_content,
+        "close",
+        close_autostamp_record(autostamps, worker_id, caller_token_id, landed, ts_iso)
+      )
+
+    with {:ok, new_content} <- merge_criteria(new_content, criteria) do
+      case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+        {:ok, updated} -> {:ok, updated}
+        :stale -> {:error, :stale_claim}
       end
     end
   end
@@ -298,6 +659,216 @@ defmodule Barkpark.Tasks.Close do
 
   defp merge_landed(content, _), do: content
 
+  # A close that overrode nothing writes nothing (no empty `close_override` key
+  # to make an honest close look confessed). A prior override on a re-closed
+  # task is merged over, never erased.
+  defp merge_override_record(content, record) when is_map(record) and map_size(record) > 0 do
+    existing =
+      case Map.get(content, "close_override") do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
+    Map.put(content, "close_override", Map.merge(existing, record))
+  end
+
+  defp merge_override_record(content, _record), do: content
+
+  # Merge-gate auto-stamp (Felix wave-9). Kills the recurring ledger toil where
+  # the final "PR merged"/LEAD-CLOSED acceptance criterion is left met=false at
+  # builder-close time and a reviewer hand-patches it every wave. When the LEAD
+  # closes on merge, synthesize a met=true criteria update for any criterion the
+  # AUTHOR explicitly marked with `"merge_gate" => true`.
+  #
+  # CONSERVATIVE by design — the union of ALL these must hold or nothing is
+  # stamped (a builder's honest pre-merge close is never touched):
+  #   * new_status is the terminal `done` (a cancelled/blocked close is not a merge),
+  #   * a non-empty `landed` digest rides the close (the LEAD merge close carries
+  #     one; a builder pre-merge close does not — this is what prevents recreating
+  #     the Mode-A false-true bug),
+  #   * the criterion carries the EXPLICIT `"merge_gate" => true` marker — never a
+  #     text / last-entry / index heuristic (only 14/34 Felix children carry the
+  #     'MERGE GATE' text convention, so a heuristic would both miss and misfire),
+  #   * it is still `met` != true (idempotent — an already-stamped gate is left alone),
+  #   * the caller's `criteria` payload did NOT already target that index (an
+  #     explicit caller update always wins; we never overwrite it),
+  #   * the criterion carries a non-empty `criterion` TEXT — see below.
+  # The synthetic update rides the SAME merge_criteria + rev-CAS write as every
+  # other close-time criteria flip, so it lands atomically with the close or not
+  # at all.
+  #
+  # D56 (wave 5): merge_criteria now FAILS CLOSED on any met-flip that carries no
+  # `"criterion"` text guard. This autostamp used to be the one blessed index-only
+  # met-flip in the codebase — the exact hole that let a wrong index fabricate a
+  # done — so it now threads the STORED text of the very row it is stamping into
+  # the update. The guard is trivially satisfiable here (the index and the text
+  # are read from the same in-lock list, so they cannot disagree), and threading
+  # it keeps ONE rule with ZERO internal exemptions. A merge_gate criterion with
+  # no text is UNGUARDABLE, so it is skipped rather than stamped through a hole —
+  # authoring a merge-gate criterion with no wording is degenerate, and the close
+  # still succeeds (that criterion is simply left for a human to stamp).
+  #
+  # cch-w66-s2: it returns the SYNTHETICS ONLY (the caller appends them), because
+  # the same list is also what the provenance record names. Two readers, one
+  # computation — a second traversal could disagree with the one that wrote.
+  defp autostamp_merge_gate(%Document{} = doc, criteria, worker_id, "done", landed, ts_iso)
+       when is_map(landed) and map_size(landed) > 0 and is_list(criteria) do
+    targeted = MapSet.new(criteria, &Map.get(&1, "index"))
+    evidence = compose_merge_gate_evidence(doc, worker_id, landed, ts_iso)
+    merge_gate_synthetics(doc.content, evidence, targeted)
+  end
+
+  defp autostamp_merge_gate(_doc, _criteria, _worker, _status, _landed, _ts_iso), do: []
+
+  # THE TRACE (cch-w66-s2). An autostamped criterion used to be indistinguishable
+  # from a hand-proven one: `unmet_after_autostamp/2` deducts the gate from the
+  # D289 unmet set, so `check_criteria_proven/4` returns `{:ok, nil}` and NO
+  # `close_override` is minted — the deduction erased itself. This key is that
+  # deduction's receipt, in `close_override`'s shape and by its precedent: ONE
+  # content key a re-read answers "was this criterion PROVEN, or merely asserted?"
+  # from, without parsing evidence prose.
+  #
+  # Two sub-keys, never overwriting each other, because they are two different
+  # claims about the world:
+  #   * "close"       — a close carried a `landed` map. NOTHING was observed;
+  #     `verified: false`. The actor is recorded twice on purpose:
+  #     `asserted_worker` is the client-supplied `worker_id` (close.ex:26-31 —
+  #     not authorization, a caller can claim to be anyone) and
+  #     `authenticated_token_id` is the api_token the server actually
+  #     authenticated (nil for internal callers). A record that named only the
+  #     first would carry the fabricator's chosen name and nothing else.
+  #   * "merge_event" — `reconcile_merge_gate/3` saw a real merge webhook;
+  #     `verified: true`.
+  @autostamp_key "merge_gate_autostamp"
+
+  defp close_autostamp_record([], _worker_id, _caller_token_id, _landed, _ts_iso), do: nil
+
+  defp close_autostamp_record(autostamps, worker_id, caller_token_id, landed, ts_iso) do
+    %{
+      "verified" => false,
+      "source" => "close_landed_digest",
+      "indices" => Enum.map(autostamps, &Map.get(&1, "index")),
+      "asserted_worker" => worker_id,
+      "authenticated_token_id" => caller_token_id,
+      "landed" => landed_summary(landed),
+      "ts" => ts_iso
+    }
+  end
+
+  # A close that autostamped nothing writes nothing (mirrors
+  # `merge_override_record/2`: an honest close leaves no receipt to explain
+  # away). A prior record is merged over per sub-key, never erased — an
+  # unverified close-time assertion stays readable after a later merge event
+  # verifies the same criterion.
+  defp merge_autostamp_record(content, _key, nil), do: content
+
+  defp merge_autostamp_record(content, key, record) when is_map(record) do
+    existing =
+      case Map.get(content, @autostamp_key) do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
+    Map.put(content, @autostamp_key, Map.put(existing, key, record))
+  end
+
+  # Shared merge-gate synthetic builder (used by the lead-close autostamp above
+  # AND by `reconcile_merge_gate/3`, the merge-event bridge). Given the stored
+  # criteria list, the composed `evidence`, and the set of indices the caller
+  # ALREADY targets (an explicit caller update always wins), it returns synthetic
+  # `%{"index","met","evidence","criterion"}` updates for every criterion that is
+  # ALL of: an explicit `"merge_gate" => true` marker, not already `met`, not
+  # caller-targeted, and carrying non-empty guardable text (the D56 fail-closed
+  # guard has nothing to CAS against otherwise, so it is skipped — never stamped
+  # through a hole). ONE definition keeps both writers on the exact same marker
+  # semantics: no text/position/index heuristic, no drift.
+  defp merge_gate_synthetics(content, evidence, %MapSet{} = targeted) do
+    content
+    |> merge_gate_criteria_list()
+    |> Enum.with_index()
+    |> Enum.filter(fn {entry, i} ->
+      is_map(entry) and Map.get(entry, "merge_gate") == true and
+        Map.get(entry, "met") != true and not MapSet.member?(targeted, i) and
+        guardable_text(entry) != nil
+    end)
+    |> Enum.map(fn {entry, i} ->
+      %{
+        "index" => i,
+        "met" => true,
+        "evidence" => evidence,
+        "criterion" => guardable_text(entry)
+      }
+    end)
+  end
+
+  # The stored criterion wording, or nil when there is nothing to CAS against.
+  defp guardable_text(%{"criterion" => text}) when is_binary(text) and text != "", do: text
+  defp guardable_text(_entry), do: nil
+
+  defp merge_gate_criteria_list(content) do
+    case Map.get(content, "acceptance_criteria") do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  # The close-time autostamp's evidence sentence (cch-w66-s2).
+  #
+  # It used to read "auto: lead-closed on merge by <worker> (epoch <n>) — landed
+  # <what>", which asserted TWO things nothing on this path observed: that the
+  # closer is a LEAD (`worker_id` is a client-supplied body param — close.ex:26-31)
+  # and that a MERGE happened (no GitHub call runs here, and none may: this
+  # executes under `pg_advisory_xact_lock`, where a network round-trip converts a
+  # fabrication bug into an availability bug). A scratch worker paid a gate citing
+  # a foreign epic's PR and the ledger recorded it as a lead-closed merge.
+  #
+  # So the sentence now names exactly what was supplied — a caller-asserted land
+  # digest, by a claimed worker, at a time — and says plainly that no merge was
+  # observed. It must stay DISTINGUISHABLE from `compose_reconcile_evidence/3`,
+  # which is written only after a real merge webhook:
+  #
+  #   this   : "auto: UNVERIFIED merge-gate autostamp — no merge observed; caller-asserted land digest from worker "lead-w" (epoch 5) naming PR #456 at <ts>"
+  #   webhook: "auto: merge-reconciled by github-merge — landed PR #456 (commit abc123) at <ts>"
+  #
+  # The claim epoch is read from the doc's own claim lease (nil for an unclaimed
+  # container close → rendered "?"); the landed summary prefers PR numbers, then a
+  # commit sha, then file paths, so the evidence names the artifact it was HANDED.
+  defp compose_merge_gate_evidence(%Document{content: content}, worker_id, landed, ts_iso) do
+    epoch =
+      case get_in(content, ["claim", "epoch"]) do
+        nil -> "?"
+        e -> to_string(e)
+      end
+
+    "auto: UNVERIFIED merge-gate autostamp — no merge observed; caller-asserted land digest " <>
+      "from worker #{inspect(worker_id)} (epoch #{epoch}) naming #{landed_summary(landed)} at #{ts_iso}"
+  end
+
+  defp landed_summary(landed) do
+    prs = normalize_landed_list(Map.get(landed, "prs") || Map.get(landed, safe_atom("prs")))
+    commit = Map.get(landed, "commit") || Map.get(landed, "commits")
+    files = normalize_landed_list(Map.get(landed, "files") || Map.get(landed, safe_atom("files")))
+
+    cond do
+      # Merge-event reconcile carries BOTH a PR number and the merge commit sha —
+      # name both so the evidence points at the exact merge artifact (criterion 1).
+      prs != [] and is_binary(commit) and commit != "" ->
+        "PR " <> Enum.map_join(prs, ", ", &"##{&1}") <> " (commit #{commit})"
+
+      prs != [] ->
+        "PR " <> Enum.map_join(prs, ", ", &"##{&1}")
+
+      is_binary(commit) and commit != "" ->
+        "commit #{commit}"
+
+      files != [] ->
+        Enum.join(files, ", ")
+
+      true ->
+        "merge"
+    end
+  end
+
   defp normalize_landed_list(nil), do: []
   defp normalize_landed_list(list) when is_list(list), do: Enum.reject(list, &is_nil/1)
   defp normalize_landed_list(scalar), do: [scalar]
@@ -322,13 +893,14 @@ defmodule Barkpark.Tasks.Close do
         new_rev = generate_rev()
         new_content = Map.put(dep.content, "lifecycle_status", "open")
 
-        {1, _} =
-          from(d in Document, where: d.id == ^dep.id and d.rev == ^dep.rev)
-          |> Repo.update_all(
-            set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-          )
+        # The stored row, not a reconstruction: this receipt is BROADCAST —
+        # `Content.Broadcast` copies `doc.updated_at` onto three PubSub topics —
+        # so a struct-merge here ships a stale timestamp to every LiveView and
+        # SSE consumer. The hard match on `{:ok, _}` preserves the previous
+        # `{1, _} =` assertion: under the per-task advisory lock a lost fence
+        # here is a bug, not a race to swallow.
+        {:ok, unblocked} = fenced_content_write(dep, dep.rev, new_content, new_rev)
 
-        unblocked = %{dep | content: new_content, rev: new_rev}
         ev = insert_mutation_event!(unblocked, @event_task_mutated, dep.rev)
         [task_broadcast(unblocked, @event_task_mutated, ev, dep.rev)]
       else

@@ -125,9 +125,9 @@ func TestRenderNeverExceedsWidth(t *testing.T) {
 	}
 }
 
-// TestRenderHeightPinsTickerAndFooter proves the frame is exactly `height`
+// TestRenderHeightPinsStatusAndFooter proves the frame is exactly `height`
 // lines and that the footer hint is the last line regardless of body size.
-func TestRenderHeightPinsTickerAndFooter(t *testing.T) {
+func TestRenderHeightPinsStatusAndFooter(t *testing.T) {
 	b := loadBoardFixture(t)
 	st := fixtureUIState()
 	for _, height := range []int{20, 30, 40, 60} {
@@ -147,9 +147,9 @@ func TestRenderHeightPinsTickerAndFooter(t *testing.T) {
 func TestRenderShortHeightScrolls(t *testing.T) {
 	b := loadBoardFixture(t)
 	st := fixtureUIState()
-	frame := plainFrame(b, st, 80, 18)
-	if lines := strings.Split(frame, "\n"); len(lines) != 18 {
-		t.Fatalf("got %d lines, want 18", len(lines))
+	frame := plainFrame(b, st, 80, 14)
+	if lines := strings.Split(frame, "\n"); len(lines) != 14 {
+		t.Fatalf("got %d lines, want 14", len(lines))
 	}
 	if !strings.Contains(frame, "more below") && !strings.Contains(frame, "more above") {
 		t.Errorf("short pane should surface a scroll affordance:\n%s", frame)
@@ -219,24 +219,142 @@ func TestReadyCountIncludesEpicRoots(t *testing.T) {
 	}
 }
 
-// TestRenderTruncationNote — when the list clamp dropped rows (TaskCount below
-// the summed lifecycle counts), the header carries an honest "showing N of M"
-// note instead of presenting a partial board as the whole.
-func TestRenderTruncationNote(t *testing.T) {
+func TestBottomChromeIsExactlyThreeUsefulLines(t *testing.T) {
 	b := Board{
-		TaskCount: 1000,
-		Counts:    map[string]int{"open": 900, "done": 600}, // total 1500 > 1000 fetched
+		TaskCount: 1500,
+		Counts:    map[string]int{"open": 900, "done": 600}, // fetch == corpus: not clamped
 	}
-	frame := ansi.Strip(Render(b, UIState{Conn: ConnPolling}, 80, 30, fixedNow))
-	if !strings.Contains(frame, "showing 1000 of 1500") {
-		t.Errorf("truncated board is missing the 'showing N of M' note:\n%s", frame)
+	chrome := bottomChrome(b, UIState{Conn: ConnPolling}, 80, fixedNow)
+	if len(chrome) != 3 {
+		t.Fatalf("bottom chrome uses %d lines, want bar + status + keys", len(chrome))
+	}
+	plain := ansi.Strip(strings.Join(chrome, "\n"))
+	for _, want := range []string{"ready", "done", "▄", "jk move"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("three-line chrome missing %q:\n%s", want, plain)
+		}
+	}
+	lines := strings.Split(plain, "\n")
+	if !strings.Contains(lines[0], "▄") || !strings.Contains(lines[1], "in flight") || !strings.Contains(lines[2], "jk move") {
+		t.Errorf("bottom chrome order = %q, want slim bar, totals, keys", lines)
+	}
+	for _, noise := range []string{"showing", "recent activity", "pulse"} {
+		if strings.Contains(plain, noise) {
+			t.Errorf("three-line chrome retained %q noise:\n%s", noise, plain)
+		}
+	}
+}
+
+// TestMomentumShowingNofM proves the 1000-row horizon disclosure (charter D40):
+// when the fetch (TaskCount) is short of the true corpus (summed Counts) the
+// momentum line owns a dim "showing N of M" note. It renders at a comfortable
+// width, sheds WHOLE (never a mid-token fragment) when the pane is tight, and
+// stays silent when nothing was clamped.
+func TestMomentumShowingNofM(t *testing.T) {
+	truncated := Board{
+		TaskCount: 1000,
+		Counts:    map[string]int{"in_progress": 2, "open": 4731, "done": 2000}, // 6733 corpus
+	}
+	st := UIState{Conn: ConnPolling}
+
+	wide := ansi.Strip(momentumLine(truncated, st, 120))
+	if !strings.Contains(wide, "showing 1000 of 6733") {
+		t.Errorf("wide momentum should disclose the clamp:\n%s", wide)
 	}
 
-	// A whole board (fetched == total) shows no note.
-	whole := Board{TaskCount: 60, Counts: map[string]int{"open": 20, "done": 40}}
-	wf := ansi.Strip(Render(whole, UIState{Conn: ConnPolling}, 80, 30, fixedNow))
-	if strings.Contains(wf, "showing") {
-		t.Errorf("a whole board should carry no truncation note:\n%s", wf)
+	// Narrow enough to clip the note but hold the base: it sheds WHOLE — no
+	// partial "showing"/" of " — while the primary counts stay untruncated.
+	narrow := ansi.Strip(momentumLine(truncated, st, 50))
+	if strings.Contains(narrow, "showing") || strings.Contains(narrow, " of ") {
+		t.Errorf("a tight pane must shed the note whole, never fragment it:\n%q", narrow)
+	}
+	// The primary instruments survive the shed.
+	for _, want := range []string{"in flight", "done"} {
+		if !strings.Contains(narrow, want) {
+			t.Errorf("primary instrument %q lost to the shed:\n%q", want, narrow)
+		}
+	}
+
+	// A full fetch (TaskCount == corpus) discloses nothing — nothing was clamped.
+	full := Board{TaskCount: 6733, Counts: truncated.Counts}
+	if got := ansi.Strip(momentumLine(full, st, 120)); strings.Contains(got, "showing") {
+		t.Errorf("an un-clamped board must stay silent:\n%s", got)
+	}
+	// A zero fetch (no snapshot yet) is not a clamp either.
+	zero := Board{Counts: truncated.Counts}
+	if got := ansi.Strip(momentumLine(zero, st, 120)); strings.Contains(got, "showing") {
+		t.Errorf("a zero-fetch board must stay silent:\n%s", got)
+	}
+}
+
+// TestMomentumInFlightDenominatorCollapsed — the D115/D120 denominator proof.
+// Prime's raw lifecycle_counts are twin-doubled (no collapse_twins), so a board
+// painted from them shows an inflated "N in flight" AND — because the deciding
+// predicate of the showing-N-of-M disclosure is TaskCount < summedLifecycleCounts,
+// not any >1000 threshold — discloses a clamp that never happened. The collapsed
+// path (mergeInflight + countInProgress, the exact FetchSnapshotFull seam)
+// repairs both numbers. Twin divergence is SYNTHESIZED (twin-doubled prime
+// counts + a union-only claimed row): the live prime-vs-union delta is 0 today,
+// so a live inequality assert would be vacuously green.
+func TestMomentumInFlightDenominatorCollapsed(t *testing.T) {
+	window := []Task{
+		{DocID: "w1", Kind: "task", Lifecycle: "in_progress", Claim: &Claim{Worker: "wA"}, UpdatedAt: fixedNow},
+		{DocID: "w2", Kind: "task", Lifecycle: "open", UpdatedAt: fixedNow},
+	}
+	inflight := []Task{
+		{DocID: "w1", Kind: "task", Lifecycle: "in_progress", Claim: &Claim{Worker: "wA"}, UpdatedAt: fixedNow}, // dedup case
+		{DocID: "u1", Kind: "task", Lifecycle: "in_progress", Claim: &Claim{Worker: "wB"}, UpdatedAt: fixedNow}, // union-only
+	}
+	// A lifecycle-divergent twin counts once per copy in prime: it says 3 in
+	// flight while the deduped union holds 2. Summed counts: 3 + 1 = 4.
+	extras := primeExtras{counts: map[string]int{"in_progress": 3, "open": 1}}
+	st := UIState{Conn: ConnLive}
+
+	// MUTATION CONTROL — the pre-D120 board: prime's RAW counts, uncollapsed.
+	// TaskCount(2, window only) < summed(4) fires the disclosure over a corpus
+	// that was never clamped, and the in-flight count paints the doubled 3.
+	// This is the exact lie D115 live-reproduced (11-vs-10); if the collapse
+	// seam ever regresses, the assertions below are what the operator would see.
+	//
+	// The verbatim Counts copy is DELIBERATE, not a shortcut. D124 (#11974) put a
+	// SECOND collapse inside BuildBoard itself — recomputeInProgress rewrites the
+	// in_progress bucket from s.Tasks — so BuildBoard can no longer compose an
+	// uncollapsed board: it collapses by construction. Left as it was, this
+	// control silently lost its teeth (it painted "1 in flight" with no
+	// disclosure at all, i.e. it stopped reproducing the lie it exists to
+	// reproduce). Restoring the pre-D124 contract — Counts copied verbatim from
+	// prime, the ONE line D124 changed on this path — is what keeps the
+	// assertions below honest instead of vacuous.
+	rawBoard := BuildBoard(composeSnapshot(window, extras, fixedNow), RepoContext{}, fixedNow)
+	rawBoard.Counts = map[string]int{"in_progress": 3, "open": 1} // prime verbatim, pre-D124
+	rawLine := ansi.Strip(momentumLine(rawBoard, st, 120))
+	if !strings.Contains(rawLine, "3 in flight") || !strings.Contains(rawLine, "showing 2 of 4") {
+		t.Fatalf("mutation control lost its teeth — uncollapsed counts no longer reproduce the twin-doubled lie:\n%s", rawLine)
+	}
+
+	// The collapsed path, exactly as FetchSnapshotFull merges it.
+	merged, _ := mergeInflight(window, nil, inflight, nil)
+	// The FETCH seam's own teeth, asserted DIRECTLY. Since D124 the board
+	// re-derives in_progress from the rows it holds, so a regression in
+	// countInProgress (prime's raw 3, or len(third-fetch)) would be MASKED by
+	// recomputeInProgress before it ever reached the rendered line below.
+	// Pin the seam's output where nothing downstream can launder it.
+	if got := countInProgress(merged); got != 2 {
+		t.Fatalf("countInProgress must collapse the twin-doubled 3 to the deduped union 2, got %d", got)
+	}
+	extras.counts["in_progress"] = countInProgress(merged)
+	b := BuildBoard(composeSnapshot(merged, extras, fixedNow), RepoContext{}, fixedNow)
+	line := ansi.Strip(momentumLine(b, st, 120))
+	if !strings.Contains(line, "2 in flight") {
+		t.Errorf("collapsed momentum should count the deduped union (2), got:\n%s", line)
+	}
+	if strings.Contains(line, "showing") {
+		t.Errorf("nothing was clamped once the denominator collapsed — the disclosure must stay silent:\n%s", line)
+	}
+	// The deciding predicate directly: the union board is whole, so TaskCount
+	// must not read short of the summed lifecycle counts.
+	if b.TaskCount < summedLifecycleCounts(b) {
+		t.Errorf("TaskCount %d < summed counts %d on a whole union board — the denominator still carries a twin double-count", b.TaskCount, summedLifecycleCounts(b))
 	}
 }
 
@@ -256,8 +374,23 @@ func TestRenderEmptyBoardIsHonest(t *testing.T) {
 	}
 }
 
-// TestRenderActionStrip proves the strip renders directly above the footer, and
-// only consumes a line when it has something to say.
+func TestHeaderNamesSnapshotFailureInsteadOfCallingItOffline(t *testing.T) {
+	old := Chrome
+	Chrome = ChromeInfo{Server: "guerrilla"}
+	t.Cleanup(func() { Chrome = old })
+
+	st := UIState{Conn: ConnOffline, ConnProblem: "snapshot too large", LastSync: fixedNow}
+	line := ansi.Strip(headerLine1(st, 100, fixedNow))
+	if !strings.Contains(line, "snapshot too large") {
+		t.Fatalf("header omitted the snapshot failure: %q", line)
+	}
+	if strings.Contains(line, "offline") {
+		t.Fatalf("header mislabeled a rejected snapshot as offline: %q", line)
+	}
+}
+
+// TestRenderActionStrip proves transient feedback replaces the help row rather
+// than expanding the fixed three-line footer.
 func TestRenderActionStrip(t *testing.T) {
 	b := Board{Counts: map[string]int{}}
 	st := UIState{Conn: ConnLive, LastSync: fixedNow,
@@ -266,17 +399,15 @@ func TestRenderActionStrip(t *testing.T) {
 	if len(lines) != 20 {
 		t.Fatalf("got %d lines, want 20", len(lines))
 	}
-	footer := lines[len(lines)-1]
-	strip := lines[len(lines)-2]
-	if !strings.Contains(footer, "jk move") {
-		t.Errorf("footer not pinned last: %q", footer)
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "claimed as tui-mbp · epoch 4") {
+		t.Errorf("action feedback did not replace the help row: %q", last)
 	}
-	if !strings.Contains(strip, "claimed as tui-mbp · epoch 4") {
-		t.Errorf("action strip not directly above the footer: %q", strip)
+	if strings.Contains(last, "jk move") {
+		t.Errorf("action feedback and keyboard help collided: %q", last)
 	}
 
-	// An empty strip costs no line: the footer is the last line with the ticker
-	// immediately above it (no blank act line inserted).
+	// An empty strip leaves keyboard help in the third slot.
 	stNo := UIState{Conn: ConnLive, LastSync: fixedNow}
 	noStrip := ansi.Strip(Render(b, stNo, 80, 20, fixedNow))
 	if strings.Contains(noStrip, "claimed as") {
@@ -298,7 +429,7 @@ func TestRenderActionStripKeepsURLTail(t *testing.T) {
 	st := UIState{Conn: ConnLive, LastSync: fixedNow, Strip: ActionStrip{Message: url, Role: RoleOK}}
 	for _, width := range []int{60, 72, 84} {
 		lines := strings.Split(ansi.Strip(Render(b, st, width, 20, fixedNow)), "\n")
-		strip := lines[len(lines)-2]
+		strip := lines[len(lines)-1]
 		if ansi.StringWidth(strip) > width {
 			t.Errorf("width %d: strip over budget: %q", width, strip)
 		}
@@ -585,14 +716,14 @@ func firstSelectableTask(b Board, st UIState) (ref string, selIdx int) {
 	return "", -1
 }
 
-// TestHoverPaintedInFrame proves the picker law in the STYLED frame (a forced
-// truecolor profile, since the runner's default drops ANSI): a live hover
-// changes the frame, the hovered row wears the background tint at FULL
-// brightness (never faint), every OTHER selectable row recedes to faint (SGR 2
-// — "lower opacity"), and the change is styling ONLY — the ansi-stripped text
-// is unchanged apart from the hovered row's trailing pad. The cursor is parked
-// on the hovered row so it is guaranteed inside the viewport window; both
-// renders share that cursor, so the selection marker is identical.
+// TestHoverPaintedInFrame proves the hover highlight in the STYLED frame (a
+// forced truecolor profile, since the runner's default drops ANSI): a live
+// hover changes the frame, EXACTLY the hovered task card re-renders in the accent
+// foreground (the chat Phases-pane selection grammar — no background bar), every
+// OTHER line is byte-identical (siblings never recede), and the change is
+// styling ONLY — the ansi-stripped text is unchanged. The cursor is parked on
+// the hovered row so it is guaranteed inside the viewport window; both renders
+// share that cursor, so the selection marker is identical.
 func TestHoverPaintedInFrame(t *testing.T) {
 	oldp := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -634,53 +765,35 @@ func TestHoverPaintedInFrame(t *testing.T) {
 		return rendered[:i]
 	}
 	hoverOpen := probeOpen(hoverStyle)
-	faintOpen := probeOpen(faintStyle)
 
-	hoveredLines, faintedLines := 0, 0
+	hoveredLines := 0
 	for i := range wl {
-		// Styling only: the visible text (trailing pad stripped) is equal.
-		if strings.TrimRight(ansi.Strip(wl[i]), " ") != strings.TrimRight(ansi.Strip(ol[i]), " ") {
+		// Styling only: the visible text is equal.
+		if ansi.Strip(wl[i]) != ansi.Strip(ol[i]) {
 			t.Errorf("line %d: hover changed the VISIBLE text (must be styling only)\n got: %q\nwant: %q",
 				i, ansi.Strip(wl[i]), ansi.Strip(ol[i]))
 		}
 		if wl[i] == ol[i] {
 			continue
 		}
-		switch {
-		case strings.Contains(wl[i], hoverOpen):
-			hoveredLines++
-			if strings.Contains(wl[i], faintOpen) {
-				t.Errorf("line %d: the hovered row is FAINT — it must light up at full brightness", i)
-			}
-		case strings.Contains(wl[i], faintOpen):
-			faintedLines++
-		default:
-			t.Errorf("line %d changed without the hover tint or the faint recede:\n%q", i, wl[i])
+		if !strings.Contains(wl[i], hoverOpen) {
+			t.Errorf("line %d changed without the accent hover restyle (siblings must stay untouched):\n%q", i, wl[i])
+			continue
 		}
+		hoveredLines++
 	}
-	if hoveredLines != 1 {
-		t.Errorf("hover tinted %d lines, want exactly 1 (only the hovered row wears the background)", hoveredLines)
-	}
-	if faintedLines == 0 {
-		t.Errorf("no sibling row receded to faint — the picker law (siblings at lower opacity) is not painting")
+	if hoveredLines != 2 {
+		t.Errorf("hover restyled %d lines, want exactly 2 (both lines of the active task card)", hoveredLines)
 	}
 
-	// D17 remains intact: hover is a Background, the flash is Foreground-only —
-	// they are DISTINCT styles. hoverStyle must carry a background and no
-	// foreground so it can compose over a row's lifecycle hues without recolour;
-	// faintStyle is an ATTRIBUTE only — no background, no foreground — so the
-	// recede can never recolor state.
-	if hoverStyle.GetBackground() == (lipgloss.NoColor{}) {
-		t.Errorf("hoverStyle has no background — it is the board's first background paint")
+	// The hover is a FOREGROUND restyle (the chat Phases-pane grammar), never a
+	// background bar: hoverStyle must carry the accent foreground and no
+	// background, so the highlight reads as accent text, not an inverted row.
+	if hoverStyle.GetForeground() == (lipgloss.NoColor{}) {
+		t.Errorf("hoverStyle has no foreground — the accent highlight would be invisible")
 	}
-	if hoverStyle.GetForeground() != (lipgloss.NoColor{}) {
-		t.Errorf("hoverStyle set a foreground — hover must tint the background only, never recolour text")
-	}
-	if !faintStyle.GetFaint() {
-		t.Errorf("faintStyle lost its faint attribute — the recede would be invisible")
-	}
-	if faintStyle.GetForeground() != (lipgloss.NoColor{}) || faintStyle.GetBackground() != (lipgloss.NoColor{}) {
-		t.Errorf("faintStyle carries a color — the recede must be the faint ATTRIBUTE only (color = state)")
+	if hoverStyle.GetBackground() != (lipgloss.NoColor{}) {
+		t.Errorf("hoverStyle set a background — hover is a foreground restyle, never a background bar")
 	}
 }
 
@@ -1082,33 +1195,14 @@ func pulseBoard(at time.Time) Board {
 	}
 }
 
-// TestRenderTickerNowLine proves the now-line: a live pulse paints the
-// worker's own words above the event tail; a board without a pulse paints no
-// extra line at all (an absent pulse costs nothing).
-func TestRenderTickerNowLine(t *testing.T) {
-	st := UIState{Conn: ConnLive, LastSync: fixedNow}
-	frame := ansi.Strip(Render(pulseBoard(fixedNow.Add(-time.Minute)), st, 80, 20, fixedNow))
-	if !strings.Contains(frame, "opus-7 · wiring the decoder · 1m") {
-		t.Errorf("frame missing the now-line:\n%s", frame)
-	}
-
-	// Without a pulse the ticker is the classic two lines: rule + event.
-	bare := pulseBoard(fixedNow.Add(-time.Minute))
-	bare.Now[0].Claim.Now = nil
-	frameBare := ansi.Strip(Render(bare, st, 80, 20, fixedNow))
-	if strings.Contains(frameBare, "wiring the decoder") {
-		t.Errorf("pulse-less board still paints a now-line:\n%s", frameBare)
-	}
-}
-
-// TestRenderTickerPulseDecay pins "stale never lies fresh" (charter D9): a
+// TestPulseLineDecay pins "stale never lies fresh" (charter D9): a
 // fresh pulse wears the live spinner; once the pulse outlives the lease TTL
 // the spinner is withheld, the line dims and says "stale" outright — visible
 // even ANSI-stripped, so no terminal can render a dead pulse as current.
-func TestRenderTickerPulseDecay(t *testing.T) {
-	st := UIState{Conn: ConnLive, LastSync: fixedNow}
-
-	fresh := ansi.Strip(Render(pulseBoard(fixedNow.Add(-time.Minute)), st, 80, 20, fixedNow))
+func TestPulseLineDecay(t *testing.T) {
+	freshBoard := pulseBoard(fixedNow.Add(-time.Minute))
+	freshTask := freshBoard.Now[0]
+	fresh := ansi.Strip(pulseLine(freshTask, freshTask.Claim.Now, 0, 80, fixedNow))
 	if !strings.Contains(fresh, "⠋ opus-7 · wiring the decoder") {
 		t.Errorf("fresh pulse missing its live spinner:\n%s", fresh)
 	}
@@ -1116,7 +1210,9 @@ func TestRenderTickerPulseDecay(t *testing.T) {
 		t.Errorf("fresh pulse dishonestly reads stale:\n%s", fresh)
 	}
 
-	stale := ansi.Strip(Render(pulseBoard(fixedNow.Add(-12*time.Minute)), st, 80, 20, fixedNow))
+	staleBoard := pulseBoard(fixedNow.Add(-12 * time.Minute))
+	staleTask := staleBoard.Now[0]
+	stale := ansi.Strip(pulseLine(staleTask, staleTask.Claim.Now, 0, 80, fixedNow))
 	if !strings.Contains(stale, "· opus-7 · wiring the decoder · stale 12m") {
 		t.Errorf("stale pulse missing the explicit decay:\n%s", stale)
 	}
@@ -1130,31 +1226,15 @@ func TestRenderTickerPulseDecay(t *testing.T) {
 	oldp := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
-	leanFrame := Render(pulseBoard(fixedNow.Add(-4*time.Minute)), st, 80, 20, fixedNow)
+	leanBoard := pulseBoard(fixedNow.Add(-4 * time.Minute))
+	leanTask := leanBoard.Now[0]
+	leanFrame := pulseLine(leanTask, leanTask.Claim.Now, 0, 80, fixedNow)
 	if !strings.Contains(leanFrame, warnStyle.Render(spinnerGlyph(0))) {
 		t.Errorf("a leaning pulse (4m of a 5m lease) should wear the warn spinner")
 	}
-	freshFrame := Render(pulseBoard(fixedNow.Add(-time.Minute)), st, 80, 20, fixedNow)
+	freshFrame := pulseLine(freshTask, freshTask.Claim.Now, 0, 80, fixedNow)
 	if !strings.Contains(freshFrame, infoStyle.Render(spinnerGlyph(0))) {
 		t.Errorf("a fresh pulse should wear the info (blue) spinner")
-	}
-}
-
-// TestRenderTickerFreshestPulseWins — with several live claims pulsing, the
-// one now-line belongs to whoever spoke last.
-func TestRenderTickerFreshestPulseWins(t *testing.T) {
-	b := pulseBoard(fixedNow.Add(-3 * time.Minute))
-	b.Now = append(b.Now, Task{
-		DocID: "louder", Title: "Louder task", Lifecycle: "in_progress",
-		Claim: &Claim{Worker: "opus-9", Epoch: 1, ClaimedAt: fixedNow.Add(-time.Minute),
-			Now: &ClaimPulse{Text: "regenerating the goldens", At: fixedNow.Add(-time.Minute)}},
-	})
-	frame := ansi.Strip(Render(b, UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 20, fixedNow))
-	if !strings.Contains(frame, "opus-9 · regenerating the goldens") {
-		t.Errorf("the freshest pulse did not win the now-line:\n%s", frame)
-	}
-	if strings.Contains(frame, "wiring the decoder") {
-		t.Errorf("two now-lines painted — the board has exactly one:\n%s", frame)
 	}
 }
 

@@ -29,6 +29,9 @@ import (
 )
 
 func renderTUI(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return "<pre>bpRenderTUI: missing required blocksJSON argument</pre>"
+	}
 	blocksJSON := args[0].String()
 	width := 92
 	if len(args) > 1 && args[1].Type() == js.TypeNumber && args[1].Int() > 0 {

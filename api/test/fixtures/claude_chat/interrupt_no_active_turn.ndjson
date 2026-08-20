@@ -1,0 +1,2 @@
+{"type":"fixture_provenance","fixture":"interrupt_no_active_turn.ndjson","captured_with":"claude 2.1.207 (Claude Code)","captured_at":"2026-07-12","source":"barkpark-chat-tui-wave-2026-07-12 v-interrupt-wire","sanitized":"volatile request/session identifiers removed; control_response payload preserved","charter":"D11/D62"}
+{"type":"control_response","response":{"subtype":"success","response":{"still_queued":[]}}}

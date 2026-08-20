@@ -80,8 +80,8 @@ defmodule Barkpark.Plugins.Tickets.KeysTest do
     end
 
     test "a revoked key is unauthorized (indistinguishable from missing)" do
-      %{key: key, raw: raw} = mint!()
-      {:ok, _} = Keys.revoke(key.id)
+      %{key: key, raw: raw, workspace: ws} = mint!()
+      {:ok, _} = Keys.revoke(key.id, ws.id)
       assert {:error, :unauthorized} = Keys.verify(raw)
     end
 
@@ -93,18 +93,18 @@ defmodule Barkpark.Plugins.Tickets.KeysTest do
     end
 
     test "a paused key is :paused — a distinguishable, reversible mute" do
-      %{key: key, raw: raw} = mint!()
-      {:ok, _} = Keys.pause(key.id)
+      %{key: key, raw: raw, workspace: ws} = mint!()
+      {:ok, _} = Keys.pause(key.id, ws.id)
       assert {:error, :paused} = Keys.verify(raw)
 
-      {:ok, _} = Keys.unpause(key.id)
+      {:ok, _} = Keys.unpause(key.id, ws.id)
       assert {:ok, _} = Keys.verify(raw)
     end
 
     test "a revoked+paused key is unauthorized (revoked wins — no oracle)" do
-      %{key: key, raw: raw} = mint!()
-      {:ok, _} = Keys.pause(key.id)
-      {:ok, _} = Keys.revoke(key.id)
+      %{key: key, raw: raw, workspace: ws} = mint!()
+      {:ok, _} = Keys.pause(key.id, ws.id)
+      {:ok, _} = Keys.revoke(key.id, ws.id)
       assert {:error, :unauthorized} = Keys.verify(raw)
     end
 
@@ -116,10 +116,10 @@ defmodule Barkpark.Plugins.Tickets.KeysTest do
     end
   end
 
-  describe "rotate/1" do
+  describe "rotate/2" do
     test "issues a new secret on the SAME row and kills the old instantly" do
-      %{key: key, raw: old_raw} = mint!()
-      assert {:ok, %{key: rotated, raw: new_raw}} = Keys.rotate(key.id)
+      %{key: key, raw: old_raw, workspace: ws} = mint!()
+      assert {:ok, %{key: rotated, raw: new_raw}} = Keys.rotate(key.id, ws.id)
 
       assert rotated.id == key.id
       assert rotated.name == key.name
@@ -130,24 +130,55 @@ defmodule Barkpark.Plugins.Tickets.KeysTest do
     end
 
     test "not_found for an unknown or malformed id" do
-      assert {:error, :not_found} = Keys.rotate(Ecto.UUID.generate())
-      assert {:error, :not_found} = Keys.rotate("not-a-uuid")
+      ws = create_workspace!()
+      assert {:error, :not_found} = Keys.rotate(Ecto.UUID.generate(), ws.id)
+      assert {:error, :not_found} = Keys.rotate("not-a-uuid", ws.id)
     end
   end
 
-  describe "pause/unpause/revoke/1" do
+  describe "pause/unpause/revoke/2" do
     test "not_found for an unknown id" do
-      assert {:error, :not_found} = Keys.pause(Ecto.UUID.generate())
-      assert {:error, :not_found} = Keys.unpause(Ecto.UUID.generate())
-      assert {:error, :not_found} = Keys.revoke(Ecto.UUID.generate())
+      ws = create_workspace!()
+      assert {:error, :not_found} = Keys.pause(Ecto.UUID.generate(), ws.id)
+      assert {:error, :not_found} = Keys.unpause(Ecto.UUID.generate(), ws.id)
+      assert {:error, :not_found} = Keys.revoke(Ecto.UUID.generate(), ws.id)
     end
 
     test "will not touch a normal api token (kind-fenced)" do
       ws = create_workspace!()
       raw = "bppat_" <> Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false)
       {:ok, token} = Auth.create_token(raw, "an api token", "production", ["read"], ws.id)
-      assert {:error, :not_found} = Keys.revoke(token.id)
-      assert {:error, :not_found} = Keys.pause(token.id)
+      assert {:error, :not_found} = Keys.revoke(token.id, ws.id)
+      assert {:error, :not_found} = Keys.pause(token.id, ws.id)
+    end
+  end
+
+  describe "workspace scope (cross-tenant IDOR)" do
+    test "another workspace's key is not_found for every by-id mutation, state unchanged" do
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+      {:ok, %{key: b_key, raw: b_raw}} = Keys.mint(%{name: "B-owned", workspace_id: ws_b.id})
+
+      # ws A (a different tenant's admin) cannot reach ws B's key through ANY
+      # by-id mutation — the workspace fence makes it invisible, not merely 403.
+      assert {:error, :not_found} = Keys.rotate(b_key.id, ws_a.id)
+      assert {:error, :not_found} = Keys.pause(b_key.id, ws_a.id)
+      assert {:error, :not_found} = Keys.unpause(b_key.id, ws_a.id)
+      assert {:error, :not_found} = Keys.revoke(b_key.id, ws_a.id)
+
+      # The key is untouched: still live, still the same secret, never paused or
+      # revoked by the cross-tenant attempts.
+      reloaded = Repo.get!(ApiToken, b_key.id)
+      assert is_nil(reloaded.paused_at)
+      assert is_nil(reloaded.revoked_at)
+      assert {:ok, _} = Keys.verify(b_raw)
+
+      # FAIL-CLOSED: a nil workspace scope matches only un-bound keys, so it
+      # cannot reach a bound key either (contrast list/1's nil → all keys).
+      assert {:error, :not_found} = Keys.revoke(b_key.id, nil)
+
+      # ws B — the real owner — still operates its own key.
+      assert {:ok, _} = Keys.pause(b_key.id, ws_b.id)
     end
   end
 

@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Barkpark Cloud</title>
     <meta name="description" content="Barkpark Cloud — fleet, launch, billing & providers control plane." />
+    <!-- favicon.ico ships in priv/static and IS in the router's Plug.Static
+         allowlist, but nothing referenced it — a served asset with no link, so
+         every tab wore the browser's blank page glyph. Same-origin only (E7:
+         the console must render fully offline) and a LINK, never a script —
+         Golden Rule 4 keeps <head> non-blocking. `sizes=any` declares this
+         multi-resolution .ico as covering every slot, so the browser stops
+         probing for an SVG mark we do not ship. -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <!-- Inter is self-hosted (@font-face in app.css → /fonts/) so the console
          renders fully offline — no third-party hosts (charter decision 27). -->
     <!-- Pre-paint theme: mode key mirrors `var THEME = "bpcloud.theme"` in app.js;
@@ -88,8 +96,8 @@
             <span class="wordmark-text">Barkpark <b>Cloud</b></span>
           </div>
 
-          <h1 style="margin-bottom: 4px;">Set a new password</h1>
-          <p class="auth-foot dim" style="text-align: left; margin: 0 0 18px;">
+          <h1 class="auth-title">Set a new password</h1>
+          <p class="auth-desc">
             Choose a new password for your account.
           </p>
 
@@ -103,7 +111,7 @@
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
               </div>
-              <p class="auth-foot dim" style="text-align: left; margin: 6px 0 0;">At least 12 characters.</p>
+              <p class="field-hint dim">At least 12 characters.</p>
             </div>
 
             <p class="form-error" id="reset-error" role="alert" hidden></p>
@@ -134,77 +142,159 @@
 
     <!-- ===================== APP SHELL (has token) ===================== -->
     <div id="app-shell" class="app-shell" hidden>
-      <!-- ---------- top bar ---------- -->
-      <header class="topbar">
-        <div class="topbar-left">
-          <a class="wordmark" href="#overview">
-            <svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
-            <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+      <!-- ---------- sidebar (v4 shell — GR1/GR10) ----------
+           The sidebar is PRESENTATION over the unchanged 4-places-plus-Settings
+           IA: the primary nav-links keep class="nav-link" + data-view so
+           applyRoute() lights them exactly as before. It CONTEXT-MORPHS — three
+           <div class="nav-layer"> panes (root / instance / site); applyShellNav()
+           shows exactly one from the parsed route (shellNavLayer). -->
+      <aside class="sidebar" aria-label="Primary">
+        <!-- workspace switcher + plan chip → opens the Account modal -->
+        <div class="ws-switch-wrap">
+        <button class="ws-switch" id="ws-switch" type="button" aria-label="Switch team"
+                    aria-haspopup="menu" aria-expanded="false">
+            <span class="ws-avatar" id="account-avatar" aria-hidden="true">B</span>
+            <span class="ws-name" id="account-team">My team</span>
+            <span class="ws-plan" id="ws-plan" hidden></span>
+            <svg class="ws-caret" width="10" height="14" viewBox="0 0 10 14" aria-hidden="true"><polyline points="2,5.2 5,2.2 8,5.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="2,8.8 5,11.8 8,8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="team-menu" id="team-menu" role="menu" hidden></div>
+        </div>
+
+        <!-- Find / ⌘K → the EXISTING command palette (never a fork) -->
+        <button class="nav-find" id="nav-find" type="button">
+          <svg class="nav-find-ico" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/><line x1="7.8" y1="7.8" x2="11" y2="11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span>Find</span>
+          <span class="nav-find-key">⌘K</span>
+        </button>
+
+        <!-- LAYER: workspace root (Overview / Fleet / Sites / Activity + Settings) -->
+        <div class="nav-layer" id="nav-layer-root">
+          <span class="nav-eyebrow">Workspace</span>
+          <a href="#overview" class="nav-link" data-view="overview">
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><rect x="1" y="1" width="5.5" height="5.5" rx="1.5" fill="currentColor"/><rect x="8.5" y="1" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.45"/><rect x="1" y="8.5" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.45"/><rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1.5" fill="currentColor" opacity="0.45"/></svg>
+            <span>Overview</span>
           </a>
-          <span class="crumb-sep" aria-hidden="true">/</span>
-          <!-- Breadcrumb / org slot. P0 shows the team chip; later phases push
-               instance + site crumbs in here (Fleet / summer-lake / site). -->
-          <span class="org-chip" id="org-chip">
-            <span class="org-avatar" aria-hidden="true">B</span>
-            <span class="org-name" id="account-team">My team</span>
-          </span>
-          <!-- Drill-down crumbs (Fleet / instance) — filled by setBreadcrumb(). -->
-          <span class="crumbs" id="crumbs"></span>
+          <a href="#fleet" class="nav-link" data-view="fleet">
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><rect x="1" y="2" width="13" height="3.4" rx="1.5" fill="currentColor"/><rect x="1" y="9.6" width="13" height="3.4" rx="1.5" fill="currentColor" opacity="0.45"/></svg>
+            <span>Fleet</span>
+          </a>
+          <a href="#sites" class="nav-link" data-view="sites">
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><circle cx="7.5" cy="7.5" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="1.5" y1="7.5" x2="13.5" y2="7.5" stroke="currentColor" stroke-width="1.2" opacity="0.6"/></svg>
+            <span>Sites</span>
+          </a>
+          <a href="#activity" class="nav-link" data-view="activity">
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><polyline points="1,8 4.5,8 6.5,3 9,12 10.8,8 14,8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>
+            <span>Activity</span>
+          </a>
+          <!-- Settings is a native <details> DISCLOSURE (cch-w14-s2). Six always-
+               open sub-links were 225px of the 690px strip that the folded shell
+               (@media max-width:720px) stacks ABOVE the page, so on every phone
+               and every 621-720px viewport .content began at y=745.88 — below the
+               fold on an 800px-tall screen, entirely off-screen at 390x667.
+               <details> is deliberate over a button+div: the expanded state and
+               the keyboard are the platform's, not ours — the AX tree reports
+               role DisclosureTriangle, name SETTINGS, focusable true, expanded
+               false -> true (driven via CDP Accessibility, both states). It ships
+               `open`, and app.js's syncNavDisclosure() collapses it ONLY while the
+               shell is folded — and never while the route you are on lives inside
+               it, so the active Settings screen is never sealed behind a summary. -->
+          <details class="nav-group" id="nav-settings" open>
+            <summary class="nav-eyebrow nav-group-summary">
+              <span>Settings</span>
+              <svg class="nav-group-caret" width="9" height="6" viewBox="0 0 9 6" aria-hidden="true"><polyline points="1,1.6 4.5,4.8 8,1.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
+            <a href="#settings/billing" class="nav-link nav-sub" data-view="billing">Billing</a>
+            <a href="#settings/providers" class="nav-link nav-sub" data-view="providers">Providers</a>
+            <a href="#settings/notifications" class="nav-link nav-sub" data-view="notifications">Notifications</a>
+            <a href="#settings/tokens" class="nav-link nav-sub" data-view="tokens">API tokens</a>
+            <a href="#settings/members" class="nav-link nav-sub" data-view="members">Members</a>
+            <a href="#settings/env" class="nav-link nav-sub" data-view="env">Environment variables</a>
+          </details>
         </div>
 
-        <div class="topbar-right">
-          <a class="topbar-link" href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener" id="nav-docs">Docs</a>
-          <a class="topbar-link" href="https://github.com/FRIKKern/barkpark/issues" target="_blank" rel="noopener" id="nav-help">Help</a>
-          <!-- Theme IDENTITY picker — orthogonal to the light/dark toggle beside it
-               (theme-system D36). Options are hardcoded; an id whose CSS block is
-               absent falls back to the evergreen declarations, so it never breaks. -->
-          <select class="btn btn-ghost btn-sm" id="bp-theme-picker" aria-label="Theme palette">
-            <option value="evergreen">Evergreen</option>
-            <option value="ember">Ember</option>
-            <option value="fjord">Fjord</option>
-          </select>
-          <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Switch to dark theme">
-            <span id="theme-label">Dark</span>
-          </button>
-          <button class="acct-btn" id="acct-btn" type="button" aria-label="Account menu">
-            <span class="acct-avatar" id="account-avatar" aria-hidden="true">B</span>
-          </button>
+        <!-- LAYER: instance morph — back row + ctx + the instance's sections
+             (built by paintInstanceSections → #instance/<id>/<tab>) -->
+        <div class="nav-layer" id="nav-layer-instance" hidden>
+          <a href="#fleet" class="nav-back">← Fleet</a>
+          <div class="nav-ctx"><span class="nav-ctx-dot" id="nav-instance-dot" aria-hidden="true"></span><span class="nav-ctx-name" id="nav-instance-name">Instance</span></div>
+          <span class="nav-eyebrow">Instance</span>
+          <div id="nav-instance-sections"></div>
         </div>
-      </header>
 
-      <!-- ---------- tab nav ---------- -->
-      <!-- IA reshape (charter decision 6): 4-place primary nav + a Settings
-           cluster. Launch is no longer a tab — it is an action on Overview and
-           the empty fleet. The <details> disclosure is a native, keyboard-
-           accessible menu; applyRoute() closes it after every navigation. -->
-      <nav class="tabnav" aria-label="Primary">
-        <div class="tabnav-primary">
-          <a href="#overview" class="nav-link" data-view="overview">Overview</a>
-          <a href="#fleet" class="nav-link" data-view="fleet">Fleet</a>
-          <a href="#sites" class="nav-link" data-view="sites">Sites</a>
-          <a href="#activity" class="nav-link" data-view="activity">Activity</a>
+        <!-- LAYER: site morph -->
+        <div class="nav-layer" id="nav-layer-site" hidden>
+          <a href="#sites" class="nav-back">← All sites</a>
+          <div class="nav-ctx"><span class="nav-ctx-dot" id="nav-site-dot" aria-hidden="true"></span><span class="nav-ctx-name" id="nav-site-name">Site</span></div>
+          <span class="nav-eyebrow">Site</span>
+          <a href="#sites" class="nav-link nav-sub">All sites</a>
         </div>
-        <details class="nav-menu">
-          <summary class="nav-link nav-menu-trigger" data-view="settings">Settings<span class="nav-caret" aria-hidden="true"></span></summary>
-          <div class="nav-menu-list">
-            <a href="#settings/billing" class="nav-menu-item">Billing</a>
-            <a href="#settings/providers" class="nav-menu-item">Providers</a>
-            <a href="#settings/notifications" class="nav-menu-item">Notifications</a>
-            <a href="#settings/tokens" class="nav-menu-item">API tokens</a>
-            <a href="#settings/members" class="nav-menu-item">Members</a>
+
+        <div class="nav-spacer"></div>
+
+        <!-- footer cluster: role-gated Operator (fail-closed on platform_operator),
+             Docs, and the account block. -->
+        <div class="nav-foot">
+          <!-- data-view is LOAD-BEARING (GR49): applyRoute lights exactly the
+               .nav-link[data-view] matching the active view and stamps
+               aria-current="page" on it. Without it #operator painted a page
+               with NO nav entry highlighted and no SR current-page cue. -->
+          <a href="#operator" class="nav-link nav-operator" id="nav-operator" data-view="operator" hidden>
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2.5 2.5"/></svg>
+            <span>Operator</span>
+          </a>
+          <a href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener" class="nav-link" id="nav-docs">
+            <svg class="nav-ico" width="15" height="15" viewBox="0 0 14 14" aria-hidden="true"><rect x="2" y="1.5" width="10" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="4.8" y1="5" x2="9.2" y2="5" stroke="currentColor" stroke-width="1.3"/><line x1="4.8" y1="8" x2="9.2" y2="8" stroke="currentColor" stroke-width="1.3"/></svg>
+            <span>Docs</span>
+          </a>
+          <button class="nav-account" id="acct-btn" type="button" aria-label="Account menu">
+            <span class="acct-avatar" id="acct-avatar" aria-hidden="true">B</span>
+            <span class="acct-id">
+              <span class="acct-name" id="acct-name">Account</span>
+              <span class="acct-email" id="acct-email"></span>
+            </span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- ---------- shell main (topbar + content) ---------- -->
+      <div class="shell-main">
+        <!-- topbar: instance-scope dropdown · live pulse (SSE chip mounts into
+             .topbar-right) · theme controls (5-identity picker + light/dark). -->
+        <header class="topbar">
+          <div class="topbar-left">
+            <div class="topbar-scope">
+              <button class="scope-switch" id="scope-switch" type="button" aria-haspopup="true" aria-expanded="false">
+                <span class="scope-label" id="scope-label">Workspace</span>
+                <svg class="scope-caret" width="9" height="6" viewBox="0 0 9 6" aria-hidden="true"><polyline points="1,1 4.5,4.5 8,1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              </button>
+              <div class="scope-menu" id="scope-menu" role="menu" hidden></div>
+            </div>
           </div>
-        </details>
-      </nav>
+
+          <div class="topbar-right">
+            <!-- Theme IDENTITY picker — orthogonal to the light/dark toggle beside
+                 it (theme-system D36). Options are GENERATED from BP_THEMES at boot
+                 (renderThemePicker → bpThemeOptions), so all 5 identities appear. -->
+            <select class="btn btn-ghost btn-sm" id="bp-theme-picker" aria-label="Theme palette"></select>
+            <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Switch to dark theme">
+              <span id="theme-label">Dark</span>
+            </button>
+          </div>
+        </header>
 
       <main class="content">
         <!-- ---------- OVERVIEW (home) ---------- -->
         <section class="view" id="view-overview" hidden>
-          <header class="view-head">
-            <div>
-              <h1>Overview</h1>
-              <p class="dim">Your fleet at a glance — and what needs you.</p>
+          <header class="view-head overview-head">
+            <div class="overview-greet">
+              <h1 id="overview-greeting">Overview</h1>
+              <p class="dim" id="overview-sub">Your fleet at a glance — and what needs you.</p>
             </div>
-            <button class="btn btn-primary btn-sm" id="overview-launch" type="button">Launch instance</button>
+            <div class="overview-head-right">
+              <div id="overview-chips" class="overview-chips" hidden></div>
+              <button class="btn btn-primary btn-sm" id="overview-launch" type="button">Launch instance</button>
+            </div>
           </header>
 
           <div id="overview-body" aria-live="polite"></div>
@@ -226,9 +316,13 @@
           <div id="fleet-body" class="fleet-body" aria-live="polite"></div>
 
           <!-- S14 portable archives: a team's archived-instance bundles, read
-               straight from object storage. The console shows each bundle + a
-               copy-paste `bp cloud instance resurrect` affordance (it does not
-               execute resurrect this wave). loadArchives() fills #archives-body. -->
+               straight from object storage. Every reader gets each bundle + a
+               copy-paste `bp cloud instance resurrect` affordance; a team admin
+               or owner ALSO gets a live Resurrect button that POSTs
+               /v1/resurrect. cch-w47-s3: that button used to render for anyone
+               who could see the row, including a plain member the route refuses
+               — it is now omitted unless /v1/me has confirmed the authority.
+               loadArchives() fills #archives-body. -->
           <section class="archives-panel" aria-labelledby="archives-heading">
             <h2 id="archives-heading" class="archives-title">Archives</h2>
             <p class="dim archives-sub">Portable bundles you can resurrect on Hetzner or Azure.</p>
@@ -241,16 +335,34 @@
              rendered inline as the empty-fleet welcome runway. -->
 
         <!-- ---------- BILLING ---------- -->
+        <!-- G-01: the NAMED REFERENCE COMPOSITION for the GR33 settings anatomy.
+             An ACTION page: the plan STATE card, then owner-gated action sections
+             (Manage billing / Cancel plan) on .set-section cards — no save-rows.
+             The Manage + Cancel sections default hidden; renderBilling() reveals
+             them per plan state + role (owner-only writes, GR36). -->
         <section class="view" id="view-billing" hidden>
           <header class="view-head">
             <div>
               <h1>Billing</h1>
-              <p class="dim">Pick a plan. An active subscription is required to launch a managed instance.</p>
+              <p class="dim">Your plan and payments for this team. An active subscription is required to launch a managed instance.</p>
             </div>
           </header>
 
-          <div id="billing-recommended"></div>
-          <div id="billing-tiers" class="tier-grid" hidden></div>
+          <div class="set-section" id="billing-plan-section">
+            <h2 class="set-h">Plan</h2>
+            <div id="billing-recommended"></div>
+            <div id="billing-tiers" class="tier-grid" hidden></div>
+          </div>
+
+          <div class="set-section" id="billing-manage-section" hidden>
+            <h2 class="set-h">Manage billing</h2>
+            <div id="billing-manage"></div>
+          </div>
+
+          <div class="set-section" id="billing-cancel-section" hidden>
+            <h2 class="set-h">Cancel plan</h2>
+            <div id="billing-cancel"></div>
+          </div>
         </section>
 
         <!-- ---------- PROVIDERS ---------- -->
@@ -260,20 +372,27 @@
               <h1>Providers</h1>
               <p class="dim">Connect a cloud provider so Barkpark can provision on your account.</p>
             </div>
-            <button class="btn btn-primary btn-sm" id="provider-add" type="button">Connect a provider</button>
           </header>
 
-          <!-- gh-2: GitHub App connection card. Renders connected / connect /
-               not-configured from GET /v1/github/installation. -->
-          <div id="github-card" class="provider-list" aria-live="polite"></div>
+          <!-- gr-p4 G-02: the connected roster (member-readable) + the inline
+               hybrid connect card (admin-only, verify+save in a .set-save-row).
+               loadProviders() paints both; a member sees the roster without any
+               Disconnect… affordance and no connect card at all. This sentence
+               speaks for loadProviders() ONLY — the GitHub card below is a
+               separate mount with its own authority arm (cch-w48-s3). -->
+          <div id="provider-roster" aria-live="polite"></div>
+          <div id="provider-connect"></div>
 
-          <div id="provider-list" class="provider-list">
-            <div class="empty-state">
-              <h2>No providers connected</h2>
-              <p>Connect Hetzner Cloud to launch managed instances on your own account.</p>
-              <button class="btn btn-primary" id="provider-add-empty" type="button">Connect a provider</button>
-            </div>
-          </div>
+          <!-- gh-2: GitHub App connection card. Renders connected / connect /
+               not-configured from GET /v1/github/installation.
+               cch-w48-s3 — AUTHORITY: both write affordances are team-admin-only
+               on the server, so githubCardHtml(g, providerCanWrite()) OMITS the
+               Disconnect button and the Connect anchor for a member (never a
+               disabled ghost); the read — state, account, badge — is unchanged. -->
+          <div id="github-card" aria-live="polite"></div>
+
+          <!-- gr-p4 G-03: the honest capability matrix (member-readable). -->
+          <div id="provider-matrix" aria-live="polite"></div>
         </section>
 
         <!-- ---------- NOTIFICATIONS (tab) ---------- -->
@@ -281,12 +400,12 @@
           <header class="view-head">
             <div>
               <h1>Notifications</h1>
-              <p class="dim">Email alerts for your fleet, and the transport they're sent over.</p>
+              <p class="dim">How your fleet reaches you &mdash; email, chat channels, and what each event routes to.</p>
             </div>
-            <button class="btn btn-ghost btn-sm" id="notif-test" type="button">Send test email</button>
+            <button class="btn btn-ghost btn-sm" id="notif-test" type="button" hidden>Send test email</button>
           </header>
 
-          <div id="notif-body" class="provider-list" aria-live="polite">
+          <div id="notif-body" aria-live="polite">
             <div class="loading">Loading notification settings&hellip;</div>
           </div>
         </section>
@@ -314,6 +433,7 @@
             <button class="btn btn-ghost btn-sm" id="activity-refresh" type="button">Refresh</button>
           </header>
 
+          <div id="activity-filters" class="activity-filters" role="group" aria-label="Filter activity by target"></div>
           <div id="activity-body" class="fleet-body" aria-live="polite"></div>
           <div id="activity-more" class="activity-more" hidden>
             <button class="btn btn-ghost btn-sm" id="activity-load-more" type="button">Load more</button>
@@ -327,10 +447,15 @@
               <h1>API tokens</h1>
               <p class="dim">Personal Access Tokens authenticate the API on your behalf. Scope each one to the abilities it needs; revoke any time.</p>
             </div>
-            <button class="btn btn-primary btn-sm" id="token-add" type="button">New token</button>
+            <button class="btn btn-primary btn-sm" id="token-add" type="button">Create token&hellip;</button>
           </header>
 
-          <div id="token-list" class="token-list" aria-live="polite"></div>
+          <!-- GR33 ACTION page: the token list is ONE .set-section (not per-row
+               floating cards); rows are hairline-separated line items with a
+               per-row Revoke. No .set-save-row — a roster acts, it does not save. -->
+          <div class="set-section">
+            <div id="token-list" class="token-list" aria-live="polite"></div>
+          </div>
         </section>
 
         <!-- ---------- MEMBERS (C10 — team members & invitations) ---------- -->
@@ -346,6 +471,39 @@
           <div id="members-body" class="fleet-body" aria-live="polite"></div>
         </section>
 
+        <!-- ---------- ENVIRONMENT VARIABLES (G-06 — team env-vars, row model) ---------- -->
+        <section class="view" id="view-env" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Environment variables</h1>
+              <!-- cch-w53-s1: this header renders BEFORE app.js paints and survives every
+                   panel error state, so it was a second, independent custody claim. It
+                   promised delivery to every instance; nothing on any instance consumes
+                   these values, so it now states storage only. -->
+              <p class="dim">Team-wide values, stored encrypted. They are not delivered to any instance yet — nothing running or newly provisioned reads them. Keys are visible; values are never shown again.</p>
+            </div>
+          </header>
+
+          <div id="env-body" aria-live="polite"></div>
+        </section>
+
+        <!-- ---------- OPERATOR CONSOLE (GR39 — platform operators only) ----------
+             The ONE fleet-wide, cross-team surface. Reachable only through the
+             role-gated sidebar entry; a non-operator who deep-links #operator is
+             BOUNCED to Overview by loadOperator (fail-closed, GR49) — this
+             section never renders for them. Body is painted by app.js. -->
+        <section class="view" id="view-operator" hidden>
+          <header class="view-head">
+            <div>
+              <h1>Operator</h1>
+              <p class="dim">Fleet-wide rollout controls. Everything here spans every team &mdash; there is no team scope on this page.</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="operator-refresh" type="button">Refresh</button>
+          </header>
+
+          <div id="operator-body" aria-live="polite"></div>
+        </section>
+
         <!-- ---------- INSTANCE DETAIL (drill-down, not a tab) ---------- -->
         <section class="view" id="view-instance" hidden>
           <div id="instance-body" aria-live="polite"></div>
@@ -356,15 +514,8 @@
           <div id="site-body" aria-live="polite"></div>
         </section>
       </main>
-
-      <!-- ---------- footer ---------- -->
-      <footer class="appfoot">
-        <span class="appfoot-brand">Barkpark Cloud &middot; <i>managed instances</i></span>
-        <nav class="appfoot-links" aria-label="Footer">
-          <a href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener">Docs</a><a href="https://github.com/FRIKKern/barkpark/issues" target="_blank" rel="noopener">Help</a>
-        </nav>
-      </footer>
-    </div>
+      </div><!-- /.shell-main -->
+    </div><!-- /#app-shell -->
 
     <!-- ===================== /new DEPLOY FLOW (dwb-6) =====================
          A REAL path (GET /new?template=<slug>, served by the router as the SPA

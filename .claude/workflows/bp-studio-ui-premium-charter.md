@@ -342,6 +342,59 @@ weighted section headers, aligned label/control columns. Settings is the flagshi
   `dataset.bpTheme` leaves the cascade half-applied (body color resolves wrong);
   (b) chrome-devtools `take_screenshot` refuses the /private/tmp scratchpad path —
   save under the repo root, then move (leave the repo clean).
+- **D28 — Wave 5 is INTERACTION-POLISH, amended in-place, not forked.** The chrome/token/
+  contrast/desk work of D1-D27 is done; the residual premium gap is interaction *quality*
+  on the surfaces authors live in. Three net-new, file-disjoint slices (D29-D31) are added
+  as Wave 5. **Why amend, not fork:** this file IS the epic's memory (D1-D27 + Waves 1-4);
+  writing a rival `bp-studio-premium-charter.md` orphans that memory and re-triggers the
+  rotating-charter-slot trap. The Decide phase (resumed after a spend-cap) re-proved on
+  origin/main @51576f128 that all three slices are OPEN and outside D1-D27 (grep of this
+  charter for aria-live/save-status/paper_canvas/doc_actions = zero hits). Reject cosmetic
+  churn per the AI-Score finding (only naming/pointer governance measured positive).
+- **D29 — Slice A: a11y live-regions on the save-status echo + the flash sink.** Add
+  `role`/`aria-live` to `editor.ex:460` `<span class="save-status">` and to the two
+  `studio_flash/1` divs in `nav.ex:28/31` (info → `role="status" aria-live="polite"`,
+  error → `role="alert" aria-live="assertive"`), mirroring the already-accessible
+  `settings_live.ex:402/405` and `editor.ex` banner pattern (`cross_violations_banner`
+  :698, `paper_halt_banner` :769). **Why:** `studio_flash` is the single *layout* flash
+  sink (both `app.html.heex` + `studio.html.heex` route through it; :app is the default
+  live_view layout), so one ~2-attr change makes every layout-rendered Studio flash
+  announce to screen readers — highest leverage, lowest risk. **Correction absorbed:**
+  it is the single *layout* sink, NOT the single sink — `settings_live` self-renders its
+  own flash and is *already* accessible; do not overclaim "every surface." Every Studio
+  `put_flash` is `:info` or `:error` (grep-proven tree-wide: 59×error, 3×info, zero other
+  kinds), so no kind bypasses the fix. **Test co-change (mandatory):** the span attr
+  change breaks two pre-existing string assertions in `studio_live_save_status_test.exs`
+  (`class="save-status">Saved`, `class="save-status"><`) — update them in the same edit;
+  add a net-new aria assertion there AND a net-new flash-aria assertion for nav.ex.
+- **D30 — Slice B: the paper canvas tells the TRUTH about saving.** `paper_editor.ex:371`
+  renders a HARDCODED `✓ Auto-saved` that never reflects the real state — it lies through
+  "Save failed" and plugin halts. Thread the socket-owned `save_status`/`paper_halt`
+  (already computed in `shared/paper.ex`) through the 3-hop chain
+  (`components.ex` `studio_paper_view` → `paper_block_editor`), echo the real `@save_status`
+  in the existing footer span, and render the reused `Editor.paper_halt_banner`. **Why:**
+  the canvas is the highest-value editing surface and currently misreports persistence —
+  this is a correctness/honesty fix, not a cosmetic gap-fill, and it brings the canvas to
+  parity with the classic editor (`editor.ex:460`). **Two mandatory builder steps:**
+  (a) `save_status` is unassigned on fresh paper open (assigned only in write handlers) —
+  guard it at the call site (`save_status={Map.get(assigns, :save_status, "")}`), do NOT
+  edit mount.ex; (b) re-baseline the committed byte-snapshot `paper_editor_flag_off.html`
+  (delete + re-run, the test prints the recipe). Beta per-doc editor (`components.ex:863`)
+  stays on the nil fallback — out of scope (D30-followup backlog).
+- **D31 — Slice C: destructive Delete out of the misclick zone.** `default_doc_actions/2`
+  emits History → **Delete (destructive red)** → Publish (primary CTA), sandwiching the
+  destructive action between a benign one and the CTA. Reorder so Publish/Unpublish leads
+  and Delete moves to the tail/separated; update the stale order comment
+  (`doc_actions.ex:84-86`). **Why + safety:** proven resolver-safe — the only two
+  production resolvers (`onixedit`, `github`) and the macro default are name-keyed with
+  ZERO positional access to the list, so no plugin assumes Delete at `base[1]`; a net-new
+  order unit test on `default_doc_actions/2` is non-vacuous (fails on the old order).
+- **D32 — `sup-w4-pixel-evidence` stays a separate close-out, NOT swept into Wave 5.** Its
+  blocker (`sup-w4-row-state-ladder`, #2146) has merged so it is now unblockable, but it is
+  orthogonal (guerrilla D24e pixel harness + desk CSS, zero file overlap with the Wave-5
+  slices) and needs a live *authenticated guerrilla* harness run, not a code slice. Left
+  open with its lapsed claim noted; a re-claim (fresh epoch) is required before anyone runs
+  it. It + the user re-verdict remain the epic's only non-Wave-5 debt.
 
 ## Roadmap
 
@@ -401,6 +454,23 @@ one commit BEHIND and rebuilds pre-scope-chip-v2 markup):
    Projects matches its siblings in both modes; evidence stamped into the ledger and
    into the crit-4 human-gate pack. Runs AFTER slice 1 merges + guerrilla redeploys.
    **small**
+
+Wave 5 (interaction polish — three file-disjoint slices, all parallel, all opus):
+
+1. `sup-w5-a11y-live-regions` — `role`/`aria-live` on the save-status span
+   (`editor.ex:460`) + both `studio_flash/1` divs (`nav.ex:28/31`); update the two
+   pre-existing save-status assertions + add aria assertions (save-status test) + a
+   net-new flash-aria assertion (nav.ex). Files: `editor.ex`, `nav.ex`,
+   `studio_live_save_status_test.exs`. **small** (D29)
+2. `sup-w5-paper-canvas-savestate` — replace the hardcoded `✓ Auto-saved` with the honest
+   `@save_status` echo + reused `paper_halt_banner`; thread `save_status`/`paper_halt`
+   through `studio_paper_view` → `paper_block_editor`; guard the missing assign;
+   re-baseline the OFF-path snapshot. Files: `components.ex`, `paper_editor.ex`,
+   `paper_canvas_test.exs`, `studio_live_paper_canvas_test.exs`,
+   `snapshots/paper_editor_flag_off.html`. **small** (D30)
+3. `sup-w5-doc-actions-order` — reorder `default_doc_actions/2` (Publish leads, Delete to
+   the tail) + update the order comment + net-new order unit test. Files:
+   `doc_actions.ex`, `studio_live_doc_actions_test.exs`. **small** (D31)
 
 ## Wave log
 
@@ -731,3 +801,29 @@ D24e harness (data-theme attr ONLY, screenshots via repo root then move),
 flip its criteria on the computed-style match, fold the before/after pack
 into the epic crit-4 human-gate material. That re-shoot + the user re-verdict
 are ALL that remain of this epic — no new code veins were found this wave.
+
+### Wave 5 — 2026-07-14 (interaction polish — IN FLIGHT)
+
+Decide (resumed post spend-cap) cut three net-new, file-disjoint slices after the
+verify fleet PROVED each one RED→GREEN in throwaway worktrees off origin/main
+@51576f128 (isolated MIX_TEST_PARTITION; shared `barkpark_test` is drifted — never
+use it). Wave Paper: `studio-premium-wave-2026-07-14`. Slices, all opus:
+
+- `sup-w5-a11y-live-regions` (D29) — a11y live-regions. Proof: new aria assertion
+  RED on unmodified source ("Assertion with =~ failed" on the attributed span),
+  GREEN after adding `role`/`aria-live`; `studio_layout_test.exs` 6/6 green (no
+  regression). Correction folded: single *layout* sink, `settings_live` self-renders
+  and is already accessible.
+- `sup-w5-paper-canvas-savestate` (D30) — honest canvas save-state. Proof: reverting
+  the footer to the hardcoded string makes the "Save failed echoed" test FAIL; honest
+  echo passes (156 tests, 0 failures on both target files after re-baseline).
+- `sup-w5-doc-actions-order` (D31) — Publish-leads reorder. Proof: 37 tests 0 failures
+  on reorder; the 2 net-new order assertions FAIL on the old order (non-vacuous);
+  onixedit/github resolver suites byte-identical either way (name-keyed, no positional
+  access).
+
+Builders build in worktrees off origin/main, commit (do NOT push — the steward
+pushes+PRs). The lead closes each slice's merge-gated criterion on merge. Review
+folds the merged results, the debrief, and the final grade back into this log.
+`sup-w4-pixel-evidence` (D32) stays separate; it + the user re-verdict remain the
+epic's only non-Wave-5 debt.

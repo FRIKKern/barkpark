@@ -1528,4 +1528,150 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert Process.alive?(view.pid)
     end
   end
+
+  # ── 4. A LANDED SAVE SAYS SO (spd-w18-save-announces) ───────────────────────
+  #
+  # MEASURED ON THE DEPLOYED BUILD: after a canvas save the API proved persisted
+  # (blocks:3, _updatedAt 4s after _createdAt), [data-test-id="bp-paper-footer-save"]
+  # — a role="status" aria-live="polite" span and the page's ONLY aria-live region
+  # — was THE EMPTY STRING, polled for 25 seconds. The footer counts DID move, so
+  # the page was alive; the announcement was silent.
+  #
+  # CAUSE: `paper_ops/2`'s `{:ok, _result}` branch assigned no save_status at all,
+  # while all three of its error branches assign "Save failed" and
+  # `save_status_label(nil)` renders "". So the affordance could only ever say
+  # nothing or failure. These tests pin BOTH arms so the asymmetry cannot return,
+  # and pin that the fix did NOT flatten success into failure.
+  #
+  # Flag pinned ON (the deployed default, config/runtime.exs forces "1" in :prod)
+  # with the prev/put/on_exit idiom — four sibling suites set it to "0"
+  # process-globally, so inheriting it would be an order-dependent green (D233).
+  describe "a landed save announces itself (flag ON — BARKPARK_PAPER_CANVAS=1)" do
+    setup do
+      prev = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+          v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+        end
+      end)
+
+      :ok
+    end
+
+    # The socket-owned truth. The canvas run wrapper is phx-update="ignore", so
+    # the assign is asserted directly (never DOM inside the canvas); the footer is
+    # server-rendered chrome OUTSIDE the ignore wrapper, so it IS assertable.
+    defp save_status_assign(view), do: :sys.get_state(view.pid).socket.assigns[:save_status]
+
+    defp footer_save_text(view) do
+      view
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s([data-test-id="bp-paper-footer-save"]))
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    test "a SUCCESSFUL paper-ops batch assigns save_status and renders it in the aria-live region",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
+
+      # Baseline: nothing written yet, so the region is honestly silent.
+      assert save_status_assign(view) == ""
+      assert footer_save_text(view) == ""
+
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "p-intro",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "Announced intro."}]}
+          }
+        ]
+      })
+
+      # The write really landed (so the announcement is not announcing nothing).
+      assert Content.paper_blocks(@slug, @dataset)
+             |> Enum.find(&(&1["id"] == "p-intro"))
+             |> Map.get("content") == [%{"type" => "text", "value" => "Announced intro."}]
+
+      # (a) the socket assign — the SAME token the single-op path
+      #     (paper_pane_op/2) assigns; one vocabulary across both write seams.
+      assert save_status_assign(view) == "Auto-saved"
+
+      # (b) the rendered aria-live region actually SAYS it (✓ affix from
+      #     PaperEditor.save_status_label/1).
+      assert footer_save_text(view) == "✓ Auto-saved"
+    end
+
+    test "a REFUSED paper-ops batch still announces Save failed (the fix did not flatten the distinction)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
+
+      before = Content.paper_blocks(@slug, @dataset)
+
+      # Removing every substantive block hollows the paper — the server-owned
+      # hollow ratchet HALTS the batch (put_paper_halt/2).
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{"op" => "remove-block", "id" => "p-intro"},
+          %{"op" => "remove-block", "id" => "c-note"},
+          %{"op" => "remove-block", "id" => "p-after"}
+        ]
+      })
+
+      # The write was refused — the paper is untouched.
+      assert Content.paper_blocks(@slug, @dataset) == before
+
+      assert save_status_assign(view) == "Save failed"
+      assert footer_save_text(view) == "Save failed"
+    end
+
+    test "success and failure are DISTINGUISHABLE on the same mounted view", %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
+
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "p-intro",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "Round one."}]}
+          }
+        ]
+      })
+
+      assert footer_save_text(view) == "✓ Auto-saved"
+
+      # A refused batch REPLACES the calm token — a rejected write must never
+      # leave a stale "Auto-saved" on screen.
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{"op" => "remove-block", "id" => "p-intro"},
+          %{"op" => "remove-block", "id" => "c-note"},
+          %{"op" => "remove-block", "id" => "p-after"}
+        ]
+      })
+
+      assert footer_save_text(view) == "Save failed"
+
+      # …and a subsequent good write recovers the announcement.
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "p-after",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "Round three."}]}
+          }
+        ]
+      })
+
+      assert footer_save_text(view) == "✓ Auto-saved"
+    end
+  end
 end

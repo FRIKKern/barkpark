@@ -337,6 +337,22 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("toggle-diff", _params, socket), do: Fields.toggle_diff(socket)
   def handle_event("editor-set-mode", params, socket), do: Fields.editor_set_mode(params, socket)
+
+  # ── Responsive width bucket (studio-space-priority-desk spd-s2) ──────────────
+  # A client-side hook (attached in spd-s4) reports which responsive width band
+  # the viewport is in so the space-priority desk knows which pane to collapse
+  # first. Pure layout telemetry — no persisted state — classified `:none` in
+  # `BarkparkWeb.Studio.Caps` so anonymous / share / grant sockets may report it
+  # (an unclassified event would fall to the default-DENY tier and never reach a
+  # non-admin socket's handler). INERT this round: no call site passes the hook
+  # yet. The guard drops any bucket outside the known set; the fallback head
+  # ignores a malformed payload without crashing the session.
+  def handle_event("width-bucket", %{"bucket" => bucket}, socket)
+      when bucket in ~w(wide standard narrow phone),
+      do: {:noreply, Phoenix.Component.assign(socket, width_bucket: bucket, focus_pane_idx: nil)}
+
+  def handle_event("width-bucket", _params, socket), do: {:noreply, socket}
+
   def handle_event("array_op", params, socket), do: Fields.array_op(params, socket)
 
   def handle_event("open-image-picker", params, socket),

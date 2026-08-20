@@ -42,7 +42,7 @@ func sampleSnapshot() Snapshot {
 // survives the round trip.
 func TestCacheRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	key := cacheKey("https://guerrilla.barkpark.cloud", "gyldendal", "prod")
+	key := cacheKey("https://guerrilla.barkpark.cloud", "gyldendal", "prod", "production")
 	want := sampleSnapshot()
 
 	SaveCachedSnapshot(dir, key, want)
@@ -78,7 +78,7 @@ func TestCacheRoundTrip(t *testing.T) {
 // (non-JSON) file, and a truncated (half-written) file.
 func TestCacheLoadMissesAreSilent(t *testing.T) {
 	dir := t.TempDir()
-	key := cacheKey("s", "w", "p")
+	key := cacheKey("s", "w", "p", "d")
 
 	if _, ok := LoadCachedSnapshot("", key); ok {
 		t.Error("empty dir should miss")
@@ -108,7 +108,7 @@ func TestCacheLoadMissesAreSilent(t *testing.T) {
 // EXACTLY the one final cache file in the dir — no *.tmp-* temp file survives.
 func TestCacheSaveIsAtomicAndLeavesNoDroppings(t *testing.T) {
 	dir := t.TempDir()
-	key := cacheKey("s", "w", "p")
+	key := cacheKey("s", "w", "p", "d")
 
 	SaveCachedSnapshot(dir, key, sampleSnapshot())
 
@@ -143,29 +143,42 @@ func TestCacheSaveEmptyDirIsNoOp(t *testing.T) {
 }
 
 // TestCacheKeyStableAndDistinct proves the key is deterministic for a scope and
-// distinct across every axis — server, workspace, project — AND that the NUL
-// separator stops adjacent fields from colliding ("ab"+"" vs "a"+"b").
+// distinct across every axis — server, workspace, project, dataset (D125) — AND
+// that the NUL separator stops adjacent fields from colliding ("ab"+"" vs
+// "a"+"b").
 func TestCacheKeyStableAndDistinct(t *testing.T) {
-	base := cacheKey("https://guerrilla", "gyldendal", "prod")
-	if base != cacheKey("https://guerrilla", "gyldendal", "prod") {
+	base := cacheKey("https://guerrilla", "gyldendal", "prod", "production")
+	if base != cacheKey("https://guerrilla", "gyldendal", "prod", "production") {
 		t.Error("cacheKey is not stable for the same scope")
 	}
 	if len(base) != 16 {
 		t.Errorf("cacheKey len = %d, want 16 (short hex)", len(base))
 	}
 	distinct := map[string]string{
-		"other server":    cacheKey("https://other", "gyldendal", "prod"),
-		"other workspace": cacheKey("https://guerrilla", "aschehoug", "prod"),
-		"other project":   cacheKey("https://guerrilla", "gyldendal", "staging"),
-		"field-boundary":  cacheKey("https://guerrillagyldendal", "", "prod"),
+		"other server":    cacheKey("https://other", "gyldendal", "prod", "production"),
+		"other workspace": cacheKey("https://guerrilla", "aschehoug", "prod", "production"),
+		"other project":   cacheKey("https://guerrilla", "gyldendal", "staging", "production"),
+		"other dataset":   cacheKey("https://guerrilla", "gyldendal", "prod", "staging"),
+		"field-boundary":  cacheKey("https://guerrillagyldendal", "", "prod", "production"),
+		// A dataset field-boundary: "prod"+"" (project prod, empty dataset) must
+		// not collide with ""+"prod" (empty project, dataset prod) — the NUL
+		// between project and dataset is what keeps them apart.
+		"dataset field-boundary": cacheKey("https://guerrilla", "gyldendal", "", "prod"),
 	}
 	for name, k := range distinct {
 		if k == base {
 			t.Errorf("cacheKey collided with base for %s", name)
 		}
 	}
+	// The project↔dataset boundary: the SAME "prod" string sliding across the NUL
+	// (project "prod" + empty dataset vs empty project + dataset "prod") must
+	// change the hash, or the separator between those two fields is doing nothing.
+	if cacheKey("https://guerrilla", "gyldendal", "prod", "") ==
+		cacheKey("https://guerrilla", "gyldendal", "", "prod") {
+		t.Error("cacheKey lost the project↔dataset boundary: project \"prod\" collided with dataset \"prod\"")
+	}
 	// The field-boundary case must ALSO differ from its own naive concat twin.
-	if cacheKey("ab", "", "c") == cacheKey("a", "b", "c") {
+	if cacheKey("ab", "", "c", "d") == cacheKey("a", "b", "c", "d") {
 		t.Error("cacheKey lost the field boundary: \"ab\"+\"\" collided with \"a\"+\"b\"")
 	}
 }
@@ -191,7 +204,7 @@ func TestCachePrimedStartIsHonestAndDoesNotFlash(t *testing.T) {
 		Counts:    map[string]int{"ready": 1},
 		FetchedAt: cachedAt,
 	}
-	SaveCachedSnapshot(dir, cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project), cached)
+	SaveCachedSnapshot(dir, cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset), cached)
 
 	// (a) A fresh model for this scope must paint from that cache.
 	m := newModel(nil, "", cfg)
@@ -266,7 +279,7 @@ func TestCachePrimedStartSurvivesBackwardsClockJump(t *testing.T) {
 		Counts:    map[string]int{"ready": 1},
 		FetchedAt: cachedAt,
 	}
-	SaveCachedSnapshot(dir, cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project), cached)
+	SaveCachedSnapshot(dir, cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset), cached)
 
 	m := newModel(nil, "", cfg)
 	m.now = func() time.Time { return fixedNow }

@@ -1,5 +1,6 @@
 defmodule Barkpark.Content.Expand do
   alias Barkpark.Content
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
 
   @type spec :: :all | [String.t()]
@@ -29,53 +30,166 @@ defmodule Barkpark.Content.Expand do
     # read-share query whose type schema lives in the shared workspace).
     schemas = load_schemas(Map.keys(docs_by_type), dataset, opts)
 
+    # ── Batch hydration — kills the `?expand=` N+1 ────────────────────────────
+    # The per-ref path issued one `Content.get_document` (Repo.one) PLUS two
+    # `Content.get_schema` per resolved reference (query count 2N+1). Instead:
+    #   1. COLLECT every {ref_type, ref_id} this expansion will resolve;
+    #   2. HYDRATE the target documents in ONE scoped batch query PER ref_type
+    #      (`get_documents_by_ids/3` — SAME scope stack as `get_document/4`) and
+    #      memoize each ref_type's schema ONCE (mirroring `load_schemas/3`);
+    #   3. ASSEMBLE by swapping each reference value for its pre-rendered doc.
+    # Query count is now constant in the resolved-document count N.
+    ref_pairs = collect_ref_pairs(docs, spec, schemas)
+    resolved = resolve_refs(ref_pairs, dataset, opts, published_only, caller_context)
+
     Enum.map(docs, fn doc ->
-      type = doc["_type"]
-      schema = Map.get(schemas, type)
+      schema = Map.get(schemas, doc["_type"])
 
       case ref_fields_for(schema, spec) do
-        [] ->
-          doc
-
-        fields ->
-          Enum.reduce(fields, doc, fn field, acc ->
-            field_name = field["name"]
-            {ref_type, array?} = ref_target(field)
-
-            case Map.get(acc, field_name) do
-              nil ->
-                acc
-
-              value when array? ->
-                Map.put(
-                  acc,
-                  field_name,
-                  expand_each(value, ref_type, dataset, opts, published_only, caller_context)
-                )
-
-              value ->
-                case ref_id_from(value) do
-                  nil ->
-                    acc
-
-                  ref_id ->
-                    case resolve_ref(
-                           ref_id,
-                           ref_type,
-                           dataset,
-                           opts,
-                           published_only,
-                           caller_context
-                         ) do
-                      nil -> acc
-                      resolved -> Map.put(acc, field_name, resolved)
-                    end
-                end
-            end
-          end)
+        [] -> doc
+        fields -> Enum.reduce(fields, doc, &put_expanded(&1, &2, resolved))
       end
     end)
   end
+
+  # Swap one reference field's stored value for its pre-resolved render. An
+  # unresolvable id (or a non-list value on an array field) is left untouched —
+  # byte-identical to the prior per-ref path.
+  defp put_expanded(field, acc, resolved) do
+    field_name = field["name"]
+    {ref_type, array?} = ref_target(field)
+
+    case Map.get(acc, field_name) do
+      nil ->
+        acc
+
+      value when array? and is_list(value) ->
+        Map.put(acc, field_name, Enum.map(value, &expand_element(&1, ref_type, resolved)))
+
+      _value when array? ->
+        acc
+
+      value ->
+        case ref_id_from(value) do
+          nil ->
+            acc
+
+          ref_id ->
+            case Map.get(resolved, {ref_type, ref_id}) do
+              nil -> acc
+              rendered -> Map.put(acc, field_name, rendered)
+            end
+        end
+    end
+  end
+
+  defp expand_element(el, ref_type, resolved) do
+    case ref_id_from(el) do
+      nil -> el
+      ref_id -> Map.get(resolved, {ref_type, ref_id}, el)
+    end
+  end
+
+  # Every {ref_type, ref_id} pair the expansion will resolve, de-duplicated, so
+  # the hydration can batch one query per ref_type instead of one per ref.
+  defp collect_ref_pairs(docs, spec, schemas) do
+    docs
+    |> Enum.flat_map(fn doc ->
+      case ref_fields_for(Map.get(schemas, doc["_type"]), spec) do
+        [] ->
+          []
+
+        fields ->
+          Enum.flat_map(fields, fn field ->
+            {ref_type, array?} = ref_target(field)
+            collect_field_pairs(Map.get(doc, field["name"]), ref_type, array?)
+          end)
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  defp collect_field_pairs(nil, _ref_type, _array?), do: []
+
+  defp collect_field_pairs(value, ref_type, true) when is_list(value) do
+    Enum.flat_map(value, fn el ->
+      case ref_id_from(el) do
+        nil -> []
+        id -> [{ref_type, id}]
+      end
+    end)
+  end
+
+  defp collect_field_pairs(_value, _ref_type, true), do: []
+
+  defp collect_field_pairs(value, ref_type, false) do
+    case ref_id_from(value) do
+      nil -> []
+      id -> [{ref_type, id}]
+    end
+  end
+
+  # Hydrate + render every collected pair up front → %{{ref_type, ref_id} =>
+  # rendered_doc}. ONE `get_documents_by_ids/3` (a single scoped Repo.all) and
+  # ONE `ref_schema/3` resolution per DISTINCT ref_type — the query count no
+  # longer scales with the number of resolved references.
+  defp resolve_refs([], _dataset, _opts, _published_only, _caller_context), do: %{}
+
+  defp resolve_refs(ref_pairs, dataset, opts, published_only, caller_context) do
+    # The batch read's owner-scope reads `opts[:caller_context]` through
+    # `Scope.scope_to_owner/2`, which only accepts a `%CallerContext{}` or nil.
+    # Expand's caller_context is DUAL-USE — it also carries render sentinels
+    # (e.g. `:internal`, which bypasses field redaction) that scope_to_owner
+    # does not understand. Normalize the QUERY scope to nil for any non-struct
+    # sentinel (fail-closed to unowned rows — the module doctrine). The per-ref
+    # `get_document/4` path only owner-scoped OWNER_SCOPED types, so a
+    # non-owner_scoped ref (rows carry NULL owner_id, which the nil clause admits)
+    # stays byte-identical; the ORIGINAL caller_context still drives the
+    # `Envelope.render` redaction below.
+    query_opts =
+      case caller_context do
+        %CallerContext{} -> opts
+        _ -> Keyword.put(opts, :caller_context, nil)
+      end
+
+    ref_pairs
+    |> Enum.group_by(fn {ref_type, _id} -> ref_type end, fn {_ref_type, id} -> id end)
+    |> Enum.reduce(%{}, fn {ref_type, ids}, acc ->
+      ids = Enum.uniq(ids)
+      # Memoized once per ref_type (was two get_schema per ref).
+      schema = ref_schema(ref_type, dataset, opts)
+
+      # One scoped batch: the ids AND their `drafts.` twins together, so the
+      # published-then-draft fallback the per-ref path did with a SECOND Repo.one
+      # costs no extra query. `published_only` suppresses the draft twins so a
+      # read-share can never leak a draft (unchanged guarantee).
+      fetch_ids =
+        if published_only, do: ids, else: ids ++ Enum.map(ids, &("drafts." <> &1))
+
+      docs_map = Content.get_documents_by_ids(fetch_ids, dataset, query_opts)
+
+      Enum.reduce(ids, acc, fn id, acc2 ->
+        case pick_ref_doc(docs_map, id, ref_type, published_only) do
+          nil -> acc2
+          doc -> Map.put(acc2, {ref_type, id}, Envelope.render(doc, schema, caller_context))
+        end
+      end)
+    end)
+  end
+
+  # Published-first, then the `drafts.` twin — the exact precedence the per-ref
+  # `resolve_ref/6` had. `get_document/4` filtered `type == ref_type`; the
+  # TYPELESS batch does not, so re-apply that guard (`typed_doc/2`): a doc_id
+  # whose row is another type resolves to nil, byte-identical to the old path.
+  defp pick_ref_doc(docs_map, id, ref_type, published_only) do
+    case typed_doc(Map.get(docs_map, id), ref_type) do
+      nil when not published_only -> typed_doc(Map.get(docs_map, "drafts." <> id), ref_type)
+      doc -> doc
+    end
+  end
+
+  defp typed_doc(%{type: ref_type} = doc, ref_type), do: doc
+  defp typed_doc(_doc, _ref_type), do: nil
 
   defp load_schemas(types, dataset, opts) do
     types
@@ -126,26 +240,6 @@ defmodule Barkpark.Content.Expand do
   defp ref_target(%{"type" => "arrayOf", "of" => %{"refType" => rt}}), do: {rt, true}
   defp ref_target(%{"refType" => rt}), do: {rt, false}
 
-  # Resolve each element of an array-of-references; an unresolvable element (or a
-  # non-list value) is left untouched.
-  defp expand_each(list, ref_type, dataset, opts, published_only, caller_context)
-       when is_list(list) do
-    Enum.map(list, fn el ->
-      case ref_id_from(el) do
-        nil ->
-          el
-
-        ref_id ->
-          case resolve_ref(ref_id, ref_type, dataset, opts, published_only, caller_context) do
-            nil -> el
-            resolved -> resolved
-          end
-      end
-    end)
-  end
-
-  defp expand_each(value, _ref_type, _dataset, _opts, _published_only, _caller_context), do: value
-
   # A single reference field's value is either a plain id string or a Sanity-style
   # `%{"_ref" => id}` object — both resolve to the target id. Returns nil for any
   # other shape (an array of refs, an absent field, or an unrecognized value),
@@ -153,27 +247,6 @@ defmodule Barkpark.Content.Expand do
   defp ref_id_from(v) when is_binary(v) and v != "", do: v
   defp ref_id_from(%{"_ref" => v}) when is_binary(v) and v != "", do: v
   defp ref_id_from(_), do: nil
-
-  defp resolve_ref(ref_id, ref_type, dataset, opts, published_only, caller_context) do
-    ref_schema = ref_schema(ref_type, dataset, opts)
-
-    case Content.get_document(ref_id, ref_type, dataset, opts) do
-      {:ok, doc} ->
-        Envelope.render(doc, ref_schema, caller_context)
-
-      _ when published_only ->
-        # Read-share path: the published target is absent. Do NOT fetch or
-        # render the `drafts.` twin — leave the reference unexpanded (the same
-        # null/omitted outcome as any unresolvable ref), never leaking a draft.
-        nil
-
-      _ ->
-        case Content.get_document("drafts." <> ref_id, ref_type, dataset, opts) do
-          {:ok, doc} -> Envelope.render(doc, ref_schema, caller_context)
-          _ -> nil
-        end
-    end
-  end
 
   # The referenced type's schema, for field-visibility redaction of the expanded
   # document. Nil when none resolves — redaction then falls back to the

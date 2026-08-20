@@ -13,6 +13,7 @@ defmodule Barkpark.PortableDoc.Render.StylesheetTest do
   @layout_root Path.expand("../../../../lib/barkpark_web/layouts", __DIR__)
   @root_heex Path.join(@layout_root, "root.html.heex")
   @bulldocs_heex Path.join(@layout_root, "bulldocs.html.heex")
+  @layouts_ex Path.expand("../../../../lib/barkpark_web/layouts.ex", __DIR__)
   @surface_css Path.expand(
                  "../../../../assets/paper-surface/paper-surface.css",
                  __DIR__
@@ -42,12 +43,36 @@ defmodule Barkpark.PortableDoc.Render.StylesheetTest do
     test "contains NO [style*= de-inline hack selectors (theme-vs-data line)" do
       refute String.contains?(Stylesheet.css(), "[style*=")
     end
+
+    test "steps suppress the native ordered-list marker on each item" do
+      css = Stylesheet.css()
+
+      assert Regex.match?(
+               ~r/\.bp-paper-surface\s+\.bp-steps__step\s*\{[^}]*list-style:\s*none;/s,
+               css
+             ),
+             """
+             .bp-paper-surface ol li assigns decimal markers directly to every
+             ordered-list item. The steps component must therefore suppress the
+             native marker on .bp-steps__step itself, not only on its parent ol,
+             or Safari paints both "1." and the component's circled "1".
+             """
+    end
   end
 
   describe "sinks embed the source" do
-    test "root.html.heex (Studio) embeds Stylesheet.css/0" do
-      heex = File.read!(@root_heex)
-      assert String.contains?(heex, "Barkpark.PortableDoc.Render.Stylesheet.css()")
+    test "root.html.heex (Studio) embeds Stylesheet.css/0 via the paper_stylesheet/0 helper" do
+      # The lone raw(Stylesheet.css()) was HOISTED out of root.html.heex into
+      # Layouts.paper_stylesheet/0 (Sobelow's XSS.Raw fingerprint is line-numbered,
+      # so an inline `# sobelow_skip` only attaches to a real .ex def, never inside
+      # HEEx). The template now embeds the css THROUGH that helper — assert both the
+      # template's call and the helper's embed, so the sink is still gate-covered.
+      assert String.contains?(File.read!(@root_heex), "paper_stylesheet()")
+
+      assert String.contains?(
+               File.read!(@layouts_ex),
+               "Barkpark.PortableDoc.Render.Stylesheet.css()"
+             )
     end
 
     test "bulldocs.html.heex (/papers reader) embeds Stylesheet.css/0" do

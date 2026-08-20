@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* Chrome background/foreground now BRIDGE to the emitted design tokens (the
    GENERATED block below): --color-bg / --color-text carry the light values and
@@ -13,8 +14,8 @@
 
 /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
 @theme {
-  --color-primary: hsl(163 46% 22%);
-  --color-primary-hover: hsl(163 46% 16%);
+  --color-primary: hsl(151.96 71.81% 29.22%);
+  --color-primary-hover: hsl(151.96 71.81% 23.22%);
   --color-primary-fg: hsl(0 0% 100%);
   --color-bg: hsl(0 0% 100%);
   --color-surface: hsl(0 0% 100%);
@@ -31,8 +32,8 @@
   --color-graph-canvas: #16161a;
 }
 [data-theme="dark"] {
-  --color-primary: hsl(160 42% 62%);
-  --color-primary-hover: hsl(160 42% 70%);
+  --color-primary: hsl(152.92 60% 52.94%);
+  --color-primary-hover: hsl(152.92 60% 60.94%);
   --color-primary-fg: hsl(163 45% 8%);
   --color-bg: hsl(240 10% 3.9%);
   --color-surface: hsl(240 10% 5.5%);
@@ -40,7 +41,7 @@
   --color-text: hsl(0 0% 95%);
   --color-muted-text: hsl(240 5% 64.9%);
   --color-border: hsl(240 3.7% 15.9%);
-  --color-ring: hsl(160 42% 62%);
+  --color-ring: hsl(152.92 60% 52.94%);
   --color-accent: hsl(33 92% 60%);
   --color-ok: hsl(142 52% 52%);
   --color-warn: hsl(38 94% 56%);
@@ -49,8 +50,8 @@
 }
 /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
 [data-bp-theme="evergreen"] {
-  --color-primary: hsl(163 46% 22%);
-  --color-primary-hover: hsl(163 46% 16%);
+  --color-primary: hsl(151.96 71.81% 29.22%);
+  --color-primary-hover: hsl(151.96 71.81% 23.22%);
   --color-primary-fg: hsl(0 0% 100%);
   --color-bg: hsl(0 0% 100%);
   --color-surface: hsl(0 0% 100%);
@@ -66,8 +67,8 @@
   --color-info: hsl(217.2 91.2% 59.8%);
 }
 [data-bp-theme="evergreen"][data-theme="dark"] {
-  --color-primary: hsl(160 42% 62%);
-  --color-primary-hover: hsl(160 42% 70%);
+  --color-primary: hsl(152.92 60% 52.94%);
+  --color-primary-hover: hsl(152.92 60% 60.94%);
   --color-primary-fg: hsl(163 45% 8%);
   --color-bg: hsl(240 10% 3.9%);
   --color-surface: hsl(240 10% 5.5%);
@@ -75,7 +76,7 @@
   --color-text: hsl(0 0% 95%);
   --color-muted-text: hsl(240 5% 64.9%);
   --color-border: hsl(240 3.7% 15.9%);
-  --color-ring: hsl(160 42% 62%);
+  --color-ring: hsl(152.92 60% 52.94%);
   --color-accent: hsl(33 92% 60%);
   --color-ok: hsl(142 52% 52%);
   --color-warn: hsl(38 94% 56%);
@@ -83,106 +84,140 @@
   --color-info: hsl(217.2 91.2% 59.8%);
 }
 [data-bp-theme="charple"] {
-  --color-primary: hsl(241 57% 45%);
-  --color-primary-hover: hsl(241 57% 39%);
+  --color-primary: hsl(282.39 44.23% 40.78%);
+  --color-primary-hover: hsl(282.39 44.23% 34.78%);
   --color-primary-fg: hsl(0 0% 100%);
   --color-bg: hsl(250 42% 98%);
   --color-surface: hsl(250 42% 98%);
-  --color-muted-surface: hsl(227.36 22.94% 96.02%);
+  --color-muted-surface: hsl(279.9 15.77% 95.84%);
   --color-text: hsl(249 10% 14%);
-  --color-muted-text: hsl(227.51 3.7% 41.92%);
-  --color-border: hsl(227.38 10.84% 88.43%);
-  --color-ring: hsl(241 57% 53%);
-  --color-accent: hsl(241 57% 45%);
-  --color-ok: hsl(145.27 88.36% 28.41%);
+  --color-muted-text: hsl(280.01 2.7% 41.61%);
+  --color-border: hsl(279.92 7.63% 88.18%);
+  --color-ring: hsl(282.39 44.23% 48.78%);
+  --color-accent: hsl(282.39 44.23% 40.78%);
+  --color-ok: hsl(137.37 45.8% 35.72%);
   --color-warn: hsl(40.11 100% 29.89%);
-  --color-danger: hsl(2.15 59.33% 48.33%);
-  --color-info: hsl(221.63 58.56% 52.81%);
+  --color-danger: hsl(4.01 48.12% 48.54%);
+  --color-info: hsl(221.09 46.48% 51.51%);
 }
 [data-bp-theme="charple"][data-theme="dark"] {
-  --color-primary: hsl(249 100% 66%);
-  --color-primary-hover: hsl(249 100% 74%);
-  --color-primary-fg: hsl(0 0% 100%);
+  --color-primary: hsl(282.56 58.11% 70.98%);
+  --color-primary-hover: hsl(282.56 58.11% 78.98%);
+  --color-primary-fg: hsl(282.56 45% 8%);
   --color-bg: hsl(249 10% 14%);
   --color-surface: hsl(249 12% 6%);
-  --color-muted-surface: hsl(235.81 10.46% 5.77%);
+  --color-muted-surface: hsl(281.67 8.96% 5.56%);
   --color-text: hsl(249 15% 93%);
-  --color-muted-text: hsl(235.41 4.56% 61.6%);
-  --color-border: hsl(235.69 7.63% 8.27%);
-  --color-ring: hsl(249 100% 66%);
-  --color-accent: hsl(249 100% 66%);
-  --color-ok: hsl(136.37 45.27% 53.58%);
-  --color-warn: hsl(40.62 100% 42.95%);
-  --color-danger: hsl(4.54 100% 70.09%);
-  --color-info: hsl(220.77 100% 73.06%);
+  --color-muted-text: hsl(281.55 3.67% 61.01%);
+  --color-border: hsl(281.64 6.45% 8.05%);
+  --color-ring: hsl(282.56 58.11% 70.98%);
+  --color-accent: hsl(282.56 58.11% 70.98%);
+  --color-ok: hsl(133.37 34.29% 57.81%);
+  --color-warn: hsl(36.55 62.65% 53.22%);
+  --color-danger: hsl(5.58 76.29% 69.57%);
+  --color-info: hsl(220.48 78.3% 71.71%);
 }
 [data-bp-theme="ember"] {
-  --color-primary: hsl(20 82% 42%);
-  --color-primary-hover: hsl(20 82% 36%);
+  --color-primary: hsl(19.33 71.29% 40.98%);
+  --color-primary-hover: hsl(19.33 71.29% 34.98%);
   --color-primary-fg: hsl(0 0% 100%);
   --color-bg: hsl(30 40% 99%);
   --color-surface: hsl(30 40% 99%);
-  --color-muted-surface: hsl(16.48 26.29% 95.68%);
+  --color-muted-surface: hsl(16.91 26.32% 95.67%);
   --color-text: hsl(22 24% 11%);
-  --color-muted-text: hsl(16.54 4.67% 41.31%);
-  --color-border: hsl(16.5 12.96% 87.95%);
-  --color-ring: hsl(20 82% 50%);
-  --color-accent: hsl(20 82% 42%);
-  --color-ok: hsl(138.34 50.65% 34.78%);
+  --color-muted-text: hsl(16.98 4.69% 41.3%);
+  --color-border: hsl(16.93 12.99% 87.94%);
+  --color-ring: hsl(19.33 71.29% 48.98%);
+  --color-accent: hsl(19.33 71.29% 40.98%);
+  --color-ok: hsl(136.56 41.81% 36.51%);
   --color-warn: hsl(40.11 100% 29.89%);
-  --color-danger: hsl(3.67 50.42% 48.54%);
-  --color-info: hsl(221.2 49.02% 51.79%);
+  --color-danger: hsl(4.3 45.96% 48.52%);
+  --color-info: hsl(220.99 44.07% 51.23%);
 }
 [data-bp-theme="ember"][data-theme="dark"] {
-  --color-primary: hsl(30 92% 60%);
-  --color-primary-hover: hsl(30 92% 68%);
-  --color-primary-fg: hsl(30 45% 8%);
+  --color-primary: hsl(19.01 75.53% 63.14%);
+  --color-primary-hover: hsl(19.01 75.53% 71.14%);
+  --color-primary-fg: hsl(19.01 45% 8%);
   --color-bg: hsl(24 22% 8%);
   --color-surface: hsl(24 26% 6%);
-  --color-muted-surface: hsl(26.83 17% 5.24%);
+  --color-muted-surface: hsl(18.16 16.09% 5.41%);
   --color-text: hsl(32 24% 92%);
-  --color-muted-text: hsl(26.68 6.42% 60.11%);
-  --color-border: hsl(26.78 12.03% 7.72%);
-  --color-ring: hsl(30 92% 60%);
-  --color-accent: hsl(30 92% 60%);
-  --color-ok: hsl(134.02 37.1% 56.89%);
-  --color-warn: hsl(37.47 67.56% 50.7%);
-  --color-danger: hsl(5.31 83.22% 69.77%);
-  --color-info: hsl(220.6 86.84% 72.26%);
+  --color-muted-text: hsl(18.07 6.38% 60.58%);
+  --color-border: hsl(18.13 11.51% 7.89%);
+  --color-ring: hsl(19.01 75.53% 63.14%);
+  --color-accent: hsl(19.01 75.53% 63.14%);
+  --color-ok: hsl(133.24 33.65% 58.01%);
+  --color-warn: hsl(36.39 61.56% 53.68%);
+  --color-danger: hsl(5.64 74.73% 69.52%);
+  --color-info: hsl(220.45 76.42% 71.58%);
 }
 [data-bp-theme="fjord"] {
-  --color-primary: hsl(222 58% 44%);
-  --color-primary-hover: hsl(222 58% 38%);
+  --color-primary: hsl(191.6 80.95% 28.82%);
+  --color-primary-hover: hsl(191.6 80.95% 22.82%);
   --color-primary-fg: hsl(0 0% 100%);
   --color-bg: hsl(210 36% 99%);
   --color-surface: hsl(210 36% 99%);
-  --color-muted-surface: hsl(219.67 25.15% 95.91%);
+  --color-muted-surface: hsl(195.16 24.3% 95.35%);
   --color-text: hsl(220 30% 11%);
-  --color-muted-text: hsl(219.7 4.2% 41.73%);
-  --color-border: hsl(219.67 12.06% 88.27%);
-  --color-ring: hsl(222 58% 52%);
-  --color-accent: hsl(222 58% 44%);
-  --color-ok: hsl(137.23 45.13% 35.85%);
-  --color-warn: hsl(40.11 100% 29.89%);
-  --color-danger: hsl(4.05 47.78% 48.54%);
-  --color-info: hsl(221.08 46.09% 51.46%);
+  --color-muted-text: hsl(195.09 4.8% 40.74%);
+  --color-border: hsl(195.15 12.47% 87.49%);
+  --color-ring: hsl(191.6 80.95% 36.82%);
+  --color-accent: hsl(191.6 80.95% 28.82%);
+  --color-ok: hsl(133.06 24.42% 40.04%);
+  --color-warn: hsl(36.2 52.84% 37.17%);
+  --color-danger: hsl(5.71 33.01% 48.02%);
+  --color-info: hsl(220.42 30.54% 49.43%);
 }
 [data-bp-theme="fjord"][data-theme="dark"] {
-  --color-primary: hsl(213 74% 66%);
-  --color-primary-hover: hsl(213 74% 74%);
-  --color-primary-fg: hsl(213 45% 8%);
+  --color-primary: hsl(193.27 62.43% 64.51%);
+  --color-primary-hover: hsl(193.27 62.43% 72.51%);
+  --color-primary-fg: hsl(193.27 45% 8%);
   --color-bg: hsl(220 28% 8%);
   --color-surface: hsl(216 30% 6%);
-  --color-muted-surface: hsl(213.45 15.36% 5.53%);
+  --color-muted-surface: hsl(194.22 17.11% 5.16%);
   --color-text: hsl(212 26% 92%);
-  --color-muted-text: hsl(213.51 6.24% 60.93%);
-  --color-border: hsl(213.47 11.04% 8.02%);
-  --color-ring: hsl(213 74% 66%);
-  --color-accent: hsl(213 74% 66%);
-  --color-ok: hsl(132.78 31.44% 58.66%);
-  --color-warn: hsl(35.93 57.77% 55.07%);
-  --color-danger: hsl(5.83 69.33% 69.33%);
-  --color-info: hsl(220.37 70.04% 71.14%);
+  --color-muted-text: hsl(194.33 6.22% 59.89%);
+  --color-border: hsl(194.26 11.99% 7.63%);
+  --color-ring: hsl(193.27 62.43% 64.51%);
+  --color-accent: hsl(193.27 62.43% 64.51%);
+  --color-ok: hsl(131.84 26.28% 60%);
+  --color-warn: hsl(35.21 48.85% 57.57%);
+  --color-danger: hsl(6.23 56.9% 68.81%);
+  --color-info: hsl(220.18 55.98% 70.09%);
+}
+[data-bp-theme="iris"] {
+  --color-primary: hsl(248.75 63.72% 55.69%);
+  --color-primary-hover: hsl(248.75 63.72% 49.69%);
+  --color-primary-fg: hsl(0 0% 100%);
+  --color-bg: hsl(0 0% 100%);
+  --color-surface: hsl(0 0% 100%);
+  --color-muted-surface: hsl(235.46 20.43% 96.1%);
+  --color-text: hsl(240 10% 3.9%);
+  --color-muted-text: hsl(235.74 3.22% 42.05%);
+  --color-border: hsl(235.51 9.55% 88.53%);
+  --color-ring: hsl(248.75 63.72% 62%);
+  --color-accent: hsl(248.75 63.72% 55.69%);
+  --color-ok: hsl(145.96 92.95% 27.76%);
+  --color-warn: hsl(40.11 100% 29.89%);
+  --color-danger: hsl(2.06 59.77% 48.31%);
+  --color-info: hsl(221.65 59.02% 52.86%);
+}
+[data-bp-theme="iris"][data-theme="dark"] {
+  --color-primary: hsl(248.87 100% 77.45%);
+  --color-primary-hover: hsl(248.87 100% 85.45%);
+  --color-primary-fg: hsl(248.87 45% 8%);
+  --color-bg: hsl(240 10% 3.9%);
+  --color-surface: hsl(244.25 31% 1.46%);
+  --color-muted-surface: hsl(243.29 9.75% 5.78%);
+  --color-text: hsl(0 0% 95%);
+  --color-muted-text: hsl(242.8 4.23% 61.64%);
+  --color-border: hsl(243.15 7.1% 8.28%);
+  --color-ring: hsl(248.87 100% 77.45%);
+  --color-accent: hsl(248.87 100% 77.45%);
+  --color-ok: hsl(134.5 39.04% 56.2%);
+  --color-warn: hsl(38.55 77.19% 47.99%);
+  --color-danger: hsl(5.1 88.03% 69.88%);
+  --color-info: hsl(220.68 92.97% 72.65%);
 }
 /* END GENERATED: tokens */
 

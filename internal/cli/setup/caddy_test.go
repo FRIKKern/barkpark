@@ -95,9 +95,10 @@ func TestRenderCaddyfile_RejectsBadOpts(t *testing.T) {
 func TestCaddySteps_CommandsAndEnv(t *testing.T) {
 	steps := CaddySteps(acmeOpts())
 
-	// One install, one Caddyfile write, two env sets, one barkpark restart, one reload, one ufw deny.
-	if len(steps) != 7 {
-		t.Fatalf("caddySteps: want 7 steps, got %d", len(steps))
+	// One install, one Caddyfile write, three env sets (PHX_HOST, PHX_SCHEME,
+	// BARKPARK_CLOUD_URL), one barkpark restart, one reload, one ufw deny.
+	if len(steps) != 8 {
+		t.Fatalf("caddySteps: want 8 steps, got %d", len(steps))
 	}
 
 	// Every shell-out step must carry a non-nil Argv whose Argv[0] is the binary,
@@ -120,9 +121,12 @@ func TestCaddySteps_CommandsAndEnv(t *testing.T) {
 	// 2. write the Caddyfile to /etc/caddy/Caddyfile.
 	mustContainOne(t, steps, "/etc/caddy/Caddyfile")
 
-	// 3. PHX_HOST + PHX_SCHEME land in the app .env (LiveView-critical pair).
+	// 3. PHX_HOST + PHX_SCHEME land in the app .env (LiveView-critical pair),
+	//    and BARKPARK_CLOUD_URL arms the "Log in with Barkpark Cloud" button on
+	//    /login — unset at provision, managed instances render no button.
 	mustContainOne(t, steps, "PHX_HOST=acme.barkpark.cloud")
 	mustContainOne(t, steps, "PHX_SCHEME=https")
+	mustContainOne(t, steps, "BARKPARK_CLOUD_URL=https://barkpark.cloud")
 	if !strings.Contains(joined, appEnvFile) {
 		t.Errorf("env steps must target the app env file %q; commands:\n%s", appEnvFile, joined)
 	}
@@ -153,16 +157,17 @@ func TestCaddySteps_SkipAppRestart(t *testing.T) {
 	opts.SkipAppRestart = true
 	steps := CaddySteps(opts)
 
-	if len(steps) != 6 {
-		t.Fatalf("caddySteps(SkipAppRestart): want 6 steps (no app restart), got %d", len(steps))
+	if len(steps) != 7 {
+		t.Fatalf("caddySteps(SkipAppRestart): want 7 steps (no app restart), got %d", len(steps))
 	}
 	joined := allCmds(steps)
 	if strings.Contains(joined, "systemctl restart barkpark") {
 		t.Errorf("SkipAppRestart must omit the barkpark restart; commands:\n%s", joined)
 	}
-	// The PHX_* env writes and the caddy reload still happen — only the restart moved.
+	// The env writes and the caddy reload still happen — only the restart moved.
 	mustContainOne(t, steps, "PHX_HOST=acme.barkpark.cloud")
 	mustContainOne(t, steps, "PHX_SCHEME=https")
+	mustContainOne(t, steps, "BARKPARK_CLOUD_URL=https://barkpark.cloud")
 	mustContainOne(t, steps, "systemctl reload caddy")
 	mustContainOne(t, steps, "ufw deny 4000")
 }
@@ -219,6 +224,9 @@ func TestCaddySteps_FakeRunProducesConfigAndEnv(t *testing.T) {
 	}
 	if !strings.Contains(all, "PHX_SCHEME=https") {
 		t.Errorf("fake run did not produce PHX_SCHEME=https; cmds:\n%s", all)
+	}
+	if !strings.Contains(all, "BARKPARK_CLOUD_URL=https://barkpark.cloud") {
+		t.Errorf("fake run did not produce BARKPARK_CLOUD_URL=https://barkpark.cloud; cmds:\n%s", all)
 	}
 
 	// Sanity: nothing in the fake run resembles a real ACME issuance trigger —

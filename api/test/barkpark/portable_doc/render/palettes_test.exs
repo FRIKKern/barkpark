@@ -6,7 +6,8 @@ defmodule Barkpark.PortableDoc.Render.PalettesTest do
 
   describe "constant accessors" do
     test "font_body returns the profile serif stack" do
-      assert Palettes.font_body() == "'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif"
+      assert Palettes.font_body() ==
+               "'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif"
     end
 
     test "font_mono returns the monospace stack" do

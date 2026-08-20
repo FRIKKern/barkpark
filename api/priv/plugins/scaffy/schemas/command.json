@@ -1,0 +1,30 @@
+{
+  "name": "command",
+  "title": "Commands",
+  "icon": "terminal",
+  "visibility": "public",
+  "fields": [
+    { "name": "title", "title": "Title", "type": "string", "surface": "body" },
+    { "name": "source", "title": "Source", "type": "source", "surface": "body" },
+    { "name": "description", "title": "Description", "type": "text", "surface": "sidebar" },
+    { "name": "concept", "title": "Concept", "type": "string", "surface": "sidebar" },
+    { "name": "variant", "title": "Variant", "type": "string", "surface": "sidebar" },
+    { "name": "domain", "title": "Domain", "type": "string", "surface": "sidebar" },
+    { "name": "direction", "title": "Direction", "type": "string", "surface": "sidebar" },
+    {
+      "name": "tags",
+      "title": "Tags",
+      "type": "arrayOf",
+      "ordered": false,
+      "surface": "sidebar",
+      "of": {
+        "type": "composite",
+        "fields": [
+          { "name": "tag", "title": "Tag", "type": "string", "validation": { "required": true, "pattern": "^[a-z0-9-]+$" } },
+          { "name": "strength", "title": "Strength", "type": "number", "validation": { "required": true, "min": 1, "max": 100 } },
+          { "name": "rationale", "title": "Rationale", "type": "string", "validation": { "required": true } }
+        ]
+      }
+    }
+  ]
+}

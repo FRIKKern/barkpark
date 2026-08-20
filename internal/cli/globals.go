@@ -27,6 +27,14 @@ type globals struct {
 	yes     bool // --yes: skip the prod write-guard confirm
 	help    bool // -h/--help
 	version bool // --version/-V: print the CLI version and exit
+	full    bool // --full: force the full server view even where a brief agent default applies
+
+	// view is the request-side response projection: applyQuery appends ?view=
+	// when it is non-empty. The CLI resolves it in runCommand (resolveView —
+	// brief for machine output on a command whose manifest declares views);
+	// the MCP handlers set it directly on their local globals copy. Never a
+	// user flag — --full is the user-facing escape hatch.
+	view string
 
 	// Pagination knobs. Present? tracked so a command can tell "user set --limit"
 	// from "user left it default".
@@ -40,6 +48,20 @@ type globals struct {
 	// runner can fall back to the tty-vs-pipe default only when the user did not
 	// choose.
 	outputSet bool
+
+	// datasetSet records whether -d/--dataset was TYPED IN ARGV, as opposed to
+	// dataset merely holding a value some other layer supplied. It exists for
+	// the verbs whose OWN --dataset flag the global parser eats: parseGlobals
+	// consumes -d/--dataset wherever it appears (by design — the global scope
+	// triple may sit before or after the noun), so a command-local `dataset`
+	// flag can never see it and must read g.dataset instead. Reading g.dataset
+	// UNCONDITIONALLY is the trap (cloud_site_cmd.go:163): the resolved content
+	// context also carries an ambient dataset from ~/.config/barkpark/config.json
+	// / BARKPARK_DATASET, so an unflagged `bp cloud workspace export --profile dev`
+	// would silently become dataset-narrowed by the operator's saved context —
+	// one silent wrong answer traded for another. Only an explicitly-typed flag
+	// may scope a bundle, and this bit is how a verb tells the difference.
+	datasetSet bool
 
 	// manifestPath is the --manifest <path> override: load the manifest from a
 	// local file instead of GET /v1/capabilities. Lets the CLI run before the
@@ -64,9 +86,21 @@ var boolFlags = map[string]bool{
 	"--json": true, "-q": true, "--quiet": true,
 	"-v": true, "--verbose": true,
 	"--no-color": true, "--dry-run": true,
-	"--yes": true, "--all": true,
+	"--yes": true, "--all": true, "--full": true,
 	"-h": true, "--help": true,
 	"--version": true, "-V": true,
+}
+
+// isKnownGlobalFlag reports whether tok resolves to a global flag parseGlobals
+// recognises — a bare short/long flag, or a long flag carrying an inline
+// `--flag=value`. Used to guard against consuming a following known flag as a
+// value.
+func isKnownGlobalFlag(tok string) bool {
+	key := tok
+	if eq := strings.IndexByte(tok, '='); eq >= 0 && strings.HasPrefix(tok, "--") {
+		key = tok[:eq]
+	}
+	return valueFlags[key] || boolFlags[key]
 }
 
 // parseGlobals extracts recognised global flags from anywhere in args and
@@ -132,7 +166,18 @@ func parseGlobals(args []string) (globals, []string, error) {
 			if i+1 >= len(args) {
 				return g, nil, fmt.Errorf("flag %q needs a value", key)
 			}
-			val = args[i+1]
+			next := args[i+1]
+			// A following token that is itself a KNOWN global flag (-v,
+			// --output, ...) is never a legitimate value for this flag — it
+			// means the caller forgot the value. Binding it anyway produces a
+			// confusing downstream error (e.g. invalid --output "-v") instead
+			// of the real complaint. A token that merely starts with '-' but
+			// is not a known global flag (a negative number, an unknown
+			// command-local flag) is still accepted as a value below.
+			if next != "-" && strings.HasPrefix(next, "-") && isKnownGlobalFlag(next) {
+				return g, nil, fmt.Errorf("flag %q needs a value", key)
+			}
+			val = next
 			i++
 		}
 
@@ -157,6 +202,7 @@ func (g *globals) set(key, val string) error {
 		g.project = val
 	case "-d", "--dataset":
 		g.dataset = val
+		g.datasetSet = true
 	case "-o", "--output":
 		if !validOutput(val) {
 			return fmt.Errorf("invalid --output %q (want table|json|yaml|minimal)", val)
@@ -181,6 +227,8 @@ func (g *globals) set(key, val string) error {
 		g.yes = true
 	case "--all":
 		g.all = true
+	case "--full":
+		g.full = true
 	case "--limit":
 		n, err := strconv.Atoi(val)
 		if err != nil {

@@ -269,11 +269,15 @@ const CANVAS_FIELD_NODE_NAME = "bpField";
 // value ops, and it DOES participate in STRUCTURAL ops (insert/remove/move by bpId)
 // like any block — so it no longer SPLITS a run.
 //
-// EXPLICITLY OUT (still boundaries): field-image / field-reference (the deferred
-// picker fields). After S3.6 sheet/embed are canvas-eligible, so the ONLY remaining
-// run splitters are those two pickers (and any composite/object/arrayOf/codelist/
-// localizedText). Keep aligned with embed-node.js:BP_SHEET_NODE_NAME /
-// BP_EMBED_NODE_NAME and paper_canvas.ex:@canvas_readonly_atom_types.
+// EXPLICITLY OUT (still boundaries): composite / object / arrayOf / codelist /
+// localizedText (the nested-structure kinds). field-image / field-reference are
+// NO LONGER out — they ride CANVAS_PICKER_FIELD_TYPES (∈ CANVAS_FIELD_TYPES), so
+// blockToNode dispatches them to the editable fieldBlockToNode and field-node.js
+// mounts bp-media-picker / bp-reference-picker as canvas-editable control-atoms.
+// After S3.6 sheet/embed are canvas-eligible too, so the ONLY remaining run
+// splitters are those nested-structure kinds. Keep aligned with
+// embed-node.js:BP_SHEET_NODE_NAME / BP_EMBED_NODE_NAME and
+// paper_canvas.ex:@canvas_readonly_atom_types.
 const CANVAS_READONLY_ATOM_TYPES = new Set(["sheet", "embed"]);
 
 // The TipTap NODE name for a read-only atom block differs from its bpType: for sheet
@@ -337,13 +341,15 @@ const CANVAS_FLEET_NODE_NAME = "bpFleet";
 // catch-all for these kinds). D4: deliberately ABSENT from slash-insert.js
 // CANVAS_SLASH_TYPES (data-bearing, API-authored).
 // KEEP LOCKSTEP with paper_canvas.ex @canvas_dataviz_types and
-// shared/paper.ex @dataviz_render_types (5 kinds in every one).
+// shared/paper.ex @dataviz_render_types (7 kinds in every one).
 const CANVAS_DATAVIZ_TYPES = new Set([
   "stat",
   "stats",
   "stat-grid",
   "heatmap",
   "chart",
+  "duel",
+  "lineage",
 ]);
 
 // editable-figure: the `figure` block the canvas handles as a SERVER-PAINTED
@@ -504,8 +510,10 @@ function isCanvasAttrAtomNode(nodeType) {
   );
 }
 
-// True when a portable-doc BLOCK type is one of the 7 native field-* control-atoms
-// (S3.5). field-image / field-reference are EXCLUDED (pickers stay boundaries).
+// True when a portable-doc BLOCK type is a canvas field-* control-atom — the 7
+// native field-* types PLUS the 2 picker types (field-image / field-reference).
+// CANVAS_FIELD_TYPES is native ∪ picker, so this returns TRUE for the pickers too:
+// they are canvas-editable, dispatched to fieldBlockToNode (NOT boundaries).
 function isCanvasFieldType(type) {
   return CANVAS_FIELD_TYPES.has(type);
 }
@@ -711,13 +719,16 @@ function blockToNode(block) {
     }
 
     if (isCanvasFieldType(bpType)) {
-      // A canvas CONTROL-ATOM node (S3.5: the 7 native field-* types): an atom node
-      // whose VALUE rides in an attr and is edited by a NATIVE control. ALL 7 types
+      // A canvas CONTROL-ATOM node (S3.5): the 7 native field-* types PLUS the 2
+      // picker types (field-image / field-reference). An atom node whose VALUE rides
+      // in an attr, edited by a NATIVE control (the 7) or by a picker WC —
+      // bp-media-picker / bp-reference-picker (field-node.js) — for the pickers. ALL
       // project to the SAME `bpField` node, discriminated by the bpType attr. The
       // node carries the FULL config (label/options/rows/fieldName) so the round-trip
       // is byte-identical — UNLIKE code/diagram, a field block has config keys the
-      // canvas must not lose. field-image/field-reference are NOT in this set; they
-      // fall through to bpOpaque below (pickers stay boundaries).
+      // canvas must not lose. field-image/field-reference ARE in this set
+      // (CANVAS_PICKER_FIELD_TYPES): they dispatch here to fieldBlockToNode and mount
+      // an editable picker — they are NOT boundaries, do NOT fall through to bpOpaque.
       return fieldBlockToNode(block, bpId, bpType);
     }
 
@@ -843,6 +854,11 @@ function sectionBlockToNode(block, bpId, bpType) {
   const attrs = { bpId, bpType: bpType || "section" };
   if (block && block.title != null) attrs.title = block.title;
   if (block && block.layout != null) attrs.layout = block.layout;
+  // FRAMED-FINALE (charter D34): the scalar `variant` ("framed") rides node.attrs
+  // VERBATIM, PRESENT-ONLY (a no-variant section adds NOTHING — byte-identical to
+  // the pre-variant path; mirrors layout above). Without this thread the canvas
+  // silently DROPPED the frame on open.
+  if (block && block.variant != null) attrs.variant = block.variant;
 
   const children = (block && block.blocks) || [];
 
@@ -897,6 +913,10 @@ function sectionNodeToBlock(node, id, taken) {
   // SEPARATE attr). The persisted layout stays cells-free (doctrine: span/order
   // live on children, hoisted into attrs.cells for canvas transport only).
   if (attrs.layout != null) block.layout = attrs.layout;
+  // FRAMED-FINALE (charter D34): lower the scalar variant back, present-only. This
+  // ONE site covers replace-block, insert, docToBlocks AND the source-mode
+  // sentinels — every reconstruction path funnels through here.
+  if (attrs.variant != null) block.variant = attrs.variant;
 
   // STEP-6: cells is a bpId-keyed OBJECT map (not a positional array). Split each
   // child's cell back BY THE CHILD'S OWN bpId, so a canvas reorder (which changes
@@ -3705,6 +3725,10 @@ function stableSectionKey(node) {
     // just confirmed must still match the live node.
     layout: a.layout == null ? null : a.layout,
     cells: a.cells == null ? null : a.cells,
+    // FRAMED-FINALE (charter D34): variant joins the echo key so a variant-bearing
+    // section the server just confirmed still matches the live node (and a DROPPED
+    // variant is never mistaken for an own-echo).
+    variant: a.variant == null ? null : a.variant,
     content: node.content || null,
   });
 }

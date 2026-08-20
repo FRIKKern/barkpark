@@ -1,0 +1,253 @@
+COMMAND "Add a Barkpark Plugin" DESCRIPTION "Scaffold a minimal, auto-discovered Barkpark plugin — manifest, entry module (use Barkpark.Plugin), README, schemas dir, and a manifest test — with zero registry wiring. Formalizes `mix barkpark.plugin.new` as a declarative, idempotent command." LAST_UPDATED "16-07-2026-11-30-00" DOMAIN "barkpark" TAGS "plugins", "scaffold" CONCEPT "plugin" VARIANT "minimal" DIRECTION "add" VARIABLES
+  VARIABLE 1 "PluginName" TITLE "Name your plugin" DESCRIPTION "Plugin slug — lowercase, matches ^[a-z][a-z0-9_-]*$. Drives the manifest plugin_name, the priv/ + lib/ + test/ paths (snake), and the Barkpark.Plugins.<Pascal> module name." EXAMPLES "analytics", "reviews", "blog_engine"
+  VARIABLE 2 "Description" TITLE "Describe your plugin" DESCRIPTION "One-line manifest + @moduledoc description. Plain prose, no braces." EXAMPLES "Pageview analytics for published documents.", "Reader reviews with moderation."
+
+# ===========================================================================
+# add-plugin — the DECLARATIVE form of `mix barkpark.plugin.new <name>`.
+#
+# PRIOR ART. Today a plugin skeleton is scaffolded imperatively by the Mix
+# task `mix barkpark.plugin.new <name>` (api/lib/mix/tasks/barkpark.plugin.new.ex),
+# which renders four EEx templates under api/priv/templates/plugin_new/. This
+# command formalizes that generator into a single reversible .scaffy document,
+# mirroring those templates VERBATIM (their EEx interpolations become declared
+# VARIABLEs). The older `mix barkpark.gen.plugin` is DEPRECATED and merely
+# delegates to `barkpark.plugin.new` (barkpark.gen.plugin.ex:11-12); the
+# similarly-named `mix barkpark.plugin.gen_types` is a DIFFERENT domain
+# (it regenerates priv/plugin_types.d.ts from the manifest JSON Schema) and
+# does not collide with this command.
+#
+# ALL-CREATE, ZERO INJECTION. Unlike add-block-type or add-oban-worker, this
+# command touches NO accretion file — there is no registry, router, barrel, or
+# config map to inject into. The annotated file tree is therefore all-● (five
+# created files, zero ○ injected rows). The reason is architectural, not an
+# oversight:
+#
+#   * DISCOVERY IS AUTOMATIC. `Barkpark.Plugins.Registry.Discovery` walks
+#     priv/plugins/*/plugin.json at boot (plugin_dirs_in/1, read in
+#     registry/boot_collectors.ex:140-142) and registers every manifest it
+#     finds. The boot invocation is `Barkpark.Plugins.Registry.discover_and_register()`
+#     at schema_bootstrap.ex:62 — SchemaBootstrap is a supervised child
+#     (application.ex:192), started after the Registry GenServer and before
+#     Oban; registry.ex:366-367 is only a defdelegate to the implementation,
+#     `Discovery.discover_and_register/0` (discovery.ex:52). Dropping
+#     a plugin.json under priv/plugins/ IS the registration. The
+#     `config :barkpark, :plugins` list is NOT a registry: unset ⇒ discover
+#     everything; set ⇒ it acts only as a kill-switch / whitelist of
+#     plugin_names (registry.ex:13, :33). A minimal plugin needs no config
+#     edit, so this command plants none.
+#
+#   * NO MIGRATION. A plugin ships no migration. Schemas declared by a plugin's
+#     `register_schemas/1` callback are UPSERTED into the host's generic tables
+#     at boot by `Barkpark.Plugins.Bootstrap.register_all_schemas/0`
+#     (bootstrap.ex:61) — idempotent on (name, dataset). Plugin data rides the
+#     host schema; there are no plugin-owned tables to create.
+#
+# Because every op below is a whole-file CREATE FILE IF ABSENT, idempotency and
+# reversibility are structural: IF ABSENT is the guard (a second run writes
+# nothing), and the created file paths are the remove handles (Wave-3 `remove`
+# deletes exactly this set, leaving the tree byte-clean). No in-file MARK is
+# needed — MARK anchors a marker INSIDE a host file, and this command has no
+# host file. Hand-apply check (D7): the output is byte-identical to
+# `mix barkpark.plugin.new {{.plugin_name}}` run with no --capabilities.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 1/5 ● Manifest — priv/plugins/<name>/plugin.json
+#     Mirrors plugin.json.eex. Discovery reads this file; `module` must match
+#     the entry module so Registry.resolve_module/1 agrees. Minimal plugin
+#     declares no capabilities (empty list, exactly as the generator emits
+#     with no --capabilities flag).
+# ---------------------------------------------------------------------------
+CREATE FILE IF ABSENT "api/priv/plugins/{{.plugin_name}}/plugin.json"
+WITH
+::: {{.plugin_name}} manifest :::
+{
+  "plugin_name": "{{.plugin_name}}",
+  "version": "0.1.0",
+  "description": "{{.Description}}",
+  "capabilities": [],
+  "module": "Barkpark.Plugins.{{.PluginName}}"
+}
+::: {{.plugin_name}} manifest :::
+
+# ---------------------------------------------------------------------------
+# 2/5 ● Entry module — lib/barkpark/plugins/<name>.ex
+#     Mirrors lib/plugin.ex.eex. Body = `use Barkpark.Plugin` + three OPEN
+#     composition seams (register_routes/1, cli_commands/0, register_schemas/1),
+#     each returning [] and carrying the openers/zone-marks the plugin command
+#     family anchors on (add-plugin-route, add-cli-verb, add-schema-type). The
+#     seams are why the 6-command feature-pack chain composes with zero
+#     hand-bridged registration edits — plant the contract, empty, at birth. The
+#     behaviour reads + validates the manifest at COMPILE time (no runtime
+#     eval). Lives in the compiled tree (elixirc_paths sees it) so the plugin
+#     actually registers. manifest_path climbs three dirs from
+#     lib/barkpark/plugins/ to the app root, then down into priv/plugins/. The
+#     EEx generator lib/plugin.ex.eex ships the identical seam block, so
+#     `mix barkpark.plugin.new` and this command stay byte-parallel (D7).
+# ---------------------------------------------------------------------------
+CREATE FILE IF ABSENT "api/lib/barkpark/plugins/{{.plugin_name}}.ex"
+WITH
+::: {{.plugin_name}} entry module :::
+defmodule Barkpark.Plugins.{{.PluginName}} do
+  @moduledoc """
+  {{.Description}}
+
+  Generated by `mix barkpark.plugin.new {{.plugin_name}}`.
+
+  Capabilities: (none)
+
+  This module lives in the compiled tree at
+  `lib/barkpark/plugins/{{.plugin_name}}.ex` so it is reachable by
+  `elixirc_paths` and registers via `Barkpark.Plugins.Registry`. The
+  manifest at `priv/plugins/{{.plugin_name}}/plugin.json` is read +
+  validated at compile time by `Barkpark.Plugin.__using__/1` (D7 — no
+  runtime eval), and its `"module"` key points back at this module so
+  discovery matches.
+
+  Drop schemas into `priv/plugins/{{.plugin_name}}/schemas/` and add any
+  custom logic below.
+  """
+
+  use Barkpark.Plugin, manifest_path: "../../../priv/plugins/{{.plugin_name}}/plugin.json"
+
+  # ── Composition seams (scaffy) ──────────────────────────────────────────
+  # Three registration callbacks ship OPEN so the scaffy plugin command family
+  # composes on this module with zero hand-bridged edits (the "plant the
+  # contract" doctrine). Each returns [] today; each add-* command anchors on
+  # the openers/marks below and inserts one element:
+  #   * register_routes/1  -- `bp scaffy run add-plugin-route`  (a route tuple)
+  #   * cli_commands/0      -- `bp scaffy run add-cli-verb`      (a verb map)
+  #   * register_schemas/1  -- `bp scaffy run add-schema-type`   (a schema wrap)
+  # Leave the `do`/`[` openers and the zone comments intact -- they are anchors.
+
+  @impl Barkpark.Plugin
+  def register_routes(_ctx) do
+    [
+    ]
+  end
+
+  @impl Barkpark.Plugin
+  def cli_commands do
+    [
+    ]
+  end
+
+  @impl Barkpark.Plugin
+  def register_schemas(_opts) do
+    # scaffy:zone register-schemas-reads (add-plugin) -- add-schema-type plants each raw_<name> read pipeline below. MARK:zone-register-schemas-reads
+
+    # scaffy:zone register-schemas-list (add-plugin) -- add-schema-type plants each %SchemaDefinition{} wrap below the [ opener. MARK:zone-register-schemas-list
+    [
+    ]
+  end
+end
+::: {{.plugin_name}} entry module :::
+
+# ---------------------------------------------------------------------------
+# 3/5 ● README — priv/plugins/<name>/README.md
+#     Mirrors README.md.eex. The Capabilities section renders empty for a
+#     minimal (zero-capability) plugin — byte-identical to the generator.
+# ---------------------------------------------------------------------------
+CREATE FILE IF ABSENT "api/priv/plugins/{{.plugin_name}}/README.md"
+WITH
+::: {{.plugin_name}} readme :::
+# {{.plugin_name}}
+
+{{.Description}}
+
+## Capabilities
+
+
+
+## Layout
+
+The entry module lives in the compiled tree so it actually registers; the
+manifest, schemas, and this README live under `priv/plugins/{{.plugin_name}}/`.
+
+```
+lib/barkpark/plugins/{{.plugin_name}}.ex     # plugin module (use Barkpark.Plugin)
+test/barkpark/plugins/{{.plugin_name}}_test.exs  # on the mix test path
+priv/plugins/{{.plugin_name}}/
+├── plugin.json                   # manifest (validated at compile time)
+├── README.md                     # this file
+└── schemas/                      # plugin schema definitions
+```
+
+## Adding code
+
+- Schemas: drop JSON or Elixir schema files into
+  `priv/plugins/{{.plugin_name}}/schemas/`.
+- Logic: extend the module in `lib/barkpark/plugins/{{.plugin_name}}.ex`.
+- Tests: add cases to `test/barkpark/plugins/{{.plugin_name}}_test.exs`
+  and run `mix test`.
+
+## Verifying
+
+```bash
+cd api
+mix compile
+mix test test/barkpark/plugins/{{.plugin_name}}_test.exs
+```
+
+## Further reading
+
+- `docs/plugins/SCHEMA_V2.md` — composite, arrayOf, codelist, localizedText
+- `Barkpark.Plugin` behaviour — `lib/barkpark/plugin.ex`
+- `Barkpark.Plugins.Registry` — discovery & registration entrypoint
+::: {{.plugin_name}} readme :::
+
+# ---------------------------------------------------------------------------
+# 4/5 ● Schemas dir keeper — priv/plugins/<name>/schemas/.gitkeep
+#     The generator writes an empty .gitkeep so the (initially empty) schemas
+#     directory is tracked. Drop schema definitions here later.
+# ---------------------------------------------------------------------------
+CREATE FILE IF ABSENT "api/priv/plugins/{{.plugin_name}}/schemas/.gitkeep"
+WITH
+::: {{.plugin_name}} gitkeep :::
+::: {{.plugin_name}} gitkeep :::
+
+# ---------------------------------------------------------------------------
+# 5/5 ● Manifest test — test/barkpark/plugins/<name>_test.exs
+#     Mirrors test/plugin_test.exs.eex. Proves the entry module parses its
+#     manifest. Lives on the `mix test` path so CI exercises it.
+# ---------------------------------------------------------------------------
+CREATE FILE IF ABSENT "api/test/barkpark/plugins/{{.plugin_name}}_test.exs"
+WITH
+::: {{.plugin_name}} test :::
+defmodule Barkpark.Plugins.{{.PluginName}}Test do
+  use ExUnit.Case, async: true
+
+  test "manifest/0 returns the parsed plugin.json map" do
+    manifest = Barkpark.Plugins.{{.PluginName}}.manifest()
+
+    assert is_map(manifest)
+    assert manifest["plugin_name"] == "{{.plugin_name}}"
+    assert manifest["version"] == "0.1.0"
+    assert is_list(manifest["capabilities"])
+  end
+end
+::: {{.plugin_name}} test :::
+
+# ===========================================================================
+# Post-conditions — assert the five files landed with the right content.
+# Guards are ASCII substrings of what the ops above write (payload-derived).
+# ===========================================================================
+ASSERT FILE "api/priv/plugins/{{.plugin_name}}/plugin.json" CONTAINS "\"module\": \"Barkpark.Plugins.{{.PluginName}}\""
+ASSERT FILE "api/priv/plugins/{{.plugin_name}}/plugin.json" CONTAINS "\"plugin_name\": \"{{.plugin_name}}\""
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin_name}}.ex" CONTAINS "use Barkpark.Plugin, manifest_path: \"../../../priv/plugins/{{.plugin_name}}/plugin.json\""
+# The three composition seams ship OPEN — the exact openers/marks the plugin
+# command family anchors on (add-plugin-route / add-cli-verb / add-schema-type).
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin_name}}.ex" CONTAINS "def register_routes(_ctx) do"
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin_name}}.ex" CONTAINS "def cli_commands do"
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin_name}}.ex" CONTAINS "MARK:zone-register-schemas-reads"
+ASSERT FILE "api/lib/barkpark/plugins/{{.plugin_name}}.ex" CONTAINS "MARK:zone-register-schemas-list"
+ASSERT FILE "api/priv/plugins/{{.plugin_name}}/README.md" CONTAINS "# {{.plugin_name}}"
+ASSERT FILE "api/priv/plugins/{{.plugin_name}}/schemas/.gitkeep" EXISTS
+ASSERT FILE "api/test/barkpark/plugins/{{.plugin_name}}_test.exs" CONTAINS "defmodule Barkpark.Plugins.{{.PluginName}}Test do"
+
+# Compile + run the generated test. Both are Elixir gates — TIER ci (never run
+# locally per A2: all Elixir gates stay CI-tier until a verifier proves scoped
+# single-file `mix test` locally safe). No new-plugin registry edit exists to
+# assert; discovery is proven at boot by the host, not by this command.
+ASSERT CMD "cd api && mix compile" TIER ci
+ASSERT CMD "cd api && mix test test/barkpark/plugins/{{.plugin_name}}_test.exs" TIER ci

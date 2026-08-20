@@ -1,0 +1,129 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "bp task stamp --criterion N is unambiguous: either 1-based to match every rendering surface, or documented 0-based AND the CLI echoes the criterion text it stamped so a mis-index is visible immediately.",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "A regression test proves that stamping the criteria a builder SEES (1..N) lands each evidence string on the criterion it describes.",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "--met on a criterion whose text contains MERGE-GATED is refused without an explicit override, so a builder cannot pre-flip the leads merge gate.",
+          "evidence": "",
+          "met": false
+        }
+      ],
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "HIT LIVE while building site-spawner-w3-admin-site-deploy-seam (2026-07-14).\n\nbp task stamp <id> <worker> <epoch> --criterion N treats N as a 0-BASED index into acceptance_criteria. But bp task get, the rubric, the spawn prompts, and every board render criteria as 1..N. A builder who follows the visible numbering therefore attaches EVERY evidence string to the criterion one slot LATER than intended.\n\nWhy it is worse than a cosmetic off-by-one: on a 7-criterion task whose #7 is the standard '[MERGE-GATED — the lead closes this]' criterion, a builder stamping 1..6 flips criteria 2..7 — which MARKS THE MERGE-GATED CRITERION MET before the PR even exists. The builder contract explicitly forbids that, and the ledger is what the lead trusts at merge. It also means five criteria carry evidence that does not describe them, which is exactly the false-done fabrication class the ledger exists to prevent.\n\nI only caught it by dumping evidence-vs-criterion pairs after stamping; nothing in the CLI's output hints at it (each stamp returns a bare 'epoch=N rev=...'). --miss cannot un-flip a lock, so recovery needs a raw bp doc patch of the whole acceptance_criteria array + re-publish.\n\nFIX (pick one, do not do both silently): (a) make --criterion 1-based to match every surface — the least-surprise option, but it is a breaking change for any script already passing 0-based; or (b) keep 0-based and make the CLI ECHO what it stamped ('criterion 3/7: \"<first 60 chars>\" -> met') so a mis-index is visible in one line. (b) is worth doing REGARDLESS of (a): a stamp that does not name what it stamped cannot be audited.\n\nGuard: refuse --met on a criterion whose text contains 'MERGE-GATED' unless an explicit --merge-gated override is passed. That is a cheap tripwire on the one flip that actually corrupts a lead's merge decision."
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "This task is open and has not yet recorded completion evidence."
+              }
+            ],
+            "id": "state-callout",
+            "title": "Ready to begin",
+            "tone": "info",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "id": "done-list",
+            "items": [
+              "bp task stamp --criterion N is unambiguous: either 1-based to match every rendering surface, or documented 0-based AND the CLI echoes the criterion text it stamped so a mis-index is visible immediately.",
+              "A regression test proves that stamping the criteria a builder SEES (1..N) lands each evidence string on the criterion it describes.",
+              "--met on a criterion whose text contains MERGE-GATED is refused without an explicit override, so a builder cannot pre-flip the leads merge gate."
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ],
+        "version": 1
+      },
+      "description": "HIT LIVE while building site-spawner-w3-admin-site-deploy-seam (2026-07-14).\n\n`bp task stamp <id> <worker> <epoch> --criterion N` treats N as a 0-BASED index into acceptance_criteria. But bp task get, the rubric, the spawn prompts, and every board render criteria as 1..N. A builder who follows the visible numbering therefore attaches EVERY evidence string to the criterion one slot LATER than intended.\n\nWhy it is worse than a cosmetic off-by-one: on a 7-criterion task whose #7 is the standard '[MERGE-GATED — the lead closes this]' criterion, a builder stamping 1..6 flips criteria 2..7 — which MARKS THE MERGE-GATED CRITERION MET before the PR even exists. The builder contract explicitly forbids that, and the ledger is what the lead trusts at merge. It also means five criteria carry evidence that does not describe them, which is exactly the false-done fabrication class the ledger exists to prevent.\n\nI only caught it by dumping evidence-vs-criterion pairs after stamping; nothing in the CLI's output hints at it (each stamp returns a bare 'epoch=N rev=...'). --miss cannot un-flip a lock, so recovery needs a raw bp doc patch of the whole acceptance_criteria array + re-publish.\n\nFIX (pick one, do not do both silently): (a) make --criterion 1-based to match every surface — the least-surprise option, but it is a breaking change for any script already passing 0-based; or (b) keep 0-based and make the CLI ECHO what it stamped ('criterion 3/7: \"<first 60 chars>\" -> met') so a mis-index is visible in one line. (b) is worth doing REGARDLESS of (a): a stamp that does not name what it stamped cannot be audited.\n\nGuard: refuse --met on a criterion whose text contains 'MERGE-GATED' unless an explicit --merge-gated override is passed. That is a cheap tripwire on the one flip that actually corrupts a lead's merge decision.",
+      "github": {
+        "issue": 3207,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_rev": "dac5ce5e639781ed914560922df10173"
+      },
+      "kind": "task",
+      "lifecycle_status": "open",
+      "main_tag": "go-cli",
+      "priority": 1,
+      "tags": [
+        {
+          "rationale": "bp task stamp argument semantics + output live in the Go CLI.",
+          "strength": 80,
+          "tag": "go-cli"
+        },
+        {
+          "rationale": "A mis-indexed stamp pre-flips the lead MERGE-GATED criterion — the exact false-done class the ledger exists to prevent.",
+          "strength": 60,
+          "tag": "ratchet-honesty"
+        }
+      ]
+    },
+    "criteria_progress": {
+      "met": 0,
+      "total": 3
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "bp-task-stamp-criterion-index-is-zero-based-footgun",
+    "execution_policy": null,
+    "id": "929d1eeb-359a-4cec-b977-e9e5d54e27d9",
+    "inserted_at": "2026-07-14T09:00:25.308188Z",
+    "kind": "task",
+    "labels": [],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": null,
+    "priority": 1,
+    "rev": "b9690437d1d18d41195717431c304797",
+    "status": "published",
+    "title": "bp task stamp --criterion N is 0-INDEXED while every board/rubric renders criteria 1..N — a builder stamping 1..N silently flips the wrong criterion (incl. merge-gated ones)",
+    "type": "task",
+    "updated_at": "2026-07-14T09:00:56.277514Z"
+  },
+  "ok": true
+}

@@ -34,8 +34,7 @@ interface QueryResultBody<T> {
  * Build a fluent filter/order/limit/offset query against a document type.
  *
  * Returns a {@link DocsBuilder} whose `.find()` / `.findOne()` hit the wire.
- * `.where(field, op, value)` chains; see {@link FilterOp} for supported ops
- * (Phase 1A: `eq` | `in` | `contains` | `gt` | `gte` | `lt` | `lte`).
+ * `.where(field, op, value)` chains; see {@link FilterOp} for supported ops.
  * Prefer `client.docs(type)` — this factory is for config-only callers.
  */
 export function createDocsOperation<T = BarkparkDocument>(

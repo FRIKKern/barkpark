@@ -10,7 +10,32 @@ defmodule Barkpark.StudioChat.RecorderTest do
   use Barkpark.DataCase, async: false
 
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.Recorder
+  alias Barkpark.StudioChat.{AgentStateSweeper, Recorder, Session}
+  alias Barkpark.StudioChat.Runtime.Event
+
+  # A managed-adapter stand-in for the threading test (charter D137/D110): it
+  # never spawns a CLI, it just reports the opts `Runtime.open` handed it back to
+  # the test process (via app-env, since it runs in the Recorder's process, not
+  # the test's). The probe pid is read from app-env so the cross-process `send`
+  # lands. Implements the full frozen Adapter contract.
+  defmodule ProbeAdapter do
+    @behaviour Barkpark.StudioChat.Runtime.Adapter
+
+    def start(opts), do: notify({:runtime_start_opts, opts})
+    def resume(opts), do: notify({:runtime_resume_opts, opts})
+    def send_turn(_runtime, _content), do: :ok
+    def steer(_runtime, _command), do: :ok
+    def interrupt(_runtime), do: {:ok, "interrupt-1"}
+    def answer_approval(_runtime, _approval_id, _decision), do: :ok
+    def close(_runtime), do: :ok
+    def readiness(_opts), do: %{binary: true, authed?: true}
+    def capabilities, do: %{modes: ["plan"], models: [], efforts: []}
+
+    defp notify(message) do
+      if pid = Application.get_env(:barkpark, :cloud_sandbox_probe_pid), do: send(pid, message)
+      {:ok, :fake_runtime}
+    end
+  end
 
   setup do
     prev = Application.get_env(:barkpark, :claude_chat)
@@ -59,6 +84,65 @@ defmodule Barkpark.StudioChat.RecorderTest do
   test "session_pid/1 exposes a live session", %{recorder: recorder} do
     assert {:ok, session} = Recorder.session_pid(recorder)
     assert Process.alive?(session)
+  end
+
+  test "a bp_sandbox frame persists the binding and is SWALLOWED (charter D137)",
+       %{sid: sid, recorder: recorder} do
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+    before = length(StudioChat.list_messages(sid))
+
+    frame(
+      recorder,
+      {:claude_chat_event,
+       %{"type" => "bp_sandbox", "subtype" => "created", "sandbox_id" => "sbx-x"}}
+    )
+
+    # persisted onto the Session row — the durable binding the next turn resumes
+    assert StudioChat.get_session(sid).cloud_sandbox_id == "sbx-x"
+    # SWALLOWED: no chat_messages row appended (the customer stream stays clean)
+    assert length(StudioChat.list_messages(sid)) == before
+    # SWALLOWED: never broadcast on the session topic
+    refute_receive {:claude_chat_event, %{"type" => "bp_sandbox"}}, 200
+
+    # non-vacuous: the subscription IS live — a normal frame still broadcasts, so
+    # the refute above proves the swallow, not a dead topic.
+    frame(
+      recorder,
+      {:claude_chat_event,
+       %{
+         "type" => "assistant",
+         "message" => %{"content" => [%{"type" => "text", "text" => "hi"}]}
+       }}
+    )
+
+    assert_receive {:claude_chat_event, %{"type" => "assistant"}}
+  end
+
+  test "the persisted Cloud sandbox binding threads into the opts handed to the runtime (D110-style)" do
+    prev = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
+    Application.put_env(:barkpark, :studio_chat_runtime_adapters, %{claude: ProbeAdapter})
+    Application.put_env(:barkpark, :cloud_sandbox_probe_pid, self())
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, :studio_chat_runtime_adapters, prev),
+        else: Application.delete_env(:barkpark, :studio_chat_runtime_adapters)
+
+      Application.delete_env(:barkpark, :cloud_sandbox_probe_pid)
+    end)
+
+    id = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: id, mode: "plan"})
+    {:ok, _} = StudioChat.set_cloud_sandbox_id(id, "sbx-threaded")
+
+    {:ok, _rec} = Recorder.ensure(%{session_id: id, mode: "plan", resume: false})
+
+    # The recorder loads the binding from the Session row (NOT from ensure/1 opts)
+    # and threads it into the map Runtime.open hands the adapter — where
+    # runtime/claude.ex lifts it into ClaudeChat.command/2's session_opts (W14-1).
+    assert_receive {:runtime_start_opts, opts}, 2_000
+    assert opts.cloud_sandbox_id == "sbx-threaded"
+    refute Map.has_key?(%{session_id: id, mode: "plan", resume: false}, :cloud_sandbox_id)
   end
 
   test "an assistant frame persists text + tool rows with NO viewer attached",
@@ -1153,7 +1237,9 @@ defmodule Barkpark.StudioChat.RecorderTest do
       # "a" vanishes from the snapshot → it completed; entries are never deleted.
       frame(
         recorder,
-        bg_frame([%{"task_id" => "b", "task_type" => "local_workflow", "description" => "Write the tests"}])
+        bg_frame([
+          %{"task_id" => "b", "task_type" => "local_workflow", "description" => "Write the tests"}
+        ])
       )
 
       rail = session_rail(sid)
@@ -1165,7 +1251,9 @@ defmodule Barkpark.StudioChat.RecorderTest do
          %{sid: sid, recorder: recorder} do
       frame(
         recorder,
-        bg_frame([%{"task_id" => "a", "task_type" => "local_workflow", "description" => "long agent"}])
+        bg_frame([
+          %{"task_id" => "a", "task_type" => "local_workflow", "description" => "long agent"}
+        ])
       )
 
       # a fresh turn begins mid-run — the rail must NOT reset (unlike per-turn state)
@@ -1187,7 +1275,13 @@ defmodule Barkpark.StudioChat.RecorderTest do
           "task_id" => "t",
           "workflow_progress" => [
             %{"type" => "workflow_phase", "title" => "Plan"},
-            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "running", "tokens" => 10}
+            %{
+              "type" => "workflow_agent",
+              "label" => "explorer",
+              "model" => "fable",
+              "state" => "running",
+              "tokens" => 10
+            }
           ],
           "usage" => %{"total_tokens" => 10}
         })
@@ -1207,7 +1301,13 @@ defmodule Barkpark.StudioChat.RecorderTest do
           "task_id" => "t",
           "workflow_progress" => [
             %{"type" => "workflow_phase", "title" => "Plan"},
-            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "running", "tokens" => 9_999}
+            %{
+              "type" => "workflow_agent",
+              "label" => "explorer",
+              "model" => "fable",
+              "state" => "running",
+              "tokens" => 9_999
+            }
           ],
           "usage" => %{"total_tokens" => 9_999}
         })
@@ -1223,12 +1323,19 @@ defmodule Barkpark.StudioChat.RecorderTest do
           "task_id" => "t",
           "workflow_progress" => [
             %{"type" => "workflow_phase", "title" => "Plan"},
-            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "completed", "tokens" => 9_999}
+            %{
+              "type" => "workflow_agent",
+              "label" => "explorer",
+              "model" => "fable",
+              "state" => "completed",
+              "tokens" => 9_999
+            }
           ]
         })
       )
 
       refute Map.has_key?(session_rail(sid), "SENTINEL")
+
       assert get_in(session_rail(sid), ["t", "workflow"]) |> Enum.at(1) |> Map.get("state") ==
                "completed"
     end
@@ -1276,13 +1383,176 @@ defmodule Barkpark.StudioChat.RecorderTest do
         ])
       )
 
-      frame(recorder, task_event("task_notification", %{"task_id" => "done", "status" => "completed"}))
+      frame(
+        recorder,
+        task_event("task_notification", %{"task_id" => "done", "status" => "completed"})
+      )
 
       StudioChat.interrupt_running_tasks(sid)
 
       rail = session_rail(sid)
       assert rail["live"]["status"] == "interrupted"
       assert rail["done"]["status"] == "completed"
+    end
+  end
+
+  describe "agents rail → {:chat_workflow} broadcast (charter D5–D7)" do
+    defp workflow_progress(tid, state, opts \\ []) do
+      tokens = Keyword.get(opts, :tokens, 10)
+
+      progress_frame(%{
+        "task_id" => tid,
+        "workflow_progress" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Plan"},
+          %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "explorer",
+            "model" => "fable",
+            "state" => state,
+            "startedAt" => 1_782_767_557_221,
+            "tokens" => tokens
+          }
+        ],
+        "usage" => %{"total_tokens" => tokens}
+      })
+    end
+
+    test "a workflow-bearing structural change broadcasts {:chat_workflow}; token-only ticks emit none",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+      # A background-only rail change carries no workflow node ⇒ zero broadcasts.
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "run"}])
+      )
+
+      refute_receive {:chat_workflow, ^sid, _}, 100
+
+      # The FIRST workflow tree is a structural change ⇒ exactly one broadcast.
+      frame(recorder, workflow_progress("t", "running"))
+
+      assert_receive {:chat_workflow, ^sid, summary}, 200
+      assert summary.agents_total == 1
+      assert summary.running == 1
+      assert summary.agents_done == 0
+      assert summary.label == "run"
+      assert summary.terminal? == false
+      refute_receive {:chat_workflow, ^sid, _}, 100
+
+      # Two token-only ticks (same tree + states, only tokens advance) leave the
+      # structural signature untouched ⇒ ZERO additional broadcasts (charter D6).
+      frame(recorder, workflow_progress("t", "running", tokens: 500))
+      frame(recorder, workflow_progress("t", "running", tokens: 9_999))
+      refute_receive {:chat_workflow, ^sid, _}, 100
+
+      # A genuine state flip (running → completed) is one structural change ⇒
+      # exactly one further broadcast, now carrying the settled counts.
+      frame(recorder, workflow_progress("t", "completed", tokens: 9_999))
+
+      assert_receive {:chat_workflow, ^sid, settled}, 200
+      assert settled.running == 0
+      assert settled.agents_done == 1
+      refute_receive {:chat_workflow, ^sid, _}, 100
+    end
+
+    test "the summary ALSO rides the per-session topic (the SSE wire) and NEVER leaks cross-session (wsc-bl-workflow-sse, D22)",
+         %{sid: sid, recorder: recorder} do
+      # A SECOND session — its per-session topic is a leak tripwire.
+      other = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: other, mode: "plan"})
+
+      # The Studio sidebar keys off the GLOBAL activity topic; the SSE forwarder
+      # keys off THIS session's per-session topic — both must fire.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+      # …and the OTHER session's topic — session B must never see session A.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(other))
+
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "run"}])
+      )
+
+      frame(recorder, workflow_progress("t", "running"))
+
+      # The activity topic fires (Studio, unchanged)…
+      assert_receive {:chat_workflow, ^sid, summary_activity}, 200
+      # …AND the per-session topic fires the SAME summary (the SSE wire, D22).
+      assert_receive {:chat_workflow, ^sid, summary_session}, 200
+      assert summary_activity == summary_session
+      assert summary_session.label == "run"
+
+      # Tenant-safe BY CONSTRUCTION: topic(other) embeds a DIFFERENT sid, so a
+      # subscriber on session B's stream never receives session A's workflow — no
+      # ^id filter needed (the topic key IS the scope).
+      refute_receive {:chat_workflow, ^other, _}, 100
+    end
+
+    test "task_updated folds patch.end_time onto the rail entry; workflow_summary surfaces ended_at (charter D5)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "run"}])
+      )
+
+      frame(recorder, workflow_progress("t", "completed"))
+
+      # Before the terminal patch there is no end_time and ended_at is nil.
+      refute Map.has_key?(session_rail(sid)["t"], "end_time")
+      assert StudioChat.workflow_summary(session_rail(sid)).ended_at == nil
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+      frame(
+        recorder,
+        task_event("task_updated", %{
+          "task_id" => "t",
+          "patch" => %{"status" => "completed", "end_time" => 1_782_767_600_000}
+        })
+      )
+
+      # The persisted entry now carries the terminal end_time…
+      assert session_rail(sid)["t"]["end_time"] == 1_782_767_600_000
+      # …and workflow_summary/1 surfaces it as a real ended_at.
+      assert StudioChat.workflow_summary(session_rail(sid)).ended_at == 1_782_767_600_000
+
+      # Stamping the terminal status was a structural change ⇒ the broadcast
+      # carries the same real ended_at to every subscribed card.
+      assert_receive {:chat_workflow, ^sid, summary}, 200
+      assert summary.ended_at == 1_782_767_600_000
+      assert summary.terminal? == true
+    end
+
+    test "plain chats pay zero: a session whose rail never carries workflow nodes never broadcasts {:chat_workflow}",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+      # A pure text turn — no rail at all.
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => "hello"}]}
+         }}
+      )
+
+      # A background-task lifecycle that moves the rail but never carries a
+      # workflow node list — still zero {:chat_workflow}.
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "run"}])
+      )
+
+      frame(
+        recorder,
+        task_event("task_updated", %{"task_id" => "t", "patch" => %{"status" => "completed"}})
+      )
+
+      refute_receive {:chat_workflow, ^sid, _}, 150
     end
   end
 
@@ -1426,6 +1696,939 @@ defmodule Barkpark.StudioChat.RecorderTest do
       row = StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["request_id"] == "mcp-w1"))
       assert row.role == "approval"
       assert row.metadata["approval_status"] == "pending"
+    end
+  end
+
+  # ── agent_state substrate (herd wave 1, charter D38–D43h) ──────────────────
+
+  describe "agent_state persistence at the publish_activity seam (D38/D39)" do
+    setup %{sid: sid} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+      %{sid: sid}
+    end
+
+    defp init_frame, do: {:claude_chat_event, %{"type" => "system", "subtype" => "init"}}
+
+    defp result_frame,
+      do: {:claude_chat_event, %{"type" => "result", "subtype" => "success"}}
+
+    defp ask_frame(rid, tool \\ "Write") do
+      {:claude_chat_permission,
+       %{request_id: rid, tool_name: tool, input: %{}, title: nil, decision_reason: nil}}
+    end
+
+    defp tool_frame(command) do
+      {:claude_chat_event,
+       %{
+         "type" => "assistant",
+         "message" => %{
+           "content" => [
+             %{"type" => "tool_use", "name" => "Bash", "input" => %{"command" => command}}
+           ]
+         }
+       }}
+    end
+
+    defp delta_frame do
+      {:claude_chat_event,
+       %{
+         "type" => "stream_event",
+         "event" => %{
+           "type" => "content_block_delta",
+           "delta" => %{"type" => "text_delta", "text" => "x"}
+         }
+       }}
+    end
+
+    defp agent_state(sid), do: StudioChat.get_session(sid).agent_state
+
+    test "init→working, ask→blocked, resolve→working, result→idle — all persisted",
+         %{sid: sid, recorder: recorder} do
+      # no backfill: a fresh row is the schema default with a NULL stamp
+      s0 = StudioChat.get_session(sid)
+      assert s0.agent_state == "idle"
+      assert s0.agent_state_at == nil
+
+      frame(recorder, init_frame())
+      s1 = StudioChat.get_session(sid)
+      assert s1.agent_state == "working"
+      assert %DateTime{} = s1.agent_state_at
+
+      frame(recorder, ask_frame("as-r1"))
+      assert agent_state(sid) == "blocked"
+
+      # resolving the ONLY pending ask unblocks the persisted state — Studio's
+      # resolve_permission and the /v1/chat approval route both funnel here
+      {:ok, _} = StudioChat.update_approval_status(sid, "as-r1", "allowed")
+      assert agent_state(sid) == "working"
+
+      frame(recorder, result_frame())
+      assert agent_state(sid) == "idle"
+    end
+
+    test "flips-only: 100 deltas + tool line-text churn cause ZERO extra writes",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      %{agent_state: "working", agent_state_at: at0} = StudioChat.get_session(sid)
+
+      for _ <- 1..100, do: frame(recorder, delta_frame())
+
+      # line-text-only churn: "Bash — x" → "Bash — y" IS an activity change
+      # (it broadcasts) but both map to "working" — never a store write
+      frame(recorder, tool_frame("mix test a"))
+      frame(recorder, tool_frame("mix test b"))
+
+      assert_receive {:chat_activity, ^sid,
+                      %{state: :working, line: "Bash — command: mix test a"}}
+
+      assert_receive {:chat_activity, ^sid,
+                      %{state: :working, line: "Bash — command: mix test b"}}
+
+      # every set_agent_state write refreshes agent_state_at, so an unchanged
+      # stamp PROVES zero writes since the single init flip (the write-count)
+      %{agent_state: "working", agent_state_at: at1} = StudioChat.get_session(sid)
+      assert DateTime.compare(at0, at1) == :eq
+    end
+
+    test "offline after working → unknown (mid-turn death, D39)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      ref = Process.monitor(recorder)
+      send(recorder, {:claude_chat_exit, 1, "boom"})
+      assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
+      assert agent_state(sid) == "unknown"
+    end
+
+    test "offline after a pending ask (needs_you) → unknown (D39)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      frame(recorder, ask_frame("as-r2"))
+      ref = Process.monitor(recorder)
+      send(recorder, {:claude_chat_exit, 0, ""})
+      assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
+      assert agent_state(sid) == "unknown"
+    end
+
+    test "idle_reap of a RESTING session stays idle — a reaped rest is not wedged (D39)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      frame(recorder, result_frame())
+      %{agent_state: "idle", agent_state_at: at0} = StudioChat.get_session(sid)
+
+      ref = Process.monitor(recorder)
+      send(recorder, :idle_reap)
+      assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
+
+      # STAYS idle, and flips-only means the reap wrote nothing at all
+      %{agent_state: "idle", agent_state_at: at1} = StudioChat.get_session(sid)
+      assert DateTime.compare(at0, at1) == :eq
+    end
+
+    test "idle_reap MID-TURN → unknown (the reaper can fire during a turn, D39)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      ref = Process.monitor(recorder)
+      send(recorder, :idle_reap)
+      assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
+      assert agent_state(sid) == "unknown"
+    end
+
+    test "the codex runtime-event path drives the SAME persisted states",
+         %{sid: sid, recorder: recorder} do
+      ev = fn kind -> %Event{kind: kind, provider: "codex", session_id: sid} end
+
+      frame(recorder, {:studio_chat_runtime_event, ev.(:turn_started)})
+      %{agent_state: "working", agent_state_at: at0} = StudioChat.get_session(sid)
+
+      # deltas collapse: same mapped state ⇒ zero further writes
+      for _ <- 1..100, do: frame(recorder, {:studio_chat_runtime_event, ev.(:text_delta)})
+      %{agent_state: "working", agent_state_at: at1} = StudioChat.get_session(sid)
+      assert DateTime.compare(at0, at1) == :eq
+
+      # a codex approval ask flips blocked (the :approval_requested branch)
+      frame(
+        recorder,
+        {:studio_chat_runtime_event,
+         %Event{
+           kind: :approval_requested,
+           provider: "codex",
+           session_id: sid,
+           approval_id: "cdx-1",
+           native: %{"method" => "item/commandExecution/requestApproval", "params" => %{}}
+         }}
+      )
+
+      assert agent_state(sid) == "blocked"
+
+      frame(recorder, {:studio_chat_runtime_event, ev.(:turn_completed)})
+      assert agent_state(sid) == "idle"
+
+      # the codex error path is an :offline site: prior working → unknown
+      frame(recorder, {:studio_chat_runtime_event, ev.(:turn_started)})
+      assert agent_state(sid) == "working"
+      frame(recorder, {:studio_chat_runtime_event, ev.(:error)})
+      assert agent_state(sid) == "unknown"
+    end
+  end
+
+  # ── blocked-truth guard (charter D56h, herd-s3f) ────────────────────────────
+  #
+  # Reproduced 3/3 live: the instant an ask fires, a trailing assistant
+  # tool_use frame re-derives :working and clobbers :needs_you 1.3–2.7ms later
+  # while the ask stays genuinely pending — blocked was observable for
+  # milliseconds only. The guard lives at the publish_activity seam: an
+  # activity-derived :working never overwrites blocked while any pending ask
+  # remains; resolution (answer / cancel / exit) still unblocks.
+  describe "blocked-truth guard — a pending ask keeps agent_state=blocked (D56h)" do
+    setup %{sid: sid} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+      %{sid: sid}
+    end
+
+    test "a late assistant tool_use frame never clobbers blocked; resolve → working",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      assert_receive {:chat_activity, ^sid, %{state: :working, line: "thinking…"}}
+
+      frame(recorder, ask_frame("bt-1", "Bash"))
+      assert_receive {:chat_activity, ^sid, %{state: :needs_you}}
+      assert agent_state(sid) == "blocked"
+
+      # THE CLOBBER: a trailing/duplicate assistant tool_use frame lands
+      # microseconds after the ask while it is still genuinely pending
+      frame(recorder, tool_frame("mix test"))
+      assert agent_state(sid) == "blocked"
+      refute_receive {:chat_activity, ^sid, %{state: :working}}, 100
+
+      # stream deltas derive :working too — same guard, same suppression
+      frame(recorder, delta_frame())
+      assert agent_state(sid) == "blocked"
+
+      # resolving the ask (Studio + /v1/chat both funnel through
+      # update_approval_status) flips the store, and the NEXT working frame
+      # passes the guard so the live overlay converges too
+      {:ok, _} = StudioChat.update_approval_status(sid, "bt-1", "allowed")
+      assert agent_state(sid) == "working"
+
+      frame(recorder, tool_frame("mix test again"))
+      assert_receive {:chat_activity, ^sid, %{state: :working}}
+      assert agent_state(sid) == "working"
+    end
+
+    test "a second ask keeps blocked until the LAST resolves",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      assert_receive {:chat_activity, ^sid, %{state: :working, line: "thinking…"}}
+
+      frame(recorder, ask_frame("bt-a", "Write"))
+      frame(recorder, ask_frame("bt-b", "AskUserQuestion"))
+      assert agent_state(sid) == "blocked"
+
+      # first resolution: one ask still pending — aligned with
+      # unblock_if_resolved's pending==0 guard, blocked holds
+      {:ok, _} = StudioChat.update_approval_status(sid, "bt-a", "allowed")
+      assert agent_state(sid) == "blocked"
+
+      frame(recorder, tool_frame("mix deps.get"))
+      assert agent_state(sid) == "blocked"
+      refute_receive {:chat_activity, ^sid, %{state: :working}}, 100
+
+      # the LAST resolution unblocks; the next working frame flows through
+      {:ok, _} = StudioChat.update_approval_status(sid, "bt-b", "denied")
+      assert agent_state(sid) == "working"
+
+      frame(recorder, tool_frame("mix test"))
+      assert_receive {:chat_activity, ^sid, %{state: :working}}
+      assert agent_state(sid) == "working"
+    end
+
+    test "cancel_pending_approvals unblocks: the next working frame flows",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      frame(recorder, ask_frame("bt-c"))
+      assert agent_state(sid) == "blocked"
+
+      # the force-cancel teardown zeroes the pending counter; the guard reads
+      # that store truth and lets the wire's working through again
+      StudioChat.cancel_pending_approvals(sid)
+      frame(recorder, tool_frame("mix test"))
+      assert agent_state(sid) == "working"
+    end
+
+    test "suppression writes NOTHING (flips-only discipline intact)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, init_frame())
+      frame(recorder, ask_frame("bt-d"))
+      %{agent_state: "blocked", agent_state_at: at0} = StudioChat.get_session(sid)
+
+      for _ <- 1..20, do: frame(recorder, delta_frame())
+      frame(recorder, tool_frame("mix a"))
+      frame(recorder, tool_frame("mix b"))
+
+      # an unchanged stamp PROVES zero writes while suppressed (every
+      # set_agent_state write refreshes agent_state_at)
+      %{agent_state: "blocked", agent_state_at: at1} = StudioChat.get_session(sid)
+      assert DateTime.compare(at0, at1) == :eq
+    end
+
+    test "codex: a text_delta after :approval_requested keeps blocked until resolve",
+         %{sid: sid, recorder: recorder} do
+      ev = fn kind -> %Event{kind: kind, provider: "codex", session_id: sid} end
+
+      frame(recorder, {:studio_chat_runtime_event, ev.(:turn_started)})
+
+      frame(
+        recorder,
+        {:studio_chat_runtime_event,
+         %Event{
+           kind: :approval_requested,
+           provider: "codex",
+           session_id: sid,
+           approval_id: "bt-cdx",
+           native: %{"method" => "item/commandExecution/requestApproval", "params" => %{}}
+         }}
+      )
+
+      assert agent_state(sid) == "blocked"
+
+      frame(recorder, {:studio_chat_runtime_event, ev.(:text_delta)})
+      assert agent_state(sid) == "blocked"
+
+      {:ok, _} = StudioChat.update_approval_status(sid, "bt-cdx", "allowed")
+      frame(recorder, {:studio_chat_runtime_event, ev.(:text_delta)})
+      assert agent_state(sid) == "working"
+    end
+  end
+
+  describe "autopilot policy (plan-approve auto-switch)" do
+    test "the plan-approved fact engages Autopilot: persist + broadcast",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(recorder, {:claude_chat_plan_approved, "req-plan"})
+
+      # Persisted: the next lazy --resume spawns in Autopilot.
+      assert StudioChat.get_session(sid).mode == "auto"
+      # Broadcast: every live viewer (Studio tab, SSE forwarder) flips now.
+      assert_receive {:studio_chat_mode_adopted, "auto", :plan_approved}, 1_000
+    end
+
+    test "init reporting permissionMode default while the store says plan engages (safety net)",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "default"}}
+      )
+
+      assert StudioChat.get_session(sid).mode == "auto"
+      assert_receive {:studio_chat_mode_adopted, "auto", :plan_approved}, 1_000
+    end
+
+    test "a routine init (mode matching the store) adopts nothing",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "plan"}}
+      )
+
+      assert StudioChat.get_session(sid).mode == "plan"
+      refute_receive {:studio_chat_mode_adopted, _, _}, 200
+    end
+
+    test "a genuine legacy-default session stays untouched (no silent escalation)",
+         %{sid: sid, recorder: recorder} do
+      StudioChat.set_mode(sid, "default")
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "default"}}
+      )
+
+      assert StudioChat.get_session(sid).mode == "default"
+      refute_receive {:studio_chat_mode_adopted, _, _}, 200
+    end
+  end
+
+  describe "agent_state heartbeat (charter D41h)" do
+    setup %{sid: sid} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+      prev = Application.get_env(:barkpark, :studio_chat_agent_heartbeat_ms)
+      Application.put_env(:barkpark, :studio_chat_agent_heartbeat_ms, 40)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :studio_chat_agent_heartbeat_ms, prev),
+          else: Application.delete_env(:barkpark, :studio_chat_agent_heartbeat_ms)
+      end)
+
+      %{sid: sid}
+    end
+
+    defp drain_heartbeats(sid) do
+      receive do
+        {:chat_heartbeat, ^sid, _} -> drain_heartbeats(sid)
+      after
+        0 -> :ok
+      end
+    end
+
+    test "while working the tick bumps agent_state_at and broadcasts {:chat_heartbeat}",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      %{agent_state: "working", agent_state_at: at0} = StudioChat.get_session(sid)
+
+      assert_receive {:chat_heartbeat, ^sid, %DateTime{}}, 1_000
+
+      # the tick bumped ONLY the stamp — the state did not flip
+      s = StudioChat.get_session(sid)
+      assert s.agent_state == "working"
+      assert DateTime.compare(s.agent_state_at, at0) == :gt
+    end
+
+    test "while blocked the heartbeat keeps beating (the sweeper must never reap a waiting ask)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_permission,
+         %{request_id: "hb-1", tool_name: "Write", input: %{}, title: nil, decision_reason: nil}}
+      )
+
+      assert StudioChat.get_session(sid).agent_state == "blocked"
+      assert_receive {:chat_heartbeat, ^sid, %DateTime{}}, 1_000
+    end
+
+    test "a flip to idle cancels the heartbeat — no ticks at rest",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      frame(recorder, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      # let any tick already in flight land, then demand silence
+      Process.sleep(80)
+      drain_heartbeats(sid)
+      refute_receive {:chat_heartbeat, ^sid, _}, 150
+    end
+  end
+
+  describe "workspace stamp on the activity broadcast (charter D43h)" do
+    setup do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+      :ok
+    end
+
+    test "publish_activity stamps owner_workspace_id as a MAP key; the stored map stays UNSTAMPED" do
+      ws = Ecto.UUID.generate()
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, mode: "plan"}, {:workspace, ws})
+
+      {:ok, recorder} =
+        Recorder.ensure(%{session_id: id, mode: "plan", resume: false, workspace_id: ws})
+
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+
+      # still a 3-tuple; the stamp rides the MAP (never a 4th element)
+      assert_receive {:chat_activity, ^id,
+                      %{state: :working, line: "thinking…", owner_workspace_id: ^ws}}
+
+      # the SAME activity again is gated: the stored map is UNSTAMPED, so the
+      # change-detect compare still collapses — a stamped store would
+      # re-broadcast every identical activity forever
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      refute_receive {:chat_activity, ^id, _}, 100
+    end
+
+    test "a workspace-less session stamps owner_workspace_id: nil (fail-closed downstream)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+
+      assert_receive {:chat_activity, ^sid, %{state: :working} = act}
+      assert Map.fetch!(act, :owner_workspace_id) == nil
+    end
+  end
+
+  # ── herd-s6 fixtures: a REAL registered host + execution lease ──────────────
+  #
+  # The report fence is a literal chat_execution_leases reuse (D79h), so these
+  # tests enroll a real host and insert a real lease row — the corroborating
+  # EXISTS predicate and the FOR-UPDATE fence validation both hit the actual
+  # table, never a stub.
+  defp reporter_host! do
+    suffix = System.unique_integer([:positive])
+
+    {:ok, ws} =
+      Barkpark.Tenancy.create_workspace(%{slug: "s6-#{suffix}", name: "S6 #{suffix}"})
+
+    {:ok, %{enrollment_token: token}} =
+      Barkpark.ChatHosts.issue_enrollment(ws.id, %{name: "reporter"})
+
+    {:ok, %{credential: credential}} = Barkpark.ChatHosts.enroll(token)
+    {:ok, host} = Barkpark.ChatHosts.authenticate(credential)
+    host
+  end
+
+  defp lease!(host, sid, opts \\ []) do
+    {:ok, lease} =
+      %Barkpark.ChatHosts.ExecutionLease{}
+      |> Barkpark.ChatHosts.ExecutionLease.changeset(%{
+        host_id: host.id,
+        workspace_id: host.workspace_id,
+        session_id: sid,
+        provider: "claude",
+        command_key: "ck-#{System.unique_integer([:positive])}",
+        status: Keyword.get(opts, :status, "running"),
+        expires_at: Keyword.get(opts, :expires_at, DateTime.add(DateTime.utc_now(), 60, :second))
+      })
+      |> Repo.insert()
+
+    lease
+  end
+
+  defp expire_lease!(lease) do
+    {1, _} =
+      Repo.update_all(
+        from(l in Barkpark.ChatHosts.ExecutionLease, where: l.id == ^lease.id),
+        set: [expires_at: DateTime.add(DateTime.utc_now(), -5, :second)]
+      )
+
+    :ok
+  end
+
+  describe "external reporter fence — precedence + explicit hand-back (herd-s6, D79h)" do
+    setup %{sid: sid} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+      %{sid: sid, host: reporter_host!()}
+    end
+
+    # Precedence BOTH directions: → while the fence lives the reporter is SOLE
+    # truth (derived flips touch NEITHER the store NOR the wire); ← on lease
+    # expiry the recorder hands authority back explicitly. (Name kept short:
+    # the OTP atom limit is 255 BYTES and closure atoms append '/1-fun-N-'.)
+    test "precedence both ways: fenced reporter is sole truth on store + wire; expiry hands back",
+         %{sid: sid, recorder: recorder, host: host} do
+      frame(recorder, init_frame())
+      assert agent_state(sid) == "working"
+      assert_receive {:chat_activity, ^sid, %{state: :working}}
+
+      lease = lease!(host, sid)
+
+      assert {:ok, %{agent_state: "blocked", lease_id: lease_id}} =
+               Barkpark.ChatHosts.report_state(host, sid, "blocked", lease.epoch)
+
+      assert lease_id == lease.id
+      # reported truth lands in the store AND speaks on the fleet-feeding topic
+      assert agent_state(sid) == "blocked"
+      assert_receive {:chat_reported_state, ^sid, %{agent_state: "blocked"}}
+
+      # a derived idle transition (the result frame) arrives while fenced…
+      frame(recorder, result_frame())
+      # …and overwrites NEITHER barrel: not the column, not the wire
+      assert agent_state(sid) == "blocked"
+      refute_receive {:chat_activity, ^sid, %{state: :idle}}, 100
+
+      # PRECEDENCE ←: the reporter dies — its lease expires (the 60s TTL
+      # clock); the fence check finds no live lease and hands authority back:
+      # the recorder re-asserts its CURRENT derived truth on both barrels.
+      expire_lease!(lease)
+      send(recorder, :reported_fence_check)
+      :sys.get_state(recorder)
+
+      assert agent_state(sid) == "idle"
+      assert_receive {:chat_activity, ^sid, %{state: :idle}}
+    end
+
+    test "a still-live lease re-arms the fence check — no premature hand-back",
+         %{sid: sid, recorder: recorder, host: host} do
+      frame(recorder, init_frame())
+      lease = lease!(host, sid)
+      assert {:ok, _} = Barkpark.ChatHosts.report_state(host, sid, "blocked", lease.epoch)
+      assert agent_state(sid) == "blocked"
+
+      # the check fires while the host heartbeat still keeps the lease live
+      send(recorder, :reported_fence_check)
+      :sys.get_state(recorder)
+
+      # still suspended: a derived idle flip stays off both barrels
+      frame(recorder, result_frame())
+      assert agent_state(sid) == "blocked"
+      refute_receive {:chat_activity, ^sid, %{state: :idle}}, 100
+    end
+
+    test "the 60s heartbeat is fence-aware: NO freshness stamp while the fence holds (the composed freeze hazard)",
+         %{sid: sid, recorder: recorder, host: host} do
+      frame(recorder, init_frame())
+      assert agent_state(sid) == "working"
+
+      lease = lease!(host, sid)
+      assert {:ok, _} = Barkpark.ChatHosts.report_state(host, sid, "working", lease.epoch)
+      %{agent_state_at: at0} = StudioChat.get_session(sid)
+
+      # the recorder's cache says "working", so WITHOUT the fence gate this
+      # tick would touch agent_state_at and keep a dead reporter's row
+      # eternally fresh — sweep-proof. Fence-aware: no touch.
+      send(recorder, :agent_state_heartbeat)
+      :sys.get_state(recorder)
+      %{agent_state_at: at1} = StudioChat.get_session(sid)
+      assert DateTime.compare(at0, at1) == :eq
+
+      # non-vacuous: after hand-back the SAME tick touches again
+      expire_lease!(lease)
+      send(recorder, :reported_fence_check)
+      :sys.get_state(recorder)
+      %{agent_state_at: at2} = StudioChat.get_session(sid)
+
+      send(recorder, :agent_state_heartbeat)
+      :sys.get_state(recorder)
+      %{agent_state_at: at3} = StudioChat.get_session(sid)
+      assert DateTime.compare(at3, at2) == :gt
+    end
+  end
+
+  describe "codex derivation completeness — the SHARED path, never a second mapper (herd-s6, D78h)" do
+    defp codex_ev(sid, kind, overrides \\ []) do
+      struct!(%Event{kind: kind, provider: "codex", session_id: sid}, overrides)
+    end
+
+    defp fresh_codex_session! do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, mode: "plan"})
+      {:ok, rec} = Recorder.ensure(%{session_id: id, mode: "plan", resume: false})
+      {id, rec}
+    end
+
+    defp codex_ask_ev(sid, approval_id) do
+      codex_ev(sid, :approval_requested,
+        approval_id: approval_id,
+        native: %{"method" => "item/commandExecution/requestApproval", "params" => %{}}
+      )
+    end
+
+    test "turn/completed lands idle for terminal_state :completed AND :interrupted",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:studio_chat_runtime_event, codex_ev(sid, :turn_started)})
+      assert agent_state(sid) == "working"
+
+      frame(
+        recorder,
+        {:studio_chat_runtime_event, codex_ev(sid, :turn_completed, terminal_state: :completed)}
+      )
+
+      assert agent_state(sid) == "idle"
+
+      frame(recorder, {:studio_chat_runtime_event, codex_ev(sid, :turn_started)})
+      assert agent_state(sid) == "working"
+
+      frame(
+        recorder,
+        {:studio_chat_runtime_event, codex_ev(sid, :turn_completed, terminal_state: :interrupted)}
+      )
+
+      assert agent_state(sid) == "idle"
+    end
+
+    test "a FAILED codex turn lands idle — the failed→idle row is DELIBERATE (D78h), not an accident",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:studio_chat_runtime_event, codex_ev(sid, :turn_started)})
+      assert agent_state(sid) == "working"
+
+      # codex "turn/completed" with turn.status=failed normalizes to
+      # kind :turn_completed / terminal_state :failed (Protocol.normalize/2) —
+      # the turn SETTLED, nothing is running and nothing needs the human, so
+      # the honest herd state is idle, never unknown/blocked.
+      frame(
+        recorder,
+        {:studio_chat_runtime_event, codex_ev(sid, :turn_completed, terminal_state: :failed)}
+      )
+
+      assert agent_state(sid) == "idle"
+    end
+
+    test "unknown from :process_failed with a BLOCKED prior and from :protocol_error with a working prior",
+         %{sid: sid, recorder: recorder} do
+      # blocked prior: a mid-ask process death is possibly-wedged → unknown
+      frame(recorder, {:studio_chat_runtime_event, codex_ev(sid, :turn_started)})
+      frame(recorder, {:studio_chat_runtime_event, codex_ask_ev(sid, "cdx-pf")})
+      assert agent_state(sid) == "blocked"
+
+      frame(recorder, {:studio_chat_runtime_event, codex_ev(sid, :process_failed)})
+      assert agent_state(sid) == "unknown"
+
+      # working prior on a FRESH session: protocol death → unknown
+      {sid2, rec2} = fresh_codex_session!()
+      frame(rec2, {:studio_chat_runtime_event, codex_ev(sid2, :turn_started)})
+      assert StudioChat.get_session(sid2).agent_state == "working"
+
+      frame(rec2, {:studio_chat_runtime_event, codex_ev(sid2, :protocol_error)})
+      assert StudioChat.get_session(sid2).agent_state == "unknown"
+    end
+
+    test "never-blocked sweep: NO normalized kind except :approval_requested can produce blocked" do
+      # Every kind the codex Protocol + host normalizer can emit. Each runs
+      # against a FRESH session so no prior state can mask a stray blocked.
+      kinds = [
+        :session_started,
+        :turn_started,
+        :text_delta,
+        :thinking_delta,
+        :tool_delta,
+        :item_started,
+        :item_completed,
+        :usage,
+        :turn_completed,
+        :control_completed,
+        :error,
+        :process_failed,
+        :protocol_error,
+        :provider_event,
+        :runtime_acknowledged
+      ]
+
+      for kind <- kinds do
+        {sid, rec} = fresh_codex_session!()
+
+        frame(
+          rec,
+          {:studio_chat_runtime_event,
+           codex_ev(sid, kind, native: %{"params" => %{"item" => %{}}})}
+        )
+
+        assert StudioChat.get_session(sid).agent_state != "blocked",
+               "normalized kind #{inspect(kind)} must NEVER produce blocked"
+
+        # release the managed-runtime admission slot before the next kind —
+        # 15 concurrent recorders would trip the capacity cap, not the sweep
+        :ok = DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, rec)
+      end
+
+      # non-vacuous control: the ONE excepted kind DOES block — the sweep's
+      # harness is provably able to observe a blocked write.
+      {sid, rec} = fresh_codex_session!()
+      frame(rec, {:studio_chat_runtime_event, codex_ask_ev(sid, "nb-ctl")})
+      assert StudioChat.get_session(sid).agent_state == "blocked"
+    end
+  end
+
+  describe "AgentStateSweeper (charter D42h)" do
+    defp seed_agent_state(state, at) do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, mode: "plan"})
+
+      {1, _} =
+        Repo.update_all(
+          from(s in Session, where: s.id == ^id),
+          set: [agent_state: state, agent_state_at: at]
+        )
+
+      id
+    end
+
+    defp long_ago, do: DateTime.add(DateTime.utc_now(), -300, :second)
+
+    test "stale working/blocked rows (old OR NULL stamp) sweep to unknown" do
+      stale_working = seed_agent_state("working", long_ago())
+      stale_blocked = seed_agent_state("blocked", long_ago())
+      null_working = seed_agent_state("working", nil)
+
+      AgentStateSweeper.sweep()
+
+      assert StudioChat.get_session(stale_working).agent_state == "unknown"
+      assert StudioChat.get_session(stale_blocked).agent_state == "unknown"
+      assert StudioChat.get_session(null_working).agent_state == "unknown"
+    end
+
+    test "a FRESH (≤150s heartbeated) working or blocked row is NEVER swept" do
+      fresh_working = seed_agent_state("working", DateTime.utc_now())
+      fresh_blocked = seed_agent_state("blocked", DateTime.utc_now())
+
+      AgentStateSweeper.sweep()
+
+      assert StudioChat.get_session(fresh_working).agent_state == "working"
+      assert StudioChat.get_session(fresh_blocked).agent_state == "blocked"
+    end
+
+    test "staleness-SCOPED, never blanket: idle/unknown rows are untouched regardless of age" do
+      old_idle = seed_agent_state("idle", long_ago())
+      old_unknown = seed_agent_state("unknown", nil)
+
+      assert AgentStateSweeper.sweep() == 0
+
+      assert StudioChat.get_session(old_idle).agent_state == "idle"
+      assert StudioChat.get_session(old_unknown).agent_state == "unknown"
+    end
+
+    test "init sweeps SYNCHRONOUSLY — the boot sweep beats the first request" do
+      stale = seed_agent_state("working", nil)
+
+      start_supervised!(
+        {AgentStateSweeper, name: :"#{__MODULE__}.BootSweeper"},
+        id: :boot_sweeper_test
+      )
+
+      # start_supervised! returns only after init/1 — the row is already swept
+      assert StudioChat.get_session(stale).agent_state == "unknown"
+    end
+
+    test "fence-aware: a stale working/blocked row under a LIVE report fence is never swept (herd-s6, D79h)" do
+      stale_working = seed_agent_state("working", long_ago())
+      stale_blocked = seed_agent_state("blocked", nil)
+      host = reporter_host!()
+      _lease_w = lease!(host, stale_working)
+      _lease_b = lease!(host, stale_blocked, status: "leased")
+
+      assert AgentStateSweeper.sweep() == 0
+      assert StudioChat.get_session(stale_working).agent_state == "working"
+      assert StudioChat.get_session(stale_blocked).agent_state == "blocked"
+    end
+
+    test "a DEAD reporter's value is never sweep-proof: an expired/revoked lease stops shielding (herd-s6, D79h)" do
+      # the composed freeze hazard, closed: the reporter died, its lease
+      # expired within the 60s TTL — the row must age into the sweep window
+      # like any other working/blocked row.
+      expired = seed_agent_state("blocked", long_ago())
+      revoked = seed_agent_state("working", long_ago())
+      host = reporter_host!()
+
+      _expired_lease =
+        lease!(host, expired, expires_at: DateTime.add(DateTime.utc_now(), -5, :second))
+
+      revoked_lease = lease!(host, revoked)
+
+      {1, _} =
+        Repo.update_all(
+          from(l in Barkpark.ChatHosts.ExecutionLease, where: l.id == ^revoked_lease.id),
+          set: [revoked_at: DateTime.utc_now()]
+        )
+
+      assert AgentStateSweeper.sweep() == 2
+      assert StudioChat.get_session(expired).agent_state == "unknown"
+      assert StudioChat.get_session(revoked).agent_state == "unknown"
+    end
+  end
+
+  # ── the durable accumulator's per-turn byte cap (charter D169) ──────────────
+  #
+  # `runtime_text` (the codex lane's TURN-scoped durable accumulator) persists
+  # verbatim as `source_markdown` at BOTH persist sites — turn_completed and the
+  # terminal-error clause. D64's 262_144 bound covers only the DISPLAY tail
+  # (StreamSegments); the PERSIST path had no twin, so a runaway turn could write
+  # unbounded bytes into one chat_messages row. These tests pin the config-
+  # overridable byte cap at both sites, truncate-with-marker (NEVER turn-abort —
+  # W22/D131), and prove the guard is load-bearing by mutation (disable it → red).
+  describe "runtime_text per-turn byte cap (charter D169)" do
+    @cap_bytes 256
+
+    setup do
+      current = Application.get_env(:barkpark, :claude_chat, [])
+
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(current, :max_runtime_text_bytes, @cap_bytes)
+      )
+
+      on_exit(fn -> Application.put_env(:barkpark, :claude_chat, current) end)
+      :ok
+    end
+
+    defp text_delta(sid, payload) do
+      {:studio_chat_runtime_event,
+       %Event{
+         kind: :text_delta,
+         provider: "codex",
+         session_id: sid,
+         native: %{"params" => %{"delta" => payload}}
+       }}
+    end
+
+    defp runtime_kind(sid, kind),
+      do: {:studio_chat_runtime_event, %Event{kind: kind, provider: "codex", session_id: sid}}
+
+    defp persisted_assistant(sid),
+      do: StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "assistant"))
+
+    test "turn_completed persists TRUNCATED-with-marker, never beyond the cap (:1126 site)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, runtime_kind(sid, :turn_started))
+      # one turn's worth of deltas, far past the 256-byte cap
+      frame(recorder, text_delta(sid, String.duplicate("a", 4096)))
+      frame(recorder, runtime_kind(sid, :turn_completed))
+
+      row = persisted_assistant(sid)
+      assert row, "turn_completed must persist the codex assistant row"
+      # THE BOUND: the durable byte size never exceeds the configured cap…
+      assert byte_size(row.source_markdown) <= @cap_bytes
+      # …the turn still SETTLED (it truncated, it did not abort)…
+      assert String.ends_with?(row.source_markdown, "truncated at the persist byte cap …]")
+      # …and the text really was clipped (non-vacuous: 4096 bytes went in).
+      assert byte_size(row.source_markdown) < 4096
+    end
+
+    test "the terminal-error clause persists TRUNCATED text too (:1145 site)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, runtime_kind(sid, :turn_started))
+      frame(recorder, text_delta(sid, String.duplicate("b", 4096)))
+      # a mid-turn death: the terminal-error clause is the SECOND persist site
+      frame(recorder, runtime_kind(sid, :error))
+
+      row = persisted_assistant(sid)
+      assert row, "the terminal-error clause must persist the partial turn"
+      assert byte_size(row.source_markdown) <= @cap_bytes
+      assert String.ends_with?(row.source_markdown, "truncated at the persist byte cap …]")
+    end
+
+    test "a turn UNDER the cap persists verbatim — no marker, no clip",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, runtime_kind(sid, :turn_started))
+      frame(recorder, text_delta(sid, "a short honest answer"))
+      frame(recorder, runtime_kind(sid, :turn_completed))
+
+      row = persisted_assistant(sid)
+      assert row.source_markdown == "a short honest answer"
+      refute String.contains?(row.source_markdown, "truncated at the persist byte cap")
+    end
+
+    test "raising the cap lets the full turn persist (config is truly overridable)",
+         %{sid: sid, recorder: recorder} do
+      current = Application.get_env(:barkpark, :claude_chat, [])
+
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(current, :max_runtime_text_bytes, 100_000)
+      )
+
+      frame(recorder, runtime_kind(sid, :turn_started))
+      frame(recorder, text_delta(sid, String.duplicate("c", 4096)))
+      frame(recorder, runtime_kind(sid, :turn_completed))
+
+      row = persisted_assistant(sid)
+      # under the raised cap the whole 4096 bytes survive, no marker
+      assert byte_size(row.source_markdown) == 4096
+      refute String.contains?(row.source_markdown, "truncated at the persist byte cap")
+    end
+
+    test "the Message changeset carries a grapheme backstop on source_markdown" do
+      # The byte cap is the real bound; this is the second fence. Prove it exists
+      # and reds a pathological over-long row (independent of the recorder path).
+      over = String.duplicate("x", 1_048_577)
+
+      cs =
+        Barkpark.StudioChat.Message.changeset(%Barkpark.StudioChat.Message{}, %{
+          session_id: Ecto.UUID.generate(),
+          seq: 1,
+          role: "assistant",
+          source_markdown: over
+        })
+
+      refute cs.valid?
+      assert %{source_markdown: [_ | _]} = Ecto.Changeset.traverse_errors(cs, & &1)
     end
   end
 end

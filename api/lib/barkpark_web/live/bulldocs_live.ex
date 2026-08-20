@@ -32,8 +32,9 @@ defmodule BarkparkWeb.BulldocsLive do
   Layout: the full-document `paper.html.heex` is the ROOT layout (set in the
   router's `:papers` live_session); `mount/3` returns `layout: false`.
 
-  Note on `raw/1`: papers are our own HTML, produced by the paper doc
-  pipeline, so injecting it unescaped is acceptable for personal-local use.
+  Note on `raw/1`: legacy HTML reaches this public/scoped reader only after the
+  paper write pipeline sanitizes it. The reader preserves those stored bytes;
+  it does not treat arbitrary caller-supplied HTML as trusted.
   """
   use BarkparkWeb, :live_view
 
@@ -44,9 +45,20 @@ defmodule BarkparkWeb.BulldocsLive do
   import Phoenix.HTML, only: [raw: 1]
 
   alias Barkpark.Content
+  alias Barkpark.Content.Labels
   alias Barkpark.Plugins.Bulldocs.Events
   alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render
+
+  defmodule NotFound do
+    @moduledoc "Raised when a canonical Paper identity is missing or unpublished."
+    defexception [:message, plug_status: 404]
+  end
+
+  defmodule InvalidSource do
+    @moduledoc "Raised when a Paper exists but has no unambiguous semantic reader source."
+    defexception [:message, plug_status: 422]
+  end
 
   @impl true
   def mount(%{"slug" => slug} = params, _session, socket) do
@@ -70,7 +82,23 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:reader_scope, reader_scope)
       |> assign(:dataset, dataset)
 
-    paper = fetch_paper(slug, reader_scope, dataset)
+    # Mount-only twin of `fetch_paper/3` that keeps the Default workspace row
+    # the public resolve already loaded (am-w1-s3) — `reader_theme/3` below
+    # reuses it instead of re-reading the same workspace by id.
+    {paper, paper_workspace} = fetch_paper_with_workspace(slug, reader_scope, dataset)
+
+    paper ||
+      raise NotFound, message: "no published paper #{inspect(slug)}"
+
+    reader_source =
+      case Content.Papers.reader_source(paper, dataset, reader_scope) do
+        {:error, reason} ->
+          raise InvalidSource,
+            message: "paper #{inspect(slug)} has invalid reader source: #{reason}"
+
+        source ->
+          source
+      end
 
     # Preview manifest (preview-contract pc-w2) — the outward social-share card.
     # Computed BEFORE the `connected?` branch so the DEAD render (crawlers +
@@ -125,13 +153,14 @@ defmodule BarkparkWeb.BulldocsLive do
       socket
       |> assign(:slug, slug)
       |> assign(:found, not is_nil(paper))
+      |> assign(:source_error, nil)
       |> assign(:rev, paper_rev(paper))
       # `:article?` is the per-doc style marker (`content["style"] == "article"`).
       # The root `:paper` layout reads it to switch on article page chrome; the
       # block render path reads it to render each block in `:article` palette.
       # Non-article papers leave it false → email default, chrome unchanged.
       |> assign(:article?, paper_article?(paper))
-      |> assign(:html, paper_html(paper))
+      |> assign(:html, source_html(reader_source))
       # P6.U2 goal-path rail: events for this paper's goal (empty when no
       # goal_id / no events → the rail is not rendered, article unchanged).
       |> assign(:rail_events, rail_events)
@@ -159,26 +188,19 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:simplify?, paper_goal_id(paper) != nil)
       |> assign(:pending_simplify, nil)
       |> assign(:last_simplify, nil)
-      # "Linked mentions" — papers that wikilink TO this one. Server-side, scoped
-      # to the SAME tenant the reader resolved (so the scan never surfaces a
-      # backlink from a paper the reader can't see). Pre-rendered to an HTML
-      # string at mount; `""` when nothing links here → the template omits the
-      # section. NOT flag-gated: it reads the stored blocks + wikilink nodes (the
-      # system of record), so it works regardless of the canvas flag.
-      |> assign(:backlinks_html, backlinks_section_html(paper, reader_scope, dataset))
-      # "Driven tasks" — the expectation reverse view (lvw-t8): tasks that cite
-      # this paper (design_doc/papers edges) with their acceptance-criteria
-      # state. Same scope + engine posture as the backlinks section; `""` when
-      # no task cites the paper. Re-reads live at mount, so a close that sets
-      # met=true + evidence (lvw-t9) shows satisfied on the next page load.
-      |> assign(:driven_tasks_html, driven_tasks_section_html(paper, dataset))
+      # "Linked mentions" + "Driven tasks" — both sections read the SAME
+      # inbound-edge walk, so they are assigned together off ONE
+      # `reverse_referencers/2` call (am-w1-s3). See `assign_linked_sections/3`
+      # for the scope + engine posture; each assign is `""` when its section
+      # has nothing to show → the template omits it.
+      |> assign_linked_sections(paper, dataset)
       # Theme identity (ts-w4e): resolve the paper's workspace theme so
       # bulldocs.html.heex stamps `data-bp-theme` server-side (no flash). The
       # reader ALWAYS mode-swaps via prefers-color-scheme — this attribute only
       # selects WHICH theme, never light/dark. No setting → default → the layout
       # omits the attribute → byte-identical to before.
-      |> assign(:bp_theme, reader_theme(paper, reader_scope))
-      |> assign_block_mode(paper)
+      |> assign(:bp_theme, reader_theme(paper, reader_scope, paper_workspace))
+      |> assign_block_mode(paper, reader_source)
 
     {:ok, socket, layout: false}
   end
@@ -186,16 +208,26 @@ defmodule BarkparkWeb.BulldocsLive do
   # Resolve the theme identity for the reader: the paper's OWN workspace, falling
   # back to the mounted reader scope's workspace (the seeded Default for the flat
   # /papers surface). A nil/unresolvable workspace → the default theme.
-  defp reader_theme(paper, reader_scope) do
+  #
+  # `prefetched` is the workspace row the public paper resolve already loaded
+  # (am-w1-s3): when it IS the paper's workspace — always true on the flat
+  # public surface — the tenancy re-read is skipped; any mismatch (scoped
+  # surface, legacy NULL-workspace paper) falls back to the plain by-id read.
+  defp reader_theme(paper, reader_scope, prefetched) do
     ws_id = (paper && Map.get(paper, :workspace_id)) || reader_scope[:workspace_id]
 
-    ws_id
-    |> Barkpark.Tenancy.get_workspace_by_id()
-    |> Barkpark.Tenancy.workspace_theme()
+    workspace =
+      case prefetched do
+        %{id: id} when id == ws_id -> prefetched
+        _ -> Barkpark.Tenancy.get_workspace_by_id(ws_id)
+      end
+
+    Barkpark.Tenancy.workspace_theme(workspace)
   end
 
-  # Render the "Linked mentions" section for a paper. Empty string (no markup)
-  # when the paper is absent or nothing links to it.
+  # Assign the "Linked mentions" AND "Driven tasks" sections for a paper off
+  # ONE inbound-edge walk. Empty strings (no markup) when the paper is absent
+  # or nothing links to it.
   #
   # Powered by the INDEXED engine `Content.Graph.reverse_referencers/2` (the same
   # one the Studio editor's backlinks pane uses) over the materialised
@@ -210,40 +242,39 @@ defmodule BarkparkWeb.BulldocsLive do
   # equals `reader_scope`; for the public reader it equals the seeded Default
   # workspace `get_public_paper/2` resolved into. A legacy NULL-workspace paper
   # resolves unscoped (back-compat, mirrors its own read).
-  defp backlinks_section_html(nil, _scope, _dataset), do: ""
-
-  defp backlinks_section_html(%{doc_id: doc_id} = paper, _reader_scope, dataset)
+  #
+  # The walk is SHARED (am-w1-s3 reader dedupe): backlinks render the
+  # referencer list directly; "Driven tasks" (lvw-t8) narrows the SAME list to
+  # citing tasks via `Expectations.driven_tasks_from_referencers/2` — the same
+  # fail-closed posture as before (a source the scope can't see was already
+  # dropped inside the walk), one `reverse_referencers/2` instead of two.
+  defp assign_linked_sections(socket, %{doc_id: doc_id} = paper, dataset)
        when is_binary(doc_id) do
     opts =
       [dataset: dataset]
       |> maybe_scope(:workspace_id, Map.get(paper, :workspace_id))
       |> maybe_scope(:project_id, Map.get(paper, :project_id))
 
-    doc_id
-    |> Content.published_id()
-    |> Content.Graph.reverse_referencers(opts)
-    |> BarkparkWeb.PaperBacklinks.section_html()
+    referencers =
+      doc_id
+      |> Content.published_id()
+      |> Content.Graph.reverse_referencers(opts)
+
+    socket
+    |> assign(:backlinks_html, BarkparkWeb.PaperBacklinks.section_html(referencers))
+    |> assign(
+      :driven_tasks_html,
+      referencers
+      |> Barkpark.Tasks.Expectations.driven_tasks_from_referencers(opts)
+      |> BarkparkWeb.PaperTasks.section_html()
+    )
   end
 
-  defp backlinks_section_html(_paper, _reader_scope, _dataset), do: ""
-
-  # "Driven tasks" (lvw-t8) — same scope derivation as the backlinks section
-  # (the paper's OWN resolved workspace/project), same fail-closed engine
-  # underneath (`Expectations.driven_tasks/2` rides `reverse_referencers/2`
-  # and drops what the scope can't see).
-  defp driven_tasks_section_html(%{doc_id: doc_id} = paper, dataset)
-       when is_binary(doc_id) do
-    opts =
-      [dataset: dataset]
-      |> maybe_scope(:workspace_id, Map.get(paper, :workspace_id))
-      |> maybe_scope(:project_id, Map.get(paper, :project_id))
-
-    doc_id
-    |> Barkpark.Tasks.driven_tasks(opts)
-    |> BarkparkWeb.PaperTasks.section_html()
+  defp assign_linked_sections(socket, _paper, _dataset) do
+    socket
+    |> assign(:backlinks_html, "")
+    |> assign(:driven_tasks_html, "")
   end
-
-  defp driven_tasks_section_html(_paper, _dataset), do: ""
 
   defp maybe_scope(opts, _key, nil), do: opts
   defp maybe_scope(opts, key, value), do: Keyword.put(opts, key, value)
@@ -372,9 +403,28 @@ defmodule BarkparkWeb.BulldocsLive do
   # Load both events; if both exist, line-diff their `payload_html` and open
   # the modal. A missing event is a no-op (no crash) with a gentle flash — the
   # rail row could have been for an event that has since been pruned.
+  #
+  # SECURITY (cross-tenant IDOR, fail-closed): `from_id`/`to_id` are client-
+  # supplied and reach here over ANY authenticated-or-anonymous socket, so a
+  # malicious client can push arbitrary UUIDs. `Events.get_event/1` is UNSCOPED
+  # (bare `Repo.get`), so an unconstrained lookup would leak another workspace's
+  # event `payload_html` into this paper's diff modal. The socket's
+  # `:rail_events` was built by `load_rail_events/1` via the already-workspace-
+  # scoped `Events.list_for_goal(goal_id, paper_scope_opts(paper))`, so it holds
+  # ONLY this paper's own rail (or, for a NULL-workspace pre-tenancy paper, its
+  # own unscoped rail — back-compat). We therefore require BOTH ids to be
+  # members of that rail before touching `Events.get_event/1`; a foreign id is
+  # not on the rail and falls through to the existing "no longer exists" flash.
+  # `reader_scope(socket)` is nil on this flat public surface, so rail
+  # membership — not scope threading — is the correct fence.
   def handle_event("open-diff", %{"from" => from_id, "to" => to_id}, socket) do
-    from = Events.get_event(from_id)
-    to = Events.get_event(to_id)
+    rail_ids = MapSet.new(socket.assigns.rail_events, & &1.id)
+
+    from =
+      if MapSet.member?(rail_ids, from_id), do: Events.get_event(from_id), else: nil
+
+    to =
+      if MapSet.member?(rail_ids, to_id), do: Events.get_event(to_id), else: nil
 
     if from && to do
       chunks = TextDiff.diff_lines(from.payload_html, to.payload_html)
@@ -593,8 +643,8 @@ defmodule BarkparkWeb.BulldocsLive do
   defp paper_rev(nil), do: 0
   defp paper_rev(%{content: content}), do: Map.get(content || %{}, "rev") || 0
 
-  defp paper_html(nil), do: ""
-  defp paper_html(%{content: content}), do: Map.get(content || %{}, "body_html") || ""
+  defp source_html({:html, html}), do: html
+  defp source_html(_), do: ""
 
   # Preview manifest for the social-share head (preview-contract pc-w2). The
   # canonical url is the RELATIVE `/papers/:slug` (ShareMeta absolutizes it at
@@ -607,8 +657,8 @@ defmodule BarkparkWeb.BulldocsLive do
   defp paper_preview(_paper, slug),
     do: BarkparkWeb.ShareMeta.manifest(%{}, "/papers/#{slug}", "paper", slug)
 
-  defp paper_blocks(%{content: content}), do: Map.get(content || %{}, "blocks")
-  defp paper_blocks(_), do: nil
+  defp source_blocks({:blocks, blocks}), do: blocks
+  defp source_blocks(_), do: nil
 
   # The paper's goal id, if any — used at mount to gate the P6.U4 Simplify
   # button. A blank string counts as absent (no goal to simplify against).
@@ -633,40 +683,52 @@ defmodule BarkparkWeb.BulldocsLive do
 
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
-  defp assign_block_mode(socket, %{content: %{"blocks" => blocks}} = paper)
-       when is_list(blocks) do
-    resolved = with_live_tasks(blocks, paper)
+  defp assign_block_mode(socket, paper, reader_source) do
+    case source_blocks(reader_source) do
+      blocks when is_list(blocks) ->
+        resolved = with_live_tasks(blocks, paper, socket.assigns.dataset)
 
-    socket
-    |> assign(:block_mode, true)
-    |> stream(
-      :blocks,
-      to_stream_items(
-        resolved,
-        paper_article?(paper),
-        reader_resolvers(resolved, socket.assigns[:dataset], paper)
-      )
-    )
-  end
+        socket
+        |> assign(:block_mode, true)
+        |> stream(
+          :blocks,
+          to_stream_items(
+            resolved,
+            paper_article?(paper),
+            reader_resolvers(resolved, socket.assigns[:dataset], paper)
+          )
+        )
 
-  defp assign_block_mode(socket, _paper) do
-    socket
-    |> assign(:block_mode, false)
-    # Initialise an empty stream so the template can reference @streams.blocks
-    # uniformly even on the HTML-only path (it just stays empty).
-    |> stream(:blocks, [])
+      _ ->
+        socket
+        |> assign(:block_mode, false)
+        # Initialise an empty stream so the template can reference @streams.blocks
+        # uniformly even on the HTML-only path (it just stays empty).
+        |> stream(:blocks, [])
+    end
   end
 
   # D2 (ratified, wire §10): the reader's mount/refetch render resolves
-  # wikilinks/task chips AND inline valuerefs FRESH per page load, as the
-  # ANONYMOUS principal over PUBLISHED rows only — per-page-load freshness with
-  # no live push, and nothing here can outrank what an unauthenticated caller
-  # may see (`resolve_values_in_blocks` defaults `:caller_context` to the
-  # anonymous `%CallerContext{}`; `published_only: true` is the D5 gate).
+  # wikilinks/task chips, inline valuerefs, `field-reference` titles AND
+  # `codelist` labels FRESH per page load, as the ANONYMOUS principal over
+  # PUBLISHED rows only — per-page-load freshness with no live push, and
+  # nothing here can outrank what an unauthenticated caller may see
+  # (`resolve_values_in_blocks` defaults `:caller_context` to the anonymous
+  # `%CallerContext{}`; `published_only: true` is the D5 gate).
   # Resolution is tenant-scoped to the paper's own workspace/project; a legacy
   # NULL-workspace row normalizes to the seeded Default workspace (the same
   # rule the PubSub topic applies) — and with NO seeded Default there is no
   # public tenant, so nothing resolves (fail closed, never a global read).
+  #
+  # `Labels.render_opts/2` supplies the `:ref_resolver`/`:codelist_resolver`
+  # closures the pure renderer reads (Render.resolve_ref_title/resolve_code_label)
+  # so a `field-reference` block shows the referenced doc's TITLE and a
+  # `codelist` block its human LABEL — matching Studio and the body_html cache
+  # instead of leaking the raw slug/code. The SAME tenant scope + published_only
+  # gate flows through: `reference_title` drops the `drafts.` twin under
+  # published_only (a draft-only target degrades to the raw id, never leaking a
+  # draft title), and `codelist_label` is a global (plugin, list_id) registry
+  # lookup carrying no per-tenant user data, so it is safe to resolve here.
   defp reader_resolvers(blocks, dataset, paper) do
     workspace_id =
       (paper && paper.workspace_id) ||
@@ -688,6 +750,7 @@ defmodule BarkparkWeb.BulldocsLive do
         wikilinks: Content.resolve_wikilinks_in_blocks(blocks, dataset, scope),
         values: Content.resolve_values_in_blocks(blocks, dataset, scope)
       }
+      |> Map.merge(Labels.render_opts(dataset, scope))
     end
   end
 
@@ -701,11 +764,11 @@ defmodule BarkparkWeb.BulldocsLive do
   # Visibility note: this surfaces the paper's-tenant task data (titles /
   # statuses) to whoever can read the paper — the author opts in by embedding a
   # query. Cross-tenant leakage is impossible (workspace fail-closed).
-  defp with_live_tasks(blocks, paper) when is_list(blocks) do
-    Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, reader_task_scope(paper))
+  defp with_live_tasks(blocks, paper, dataset) when is_list(blocks) do
+    Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, reader_task_scope(paper), dataset)
   end
 
-  defp with_live_tasks(blocks, _paper), do: blocks
+  defp with_live_tasks(blocks, _paper, _dataset), do: blocks
 
   defp reader_task_scope(paper) do
     ws_id =
@@ -790,15 +853,7 @@ defmodule BarkparkWeb.BulldocsLive do
 
   # ── whole-HTML frame (Wave 3 fallback) ────────────────────────────────────
 
-  def handle_info({:paper_updated, %{html: html} = msg}, socket) do
-    # Re-assign only. No remount, no navigate — LiveView diffs the DOM.
-    {:noreply,
-     socket
-     |> assign(:html, html)
-     |> assign(:found, true)
-     |> assign(:block_mode, false)
-     |> assign(:rev, msg[:rev] || socket.assigns.rev)}
-  end
+  def handle_info({:paper_updated, _msg}, socket), do: {:noreply, refetch(socket)}
 
   # Live-plan push: a task moved in this paper's tenant → re-resolve the
   # embedded task blocks (resolve-at-read) and re-stream. Only reacts to
@@ -862,13 +917,25 @@ defmodule BarkparkWeb.BulldocsLive do
     case fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope], socket.assigns[:dataset]) do
       nil ->
         socket
+        |> stream(:blocks, [], reset: true)
+        |> assign(:html, "")
+        |> assign(:block_mode, false)
+        |> assign(:found, false)
+        |> assign(:source_error, nil)
 
       paper ->
         article? = paper_article?(paper)
 
-        case paper_blocks(paper) do
-          blocks when is_list(blocks) ->
-            resolved = with_live_tasks(blocks, paper)
+        reader_source =
+          Content.Papers.reader_source(
+            paper,
+            socket.assigns[:dataset],
+            socket.assigns[:reader_scope]
+          )
+
+        case reader_source do
+          {:blocks, blocks} ->
+            resolved = with_live_tasks(blocks, paper, socket.assigns.dataset)
 
             socket
             |> stream(
@@ -884,15 +951,27 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:article?, article?)
             |> assign(:block_mode, true)
             |> assign(:found, true)
+            |> assign(:source_error, nil)
 
-          _ ->
+          {:html, html} ->
             # Refetched a paper that has reverted to HTML-only — fall back.
             socket
-            |> assign(:html, paper_html(paper))
+            |> assign(:html, html)
             |> assign(:rev, paper_rev(paper))
             |> assign(:article?, article?)
             |> assign(:block_mode, false)
             |> assign(:found, true)
+            |> assign(:source_error, nil)
+
+          {:error, reason} ->
+            socket
+            |> stream(:blocks, [], reset: true)
+            |> assign(:html, "")
+            |> assign(:rev, paper_rev(paper))
+            |> assign(:article?, article?)
+            |> assign(:block_mode, false)
+            |> assign(:found, false)
+            |> assign(:source_error, reason)
         end
     end
   end
@@ -982,6 +1061,10 @@ defmodule BarkparkWeb.BulldocsLive do
       </div>
 
       <%= cond do %>
+        <% @source_error -> %>
+          <article id="paper-body" data-rev={@rev} data-source-error={@source_error}>
+            <p id="paper-invalid">This paper has no safe, unambiguous reader source.</p>
+          </article>
         <% not @found -> %>
           <article id="paper-body" data-rev={@rev}>
             <p id="paper-empty">No paper saved yet for <code>{@slug}</code>.</p>
@@ -1093,4 +1176,16 @@ defmodule BarkparkWeb.BulldocsLive do
   # Tenant-scoped reader (/w/:ws/p/:proj/papers/:slug) — dataset stays
   # "production" exactly as before (no dataset segment on that route).
   defp fetch_paper(slug, scope, _dataset), do: Content.get_paper(slug, "production", scope)
+
+  # Mount-only sibling of `fetch_paper/3`: `{paper, workspace_row_or_nil}`. On
+  # the public surface the resolve pins the Default workspace anyway (am-w1-s3)
+  # — keep that row for `reader_theme/3`. The scoped surface resolves no
+  # workspace row here, so it threads nil and reader_theme reads by id as
+  # before. Refetch paths (rev-gap, action reload) keep calling `fetch_paper/3`.
+  defp fetch_paper_with_workspace(slug, nil, dataset) do
+    Content.Papers.get_public_paper_with_workspace(slug, dataset) || {nil, nil}
+  end
+
+  defp fetch_paper_with_workspace(slug, scope, dataset),
+    do: {fetch_paper(slug, scope, dataset), nil}
 end

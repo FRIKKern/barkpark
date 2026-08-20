@@ -15,6 +15,22 @@ defmodule Barkpark.Tasks.QueueTest do
        down to 1 (only the highest-priority task comes back).
     4. `ready/1` with no workspace_id fails CLOSED (zero rows from
        `Scope.scope_to_workspace/3`), including when called with []).
+
+  ## Axis-2 ruling: a cancelled blocker strands its dependents — BY DESIGN
+
+  `content.dependencies` (axis 2) is satisfied ONLY by a same-scope task with
+  `lifecycle_status: "done"`; the anti-join fails CLOSED for any non-done id.
+  A CANCELLED blocker therefore gates its dependents exactly like an open one.
+  RULING (tlv-bl-axis2-cancelled-strand, charter D6): this fail-closed behavior
+  is correct-by-design — there is NO query-time carve-out treating cancelled as
+  satisfying, because that would change claim semantics repo-wide (`ready/1`,
+  `Claim.claim/2`, and every readiness consumer share `ready_query/1`) and
+  there is no reverse-lookup for `content.dependencies` today. The stranding is
+  RECOVERABLE, not permanent: charter D7 makes `cancelled -> open` a legal
+  transition, so a stranded dependent is un-stuck by reopening the blocker and
+  driving it to done (or by re-pointing its `content.dependencies`). Automatic
+  carve-out and kill-time warnings are an explicitly deferred future survey.
+  Section (8) below holds the protective tests for both halves of this ruling.
   """
 
   use Barkpark.DataCase, async: false
@@ -165,6 +181,106 @@ defmodule Barkpark.Tasks.QueueTest do
     end
   end
 
+  describe "ready/1 — queue gate and campaign ordering" do
+    test "five non-executable classes never enter ready or atomic next", %{scope: scope} do
+      phase = "phase-gates-#{System.unique_integer([:positive])}"
+
+      for {name, gate} <- [
+            {"human", %{"version" => 1, "state" => "human_gated", "reason" => "approval"}},
+            {"parked", %{"version" => 1, "state" => "parked", "reason" => "later"}},
+            {"stalled",
+             %{
+               "version" => 1,
+               "state" => "evidence_stalled",
+               "reason" => "missing proof",
+               "evidence" => "attempt log"
+             }},
+            {"malformed", %{"version" => 2, "state" => "executable"}},
+            {"contradictory",
+             %{
+               "version" => 1,
+               "state" => "executable",
+               "reason" => "must not coexist"
+             }}
+          ] do
+        doc =
+          mk_task!("gate-#{name}-#{System.unique_integer([:positive])}", scope, @dataset, %{
+            "parent_id" => phase
+          })
+
+        Repo.update_all(
+          from(d in Document, where: d.id == ^doc.id),
+          set: [content: Map.put(doc.content, "queue_gate", gate)]
+        )
+      end
+
+      foreign =
+        mk_task!("gate-foreign-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase
+        })
+
+      Repo.update_all(
+        from(d in Document, where: d.id == ^foreign.id),
+        set: [content: Map.put(foreign.content, "claim", %{"worker" => "other-worker"})]
+      )
+
+      assert Queue.ready(scope ++ [dataset: @dataset, phase_id: phase]) == []
+
+      assert {:ok, nil} =
+               Tasks.claim("gate-worker", scope ++ [dataset: @dataset, phase_id: phase])
+    end
+
+    test "closure_nearest sorts six executable tasks by unmet count, age, then doc_id", %{
+      scope: scope
+    } do
+      phase = "phase-closure-order-#{System.unique_integer([:positive])}"
+      base = DateTime.utc_now() |> DateTime.add(-3600, :second) |> DateTime.truncate(:microsecond)
+
+      specs = [
+        {"z-two", 2, 0},
+        {"z-one-new", 1, 30},
+        {"b-zero-tie", 0, 10},
+        {"a-zero-tie", 0, 10},
+        {"z-zero-old", 0, 0},
+        {"z-one-old", 1, 20}
+      ]
+
+      Enum.each(specs, fn {id, unmet, seconds} ->
+        criteria =
+          Enum.map(1..max(unmet, 1), fn i ->
+            %{"criterion" => "c#{i}", "met" => unmet == 0}
+          end)
+
+        doc =
+          mk_task!(id <> "-" <> phase, scope, @dataset, %{
+            "parent_id" => phase,
+            "acceptance_criteria" => criteria
+          })
+
+        Repo.update_all(
+          from(d in Document, where: d.id == ^doc.id),
+          set: [inserted_at: DateTime.add(base, seconds, :second)]
+        )
+      end)
+
+      ids =
+        Queue.ready(scope ++ [dataset: @dataset, phase_id: phase, order: :closure_nearest])
+        |> Enum.map(& &1.doc_id)
+
+      assert ids ==
+               Enum.map(
+                 ["z-zero-old", "a-zero-tie", "b-zero-tie", "z-one-old", "z-one-new", "z-two"],
+                 &("drafts." <> &1 <> "-" <> phase)
+               )
+    end
+
+    test "unknown internal order values are rejected", %{scope: scope} do
+      assert_raise ArgumentError, ~r/unsupported ready order/, fn ->
+        Queue.ready(scope ++ [dataset: @dataset, order: :closure_neerest])
+      end
+    end
+  end
+
   # ─── (5) draft/published twin collapse (published-wins) ──────────────────
 
   describe "ready/1 — draft/published twin collapse" do
@@ -242,6 +358,52 @@ defmodule Barkpark.Tasks.QueueTest do
     end
   end
 
+  describe "ready/1 — deterministic offset pages" do
+    test "consecutive pages are disjoint and beyond-end is empty", %{scope: scope} do
+      phase_id = "phase-offset-#{System.unique_integer([:positive])}"
+
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      ids = 1..4 |> Enum.map(fn _ -> Ecto.UUID.generate() end) |> Enum.sort(:desc)
+
+      rows =
+        Enum.with_index(ids, fn id, index ->
+          %{
+            id: id,
+            doc_id: "offset-#{index}-#{System.unique_integer([:positive])}",
+            type: "task",
+            dataset: @dataset,
+            title: "offset #{index}",
+            status: "draft",
+            content: %{
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "parent_id" => phase_id,
+              "priority" => 1
+            },
+            workspace_id: scope[:workspace_id],
+            project_id: scope[:project_id],
+            inserted_at: now,
+            updated_at: now,
+            rev: "offset-#{index}"
+          }
+        end)
+
+      {4, nil} = Repo.insert_all(Document, rows)
+
+      opts = scope ++ [dataset: @dataset, phase_id: phase_id, limit: 2]
+      first = Queue.ready(opts ++ [offset: 0]) |> ids_of()
+      second = Queue.ready(opts ++ [offset: 2]) |> ids_of()
+      expected = Enum.sort(ids)
+
+      assert first == Enum.take(expected, 2)
+      assert second == Enum.drop(expected, 2)
+      assert first ++ second == expected
+      assert MapSet.disjoint?(MapSet.new(first), MapSet.new(second))
+      assert Queue.ready(opts ++ [offset: 4]) == []
+      assert Queue.ready(opts ++ [offset: 0]) |> ids_of() == first
+    end
+  end
+
   # ─── (7) content.dependencies gates readiness (fail-closed) ──────────────
 
   describe "ready/1 — content.dependencies gating" do
@@ -308,6 +470,37 @@ defmodule Barkpark.Tasks.QueueTest do
       ready_ids = ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
       assert empty.id in ready_ids
       assert absent.id in ready_ids
+    end
+
+    test "legacy non-array dependencies are treated as no dependencies", %{scope: scope} do
+      phase_id = "phase-dep-legacy-#{System.unique_integer([:positive])}"
+      id = Ecto.UUID.generate()
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      {1, nil} =
+        Repo.insert_all(Document, [
+          %{
+            id: id,
+            doc_id: "main-dep-legacy-#{System.unique_integer([:positive])}",
+            type: "task",
+            dataset: @dataset,
+            title: "legacy non-array dependencies",
+            status: "draft",
+            content: %{
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "parent_id" => phase_id,
+              "dependencies" => "legacy-dependency-id"
+            },
+            workspace_id: scope[:workspace_id],
+            project_id: scope[:project_id],
+            inserted_at: now,
+            updated_at: now,
+            rev: "legacy-non-array"
+          }
+        ])
+
+      assert id in ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
     end
 
     test "dependency match tolerates a drafts. prefix on either side", %{scope: scope} do
@@ -446,20 +639,110 @@ defmodule Barkpark.Tasks.QueueTest do
       assert done_cte
       assert unsatisfied_cte
 
-      assert Enum.any?(plan_nodes(done_cte), fn node ->
-               node["Relation Name"] == "documents" and node["Actual Loops"] == 1
-             end)
+      # The done-task CTE reads `documents` — assert it does so at most once (not
+      # per-row), same plan-agnostic bound as the CTE-scan check below rather
+      # than pinning `== 1` (a pruned/materialized plan reports 0 and flaked).
+      done_doc_scans =
+        Enum.filter(plan_nodes(done_cte), &(&1["Relation Name"] == "documents"))
 
-      # The property under test is ONE-TIME consumption of the done-task CTE —
-      # never a per-row re-scan. Assert that behavior directly instead of
-      # pinning the planner's join algorithm (environment-sensitive).
-      done_cte_scans =
-        Enum.filter(plan_nodes(unsatisfied_cte), fn node ->
-          node["Node Type"] == "CTE Scan" and node["CTE Name"] == "ready_done_tasks"
-        end)
+      assert done_doc_scans != []
 
-      assert done_cte_scans != []
-      assert Enum.all?(done_cte_scans, &(&1["Actual Loops"] == 1))
+      assert Enum.all?(done_doc_scans, &(&1["Actual Loops"] <= 1)),
+             "done-task documents scan looped per row (loops: #{inspect(Enum.map(done_doc_scans, & &1["Actual Loops"]))})"
+
+      # The property under test is ONE-TIME COMPUTATION of the done-task set —
+      # the subquery runs once, not once per candidate row. That is guaranteed
+      # STRUCTURALLY by `with_cte(..., materialized: true)` (queue.ex) and shown
+      # in the plan by the CTE subplan node itself running exactly once
+      # (`done_cte`'s own Actual Loops == 1). Its underlying `documents` scan
+      # running at most once (asserted above) is the same guarantee from the
+      # inside.
+      #
+      # NOTE (the earlier flake's real cause): a `CTE Scan` node in the
+      # consuming query is NOT the computation — it is a cheap READ of the
+      # already-materialized buffer. A nested-loop join legitimately re-reads it
+      # once per outer row (loops == row_count), which is correct and fast; a
+      # prior assertion pinned that read count and failed on plan variance while
+      # proving nothing (materialization already guarantees single computation).
+      # So we assert the COMPUTATION-once property, not the join's read count.
+      assert done_cte["Actual Loops"] == 1,
+             "done-task CTE was not computed once (materialized) — Actual Loops: #{inspect(done_cte["Actual Loops"])}"
+    end
+  end
+
+  # ─── (8) axis-2 cancelled-blocker stranding — fail-closed correct-by-design ─
+  #
+  # Protective tests for the tlv-bl-axis2-cancelled-strand ruling (see the
+  # moduledoc): a cancelled dependency does NOT satisfy axis 2 (no carve-out),
+  # and the D7 escape hatch (cancelled -> open -> done) un-strands dependents.
+
+  # Flip a task's lifecycle_status by direct DB write. Deliberately bypasses
+  # the Content.Writer seam (where D7 transition legality is enforced): this
+  # file tests QUEUE readiness semantics, not transition legality, and the
+  # `open -> done` leg below is only legal in the real system via the close
+  # verb — an engine primitive that also writes the row directly.
+  defp set_lifecycle!(doc, status) do
+    doc = Repo.get!(Document, doc.id)
+
+    doc
+    |> Ecto.Changeset.change(content: Map.put(doc.content, "lifecycle_status", status))
+    |> Repo.update!()
+  end
+
+  describe "ready/1 — axis-2 cancelled-blocker stranding (ruling: fail-closed)" do
+    test "one cancelled dependency => NOT ready and NOT claimable via queue-claim",
+         %{scope: scope} do
+      phase_id = "phase-dep-cancelled-#{System.unique_integer([:positive])}"
+      dep_id = "dep-cancelled-#{System.unique_integer([:positive])}"
+      # Mirror of the "one open dependency" fixture with the blocker CANCELLED:
+      # axis 2 satisfies only on done, so cancelled must gate exactly like open.
+      # Mutation-provable — a query-time carve-out (cancelled admitted to the
+      # done set, or the anti-join loosened) makes `main` ready and fails this.
+      # The dependency is deliberately parentless so the phase-scoped ready set
+      # contains ONLY `main` — an empty result then proves `main` is excluded.
+      _dep = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "cancelled"})
+
+      main =
+        mk_task!("main-dep-cancelled-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => [dep_id]
+        })
+
+      assert Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]) == []
+      refute main.id in ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
+      # Nothing else is in this phase, so queue-claim finds nothing to claim.
+      assert {:ok, nil} =
+               Tasks.claim(
+                 "dep-cancelled-worker",
+                 scope ++ [dataset: @dataset, phase_id: phase_id]
+               )
+    end
+
+    test "escape hatch: reopening a cancelled blocker (cancelled -> open -> done) un-strands the dependent",
+         %{scope: scope} do
+      phase_id = "phase-dep-reopen-#{System.unique_integer([:positive])}"
+      dep_id = "dep-reopen-#{System.unique_integer([:positive])}"
+      dep = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "cancelled"})
+
+      main =
+        mk_task!("main-dep-reopen-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => [dep_id]
+        })
+
+      opts = scope ++ [dataset: @dataset, phase_id: phase_id]
+
+      # Stranded while the blocker is cancelled.
+      refute main.id in ids_of(Queue.ready(opts))
+
+      # D7 makes cancelled -> open legal: reopened, the blocker gates like any
+      # open dependency — still not ready (recoverable, not yet recovered).
+      set_lifecycle!(dep, "open")
+      refute main.id in ids_of(Queue.ready(opts))
+
+      # Driven to done, the dependency satisfies axis 2 — dependent is ready.
+      set_lifecycle!(dep, "done")
+      assert main.id in ids_of(Queue.ready(opts))
     end
   end
 end

@@ -3,11 +3,18 @@
 # barkpark — one-command entrypoint for a personal-local install (Wave 5).
 #
 #   barkpark up        ensure secrets → start managed Postgres → migrate →
-#                      boot the server → print the URL. Safe to re-run.
+#                      boot the server → print the URL. Safe to re-run: it says
+#                      "already running" only when a listener on the port
+#                      ANSWERS, never on the strength of a pidfile.
 #   barkpark reload    restart the server so config changes take effect.
 #                      (See "CONFIG-RELOAD FOOTGUN" below.)
-#   barkpark stop      stop the server and the managed Postgres.
-#   barkpark status    report Postgres + server state.
+#   barkpark stop      stop the server and the managed Postgres — killing only a
+#                      process it can identify as ours, never a stranger that
+#                      happens to hold the port.
+#   barkpark status    report Postgres + the OBSERVED server state — one of
+#                      ANSWERING / PROCESS-ALIVE-NOT-ANSWERING / STOPPED /
+#                      UNKNOWN, decided from the port and an HTTP answer,
+#                      never from a pidfile alone.
 #   barkpark psql ...  open a psql shell on the managed Postgres.
 #
 # ── CONFIG-RELOAD FOOTGUN ─────────────────────────────────────────────────────
@@ -91,6 +98,21 @@ ensure_secrets() {
       >/dev/null )
 }
 
+# ── PDS W1 — personal-local is the pull TARGET, so it opts into bundle import ──
+#
+# The free Personal-Local twin exists to PULL a cloud workspace's data down into
+# it (bp cloud workspace import), so it turns the fail-closed
+# BARKPARK_ALLOW_BUNDLE_IMPORT switch ON. Append only if the key is ABSENT — a
+# user who set =0 by hand is never clobbered (mirrors write_env's idempotency).
+# Runs after ensure_secrets so ENV_FILE always exists.
+ensure_bundle_import_flag() {
+  if grep -q '^BARKPARK_ALLOW_BUNDLE_IMPORT=' "$ENV_FILE" 2>/dev/null; then
+    return 0
+  fi
+  printf 'BARKPARK_ALLOW_BUNDLE_IMPORT=1\n' >>"$ENV_FILE"
+  log "enabled bundle import (BARKPARK_ALLOW_BUNDLE_IMPORT=1) — personal-local is a pull target"
+}
+
 # Load ~/.barkpark/.env into the environment, then override DATABASE_URL to the
 # managed Postgres so the .env placeholder (default :5432) never wins. PORT and
 # PHX_HOST come from the env file if set there, else the defaults above.
@@ -121,18 +143,43 @@ listener_pid() {
   lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1
 }
 
-server_running() {
-  [ -f "$SERVER_PID_FILE" ] && kill -0 "$(cat "$SERVER_PID_FILE")" 2>/dev/null
-}
-
+# `up` decides from the OBSERVED port, never from the pidfile alone — the same
+# rule `status` follows (see cmd_status). A pidfile is a CLAIM: it can name a
+# recycled PID or a leftover `sleep`, and deciding on a bare `kill -0` of it made
+# `barkpark up` print "server already running" and exit 0 with NOTHING listening.
+# On a personal instance nobody is watching that, so it is a silent no-op that
+# reports success. The pidfile is bookkeeping to be reconciled, not evidence.
 start_server() {
-  if server_running; then
-    log "server already running (pid $(cat "$SERVER_PID_FILE"))"
-    return 0
+  local lpid claim
+  lpid="$(listener_pid || true)"
+  claim="$(cat "$SERVER_PID_FILE" 2>/dev/null || true)"
+
+  if [ -n "$lpid" ]; then
+    if server_answering; then
+      # Corroborated: something holds the port AND serves the Barkpark API.
+      if [ "$claim" != "$lpid" ]; then
+        if [ -n "$claim" ]; then
+          log "note: $SERVER_PID_FILE claimed pid $claim, which is NOT the process holding port $PORT — recording $lpid instead"
+        fi
+        mkdir -p "$BARKPARK_HOME"
+        echo "$lpid" >"$SERVER_PID_FILE"
+      fi
+      log "server already running (pid $lpid) — ANSWERING on http://$PHX_HOST:$PORT/studio"
+      return 0
+    fi
+    die "port $PORT is held by pid $lpid but http://$PHX_HOST:$PORT/api/schemas does not answer — a wedged server, one still booting, or something else entirely. Run 'barkpark status', then stop it (kill $lpid) or set PORT=<other>; see $SERVER_LOG"
   fi
-  if [ -n "$(listener_pid)" ]; then
-    die "something is already listening on port $PORT — stop it or set PORT=<other>"
+
+  # Nothing is listening, so ANY pidfile here is a claim we cannot corroborate:
+  # that pid — alive or not — is not serving Barkpark on this port. Say so and
+  # discard it rather than reporting a running server that does not exist.
+  if [ -n "$claim" ]; then
+    if kill -0 "$claim" 2>/dev/null; then
+      log "ignoring stale $SERVER_PID_FILE — it claims pid $claim is alive, but nothing is listening on port $PORT"
+    fi
+    rm -f "$SERVER_PID_FILE"
   fi
+
   log "booting server on http://$PHX_HOST:$PORT (MIX_ENV=$MIX_ENV)"
   mkdir -p "$BARKPARK_HOME"
   # Boot via mix phx.server in MIX_ENV=prod (exported at top): runtime.exs reads
@@ -162,15 +209,41 @@ wait_server() {
   die "server did not answer on http://$PHX_HOST:$PORT within 60s — see $SERVER_LOG"
 }
 
+# `stop` proves identity BEFORE it kills. The old fallback took listener_pid()
+# on $PORT — whose default is 4000 (:50) — whenever the pidfile was stale, so a
+# leftover pidfile could make `barkpark stop` SIGKILL an unrelated process that
+# happened to hold 4000. A process is ours on exactly two proofs: the pidfile
+# names the pid that HOLDS the port, or the thing holding the port ANSWERS the
+# Barkpark API. Anything else we refuse to kill, and we say why.
 stop_server() {
-  local pid
-  pid="$(cat "$SERVER_PID_FILE" 2>/dev/null || true)"
-  # Fall back to the live listener if the pidfile is stale/missing.
-  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
-    pid="$(listener_pid)"
+  local claim lpid pid why
+  claim="$(cat "$SERVER_PID_FILE" 2>/dev/null || true)"
+  lpid="$(listener_pid || true)"
+  pid=""
+  why=""
+
+  if [ -n "$claim" ] && [ "$claim" = "$lpid" ]; then
+    pid="$claim"
+    why="$SERVER_PID_FILE names the pid holding port $PORT"
+  elif [ -n "$lpid" ] && server_answering; then
+    pid="$lpid"
+    why="it answers http://$PHX_HOST:$PORT/api/schemas"
   fi
+
+  if [ -z "$pid" ]; then
+    if [ -n "$lpid" ]; then
+      log "refusing to stop pid $lpid — it holds port $PORT but does not answer http://$PHX_HOST:$PORT/api/schemas and $SERVER_PID_FILE does not name it, so it is not identifiably Barkpark. Nothing was killed (run 'kill $lpid' yourself if it is yours)."
+    elif [ -n "$claim" ] && kill -0 "$claim" 2>/dev/null; then
+      log "not stopping pid $claim — $SERVER_PID_FILE claims it, but nothing is listening on port $PORT. Stale pidfile: discarding it without killing anything."
+    else
+      log "server not running"
+    fi
+    rm -f "$SERVER_PID_FILE"
+    return 0
+  fi
+
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-    log "stopping server (pid $pid)"
+    log "stopping server (pid $pid — $why)"
     kill "$pid" 2>/dev/null || true
     # Wait for it to actually release the port (graceful BEAM shutdown).
     local i
@@ -197,6 +270,7 @@ migrate() {
 cmd_up() {
   command -v mix >/dev/null 2>&1 || die "mix not found on PATH — install Elixir"
   ensure_secrets        # T5.4
+  ensure_bundle_import_flag  # PDS W1 — local twin is the pull target
   "$PG" start           # T5.2 — managed Postgres on :5433
   load_env              # pulls DATABASE_URL from the managed instance
   migrate               # apply schema to the managed DB
@@ -221,13 +295,79 @@ cmd_stop() {
   "$PG" stop
 }
 
+# Does the server ANSWER? The same probe wait_server uses to decide the boot
+# succeeded — liveness is "it serves HTTP", never "a pid exists".
+server_answering() {
+  curl -sf "http://$PHX_HOST:$PORT/api/schemas" >/dev/null 2>&1
+}
+
+# version + commit of the RUNNING server, read back from its own /status.json
+# (public, unauthenticated). Empty when the endpoint is absent or unparseable —
+# an older build answers /api/schemas but may not carry /status.json.
+running_version() {
+  local body version commit
+  body="$(curl -sf "http://$PHX_HOST:$PORT/status.json" 2>/dev/null || true)"
+  [ -n "$body" ] || return 0
+  version="$(printf '%s' "$body" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
+  commit="$(printf '%s' "$body" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')"
+  # The server reports version "unknown" when it was not built from a tag; the
+  # commit sha is then the only real identity — do not print "running unknown".
+  [ "$version" = "unknown" ] && version=""
+  [ "$commit" = "unknown" ] && commit=""
+  if [ -n "$version" ] && [ -n "$commit" ]; then
+    echo "$version ($commit)"
+  elif [ -n "$commit" ]; then
+    echo "$commit"
+  elif [ -n "$version" ]; then
+    echo "$version"
+  fi
+}
+
+# `status` reports what it can OBSERVE, never what a pidfile asserts. A pidfile
+# is a claim; the port and an HTTP answer are the state. Both failure directions
+# were observed on a dev box before this: a pidfile pointing at an unrelated
+# `sleep` printed "server running", and with no pidfile at all it printed
+# "server stopped" while beam.smp held :4000 and /api/schemas returned 200.
+#
+# FOUR OUTCOMES — there is no bare "running":
+#   ANSWERING                    port held AND /api/schemas answers (+ version/commit)
+#   PROCESS-ALIVE-NOT-ANSWERING  port held, HTTP does not answer (booting or wedged)
+#   STOPPED                      nothing holds the port
+#   UNKNOWN                      pidfile claims a live pid that does NOT hold the port
 cmd_status() {
   "$PG" status || true
-  if server_running; then
-    log "server running (pid $(cat "$SERVER_PID_FILE")) — http://$PHX_HOST:$PORT"
-  else
-    log "server stopped"
+
+  local lpid ppid_claim ver
+  # `|| true`: lsof exits non-zero when nothing holds the port, and under
+  # `set -euo pipefail` that would abort status before it could report STOPPED.
+  lpid="$(listener_pid || true)"
+  ppid_claim="$(cat "$SERVER_PID_FILE" 2>/dev/null || true)"
+
+  if [ -n "$lpid" ]; then
+    if server_answering; then
+      ver="$(running_version)"
+      if [ -n "$ver" ]; then
+        log "server ANSWERING (pid $lpid) — http://$PHX_HOST:$PORT — running $ver"
+      else
+        log "server ANSWERING (pid $lpid) — http://$PHX_HOST:$PORT — version unknown (/status.json not served)"
+      fi
+    else
+      log "server PROCESS-ALIVE-NOT-ANSWERING — pid $lpid holds port $PORT but http://$PHX_HOST:$PORT/api/schemas did not answer — see $SERVER_LOG"
+    fi
+    if [ -n "$ppid_claim" ] && [ "$ppid_claim" != "$lpid" ]; then
+      log "note: $SERVER_PID_FILE claims pid $ppid_claim, which is NOT the process holding port $PORT"
+    fi
+    return 0
   fi
+
+  # Nothing is listening. A pidfile pointing at a live process is then a claim
+  # we cannot corroborate — that process is not serving Barkpark on this port.
+  if [ -n "$ppid_claim" ] && kill -0 "$ppid_claim" 2>/dev/null; then
+    log "server UNKNOWN — $SERVER_PID_FILE claims pid $ppid_claim is alive, but nothing is listening on port $PORT (stale pidfile, or the server is on another port)"
+    return 0
+  fi
+
+  log "server STOPPED — nothing is listening on port $PORT"
 }
 
 case "${1:-up}" in

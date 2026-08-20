@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -200,6 +201,37 @@ func TestDispatchClaimSpawnsOnlyWinners(t *testing.T) {
 	}
 }
 
+// TestDispatchClaimRendersHelpAndNotices pins charter D18 on the cmux --claim
+// path (which BYPASSES runCommand): on a won claim the server's help[] templates
+// and rail-awareness notices are surfaced to stderr, one line each, instead of
+// being silently dropped. stdout keeps the clean spawn receipt.
+func TestDispatchClaimRendersHelpAndNotices(t *testing.T) {
+	srv := nextFrontierServer(t, map[string]claimReply{
+		"task-a": {body: `{"ok":true,"doc":{"claim":{"epoch":5}},` +
+			`"help":["bp task pulse task-a w --now \"...\""],` +
+			`"notices":[{"type":"rail_changed","parent_id":"epic-1","rail_rev":"r3"}]}`},
+		"task-b": {body: `{"ok":true,"doc":{"claim":{"epoch":6}}}`},
+	}, nil)
+	withCmuxSeams(t, true, func(id, cwd, cmd string) error { return nil })
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	code := runCmuxDispatch(w, globals{}, dispatchCtx(srv.URL), []string{"--claim"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr=%s", code, se.String())
+	}
+	if !strings.Contains(se.String(), "help: bp task pulse task-a w") {
+		t.Errorf("dispatch --claim dropped the server help template:\n%s", se.String())
+	}
+	if !strings.Contains(se.String(), "notice: rail_changed parent=epic-1 rail_rev=r3") {
+		t.Errorf("dispatch --claim dropped the rail-awareness notice:\n%s", se.String())
+	}
+	// The spawn receipt (stdout) stays clean — advisories are stderr-only.
+	if strings.Contains(so.String(), "help:") || strings.Contains(so.String(), "notice:") {
+		t.Errorf("advisories leaked onto stdout (must be stderr):\n%s", so.String())
+	}
+}
+
 // Default dispatch (no --claim) claims NOTHING — the pane derives and claims its
 // own lease at SessionStart. This asserts the byte-unchanged default path never
 // hits the /claim endpoint.
@@ -217,6 +249,42 @@ func TestDispatchDefaultNeverClaims(t *testing.T) {
 	}
 	if len(captured) != 0 {
 		t.Errorf("default dispatch claimed %d task(s), want 0 (pane self-claims):\n%v", len(captured), captured)
+	}
+}
+
+// TestDispatchFetchFailureEmitsJSONEnvelope pins the fetchSnapshotErr fix
+// (wbqs-go-board-fetch-error-envelope): before the fix, a failed
+// taskboard.FetchSnapshotFull hit `out.userErr(...); return exitGeneric` with
+// no machineOut() check, so `bp cmux dispatch -o json | jq` on a broken board
+// fetch got EMPTY stdout. It must now emit a parseable
+// {"ok":false,"error":{"code":...,"message":...}} envelope on stdout.
+func TestDispatchFetchFailureEmitsJSONEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "json"}
+	code := runCmuxDispatch(w, globals{dryRun: true}, dispatchCtx(srv.URL), nil)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want exitGeneric (%d)", code, exitGeneric)
+	}
+	if se.Len() != 0 {
+		t.Errorf("json mode must not also leak the human stderr line:\n%s", se.String())
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("json stdout not parseable (empty stdout is exactly the pre-fix bug): %v\n%s", err, so.String())
+	}
+	if env.OK || env.Error.Code == "" || env.Error.Message == "" {
+		t.Errorf("bad fetch-failure envelope:\n%s", so.String())
 	}
 }
 

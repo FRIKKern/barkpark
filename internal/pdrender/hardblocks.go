@@ -50,10 +50,10 @@ func innerWidth(ctx RenderCtx) int {
 
 // ── diagram (Mermaid) ───────────────────────────────────────────────────────
 // Mirrors compose_block(diagram)'s EMAIL-mode degradation: a bordered box with
-// a header naming the detected Mermaid kind, the folded source (dim, each line
-// truncated to the inner width), and a "Figure N." caption noting the limit.
-// The article-mode `<pre class="mermaid">` browser render has no terminal
-// analogue — no library draws mermaid — so the box IS the honest ceiling.
+// a header naming the detected Mermaid kind, the complete wrapped source, and a
+// caption noting the limit. The article-mode `<pre class="mermaid">`
+// browser render has no full terminal analogue, so the box is the honest
+// complete-source ceiling for kinds the native renderer cannot draw.
 //
 // The SEAM is now realized for the kinds we can draw well: a native, dependency-
 // free layout engine turns `flowchart`/`graph` source into ranked boxes + a
@@ -65,7 +65,6 @@ func innerWidth(ctx RenderCtx) int {
 type diagramRenderer struct{}
 
 func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
-	n := ctx.nextFigure()
 	source := attrStr(b.Attrs, "source")
 	caption := sanitizeText(attrStr(b.Attrs, "caption"))
 	kind := mermaidKind(source)
@@ -86,7 +85,7 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 			art = renderSequence(doc.seq, ctx)
 		}
 		if len(art) > 0 {
-			return append(art, diagramCaption(n, caption, ctx))
+			return append(art, diagramCaption(caption, ctx)...)
 		}
 	}
 
@@ -95,35 +94,49 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 	var sb strings.Builder
 	sb.WriteString(ctx.Theme.FieldLabel.Render("◇ Mermaid diagram (" + sanitizeText(kind) + ")"))
 
-	// Folded source: each line dim + truncated so nothing overflows the box.
+	// Folded source: preserve every authored token. A narrow terminal may add
+	// continuation rows, but it must not replace source with renderer ellipsis.
 	for _, line := range strings.Split(strings.TrimRight(source, "\n"), "\n") {
-		sb.WriteString("\n")
-		sb.WriteString(ctx.Theme.Dim.Render(truncateANSI(sanitizeCodeText(line), inner)))
+		wrapped := hardBoundDisplayLines(
+			[]string{ctx.Theme.Dim.Render(sanitizeCodeText(line))},
+			inner,
+		)
+		for _, continuation := range wrapped {
+			sb.WriteString("\n")
+			sb.WriteString(continuation)
+		}
 	}
 
-	// "Figure N." caption — shares the document-global counter, like figure —
-	// and states the limit so the box isn't mistaken for a render bug.
-	cap := "Figure " + itoa(n) + "."
-	if caption != "" {
-		cap += " " + caption
+	// Caption: the author's text (an author-typed "Figure N." lead emphasised,
+	// never one we invent) plus the limit, so the box isn't mistaken for a render
+	// bug. With no caption the limit note stands alone.
+	capLine := figureCaption(caption, ctx)
+	studio := ctx.Theme.Caption.Render("(view in Studio)")
+	if capLine == "" {
+		capLine = studio
+	} else {
+		capLine += ctx.Theme.Caption.Render(" ") + studio
 	}
-	cap += " (view in Studio)"
 	sb.WriteString("\n")
-	sb.WriteString(strings.Join(wrapLines(ctx.Theme.Caption.Render(cap), inner), "\n"))
+	sb.WriteString(strings.Join(wrapLines(capLine, inner), "\n"))
 
 	return boxLines(sb.String(), ctx)
 }
 
-// diagramCaption is the "Figure N. <caption>" line beneath a drawn diagram —
-// the same document-global figure counter figure/asciicast share. A drawn
-// diagram needs no "view in Studio" suffix (it IS the render), unlike the folded
-// fallback box which states its ceiling.
-func diagramCaption(n int, caption string, ctx RenderCtx) string {
-	cap := "Figure " + itoa(n) + "."
-	if caption != "" {
-		cap += " " + caption
+// diagramCaption is the caption line beneath a drawn diagram: the AUTHOR'S
+// caption, with an author-typed "Figure N." lead emphasised the way the web
+// reader does — pdrender numbers nothing (figureCaption). No caption → no line.
+// A drawn diagram needs no "view in Studio" suffix (it IS the render), unlike
+// the folded fallback box which states its ceiling.
+func diagramCaption(caption string, ctx RenderCtx) []string {
+	styled := figureCaption(caption, ctx)
+	if styled == "" {
+		return nil
 	}
-	return ctx.Theme.Caption.Render(truncateANSI(cap, clampWidth(ctx.Width)))
+	return hardBoundDisplayLines(
+		wrapLines(styled, clampWidth(ctx.Width)),
+		ctx.Width,
+	)
 }
 
 // mermaidKind detects the diagram kind from the FIRST non-empty, non-directive
@@ -163,6 +176,13 @@ func mermaidKind(source string) string {
 // link + action CTA use. A `.cast` is a time-indexed stream; a static render
 // makes ONE frame, so inline playback is the honest ceiling (mirrors render.ex's
 // email-mode "Terminal recording" plain link).
+//
+//	asciicast: {src, caption?, poster?}
+//
+//	- poster carries no TUI-visible effect. It is an asciinema-player option
+//	  (an npt timestamp naming the frame the WEB player rests on before play);
+//	  with no player here there is no resting frame to choose. Same ruling as
+//	  video.go's poster — a browser-only affordance, deliberately inert.
 type asciicastRenderer struct{}
 
 func (asciicastRenderer) Render(b Block, ctx RenderCtx) []string {

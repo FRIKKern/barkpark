@@ -1,0 +1,29 @@
+# Synthetic remove-direction fixture — REMOVE with a consumed mark,
+# DELETE FILE IF PRESENT with a distinguishing guard, positive-polarity
+# ASLONG, ASSERT FILE ... ABSENT / DONT CONTAIN.
+COMMAND "remove-widget"
+DESCRIPTION "Reverse of add-widget (synthetic fixture)."
+LAST_UPDATED "16-07-2026-10-05-00"
+DOMAIN "barkpark"
+TAGS "scaffy, synthetic"
+CONCEPT "widget"
+VARIANT "default"
+DIRECTION "remove"
+
+VARIABLE 1 "WidgetName" TITLE "Name your widget" DESCRIPTION "Pascal name of the widget." EXAMPLES "Timeline"
+
+IN "internal/widgets/registry.go"
+### Consume the planted mark: the block being removed carries it.
+REMOVE
+::: {{.widget-name}} registration :::
+	// scaffy:add-widget {{.WidgetName}} MARK:registry-{{.widget-name}}
+	registry["{{.widget-name}}"] = {{.widgetName}}Widget{}
+::: {{.widget-name}} registration :::
+MARK "registry-{{.widget-name}}"
+ASLONG FILE CONTAIN "MARK:registry-{{.widget-name}}"
+
+DELETE FILE IF PRESENT "internal/widgets/{{.widget_name}}.go"
+ASLONG FILE CONTAIN "// {{.WidgetName}} renders the {{.widget-name}} widget."
+
+ASSERT FILE "internal/widgets/{{.widget_name}}.go" ABSENT
+ASSERT FILE "internal/widgets/registry.go" DONT CONTAIN "MARK:registry-{{.widget-name}}"

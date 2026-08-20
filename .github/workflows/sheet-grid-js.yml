@@ -18,12 +18,22 @@ on:
       - "api/priv/static/assets/bp-sheet-grid.js"
       - "api/priv/static/assets/bp-sheet-formula.js"
       - "api/assets/sheet-grid/**"
+      # THE FILES __palette.test.mjs READS. Without these three the contrast
+      # harness never ran on a PR that changed a hue, a background token, or the
+      # presence palette — i.e. on every PR that could actually break it. A gate
+      # that does not trigger on its own subject is green for free.
+      - "api/lib/barkpark_web/layouts/root.html.heex"
+      - "api/lib/barkpark_web/studio/presence_state.ex"
+      - "api/lib/barkpark_web/studio/tokens_gen.ex"
       - ".github/workflows/sheet-grid-js.yml"
   pull_request:
     paths:
       - "api/priv/static/assets/bp-sheet-grid.js"
       - "api/priv/static/assets/bp-sheet-formula.js"
       - "api/assets/sheet-grid/**"
+      - "api/lib/barkpark_web/layouts/root.html.heex"
+      - "api/lib/barkpark_web/studio/presence_state.ex"
+      - "api/lib/barkpark_web/studio/tokens_gen.ex"
       - ".github/workflows/sheet-grid-js.yml"
 
 concurrency:

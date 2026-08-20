@@ -54,6 +54,26 @@ defmodule BarkparkWeb.AdminStudioRedirectController do
   end
 
   @doc """
+  `/studio/connectors` → the workspace-level scoped Connectors canonical
+  (connectors D49). Identical substance argument to `settings/2`: a connector
+  install belongs to ONE workspace, so a flat mount would carry no
+  `current_workspace` and pin every install to the seeded Default. The flat
+  spelling exists so a bookmark (and the flat-surface nav tab, which the
+  nav-parity contract requires to be present everywhere) resolves.
+  """
+  def connectors(conn, _params) do
+    case resolve_scope(conn) do
+      {:ok, ws_slug, proj_slug} ->
+        redirect(conn,
+          to: with_query("/w/#{ws_slug}/p/#{proj_slug}/studio/connectors", conn.query_string)
+        )
+
+      :error ->
+        redirect(conn, to: "/login")
+    end
+  end
+
+  @doc """
   `/studio/:dataset/_plugins[/:plugin/settings]` → the dataset-scoped
   plugins-admin canonical, preserving the `/:plugin/settings` tail.
   """

@@ -1,0 +1,104 @@
+COMMAND "Plant a @canonical Marker" DESCRIPTION "Plant the two-line `@canonical capability:<slug>` marker above any PUBLIC entry point so a cold agent's `grep '@canonical capability:'` LANDS on the one true implementation of a capability. One INSERT BEFORE FIRST: a scaffy provenance line + the `@canonical` pointer line, spliced directly above the head line the marker certifies — the head is a pure anchor, never rewritten. Works on Go funcs and Elixir public defs alike — the head line is taken VERBATIM as an opaque anchor, so multi-clause Elixir heads and brace-terminated Go signatures both anchor cleanly." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "docs", "cli", "search" CONCEPT "canonical-marker" VARIANT "plant-above-head" DIRECTION "add" VARIABLES
+  VARIABLE 1 "TargetFile" OPAQUE TITLE "File holding the entry point to mark" DESCRIPTION "Repo-relative path of the source file whose public entry point becomes the canonical owner of a capability. OPAQUE: a path, never re-cased, exempt from path-casing lints — this file spells it {{.TargetFile}} throughout. The command is language-agnostic: any file whose comment syntax matches CommentToken (Go `//`, Elixir `#`)." EXAMPLES "internal/apiclient/client.go", "api/lib/barkpark/content/graph.ex"
+  VARIABLE 2 "HeadLine" OPAQUE TITLE "The exact head line to mark (verbatim)" DESCRIPTION "The FULL source line of the public entry point, copied byte-for-byte from the file — the whole `func New(cfg Config) *Client {` or `def clamp_depth(nil), do: @default_depth`, never a name-prefix. This is the load-bearing lesson (D58): fenced anchors are LINE-granular, so a name-prefix anchor like `func New(` would clean-MISS the byte-exact match (the fenced anchor is the whole line incl. its trailing newline) — the anchor must BE the whole line. OPAQUE: the line is matched verbatim, never re-cased. For a multi-clause Elixir function anchor the FIRST clause head — no two clause heads are byte-identical, so the full-line anchor is still unique. WARNING 1 (occurrence): INSERT BEFORE FIRST splices at the FIRST occurrence of the anchor bytes — pick a head line that occurs exactly once in TargetFile (extend it if a bare signature repeats) so FIRST is provably the head you mean; `bp scaffy validate --repo` reports the live occurrence count. WARNING 2 (indentation): copy the head WITH its leading whitespace — a `def` nested in a `defmodule` is 2-space indented, and only a byte-exact copy matches it. The two planted comment lines are emitted flush-left; `mix format` realigns leading comments to the following code's column on its next pass, so the planted marker settles to the head's indent (Go top-level funcs are column-0, so no realign is needed there)." EXAMPLES "func New(cfg Config) *Client {", "  def clamp_depth(nil), do: @default_depth", "  def render(assigns) do"
+  VARIABLE 3 "slug" OPAQUE TITLE "The capability slug (kebab, unique repo-wide)" DESCRIPTION "The kebab-case capability name — the repo-wide-unique key in `@canonical capability:<slug>`. `grep -rn '@canonical capability:'` IS the index, so the slug must not already exist on any other impl (§8 invariant (a): a duplicate slug turns CI red). OPAQUE: one spelling per file, `{{.slug}}` everywhere — it names the capability, it is not a code identifier to be re-cased." EXAMPLES "api-client-new", "graph-depth-clamp", "preview-manifest"
+  VARIABLE 4 "Aka" OPAQUE TITLE "aka: grep vocabulary (comma-list, no spaces)" DESCRIPTION "The `aka:` search words an agent actually types to find this code — comma-separated, NO spaces (so `depth,clamp,bound` lands a `grep clamp` on the marked head). OPAQUE literal: emitted verbatim into the marker line, never re-cased. Keep it to the words that would otherwise MISS the canonical impl (jargon names, error strings, alternate spellings)." EXAMPLES "New,client,constructor", "depth,clamp,bound,pagination", "og,opengraph,unfurl,share-card"
+  VARIABLE 5 "CommentToken" OPAQUE TITLE "Line-comment token for the target language" DESCRIPTION "The host language's line-comment marker — `//` for Go/TS/JS, `#` for Elixir/Ruby/shell. OPAQUE literal: it prefixes both planted lines and is emitted verbatim. The command carries no language table; the caller states the token, keeping this one command usable across every surface." EXAMPLES "//", "#"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# What this plants, and why it is ONE INSERT BEFORE FIRST (D58 → W6 ratify)
+# ─────────────────────────────────────────────────────────────────────────────
+# A canonical marker is two comment lines that must sit DIRECTLY ABOVE a public
+# entry point, because scripts/docs-anchors-check.sh §8(b) asserts a public
+# `def `/`func `/`export ` within 6 lines BELOW every `@canonical capability:`
+# line. The only byte-exact, line-granular anchor for "directly above the head"
+# is the head line ITSELF — so the op is INSERT BEFORE FIRST anchored on the
+# head: the payload (provenance line + @canonical line) splices above it and
+# the head survives UNTOUCHED as a pure anchor.
+#
+# HISTORY (why this op used to be a REPLACE): before INSERT BEFORE was ratified
+# (D55 deferral), prepend-above-a-surviving-head was only expressible as a
+# self-consuming REPLACE re-emitting the head, and E-005 then FORCED a REANCHOR
+# alongside the payload-derived ASLONG. That forced REANCHOR was not merely
+# vestigial — it was the corruption vector that ratified this primitive: on a
+# SECOND different-slug marker in the SAME file, the per-slug guard doesn't
+# skip, the `MARK:canonical-` family match hijacks the anchor, and the splice
+# either aborts (tail desync, D33) or comma-mutates the previously marked head
+# and plants a duplicate head line — run-proven in the W6 ratify experiment
+# (task scaffy-backlog-insert-before-primitive). As a plain INSERT the op is
+# not self-consuming, carries no REANCHOR, and a second marker in the same
+# file is an independent clean insert.
+#
+# Idempotency: the planted `MARK:canonical-{{.slug}}` is the implicit re-run
+# guard (a plain MARK skips when already planted), and the payload-derived
+# ASLONG below is the explicit belt to that suspender.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# PRE-RUN CHECK — the different-slug double-mark residual (D58)
+# ─────────────────────────────────────────────────────────────────────────────
+# The ASLONG guard is per-SLUG (`capability:{{.slug}}`). It refuses a re-plant
+# of the SAME slug, but it is BLIND to a DIFFERENT-slug marker already sitting
+# on the same head — a run with a fresh slug against an already-marked head
+# would cleanly stack a second marker above the same entry point. Before
+# running, grep the target for an existing marker on YOUR head:
+#
+#     grep -n '@canonical capability:' <TargetFile>
+#
+# If the head already carries a marker, DON'T run this — a public entry point
+# owns at most one capability slug. This is the demand-driven doctrine
+# (CLAUDE.md "Canonical-impl markers"): tag ONLY a genuinely-forked or
+# jargon-named capability that a cold agent would otherwise have to find among
+# decoys — a well-named, unforked function earns no marker, and a marker is
+# REMOVED once dedup kills its decoys. The marker certifies "one owner," never
+# "bug-free."
+#
+# Token spellings (D3d / A1): every variable here is OPAQUE, so each renders in
+# exactly ONE spelling — no casing transforms. `{{.slug}}` is the capability
+# name, never a code identifier; `{{.HeadLine}}` / `{{.TargetFile}}` /
+# `{{.Aka}}` / `{{.CommentToken}}` are all verbatim literals.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OP — splice { provenance + @canonical } directly above the head (W6)
+# ─────────────────────────────────────────────────────────────────────────────
+# The fenced anchor is the head line, byte-exact and line-granular: INSERT
+# BEFORE FIRST splices the payload at the anchor's first occurrence, leaving
+# the head bytes untouched. The provenance line plants the real mark
+# `MARK:canonical-{{.slug}}` (D24 — a plain MARK requires its `MARK:<name>`
+# text in the op's own payload; present here, and it doubles as the implicit
+# re-run skip). ASLONG is the @canonical line's own `capability:{{.slug}}`
+# substring (payload-derived per E-006; ASCII, brace-free, no `}}` beside a
+# literal `}`).
+IN "{{.TargetFile}}"
+### Plant @canonical capability:{{.slug}} above the marked head
+INSERT BEFORE FIRST
+::: target head line :::
+{{.HeadLine}}
+::: target head line :::
+WITH
+::: {{.slug}} canonical marker :::
+{{.CommentToken}} scaffy:add-canonical-marker {{.slug}} MARK:canonical-{{.slug}}
+{{.CommentToken}} @canonical capability:{{.slug}} aka:{{.Aka}}
+::: {{.slug}} canonical marker :::
+MARK "canonical-{{.slug}}"
+ASLONG FILE DONT CONTAIN "capability:{{.slug}}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTCONDITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# ASSERT FILE: both planted lines are present. Both strings are verbatim
+# substrings the op writes and are guard-consistent with the ASLONG (A4/A5:
+# ASCII, no `}}` adjacent to a literal `}`).
+ASSERT FILE "{{.TargetFile}}" CONTAINS "@canonical capability:{{.slug}} aka:{{.Aka}}"
+ASSERT FILE "{{.TargetFile}}" CONTAINS "MARK:canonical-{{.slug}}"
+
+# ASSERT CMD (LOCAL): the §8(b) invariant in isolation — the marker sits on a
+# PUBLIC entry point, i.e. a `def `/`func `/`export ` within 6 lines below the
+# `@canonical capability:` line. `grep -A6` scopes to exactly the §8 window; this
+# is the cheap, litter-immune local proof that the marker is well-placed.
+ASSERT CMD "grep -A6 'capability:{{.slug}}' {{.TargetFile}} | grep -qE '^[[:space:]]*(def |func |export )'"
+
+# ASSERT CMD (TIER ci): the FULL guard, §8(a) uniqueness + §8(b) placement across
+# the whole tree. Deferred to CI — in the litter-saturated primary checkout
+# docs-anchors-check.sh hangs past 115s scanning the tree (README clean-checkout
+# caveat); CI runs it green in a fresh checkout in ~24s.
+ASSERT CMD "bash scripts/docs-anchors-check.sh" TIER ci

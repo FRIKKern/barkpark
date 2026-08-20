@@ -16,13 +16,15 @@ var (
 // Generated lifecycle glyph hues (design/tokens.json lifecycle.*.color).
 // done/closed stay TEAL — deliberately distinct from status.ok green.
 var (
-	GenInProgressHue = lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"}
-	GenBlockedHue    = lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"}
-	GenDoneHue       = lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"}
-	GenClosedHue     = lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"}
-	GenCancelledHue  = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"}
-	GenReadyHue      = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"}
-	GenOpenHue       = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"}
+	GenInProgressHue  = lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"}
+	GenBlockedHue     = lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"}
+	GenDoneHue        = lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"}
+	GenClosedHue      = lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"}
+	GenCancelledHue   = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"}
+	GenReadyHue       = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"}
+	GenOpenHue        = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"}
+	GenConsideringHue = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"}
+	GenResearchingHue = lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"}
 )
 
 // GenStatusTone maps a semantic role to its adaptive tone.
@@ -42,6 +44,8 @@ var GenLifecycleHue = map[string]lipgloss.AdaptiveColor{
 	"cancelled":   GenCancelledHue,
 	"ready":       GenReadyHue,
 	"open":        GenOpenHue,
+	"considering": GenConsideringHue,
+	"researching": GenResearchingHue,
 }
 
 // GenANSI16 pins each status role to its basic-16 SGR foreground code — the
@@ -72,70 +76,101 @@ var genTones = map[string]ThemeTones{
 	"evergreen": {StatusTone: GenStatusTone, LifecycleHue: GenLifecycleHue, ANSI16: GenANSI16},
 	"charple": {
 		StatusTone: map[string]lipgloss.AdaptiveColor{
-			"ok": lipgloss.AdaptiveColor{Light: "#08883e", Dark: "#53be70"},
-			"info": lipgloss.AdaptiveColor{Light: "#406bcd", Dark: "#76a2ff"},
-			"warn": lipgloss.AdaptiveColor{Light: "#986600", Dark: "#db9400"},
-			"danger": lipgloss.AdaptiveColor{Light: "#c43732", Dark: "#ff7266"},
+			"ok":     lipgloss.AdaptiveColor{Light: "#31854a", Dark: "#6fb87f"},
+			"info":   lipgloss.AdaptiveColor{Light: "#4a6ebd", Dark: "#7ea3ef"},
+			"warn":   lipgloss.AdaptiveColor{Light: "#986600", Dark: "#d2983d"},
+			"danger": lipgloss.AdaptiveColor{Light: "#b74840", Dark: "#ed8176"},
 		},
 		LifecycleHue: map[string]lipgloss.AdaptiveColor{
 			"in_progress": lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"},
-			"blocked": lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"},
-			"done": lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
-			"closed": lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
-			"cancelled": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
-			"ready": lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
-			"open": lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"blocked":     lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"},
+			"done":        lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"closed":      lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"cancelled":   lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"ready":       lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
+			"open":        lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"considering": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"researching": lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"},
 		},
 		ANSI16: map[string]int{
-			"ok": 32,
-			"info": 34,
-			"warn": 33,
+			"ok":     32,
+			"info":   34,
+			"warn":   33,
 			"danger": 31,
 		},
 	},
 	"ember": {
 		StatusTone: map[string]lipgloss.AdaptiveColor{
-			"ok": lipgloss.AdaptiveColor{Light: "#2c8647", Dark: "#68ba7b"},
-			"info": lipgloss.AdaptiveColor{Light: "#486ec0", Dark: "#7ba3f6"},
-			"warn": lipgloss.AdaptiveColor{Light: "#986600", Dark: "#d6962c"},
-			"danger": lipgloss.AdaptiveColor{Light: "#ba453d", Dark: "#f27d72"},
+			"ok":     lipgloss.AdaptiveColor{Light: "#36844c", Dark: "#70b880"},
+			"info":   lipgloss.AdaptiveColor{Light: "#4c6fb9", Dark: "#7fa3ee"},
+			"warn":   lipgloss.AdaptiveColor{Light: "#986600", Dark: "#d29840"},
+			"danger": lipgloss.AdaptiveColor{Light: "#b54b43", Dark: "#eb8277"},
 		},
 		LifecycleHue: map[string]lipgloss.AdaptiveColor{
 			"in_progress": lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"},
-			"blocked": lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"},
-			"done": lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
-			"closed": lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
-			"cancelled": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
-			"ready": lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
-			"open": lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"blocked":     lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"},
+			"done":        lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"closed":      lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"cancelled":   lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"ready":       lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
+			"open":        lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"considering": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"researching": lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"},
 		},
 		ANSI16: map[string]int{
-			"ok": 32,
-			"info": 34,
-			"warn": 33,
+			"ok":     32,
+			"info":   34,
+			"warn":   33,
 			"danger": 31,
 		},
 	},
 	"fjord": {
 		StatusTone: map[string]lipgloss.AdaptiveColor{
-			"ok": lipgloss.AdaptiveColor{Light: "#32854a", Dark: "#74b783"},
-			"info": lipgloss.AdaptiveColor{Light: "#4a6ebc", Dark: "#82a4e9"},
-			"warn": lipgloss.AdaptiveColor{Light: "#986600", Dark: "#cf9a4a"},
-			"danger": lipgloss.AdaptiveColor{Light: "#b74941", Dark: "#e7857b"},
+			"ok":     lipgloss.AdaptiveColor{Light: "#4d7f58", Dark: "#7eb489"},
+			"info":   lipgloss.AdaptiveColor{Light: "#5871a5", Dark: "#88a4dd"},
+			"warn":   lipgloss.AdaptiveColor{Light: "#91692d", Dark: "#c89c5e"},
+			"danger": lipgloss.AdaptiveColor{Light: "#a35a52", Dark: "#dd8c82"},
 		},
 		LifecycleHue: map[string]lipgloss.AdaptiveColor{
 			"in_progress": lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"},
-			"blocked": lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"},
-			"done": lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
-			"closed": lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
-			"cancelled": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
-			"ready": lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
-			"open": lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"blocked":     lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"},
+			"done":        lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"closed":      lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"cancelled":   lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"ready":       lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
+			"open":        lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"considering": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"researching": lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"},
 		},
 		ANSI16: map[string]int{
-			"ok": 32,
-			"info": 34,
-			"warn": 33,
+			"ok":     32,
+			"info":   34,
+			"warn":   33,
+			"danger": 31,
+		},
+	},
+	"iris": {
+		StatusTone: map[string]lipgloss.AdaptiveColor{
+			"ok":     lipgloss.AdaptiveColor{Light: "#05893e", Dark: "#64bb79"},
+			"info":   lipgloss.AdaptiveColor{Light: "#406bce", Dark: "#78a2fa"},
+			"warn":   lipgloss.AdaptiveColor{Light: "#986600", Dark: "#d9951c"},
+			"danger": lipgloss.AdaptiveColor{Light: "#c53732", Dark: "#f67a6f"},
+		},
+		LifecycleHue: map[string]lipgloss.AdaptiveColor{
+			"in_progress": lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"},
+			"blocked":     lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"},
+			"done":        lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"closed":      lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"cancelled":   lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"ready":       lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
+			"open":        lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+			"considering": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"researching": lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"},
+		},
+		ANSI16: map[string]int{
+			"ok":     32,
+			"info":   34,
+			"warn":   33,
 			"danger": 31,
 		},
 	},
@@ -153,4 +188,4 @@ func Resolve(theme string) ThemeTones {
 // Themes lists every generated theme id in dir order (evergreen first). bp style
 // and the styleguide showroom enumerate it to iterate skins; it grows by exactly
 // one id when theme N+1 ships its file.
-func Themes() []string { return []string{"evergreen", "charple", "ember", "fjord"} }
+func Themes() []string { return []string{"evergreen", "charple", "ember", "fjord", "iris"} }

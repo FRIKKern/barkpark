@@ -1,0 +1,209 @@
+{
+  "_meta": {
+    "schema": 1,
+    "what": "The level-skip specimens the adversarial suite fires against. Charter D12: the ratified table at /papers/survey-once-build-forever has SIX rows, not seven. Unratified specimens are present but labelled UNCAUGHT with a reason, because labelling the gap honestly is the anti-vacuity discipline — padding the fixture by pretending the grammar catches them is the same laundering the epic exists to prevent.",
+    "authority_hierarchy": {
+      "L1": "running system — served bytes, live DB, box HEAD, a real click",
+      "L2": "origin/main",
+      "L3": "local checkout — a CLAIM about L2",
+      "L4": "generated artifacts — openapi.json, token layer, goldens",
+      "L5": "charters / docs / cards — a CLAIM about L2",
+      "L6": "agent memory / the wish — a CLAIM about L5"
+    },
+    "rules": {
+      "R1": "a fact records the level it was read at and may never be quoted above it",
+      "R2": "a fact records its DEPENDENCIES, not just its subject",
+      "R3": "no fact is stored without a demonstration the method COULD have answered differently — rejection at WRITE time",
+      "R4": "conflicting facts are BOTH stored and flagged, never resolved by write order"
+    },
+    "caught_by_vocabulary": [
+      "R1",
+      "R2",
+      "R3",
+      "R4",
+      "UNCAUGHT"
+    ],
+    "caught_by_is_a_hypothesis": "Every `caught_by` label below is a HYPOTHESIS for the acceptance suite (slice 6) to TEST, never a verified fact. This fixture's own gate checks its STRUCTURE, not its semantics: a specimen labelled R1 that R1 does not actually catch passes here and fails only in slice 6. Reading these labels as measured catches would be the level-skip this fixture documents, committed against the fixture itself.",
+    "frozen_at": "2026-07-20",
+    "freeze_doctrine": "Freeze the COMMAND and the identity of what was read (sha, ref, host). Never freeze a measured number as a standing assertion — numbers drift, and a frozen number encodes a fact that may already be false. Where a specimen names a figure, it is recorded as an observation WITH its observed_at, never as an assertion.",
+    "rerun_verification": "Every `rerun` below was executed on 2026-07-20 from a clean worktree; `last_rerun` records what it returned. Re-run them — do not trust these transcripts.",
+    "row_count_provenance": {
+      "claim": "the ratified table has exactly SIX rows",
+      "how_derived": "NOT taken from the wave brief. Re-derived from the durable paper itself on 2026-07-20: `bp doc get paper survey-once-build-forever -o json`, then counting rows of the table block whose cells carry the level-skip vocabulary. That block is table index 1 of 4 and has 6 rows, matching specimens 1-6 in order.",
+      "rerun": "bp doc get paper survey-once-build-forever -o json | node -e 'const d=JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"));const t=(d.blocks||[]).filter(b=>b.type===\"table\")[1];console.log(t.rows.length)'",
+      "why_this_matters": "Accepting 'six rows' from the brief would have been an L6 read quoted as an L5 fact about the paper — this fixture's own failure mode, committed while building the fixture that documents it. The count is derived from the paper, not from the prompt."
+    }
+  },
+  "specimens": [
+    {
+      "id": 1,
+      "ratified": true,
+      "title": "deploy lag: \"0, the fix is live\"",
+      "level_skip": "read at L2 (git HEAD matched origin/main), claimed at L1 (\"it is live\")",
+      "wrong_evidence": "deploy lag: 0, the fix is live",
+      "honest_counterpart": "origin/main contains the fix (L2). Whether the running BEAM has rebuilt to it is a SEPARATE L1 question, answered only by asking the box.",
+      "rerun": "ssh -o BatchMode=yes -o ConnectTimeout=10 -i ~/.ssh/barkpark_indx root@157.180.90.121 'cd /opt/barkpark && git rev-parse --short HEAD'",
+      "rerun_companion": "git rev-parse --short origin/main",
+      "caught_by": "R1",
+      "why_caught": "The L2 command (`git rev-parse origin/main`) derives level L2. The claim asserts L1. R1 forbids quoting a fact above the level its command derives, so the claim is rejected without anyone needing to know the right answer.",
+      "sides": {
+        "lag": {
+          "description": "The control FIRING: the box is behind origin/main, so an L2 read would have forged a false L1 claim.",
+          "observed_at": "2026-07-20T12:40Z",
+          "box_head": "65541e2d4",
+          "origin_main": "dcd80b36b",
+          "commits_behind_observed": 13,
+          "note": "Observed as 11 behind earlier in the session and 13 at freeze time. The lag is a MOVING observation, never a frozen assertion — re-run `git rev-list --count <box_head>..origin/main` to re-derive.",
+          "rerun_lag_count": "git rev-list --count $(ssh -o BatchMode=yes -i ~/.ssh/barkpark_indx root@157.180.90.121 'cd /opt/barkpark && git rev-parse HEAD')..origin/main"
+        },
+        "no_lag": {
+          "description": "The control NOT firing: box HEAD equals origin/main. The level-skip is still a level-skip — the L2 read simply happened to agree with L1 this time. This side is frozen so the specimen does not depend on the lag persisting; an auto-deploy can close it within the hour.",
+          "synthetic": true,
+          "synthetic_note": "CONSTRUCTED, not observed. The lag side was captured live; this side was hand-written because the box WAS behind at freeze time, so an equal-HEAD observation did not exist to capture. box_head and origin_main below are PLACEHOLDER STRINGS, not shas — any consumer that reads them as commit ids is reading fiction. The side exists to pin the ASSERTION (reject the L1 claim even when the answer agrees), never to supply data.",
+          "box_head": "<equal to origin_main>",
+          "origin_main": "<equal to box_head>",
+          "commits_behind_observed": 0,
+          "note": "A correct answer reached by an inadmissible method is still inadmissible. The suite must reject the L1 claim in BOTH sides — a grammar that only rejects when the answer happens to be wrong is grading the answer, not the method."
+        }
+      },
+      "last_rerun": {
+        "at": "2026-07-20T12:40Z",
+        "box_head": "65541e2d4",
+        "origin_main": "dcd80b36b",
+        "exit": 0
+      }
+    },
+    {
+      "id": 2,
+      "ratified": true,
+      "title": "three surveyors reporting a CI rule \"missing\"",
+      "level_skip": "read at L3 (stale local checkout), claimed at L2 (\"the rule does not exist\")",
+      "wrong_evidence": "web-literal-check is missing from the doc-gates workflow",
+      "honest_counterpart": "The rule is present on origin/main at 4 sites in .github/workflows/doc-gates.yml — two path filters, one comment, one run step. The local checkout was stale; three independent surveyors reproduced the same stale read, which reads exactly like corroboration and is not.",
+      "rerun": "git show origin/main:.github/workflows/doc-gates.yml | grep -n web-literal-check",
+      "caught_by": "R1",
+      "why_caught": "A local read derives L3. The absence claim is about L2. R1 rejects the promotion; the honest fix is one `git show` away, which is the point of D3 — the honest path must be the cheap one.",
+      "note_on_corroboration": "Three agents agreeing is NOT independent confirmation when they share a root cause (one stale checkout). This specimen is also the R2 case: the fact's real dependency is the checkout's freshness, not the file.",
+      "last_rerun": {
+        "at": "2026-07-20T12:38Z",
+        "exit": 0,
+        "hits": 4,
+        "output": "79:      - \"scripts/web-literal-check.sh\"\n191:      - \"scripts/web-literal-check.sh\"\n362:      # resisters). See scripts/web-literal-check.sh for the full list.\n364:        run: bash scripts/web-literal-check.sh"
+      }
+    },
+    {
+      "id": 3,
+      "ratified": true,
+      "title": "\"the charter stops at D38\"",
+      "level_skip": "read at L6 (agent recollection), claimed at L5 (a statement about the charter's contents)",
+      "wrong_evidence": "the charter stops at D38",
+      "honest_counterpart": "It stopped at D57 — nineteen decisions later. Recollection of a document is not a read of it.",
+      "rerun": "grep -ohE '[*][*]D[0-9]+' .claude/workflows/*charter*.md | grep -oE '[0-9]+' | sort -n | tail -1",
+      "rerun_per_charter": "for f in .claude/workflows/*charter*.md; do printf '%s %s\\n' \"$f\" \"$(grep -oE 'D[0-9]+' \"$f\" | grep -oE '[0-9]+' | sort -n | tail -1)\"; done",
+      "rerun_was": "grep -oE '\\*\\*D[0-9]+' .claude/workflows/<charter>.md | grep -oE '[0-9]+' | sort -n | tail -1",
+      "why_rerun_changed": "Replaced 2026-07-20 (review), for two independent reasons. (a) The original carried an UNFILLED placeholder `<charter>` and was therefore NOT EXECUTABLE — a template posing as a command, in the one field whose entire purpose is that it can be re-run. (b) That placeholder's `>` reads as an output redirection, so the executor refused the command UNSAFE-RERUN before running it: the specimen could never have been re-derived at all. The replacement is grep-headed on purpose — the grammar levels the HEAD token, so this derives L3 (a local checkout read, its true level), whereas the equally-correct `for` loop kept as rerun_per_charter derives L6 because a shell loop is not a reader shape the grammar recognises. Generality over all charters matches the row, which names none (see fidelity_caveat).",
+      "caught_by": "R1",
+      "why_caught": "No command at all means the fact is L6 by construction (D1/D3: DEMOTED, never rejected). An L6 fact quoted as a statement about L5 content is exactly the R1 violation.",
+      "fidelity_caveat": "The ratified table does not name WHICH charter — VERIFIED against the paper itself on 2026-07-20, not assumed from the brief. Row 2 reads in full: '\"the charter stops at D38\" | L6 — recollection | L5 — it stopped at D57, nineteen decisions later', with no charter identity anywhere in the row. So this specimen freezes the SHAPE and a generalised rerun rather than inventing one. Separately, re-derivation across .claude/workflows/ on 2026-07-20 found NO charter whose decision list terminates at D57 — the nearest, bp-azure-hetzner-hosting-charter.md and bp-chat-tui-charter.md, now run past it. The terminal id has itself drifted, which is precisely why the number is not frozen as an assertion.",
+      "verified_row_text": "\"the charter stops at D38\" | L6 — recollection | L5 — it stopped at D57, nineteen decisions later",
+      "number_is_frozen": false,
+      "last_rerun": {
+        "at": "2026-07-20T12:45Z",
+        "note": "Ran across all charters; no terminal D57 today. See fidelity_caveat.",
+        "exit": 0
+      }
+    },
+    {
+      "id": 4,
+      "ratified": true,
+      "title": "\"64.00ch at viewport 900\" vs 44.80ch under a panel",
+      "level_skip": "NONE — this is a unit/identity confusion WITHIN one level: two different measurements of two different things, both read at L1, reported as one quantity.",
+      "verified_row_text": "\"64.00ch at viewport 900\" | the layout box | the reader's eye, which saw 44.80ch under a panel",
+      "verified_row_note": "The ratified row itself names no L-levels for this specimen — its two columns are 'the layout box' and 'the reader's eye', not L-numbers. That is the paper agreeing, in its own wording, that this row is not a level-skip. Confirms the UNCAUGHT label is faithful to the source rather than a builder's convenience.",
+      "wrong_evidence": "measured line length is 64.00ch at viewport 900",
+      "honest_counterpart": "The two figures measure different viewport conditions (unoccluded vs occluded by an inspector panel). Neither is wrong; naming them as one quantity is. The correct record names the occlusion axis as a DEPENDENCY of the measurement.",
+      "rerun": "curl -s https://barkpark.cloud/app.css | shasum -a 256",
+      "rerun_note": "This re-derives the IDENTITY of the served artifact whose typography was measured, not the measurement. Re-measuring requires driving a real browser at a declared viewport AND a declared occlusion state; the measurement command is the browser run, and its two inputs must both be named or the figure is meaningless.",
+      "served_sha": "c5c759f973c79f8962cf696c9c040529360ce431e7ad53787beca02d5249b28f",
+      "served_sha_of": "https://barkpark.cloud/app.css (L1 — the served bytes)",
+      "served_sha_observed_at": "2026-07-20T12:47Z",
+      "frozen_number": null,
+      "number_is_frozen": false,
+      "why_no_number": "The figures have ALREADY drifted to 44.69 / 37.9 and the occlusion moved from the `default` to the `user-opened` inspector axis. Freezing 64.00 would encode a fact that is already false — the fixture would ship a lie as its own control. Charter doctrine: freeze the served_sha and the command, never the number.",
+      "caught_by": "UNCAUGHT",
+      "uncaught_reason": "R1 compares the level a fact was READ at against the level it is CLAIMED at. Both figures here were read at L1 and claimed at L1, so R1 has nothing to compare and structurally cannot fire. Catching this needs R2 (the measurement's DEPENDENCIES — viewport and occlusion — must be recorded as part of the fact) plus D7's discrete-predicate rule. Recorded as a known gap in the wave-1 grammar, NOT as a caught case.",
+      "last_rerun": {
+        "at": "2026-07-20T12:47Z",
+        "served_sha": "c5c759f973c79f8962cf696c9c040529360ce431e7ad53787beca02d5249b28f",
+        "local_l3_sha": "c5c759f973c79f8962cf696c9c040529360ce431e7ad53787beca02d5249b28f",
+        "note": "L1 and L3 agreed at freeze time. Agreement is an OBSERVATION, not a licence to read L3 and claim L1 next time — see specimen 1's no_lag side.",
+        "exit": 0
+      }
+    },
+    {
+      "id": 5,
+      "ratified": true,
+      "title": "kalle@jarl.no as the ops value",
+      "level_skip": "read at L5/L3 (the env var is present and the config parses), claimed at L1 (\"the ops recipient is kalle@jarl.no\")",
+      "wrong_evidence": "ops recipient is configured: kalle@jarl.no is set and the config parses",
+      "honest_counterpart": "platform_admin_emails/0 maps each configured address through Accounts.get_user_by_email/1 and rejects nils — so an address with no matching USER row yields []. Config presence does not imply a recipient; only calling the function does.",
+      "rerun": "git show origin/main:cloud/lib/barkpark_cloud/notifications.ex | sed -n '389,399p'",
+      "caught_by": "R3",
+      "why_caught": "The control never fired. Nothing demonstrated the method COULD have answered differently — the check would have reported success against an empty list just as readily. R3 rejects at WRITE time any fact stored without that demonstration.",
+      "control_that_should_have_run": "Call platform_admin_emails/0 with the env set to an address that has NO user row and assert it returns []. If that assertion cannot fail, the original check proved nothing.",
+      "path_note": "D9: the original citation was the path-less `notifications.ex:389-397`, which sent a verifier to api/lib and returned empty. The real file is cloud/lib/barkpark_cloud/notifications.ex — a path-less line reference is REJECTED.",
+      "last_rerun": {
+        "at": "2026-07-20T12:38Z",
+        "exit": 0,
+        "output": "  def platform_admin_emails do\n    :barkpark_cloud\n    |> Application.get_env(:platform_admin_emails, [])\n    |> List.wrap()\n    |> Enum.map(&normalize_recipient/1)\n    |> Enum.reject(&is_nil/1)\n    |> Enum.map(&Accounts.get_user_by_email/1)\n    |> Enum.reject(&is_nil/1)\n    |> Enum.map(& &1.email)\n    |> Enum.uniq()\n  end"
+      }
+    },
+    {
+      "id": 6,
+      "ratified": true,
+      "title": "`emit --write` reporting success",
+      "level_skip": "read at L4 (the generated region regenerated cleanly), claimed at L2/L3 (\"the file is correct\")",
+      "wrong_evidence": "emit --write succeeded, the artifacts are in sync",
+      "honest_counterpart": "The generated region regenerated cleanly AND the write deleted 33 authored lines outside that region. A generator reporting success speaks only for what it generates; it is silent about what it destroyed.",
+      "rerun": "node design/emit.mjs",
+      "rerun_note": "The BARE invocation is check mode — it does not write. Verified 0.11s, green, 19 artifacts in sync on 2026-07-20.",
+      "caught_by": "R1",
+      "why_caught": "The generator's own exit code is an L4 fact about generated regions. Claiming file-level correctness is an L2/L3 claim about the whole file, including authored regions the generator never inspected. R1 rejects the promotion.",
+      "dependency_note": "Also an R2 case: the fact's real dependency is the set of lines OUTSIDE the generated region, which the L4 read never touched.",
+      "last_rerun": {
+        "at": "2026-07-20T12:38Z",
+        "exit": 0,
+        "seconds": 0.11,
+        "output": "emit --check: all 19 artifacts in sync (18 surfaces + paper-editor mirror)."
+      }
+    },
+    {
+      "id": 101,
+      "ratified": false,
+      "title": "420px vs 340px",
+      "level_skip": "none — a unit/identity confusion at ONE level",
+      "wrong_evidence": "the panel is 420px wide",
+      "honest_counterpart": "The two figures measure different things (different element or different state), both read at the same level. Naming them as one quantity is the error.",
+      "rerun": null,
+      "caught_by": "UNCAUGHT",
+      "uncaught_reason": "Both values were read at the same authority level, so R1 — which only compares read-level against claim-level — has nothing to compare and structurally cannot fire. This is the same class as specimen 4 and needs R2's dependency recording, not R1.",
+      "why_frozen_anyway": "Frozen as an explicit NEGATIVE control: the suite must NOT claim to catch it. A fixture that quietly counts this as a catch would inflate the grammar's measured power, which is the vacuity this epic exists to prevent.",
+      "number_is_frozen": false,
+      "no_rerun_reason": "n/a — the ratified table did not carry a re-derivation command for this row; it was never ratified as a level-skip specimen."
+    },
+    {
+      "id": 102,
+      "ratified": false,
+      "title": "82 vs 86 children",
+      "level_skip": "none — an R4 conflict, not a level-skip",
+      "wrong_evidence": "the parent has 82 children",
+      "honest_counterpart": "Two reads of the same quantity disagree (82 and 86). Neither is a promotion across levels; they are conflicting facts about one subject.",
+      "rerun": null,
+      "caught_by": "UNCAUGHT",
+      "uncaught_reason": "This is an R4 case (conflicting facts must BOTH be stored and flagged, never resolved by write order), not an R1 level-skip. R1 cannot fire on it. It belongs to the conflict engine in slice 5, keyed on (subject, quantity) — and per D7 it is only admissible at all if the quantity is a DISCRETE predicate rather than a drifting count.",
+      "why_frozen_anyway": "Frozen as an explicit NEGATIVE control for the R1 grammar and as a positive fixture for the LATER R4 conflict engine. Labelled honestly so wave 1 cannot bank it as a catch.",
+      "number_is_frozen": false,
+      "no_rerun_reason": "n/a — the ratified table did not carry a re-derivation command for this row; it was never ratified as a level-skip specimen."
+    }
+  ]
+}

@@ -22,7 +22,15 @@ defmodule BarkparkWeb.Telemetry do
       # `prometheus_metrics/0` and holds the running aggregates in ETS; the
       # token-gated `GET /v1/instance/metrics` route scrapes them. It runs in
       # EVERY env (not dev-gated) so the prod hole cannot reopen unnoticed.
-      {TelemetryMetricsPrometheus.Core, name: :barkpark_metrics, metrics: prometheus_metrics()}
+      {TelemetryMetricsPrometheus.Core, name: :barkpark_metrics, metrics: prometheus_metrics()},
+
+      # Distributions in Core keep every observation in ETS until a scrape folds
+      # them into buckets. `prometheus_metrics/0` puts distributions on
+      # `barkpark.repo.query.*`, which fire per QUERY, so an instance nobody
+      # scrapes grows that table without bound — see the module doc for the
+      # measurements. This prunes only when the endpoint looks unused, so an
+      # instance with a real Prometheus attached is unaffected.
+      BarkparkWeb.Telemetry.DistributionPruner
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -75,6 +83,38 @@ defmodule BarkparkWeb.Telemetry do
         unit: {:byte, :kilobyte},
         description: "Total BEAM memory — watch for a monotonic climb (leak → OOM)."
       ),
+      # Q: "WHICH subsystem is growing?" — the total above says a leak exists but
+      # not where it lives. telemetry_poller's default vm measurement already
+      # emits the full nine-key `:erlang.memory()` map on [:vm, :memory] every
+      # 10s; only the subscription was narrow. These four break the total down
+      # into the answers that change what you do: processes (a leaking GenServer
+      # state / mailbox), binary (the classic refc-binary leak), ets (an
+      # unbounded cache table), code (module churn / hot-loading).
+      #
+      # UNIT DISCIPLINE (charter D64): every BEAM gauge here carries
+      # `unit: {:byte, :kilobyte}` to match `vm.memory.total` above.
+      # TelemetryMetricsPrometheus.Core scales the value but keeps the
+      # event-derived NAME, so these render unsuffixed (`vm_memory_processes`,
+      # not `..._kilobytes`) — an unsuffixed BYTE gauge sitting beside these
+      # unsuffixed KILOBYTE ones is exactly how a 1024x unit error renders as a
+      # phantom memory leak. Same unit or an explicit `_bytes` suffix, never
+      # neither.
+      last_value("vm.memory.processes",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory held by processes — climbs on leaking state or mailboxes."
+      ),
+      last_value("vm.memory.binary",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory in refc binaries — the classic binary leak."
+      ),
+      last_value("vm.memory.ets",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory in ETS tables — climbs on an unbounded cache."
+      ),
+      last_value("vm.memory.code",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory holding loaded code — climbs on module churn."
+      ),
       # Q: "is the scheduler backing up?" — run-queue length is the twin health
       # signal to memory; a sustained non-zero backlog means the box is overloaded
       # before latency alone makes it obvious.
@@ -93,6 +133,22 @@ defmodule BarkparkWeb.Telemetry do
         unit: {:native, :millisecond},
         description:
           "Batch-mutate (apply_mutations) latency — p95 via histogram_quantile; tag :workspace_id."
+      ),
+      # Q: "what is p95 of a search?" — the READ path (QueryPipeline.search/4, the
+      # single choke point every documents+media search funnels through) had ZERO
+      # timing: it computed `ms` locally for the response body but fired no
+      # telemetry (the only search event, [:barkpark, :search, :intel, :record],
+      # is a WRITE with no workspace_id). `:telemetry.span` emits
+      # [:barkpark, :search, :query, :stop] with :duration; this histogram makes
+      # p95 derivable. `:workspace_id` tags per-workspace search volume/latency
+      # (perfect-plan-build W7); unscoped/anonymous reads carry the "global"
+      # sentinel, mirroring the content.mutate distribution above (D12).
+      distribution("barkpark.search.query.stop.duration",
+        tags: [:workspace_id],
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description:
+          "Search read-path (QueryPipeline.search) latency — p95 via histogram_quantile; tag :workspace_id."
       ),
       # Q: "what is p95 of a publish?" — the publish/lifecycle hot path had ZERO
       # timing. One span [:barkpark, :content, :lifecycle, :stop] covers all four
@@ -146,7 +202,8 @@ defmodule BarkparkWeb.Telemetry do
         tag_values: &lv_view_tag/1,
         reporter_options: [buckets: latency_buckets],
         unit: {:native, :millisecond},
-        description: "LiveView mount latency — p95 via histogram_quantile; tag :view = the module."
+        description:
+          "LiveView mount latency — p95 via histogram_quantile; tag :view = the module."
       ),
       distribution("phoenix.live_view.handle_params.stop.duration",
         tags: [:view],
@@ -173,6 +230,34 @@ defmodule BarkparkWeb.Telemetry do
         unit: {:native, :millisecond},
         description:
           "LiveComponent handle_event latency — p95 via histogram_quantile; tag :component = the module."
+      ),
+      # ── Authoring wall — curator legibility (charter D44) ───────────────────
+      # Q: "how often is the publish wall rejecting a publish, and for what?"
+      # Waves 1–5 sealed the wall; every rejection fired
+      # [:barkpark, :authoring, :wall_rejection] (authoring_wall.ex emit_wall_rejection)
+      # into a total production VOID — no Prometheus series, no attached handler
+      # (proven on the deployed build). Before this, an operator could only raw-grep
+      # journalctl for "Sent 422", which drifts with slot + log retention and cannot
+      # answer "how often" reproducibly. The RULED consumer is the already-live,
+      # Bearer-gated `GET /v1/instance/metrics` scrape (charter D44 inverts D29's
+      # inventory doctrine — the consumer now EXISTS, so no novel findings store).
+      # Tagged ONLY by BOUNDED keys: :code (label_spine | unknown_tag | duplicate_of),
+      # :type (paper | task), :dataset. The emitter carries no other metadata.
+      sum("barkpark.authoring.wall_rejection.count",
+        tags: [:code, :type, :dataset],
+        description:
+          "Publish-wall rejections — tags :code=gate (label_spine|unknown_tag|duplicate_of), :type, :dataset."
+      ),
+      # Q: "how often does a just-published doc fail to retrieve ITSELF by its own
+      # labels?" The D9 findability post-test (an Oban worker) fires
+      # [:barkpark, :authoring, :findability_miss] (findability_posttest.ex emit_miss)
+      # into the same void. Tagged ONLY by BOUNDED :type/:dataset — the emitter's
+      # :doc_id, :query and :rank_diagnostics are UNBOUNDED cardinality and are
+      # deliberately DROPPED here (never Prometheus tags; they live in the log line).
+      sum("barkpark.authoring.findability_miss.count",
+        tags: [:type, :dataset],
+        description:
+          "Post-publish self-retrieval misses — a published doc absent from top-N for its own labels; tags :type, :dataset."
       )
     ]
   end

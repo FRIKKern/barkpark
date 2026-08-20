@@ -22,7 +22,7 @@ concrete mechanisms that deliver it — each specced further down:
 2. **Progress at every scale** — criteria `2/3` → phase rollup `5/11` → an overall % header. The needle
    is visible wherever you look.
 3. **Movement surfaced** — flash-on-change per row + a one-line activity ticker of what just moved
-   (`✓ tokens.json completed · ◐ inject snapshot 1→2`). Nothing changes silently.
+   (`✓ tokens.json completed · ⠋ inject snapshot 1→2`). Nothing changes silently.
 4. **Completion is felt** — the done blink-×3 + a "done today" tally that climbs. Every finish lands.
 5. **Always a next step** — ready-to-claim pinned; you can always make progress in one keypress
    (claim-forward, from the TUI charter).
@@ -30,7 +30,7 @@ concrete mechanisms that deliver it — each specced further down:
    on width / animated count); in the TUI, the heartbeat repaints the changed cells. Change you can
    *watch happen*.
 
-A **momentum header** (aggregate: `◐ N in flight · ▶ N ready · ✓ N done today · NN%` + an animated
+A **momentum header** (aggregate: `⠋ N in flight · ○ N ready · ✓ N done today · NN%` + an animated
 overall bar) sits atop the board on both surfaces — the always-on progress read. Motion is never
 decoration here: it is the signal that the system, and your work, is moving.
 
@@ -38,8 +38,54 @@ decoration here: it is the signal that the system, and your work, is moving.
 
 ## 1. The shared status vocabulary
 
-Six lifecycle states. Each is ONE manifest row → `state → { role, glyph, active_frames, color }`.
+Lifecycle states. Each is ONE manifest row → `state → { role, glyph, active_frames, color }`.
 Reconciles with `internal/semrole` (which already owns the role token vocabulary).
+
+### 1a. The 7-state graph (task-lifecycle-visibility epic)
+
+Lifecycle is a **state graph, not a linear funnel**. Seven states a task can be in:
+
+```
+                 ┌──────────────┐
+   (born) ──────▶│  considering │◀────────┐   a candidate the strategizer NAMED
+                 └──────┬───────┘         │   the minute it is named (◌ dotted circle)
+                        │  decide to look │
+                        ▼                 │
+                 ┌──────────────┐         │
+                 │ researching  │─────────┘   under active investigation (◎ violet bullseye)
+                 └──────┬───────┘
+              felt ready│  ┌── kill ──▶ cancelled/deleted   (◌/◎ never became open)
+                        ▼  │
+   (born) ──────▶┌──────────────┐  re-weigh backlog
+                 │     open     │◀──────────────┐          READY is DERIVED from here
+                 └──────┬───────┘               │
+                   claim│                        │(a cycle re-weighs → back to considering)
+                        ▼                        │
+                 ┌──────────────┐                │
+                 │ in_progress  │⇄ blocked ──▶ done
+                 └──────────────┘
+```
+
+- **BIRTHS**: a task may be born `considering` (a candidate) OR born `open` (clearly-ready work, exactly
+  as today — nothing about today's direct filing breaks).
+- **TRANSITIONS**: `considering → researching | → open | → cancelled/deleted`; `researching → open |
+  → considering | → cancelled/deleted`; `open → considering` (a cycle re-weighs the backlog) `|
+  → in_progress` (a normal claim); `in_progress ⇄ blocked → done` exactly as today.
+- **CONSIDERING CARRIES ITS OBJECT**: *considering-researching-it* vs *considering-building-it* — the
+  state expresses the contemplated next move.
+- **OPEN MEANS READY-TO-WORK**: this snaps onto existing semantics — `bp task ready` lists open tasks;
+  only `open` is claimable by `bp task next`. considering + researching are **never claimable**.
+
+**READY IS DERIVED, NEVER STORED.** `ready` is not a stored lifecycle value — a task's stored value is
+`open`, and the board *derives* readiness (open **and** every blocks-edge satisfied) and overlays the
+bright `○` on top. The manifest still carries a `ready` row (its bright-white hue), but the storage enum
+never holds `"ready"`. This is why "only open is claimable" is true *by construction*: promoting a
+candidate to `open` is the single act that makes it workable.
+
+**Unknown state = fail-open dim neutral.** Any lifecycle value a surface does not recognise degrades to
+the neutral dim dot (`·`, `lifecycle._default`) — never a guess, never a crash. The Go TUI model
+(`board.go` childBand / `RoleFor` default) treats an unrecognised non-terminal row as ordinary work
+ranked just after `open`.
 
 **EXACT SAME ICONS, both surfaces (user directive 2026-07-04, verbatim: "Make it use the same icons as
 TUI precisely — exactly same icons").** The TUI is the constraint (a terminal can only paint Unicode),
@@ -55,14 +101,24 @@ that carry meaning**: blue (working), amber (blocked), teal/green (done). This i
 `!` and `✕` offshoots. (Supersedes the earlier "green for ready" — green now signifies completion, not
 readiness; ready is white.)
 
-| state | meaning | glyph (GUI & TUI, identical) | codepoint | color |
-|---|---|---|---|---|
-| `open` | filed, backlog, not workable | `○` | U+25CB | **white @ 50% opacity** (foreground, adaptive) |
-| `ready` | unchecked, deps met — claim it | `○` | U+25CB | **white / full foreground** (adaptive) |
-| `in_progress` | claimed, worked now | Braille spinner `⠋…⠏` (**cycles, TUI-identical**) | U+280B… | blue `#2563eb` / `#60a5fa` |
-| `blocked` | needs something / requirement unmet | `!` | U+0021 | amber `#d97706` / `#fbbf24` |
-| `done` | complete | `✓` (**blinks ×3 on complete**) | U+2713 | teal `#0d9488` / `#2dd4bf` |
-| `cancelled` | abandoned / superseded | `✕` | U+2715 | neutral-dim `#a1a1aa` / `#71717a` |
+| state | meaning | glyph (GUI & TUI, identical) | codepoint | ascii | color |
+|---|---|---|---|---|---|
+| `considering` | a candidate just named — weighing whether it is real | `◌` | U+25CC | `?` | neutral-dim `#a1a1aa` / `#71717a` (~35%, fainter than open) |
+| `researching` | candidate under active investigation | `◎` | U+25CE | `R` | **violet** `#7c3aed` / `#a78bfa` |
+| `open` | filed, backlog, not workable | `○` | U+25CB | `.` | **white @ 50% opacity** (foreground, adaptive) |
+| `ready` | unchecked, deps met — claim it (**DERIVED, never stored**) | `○` | U+25CB | `o` | **white / full foreground** (adaptive) |
+| `in_progress` | claimed, worked now | Braille spinner `⠋…⠏` (**cycles, TUI-identical**) | U+280B… | `~` | blue `#2563eb` / `#60a5fa` |
+| `blocked` | needs something / requirement unmet | `!` | U+0021 | `!` | amber `#d97706` / `#fbbf24` |
+| `done` | complete | `✓` (**blinks ×3 on complete**) | U+2713 | `v` | teal `#0d9488` / `#2dd4bf` |
+| `cancelled` | abandoned / superseded | `✕` | U+2715 | `x` | neutral-dim `#a1a1aa` / `#71717a` |
+
+The **brightness ladder extends DOWNWARD** with the thought states: `considering` (~35%, faintest) is
+dimmer than `open` (~50%) is dimmer than `ready` (100%) — thought is fainter than backlog is fainter
+than actionable. `considering` shares `cancelled`'s neutral-dim hue (a candidate and a killed task are
+both "not live work"); `researching` earns the one **violet** in the palette so "being looked into"
+reads at a glance, deliberately distinct from blue (working) / amber (blocked) / teal (done). The `◌`
+considering glyph collides with the cloud `instanceLifecycle.provisioning` glyph — **RULED accepted**:
+task lifecycle and cloud instance state are disjoint vocabularies that never co-render.
 
 open & ready share the glyph `○` and codepoint — opacity (50% vs 100% of the foreground) is the only
 difference, a brightness cue that reads as "backlog vs ready." "white / foreground" = adaptive: near-

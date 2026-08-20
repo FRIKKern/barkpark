@@ -33,6 +33,7 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.{Auth, Content}
+  alias BarkparkWeb.{AnonPerspective, LegacyController}
 
   @token "barkpark-dev-token"
   @type_name "post"
@@ -310,5 +311,88 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
       refute "drafts.lc-ten-otherws" in ids,
              "CROSS-WORKSPACE LEAK: workspace-A's doc leaked into the Default-scoped legacy read"
     end
+  end
+
+  # ── Drafts-LIST clamp (api-read-path-security-sweep w3) ───────────────────
+  #
+  # The LIST twin of the show/2 by-id clamp. `LegacyController.index/2` passed
+  # no `:perspective` to `Content.list_documents`, which defaults to `:raw`
+  # (content/query.ex:57), so `drafts.` rows sat in the result set — the same
+  # latent shape QueryController.index has always narrowed via
+  # `perspective: AnonPerspective.resolve(conn, params)`.
+  #
+  # PROOF-SHAPE LAW: an HTTP request through the live route can only ever prove
+  # the Plugs.PublicRead 403 (the route is not in its allowlist), which holds
+  # with the clamp deleted — a vacuous certification of the upstream plug, not
+  # the clamp. So this proof is ACTION-LEVEL: it calls `index/2` directly with a
+  # REAL minted `["public-read"]` token in `:api_token`, resolved through
+  # `Auth.verify_token/1` (the same path RequireToken uses), the one
+  # `anon_pinned?` principal the clamp keys on.
+  #
+  # ## Mutation transcript — 2026-08-17 (this file)
+  #
+  #   * clamp DELETED from index/2 (`perspective:` opt removed, back to the
+  #     `:raw` default) → the ACTION-LEVEL case below fails: `drafts.lc-listclamp`
+  #     returns in the body (count 1 → the draft, served to the public-read
+  #     caller). The read-tier "with auth" listing at :137 stays GREEN — that is
+  #     the measurement proving it certifies the clamp, not the upstream 403.
+  #   * clamp WIDENED to an unconditional `perspective: :published` (the
+  #     `anon_pinned?` scope dropped) → the "with auth → 200 + JSON list" test
+  #     at :137 fails: the admin token stops seeing `drafts.lc-list-2`.
+  #     Over-clamping is caught too.
+  #   * clamp as shipped → 0 failures (10 baseline + 2 here).
+  describe "GET /api/documents/:type — drafts-list clamp" do
+    setup do
+      # Draft-only: `drafts.lc-listclamp` exists, no published twin, so a leak is
+      # observable as its presence in the list rather than a coincidental miss.
+      {:ok, _} =
+        Content.create_document(
+          @type_name,
+          %{"_id" => "lc-listclamp", "title" => "Unpublished"},
+          "production"
+        )
+
+      :ok
+    end
+
+    test "ACTION-LEVEL: a public-read caller gets a draft-free list" do
+      ws = create_workspace!()
+      raw = mint!(ws, ["public-read"], "legacy list clamp public-read")
+      {:ok, token} = Auth.verify_token(raw)
+      conn = build_conn() |> Plug.Conn.assign(:api_token, token)
+
+      # Sanity: this principal really is the pinned class the clamp keys on —
+      # otherwise the assertion below could pass for the wrong reason.
+      assert AnonPerspective.anon_pinned?(conn)
+
+      served = LegacyController.index(conn, %{"type" => @type_name})
+      body = Jason.decode!(served.resp_body)
+
+      ids = Enum.map(body["documents"], & &1["id"])
+
+      refute "drafts.lc-listclamp" in ids,
+             "DRAFTS LEAK: the draft listed for a public-read caller, got #{inspect(ids)}"
+    end
+
+    test "ACTION-LEVEL: the clamp is anon_pinned?-scoped — a read token still lists the draft" do
+      ws = create_workspace!()
+      raw = mint!(ws, ["read"], "legacy list clamp read")
+      {:ok, token} = Auth.verify_token(raw)
+      conn = build_conn() |> Plug.Conn.assign(:api_token, token)
+
+      refute AnonPerspective.anon_pinned?(conn)
+
+      served = LegacyController.index(conn, %{"type" => @type_name})
+      ids = served.resp_body |> Jason.decode!() |> Map.fetch!("documents") |> Enum.map(& &1["id"])
+
+      assert "drafts.lc-listclamp" in ids,
+             "OVER-CLAMP: the draft was hidden from a non-anon read token, got #{inspect(ids)}"
+    end
+  end
+
+  defp mint!(ws, permissions, label) do
+    raw = "#{label}-#{System.unique_integer([:positive])}"
+    {:ok, _} = Auth.create_token(raw, label, "production", permissions, ws.id)
+    raw
   end
 end

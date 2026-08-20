@@ -1,0 +1,50 @@
+{
+  "assignment_id": "E20",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "capability_blocks": [
+    "E19 is BLOCKED rather than PASS.",
+    "E19 has no live immutable isolated deployment id.",
+    "The immutable E20 stop condition forbids TUI sessions, delivery, and client capture before E19 passes."
+  ],
+  "counts": {
+    "accepted_candidate_specific_captures": 0,
+    "client_open_captures": 0,
+    "delivery_receipts": 0,
+    "expected_cells": 72,
+    "fixtures": 36,
+    "not_started_cells": 72,
+    "production_mutations": 0,
+    "proxy_cells": 0,
+    "rollback_or_untouched": 36,
+    "silent_blanks": 0,
+    "surfaces": 2
+  },
+  "deployment_id": null,
+  "evidence": {
+    "capture_index": "capture-index.json",
+    "delivery_manifest": "delivery-manifest.json",
+    "expected_output": "E20 REPLAY PASS verdict=BLOCKED cells=72 accepted=0 proxies=0",
+    "hard_gates": "hard-gates.json",
+    "preflight": "preflight.json",
+    "rollback": "rollback.json",
+    "tui_session_manifest": "tui-session-manifest.json",
+    "validation_command": ".omx/state/legendary-experiments/E20/scripts/replay.sh"
+  },
+  "pins": {
+    "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+    "deployment_id": null,
+    "e19_deployment_sha256": "a457e24497b3654c7fbde476f755a7e0e5cba4fe0a9b6ab7da152fe6f81150d4",
+    "e19_provenance_sha256": "05bdac077caa3e3d61b82805effdc59feeb533124dfebfd117dee76d87c7110f",
+    "e19_result_sha256": "3c2228fe964aedbbc7ebd881d16f03144a6d9e6fee390b75b371189f62d60ad6",
+    "fixture_manifest_sha256": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df",
+    "plan_sha256": "f33916ea678dc8c9117588ea4b168b5735cc8a6b7b150c3a03bae9446667aa58"
+  },
+  "schema_version": "legendary-e20-result/v1",
+  "verdict": {
+    "action": "REWORK",
+    "pilot_authorized": false,
+    "quality": "BLOCKED",
+    "real_surface_gate_passed": false,
+    "winner_selected": false
+  }
+}

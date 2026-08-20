@@ -289,8 +289,11 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
     } do
       {:ok, _view, html} = live(conn, "/studio/styleguide/swatch?theme=evergreen&mode=dark")
 
-      # the mode is forced client-side (data-theme is otherwise client-owned)
-      assert html =~ ~s(document.documentElement.dataset.theme = "dark")
+      # the mode is forced client-side (data-theme is otherwise client-owned).
+      # BYTE-EXACT form matters: #3545 allow-lists this script by sha256 in
+      # BarkparkWeb.CSP (no spaces around =) — keep the assertion in lockstep
+      # with CSP.swatch_theme_script/1.
+      assert html =~ ~s(document.documentElement.dataset.theme="dark")
       # samples paint through shipped CSS vars, never inline role hex
       assert html =~ "background: var(--primary)"
       assert html =~ "background: var(--ok)"
@@ -322,11 +325,11 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
 
     test "GENERATED block emits the evergreen primary for light and dark", %{root: root} do
       # light :root primary + ring are evergreen (design/tokens.json color.primary/ring.light)
-      assert root =~ "--primary: hsl(163 46% 22%);"
+      assert root =~ "--primary: hsl(151.96 71.81% 29.22%);"
       assert root =~ "--ring: hsl(163 42% 30%);"
       # dark base is keyed on the data-theme toggle (the emitter extension), not @media
       assert root =~ ~s(html[data-theme="dark"] {)
-      assert root =~ "--primary: hsl(160 42% 62%);"
+      assert root =~ "--primary: hsl(152.92 60% 52.94%);"
     end
 
     test "no hand-authored block re-declares --primary/--ring in the old blue/zinc", %{root: root} do

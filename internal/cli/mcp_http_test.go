@@ -150,7 +150,7 @@ func newMCPHTTPStack(t *testing.T, toolset string) (*mcpHTTPBackend, string) {
 	}
 	base := manifest.Context{Server: api.URL, Token: mcpHTTPAmbientToken, Dataset: "production"}
 
-	handler, err := newMCPHTTPHandler(newWriter(io.Discard, io.Discard), globals{}, base, m, toolset)
+	handler, err := newMCPHTTPHandler(newWriter(io.Discard, io.Discard), globals{}, base, m, toolset, nil)
 	if err != nil {
 		t.Fatalf("newMCPHTTPHandler: %v", err)
 	}
@@ -216,7 +216,8 @@ func TestMCPHTTPForwardThroughBearer(t *testing.T) {
 	cs := connectMCPHTTPClient(t, endpoint, mcpHTTPGoodToken)
 	bg := context.Background()
 
-	// tools/list — the same curated eight the stdio transport serves.
+	// tools/list — the same curated set the stdio transport serves: the eight
+	// task tools plus the four chat session tools (herd charter D74h).
 	lt, err := cs.ListTools(bg, nil)
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
@@ -226,7 +227,10 @@ func TestMCPHTTPForwardThroughBearer(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	sort.Strings(names)
-	want := []string{"task_close", "task_create", "task_next", "task_prime", "task_pulse", "task_ready", "task_show", "task_stamp"}
+	want := []string{
+		"chat_read_tail", "chat_send", "chat_spawn_session", "chat_wait_for_state",
+		"task_close", "task_create", "task_next", "task_prime", "task_pulse", "task_ready", "task_show", "task_stamp",
+	}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools = %v, want %v", names, want)
 	}

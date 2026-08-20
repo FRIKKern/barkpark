@@ -1,0 +1,9 @@
+---
+'@barkpark/react': patch
+---
+
+react: ship `paper-surface.css` as a consumable asset. `@barkpark/react` now emits `dist/paper-surface.css` — a byte-for-byte copy of `api/assets/paper-surface/paper-surface.css`, the source of Phoenix's `Render.Stylesheet.css/0` — and exposes it via a new `"./paper-surface.css"` export subpath. Consumers `import "@barkpark/react/paper-surface.css"` to skin the (incoming) type-keyed `PortableDoc` renderer with the exact `bp-*` vocabulary Phoenix emits, so one stylesheet skins Next, Astro, and Phoenix identically.
+
+The stylesheet is COPIED at build time by tsup's `onSuccess` hook, never `import`ed as a JS string — it gzips to ~15.9KB and inlining it would blow the bundle budgets. Because the api source lives outside `js/`'s turbo/pnpm workspace (turbo's cache hash can't observe edits to it), `tests/paper-surface-asset.test.ts` is the real drift guard: it fails CI if `dist/paper-surface.css` is not byte-identical to the api source.
+
+size-limit budgets are set off the ACTUAL merged-bundle measurement (renderer included), not the loose 8KB/15KB caps. The 42-type `PortableDoc` renderer compiles to a ~73KB raw / ~16KB gzipped shared chunk that BOTH the client (`dist/index.mjs`) and RSC (`dist/server.mjs`) entries re-export from — so the whole package now costs ~16KB gzipped for any import. Budgets reflect that reality with ~12% headroom: `dist/index.mjs` client barrel 18KB (actual 15.99), `dist/server.mjs` RSC entry 17KB (actual 15.19), and the `import { PortableText }` shim 16KB (actual 13.93 — it shares the renderer chunk, so it no longer tree-shakes back to its former 1.2KB in this dist). NOTE for a later wave: if bundle size matters to PortableText-only consumers, split PortableText and PortableDoc into separate subpath entries so the legacy shim stops dragging the renderer chunk.

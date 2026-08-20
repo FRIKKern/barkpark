@@ -947,10 +947,11 @@ defmodule Barkpark.Plugin do
   The set of schema `name`s this plugin OWNS — the harvested truth the host's
   Desk Structure builder uses to (a) claim a plugin's types for its top-menu
   surface so they never leak into …Rest, and (b) reject a plugin-owned PRIVATE
-  schema from the host "Settings" catch-all (which is for host singletons like
-  siteSettings/navigation, NOT a plugin's private types). Ownership, not
-  enablement: a DISABLED plugin still owns its types (they fall to …Rest, never
-  Settings).
+  schema from the host "Settings" AND "Content" catch-alls (issue #8463 —
+  "Settings" is for host singletons like siteSettings/navigation, "Content" is
+  the generic consumer-content fallback; neither is for a plugin's private
+  types). Ownership, not enablement: a DISABLED plugin still owns its types
+  (they fall to …Rest, never Settings/Content).
 
   The `use Barkpark.Plugin` default derives this from the plugin's own
   `register_schemas([])` (`|> Enum.map(& &1.name)`), wrapped in a `try/rescue`

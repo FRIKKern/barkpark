@@ -1,0 +1,33 @@
+{
+  "grip_id": "vm-doctor-matrix-2026-07-23",
+  "verifier": "vm-doctor-matrix",
+  "wave": "cli-reliability-wave-2026-07-23",
+  "assignment": "Prove the GUARDED merge-base staleness formula (proposed doctor.sh section 2 fix) produces the exact verdict matrix on real fixture repos: at-tip green, behind-only RED, ahead-with-local-Go green, diverged RED, unknown BP_COMMIT loud skip, offline/missing-origin-ref loud skip, no-stamp red, identical from a non-main worktree. Prove the BARE unguarded one-liner false-greens offline (guard load-bearing). Prove a rebuild at origin/main tip flips behind-RED to green (fixer-clears). Prove the OLD (HEAD-diffing) formula false-greens where the new one honestly reds.",
+  "verdict": "PROVEN. Guarded merge-base formula yields the exact 8-cell matrix on real fixtures: at-tip GREEN, behind-Go RED, behind-docs-only GREEN (binary already has all merged Go), ahead-local-Go GREEN, diverged RED, unknown-commit LOUD-SKIP, no-stamp RED, non-main-worktree verdicts IDENTICAL. Guard is demonstrably load-bearing: offline (origin/main ref removed) the BARE one-liner false-GREENs a behind binary while the guarded form LOUD-SKIPs. Fixer-clears proven: behind-Go RED -> rebuild at tip -> GREEN. OLD formula (diff BP_COMMIT..HEAD) false-GREENs a stale diverged-worktree binary that the NEW formula honestly REDs. BONUS (Decide risk-down): doctor.sh always exit 0 (advisory) so section 2 can NEVER break upgrade_test on exit code; upgrade_test runs doctor.sh with PATH=bin:/usr/bin:/bin and NO fake bp, so `command -v bp` fails and section 2 is skipped entirely -> the new git calls are never even reached by that test.",
+  "recipes": [
+    {
+      "claim": "Guarded merge-base verdict matrix is exact on real fixtures: at-tip GREEN, behind-Go RED, behind-docs-only GREEN, ahead-local-Go GREEN, diverged RED, unknown-commit SKIP, no-stamp RED",
+      "rerun": "SCRATCH=/private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/406f9acc-915f-46bb-80cb-735aea29f71f/scratchpad; cd $SCRATCH/vm-doctor-matrix/work && verdict(){ b=$1; [ -z \"$b\" ]&&{ echo RED-no-stamp;return;}; git cat-file -e \"$b^{commit}\" 2>/dev/null||{ echo SKIP-unknown;return;}; git rev-parse --verify --quiet origin/main >/dev/null 2>&1||{ echo SKIP-no-ref;return;}; base=$(git merge-base \"$b\" origin/main 2>/dev/null); [ -z \"$base\" ]&&{ echo SKIP-no-base;return;}; [ -n \"$(git diff --name-only \"$base\" origin/main -- '*.go' go.mod go.sum internal cmd deploy.sh 2>/dev/null|head -1)\" ]&&echo RED-stale||echo GREEN; }; for c in $(git rev-parse origin/main~2) $(git rev-parse origin/main~1) $(git rev-parse origin/main); do verdict $c; done"
+    },
+    {
+      "claim": "GUARD IS LOAD-BEARING: with origin/main ref removed (offline), the BARE one-liner false-GREENs a genuinely-behind binary; the guarded form LOUD-SKIPs (no-origin-ref)",
+      "rerun": "SCRATCH=/private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/406f9acc-915f-46bb-80cb-735aea29f71f/scratchpad; cd $SCRATCH/vm-doctor-matrix/work && C0=$(git rev-parse origin/main~2); git update-ref -d refs/remotes/origin/main; base=$(git merge-base \"$C0\" origin/main 2>/dev/null); out=$(git diff --name-only \"$base\" origin/main -- '*.go' 2>/dev/null|head -1); [ -n \"$out\" ]&&echo 'BARE:RED'||echo 'BARE:GREEN(false-green)'; git rev-parse --verify --quiet origin/main >/dev/null 2>&1||echo 'GUARDED:LOUD-SKIP'; git fetch -q origin main; git update-ref refs/remotes/origin/main $(git rev-parse FETCH_HEAD)"
+    },
+    {
+      "claim": "FIXER-CLEARS: behind-Go binary (BP_COMMIT=C0) reds; rebuilt at origin/main tip (BP_COMMIT=C2) greens",
+      "rerun": "SCRATCH=/private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/406f9acc-915f-46bb-80cb-735aea29f71f/scratchpad; cd $SCRATCH/vm-doctor-matrix/work && for c in $(git rev-parse origin/main~2) $(git rev-parse origin/main); do base=$(git merge-base $c origin/main); [ -n \"$(git diff --name-only $base origin/main -- '*.go' internal|head -1)\" ]&&echo \"$c RED\"||echo \"$c GREEN\"; done"
+    },
+    {
+      "claim": "Non-main worktree gives IDENTICAL verdicts (origin/main ref is shared across worktrees): at-tip GREEN, behind RED from a worktree checked out on a diverged branch",
+      "rerun": "SCRATCH=/private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/406f9acc-915f-46bb-80cb-735aea29f71f/scratchpad; cd $SCRATCH/vm-doctor-matrix/wt && echo HEAD=$(git rev-parse --abbrev-ref HEAD); for c in $(git rev-parse origin/main~2) $(git rev-parse origin/main); do base=$(git merge-base $c origin/main); [ -n \"$(git diff --name-only $base origin/main -- '*.go' internal|head -1)\" ]&&echo \"$c RED\"||echo \"$c GREEN\"; done"
+    },
+    {
+      "claim": "OLD formula (diff BP_COMMIT..HEAD) false-GREENs a stale binary built from a diverged worktree whose HEAD lacks merged Go changes; NEW guarded merge-base formula honestly REDs it",
+      "rerun": "SCRATCH=/private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/406f9acc-915f-46bb-80cb-735aea29f71f/scratchpad; cd $SCRATCH/vm-doctor-matrix/wt && D=$(git rev-parse HEAD); old=$(git diff --name-only $D HEAD -- '*.go' internal|head -1); [ -n \"$old\" ]&&echo OLD:RED||echo 'OLD:GREEN(false-green)'; base=$(git merge-base $D origin/main); new=$(git diff --name-only $base origin/main -- '*.go' internal|head -1); [ -n \"$new\" ]&&echo NEW:RED||echo NEW:GREEN"
+    },
+    {
+      "claim": "doctor.sh always exits 0 (advisory: `exit 0` after PROBLEMS report) so section-2 bad() can never break a script chain or upgrade_test's exit-0 assertion; upgrade_test runs doctor.sh with a restricted PATH and NO fake bp so `command -v bp` fails and section 2 is skipped entirely",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:scripts/doctor.sh | grep -n 'exit 0   # advisory'; git show origin/main:internal/cli/upgrade_test.go | sed -n '225,233p'"
+    }
+  ]
+}

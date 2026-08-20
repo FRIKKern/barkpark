@@ -1,0 +1,45 @@
+{
+  "grip_id": "v-newground-fleet-2026-07-21",
+  "verifier": "v-newground-fleet",
+  "wave": "felix-pristine-wave-13-2026-07-21",
+  "assignment": "Sweep the never-audited new contexts (epic_fleet/ + cycle_fleet/ created 07-15, plugins/capabilities.ex, tasks/schema.ex) for binary_id CastError, changeset/FK-abort, field-visibility leaks past Envelope, N+1. Rule whether ClaimFence.verify/2 and bulldocs/event.ex FK candidates clear the reproducible-red-before bar.",
+  "verdict": "PROVE-CLEAN on the new ground: NO in-fence buildable named-failure finding. binary_id fully guarded (Ecto.UUID.cast / nullable_uuid precede every raw-input Repo.get on a binary_id PK; cycle-fleet external ids are STRING fields scanned, not PKs). capabilities.ex + tasks/schema.ex are DB-free (0 Repo). NO Envelope in this surface (internal fleet contexts, not content-read paths) -> no field-visibility leak. reconcile/1 has a bounded-N per-row get_result (latent, cold admin path, no red). ClaimFence.verify/2 = a REAL unit-boundary contract-violation (non-UUID -> Ecto.Query.CastError raise, spec says {:ok}|{:error}) but NO live caller triggers it (receipt.task_id is Ecto.UUID) -> defense-in-depth, borderline. bulldocs/event.ex FK = REFUSED under improvement-only (workspace_id/project_id have DB FKs but are stamped from DB-resolved ids; no reachable red; dataset_id/parent_event_id have no FK).",
+  "recipes": [
+    {
+      "claim": "cycle_fleet external identifiers reaching web are STRING schema fields (epic_id/wave_id/assignment_id), not binary_id PKs; get_assignment/2 is an Enum.find string scan over list_assignments -> no CastError path",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'field :epic_id\\|field :wave_id\\|field :assignment_id' api/lib/barkpark/epic_fleet/assignment.ex; sed -n '1877,1879p' api/lib/barkpark/cycle_fleet.ex"
+    },
+    {
+      "claim": "EVERY raw-input Repo.get on a binary_id PK in cycle_fleet is preceded by Ecto.UUID.cast (gate_id, wave_revision, candidate_id, b1_experiment_id, document_id) or nullable_uuid (previous_event_id, restore_event_id); DB-derived ids (reserved_target_revision, target_wave_id, event chain) are safe",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'Ecto.UUID.cast\\|nullable_uuid' api/lib/barkpark/cycle_fleet.ex | head -30; sed -n '3678,3688p' api/lib/barkpark/cycle_fleet.ex"
+    },
+    {
+      "claim": "EpicFleet.get_assignment/1 (Repo.get(Assignment, id) on binary_id PK) has NO caller -> only its own def/spec matches; not a raw-input path",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -rn 'get_assignment(' api/lib/barkpark api/lib/barkpark_web | grep -v 'def get_assignment\\|cycle_fleet'"
+    },
+    {
+      "claim": "plugins/capabilities.ex and tasks/schema.ex are DB-free: 0 Repo. calls each; moduledocs state 'no DB reads' / 'Pure data-builder. No DB access'",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -c 'Repo\\.' api/lib/barkpark/plugins/capabilities.ex; grep -c 'Repo\\.' api/lib/barkpark/tasks/schema.ex"
+    },
+    {
+      "claim": "NO Envelope reference anywhere in epic_fleet/cycle_fleet/capabilities/tasks-schema -> internal fleet contexts, not Envelope.render read paths; the field-visibility scar class does not apply to this surface",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -rn 'Envelope' api/lib/barkpark/epic_fleet.ex api/lib/barkpark/epic_fleet api/lib/barkpark/cycle_fleet.ex api/lib/barkpark/cycle_fleet api/lib/barkpark/plugins/capabilities.ex api/lib/barkpark/tasks/schema.ex || echo NONE"
+    },
+    {
+      "claim": "hot reduce paths (reduce_fleet/2, reduce_cycle/2) batch-load Results via a single join(:left,[a],r in Result) select({a,r}) -> N+1-free; only cold reconcile/1 does per-row EpicFleet.get_result over a bounded per-wave assignment set (latent, no red)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && sed -n '160,190p' api/lib/barkpark/epic_fleet.ex; sed -n '1894,1894p' api/lib/barkpark/cycle_fleet.ex"
+    },
+    {
+      "claim": "ClaimFence.verify/2 guards only is_binary(task_id) then queries d.id == ^task_id where Document PK is :binary_id -> a non-UUID binary RAISES Ecto.Query.CastError, violating its own @spec {:ok}|{:error,reason}; but the sole caller passes receipt.task_id typed field :task_id, Ecto.UUID (validated upstream) -> defense-in-depth, no live red",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && sed -n '20,34p' api/lib/barkpark/tasks/claim_fence.ex; grep -n '@primary_key' api/lib/barkpark/content/document.ex | head -1; grep -n 'field :task_id, Ecto.UUID\\|verify_claim_fence' api/lib/barkpark/studio_chat/runtime_usage.ex api/lib/barkpark/tasks.ex"
+    },
+    {
+      "claim": "bulldocs/event.ex changeset casts workspace_id/project_id which DO carry DB FKs (references(:workspaces/:projects, on_delete: :nilify_all)) but lacks foreign_key_constraint; REFUSED because ids are stamped from DB-resolved workspace/project (never raw), dataset_id is NOT cast, parent_event_id has no references() FK -> no reachable ConstraintError red",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && sed -n '55,68p' api/lib/barkpark/plugins/bulldocs/event.ex; grep -n 'references(' api/priv/repo/migrations/20260527120000_add_tenancy_to_paper_events.exs; grep -n 'parent_event_id\\|references' api/priv/repo/migrations/20260526180000_create_paper_events.exs"
+    },
+    {
+      "claim": "all 8 assigned target files are BYTE-IDENTICAL to origin/main (seal rests on origin/main state, not the ahead worktree HEAD)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git diff --stat origin/main -- api/lib/barkpark/epic_fleet.ex api/lib/barkpark/cycle_fleet.ex api/lib/barkpark/plugins/capabilities.ex api/lib/barkpark/tasks/schema.ex api/lib/barkpark/tasks/claim_fence.ex api/lib/barkpark/plugins/bulldocs/event.ex api/lib/barkpark/epic_fleet/ api/lib/barkpark/cycle_fleet/ && echo CLEAN-MATCH"
+    }
+  ]
+}

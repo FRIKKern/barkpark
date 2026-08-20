@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.vercel/
+*.log
+.env
+.env.*
+!.env.example
+coverage/
+# The vitest JSON reporter's output — the CI gate's zero-skip assertion reads
+# this, and the local gate command writes it. A build artifact, never committed.
+vitest-results.json

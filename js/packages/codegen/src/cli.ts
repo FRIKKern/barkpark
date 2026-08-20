@@ -56,11 +56,28 @@ interface GenerateCliOptions {
   from?: string
 }
 
+/**
+ * Cache-bust counter for config re-imports. The ESM module registry is keyed by
+ * the resolved URL, so `--watch` re-importing the same config path returns the
+ * module loaded on the FIRST run — the watcher then regenerates from the stale
+ * config and prints `Re-wrote …`, a false success rather than a no-op. A unique
+ * query per import makes each load a distinct URL.
+ *
+ * Monotonic counter, deliberately NOT `mtimeMs`: a filesystem with 1-second
+ * timestamp granularity would give two saves in the same second the same key
+ * and reintroduce exactly this bug on a subset of machines.
+ *
+ * Cost: every reload adds a permanent entry to the ESM registry (one small
+ * module per save, never collected). Acceptable for a dev-loop CLI, but real.
+ */
+let configLoadSeq = 0
+
 /** Load `barkpark.config.{ts,js,mjs}` if present; CLI flags override its values. */
 async function loadConfig(configPath?: string): Promise<Partial<BarkparkCodegenConfig>> {
   if (!configPath) return {}
   const abs = resolve(process.cwd(), configPath)
-  const mod = (await import(pathToFileURL(abs).href)) as {
+  const url = `${pathToFileURL(abs).href}?t=${++configLoadSeq}`
+  const mod = (await import(url)) as {
     default?: BarkparkCodegenConfig
   }
   return mod.default ?? {}

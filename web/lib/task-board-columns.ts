@@ -30,14 +30,18 @@ export interface TaskBoardRow {
   [attr: string]: unknown;
 }
 
-/** The five rendered columns, in white-ladder order (cancelled is folded to a
- * tally, never a column — D-fold). */
+/** The rendered columns, in white-ladder order (cancelled is folded to a tally,
+ * never a column — D-fold). The two thought states — `considering`/`researching`
+ * (task-lifecycle-visibility) — trail at the END, dim; empty columns collapse.
+ * They are NOT committed work, so they stay OUT of the momentum denominator. */
 export const TASK_BOARD_COLUMN_ORDER = [
   "open",
   "ready",
   "in_progress",
   "blocked",
   "done",
+  "considering",
+  "researching",
 ] as const;
 
 export type TaskBoardColumnKey = (typeof TASK_BOARD_COLUMN_ORDER)[number];
@@ -71,6 +75,8 @@ export const TASK_BOARD_GLYPHS = {
   blocked: "!", // U+0021
   done: "✓", // U+2713
   cancelled: "✕", // U+2715
+  considering: "◌", // U+25CC dotted circle — a candidate, weighed (dim)
+  researching: "◎", // U+25CE bullseye — under investigation (dim)
 } as const;
 
 /** Momentum read — the "always feel progress" header. `pct` is done over the
@@ -104,13 +110,17 @@ function columnForStatus(status: string): TaskBoardColumnKey | "cancelled" {
       return "blocked";
     case "ready":
       return "ready";
+    case "considering":
+      return "considering";
+    case "researching":
+      return "researching";
     case "cancelled":
     case "cancel":
       return "cancelled";
     case "open":
       return "open";
     default:
-      return "open"; // fail-soft — never drop a row
+      return "open"; // fail-soft — never drop a row (unknown homes in open)
   }
 }
 
@@ -130,6 +140,8 @@ export function taskBoardColumns(snapshot: TaskBoardRow[]): TaskBoardColumns {
     in_progress: [],
     blocked: [],
     done: [],
+    considering: [],
+    researching: [],
   };
   let cancelledCount = 0;
 
@@ -145,6 +157,9 @@ export function taskBoardColumns(snapshot: TaskBoardRow[]): TaskBoardColumns {
   }
 
   const done = columns.done.length;
+  // Momentum denominator = COMMITTED work only. Cancelled is excluded (folded to
+  // a tally), and the thought states (considering/researching) are DELIBERATELY
+  // absent too — contemplation is not committed work, so it must not dilute pct.
   const nonCancelledTotal =
     columns.open.length +
     columns.ready.length +

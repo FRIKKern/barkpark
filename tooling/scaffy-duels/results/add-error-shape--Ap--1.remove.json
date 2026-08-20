@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "not_found",
+    "message": "scaffy remove: no receipt for \"Add an API Error Shape\" at /private/tmp/scaffy-duel-add-error-shape--Ap--1/.scaffy/receipts/error-shape--duel-probe--e811af0c9837.json — nothing to remove (was the command applied with exactly these vars?)"
+  },
+  "ok": false
+}

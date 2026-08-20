@@ -150,6 +150,64 @@ defmodule BarkparkCloud.BillingLimitsTest do
     end
   end
 
+  ## PDF-D86 — fleet SUPPORTS are quota-exempt (the ONE documented exception)
+
+  describe "support inserts bypass the ceiling; mains do not" do
+    test "a subscribed trial team at its ceiling can still add a support, but not a 2nd main" do
+      # A trial team's ceiling is 1 — saturated by its single main. Per PDF-D86 a
+      # SUPPORT (a subordinate runner, not a billable main) must still be
+      # addable, while a 2nd MAIN stays blocked. This is a SECURITY test: it fails
+      # if the bypass ever widens to admit a main.
+      team = team_on("trial")
+
+      {:ok, main} = Registry.register_barkpark(team, %{name: "home", slug: "home"})
+      {:ok, _} = main |> Barkpark.fleet_changeset(%{fleet_role: "main"}) |> Repo.update()
+
+      # The ceiling is now saturated (1 held >= trial ceiling 1).
+      assert Billing.barkpark_limit_reached?(team)
+
+      # add-support SUCCEEDS despite the saturated ceiling (register_support_barkpark
+      # never consults barkpark_limit_reached?/1).
+      assert {:ok, support} =
+               Registry.register_support_barkpark(team, %{
+                 name: "helper",
+                 slug: "helper",
+                 parent_id: main.id,
+                 token_id: nil
+               })
+
+      assert support.fleet_role == "support"
+      assert support.fleet_parent_id == main.id
+
+      # A 2nd MAIN is STILL blocked — the bypass is role-scoped to support inserts.
+      assert {:error, :limit_reached} =
+               Registry.register_barkpark(team, %{name: "home2", slug: "home2"})
+
+      assert {:error, :limit_reached} =
+               Registry.register_managed_barkpark(team, "home2", "home2")
+    end
+
+    test "supports can be piled on past the ceiling — each one bypasses" do
+      team = team_on("trial")
+      {:ok, main} = Registry.register_barkpark(team, %{name: "home", slug: "home"})
+      {:ok, _} = main |> Barkpark.fleet_changeset(%{fleet_role: "main"}) |> Repo.update()
+
+      for i <- 1..3 do
+        assert {:ok, _} =
+                 Registry.register_support_barkpark(team, %{
+                   name: "helper-#{i}",
+                   slug: "helper-#{i}",
+                   parent_id: main.id,
+                   token_id: nil
+                 })
+      end
+
+      # 1 main + 3 supports held; the main create path is still blocked.
+      assert length(Registry.list_barkparks(team)) == 4
+      assert {:error, :limit_reached} = Registry.register_barkpark(team, %{name: "x", slug: "x"})
+    end
+  end
+
   ## reconcile_plan_limit/1 (reversible, newest-first, quota axis only)
 
   describe "reconcile_plan_limit/1" do

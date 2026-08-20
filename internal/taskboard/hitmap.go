@@ -131,9 +131,10 @@ func windowTargets(targets []LineTarget, top, avail int) []LineTarget {
 // twin of windowFrame (compose.go). It maps each VISIBLE body line to a target —
 // a rail stop's line (Stop.Line) becomes LineSpineRow carrying that stop's index,
 // prose becomes LineNone — and stamps the ↑/↓ affordances on the same first/last
-// rows windowFrame overwrites. It reuses windowFrame's exact top math (absolute
-// Scroll>=0, else followTop for cursor-follow) so a click resolves against the
-// lines actually painted. `avail` is the reading viewport height Compose reserves.
+// rows windowFrame overwrites. It shares windowFrame's window-top producer
+// (readingWindowTop, charter D42/D105) — one function, not a re-inlined copy — so
+// the hit map and the paint can never drift about which body line a screen row
+// shows. `avail` is the reading viewport height Compose reserves.
 func frameHitTargets(body []string, stops []Stop, cursor, scroll, avail int) []LineTarget {
 	if avail <= 0 {
 		return nil
@@ -158,18 +159,7 @@ func frameHitTargets(body []string, stops []Stop, cursor, scroll, avail int) []L
 		}
 		return out
 	}
-	var top int
-	if scroll >= 0 {
-		top = scroll
-	} else {
-		top = followTop(len(body), stops, cursor, avail)
-	}
-	if top < 0 {
-		top = 0
-	}
-	if top > len(body)-avail {
-		top = len(body) - avail
-	}
+	top := readingWindowTop(len(body), stops, cursor, scroll, avail)
 	out := make([]LineTarget, avail)
 	for i := 0; i < avail; i++ {
 		out[i] = mk(top + i)
@@ -197,7 +187,7 @@ func (m Model) composeInner() (int, int) {
 // origin offsets exactly once (charter D89) so the mouse reducer does zero
 // coordinate math. It mirrors Compose/composeAt: the leading blank row (LineNone,
 // compose.go), then the board frame's HitMapFor OR a pushed reading frame's
-// breadcrumb (chrome) + windowed body + footer (chrome). The left gutter is a
+// windowed body + footer (chrome; the breadcrumb row was retired). The left gutter is a
 // pure X shift that never changes a row's identity — a board row's click target
 // is the FULL row width — so only the Y axis is mapped here. len(ComposeHitMap)
 // == len(strings.Split(m.View(), "\n")) by construction. Wide mode returns nil:
@@ -215,13 +205,14 @@ func (m Model) ComposeHitMap() []LineTarget {
 		body = HitMapFor(m.board, m.ui, bw, bh, now)
 	} else {
 		width, height := m.composeInner()
-		avail := height - 2 // breadcrumb + footer, exactly as composeAt reserves
+		avail := height - 2 // footer + the sheet's ─ top edge, exactly as composeAt reserves
 		if avail < 1 {
 			avail = 1
 		}
-		content, stops := m.frameContent(top, width, now)
+		docW, _ := docLayout(width)
+		content, stops := m.frameContent(top, docW, now)
 		body = make([]LineTarget, 0, avail+2)
-		body = append(body, chromeTarget) // breadcrumb
+		body = append(body, chromeTarget) // the sheet's ─ top edge (renderDocPane)
 		body = append(body, frameHitTargets(content, stops, top.Cursor, top.Scroll, avail)...)
 		body = append(body, chromeTarget) // reading footer
 	}

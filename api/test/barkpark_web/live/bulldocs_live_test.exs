@@ -22,6 +22,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Bulldocs.Events
+  alias Barkpark.Repo
 
   @slug "2026-05-23-convergence-demo"
 
@@ -98,10 +99,73 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert updated =~ ~s(data-slug="#{@slug}")
     end
 
-    test "renders an empty-state when no paper is stored for the slug", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/papers/never-saved")
-      assert html =~ ~s(id="paper-empty")
-      assert html =~ "No paper saved yet"
+    test "returns an explicit 404 when no published paper is stored for the slug", %{conn: conn} do
+      assert_raise BarkparkWeb.BulldocsLive.NotFound, fn ->
+        live(conn, "/papers/never-saved")
+      end
+    end
+
+    test "renders a historical paper whose blocks exist only under content.body", %{conn: conn} do
+      slug = "2026-07-16-nested-body-reader"
+
+      blocks = [
+        %{
+          "id" => "nested-body",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Nested body blocks are visible."}]
+        }
+      ]
+
+      {:ok, paper} =
+        Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks}))
+
+      nested_only =
+        paper.content
+        |> Map.delete("blocks")
+        |> Map.delete("body_html")
+        |> Map.put("body", %{"blocks" => blocks})
+
+      paper
+      |> Ecto.Changeset.change(content: nested_only)
+      |> Barkpark.Repo.update!()
+
+      {:ok, _view, html} = live(conn, "/papers/#{slug}")
+
+      assert html =~ ~s(data-block-id="nested-body")
+      assert html =~ "Nested body blocks are visible."
+    end
+
+    test "block-backed public reader rejects a conflicting body_html cache", %{
+      conn: conn
+    } do
+      slug = "2026-07-16-public-block-authority"
+
+      blocks = [
+        %{
+          "id" => "public-authority",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Public blocks are authoritative."}]
+        }
+      ]
+
+      {:ok, paper} =
+        Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks}))
+
+      stale_content =
+        paper.content
+        |> Map.put("body_html", "<p>STALE PUBLIC CACHE</p>")
+        |> Map.put(
+          "body_html_sv",
+          Barkpark.PortableDoc.Render.body_html_render_version()
+        )
+
+      paper
+      |> Ecto.Changeset.change(content: stale_content)
+      |> Barkpark.Repo.update!()
+
+      assert_raise BarkparkWeb.BulldocsLive.InvalidSource, fn ->
+        live(conn, "/papers/#{slug}")
+      end
     end
   end
 
@@ -539,6 +603,52 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert view.pid == pid_before
       assert rendered =~ ~s(id="paper-sentinel")
     end
+
+    test "whole-HTML broadcasts are advisory and cannot inject an unvalidated body", %{
+      conn: conn
+    } do
+      slug = "wave4-html-advisory"
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            body_html: "<p id=\"stored-safe\">Stored safe body</p>"
+          })
+        )
+
+      {:ok, view, _html} = live(conn, "/papers/#{slug}")
+      send(view.pid, {:paper_updated, %{html: "<script>injected()</script>", rev: 999}})
+
+      rendered = render(view)
+      assert rendered =~ "Stored safe body"
+      assert rendered =~ ~s(id="stored-safe")
+      refute rendered =~ "injected()"
+    end
+
+    test "connected refetch exposes an explicit invalid-source state instead of an empty success",
+         %{conn: conn} do
+      slug = "wave4-invalid-refetch"
+      blocks = [%{"id" => "body", "type" => "paragraph", "text" => "Initially valid"}]
+
+      {:ok, paper} =
+        Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks}))
+
+      {:ok, view, html} = live(conn, "/papers/#{slug}")
+      assert html =~ "Initially valid"
+
+      paper
+      |> Ecto.Changeset.change(content: Map.put(paper.content, "body_html", "<p>conflict</p>"))
+      |> Repo.update!()
+
+      send(view.pid, {:paper_updated, %{html: "<p>conflict</p>", rev: 999}})
+      rendered = render(view)
+
+      assert rendered =~ ~s(id="paper-invalid")
+      assert rendered =~ ~s(data-source-error="ambiguous_source")
+      refute rendered =~ "Initially valid"
+      refute rendered =~ "<p>conflict</p>"
+    end
   end
 
   describe "P6.U2: goal-path rail" do
@@ -675,25 +785,38 @@ defmodule BarkparkWeb.BulldocsLiveTest do
           Barkpark.LabelFixtures.paper_attrs(%{
             "slug" => @diff_slug,
             "style" => "article",
+            "goal_id" => @diff_goal,
             "body_html" => "<p id=\"diff-body\">Diff demo body.</p>"
           })
         )
 
+      # W1.5-C (same reason as seed_rail_paper above): the rail scopes events to
+      # the paper's OWN workspace, so these must carry the paper's resolved scope
+      # to appear on it — mirroring how a real BulldocsLive write stamps the
+      # paper's workspace onto each event. Without it the paper is Default-stamped
+      # while its events are workspace-less, the rail loads EMPTY, and open-diff
+      # cannot find the paper's own events.
+      scope = %{"workspace_id" => paper.workspace_id, "project_id" => paper.project_id}
+
       {:ok, a} =
-        Events.create_event(%{
-          "goal_id" => @diff_goal,
-          "paper_slug" => @diff_slug,
-          "event_type" => "plan-written",
-          "payload_html" => "shared line\nORIGINAL middle\ntail line"
-        })
+        Events.create_event(
+          Map.merge(scope, %{
+            "goal_id" => @diff_goal,
+            "paper_slug" => @diff_slug,
+            "event_type" => "plan-written",
+            "payload_html" => "shared line\nORIGINAL middle\ntail line"
+          })
+        )
 
       {:ok, b} =
-        Events.create_event(%{
-          "goal_id" => @diff_goal,
-          "paper_slug" => @diff_slug,
-          "event_type" => "plan-grilled",
-          "payload_html" => "shared line\nREVISED middle\ntail line"
-        })
+        Events.create_event(
+          Map.merge(scope, %{
+            "goal_id" => @diff_goal,
+            "paper_slug" => @diff_slug,
+            "event_type" => "plan-grilled",
+            "payload_html" => "shared line\nREVISED middle\ntail line"
+          })
+        )
 
       {paper, a, b}
     end
@@ -1068,6 +1191,140 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert html =~ "A Branded Title · Barkpark</title>"
       assert html =~ ~s(<meta property="og:title" content="A Branded Title")
       refute html =~ ">Paper · Barkpark</title>"
+    end
+  end
+
+  describe "field-reference / codelist resolution on the public reader (pbw-w1)" do
+    # The anonymous reader mount/refetch wires the SAME `:ref_resolver` /
+    # `:codelist_resolver` closures Studio and the body_html cache use, so a
+    # `field-reference` block shows the referenced doc's TITLE and a `codelist`
+    # block its human LABEL instead of leaking the raw slug/code (live bug:
+    # /papers/portabledoc-showcase rendered `terminal-mermaid-diagrams` raw).
+    # Tenant scope + published_only flow through unchanged (D2, fail-closed).
+
+    test "a published field-reference renders the referenced doc's TITLE, not the raw id",
+         %{conn: conn} do
+      {ws, _project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      dataset = Content.paper_default_dataset()
+
+      # A PUBLISHED referenced doc in the reader's tenant — created THEN
+      # published so a real published projection exists (the exact row shape the
+      # published_only gate admits: status "published", bare doc_id).
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"_id" => "pbw-ref-target", "title" => "The Referenced Title"},
+          dataset,
+          workspace_id: ws.id
+        )
+
+      {:ok, _} =
+        Content.publish_document("pbw-ref-target", "post", dataset, workspace_id: ws.id)
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: "pbw-ref-paper",
+            style: "article",
+            blocks: [
+              %{"type" => "heading", "role" => "title", "text" => "Reference Host"},
+              %{"type" => "paragraph", "text" => "Body copy to clear the hollow gate."},
+              %{
+                "id" => "the-ref",
+                "type" => "field-reference",
+                "label" => "Related",
+                "value" => "pbw-ref-target"
+              }
+            ]
+          })
+        )
+
+      {:ok, _view, html} = live(conn, "/papers/pbw-ref-paper")
+
+      # The referenced doc's TITLE is resolved and rendered…
+      assert html =~ "The Referenced Title"
+      # …and the raw id never leaks in the field-reference row (regression: the
+      # reader used to render the raw slug because it wired no `:ref_resolver`).
+      refute html =~ "pbw-ref-target"
+    end
+
+    test "a codelist block with a REGISTERED code renders its human LABEL", %{conn: conn} do
+      _ = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+      {:ok, _} =
+        Barkpark.Content.Codelists.register("onixedit", "pbw:contributor_role", %{
+          issue: "1",
+          name: "PBW Contributor Role",
+          values: [%{code: "A01", translations: [%{language: "eng", label: "By (author)"}]}]
+        })
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: "pbw-codelist-paper",
+            style: "article",
+            blocks: [
+              %{"type" => "heading", "role" => "title", "text" => "Codelist Host"},
+              %{"type" => "paragraph", "text" => "Body copy to clear the hollow gate."},
+              %{
+                "id" => "the-code",
+                "type" => "codelist",
+                "label" => "Role",
+                "plugin" => "onixedit",
+                "codelistId" => "pbw:contributor_role",
+                "value" => "A01"
+              }
+            ]
+          })
+        )
+
+      {:ok, _view, html} = live(conn, "/papers/pbw-codelist-paper")
+
+      # The registered code's LABEL renders instead of the raw code.
+      assert html =~ "By (author)"
+    end
+
+    test "a field-reference to a DRAFT-ONLY doc still renders the raw value (fail-closed)",
+         %{conn: conn} do
+      {ws, _project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      dataset = Content.paper_default_dataset()
+
+      # A doc that was NEVER published — only its draft exists. The anonymous
+      # reader threads `published_only: true`, so `reference_title` drops the
+      # `drafts.` twin and the reference degrades to the raw id: a draft title
+      # must NEVER leak on the public surface.
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => "pbw-draft-target", "title" => "Secret Draft Title"},
+          dataset,
+          workspace_id: ws.id
+        )
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: "pbw-draft-ref-paper",
+            style: "article",
+            blocks: [
+              %{"type" => "heading", "role" => "title", "text" => "Draft Reference Host"},
+              %{"type" => "paragraph", "text" => "Body copy to clear the hollow gate."},
+              %{
+                "id" => "the-draft-ref",
+                "type" => "field-reference",
+                "label" => "Related",
+                "value" => "pbw-draft-target"
+              }
+            ]
+          })
+        )
+
+      {:ok, _view, html} = live(conn, "/papers/pbw-draft-ref-paper")
+
+      # The raw id renders (the reference is unresolved) and the draft title is
+      # nowhere on the page.
+      assert html =~ "pbw-draft-target"
+      refute html =~ "Secret Draft Title"
     end
   end
 

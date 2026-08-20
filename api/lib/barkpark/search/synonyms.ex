@@ -13,18 +13,21 @@ defmodule Barkpark.Search.Synonyms do
   @kinds ~w(one_way alt_correction)
   @sources ~w(manual auto)
 
-  @spec list(String.t(), String.t()) :: [map()]
-  def list(surface, scope) when is_binary(surface) and is_binary(scope) do
+  @spec list(String.t(), String.t(), binary() | nil) :: [map()]
+  def list(surface, scope, workspace_id \\ nil) when is_binary(surface) and is_binary(scope) do
     from(s in Synonym,
       where: s.surface == ^surface and s.scope == ^scope,
       order_by: [asc: s.from_query, asc: s.to_query]
     )
+    |> scope_to_workspace(workspace_id)
     |> Repo.all()
     |> Enum.map(&synonym_payload/1)
   end
 
-  @spec create(String.t(), String.t(), map()) :: {:ok, map()} | {:error, Ecto.Changeset.t()}
-  def create(surface, scope, attrs) when is_binary(surface) and is_binary(scope) do
+  @spec create(String.t(), String.t(), map(), binary() | nil) ::
+          {:ok, map()} | {:error, Ecto.Changeset.t()}
+  def create(surface, scope, attrs, workspace_id \\ nil)
+      when is_binary(surface) and is_binary(scope) do
     from_q = normalize_field(attrs, :from_query, "from")
     to_q = normalize_field(attrs, :to_query, "to")
 
@@ -35,7 +38,7 @@ defmodule Barkpark.Search.Synonyms do
       {:error, invalid_changeset("from and to are required")}
     else
       %Synonym{}
-      |> Ecto.Changeset.change(
+      |> Synonym.changeset(
         %{
           surface: surface,
           scope: scope,
@@ -46,6 +49,7 @@ defmodule Barkpark.Search.Synonyms do
           enabled: Map.get(attrs, "enabled", true)
         }
         |> put_dataset_id(scope)
+        |> put_workspace_id(workspace_id)
       )
       |> Repo.insert()
       |> case do
@@ -55,8 +59,9 @@ defmodule Barkpark.Search.Synonyms do
     end
   end
 
-  @spec delete(String.t(), String.t(), String.t()) :: :ok | {:error, :not_found}
-  def delete(id, surface, scope) when is_binary(surface) and is_binary(scope) do
+  @spec delete(String.t(), String.t(), String.t(), binary() | nil) :: :ok | {:error, :not_found}
+  def delete(id, surface, scope, workspace_id \\ nil)
+      when is_binary(surface) and is_binary(scope) do
     # Guard the raw :id path param: a non-UUID would raise Ecto.CastError (→ 500)
     # inside Repo.get on the :binary_id primary key. Treat it as not_found.
     case Repo.uuid_or_nil(id) do
@@ -66,11 +71,20 @@ defmodule Barkpark.Search.Synonyms do
       uuid ->
         case Repo.get(Synonym, uuid) do
           %Synonym{surface: ^surface, scope: ^scope} = row ->
-            # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500);
-            # stale_error_field turns the race into a changeset error → :not_found.
-            case Repo.delete(row, stale_error_field: :id) do
-              {:ok, _} -> :ok
-              {:error, _cs} -> {:error, :not_found}
+            # Tenant guard: a workspace-scoped caller may delete ONLY its own row
+            # or a legacy/global (NULL-workspace) row — never a sibling
+            # workspace's row sharing the dataset slug. A nil workspace_id
+            # (anonymous / unscoped / pre-tenancy) keeps the legacy behaviour
+            # (surface+scope match is sufficient).
+            if workspace_deletable?(row, workspace_id) do
+              # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500);
+              # stale_error_field turns the race into a changeset error → :not_found.
+              case Repo.delete(row, stale_error_field: :id) do
+                {:ok, _} -> :ok
+                {:error, _cs} -> {:error, :not_found}
+              end
+            else
+              {:error, :not_found}
             end
 
           nil ->
@@ -85,8 +99,9 @@ defmodule Barkpark.Search.Synonyms do
   @doc """
   Expand a raw query into distinct search terms (original + synonym targets).
   """
-  @spec search_terms(String.t(), String.t(), String.t()) :: [String.t()]
-  def search_terms(surface, scope, query) when is_binary(surface) and is_binary(scope) do
+  @spec search_terms(String.t(), String.t(), String.t(), binary() | nil) :: [String.t()]
+  def search_terms(surface, scope, query, workspace_id \\ nil)
+      when is_binary(surface) and is_binary(scope) do
     raw = String.trim(query || "")
 
     if raw == "" do
@@ -101,6 +116,7 @@ defmodule Barkpark.Search.Synonyms do
               (s.from_query == ^normalized or
                  (s.kind == "alt_correction" and s.to_query == ^normalized))
         )
+        |> scope_to_workspace(workspace_id)
         |> Repo.all()
 
       expanded =
@@ -137,8 +153,10 @@ defmodule Barkpark.Search.Synonyms do
   `(from_query, to_query)` order wins. Used by the query pipeline to surface
   `corrected_to` so the UI can show "Showing results for <term>".
   """
-  @spec correction_for(String.t(), String.t(), String.t()) :: String.t() | nil
-  def correction_for(surface, scope, query)
+  @spec correction_for(String.t(), String.t(), String.t(), binary() | nil) :: String.t() | nil
+  def correction_for(surface, scope, query, workspace_id \\ nil)
+
+  def correction_for(surface, scope, query, workspace_id)
       when is_binary(surface) and is_binary(scope) and is_binary(query) do
     normalized = Sanitizer.normalize(query)
 
@@ -153,6 +171,7 @@ defmodule Barkpark.Search.Synonyms do
         order_by: [asc: s.from_query, asc: s.to_query],
         limit: 1
       )
+      |> scope_to_workspace(workspace_id)
       |> Repo.one()
       |> case do
         nil ->
@@ -167,11 +186,12 @@ defmodule Barkpark.Search.Synonyms do
     end
   end
 
-  def correction_for(_surface, _scope, _query), do: nil
+  def correction_for(_surface, _scope, _query, _workspace_id), do: nil
 
   @spec candidates(String.t(), String.t(), keyword()) :: [map()]
   def candidates(surface, scope, opts \\ [])
       when is_binary(surface) and is_binary(scope) do
+    workspace_id = Keyword.get(opts, :workspace_id)
     period = opts |> Keyword.get(:period, "week") |> to_string()
 
     period_start =
@@ -211,6 +231,7 @@ defmodule Barkpark.Search.Synonyms do
         where: s.surface == ^surface and s.scope == ^scope and s.enabled == true,
         select: {s.from_query, s.to_query}
       )
+      |> scope_to_workspace(workspace_id)
       |> Repo.all()
       |> MapSet.new()
 
@@ -219,40 +240,46 @@ defmodule Barkpark.Search.Synonyms do
     |> Enum.uniq_by(fn c -> {c.from, c.to} end)
   end
 
-  @spec promote(String.t(), String.t(), map()) ::
+  @spec promote(String.t(), String.t(), map(), binary() | nil) ::
           {:ok, map()} | {:error, :invalid | :missing_fields | Ecto.Changeset.t()}
-  def promote(surface, scope, attrs) when is_binary(surface) and is_binary(scope) do
+  def promote(surface, scope, attrs, workspace_id \\ nil)
+      when is_binary(surface) and is_binary(scope) do
     from_q = normalize_field(attrs, :from_query, "from")
     to_q = normalize_field(attrs, :to_query, "to")
 
     if from_q in [nil, ""] or to_q in [nil, ""] do
       {:error, :missing_fields}
     else
-      create(surface, scope, %{
-        "from" => from_q,
-        "to" => to_q,
-        "kind" => Map.get(attrs, "kind") || Map.get(attrs, :kind) || "one_way",
-        "source" => "auto"
-      })
+      create(
+        surface,
+        scope,
+        %{
+          "from" => from_q,
+          "to" => to_q,
+          "kind" => Map.get(attrs, "kind") || Map.get(attrs, :kind) || "one_way",
+          "source" => "auto"
+        },
+        workspace_id
+      )
     end
   end
 
-  @spec preview(String.t(), String.t(), String.t() | nil, map()) :: map()
-  def preview(surface, scope, query, attrs \\ %{})
+  @spec preview(String.t(), String.t(), String.t() | nil, map(), binary() | nil) :: map()
+  def preview(surface, scope, query, attrs \\ %{}, workspace_id \\ nil)
       when is_binary(surface) and is_binary(scope) do
     from_q = normalize_field(attrs, :from_query, "from") || query
     to_q = normalize_field(attrs, :to_query, "to")
 
     before =
       if is_binary(from_q) and from_q != "" do
-        preview_count(surface, scope, from_q)
+        preview_count(surface, scope, from_q, workspace_id)
       else
         0
       end
 
     after_count =
       if is_binary(to_q) and to_q != "" do
-        preview_count(surface, scope, to_q)
+        preview_count(surface, scope, to_q, workspace_id)
       else
         before
       end
@@ -265,17 +292,21 @@ defmodule Barkpark.Search.Synonyms do
     }
   end
 
-  defp preview_count("documents", scope, query) do
-    {_, count, _} = Barkpark.Content.search_documents(query, scope, limit: 1)
+  defp preview_count("documents", scope, query, workspace_id) do
+    {_, count, _} =
+      Barkpark.Content.search_documents(query, scope, maybe_workspace([limit: 1], workspace_id))
+
     count
   end
 
-  defp preview_count("media", scope, query) do
-    {_, count, _, _} = Barkpark.Media.search_files(scope, q: query, limit: 1)
+  defp preview_count("media", scope, query, workspace_id) do
+    {_, count, _, _} =
+      Barkpark.Media.search_files(scope, maybe_workspace([q: query, limit: 1], workspace_id))
+
     count
   end
 
-  defp preview_count(_, _, _), do: 0
+  defp preview_count(_, _, _, _), do: 0
 
   defp candidate_evidence(surface, scope, from_q, to_q, transitions) do
     from_stats = crystal_stats(surface, scope, from_q)
@@ -386,4 +417,38 @@ defmodule Barkpark.Search.Synonyms do
       _ -> attrs
     end
   end
+
+  # W7 tenancy: stamp the caller's `workspace_id` on the write so the per-tenant
+  # partial unique index (`workspace_id IS NOT NULL`) keys the row to its owning
+  # workspace — two workspaces sharing the `production` slug can each hold the
+  # same synonym without the cross-tenant `dataset_id` collision (the live 500).
+  # No-op for a nil workspace_id (legacy/global write path preserved).
+  defp put_workspace_id(attrs, workspace_id) when is_binary(workspace_id),
+    do: Map.put(attrs, :workspace_id, workspace_id)
+
+  defp put_workspace_id(attrs, _), do: attrs
+
+  # Tenant read boundary. A workspace-scoped caller sees ONLY its own rows plus
+  # legacy/global (NULL-workspace) rows — never a sibling workspace's rows under
+  # a shared dataset slug. A nil workspace_id (anonymous / unscoped / pre-tenancy)
+  # leaves the query workspace-blind (every matching row), preserving the exact
+  # legacy behaviour of the anonymous search read path.
+  defp scope_to_workspace(query, workspace_id) when is_binary(workspace_id) do
+    from(s in query, where: s.workspace_id == ^workspace_id or is_nil(s.workspace_id))
+  end
+
+  defp scope_to_workspace(query, _), do: query
+
+  # Delete tenant guard — a workspace-scoped caller may remove its own row or a
+  # legacy/global (NULL-workspace) row, but not a sibling workspace's. Mirrors
+  # the read visibility in scope_to_workspace/2. A nil workspace_id keeps the
+  # pre-tenancy behaviour (surface+scope match is authorization enough).
+  defp workspace_deletable?(_row, nil), do: true
+  defp workspace_deletable?(%Synonym{workspace_id: nil}, ws) when is_binary(ws), do: true
+  defp workspace_deletable?(%Synonym{workspace_id: wid}, ws), do: wid == ws
+
+  defp maybe_workspace(opts, workspace_id) when is_binary(workspace_id),
+    do: Keyword.put(opts, :workspace_id, workspace_id)
+
+  defp maybe_workspace(opts, _), do: opts
 end

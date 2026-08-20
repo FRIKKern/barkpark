@@ -1,0 +1,15 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "include": [".astro/types.d.ts", "src/**/*"],
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "baseUrl": ".",
+    "paths": {
+      "@/lib/*": ["src/finder/lib/*"],
+      "@/*": ["src/finder/*"],
+      "next/link": ["src/finder/shims/next-link.tsx"],
+      "next/navigation": ["src/finder/shims/next-navigation.tsx"]
+    }
+  }
+}

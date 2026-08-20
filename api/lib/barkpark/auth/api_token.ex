@@ -83,6 +83,15 @@ defmodule Barkpark.Auth.ApiToken do
     ])
     |> validate_required([:token_hash])
     |> unique_constraint(:token_hash)
+    # FK-abort containment (Felix W18, the W13 changeset-FK-abort scar-class —
+    # sibling of MediaFile/Event/SchemaDefinition/Document). Both columns are
+    # real Postgres FKs with `on_delete: :nilify_all` (migrations
+    # 20260527110100_add_tenancy_columns + 20260708130000_add_owner_user_id_to_api_tokens,
+    # default-derived names `api_tokens_<col>_fkey`). Without these, a mint that
+    # references a workspace/user deleted concurrently RAISES Ecto.ConstraintError
+    # out of Repo.insert (a 500) instead of returning {:error, changeset}.
+    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:owner_user_id)
   end
 
   @type t :: %__MODULE__{}

@@ -105,6 +105,21 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       conn = get(conn, "/w/#{ws.slug}/p/#{proj.slug}/papers/p4-shared-paper")
       assert conn.status == 403
     end
+
+    test "the canonical source endpoint inherits the section-share boundary", %{
+      conn: conn,
+      ws: ws,
+      proj: proj
+    } do
+      path = "/w/#{ws.slug}/p/#{proj.slug}/papers/p4-shared-paper/source"
+      browser_fetch = put_req_header(conn, "accept", "*/*")
+      assert get(browser_fetch, path).status == 403
+
+      with_shares("#{ws.slug}/#{proj.slug}/#{@dataset}:papers:read")
+      source = browser_fetch |> get(path) |> json_response(200) |> get_in(["source"])
+      assert source["kind"] == "blocks"
+      assert inspect(source["blocks"]) =~ "SHARED-PAPER-BODY"
+    end
   end
 
   describe "?share=<item-token> on the scoped reader" do
@@ -119,6 +134,30 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
         live(conn, "/w/#{ws.slug}/p/#{proj.slug}/papers/p4-shared-paper?share=#{raw}")
 
       assert html =~ "SHARED-PAPER-BODY"
+    end
+
+    test "the same item token opens the canonical source and no other Paper", %{
+      conn: conn,
+      ws: ws,
+      proj: proj
+    } do
+      raw = mint_link!(ws, proj, "p4-shared-paper")
+      base = "/w/#{ws.slug}/p/#{proj.slug}/papers"
+
+      source =
+        conn
+        |> put_req_header("accept", "*/*")
+        |> get("#{base}/p4-shared-paper/source?share=#{raw}")
+        |> json_response(200)
+        |> get_in(["source"])
+
+      assert source["kind"] == "blocks"
+      assert inspect(source["blocks"]) =~ "SHARED-PAPER-BODY"
+
+      assert get(
+               put_req_header(conn, "accept", "*/*"),
+               "#{base}/some-other-paper/source?share=#{raw}"
+             ).status == 403
     end
 
     test "a token minted for ANOTHER scope does not open this URL", %{

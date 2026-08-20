@@ -1,5 +1,11 @@
 defmodule Barkpark.Media.ImageBackend.VixTest do
-  use ExUnit.Case, async: true
+  # async: false — this module swaps node-global env
+  # (`:barkpark, Barkpark.Media.ImageBackend.Vix`) to force a decode-budget
+  # rejection. Application env is ONE value for the whole node — the SQL sandbox
+  # isolates the DB connection, never the VM-global env (see
+  # api/test/barkpark/application_env_isolation_test.exs, which proves the leak
+  # channel). Ratchet: scripts/async_env_seam_scan.exs.
+  use ExUnit.Case, async: false
 
   alias Barkpark.Media.ImageBackend.Vix
 

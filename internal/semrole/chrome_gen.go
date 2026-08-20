@@ -9,19 +9,19 @@ import "github.com/charmbracelet/lipgloss"
 // Nine NEW hex roles + five REUSE references resolved to their target role's
 // hex (chrome-primary-cta = evergreen --primary; chrome-on-primary = --primary-fg).
 var (
-	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
+	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#15804e", Dark: "#3fcf8e"}
 	GenChromeDim           = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"}
 	GenChromeInk           = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}
 	GenChromeTextSecondary = lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}
-	GenChromeSelectionBg   = lipgloss.AdaptiveColor{Light: "#e9eeec", Dark: "#141c1b"}
-	GenChromeSelectionFg   = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#92d3bd"}
+	GenChromeSelectionBg   = lipgloss.AdaptiveColor{Light: "#e8f2ed", Dark: "#0e1d18"}
+	GenChromeSelectionFg   = lipgloss.AdaptiveColor{Light: "#15804e", Dark: "#60d7a1"}
 	GenChromeFieldBorder   = lipgloss.AdaptiveColor{Light: "#d4d4d8", Dark: "#3f3f46"}
 	GenChromeToolbarBg     = lipgloss.AdaptiveColor{Light: "#fafafa", Dark: "#0a0a0a"}
 	GenChromeCursorBg      = lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#18181b"}
 	GenChromeBorder        = lipgloss.AdaptiveColor{Light: "#e4e4e7", Dark: "#27272a"}
 	GenChromeBorderActive  = lipgloss.AdaptiveColor{Light: "#3b82f6", Dark: "#3b82f6"}
 	GenChromeLabel         = lipgloss.AdaptiveColor{Light: "#6e6e77", Dark: "#a1a1aa"}
-	GenChromePrimaryCta    = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
+	GenChromePrimaryCta    = lipgloss.AdaptiveColor{Light: "#15804e", Dark: "#3fcf8e"}
 	GenChromeOnPrimary     = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#0b1e18"}
 )
 
@@ -54,52 +54,68 @@ type ThemeChrome struct {
 var genChrome = map[string]ThemeChrome{
 	"evergreen": {Chrome: GenChrome},
 	"charple": {Chrome: map[string]lipgloss.AdaptiveColor{
-			"chrome-accent": lipgloss.AdaptiveColor{Light: "#3431b4", Dark: "#6c52ff"},
-			"chrome-dim": lipgloss.AdaptiveColor{Light: "#a7a6ab", Dark: "#6e6d73"},
-			"chrome-ink": lipgloss.AdaptiveColor{Light: "#323138", Dark: "#d7d6dc"},
-			"chrome-text-secondary": lipgloss.AdaptiveColor{Light: "#57565c", Dark: "#a1a0a6"},
-			"chrome-selection-bg": lipgloss.AdaptiveColor{Light: "#e5e4f5", Dark: "#29253d"},
-			"chrome-selection-fg": lipgloss.AdaptiveColor{Light: "#3431b4", Dark: "#8e7aff"},
-			"chrome-field-border": lipgloss.AdaptiveColor{Light: "#d2d1d6", Dark: "#a5a4aa"},
-			"chrome-toolbar-bg": lipgloss.AdaptiveColor{Light: "#f4f3f8", Dark: "#29282f"},
-			"chrome-cursor-bg": lipgloss.AdaptiveColor{Light: "#eeedf1", Dark: "#35343b"},
-			"chrome-border": lipgloss.AdaptiveColor{Light: "#dee0e5", Dark: "#131417"},
-			"chrome-border-active": lipgloss.AdaptiveColor{Light: "#406bcd", Dark: "#76a2ff"},
-			"chrome-label": lipgloss.AdaptiveColor{Light: "#67696f", Dark: "#9999a2"},
-			"chrome-primary-cta": lipgloss.AdaptiveColor{Light: "#3431b4", Dark: "#6c52ff"},
-			"chrome-on-primary": lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#ffffff"},
+		"chrome-accent":         lipgloss.AdaptiveColor{Light: "#7b3a96", Dark: "#c78ae0"},
+		"chrome-dim":            lipgloss.AdaptiveColor{Light: "#a7a6ab", Dark: "#6e6d73"},
+		"chrome-ink":            lipgloss.AdaptiveColor{Light: "#323138", Dark: "#d7d6dc"},
+		"chrome-text-secondary": lipgloss.AdaptiveColor{Light: "#57565c", Dark: "#a1a0a6"},
+		"chrome-selection-bg":   lipgloss.AdaptiveColor{Light: "#ece5f2", Dark: "#322b3a"},
+		"chrome-selection-fg":   lipgloss.AdaptiveColor{Light: "#7b3a96", Dark: "#d6aae9"},
+		"chrome-field-border":   lipgloss.AdaptiveColor{Light: "#d2d1d6", Dark: "#a5a4aa"},
+		"chrome-toolbar-bg":     lipgloss.AdaptiveColor{Light: "#f4f3f8", Dark: "#29282f"},
+		"chrome-cursor-bg":      lipgloss.AdaptiveColor{Light: "#eeedf1", Dark: "#35343b"},
+		"chrome-border":         lipgloss.AdaptiveColor{Light: "#e2dfe3", Dark: "#151316"},
+		"chrome-border-active":  lipgloss.AdaptiveColor{Light: "#4a6ebd", Dark: "#7ea3ef"},
+		"chrome-label":          lipgloss.AdaptiveColor{Light: "#6b676d", Dark: "#9d989f"},
+		"chrome-primary-cta":    lipgloss.AdaptiveColor{Light: "#7b3a96", Dark: "#c78ae0"},
+		"chrome-on-primary":     lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#180b1e"},
 	}},
 	"ember": {Chrome: map[string]lipgloss.AdaptiveColor{
-			"chrome-accent": lipgloss.AdaptiveColor{Light: "#c34e13", Dark: "#f7993b"},
-			"chrome-dim": lipgloss.AdaptiveColor{Light: "#aaa6a4", Dark: "#6a6561"},
-			"chrome-ink": lipgloss.AdaptiveColor{Light: "#342c28", Dark: "#dad5d0"},
-			"chrome-text-secondary": lipgloss.AdaptiveColor{Light: "#59534f", Dark: "#a09b97"},
-			"chrome-selection-bg": lipgloss.AdaptiveColor{Light: "#f8ebe4", Dark: "#2f2114"},
-			"chrome-selection-fg": lipgloss.AdaptiveColor{Light: "#c34e13", Dark: "#f8ad62"},
-			"chrome-field-border": lipgloss.AdaptiveColor{Light: "#d6d4d2", Dark: "#a4a09b"},
-			"chrome-toolbar-bg": lipgloss.AdaptiveColor{Light: "#f9f8f7", Dark: "#211c18"},
-			"chrome-cursor-bg": lipgloss.AdaptiveColor{Light: "#f3f1f0", Dark: "#2e2925"},
-			"chrome-border": lipgloss.AdaptiveColor{Light: "#e4dedc", Dark: "#161311"},
-			"chrome-border-active": lipgloss.AdaptiveColor{Light: "#486ec0", Dark: "#7ba3f6"},
-			"chrome-label": lipgloss.AdaptiveColor{Light: "#6e6764", Dark: "#a09993"},
-			"chrome-primary-cta": lipgloss.AdaptiveColor{Light: "#c34e13", Dark: "#f7993b"},
-			"chrome-on-primary": lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1e140b"},
+		"chrome-accent":         lipgloss.AdaptiveColor{Light: "#b34e1e", Dark: "#e8875a"},
+		"chrome-dim":            lipgloss.AdaptiveColor{Light: "#aaa6a4", Dark: "#6a6561"},
+		"chrome-ink":            lipgloss.AdaptiveColor{Light: "#342c28", Dark: "#dad5d0"},
+		"chrome-text-secondary": lipgloss.AdaptiveColor{Light: "#59534f", Dark: "#a09b97"},
+		"chrome-selection-bg":   lipgloss.AdaptiveColor{Light: "#f6ebe5", Dark: "#2e1f17"},
+		"chrome-selection-fg":   lipgloss.AdaptiveColor{Light: "#b34e1e", Dark: "#eda17e"},
+		"chrome-field-border":   lipgloss.AdaptiveColor{Light: "#d6d4d2", Dark: "#a4a09b"},
+		"chrome-toolbar-bg":     lipgloss.AdaptiveColor{Light: "#f9f8f7", Dark: "#211c18"},
+		"chrome-cursor-bg":      lipgloss.AdaptiveColor{Light: "#f3f1f0", Dark: "#2e2925"},
+		"chrome-border":         lipgloss.AdaptiveColor{Light: "#e4dfdc", Dark: "#161312"},
+		"chrome-border-active":  lipgloss.AdaptiveColor{Light: "#4c6fb9", Dark: "#7fa3ee"},
+		"chrome-label":          lipgloss.AdaptiveColor{Light: "#6e6764", Dark: "#a19894"},
+		"chrome-primary-cta":    lipgloss.AdaptiveColor{Light: "#b34e1e", Dark: "#e8875a"},
+		"chrome-on-primary":     lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1e110b"},
 	}},
 	"fjord": {Chrome: map[string]lipgloss.AdaptiveColor{
-			"chrome-accent": lipgloss.AdaptiveColor{Light: "#2f56b1", Dark: "#68a2e8"},
-			"chrome-dim": lipgloss.AdaptiveColor{Light: "#a3a6ab", Dark: "#60646b"},
-			"chrome-ink": lipgloss.AdaptiveColor{Light: "#262b36", Dark: "#d0d5db"},
-			"chrome-text-secondary": lipgloss.AdaptiveColor{Light: "#4e525b", Dark: "#969aa1"},
-			"chrome-selection-bg": lipgloss.AdaptiveColor{Light: "#e7ecf6", Dark: "#18212f"},
-			"chrome-selection-fg": lipgloss.AdaptiveColor{Light: "#2f56b1", Dark: "#8cb8ee"},
-			"chrome-field-border": lipgloss.AdaptiveColor{Light: "#d2d4d6", Dark: "#9a9fa5"},
-			"chrome-toolbar-bg": lipgloss.AdaptiveColor{Light: "#f7f8f9", Dark: "#171b23"},
-			"chrome-cursor-bg": lipgloss.AdaptiveColor{Light: "#f0f1f3", Dark: "#24282f"},
-			"chrome-border": lipgloss.AdaptiveColor{Light: "#dde0e5", Dark: "#121417"},
-			"chrome-border-active": lipgloss.AdaptiveColor{Light: "#4a6ebc", Dark: "#82a4e9"},
-			"chrome-label": lipgloss.AdaptiveColor{Light: "#66696f", Dark: "#959ba2"},
-			"chrome-primary-cta": lipgloss.AdaptiveColor{Light: "#2f56b1", Dark: "#68a2e8"},
-			"chrome-on-primary": lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#0b131e"},
+		"chrome-accent":         lipgloss.AdaptiveColor{Light: "#0e6e85", Dark: "#6cc4dd"},
+		"chrome-dim":            lipgloss.AdaptiveColor{Light: "#a3a6ab", Dark: "#60646b"},
+		"chrome-ink":            lipgloss.AdaptiveColor{Light: "#262b36", Dark: "#d0d5db"},
+		"chrome-text-secondary": lipgloss.AdaptiveColor{Light: "#4e525b", Dark: "#969aa1"},
+		"chrome-selection-bg":   lipgloss.AdaptiveColor{Light: "#e4eef1", Dark: "#18242e"},
+		"chrome-selection-fg":   lipgloss.AdaptiveColor{Light: "#0e6e85", Dark: "#8dd1e5"},
+		"chrome-field-border":   lipgloss.AdaptiveColor{Light: "#d2d4d6", Dark: "#9a9fa5"},
+		"chrome-toolbar-bg":     lipgloss.AdaptiveColor{Light: "#f7f8f9", Dark: "#171b23"},
+		"chrome-cursor-bg":      lipgloss.AdaptiveColor{Light: "#f0f1f3", Dark: "#24282f"},
+		"chrome-border":         lipgloss.AdaptiveColor{Light: "#dbe1e3", Dark: "#111516"},
+		"chrome-border-active":  lipgloss.AdaptiveColor{Light: "#5871a5", Dark: "#88a4dd"},
+		"chrome-label":          lipgloss.AdaptiveColor{Light: "#636a6d", Dark: "#929c9f"},
+		"chrome-primary-cta":    lipgloss.AdaptiveColor{Light: "#0e6e85", Dark: "#6cc4dd"},
+		"chrome-on-primary":     lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#0b1a1e"},
+	}},
+	"iris": {Chrome: map[string]lipgloss.AdaptiveColor{
+		"chrome-accent":         lipgloss.AdaptiveColor{Light: "#5b46d6", Dark: "#9d8cff"},
+		"chrome-dim":            lipgloss.AdaptiveColor{Light: "#a2a2a2", Dark: "#626263"},
+		"chrome-ink":            lipgloss.AdaptiveColor{Light: "#1d1d1e", Dark: "#dbdbdb"},
+		"chrome-text-secondary": lipgloss.AdaptiveColor{Light: "#464648", Dark: "#9c9c9d"},
+		"chrome-selection-bg":   lipgloss.AdaptiveColor{Light: "#efedfb", Dark: "#181623"},
+		"chrome-selection-fg":   lipgloss.AdaptiveColor{Light: "#5b46d6", Dark: "#c0b5ff"},
+		"chrome-field-border":   lipgloss.AdaptiveColor{Light: "#d3d3d3", Dark: "#a1a1a1"},
+		"chrome-toolbar-bg":     lipgloss.AdaptiveColor{Light: "#fafafa", Dark: "#121214"},
+		"chrome-cursor-bg":      lipgloss.AdaptiveColor{Light: "#f3f3f3", Dark: "#202022"},
+		"chrome-border":         lipgloss.AdaptiveColor{Light: "#dfdfe5", Dark: "#141417"},
+		"chrome-border-active":  lipgloss.AdaptiveColor{Light: "#406bce", Dark: "#78a2fa"},
+		"chrome-label":          lipgloss.AdaptiveColor{Light: "#68686f", Dark: "#9999a1"},
+		"chrome-primary-cta":    lipgloss.AdaptiveColor{Light: "#5b46d6", Dark: "#9d8cff"},
+		"chrome-on-primary":     lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#0e0b1e"},
 	}},
 }
 

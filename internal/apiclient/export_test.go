@@ -43,8 +43,12 @@ func TestExportStreamsNDJSON(t *testing.T) {
 	if !strings.Contains(gotPath, "type=post") {
 		t.Errorf("path = %q, want type=post", gotPath)
 	}
-	if gotAccept != "application/x-ndjson" {
-		t.Errorf("Accept = %q, want application/x-ndjson", gotAccept)
+	// The Accept must state the streaming type AND keep `application/json`
+	// negotiable: the export route rides `plug(:accepts, ["json"])`, which 406s
+	// a bare `application/x-ndjson` before auth (live-proven on guerrilla:
+	// ndjson=406, ndjson+json=401 on the identical URL).
+	if gotAccept != "application/x-ndjson, application/json" {
+		t.Errorf("Accept = %q, want %q", gotAccept, "application/x-ndjson, application/json")
 	}
 }
 

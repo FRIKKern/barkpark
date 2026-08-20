@@ -16,13 +16,14 @@
 // tail SETTLES into server-computed PortableDoc blocks. Nothing rendered from
 // a delta outlives the turn that produced it.
 //
-// # Figure numbering — per-message reset (charter D10)
+// # Figure captions — the author's words, per message (charter D10)
 //
 // Each assistant reply is rendered as its OWN document (one pdrender.RenderDoc
-// call per message), so "Figure N." numbering resets per message. That is the
-// deliberate chat convention — a reply is a self-contained document, not a
-// page in one long paper — documented here so it reads as a decision, not an
-// accident inherited from RenderDoc's per-call counter seeding.
+// call per message) — a reply is a self-contained document, not a page in one
+// long paper. Figure captions therefore never drift between replies: pdrender
+// generates no numbering whatsoever (it emphasises an author-typed "Figure N."
+// lead and adds nothing, the same rule the web reader follows), so there is no
+// counter whose state could leak across messages.
 //
 // # Result-boundary settlement (charter D8/D15)
 //
@@ -41,8 +42,34 @@
 // The golden-transcript parity harness (ct-w1-golden-harness) covers exactly the
 // ASSISTANT REPLY BODY projection: renderAssistantDoc is the seam it diffs
 // against the Studio reader. User echoes, the live tail, and the bespoke
-// read-only approval/question/plan cards are DELIBERATELY out of golden scope —
-// the cards are replay-only (answering is ct-bl-cards-interactive), and the tail
+// approval/question/plan cards are DELIBERATELY out of golden scope — the tail
 // is transient truth that settles into a golden-covered assistant body at the
 // result boundary. One projection, one parity contract.
+//
+// # The archived shelf — a two-way door (charter D28)
+//
+// Archiving is DISMISSAL: orthogonal to status (liveness) and to agent_state
+// (attention), and the server emits no fleet frame for the flip in EITHER
+// direction. `a` on the herd home shelves the cursor row; `s` opens the SHELF
+// screen (its own roster, its own cursor — GET /v1/chat/sessions?archived=true),
+// where `enter`/`u` restores a row (POST …/unarchive) and `esc` returns to the
+// herd. Both flips are optimistic because nothing else will ever tell the list
+// the row moved; a refused flip surfaces honestly and RE-READS the list it came
+// from rather than guessing the row back in. `bp chat ls --archived` and `bp
+// chat unarchive <id>` are the same two verbs for scripts.
+//
+// # Interactive cards + the agents rail (charter D27/D28, Law-1/Law-2)
+//
+// approval/question/plan cards are answerable in-canvas: the focused pending
+// card takes Ctrl+A (allow / approve / plan-approve) or Ctrl+R (deny / keep
+// planning); Tab cycles the focus ring. An answer POSTs {request_id, decision}
+// to /v1/chat/sessions/:id/approval (allow/deny ONLY — rich AskUserQuestion
+// updatedInput is deferred, ct-bl-question-updatedinput) and then FULL-refetches
+// the tail. The resolved row keeps its seq — only its approval_status metadata
+// flips pending → allowed/denied — so the turn-boundary merge UPDATES rows in
+// place, not append-only. Because the flip is a Postgres row (server-side
+// update_approval_status/3), a Studio answer and a TUI answer converge on the
+// SAME card with no sync engine (Law-2, one truth). The session's rail_snapshot
+// decodes into a task-keyed agents rail band below the transcript, so a
+// mid-session surface switch keeps the same mission control Studio shows.
 package chat

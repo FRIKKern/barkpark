@@ -191,6 +191,18 @@ defmodule BarkparkCloud.DeviceAuthTest do
       assert session.ip_address == "5.6.7.8"
       assert session.user_agent == "bp/agent"
 
+      # ...and saying so: the ONE mint site outside the router stamps its own
+      # origin, so the sessions list can honestly show "via device link" for a
+      # session nobody typed a password into this browser for
+      # (gr-p5-session-provenance). Read off the COLUMN, not just the struct —
+      # a struct default would satisfy the field read alone.
+      assert session.origin == "device_link"
+
+      assert %Postgrex.Result{rows: [["device_link"]]} =
+               Repo.query!("SELECT origin FROM user_tokens WHERE token_hash = $1", [
+                 UserToken.hash_token(token)
+               ])
+
       # The request row is consumed.
       assert Repo.aggregate(Request, :count) == 0
     end
@@ -416,6 +428,52 @@ defmodule BarkparkCloud.DeviceAuthTest do
       throttled = call(:post, "/v1/auth/device/poll", %{device_code: dc})
       assert throttled.status == 429
       assert jbody(throttled) == %{"error" => "slow_down"}
+    end
+  end
+
+  # FK-abort containment (Felix W18). `device_auth_requests.user_id` is a real
+  # Postgres FK (migration 20260709140000, default name
+  # `device_auth_requests_user_id_fkey`). `Request.changeset/2` declares
+  # `assoc_constraint(:user)`, so a changeset-path insert carrying a phantom
+  # user_id returns {:error, changeset} instead of raising Ecto.ConstraintError.
+  #
+  # NOTE: the hot approve path — `DeviceAuth.approve/2` — stamps user_id via
+  # `Repo.update_all`, which BYPASSES changesets by construction; that path is
+  # unchanged and only ever writes a user_id resolved from a live session.
+  describe "Request.changeset/2 FK-abort containment" do
+    defp request_attrs(overrides) do
+      suffix = System.unique_integer([:positive])
+
+      Map.merge(
+        %{
+          device_code_hash: "dc-#{suffix}",
+          user_code_hash: "uc-#{suffix}",
+          status: "approved",
+          expires_at:
+            DateTime.add(DateTime.utc_now(), 600, :second) |> DateTime.truncate(:microsecond)
+        },
+        overrides
+      )
+    end
+
+    test "a phantom user_id returns {:error, changeset} via the changeset path, never a raise" do
+      assert {:error, %Ecto.Changeset{} = cs} =
+               %Request{}
+               |> Request.changeset(request_attrs(%{user_id: Ecto.UUID.generate()}))
+               |> Repo.insert()
+
+      assert {"does not exist", _} = cs.errors[:user]
+    end
+
+    test "a live user_id still inserts" do
+      user = user_fixture()
+
+      assert {:ok, %Request{} = row} =
+               %Request{}
+               |> Request.changeset(request_attrs(%{user_id: user.id}))
+               |> Repo.insert()
+
+      assert row.user_id == user.id
     end
   end
 end

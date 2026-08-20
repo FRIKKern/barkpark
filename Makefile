@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
+.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -27,6 +27,15 @@ logs: ## Tail Phoenix service logs
 
 seed: ## Re-seed the database
 	cd api && bash start.sh mix run priv/repo/seeds.exs
+
+seed-check: ## Audit the served scaffy catalog vs the main corpus (tokenless drift tripwire)
+	@# Tokenless: reads the PUBLISHED perspective with a plain GET — no creds.
+	@# Exits nonzero on ANY drift OR on a fetch failure (a check that cannot
+	@# check must never report clean). Remediation: re-seed per
+	@# scaffy/seed/README.md, or let the ACTING gate in
+	@# .github/workflows/scaffy-catalog-drift.yml auto-seed it (charter D100;
+	@# secret-gated — reds hard until BARKPARK_SEED_TOKEN is minted).
+	go run ./scaffy/seed --check
 
 migrate: ## Run database migrations
 	cd api && bash start.sh mix ecto.migrate
@@ -102,15 +111,20 @@ cli-assets-check: ## Fail when the embedded deploy.sh drifted from the repo-root
 
 # The deploy templates (templates/<name>/) are go:embedded into the provisioner
 # (internal/provisioner/catalog/templates/) for the dwb-4 content bootstrap.
-# The canonical files stay at the repo root; sync re-copies the manifest +
-# schemas + seed per template, and TestEmbeddedCatalogMatchesRepoRoot is the
-# per-test-run drift guard.
-provisioner-catalog-sync: ## Sync deploy templates into the provisioner's go:embed catalog
-	@for t in place-directory website-starter blog-starter; do \
+# The canonical files stay at the repo root; sync MIRRORS the manifest +
+# schemas + seed of every templates/<name>/ that carries a
+# barkpark.template.json (the list is derived, never hand-maintained — a new
+# template is picked up by its manifest alone, and a removed one is pruned by
+# the rm -rf), and TestEmbeddedCatalogMatchesRepoRoot is the per-test-run
+# drift guard in both directions.
+provisioner-catalog-sync: ## Mirror deploy templates into the provisioner's go:embed catalog
+	@rm -rf internal/provisioner/catalog/templates
+	@for m in templates/*/barkpark.template.json; do \
+	  t=$$(basename $$(dirname $$m)); \
 	  mkdir -p internal/provisioner/catalog/templates/$$t/schemas; \
 	  cp templates/$$t/barkpark.template.json internal/provisioner/catalog/templates/$$t/; \
 	  cp templates/$$t/schemas/*.json internal/provisioner/catalog/templates/$$t/schemas/; \
-	  cp templates/$$t/seed-*.json internal/provisioner/catalog/templates/$$t/ 2>/dev/null || true; \
+	  cp templates/$$t/seed*.json internal/provisioner/catalog/templates/$$t/ 2>/dev/null || true; \
 	done
 	@echo ">> provisioner catalog synced"
 
@@ -149,6 +163,25 @@ cli-build: cli-assets-sync ## Build native bp binary into dist/ (this host's GOO
 	@echo ">> Building native bp $(VERSION) -> dist/bp..."
 	CGO_ENABLED=0 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp ./cmd/barkpark
 	@echo ">> Done: dist/bp"
+
+# Where the installed `bp` lands on PATH. Default mirrors doctor.sh's hint and
+# the common `~/.local/bin` user-bin dir; override for a different prefix,
+# e.g. `make cli-install BINDIR=/usr/local/bin`.
+BINDIR ?= $(HOME)/.local/bin
+
+cli-install: cli-build ## LOCAL: build + install the STAMPED bp onto PATH ($(BINDIR)/bp)
+	@# cli-build stamps cliCommit/cliVersion/cliDate via -ldflags; install (not a
+	@# bare `go build`) PRESERVES that stamp so `make doctor` can prove provenance.
+	@mkdir -p "$(BINDIR)"
+	@install -m 0755 dist/bp "$(BINDIR)/bp"
+	@echo ">> Installed stamped bp -> $(BINDIR)/bp"
+	@# Fail loudly if the copy we just placed lacks a commit stamp — an unstamped
+	@# binary is exactly the drift doctor.sh reds on, so never call it installed.
+	@"$(BINDIR)/bp" version -o json 2>/dev/null | grep -q '"commit"' \
+	  || { echo "!! installed bp has NO commit stamp (built without -ldflags) — provenance broken"; exit 1; }
+	@echo ">> Provenance OK: $$("$(BINDIR)/bp" version -o json 2>/dev/null)"
+	@command -v bp >/dev/null 2>&1 && [ "$$(command -v bp)" != "$(BINDIR)/bp" ] \
+	  && echo ">> NOTE: PATH resolves bp to $$(command -v bp), not $(BINDIR)/bp — adjust PATH or BINDIR" || true
 
 # The pdrender→TUI wasm the paper reader lazy-loads (api/.../bulldocs.html.heex
 # fetches /assets/bp-pdrender.wasm.gz). Built from #1357's entry (cmd/pdrender-wasm)

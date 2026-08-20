@@ -50,14 +50,73 @@ defmodule BarkparkCloud.Web.RouterTemplatesTest do
     refute body =~ ~s("secret")
   end
 
-  test "LOCK: catalog slugs mirror Registry.known_templates/0 (sorted)" do
+  test "LOCK: catalog slugs mirror Registry.known_templates/0" do
+    # The mirror equality IS the drift lock. Declaration order is display
+    # order (new templates insert at the head — scaffy add-site-template),
+    # so sortedness is deliberately NOT pinned.
     assert Templates.slugs() == Registry.known_templates()
-    assert Templates.slugs() == Enum.sort(Templates.slugs())
   end
 
   test "Templates.get/1 resolves a known slug and rejects an unknown one" do
     assert %{slug: "place-directory", title: "Place Directory"} = Templates.get("place-directory")
     assert Templates.get("wordpress") == nil
     assert Templates.get(nil) == nil
+  end
+
+  # stw12-copy-honesty-content-lock — a FAILABLE content lock on the flagship's
+  # served copy. The catalog is the public marketing surface, so a false claim
+  # regressing into it (a fabricated block COUNT, a `listings map` that is dead
+  # on managed deploys, or an unqualified `typo-tolerant` promise implying a
+  # fuzzy engine) must RED the suite, not ship silently. Proven failable: put
+  # `(all 42 block types)` back on the served search-starter row and this REDs.
+  test "LOCK: the served catalog is exactly the five known slugs (literal pin)" do
+    conn = Router.call(conn(:get, "/v1/templates"), @opts)
+    %{"templates" => templates} = json_body(conn)
+
+    served = templates |> Enum.map(& &1["slug"]) |> MapSet.new()
+
+    # A LITERAL set — not derived from the catalog under test — so adding or
+    # removing a template without updating this pin reds here.
+    pinned =
+      MapSet.new([
+        "astro-search-starter",
+        "blog-starter",
+        "place-directory",
+        "search-starter",
+        "website-starter"
+      ])
+
+    assert served == pinned
+  end
+
+  test "LOCK: the flagship search-starter copy carries no false claims" do
+    conn = Router.call(conn(:get, "/v1/templates"), @opts)
+    %{"templates" => templates} = json_body(conn)
+
+    search = Enum.find(templates, &(&1["slug"] == "search-starter"))
+    assert search, "search-starter must be in the served catalog"
+
+    # Every string the row ships to the marketing surface.
+    copy = Enum.join([search["description"] | search["what_you_get"]], "\n")
+
+    # No fabricated block COUNT — the canonical PortableDoc renders "all block
+    # types"; pinning a number (42/60/77) rots the moment the grammar grows.
+    refute copy =~ "block types",
+           "search-starter copy must not pin a PortableDoc block count"
+
+    refute copy =~ ~r/\d+ block/,
+           "search-starter copy must not state a numeric block count"
+
+    # The `listings map` is dead on managed deploys — cut for reachability (D89).
+    refute copy =~ "listings map",
+           "search-starter copy must not advertise the listings map"
+
+    # No unqualified typo-tolerance promise implying a client/indx fuzzy engine —
+    # widening is server-side Postgres trigram and the copy must say so.
+    refute copy =~ "typo-tolerant",
+           "search-starter copy must not make an unqualified typo-tolerant claim"
+
+    assert search["description"] =~ "Postgres trigram",
+           "search-starter description must attribute widening to Postgres trigram"
   end
 end

@@ -76,6 +76,52 @@
       },
       "additionalProperties": false
     },
+    "chat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providers"
+      ],
+      "description": "Root chat capability-discovery block (charter D27). STRICTLY OPT-IN: emitted only to callers that send ?chat=1 and hold a tier above \"none\" — absent otherwise, and absent on servers older than the feature. Consumers treat absence as \"discover nothing, degrade\".",
+      "properties": {
+        "providers": {
+          "type": "object",
+          "description": "Per-provider picker vocabulary, keyed by provider id (e.g. \"claude\", \"codex\"). Provider ids are a growth axis — keys stay UNCONSTRAINED; each value is strict. Empty arrays are the honest degrade signal (codex ships all-empty today): offer no picker rather than inventing values.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "modes",
+              "models",
+              "efforts"
+            ],
+            "properties": {
+              "modes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Permission modes the /v1/chat transport ACCEPTS for this provider. The provider's danger mode (bypassPermissions) is never advertised — the transport categorically rejects it (D22)."
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Model aliases the transport accepts for this provider."
+              },
+              "efforts": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Reasoning-effort tiers the transport accepts for this provider."
+              }
+            }
+          }
+        }
+      }
+    },
     "auth_tier": {
       "$ref": "#/$defs/auth_tier",
       "description": "The CALLER's projected tier — the resolved tier of THIS request's token. Echoes the auth context so the CLI can render `whoami` without a dedicated endpoint (the manifest's caller-tier echo + GET /v1/meta cover whoami's needs; see plan open decision #6). DISTINCT from each command's required auth_tier."
@@ -280,6 +326,41 @@
           "type": "string",
           "minLength": 1,
           "description": "OPTIONAL (additive). The manifest/api version in which this command first appeared — used for version gating so a CLI can tell when a command is too new for the server it is pointed at. Free string, NOT in the required list."
+        },
+        "views": {
+          "$ref": "#/$defs/views",
+          "description": "OPTIONAL (additive). Present ONLY when this command supports a brief/full projection (a token-thrifty card vs the full envelope) AND the caller opted in via ?views=1. Absence means the command is full-only. NOT in the required list — released CLIs that predate views still validate because the server withholds the key unless ?views=1 is sent (opt-in, mirroring `build`)."
+        }
+      }
+    },
+    "views": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "supported",
+        "default",
+        "default_for_agents"
+      ],
+      "description": "A command's brief/full projection descriptor. The server emits this ONLY under ?views=1 (opt-in), so a stale CLI that strict-decodes each command never sees an unknown key. A consuming client picks `default_for_agents` when it is an automated caller (bp resolving a piped/JSON default, the MCP bridge), else `default`; it appends the chosen name as ?view=<name> on the command's request.",
+      "properties": {
+        "supported": {
+          "type": "array",
+          "description": "The view names this command accepts on ?view=. Frozen for the axi-brief-views wave as [\"brief\",\"full\"].",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "default": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The view a human/default caller gets when no ?view= is sent (\"full\")."
+        },
+        "default_for_agents": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The view an automated caller SHOULD request (\"brief\") — the token-thrifty projection."
         }
       }
     },

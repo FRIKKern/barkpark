@@ -1,0 +1,31 @@
+{
+  "assignment_id": "E12",
+  "frozen_thresholds_sha256": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b",
+  "outcomes": {
+    "authored_content_preservation": {
+      "evidence": "36/36 pre-images retained",
+      "status": "PASS_DRY_RUN"
+    },
+    "convergence": {
+      "evidence": "Round 3 selected no winner; E05 remains BLOCKED_REWORK",
+      "status": "REJECTED"
+    },
+    "evidence_truth_boundary": {
+      "evidence": "0/20 required sealed paired blind records",
+      "status": "BLOCKED"
+    },
+    "idempotence": {
+      "evidence": "36/36 fixture hashes stable and E05 tracked artifacts identical across two E09 runs",
+      "status": "PASS_DRY_RUN"
+    },
+    "rollback": {
+      "evidence": "36/36 restored hashes equal pre-images; zero residue keys",
+      "status": "PASS_DRY_RUN"
+    },
+    "surface_exercise": {
+      "evidence": "authenticated Studio and real-client email unavailable",
+      "status": "BLOCKED"
+    }
+  },
+  "schema_version": "legendary-e12-threshold-outcomes/v1"
+}

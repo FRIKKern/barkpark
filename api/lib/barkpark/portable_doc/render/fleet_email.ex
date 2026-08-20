@@ -586,10 +586,12 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
   # Static role→colour map (charter D2). Lifecycle hues come from the
   # status-manifest tones (light), NOT TokensGen.tone_* (health greens). ready is
-  # the ink; open/cancel (and any unknown role) fall to muted.
+  # the ink; researching carries the violet thought-hue (charter D9/D12);
+  # open/cancel/considering (and any unknown role) fall to muted.
   defp role_color("done", _sk), do: tone_light("ok")
   defp role_color("progress", _sk), do: tone_light("info")
   defp role_color("blocked", _sk), do: tone_light("warn")
+  defp role_color("researching", _sk), do: tone_light("violet")
   defp role_color("ready", sk), do: sk.ink
   defp role_color(_role, sk), do: sk.muted
 
@@ -600,7 +602,10 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
   defp tone_light(tone), do: StatusVocab.tones() |> Map.fetch!(tone) |> Map.fetch!("light")
 
-  defp board_roles, do: ~w(open ready progress blocked done)
+  # White-ladder column order, with the two thought states as dim columns at the
+  # ladder BOTTOM (charter D12 — thought states ARE visible board columns). Empty
+  # columns are dropped, so a board with no considering/researching rows is byte-stable.
+  defp board_roles, do: ~w(open ready progress blocked done considering researching)
 
   # ── meta cells ───────────────────────────────────────────────────────────────
 

@@ -6,12 +6,35 @@ package apiclient
 import (
 	"bufio"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
+
+// maxSSELineBytes caps a single SSE line the shared reader will assemble. It
+// follows the in-tree precedent for the same class of problem: export.go raises
+// bufio's 64KB default to 8 MiB so one oversized record cannot truncate a whole
+// stream. A line of maxSSELineBytes-1 bytes is the largest bufio.Scanner can
+// deliver (the newline must still fit in the buffer), so that byte is the real
+// ceiling — see TestScanListenFramesByteBoundary.
+//
+// Raising this cap does NOT retire the server-side 262144-byte per-frame bound
+// (charter D64): binaries already installed in the field carry the OLD cap and
+// can never be fixed there, so the server must keep every frame inside the
+// smallest cap any shipped client has. The client cap is a safety net, not a
+// licence for the server to emit bigger frames.
+const maxSSELineBytes = 8 * 1024 * 1024
+
+// ErrFrameTooLarge reports that one SSE line exceeded maxSSELineBytes, so the
+// scanner aborted and the rest of that HTTP response was discarded. It exists to
+// be DISTINGUISHABLE: before it, an over-cap frame and a dropped connection both
+// ended the read with a bare nil, so callers answered permanent data loss with a
+// reconnect and no diagnosis. Test with errors.Is.
+var ErrFrameTooLarge = errors.New("sse frame line too large")
 
 // Listen opens the SSE change stream for `types` (comma-separated document types,
 // or "" for all) and invokes onEvent for each event. onEvent receives the event
@@ -113,10 +136,12 @@ func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, d
 
 		connected = true
 		consecutive5xx = 0 // a healthy 200 stream clears the 5xx blip streak
-		cbErr := scanListenFrames(resp.Body, &lastEventID, &backoff, floorBackoff, onEvent)
+		cbErr := scanListenFrames(resp.Body, &lastEventID, &backoff, floorBackoff, onEvent, nil)
 		resp.Body.Close()
 
-		// onEvent asked to stop (e.g. a broken stdout pipe) — propagate it.
+		// onEvent asked to stop (e.g. a broken stdout pipe), or the reader hit
+		// ErrFrameTooLarge — permanent loss, not a drop. Either way, propagate:
+		// reconnecting past an over-cap frame would silently skip it forever.
 		if cbErr != nil {
 			return cbErr
 		}
@@ -142,10 +167,26 @@ func (c *Client) Listen(ctx context.Context, types string, onEvent func(event, d
 // delivered event resets *backoff to floor (proof the stream is healthy, so the
 // next drop retries fast). It returns only a non-nil error from onEvent; any
 // other scan-loop end (EOF / read error / ctx cancel) simply returns nil and the
-// caller decides whether to reconnect.
-func scanListenFrames(r io.Reader, lastEventID *string, backoff *time.Duration, floor time.Duration, onEvent func(event, data string) error) error {
+// caller decides whether to reconnect — with ONE exception: a line that exceeds
+// maxSSELineBytes returns ErrFrameTooLarge. That case is not a drop and must not
+// read like one: bufio has already thrown the giant line away and stopped, so
+// every later frame in the same response is lost too, and if the oversize frame
+// carried an id: line (the server writes it BEFORE the data line, and resumes
+// strictly exclusive) the cursor has advanced past a row that never arrived —
+// permanent loss, invisible behind a reconnect. Every OTHER scan-loop end (EOF,
+// a mid-stream read error, ctx cancel) still returns nil, so the callers'
+// reconnect ladders keep their existing resilience unchanged.
+//
+// onCursor (nil-safe, herd charter D76h) observes every cursor advance as it
+// happens: it fires with the new value each time an id: line moves *lastEventID,
+// and ONLY then — id-less frames (live deltas, heartbeats) never fire it, so a
+// caller exposing the cursor (chat_wait_for_state's resumable bound) hands out a
+// value pinned across id-less heartbeats, exactly the replay position the server
+// honours on Last-Event-ID. Listen and ChatEvents pass nil (no exposure, byte-
+// identical behaviour); FleetEventsWithCursor threads its caller's func through.
+func scanListenFrames(r io.Reader, lastEventID *string, backoff *time.Duration, floor time.Duration, onEvent func(event, data string) error, onCursor func(cursor string)) error {
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20) // tolerate large event frames
+	scanner.Buffer(make([]byte, 0, 64*1024), maxSSELineBytes) // tolerate large event frames
 
 	var event string
 	var data []string
@@ -169,7 +210,14 @@ func scanListenFrames(r io.Reader, lastEventID *string, backoff *time.Duration, 
 			// The server tags each frame with a keyset id; remember it so the
 			// reconnect's Last-Event-ID header resumes exactly after it.
 			*lastEventID = strings.TrimSpace(line[len("id:"):])
+			if onCursor != nil {
+				onCursor(*lastEventID)
+			}
 		}
+	}
+	// Read scanner.Err(): an over-cap line is a diagnosable failure, not silence.
+	if err := scanner.Err(); errors.Is(err, bufio.ErrTooLong) {
+		return fmt.Errorf("%w: a single SSE line exceeded the %d-byte reader cap; that frame and every later frame in this response were discarded", ErrFrameTooLarge, maxSSELineBytes)
 	}
 	return nil
 }

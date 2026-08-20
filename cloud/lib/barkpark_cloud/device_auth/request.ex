@@ -49,5 +49,15 @@ defmodule BarkparkCloud.DeviceAuth.Request do
     |> validate_inclusion(:status, ["pending", "approved"])
     |> unique_constraint(:device_code_hash)
     |> unique_constraint(:user_code_hash)
+    # FK-abort containment (Felix W18, cloud sibling of the api-side family).
+    # `user_id` is a real Postgres FK (migration 20260709140000, default name
+    # `device_auth_requests_user_id_fkey`). Without this, a changeset-path insert
+    # (or `Repo.insert`) carrying a phantom user_id would RAISE Ecto.ConstraintError
+    # instead of returning {:error, changeset}. NOTE: the hot approve path,
+    # `BarkparkCloud.DeviceAuth.approve/2`, stamps user_id via `Repo.update_all`,
+    # which BYPASSES changesets by construction — this translator does not (and
+    # cannot) cover that path; it is left unchanged, and approve/2 only ever
+    # writes a user_id it just resolved from a live session.
+    |> assoc_constraint(:user)
   end
 end

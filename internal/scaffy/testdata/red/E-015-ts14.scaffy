@@ -1,0 +1,4 @@
+# expect: E-015 3
+DIRECTION "add"
+VARIABLE 1 "Ts" OPAQUE SHAPE "ts14" TITLE "t" DESCRIPTION "d" EXAMPLES "20261340100000"
+ASSERT FILE "api/priv/repo/migrations/{{.Ts}}_x.exs" EXISTS

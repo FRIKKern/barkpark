@@ -46,6 +46,13 @@ type ActionResult struct {
 	OK      bool
 	Message string
 	Role    Role
+	// Help is the server's help[] next-command templates the claim/close 2xx
+	// envelope carried (charter D18) — parity with the CLI's stderr help: lines so
+	// the board/hook no longer silently drops them. It rides the struct as
+	// structured data; foldHelp surfaces the PRIMARY template inline in the
+	// one-line status strip (the whole set stays available on the field, and on the
+	// CLI stderr path). Empty when the server sent none.
+	Help []string
 }
 
 // DoClaim claims docID for worker over POST /v1/tasks/:doc_id/claim. On success
@@ -54,12 +61,12 @@ type ActionResult struct {
 // claim / resource conflict) or any transport failure comes back as OK:false
 // with the server's reason humanised — never a silent success, never a retry.
 func DoClaim(c *apiclient.Client, docID, worker string) ActionResult {
-	epoch, notices, err := c.TaskClaimN(docID, worker)
+	epoch, notices, help, err := c.TaskClaimN(docID, worker)
 	if err != nil {
 		return ActionResult{OK: false, Message: "claim failed: " + humanizeReason(err)}
 	}
 	res := ActionResult{OK: true, Message: fmt.Sprintf("claimed as %s · epoch %d", worker, epoch)}
-	return withTopNotice(res, notices)
+	return foldHelp(withTopNotice(res, notices), help)
 }
 
 // DoClose closes docID for worker over POST /v1/tasks/:doc_id/close, fencing on
@@ -75,7 +82,7 @@ func DoCloseRev(c *apiclient.Client, docID, worker string, epoch int, observedRe
 	if observedRev == "" {
 		return DoClose(c, docID, worker, epoch)
 	}
-	notices, err := c.TaskCloseRevN(docID, worker, epoch, observedRev)
+	notices, help, err := c.TaskCloseRevN(docID, worker, epoch, observedRev)
 	if err != nil {
 		if msg, ok := resyncGuidance(err); ok {
 			return ActionResult{OK: false, Message: msg, Role: RoleDanger}
@@ -83,11 +90,11 @@ func DoCloseRev(c *apiclient.Client, docID, worker string, epoch int, observedRe
 		return ActionResult{OK: false, Message: "close rejected: " + humanizeReason(err)}
 	}
 	res := ActionResult{OK: true, Message: fmt.Sprintf("closed · epoch %d", epoch)}
-	return withTopNotice(res, notices)
+	return foldHelp(withTopNotice(res, notices), help)
 }
 
 func DoClose(c *apiclient.Client, docID, worker string, epoch int) ActionResult {
-	notices, err := c.TaskCloseN(docID, worker, epoch)
+	notices, help, err := c.TaskCloseN(docID, worker, epoch)
 	if err != nil {
 		// The two recoverable fence reasons get actionable resync guidance instead
 		// of the bare humanised reason: they tell the worker the concrete next
@@ -98,7 +105,7 @@ func DoClose(c *apiclient.Client, docID, worker string, epoch int) ActionResult 
 		return ActionResult{OK: false, Message: "close rejected: " + humanizeReason(err)}
 	}
 	res := ActionResult{OK: true, Message: fmt.Sprintf("closed · epoch %d", epoch)}
-	return withTopNotice(res, notices)
+	return foldHelp(withTopNotice(res, notices), help)
 }
 
 // withTopNotice folds the single most important rail-awareness notice into a
@@ -118,6 +125,24 @@ func withTopNotice(res ActionResult, notices []apiclient.TaskNotice) ActionResul
 	case "rail_changed":
 		res.Message += " · rail changed: " + n.ParentID
 		res.Role = RoleInfo
+	}
+	return res
+}
+
+// foldHelp records the server's help[] next-command templates on the result AND
+// surfaces the PRIMARY one inline in the one-line status strip (charter D18 — the
+// board/hook used to drop help entirely). Only help[0] is inlined: after a claim
+// that is the pulse template, the single most useful next step; the full set
+// stays on res.Help for a caller that wants it, and the CLI stderr path prints
+// them all. Empty help leaves the message untouched. The strip truncates on
+// width, so a long template never breaks layout — it clips like any other reason.
+func foldHelp(res ActionResult, help []string) ActionResult {
+	res.Help = help
+	for _, h := range help {
+		if h != "" {
+			res.Message += " · next: " + h
+			break
+		}
 	}
 	return res
 }

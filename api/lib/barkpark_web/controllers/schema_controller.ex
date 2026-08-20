@@ -32,7 +32,7 @@ defmodule BarkparkWeb.SchemaController do
          {:ok, schema} <- Content.upsert_schema(attrs, dataset, scope_opts(conn)) do
       conn
       |> put_status(:created)
-      |> json(render_schema(schema))
+      |> json(Content.serialize_schema_for_sdk(schema))
     end
   end
 
@@ -58,8 +58,14 @@ defmodule BarkparkWeb.SchemaController do
   def delete(conn, %{"dataset" => dataset, "name" => name} = params) do
     opts = Keyword.put(scope_opts(conn), :force, force_param?(params))
 
-    with {:ok, _} <- Content.delete_schema(name, dataset, opts) do
-      json(conn, %{deleted: name})
+    # RECEIPT LAW (pds w39): the emitted value DESCENDS FROM THE WRITE RETURN.
+    # `delete_schema/3` already hands back the row `Repo.delete/2` removed
+    # (content/schema.ex:181-206) — this used to discard it and echo the `:name`
+    # path param, so the printed sentence could not change if the store said
+    # something else. `id` is the store's own binary_id: it appears nowhere in
+    # the request, so a revert to echoing `name` cannot reproduce this body.
+    with {:ok, %SchemaDefinition{} = deleted} <- Content.delete_schema(name, dataset, opts) do
+      json(conn, %{deleted: deleted.name, id: deleted.id, dataset: deleted.dataset})
     end
   end
 
@@ -68,16 +74,5 @@ defmodule BarkparkWeb.SchemaController do
       v when v in [true, "true", "1"] -> true
       _ -> false
     end
-  end
-
-  defp render_schema(schema) do
-    %{
-      name: schema.name,
-      title: schema.title,
-      icon: schema.icon,
-      visibility: schema.visibility,
-      fields: schema.fields,
-      actions: schema.actions || []
-    }
   end
 end

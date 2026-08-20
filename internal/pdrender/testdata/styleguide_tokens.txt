@@ -10,7 +10,7 @@ neutral  #374151    #9ca3af
 pdrender chrome/reading roles (threaded onto tokens_gen.go)
 role         light      dark
 ----------   -------    -------
-accent       #1e5243    #75c7ac
+accent       #15804e    #3fcf8e
 ink          #18181b    #e4e4e7
 body         #3f3f46    #a1a1aa
 dim          #a1a1aa    #52525b

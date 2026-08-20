@@ -1,10 +1,12 @@
 package setup
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -71,6 +73,21 @@ type HealthGate struct {
 	// pool so the self-signed test cert verifies; production leaves it nil.
 	RootCAs *x509.CertPool
 
+	// PinnedIP, when non-empty, makes every probe whose URL host equals
+	// BaseURL's hostname DIAL PinnedIP:<port> instead of resolving the name
+	// through the local resolver. The URL's hostname stays in place for the
+	// Host header, TLS SNI, and cert verification (the rewrite happens inside
+	// DialContext, below the layer net/http derives all three from), so the
+	// gate still proves the box answers AS its public identity — it just stops
+	// trusting the resolver. Why: the support chain's gate runs on the CP box,
+	// and barkpark.cloud's SOA minimum is 3600s — after a failed chain deletes
+	// the A record, NXDOMAIN is negative-cached for up to an hour, so a retry
+	// on the same name fails the entire gate deadline even though box, record,
+	// and cert are fine (live-reproduced twice, 2026-07-26); a repointed name's
+	// stale positive cache (zone TTL 300) fails the same way. Probe URLs on
+	// OTHER hosts (injected agent/backup/cloud-sites probes) dial normally.
+	PinnedIP string
+
 	// StubsOptional flips the unconfigured-stub behavior from fail-closed to
 	// skip-OK. By default an empty AgentStatusURL/BackupStatusURL is not-ready
 	// (forces wiring before go-live). The Cloud warm-pool sets this true for v1:
@@ -111,7 +128,9 @@ func (r HealthReport) Failures() []string {
 }
 
 // String renders the report as a human-scannable block: one line per check
-// with a PASS/FAIL marker and the detail, then a final roll-up line.
+// with a PASS/FAIL marker and the detail, then a final roll-up line. It is
+// used implicitly via fmt's Stringer interface by test %s/%v format verbs
+// (healthgate_test.go) — a live caller, so it stays.
 func (r HealthReport) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "health gate — %s\n", r.BaseURL)
@@ -184,12 +203,35 @@ func RunHealthGate(base, token string, opts HealthGate) (HealthReport, error) {
 }
 
 // httpClient builds an HTTP client for the gate's probes. It never follows
-// redirects (the websocket + studio checks read the FIRST status verbatim) and
-// pins RootCAs when the caller injected a test trust store.
+// redirects (the websocket + studio checks read the FIRST status verbatim),
+// pins RootCAs when the caller injected a test trust store, and — with
+// PinnedIP set — rewrites the DIAL for BaseURL's hostname (every check, the
+// websocket preflight included, goes through this one client, so the pin
+// covers the whole battery).
 func (g HealthGate) httpClient() *http.Client {
 	tr := &http.Transport{}
 	if g.RootCAs != nil {
 		tr.TLSClientConfig = &tls.Config{RootCAs: g.RootCAs}
+	}
+	if g.PinnedIP != "" {
+		// Rewrite ONLY the dialed address, only for BaseURL's host: net/http
+		// derives the Host header, TLS SNI, and the cert-verification name from
+		// the request URL, all above this hook, so swapping the address here
+		// keeps every identity check intact while skipping the resolver — the
+		// whole point of the pin (never touch tls.Config.ServerName for this).
+		// Off-base hosts (injected agent/backup/cloud-sites probe URLs) fall
+		// through to a normal resolved dial.
+		pinnedHost := ""
+		if u, err := url.Parse(g.BaseURL); err == nil {
+			pinnedHost = u.Hostname()
+		}
+		dialer := &net.Dialer{}
+		tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if host, port, err := net.SplitHostPort(addr); err == nil && pinnedHost != "" && strings.EqualFold(host, pinnedHost) {
+				addr = net.JoinHostPort(g.PinnedIP, port)
+			}
+			return dialer.DialContext(ctx, network, addr)
+		}
 	}
 	return &http.Client{
 		Timeout:   g.Timeout,

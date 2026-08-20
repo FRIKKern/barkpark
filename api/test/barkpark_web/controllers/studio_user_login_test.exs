@@ -11,6 +11,10 @@ defmodule BarkparkWeb.StudioUserLoginTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # TOTP codes come from the window-stable helper ONLY — a code minted inline
+  # can expire in the gap before the server validates it (honest-gates S1).
+  import Barkpark.TotpTestHelper
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.Accounts
@@ -43,7 +47,7 @@ defmodule BarkparkWeb.StudioUserLoginTest do
     secret = NimbleTOTP.secret()
 
     {:ok, user, _recovery_codes} =
-      Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+      Accounts.enable_totp(user, secret, totp_code_stable!(secret))
 
     {user, secret}
   end
@@ -96,7 +100,7 @@ defmodule BarkparkWeb.StudioUserLoginTest do
       refute get_session(conn, "user_session")
 
       conn =
-        post(conn, "/login/mfa", %{"code" => NimbleTOTP.verification_code(secret)})
+        post(conn, "/login/mfa", %{"code" => totp_code_stable!(secret)})
 
       assert redirected_to(conn) == "/studio"
       assert is_binary(get_session(conn, "user_session"))

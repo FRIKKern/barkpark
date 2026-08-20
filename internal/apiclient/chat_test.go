@@ -87,6 +87,38 @@ func TestCreateChatSessionOmitsEmptyOptions(t *testing.T) {
 	}
 }
 
+func TestCreateChatSessionWithProviderExecutionOptions(t *testing.T) {
+	var gotBody map[string]interface{}
+	const hostID = "0f9d8c7b-6a5e-4d3c-2b1a-0f9e8d7c6b5a"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wantBearer(t, r)
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"sess-codex","provider":"codex","execution_target":"registered_host","execution_host_id":"`+hostID+`","provider_session_id":"thread-7"}`)
+	}))
+	defer srv.Close()
+
+	s, err := newChatClient(srv.URL).CreateChatSessionWithOptions(ChatSessionCreateOptions{
+		Provider:        "codex",
+		ExecutionTarget: "registered_host",
+		ExecutionHostID: hostID,
+		Mode:            "read-only",
+		Model:           "gpt-5.6",
+		Effort:          "high",
+	})
+	if err != nil {
+		t.Fatalf("CreateChatSessionWithOptions: %v", err)
+	}
+
+	if gotBody["provider"] != "codex" || gotBody["execution_target"] != "registered_host" || gotBody["execution_host_id"] != hostID {
+		t.Errorf("provider execution body = %v", gotBody)
+	}
+	if s.Provider != "codex" || s.ExecutionTarget != "registered_host" || s.ExecutionHostID != hostID || s.ProviderSessionID != "thread-7" {
+		t.Errorf("provider identity decode = %+v", s)
+	}
+}
+
 func TestListChatSessions(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wantBearer(t, r)
@@ -106,6 +138,33 @@ func TestListChatSessions(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].ID != "a" || got[1].Title != "Second" {
 		t.Fatalf("list = %+v", got)
+	}
+}
+
+// TestChatSessionSummaryDecodesHerdFields is the D50h decode lock: the herd
+// cold-mount fields (agent_state / agent_state_at / total_cost_usd) decode off
+// the widened sidebar wire, and an older server that omits them is
+// ignore-safe (zero values, no error).
+func TestChatSessionSummaryDecodesHerdFields(t *testing.T) {
+	widened := []byte(`{"id":"a","title":"T","agent_state":"blocked",
+		"agent_state_at":"2026-07-18T11:55:00.123456Z","total_cost_usd":1.25}`)
+	var s ChatSessionSummary
+	if err := json.Unmarshal(widened, &s); err != nil {
+		t.Fatalf("decode widened summary: %v", err)
+	}
+	if s.AgentState != "blocked" || s.AgentStateAt != "2026-07-18T11:55:00.123456Z" {
+		t.Fatalf("herd fields must decode, got %+v", s)
+	}
+	if s.TotalCostUSD != 1.25 {
+		t.Fatalf("total_cost_usd must decode, got %v", s.TotalCostUSD)
+	}
+
+	var old ChatSessionSummary
+	if err := json.Unmarshal([]byte(`{"id":"b","title":"pre-widen"}`), &old); err != nil {
+		t.Fatalf("decode pre-widen summary: %v", err)
+	}
+	if old.AgentState != "" || old.AgentStateAt != "" || old.TotalCostUSD != 0 {
+		t.Fatalf("a pre-widen wire must decode to zero values, got %+v", old)
 	}
 }
 
@@ -169,6 +228,84 @@ func TestGetChatSessionPassesBlocksRaw(t *testing.T) {
 	}
 	if len(decoded) != 2 || decoded[0]["type"] != "heading" {
 		t.Errorf("blocks passthrough corrupted: %+v", decoded)
+	}
+}
+
+// PROTECTIVE (charter D26 / the dedup 3-way merge): the full GET must decode the
+// live server projection's FLAT usage metrics, denormalised counters,
+// rail_snapshot, and message metadata/inserted_at — the exact fields the fork
+// was blind to. A revert to the old apiclient shape (token_metrics/
+// context_metrics/archived/created_at) would leave every one of these zero and
+// red this test, because none of those keys are on the wire.
+func TestGetChatSessionDecodesLiveProjection(t *testing.T) {
+	const body = `{
+		"id":"sess-1","title":"T","status":"running","mode":"plan","model_choice":"opus","effort_choice":"high",
+		"draft":"wip","summary":"a chat","message_count":4,"pending_approvals":1,
+		"input_tokens":1200,"output_tokens":800,"total_cost_usd":0.042,"context_window":200000,"last_context_tokens":15000,
+		"last_active_at":"2026-07-13T00:00:00Z","inserted_at":"2026-07-12T00:00:00Z","updated_at":"2026-07-13T00:00:00Z",
+		"rail_snapshot":{"task-abc":{"status":"running","origin":"background","description":"survey the tree","seq":1,"usage":{"input":10}}},
+		"messages":[{"seq":9,"role":"tool","source_markdown":"ran ls","metadata":{"prompt":"list files"},"inserted_at":"2026-07-13T00:00:01Z"}]
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	s, err := newChatClient(srv.URL).GetChatSession("sess-1", 0)
+	if err != nil {
+		t.Fatalf("GetChatSession: %v", err)
+	}
+	// Flat usage metrics (top-level, NOT nested).
+	if s.InputTokens != 1200 || s.OutputTokens != 800 || s.ContextWindow != 200000 || s.LastContextTokens != 15000 {
+		t.Errorf("flat token metrics = %+v", s)
+	}
+	if s.TotalCostUSD != 0.042 {
+		t.Errorf("total_cost_usd = %v, want 0.042", s.TotalCostUSD)
+	}
+	// Denormalised counters + timestamps.
+	if s.MessageCount != 4 || s.PendingApprovals != 1 {
+		t.Errorf("counters = msg %d / pending %d", s.MessageCount, s.PendingApprovals)
+	}
+	if s.InsertedAt == "" || s.LastActiveAt == "" {
+		t.Errorf("inserted_at / last_active_at dropped: %+v", s)
+	}
+	// Rail decodes the task_id-keyed map with origin/status/description.
+	rail, err := s.Rail()
+	if err != nil {
+		t.Fatalf("Rail: %v", err)
+	}
+	entry, ok := rail["task-abc"]
+	if !ok {
+		t.Fatalf("rail entry missing, got %v", rail)
+	}
+	if entry.Status != "running" || entry.Origin != "background" || entry.Description != "survey the tree" {
+		t.Errorf("rail entry = %+v", entry)
+	}
+	if len(entry.Usage) == 0 {
+		t.Errorf("rail entry usage passthrough dropped")
+	}
+	// Message metadata reaches the read-only cards; inserted_at present.
+	if len(s.Messages) != 1 {
+		t.Fatalf("want 1 message, got %d", len(s.Messages))
+	}
+	m := s.Messages[0]
+	if m.Metadata["prompt"] != "list files" || m.InsertedAt == "" {
+		t.Errorf("message metadata/inserted_at = %+v", m)
+	}
+}
+
+// An absent or empty rail_snapshot is the common idle case: Rail returns nil,nil
+// (never an error), so callers can range over it safely.
+func TestChatSessionRailEmpty(t *testing.T) {
+	for _, raw := range []string{"", "{}", "null", "  "} {
+		s := ChatSession{RailSnapshot: json.RawMessage(raw)}
+		rail, err := s.Rail()
+		if err != nil {
+			t.Errorf("Rail(%q) errored: %v", raw, err)
+		}
+		if rail != nil {
+			t.Errorf("Rail(%q) = %v, want nil", raw, rail)
+		}
 	}
 }
 
@@ -528,5 +665,83 @@ func TestChatEventsPublicExit(t *testing.T) {
 	}
 	if strings.Contains(gotData, "stderr") {
 		t.Errorf("exit frame must not carry stderr vocabulary, got %q", gotData)
+	}
+}
+
+// TestArchiveChatSessionVerbs is the archive wire pin (charter D28). Archive is
+// a lifecycle ACTION with its own POST routes — NOT a key on the PATCH
+// allowlist — so these assert the method and the exact path, both directions.
+func TestArchiveChatSessionVerbs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(*Client) (ChatSession, error)
+		want string
+	}{
+		{"archive", func(c *Client) (ChatSession, error) { return c.ArchiveChatSession("s1") },
+			"/v1/chat/sessions/s1/archive"},
+		{"unarchive", func(c *Client) (ChatSession, error) { return c.UnarchiveChatSession("s1") },
+			"/v1/chat/sessions/s1/unarchive"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			var gotBody []byte
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				wantBearer(t, r)
+				gotMethod, gotPath = r.Method, r.URL.Path
+				gotBody, _ = io.ReadAll(r.Body)
+				_, _ = io.WriteString(w, `{"id":"s1","title":"T","status":"active"}`)
+			}))
+			defer srv.Close()
+
+			got, err := tc.call(newChatClient(srv.URL))
+			if err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if gotMethod != http.MethodPost || gotPath != tc.want {
+				t.Errorf("got %s %s, want POST %s", gotMethod, gotPath, tc.want)
+			}
+			// A verb, not a field write: no JSON body rides along.
+			if len(gotBody) != 0 {
+				t.Errorf("archive verbs must send no body, got %q", gotBody)
+			}
+			// The 200 carries the refreshed session; callers that want it get it.
+			if got.ID != "s1" || got.Title != "T" {
+				t.Errorf("the 200 must decode into the session, got %+v", got)
+			}
+		})
+	}
+}
+
+// TestArchiveChatSessionNotFoundOracle: a foreign tenant's session and a
+// missing id are DELIBERATELY indistinguishable (both 404). The client must
+// surface that as an error so an optimistic caller can roll back — never
+// swallow it into a zero-value success.
+func TestArchiveChatSessionNotFoundOracle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":{"code":"not_found"}}`)
+	}))
+	defer srv.Close()
+
+	if _, err := newChatClient(srv.URL).ArchiveChatSession("nope"); err == nil {
+		t.Fatal("a 404 must be an error — a silent success would strand the row off both shelves")
+	}
+}
+
+// TestArchiveChatSessionEscapesID: ids reach the path escaped, so a hostile or
+// merely awkward id cannot climb out of its route segment.
+func TestArchiveChatSessionEscapesID(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		_, _ = io.WriteString(w, `{"id":"x"}`)
+	}))
+	defer srv.Close()
+
+	if _, err := newChatClient(srv.URL).UnarchiveChatSession("a/b"); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+	if gotPath != "/v1/chat/sessions/a%2Fb/unarchive" {
+		t.Errorf("id must be path-escaped, got %q", gotPath)
 	}
 }

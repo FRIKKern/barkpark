@@ -89,6 +89,15 @@ defmodule BarkparkCloud.MixProject do
       # (notification dispatch, backup kickoff) all enqueue/schedule through this.
       # Pulls only ecto_sql + postgrex + jason as deps — all already present.
       {:oban, "~> 2.17"},
+      # push-relay build (mobile charter D15): the ONE HTTP client in cloud/ that
+      # speaks HTTP/2. Everything else here reaches the network over :httpc
+      # (Billing.HttpClient) — but the APNs provider API is HTTP/2-ONLY, with no
+      # HTTP/1.1 endpoint at all, so :httpc cannot deliver an iOS notification
+      # under any configuration. Mint is the minimal answer: pure Elixir, one
+      # transitive dep (hpax) that bandit already brings, no pool/supervision
+      # tree of its own. api/ already ships mint (via finch), so this is a
+      # version the repo already runs. Used ONLY by Push.HTTP.Mint.
+      {:mint, "~> 1.6"},
       # notifications-email: the Phoenix-native mailer. Swoosh builds the email +
       # selects a transport ADAPTER from config — the same config-selected-adapter
       # seam as Billing.Gateway / Registry.Vault. gen_smtp backs

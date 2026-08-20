@@ -1,0 +1,770 @@
+{
+  "accepted_capture_count": 0,
+  "attempt_count": 108,
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "deployment_id": null,
+  "duplicate_cells": 0,
+  "formula": "36 fixtures x 3 required real surfaces = 108 reconciled attempts",
+  "missing_cells": 0,
+  "proxy_cells": 0,
+  "rows": [
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "dab61ad354ef44b3dd2a0e964acf79d2a78053f5e16fecc74444ca93068c0cb6",
+      "fixture_id": "adv-long-content",
+      "path": "attempts/authenticated_studio/adv-long-content.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "08f255223cf31cf128889d89e3be62c668a6dc88d8efd8cc8f0758b74a759dd3",
+      "fixture_id": "adv-long-content",
+      "path": "attempts/public_reader/adv-long-content.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "8234363ea9c34fc8b6b2ce59962ad8a93fe961de80820356a490f4e96d6039e3",
+      "fixture_id": "adv-long-content",
+      "path": "attempts/cli_api/adv-long-content.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "2e5e7bf27c28a05ccfd38d3861eb2b98c96e70640ef7dd0da93a583d34b7310f",
+      "fixture_id": "adv-long-token",
+      "path": "attempts/authenticated_studio/adv-long-token.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "aa0eab3812b1155e2a7defb469b564fef71ffa57aa11bf47e1bb57182857408b",
+      "fixture_id": "adv-long-token",
+      "path": "attempts/public_reader/adv-long-token.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "f9ab9d5b3470c15e8ebd89eff48bad629fe68b34800dfac317766ed61a1967dd",
+      "fixture_id": "adv-long-token",
+      "path": "attempts/cli_api/adv-long-token.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "a970313d1aa5f6afa6411042c640a4560a2c4f22d76b6c51b3d82cc1b01cd7c1",
+      "fixture_id": "adv-malformed-legacy",
+      "path": "attempts/authenticated_studio/adv-malformed-legacy.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "06a7e140f17cad45bac47929d9b72b8f33dd6e421ee837d70e932965a98f78d1",
+      "fixture_id": "adv-malformed-legacy",
+      "path": "attempts/public_reader/adv-malformed-legacy.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "d101773e3fbea2a33e4b57a5eea307ae71b688625d71e160643392e38b193b21",
+      "fixture_id": "adv-malformed-legacy",
+      "path": "attempts/cli_api/adv-malformed-legacy.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "7d295e4b5f9d260bceb429ecbe8252d1a3d8732cd0b6d374d61ec67550cf9bce",
+      "fixture_id": "adv-missing-fields",
+      "path": "attempts/authenticated_studio/adv-missing-fields.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "8bf6a059fb1a7a721db6039ac129075f156ca78aea4fc591ae4b895bf1428c53",
+      "fixture_id": "adv-missing-fields",
+      "path": "attempts/public_reader/adv-missing-fields.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "55db21036b222330b8e631e2f404122718d6f38e25de40bf0f29dfd0607b523e",
+      "fixture_id": "adv-missing-fields",
+      "path": "attempts/cli_api/adv-missing-fields.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "987b0437ac988156fc51e55df568c8dbfbd133216ef440549a9c7e73169110c3",
+      "fixture_id": "adv-narrow-width",
+      "path": "attempts/authenticated_studio/adv-narrow-width.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "5982244af0eadaaebf5f0c924823b4a69ba69a8668d5c4aeb70540dde9604298",
+      "fixture_id": "adv-narrow-width",
+      "path": "attempts/public_reader/adv-narrow-width.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "aecacc053ada5384be0a17a1daaa57c510d7d77a038eb0b4026128401a557c4f",
+      "fixture_id": "adv-narrow-width",
+      "path": "attempts/cli_api/adv-narrow-width.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "8e0db0f2a91c13b9c9361a0fbe4d95f170d6c5cf9050e5cbc56ce51606c79092",
+      "fixture_id": "adv-nested-list-table",
+      "path": "attempts/authenticated_studio/adv-nested-list-table.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "a077a08b13a181c3a7947d9a0ee670ac47cd09238e6b4c3ca5dbeac60e63267d",
+      "fixture_id": "adv-nested-list-table",
+      "path": "attempts/public_reader/adv-nested-list-table.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "92ebd7cdc0dae4bb52eacbf37279fc5c9f822f607b3dbbd32f69c8ede4e0f797",
+      "fixture_id": "adv-nested-list-table",
+      "path": "attempts/cli_api/adv-nested-list-table.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "5c06d2c73097c59122e8660ad2d842ffc64aa34aeb1dd71c47ff6add6880077b",
+      "fixture_id": "aesthetic-unification-epic-wave-2026-07-11",
+      "path": "attempts/authenticated_studio/aesthetic-unification-epic-wave-2026-07-11.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "5b99b55cdf124419ffb4590f67c3b6909e7063ef83bb515cab89a86ddf02f4f1",
+      "fixture_id": "aesthetic-unification-epic-wave-2026-07-11",
+      "path": "attempts/public_reader/aesthetic-unification-epic-wave-2026-07-11.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "08f0318cbba100f96c8176cb6c8663a3413e0b62de8a07d85a3afc845e5c09ab",
+      "fixture_id": "aesthetic-unification-epic-wave-2026-07-11",
+      "path": "attempts/cli_api/aesthetic-unification-epic-wave-2026-07-11.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "f6cca4f27254c5c066736c7bea37479f788a749d3d1dc21e39837ab006106e09",
+      "fixture_id": "ag-broadcast-revoked-residual",
+      "path": "attempts/authenticated_studio/ag-broadcast-revoked-residual.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "73987d3ff42c01647b13d0e704b1f2d7ab380249243d03e7726d143df1065bb1",
+      "fixture_id": "ag-broadcast-revoked-residual",
+      "path": "attempts/public_reader/ag-broadcast-revoked-residual.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "f552d7182dc969144036f5a053099780ec234afc451c2842371881ba31b5ec1d",
+      "fixture_id": "ag-broadcast-revoked-residual",
+      "path": "attempts/cli_api/ag-broadcast-revoked-residual.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "c601f1ade6196e9dbc4e5322569458f2bda5054e129c4ecdb2a36ff5e96e536a",
+      "fixture_id": "ag-deny-matrix-residual-coverage",
+      "path": "attempts/authenticated_studio/ag-deny-matrix-residual-coverage.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "ce786c6321b8edc9c4fbcd24d4f3ba693fa3943f1c54be722f9a19741eb89287",
+      "fixture_id": "ag-deny-matrix-residual-coverage",
+      "path": "attempts/public_reader/ag-deny-matrix-residual-coverage.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "2fd2b72cc8d07dba3ad506b498e5c64dc933c08cd9a559d3e9af0f60b36741c4",
+      "fixture_id": "ag-deny-matrix-residual-coverage",
+      "path": "attempts/cli_api/ag-deny-matrix-residual-coverage.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "f5dac87c834c7e93c6f32bd5c117b72a58fb0ea2e0314bf01c1c391b42ae85ce",
+      "fixture_id": "ag-studio-access-panel-countdown",
+      "path": "attempts/authenticated_studio/ag-studio-access-panel-countdown.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "8b00595a693b233ae1425a2ec5093b9900f6b59c13434690df02cb3cb3c1c7d3",
+      "fixture_id": "ag-studio-access-panel-countdown",
+      "path": "attempts/public_reader/ag-studio-access-panel-countdown.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "e1794bd0b42bc66cda2a7552854f29472ac1fce1552245018555f0c1e641919a",
+      "fixture_id": "ag-studio-access-panel-countdown",
+      "path": "attempts/cli_api/ag-studio-access-panel-countdown.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "f65e58888d3558b8ddeefcabc9ea7fa2777c2b1f2968e6a509872246e875adcf",
+      "fixture_id": "au-w6-brand-mark",
+      "path": "attempts/authenticated_studio/au-w6-brand-mark.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "366b4948502a07940dde1db329c66ef3120da143fe9c5fc1dd7c32712a807b9a",
+      "fixture_id": "au-w6-brand-mark",
+      "path": "attempts/public_reader/au-w6-brand-mark.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "40be4ccf9f5e5b0525289fffb6bf00536cca4d1c338d0bb826162af3de5f7785",
+      "fixture_id": "au-w6-brand-mark",
+      "path": "attempts/cli_api/au-w6-brand-mark.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "e3c0690ae6d39eea7b66b35d21a15b899f4975da8cc0d16ab3b4fb79e51d9005",
+      "fixture_id": "au-w6-visual-audit",
+      "path": "attempts/authenticated_studio/au-w6-visual-audit.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "8234bd98ae1fedc4e417b1fc3c202c918abcdefaff04c37a78d4bc3077d8a1bc",
+      "fixture_id": "au-w6-visual-audit",
+      "path": "attempts/public_reader/au-w6-visual-audit.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "bf3e12fdbe2cbb43f75d4981dbe683c2deba62275ae3a9f160ae8e795b7a3c9a",
+      "fixture_id": "au-w6-visual-audit",
+      "path": "attempts/cli_api/au-w6-visual-audit.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "c32212fb4511bce07071727868cb1910452a8cdc8103982d99f8d393338084a7",
+      "fixture_id": "authoring-excellence-wave-2026-07-13",
+      "path": "attempts/authenticated_studio/authoring-excellence-wave-2026-07-13.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "9822f8a7bbf21cbde1c50ea6365cc7f03d7f12e9030d355ab52e658183ae1fae",
+      "fixture_id": "authoring-excellence-wave-2026-07-13",
+      "path": "attempts/public_reader/authoring-excellence-wave-2026-07-13.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "f4403fb4d4b3a6e44b173cb04e74379b593369382c4ae2b4153e29ed748416b7",
+      "fixture_id": "authoring-excellence-wave-2026-07-13",
+      "path": "attempts/cli_api/authoring-excellence-wave-2026-07-13.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "4596475f8cb239284cf396e9158d9287d35c0788229fc55cbd2f20c99307e120",
+      "fixture_id": "authoring-excellence-wave-2026-07-13b",
+      "path": "attempts/authenticated_studio/authoring-excellence-wave-2026-07-13b.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "ff4262305eba2da761b26a4cfd9c9d0770ea46e51932aacaccf17e3af0561b94",
+      "fixture_id": "authoring-excellence-wave-2026-07-13b",
+      "path": "attempts/public_reader/authoring-excellence-wave-2026-07-13b.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "844f5689fc1267008a8b1eff79fcea8b338fd6609ddc5e354862dfa5f7acd459",
+      "fixture_id": "authoring-excellence-wave-2026-07-13b",
+      "path": "attempts/cli_api/authoring-excellence-wave-2026-07-13b.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "e152220da49a20f05ceb16bf9b1d2b36c0d13d73ccd9dc90c186ab434da00859",
+      "fixture_id": "autorebuild-proof-164347",
+      "path": "attempts/authenticated_studio/autorebuild-proof-164347.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "a497915cd4f4d599ed2278bce54c119c966ed204f285a3f7550b0c0c0f3a02c0",
+      "fixture_id": "autorebuild-proof-164347",
+      "path": "attempts/public_reader/autorebuild-proof-164347.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "2cabff56d86018453521e7bd998377087f33cef35808a4c39e9bde04fc1cad4f",
+      "fixture_id": "autorebuild-proof-164347",
+      "path": "attempts/cli_api/autorebuild-proof-164347.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "b89269d6e3edb6c4a5fedabfc9441f4dbc4d85e6ca550a6bfd494129df79eedc",
+      "fixture_id": "bp-mcp-serve-epic-wave-2026-07-11",
+      "path": "attempts/authenticated_studio/bp-mcp-serve-epic-wave-2026-07-11.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "d01d136f86ac965a38e3578d579e4c4473aa4d31bcfed155c7d8c6eb54ea637e",
+      "fixture_id": "bp-mcp-serve-epic-wave-2026-07-11",
+      "path": "attempts/public_reader/bp-mcp-serve-epic-wave-2026-07-11.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "991d389c3e8bc02be02babb89a61795c19d1662c0a4cb363e7517cc3a6062e67",
+      "fixture_id": "bp-mcp-serve-epic-wave-2026-07-11",
+      "path": "attempts/cli_api/bp-mcp-serve-epic-wave-2026-07-11.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "a79bf2bfd2238ec10f8e7e1a27cd6ed8046ea6ce442edd4e95f2fa13b20c74c2",
+      "fixture_id": "bp-task-stamp-criterion-index-is-zero-based-footgun",
+      "path": "attempts/authenticated_studio/bp-task-stamp-criterion-index-is-zero-based-footgun.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "d917e5cd824210b7f5dd96c0329968a211ba9d0a207f70cfb5febb9db1c8369e",
+      "fixture_id": "bp-task-stamp-criterion-index-is-zero-based-footgun",
+      "path": "attempts/public_reader/bp-task-stamp-criterion-index-is-zero-based-footgun.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "6c299e5d51a3d762329b076b6af903e80a5756a1aed0ea3bd0c113da611ecf7a",
+      "fixture_id": "bp-task-stamp-criterion-index-is-zero-based-footgun",
+      "path": "attempts/cli_api/bp-task-stamp-criterion-index-is-zero-based-footgun.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "30ea2c027b962cd0807b97080157d52398f192e816f64a89403faf0be876e8ba",
+      "fixture_id": "choosing-your-site-framework",
+      "path": "attempts/authenticated_studio/choosing-your-site-framework.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "3f6db6c20a57ec523fc49a44335fb56e4ea86e3a1f7b43e9966cb230d4582aa3",
+      "fixture_id": "choosing-your-site-framework",
+      "path": "attempts/public_reader/choosing-your-site-framework.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "b9d9b1f44ad5a6c9332bd5458d3cf803e135bb954599ef7c57cbb4336450f443",
+      "fixture_id": "choosing-your-site-framework",
+      "path": "attempts/cli_api/choosing-your-site-framework.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "473cae7b2c091ca5409fa5c7b9df9bf643bf179a8988f86070437c9d6414059f",
+      "fixture_id": "cloud-console-wave-2026-07-11",
+      "path": "attempts/authenticated_studio/cloud-console-wave-2026-07-11.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "99100e3239b7db632332d3a791f557721c64c106e9eb0cee234f599db23367d1",
+      "fixture_id": "cloud-console-wave-2026-07-11",
+      "path": "attempts/public_reader/cloud-console-wave-2026-07-11.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "aa66e9b56745d94d6e1c385a6705c302563586d804dc7d4a8d0733666e13152c",
+      "fixture_id": "cloud-console-wave-2026-07-11",
+      "path": "attempts/cli_api/cloud-console-wave-2026-07-11.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "20215754c5507dfda9bf4638501c327b230ef4aab962fc1cdf6d9b4d3b639293",
+      "fixture_id": "component-reference",
+      "path": "attempts/authenticated_studio/component-reference.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "a7ab33591fe550a979b7e03853ebb38482e2d1e4bad00fc2c89616ba7daaf7ec",
+      "fixture_id": "component-reference",
+      "path": "attempts/public_reader/component-reference.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "91290aaa3dcebd7081131a6aa093e5773b352bcb9c55004fee4f2cc3dcc897a4",
+      "fixture_id": "component-reference",
+      "path": "attempts/cli_api/component-reference.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "2bff6236029ba0863b346226571a031421d4324f771d4975feaa61222af60b66",
+      "fixture_id": "drafts.paper-editor-parity-wave3",
+      "path": "attempts/authenticated_studio/drafts.paper-editor-parity-wave3.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "02efc625e9e42cd1ab4ba4bd1b8332c9289494ac0dcd9749620e28de27f31e13",
+      "fixture_id": "drafts.paper-editor-parity-wave3",
+      "path": "attempts/public_reader/drafts.paper-editor-parity-wave3.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "c553e65fca009d86181cb11814210e2b20e85cb84ccf2b5c1a1961e5ba379542",
+      "fixture_id": "drafts.paper-editor-parity-wave3",
+      "path": "attempts/cli_api/drafts.paper-editor-parity-wave3.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "497b1c91fab42df17fa79a7aa2103bcd9d3eaa1959a3d4c4fb251496d738d769",
+      "fixture_id": "drafts.probe-rail-move",
+      "path": "attempts/authenticated_studio/drafts.probe-rail-move.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "952dea1cf5fe22bae5881b7e0c070a11e854301307f35cde5ea043cbfd344911",
+      "fixture_id": "drafts.probe-rail-move",
+      "path": "attempts/public_reader/drafts.probe-rail-move.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "5a0368f66e7220692b6f27c6e94a23b1f4bb61b3408985dd1f29fd358a188526",
+      "fixture_id": "drafts.probe-rail-move",
+      "path": "attempts/cli_api/drafts.probe-rail-move.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "1efaa6b4dd878daa89ccb4d2b229bdd9547fb45c28c4c5bc59d845443911f3a2",
+      "fixture_id": "drafts.task-0f79e6c78378b9aa",
+      "path": "attempts/authenticated_studio/drafts.task-0f79e6c78378b9aa.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "cf2f732c74cabaf6a171ce173007f6505d66e42b480d570c2365050a62ad2e5a",
+      "fixture_id": "drafts.task-0f79e6c78378b9aa",
+      "path": "attempts/public_reader/drafts.task-0f79e6c78378b9aa.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "ec3e7f2c8b43bdd5fd22bb3679876d1147f15cda5a83b2d7ae23b830944f435e",
+      "fixture_id": "drafts.task-0f79e6c78378b9aa",
+      "path": "attempts/cli_api/drafts.task-0f79e6c78378b9aa.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "ccc33b9c74b9e1f44662ad8f5cbe41aa2d952258c345da0023d38afdf1dcacd4",
+      "fixture_id": "drafts.task-823a80389028877b",
+      "path": "attempts/authenticated_studio/drafts.task-823a80389028877b.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "6dd80bce2dfda992f4e4be928c8d5bd6661aa6fa7c3acc99d40d01cb4c66f706",
+      "fixture_id": "drafts.task-823a80389028877b",
+      "path": "attempts/public_reader/drafts.task-823a80389028877b.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "1ffc75ad3e661bd102a906c9e70eadeef9db5f418ccc4677b58614ae5c8f1263",
+      "fixture_id": "drafts.task-823a80389028877b",
+      "path": "attempts/cli_api/drafts.task-823a80389028877b.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "19c9074f01e1d7138920e18864952c8dffcc1e9d451d5bb3d5689538a1de4848",
+      "fixture_id": "drafts.task-859af59466f08494",
+      "path": "attempts/authenticated_studio/drafts.task-859af59466f08494.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "acff890d70ae57c6373e3c0ce846b0575ab25a1f80a0996db20f0a67206e705e",
+      "fixture_id": "drafts.task-859af59466f08494",
+      "path": "attempts/public_reader/drafts.task-859af59466f08494.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "044a9af8f53a11bd62acf4c93133d595c6c3cba85d1fa9b0f8538d3f4ef0e958",
+      "fixture_id": "drafts.task-859af59466f08494",
+      "path": "attempts/cli_api/drafts.task-859af59466f08494.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "908e3833928a0dedc710830bd111cabe9bd8eb9f8383a7310150abdcecc1e483",
+      "fixture_id": "drafts.task-a54820a835b6d0e2",
+      "path": "attempts/authenticated_studio/drafts.task-a54820a835b6d0e2.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "586e609bd2d7959d730cf5a11dd69f772c06259cad121a3755c3c5f098270dad",
+      "fixture_id": "drafts.task-a54820a835b6d0e2",
+      "path": "attempts/public_reader/drafts.task-a54820a835b6d0e2.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "5bcff7e37a297d5c24ba72a5a4b774ecdaaf434dfa464c208bc01028913fecd1",
+      "fixture_id": "drafts.task-a54820a835b6d0e2",
+      "path": "attempts/cli_api/drafts.task-a54820a835b6d0e2.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "995dc0e7bc97e969f0589e72a5939b5fcaae5164deb45a7fdcf2b966787a9d8a",
+      "fixture_id": "dwb",
+      "path": "attempts/authenticated_studio/dwb.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "466ed4405315374384f24b7f4c2a0143bca8646455bc9e72fd219cac26213380",
+      "fixture_id": "dwb",
+      "path": "attempts/public_reader/dwb.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "2732521e8fff5e0ae308edf4284450a31137731edf0facf95c6cdea5e382ed0b",
+      "fixture_id": "dwb",
+      "path": "attempts/cli_api/dwb.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "836e77bdc760aba415607049af514eb38a6fe78b4ad0c7f5b89ddd2b4ab03426",
+      "fixture_id": "era-w8-epic-rollup",
+      "path": "attempts/authenticated_studio/era-w8-epic-rollup.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "4f70a395b76464b5245638955eecfed1c20b6795485d5bead568c275e1dd6997",
+      "fixture_id": "era-w8-epic-rollup",
+      "path": "attempts/public_reader/era-w8-epic-rollup.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "6612afaff0d3559ded9a1a44405b725fdace51e3e5b32abf241a60e6da62de28",
+      "fixture_id": "era-w8-epic-rollup",
+      "path": "attempts/cli_api/era-w8-epic-rollup.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "c96a2ba5c8d92583ed76932e4d146d37784e2e262365ef9d516c719d21db66aa",
+      "fixture_id": "hq-heatmap-live-lever",
+      "path": "attempts/authenticated_studio/hq-heatmap-live-lever.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "1b6d04c6fe37f28d0848401da5add026b68841283b687f510383237ca1408a99",
+      "fixture_id": "hq-heatmap-live-lever",
+      "path": "attempts/public_reader/hq-heatmap-live-lever.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "3ea75737c9a37312d44d5e4cb5c3f3952820e1afd5affe2ee65f9f8d3176f7dc",
+      "fixture_id": "hq-heatmap-live-lever",
+      "path": "attempts/cli_api/hq-heatmap-live-lever.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "a6e7f44cdcf6ffc260faab69858dfe2f1485579425d206ea5cff7f952c73018b",
+      "fixture_id": "onboarding-composition-wave-2026-07-14",
+      "path": "attempts/authenticated_studio/onboarding-composition-wave-2026-07-14.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "aba7ab14d9daaeb074b8f34da89e1517a5226fa55b3593e6c8bf7544812bc7a6",
+      "fixture_id": "onboarding-composition-wave-2026-07-14",
+      "path": "attempts/public_reader/onboarding-composition-wave-2026-07-14.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "2172c8d5b32230e1af06a20b81ff0a89a8e199ecf08d11e49244907b02a84156",
+      "fixture_id": "onboarding-composition-wave-2026-07-14",
+      "path": "attempts/cli_api/onboarding-composition-wave-2026-07-14.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "7655722b01c206bfb46b8b3bcdab41e0addabd271b60718c458c50e9e6e9dfba",
+      "fixture_id": "pd-everything-editable",
+      "path": "attempts/authenticated_studio/pd-everything-editable.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "d68475c9101002978993c961b1f8765c8ff52990c9bf3545eea3ffb746b99eab",
+      "fixture_id": "pd-everything-editable",
+      "path": "attempts/public_reader/pd-everything-editable.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "d76ea8e8b1553bd554c159e50a7ec3ee068cd35dfeb668002717fc521ac1858f",
+      "fixture_id": "pd-everything-editable",
+      "path": "attempts/cli_api/pd-everything-editable.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "6611ca5b6cfe7e2252bed9b9ed7f4281807f2e42eeb5eee3429daa78e72a1e6d",
+      "fixture_id": "pd-everything-editable-wave-2026-07-11",
+      "path": "attempts/authenticated_studio/pd-everything-editable-wave-2026-07-11.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "e17cfd4a9491d41e48bdcb0997620583e256a3d7f33003a1e5fc8067e92c7a8e",
+      "fixture_id": "pd-everything-editable-wave-2026-07-11",
+      "path": "attempts/public_reader/pd-everything-editable-wave-2026-07-11.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "4ba59c63f360a5391c32ba2dd17910259efef24ba172a02feac2aba59f3ec562",
+      "fixture_id": "pd-everything-editable-wave-2026-07-11",
+      "path": "attempts/cli_api/pd-everything-editable-wave-2026-07-11.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "46c113952c4046786fce86df77b324e8da0480dedf92c252c74e008b9461ceb4",
+      "fixture_id": "perfect-plan-build-wave-5-2026-07-14",
+      "path": "attempts/authenticated_studio/perfect-plan-build-wave-5-2026-07-14.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "2d068035fce55bfb3f49ea6235c7d099a906c8ab29c2cdbe20924304037a0b4c",
+      "fixture_id": "perfect-plan-build-wave-5-2026-07-14",
+      "path": "attempts/public_reader/perfect-plan-build-wave-5-2026-07-14.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "a54ed26416a16cd8e090d98bd257f175952bbe7ba27f057d7e620da4f15bdbf7",
+      "fixture_id": "perfect-plan-build-wave-5-2026-07-14",
+      "path": "attempts/cli_api/perfect-plan-build-wave-5-2026-07-14.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "e020b8b1f6baafcf34ba8c902d5feecacf658cfd75238182dfe732c83acae6b6",
+      "fixture_id": "task-1bb04ac51efec9af",
+      "path": "attempts/authenticated_studio/task-1bb04ac51efec9af.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "6a67f749e5352d0c8a5a04d6a49662ea5be0a37fb6b13e93f29182381e3dee91",
+      "fixture_id": "task-1bb04ac51efec9af",
+      "path": "attempts/public_reader/task-1bb04ac51efec9af.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "083d47e0cbab9b6fb1d6b164833adead07021bb4968085360f5f10ffbbee1f36",
+      "fixture_id": "task-1bb04ac51efec9af",
+      "path": "attempts/cli_api/task-1bb04ac51efec9af.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "86f6040597b8f2c51b5fad9081891b52ebeca3ed34628ddec03a8116bdf24cb2",
+      "fixture_id": "task-4e4a53b101a97051",
+      "path": "attempts/authenticated_studio/task-4e4a53b101a97051.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "326930a4127fbb7ddd227fdb431879f9c3b0fe4c5826dd5948c9fb6c0cb5cce9",
+      "fixture_id": "task-4e4a53b101a97051",
+      "path": "attempts/public_reader/task-4e4a53b101a97051.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "6cc6b2355e724afb9424b0340f7005f81153e4b184f6fb1d134a40090a9908bb",
+      "fixture_id": "task-4e4a53b101a97051",
+      "path": "attempts/cli_api/task-4e4a53b101a97051.json",
+      "surface": "cli_api"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "455f1fadb422419b785408f4cc5158ae4f79c34ea0ffd16e5468c33395044b93",
+      "fixture_id": "wave-deck",
+      "path": "attempts/authenticated_studio/wave-deck.json",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "323f7685c03fc020e374edd6a4217837ced2a045adf332656e15a7019944810f",
+      "fixture_id": "wave-deck",
+      "path": "attempts/public_reader/wave-deck.json",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_capture": false,
+      "attempt_sha256": "5f33aefe39b37e8d6cc74146fa8ae3a5891b97c91738dd184c6d0f8646ff2e8b",
+      "fixture_id": "wave-deck",
+      "path": "attempts/cli_api/wave-deck.json",
+      "surface": "cli_api"
+    }
+  ],
+  "schema_version": "legendary-e19-capture-index/v1"
+}

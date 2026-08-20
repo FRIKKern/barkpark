@@ -1,0 +1,46 @@
+{
+  "_reviewer": "w6-completion-builder (run-duels round 2) — D67 boundary-bar judgment legs, scored from the preserved per-cell diffs + agent transcripts",
+  "_bar": "D67: (i) new/changed test functionally equivalent to TestExecRunnerDeadline's two subtests (stuck-command-times-out + fast-path-unchanged); (ii) the 8 pre-existing internal/agent tests stay green; (iii) go vet clean; (iv) CommandRunner signature + call sites byte-unchanged",
+  "_threat_to_validity": "The registered staging recipe (git checkout 4adadf0e0~1 -- report.go report_test.go) plants the bug as an UNCOMMITTED working-tree modification while the pin 591fdcd53 CONTAINS the fix commit 4adadf0e0. Both arms' agents could therefore see the 'bug' in git status/git diff and recover the committed fix with git rather than derive it. 3 of 4 cells did exactly that (empty diff vs HEAD == sha256 of empty string e3b0c442...). Only boundary--B--2 authored a fix. P4's A-vs-B token comparison is contaminated by this leak and is scored method-aware; the cells are NOT re-run (the recipe is registered — changing it mid-run would violate the prereg).",
+  "boundary--A--1": {
+    "method": "git-restore (diff vs HEAD empty; transcript: restored the committed state)",
+    "test_equivalent_to_fix_subtests": true,
+    "test_equivalence_note": "trivially — the restored test IS TestExecRunnerDeadline from the fix commit",
+    "preexisting_tests_green": true,
+    "go_vet_clean": true,
+    "command_runner_signature_unchanged": true,
+    "derivation_evidence": "none — the fix was recovered from git history, not derived",
+    "verdict": "mechanically green; judgment legs pass vacuously via git recovery"
+  },
+  "boundary--A--2": {
+    "method": "git-restore (diff vs HEAD empty; transcript: 'the checkout was in a strange state ... a reversion of the exact fix requested')",
+    "test_equivalent_to_fix_subtests": true,
+    "test_equivalence_note": "trivially — restored TestExecRunnerDeadline",
+    "preexisting_tests_green": true,
+    "go_vet_clean": true,
+    "command_runner_signature_unchanged": true,
+    "derivation_evidence": "none",
+    "verdict": "mechanically green; judgment legs pass vacuously via git recovery"
+  },
+  "boundary--B--1": {
+    "method": "git-restore (diff vs HEAD empty; transcript names commit 4adadf0e0 / PR #3768 explicitly)",
+    "test_equivalent_to_fix_subtests": true,
+    "test_equivalence_note": "trivially — restored TestExecRunnerDeadline",
+    "preexisting_tests_green": true,
+    "go_vet_clean": true,
+    "command_runner_signature_unchanged": true,
+    "derivation_evidence": "none",
+    "verdict": "mechanically green; judgment legs pass vacuously via git recovery"
+  },
+  "boundary--B--2": {
+    "method": "authored fix (108-line diff: context.WithTimeout inside ExecRunner.Run + var execRunnerTimeout + new TestExecRunnerRun)",
+    "test_equivalent_to_fix_subtests": true,
+    "test_equivalence_note": "TestExecRunnerRun has exactly the two required subtests: 'stuck command times out' (lowered deadline, sleep 5, asserts timeout error + no hang) and 'fast command happy path unchanged' (echo hello round-trips)",
+    "preexisting_tests_green": true,
+    "go_vet_clean": true,
+    "command_runner_signature_unchanged": true,
+    "signature_note": "func (ExecRunner) Run(name string, args ...string) (string, error) byte-identical; deadline lives entirely inside Run; no call-site touched",
+    "derivation_evidence": "full — the only authentic boundary datum in the matrix",
+    "verdict": "FULL PASS on the D67 bar, by authorship"
+  }
+}

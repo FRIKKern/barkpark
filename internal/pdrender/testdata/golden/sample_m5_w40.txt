@@ -1,64 +1,69 @@
-GRID & LADDER WIDGETS                    
-─────────────────────                    
-                                         
-▌ Rule 1  Clean first Never compile      
-▌ without nuking the whole _build/prod   
-▌ tree.                                  
-                                         
-▌ Rule 2  A note with no lead run-in     
-▌ still renders its label chip and body. 
-                                         
-▌ No label And a note with no label      
-▌ leads straight into its bold run-in.   
-                                         
-                                         
-                                         
-INGEST                                   
-Decode document                          
-Parse the portable-doc envelope into a   
-block tree.                              
-files: decode.go                         
-source: cli                              
-↓                                        
-RENDER                                   
-Stack the widgets                        
-Each grid block collapses to a vertical  
-stack.                                   
-↓                                        
-EMIT                                     
-Write to the terminal                    
-Flush the composed lines to stdout.      
-source: tui                              
-                                         
-╭────────────────────────────────────╮   
-│ Info card                          │   
-│ An informational card carries the  │   
-│ neutral-info tone border.          │   
-╰────────────────────────────────────╯   
-                                         
-╭────────────────────────────────────╮   
-│ OK card                            │   
-│ A success card is tinted with the  │   
-│ ok/success tone.                   │   
-╰────────────────────────────────────╯   
-                                         
-╭────────────────────────────────────╮   
-│ Warn card                          │   
-│ A warning card draws attention     │   
-│ with                               │   
-│ the warn tone border.              │   
-╰────────────────────────────────────╯   
-                                         
-╭────────────────────────────────────╮   
-│ Danger card                        │   
-│ A danger card signals a            │   
-│ destructive                        │   
-│ or failing state.                  │   
-╰────────────────────────────────────╯   
-                                         
-○  open  — backlog — not ready yet       
-○  ready  — unchecked — claim it now     
-⠋  in progress  — being worked right now 
-!  blocked  — something is required first
-✓  done  — complete                      
-✕  cancelled  — abandoned or superseded  
+GRID & LADDER WIDGETS                   
+─────────────────────                   
+                                        
+▌ Rule 1  Clean first Never compile     
+▌ without nuking the whole _build/prod  
+▌ tree.                                 
+                                        
+▌ Rule 2  A note with no lead run-in    
+▌ still renders its label chip and body.
+                                        
+▌ No label And a note with no label     
+▌ leads straight into its bold run-in.  
+                                        
+                                        
+                                        
+INGEST                                  
+Decode document                         
+Parse the portable-doc envelope into a  
+block tree.                             
+files: decode.go                        
+source: cli                             
+↓                                       
+RENDER                                  
+Stack the widgets                       
+Each grid block collapses to a vertical 
+stack.                                  
+↓                                       
+EMIT                                    
+Write to the terminal                   
+Flush the composed lines to stdout.     
+source: tui                             
+                                        
+╭────────────────────────────────────╮  
+│ Info card                          │  
+│ An informational card carries the  │  
+│ neutral-info tone border.          │  
+╰────────────────────────────────────╯  
+                                        
+╭────────────────────────────────────╮  
+│ OK card                            │  
+│ A success card is tinted with the  │  
+│ ok/success tone.                   │  
+╰────────────────────────────────────╯  
+                                        
+╭────────────────────────────────────╮  
+│ Warn card                          │  
+│ A warning card draws attention     │  
+│ with                               │  
+│ the warn tone border.              │  
+╰────────────────────────────────────╯  
+                                        
+╭────────────────────────────────────╮  
+│ Danger card                        │  
+│ A danger card signals a            │  
+│ destructive                        │  
+│ or failing state.                  │  
+╰────────────────────────────────────╯  
+                                        
+○  open  — backlog — not ready yet      
+○  ready  — unchecked — claim it now    
+⠋  in progress  — being worked right now
+!  blocked  — something is required     
+first                                   
+✓  done  — complete                     
+✕  cancelled  — abandoned or superseded 
+◌  considering  — a candidate being     
+weighed                                 
+◎  researching  — under active          
+investigation                           

@@ -47,8 +47,7 @@ func runTaskFrontier(out *writer, g globals, ctx manifest.Context, tail []string
 
 	snap, details, err := taskboard.FetchSnapshotFull(client)
 	if err != nil {
-		out.userErr("frontier: %v", err)
-		return exitGeneric
+		return fetchSnapshotErr(out, "frontier", err)
 	}
 
 	now := time.Now().UTC()

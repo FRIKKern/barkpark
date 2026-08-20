@@ -16,10 +16,13 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
        reset the header to blank (the pane rebuild gates the carry on doc
        identity, exactly like `editor_mode`).
 
-  Layer 1 is exercised at the handler seam (a hand-built socket + a direct
-  `StudioLive.handle_event/3`, the `array_op` pattern) because the paper pane
-  does not render `save_status` inline; layer 2 is a full `live/2` mount where
-  the form editor's `save-status` span is on screen.
+  Layer 1 is exercised at the handler seam (a direct `StudioLive.handle_event/3`,
+  the `array_op` pattern) because the paper pane does not render `save_status`
+  inline; layer 2 is a full `live/2` mount where the form editor's `save-status`
+  span is on screen.
+
+  spd-w19: layer 1's socket is now taken FROM a real mount rather than built by
+  hand — see `paper_socket/2`.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -67,41 +70,44 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
   # A paper-pane editor socket the paper handlers accept: editor_view :paper
   # routes paper_op → paper_pane_op (NOT the Beta document_op branch), and
   # paper_block_by_id reads the block list off paper_doc.content.
-  defp paper_socket(paper) do
-    %Phoenix.LiveView.Socket{
-      assigns: %{
-        __changed__: %{},
-        flash: %{},
-        editor_view: :paper,
-        editor_mode: :classic,
-        editor_doc: nil,
-        paper_doc: paper,
-        dataset: @dataset,
-        save_status: ""
-      }
-    }
+  #
+  # spd-w19 — taken from a REAL `live/2` mount instead of hand-built. The
+  # accepted-write arm of `paper_pane_op/2` now re-derives the pane through
+  # `Shared.Paper.refetch_paper/1` when it is not already in block mode, and that
+  # calls `stream/3` → `attach_hook`, which reaches into `socket.private`'s
+  # `:lifecycle` and into `assigns.streams`. A `%Phoenix.LiveView.Socket{}`
+  # literal carries neither (`** (KeyError) key :lifecycle not found in:
+  # %{live_temp: %{}}`), and papering over that with a fake `:lifecycle` would be
+  # asserting against a socket LiveView never builds. The mount gives the real
+  # one; the seam-level precision of this suite (a direct `handle_event/3`, no
+  # DOM in the way) is unchanged.
+  defp paper_socket(conn, paper) do
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{paper.doc_id}"))
+
+    :sys.get_state(view.pid).socket
   end
 
   describe "paper block autosave truthfulness (#8)" do
-    setup do
+    setup %{conn: conn} do
       seed_paper_schema!()
       paper = seed_block_paper!()
-      {:ok, paper: paper}
+      {:ok, paper: paper, socket: paper_socket(conn, paper)}
     end
 
-    test "a clean edit reports Auto-saved", %{paper: paper} do
+    test "a clean edit reports Auto-saved", %{socket: socket} do
       {:noreply, socket} =
         StudioLive.handle_event(
           "paper-block-autosave",
           %{"block_id" => "b-intro", "text" => "Edited body."},
-          paper_socket(paper)
+          socket
         )
 
       assert socket.assigns.save_status == "Auto-saved"
     end
 
     test "a FAILED edit (paper deleted behind the view) reports failure, never Auto-saved",
-         %{paper: paper} do
+         %{socket: socket} do
       # Delete the row the LiveView still holds in-memory — the next persist
       # attempt hits the DB and comes back {:error, :not_found}.
       {:ok, _} = Content.delete_document(@slug, "paper", @dataset)
@@ -110,7 +116,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
         StudioLive.handle_event(
           "paper-block-autosave",
           %{"block_id" => "b-intro", "text" => "Edited body."},
-          paper_socket(paper)
+          socket
         )
 
       # The pre-fix bug: an unconditional "Auto-saved" beside the red flash.
@@ -184,14 +190,89 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
       html_a =
         render_hook(view, "autosave", %{"doc" => %{"title" => "Post One", "body" => "aaa-edited"}})
 
-      assert html_a =~ ~s(class="save-status">Saved)
+      assert html_a =~ ~s(class="save-status" role="status" aria-live="polite">Saved)
 
       # Navigate the editor to doc B (same LiveView, push_patch — no remount).
       html_b = render_patch(view, scoped_studio("/d/#{@dataset}/studio/page/about"))
 
       # Doc B must NOT inherit doc A's "Saved" — the status resets to blank.
-      refute html_b =~ ~s(class="save-status">Saved)
-      assert html_b =~ ~s(class="save-status"><)
+      refute html_b =~ ~s(class="save-status" role="status" aria-live="polite">Saved)
+      assert html_b =~ ~s(class="save-status" role="status" aria-live="polite"><)
+    end
+  end
+
+  describe "save-status span announces to screen readers (a11y live region)" do
+    setup %{conn: conn} do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "icon" => "file-text",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "title" => "Title", "type" => "string"},
+              %{"name" => "body", "title" => "Body", "type" => "text"}
+            ],
+            "layout" => [
+              %{"kind" => "field", "name" => "title", "max" => 1, "enforce" => true},
+              %{"kind" => "region", "name" => "body"}
+            ]
+          },
+          @dataset
+        )
+
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => "p1", "title" => "Post One", "content" => %{"body" => "aaa"}},
+          @dataset
+        )
+
+      {:ok, conn: conn}
+    end
+
+    # The status text is what changes; screen readers only voice it if the
+    # span is a polite live region. This asserts the live-region attrs travel
+    # with the save-status span (RED before role/aria-live were added).
+    test "the save-status span is a polite live region", %{conn: conn} do
+      {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post/p1"))
+      assert html =~ ~s(id="editor-form")
+
+      html_saved =
+        render_hook(view, "autosave", %{"doc" => %{"title" => "Post One", "body" => "aaa-x"}})
+
+      assert html_saved =~ ~s(<span class="save-status" role="status" aria-live="polite">Saved)
+    end
+  end
+
+  describe "studio_flash sink announces to screen readers (nav.ex live regions)" do
+    # nav.ex studio_flash is the single LAYOUT flash sink rendered by BOTH
+    # studio.html.heex and app.html.heex, so these live-region attrs upgrade
+    # every layout-rendered Studio flash. No aria assertion existed for it
+    # before this slice.
+    test "an :info flash is a polite status region" do
+      html =
+        render_component(&BarkparkWeb.StudioComponents.Nav.studio_flash/1,
+          flash: %{"info" => "Saved your changes"}
+        )
+
+      assert html =~ ~s(class="flash flash-info")
+      assert html =~ ~s(role="status")
+      assert html =~ ~s(aria-live="polite")
+      assert html =~ "Saved your changes"
+    end
+
+    test "an :error flash is an assertive alert region" do
+      html =
+        render_component(&BarkparkWeb.StudioComponents.Nav.studio_flash/1,
+          flash: %{"error" => "Something broke"}
+        )
+
+      assert html =~ ~s(class="flash flash-error")
+      assert html =~ ~s(role="alert")
+      assert html =~ ~s(aria-live="assertive")
+      assert html =~ "Something broke"
     end
   end
 end

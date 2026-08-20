@@ -14,6 +14,7 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
   use Barkpark.DataCase, async: false
 
   import Ecto.Query
+  import ExUnit.CaptureLog
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.MutationEvent
@@ -259,11 +260,15 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
       # Simulate a wave-4-style adoption / Studio edit AFTER birth: strip
       # `needs-human`, flip lifecycle, rename. The ownership matrix says the
       # outsider issue is read ONCE at birth — a webhook re-delivery must never
-      # regress these Barkpark-owned edits back to the birth attrs.
+      # regress these Barkpark-owned edits back to the birth attrs. The flip
+      # must be a LEGAL D7 transition (open → blocked): the Writer-seam
+      # transition gate (tlv) refuses a raw open → in_progress (a claim is
+      # minted only by `bp task claim`), and the concern here is re-delivery
+      # no-clobber, not the lifecycle value.
       adopted_content =
         doc.content
         |> Map.put("labels", ["src:github"])
-        |> Map.put("lifecycle_status", "in_progress")
+        |> Map.put("lifecycle_status", "blocked")
 
       {:ok, _} =
         Content.upsert_document(
@@ -279,7 +284,7 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
       # The adopted state survives — no rewrite back to the birth attrs.
       assert existing.title == "Adopted title"
       assert existing.content["labels"] == ["src:github"]
-      assert existing.content["lifecycle_status"] == "in_progress"
+      assert existing.content["lifecycle_status"] == "blocked"
       refute_receive {:comment, _, _, _}
 
       reloaded = fetch_task(31, scope)
@@ -371,6 +376,32 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
       # The dead-letter seam only fires on a dedup refusal — a normal birth
       # leaves it untouched (fail-open preserved).
       refute_receive {:conflict, _attrs}
+    end
+  end
+
+  describe "lifecycle-gate refusal — deterministic vetoes do not redeliver" do
+    test "a before_save-vetoed issue is logged as a clean refusal and writes nothing",
+         %{scope: scope} do
+      payload = opened_payload(54, %{"issue" => %{"title" => "   "}})
+
+      log =
+        capture_log(fn ->
+          assert {:refused, "gh-54"} = Intake.ingest(payload, opts(scope))
+        end)
+
+      assert log =~ "github intake: lifecycle gate refused gh-54"
+      assert log =~ "task title is required"
+      assert task_rows(54) == []
+      assert fetch_task(54, scope) == nil
+      refute_receive {:comment, _, _, _}
+    end
+
+    test "positive control: a normally titled issue still births its task", %{scope: scope} do
+      assert {:ok, :born, doc} = Intake.ingest(opened_payload(55), opts(scope))
+
+      assert doc.doc_id == Content.draft_id("gh-55")
+      assert fetch_task(55, scope).id == doc.id
+      assert_receive {:comment, "FRIKKern/barkpark", 55, _body}
     end
   end
 

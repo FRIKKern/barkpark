@@ -68,8 +68,12 @@ defmodule BarkparkWeb.StudioAnonLockdownTest do
       # The reader pipeline keeps the literal allowance — an anonymous GET for
       # a Default-scope paper slug must NOT redirect to /login. (404/200 both
       # prove the gate passed; only a redirect would mean the flag leaked.)
-      resp = get(conn, "/w/default/p/default/papers/no-such-paper-slug")
-      refute resp.status in [301, 302]
+      # A raise with plug_status 404 renders 404 in prod; in ConnTest it
+      # surfaces via assert_error_sent. A redirect would send no error and
+      # fail this assertion — the leak this test guards is still caught.
+      assert_error_sent 404, fn ->
+        get(conn, "/w/default/p/default/papers/no-such-paper-slug")
+      end
     end
   end
 

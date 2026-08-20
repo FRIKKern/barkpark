@@ -7,7 +7,7 @@ A Next.js 15 blog starter powered by [Barkpark](https://github.com/barkpark/bark
 
 - Next.js 15 App Router, React 19, TypeScript
 - `@barkpark/nextjs` for server fetching + draft-mode preview
-- `@barkpark/react` for `PortableText` rendering
+- `@barkpark/react` `PortableDoc` — the canonical, Phoenix-faithful PortableDocument renderer (42 block types), plus `@barkpark/react/client` media hydration (mermaid diagrams + asciicasts) and `@barkpark/react/paper-surface.css` for the skin
 - Tailwind CSS
 - `docker-compose.yml` bundling the Phoenix API + PostgreSQL
 - Schemas: `post`, `author`, `tag` + seed script with sample content

@@ -49,6 +49,14 @@ log "target=$NEW"
 if [ ! -f cloud/.env ]; then log "MISSING cloud/.env — abort (containers untouched)"; git reset --hard "$OLD"; exit 12; fi
 set -a; . cloud/.env; set +a
 
+# The slot must be able to state which commit it serves (dr-w20-s1). Sourced
+# from $NEW — the sha this run just checked out — never a second `git rev-parse`,
+# so it can never disagree with what was actually deployed. This export sits
+# AFTER the .env source on purpose: a stale BARKPARK_GIT_SHA left in cloud/.env
+# must not be able to win. compose passes it through via the bare
+# `- BARKPARK_GIT_SHA` line in cloud/docker-compose.yml; GET /health reads it.
+export BARKPARK_GIT_SHA="$NEW"
+
 # ---- Which slot serves now? Caddy's upstream port is the source of truth.
 ACTIVE_PORT="$(grep -oE 'localhost:41[0-9]{2}' "$CADDYFILE" | head -1 | cut -d: -f2)"
 ACTIVE_PORT="${ACTIVE_PORT:-4100}"
@@ -59,13 +67,38 @@ else
 fi
 log "active upstream :$ACTIVE_PORT -> deploying slot '$TARGET' on :$TARGET_PORT"
 
+# db+postfix must NEVER be left stopped: a recreate (image/config changed by the
+# pull) stops the old containers first, and on Docker 29 the follow-up network
+# disconnect can 500 ("container … is not connected to the network") while the
+# teardown is still settling — compose aborts BETWEEN stop-old and start-new. An
+# immediate retry simply starts the already-created containers. Without this,
+# every deploy after a cloud/ config change killed the db and the control plane
+# served 500s on all DB-backed routes until someone noticed (16h on 2026-07-21,
+# and re-broken by every subsequent merge — the site LOOKS up because the static
+# SPA still serves).
+ensure_shared_services() {
+  compose up -d db postfix && return 0
+  log "db/postfix up hit the recreate race — retrying"
+  sleep 3
+  compose up -d db postfix
+}
+
 # Rolls back git + image tag and stops the target slot; the active slot keeps
-# serving throughout, so every abort path here is zero-downtime.
+# serving throughout, so every abort path here is zero-downtime. Re-asserts
+# db+postfix so no abort path can strand them stopped.
 abort_deploy() {
   compose rm -sf "control_plane_$TARGET" >/dev/null 2>&1 || true
   docker tag cloud-control_plane:rollback cloud-control_plane:latest 2>/dev/null || true
   git reset --hard "$OLD"
+  ensure_shared_services || log "WARNING: db/postfix still down after abort — API is dead until they start"
 }
+
+# A killed deploy (dropped SSH, cancelled CD run) must not strand db+postfix
+# stopped mid-recreate either — that was the original 16h outage. EXIT alone is
+# not enough: bash skips EXIT traps on an unhandled SIGHUP/TERM, and a dropped
+# SSH session delivers exactly SIGHUP.
+trap 'ensure_shared_services >/dev/null 2>&1 || true' EXIT
+trap 'ensure_shared_services >/dev/null 2>&1 || true; exit 130' HUP INT TERM
 
 log "docker compose build (active slot still serving)"
 if ! compose build; then
@@ -77,10 +110,18 @@ fi
 for c in $(docker ps -q --filter "publish=$TARGET_PORT"); do
   log "stopping stale container on :$TARGET_PORT ($c)"; docker stop -t 30 "$c"
 done
-compose up -d db postfix
+if ! ensure_shared_services; then
+  log "db/postfix up FAILED twice — abort (active slot untouched)"; abort_deploy; exit 13
+fi
 log "boot slot $TARGET (auto-migrates on boot; active slot untouched)"
+# Same retry: the slot's own up can trip the identical recreate race when it
+# (re)starts db as a dependency.
 if ! compose up -d --no-build "control_plane_$TARGET"; then
-  log "SLOT BOOT FAILED — abort (active slot untouched)"; abort_deploy; exit 13
+  log "slot boot hit the recreate race — retrying"
+  sleep 3
+  if ! compose up -d --no-build "control_plane_$TARGET"; then
+    log "SLOT BOOT FAILED — abort (active slot untouched)"; abort_deploy; exit 13
+  fi
 fi
 
 ok=0
@@ -93,6 +134,19 @@ if [ "$ok" != "1" ]; then
   log "slot $TARGET UNHEALTHY — stopping it; :$ACTIVE_PORT was never touched (no downtime)"
   abort_deploy; exit 14
 fi
+
+# The '/' gate only proves the static SPA serves — it stayed green through a 16h
+# outage where every DB-backed route 500'd. Require a DB-touching endpoint too:
+# bad-creds login must answer 401 (a live auth stack), not 5xx/000 (dead pool).
+dbcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+  -X POST -H 'content-type: application/json' \
+  -d '{"email":"cp-deploy-probe@invalid.example","password":"x"}' \
+  "http://localhost:${TARGET_PORT}/v1/auth/login" || true)"
+if [ "$dbcode" != "401" ]; then
+  log "slot $TARGET DB probe failed (login=$dbcode, want 401) — abort (active slot untouched)"
+  abort_deploy; exit 14
+fi
+log "slot $TARGET DB probe ok (login=401)"
 
 # ---- Hot swap: point Caddy at the new slot (graceful reload, no drops).
 cp -a "$CADDYFILE" "$CADDYFILE.pre-deploy"

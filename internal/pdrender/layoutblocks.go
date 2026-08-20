@@ -99,11 +99,17 @@ func (cr columnsRenderer) Render(b Block, ctx RenderCtx) []string {
 // with a blank rhythm line between consecutive blocks (the RenderDoc cadence).
 func (cr columnsRenderer) renderColumn(blocks []Block, ctx RenderCtx) []string {
 	var lines []string
-	for i, blk := range blocks {
-		if i > 0 {
+	emitted := 0
+	for _, blk := range blocks {
+		group := cr.reg.Render(blk, ctx)
+		if len(group) == 0 {
+			continue
+		}
+		if emitted > 0 {
 			lines = append(lines, "") // rhythm between stacked blocks
 		}
-		lines = append(lines, cr.reg.Render(blk, ctx)...)
+		lines = append(lines, group...)
+		emitted++
 	}
 	return lines
 }

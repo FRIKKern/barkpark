@@ -1,6 +1,6 @@
 defmodule Barkpark.Sso.SamlTest do
   @moduledoc "SAML SP assertion consumption + SLO — we play the IdP with a test cert (era-w3-saml, era-w7 SLO)."
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Sso.Saml, Tenancy}
 
@@ -112,7 +112,8 @@ defmodule Barkpark.Sso.SamlTest do
 
     xml = signed_assertion("alice@samlorg.com", i.key, i.cert_der, session_index: "idx-42")
 
-    assert {:ok, %{email: "alice@samlorg.com", name_id: "alice@samlorg.com", session_index: "idx-42"}} =
+    assert {:ok,
+            %{email: "alice@samlorg.com", name_id: "alice@samlorg.com", session_index: "idx-42"}} =
              Saml.consume(c, xml, @slug)
   end
 

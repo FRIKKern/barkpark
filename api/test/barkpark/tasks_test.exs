@@ -18,10 +18,13 @@ defmodule Barkpark.TasksTest do
        `documents.status="draft"` flow on the SAME row (choice (b)).
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
+
+  import Ecto.Query, only: [from: 2]
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.{Document, SchemaDefinition}
+  alias Barkpark.Tasks.{Close, Internal}
 
   @dataset "production"
 
@@ -73,8 +76,11 @@ defmodule Barkpark.TasksTest do
     end
 
     test "Tasks.lifecycle_statuses/0 and Tasks.kinds/0 are stable contract" do
+      # Five original states first (index-stable), then the two thought states
+      # appended (task-lifecycle-visibility 5→7). "open means ready" still holds:
+      # considering/researching are not in the ready/claim allowlist.
       assert Tasks.lifecycle_statuses() ==
-               ~w(open in_progress blocked done cancelled)
+               ~w(open in_progress blocked done cancelled considering researching)
 
       assert Tasks.kinds() == ~w(task)
     end
@@ -436,6 +442,125 @@ defmodule Barkpark.TasksTest do
                %Document{}
                |> Document.changeset(attrs)
                |> Repo.insert()
+    end
+  end
+
+  # ─── close-drift recovery contract (S2, task-1471170216ac6b54) ─────────────
+  #
+  # The doc_changed_since_claim fence is recoverable ONLY by pinning the current
+  # rev as observed_rev. The old guidance ("re-read, then close again") is a dead
+  # end: a same-worker re-read RENEWS the lease but do_renew deliberately keeps
+  # the ORIGINAL claim's work_digest (claim.ex:357), so the fence still fires.
+  # These tests weld the true recovery sequence shut against regression.
+
+  defp s2_uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  defp s2_mk_task!(doc_id, scope, content_extra) do
+    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+
+    {:ok, doc} =
+      Content.create_document(
+        "task",
+        %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
+        @dataset,
+        scope
+      )
+
+    doc
+  end
+
+  # Rewrite content while PRESERVING the claim (its work_digest stays put) — the
+  # "a reviewer edited the brief while I held the claim" race the fence exists for.
+  defp s2_foreign_patch!(task_id, patch) do
+    doc = Repo.get!(Document, task_id)
+    new_content = Map.merge(doc.content, patch)
+
+    {1, _} =
+      from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)
+      |> Repo.update_all(set: [content: new_content, rev: Internal.generate_rev()])
+
+    :ok
+  end
+
+  describe "close/3 — re-read is a dead end; observed_rev is the recovery (S2 regression)" do
+    test "(a) a same-worker re-read/renewal preserves the claim work_digest, so a plain close STILL 409s doc_changed_since_claim",
+         %{scope: scope} do
+      doc_id = s2_uniq("s2-reread")
+      task = s2_mk_task!(doc_id, scope, %{"description" => "original brief"})
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "w", scope)
+      epoch = claimed.content["claim"]["epoch"]
+
+      # A reviewer rewrites the brief under the claim.
+      :ok = s2_foreign_patch!(task.id, %{"description" => "reviewer-rewritten brief"})
+
+      # The worker tries to "refresh" the way the OLD hint implies — a same-worker
+      # re-claim (renewal). It mints a FRESH epoch (so a later close clears the
+      # epoch fence) but do_renew DELIBERATELY keeps the ORIGINAL work_digest
+      # (claim.ex:357). The re-read/renewal reconciled nothing the fence compares.
+      assert {:ok, renewed} = Tasks.claim_by_id(doc_id, "w", scope)
+      fresh_epoch = renewed.content["claim"]["epoch"]
+      assert fresh_epoch != epoch
+
+      # Closing with that fresh epoch and NO observed_rev therefore STILL repeats
+      # the SAME 409, and the response hands back the current rev + the changed
+      # field so the worker need not infer which value to pass.
+      assert {:error, {:doc_changed_since_claim, current_rev, changed}} =
+               Close.close(task.id, "w", observed_epoch: fresh_epoch, lifecycle_status: "done")
+
+      assert changed == ["description"]
+      assert current_rev == Repo.get!(Document, task.id).rev
+      assert Repo.get!(Document, task.id).content["lifecycle_status"] == "in_progress"
+    end
+
+    test "(b) closing with observed_rev = the current rev the 409 named succeeds",
+         %{scope: scope} do
+      doc_id = s2_uniq("s2-observed-ok")
+      task = s2_mk_task!(doc_id, scope, %{"description" => "original brief"})
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "w", scope)
+      epoch = claimed.content["claim"]["epoch"]
+
+      :ok = s2_foreign_patch!(task.id, %{"description" => "reviewer-rewritten brief"})
+
+      # First close 409s and NAMES the current rev to reconcile against.
+      assert {:error, {:doc_changed_since_claim, current_rev, _changed}} =
+               Close.close(task.id, "w", observed_epoch: epoch, lifecycle_status: "done")
+
+      # The documented recovery: pass that exact current rev as observed_rev. It
+      # switches to strict full-rev CAS, bypasses the digest fence, and lands.
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: epoch,
+                 observed_rev: current_rev,
+                 lifecycle_status: "done"
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
+    end
+
+    test "(c) a STALE observed_rev still loses the full-rev CAS — the guard is not blanket-bypassed",
+         %{scope: scope} do
+      doc_id = s2_uniq("s2-stale-rev")
+      task = s2_mk_task!(doc_id, scope, %{"description" => "original brief"})
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "w", scope)
+      epoch = claimed.content["claim"]["epoch"]
+      stale_rev = claimed.rev
+
+      # A concurrent write moves the rev on after the worker's read.
+      :ok = s2_foreign_patch!(task.id, %{"description" => "moved on after the read"})
+
+      # A stale observed_rev opts into strict full-rev CAS and loses it — the
+      # recovery escape hatch never becomes an unconditional bypass.
+      assert {:error, :stale_claim} =
+               Close.close(task.id, "w",
+                 observed_epoch: epoch,
+                 observed_rev: stale_rev,
+                 lifecycle_status: "done"
+               )
+
+      assert Repo.get!(Document, task.id).content["lifecycle_status"] == "in_progress"
     end
   end
 end

@@ -2,6 +2,7 @@ package pdrender
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -28,7 +29,8 @@ var fieldGroupTypes = map[string]bool{
 	"field-string": true, "field-slug": true, "field-text": true,
 	"field-boolean": true, "field-select": true, "field-datetime": true,
 	"field-color": true, "field-reference": true, "field-image": true,
-	"composite": true, "arrayOf": true, "localizedText": true,
+	"field-number": true,
+	"composite":    true, "arrayOf": true, "localizedText": true,
 	"codelist": true, // label + resolved code→label; same definition-list shape
 }
 
@@ -222,4 +224,32 @@ func (fieldImageRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 	out := []string{ctx.Theme.FieldLabel.Render(sanitizeText(label))}
 	return append(out, wrapLines(valueLine, ctx.Width)...)
+}
+
+// field-number (B085) → the numeric `value` formatted with `strconv`'s
+// minimal-digits 'f' verb (5 → "5", 19.99 → "19.99", never exponent
+// notation), plus an optional trailing `unit`. An absent/uncoercible value
+// renders "—" (the field-reference empty-value precedent) — `min`/`max`/
+// `step` are Edit-mode control bounds (E4a, out of View's scope) and are
+// never read here.
+type fieldNumberRenderer struct{}
+
+func (fieldNumberRenderer) Render(b Block, ctx RenderCtx) []string {
+	unit := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "unit")))
+
+	f, ok := toFloat(b.Attrs["value"])
+	var value string
+	switch {
+	case !ok:
+		value = "—"
+	case unit == "":
+		value = formatFieldNumber(f)
+	default:
+		value = formatFieldNumber(f) + " " + unit
+	}
+	return fieldRow(b, value, ctx)
+}
+
+func formatFieldNumber(f float64) string {
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }

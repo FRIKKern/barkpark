@@ -40,6 +40,15 @@ defmodule Barkpark.SelfUpdate.Runner do
                                        ["deploy/instance-deploy.sh", "--rollback-preflight"]}
   @default_max_log_lines 500
 
+  # Deadlines. The preflight is read-only but a hung git/ssh under it would block
+  # the admin request forever; the main run holds `running?`=true until the port
+  # closes, so a wedged run would block every future trigger until a BEAM restart.
+  # Both are config-overridable per env for tests via
+  # `config :barkpark, __MODULE__, preflight_timeout_ms: N, run_deadline_ms: N`.
+  @default_preflight_timeout_ms 60_000
+  # 30 min — comfortably covers a real self-update/rollback + clean rebuild.
+  @default_run_deadline_ms 1_800_000
+
   # exit 0 prints `TARGET_SHA=<40-hex>` (charter W6 contract); tolerate a short
   # sha for stub-command tests, but require hex so a garbage line can't pass.
   @target_sha_re ~r/TARGET_SHA=([0-9a-fA-F]{7,40})\b/
@@ -111,7 +120,15 @@ defmodule Barkpark.SelfUpdate.Runner do
     {exe, args} =
       Keyword.get(config(), :rollback_preflight_command, @default_rollback_preflight_command)
 
-    case System.cmd(exe, args, cd: run_cd(), stderr_to_stdout: true) do
+    case bounded_preflight(exe, args) do
+      # A hung preflight is force-killed at the deadline and fails closed — never
+      # a silent flip, never an unbounded hang of the admin request.
+      {:preflight_timeout, ms} ->
+        {:error, {:preflight_failed, {:preflight_timeout, ms}}}
+
+      {:preflight_crashed, reason} ->
+        {:error, {:preflight_failed, reason}}
+
       {output, 0} ->
         case Regex.run(@target_sha_re, output) do
           [_, sha] -> {:ok, sha}
@@ -135,8 +152,36 @@ defmodule Barkpark.SelfUpdate.Runner do
   rescue
     # System.cmd raises (e.g. ErlangError :enoent) when the executable is
     # missing — a preflight that cannot even run is a fail-closed refusal,
-    # never a silent flip.
+    # never a silent flip. (With async_nolink the raise surfaces as a crash
+    # tuple below; this rescue stays a backstop.)
     error -> {:error, {:preflight_failed, error}}
+  end
+
+  # Run the read-only preflight probe under a hard deadline. Mirrors
+  # `studio_chat/titles.ex` per-site: Task.yield waits, Task.shutdown brutal-kills
+  # a child that outlives the deadline. `async_nolink` (via the app's
+  # TaskSupervisor) so a missing/crashing executable degrades to a `{:exit, _}`
+  # crash tuple here rather than taking the caller down.
+  #
+  # Sobelow CI.System is a false-positive: `exe`/`args` come from module config
+  # (`@default_rollback_preflight_command` or a test-only override), never request
+  # data — no shell string, no client input. This inline skip replaces the
+  # line-anchored `.sobelow-skips` fingerprint (`runner.ex:114`) that the deadline
+  # wrapper moved System.cmd off of.
+  # sobelow_skip ["CI.System"]
+  defp bounded_preflight(exe, args) do
+    task =
+      Task.Supervisor.async_nolink(Barkpark.TaskSupervisor, fn ->
+        System.cmd(exe, args, cd: run_cd(), stderr_to_stdout: true)
+      end)
+
+    ms = Keyword.get(config(), :preflight_timeout_ms, @default_preflight_timeout_ms)
+
+    case Task.yield(task, ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      {:exit, reason} -> {:preflight_crashed, reason}
+      nil -> {:preflight_timeout, ms}
+    end
   end
 
   @doc """
@@ -183,6 +228,10 @@ defmodule Barkpark.SelfUpdate.Runner do
       true ->
         case open_port(mode) do
           {:ok, port} ->
+            # Watchdog: force-close a run that outlives the deadline so `running?`
+            # can't wedge true (and block every future trigger) until a BEAM restart.
+            schedule_run_deadline(port)
+
             {:reply, {:ok, :started},
              %{
                state
@@ -219,9 +268,43 @@ defmodule Barkpark.SelfUpdate.Runner do
     {:noreply, %{state | run: {:done, -1}, port: nil, finished_at: DateTime.utc_now()}}
   end
 
+  # Deadline watchdog fired for the CURRENT run — force-close the port and record
+  # a bounded failure so `running?` flips back to done. Matches only the live port
+  # + a still-:running state; a stale deadline from an already-finished run has a
+  # nil `state.port`, so it falls through to the catch-all below.
+  def handle_info({:run_deadline, port}, %{port: port, run: :running} = state) do
+    _ = close_port(port)
+
+    state =
+      push_log(state, "[runner] run exceeded #{run_deadline_ms()}ms deadline — force-closed")
+
+    {:noreply, %{state | run: {:done, -2}, port: nil, finished_at: DateTime.utc_now()}}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
 
   # ── internals ───────────────────────────────────────────────────────────
+
+  defp schedule_run_deadline(port) do
+    Process.send_after(self(), {:run_deadline, port}, run_deadline_ms())
+  end
+
+  defp run_deadline_ms, do: Keyword.get(config(), :run_deadline_ms, @default_run_deadline_ms)
+
+  # Closing a `{:spawn_executable, _}` port closes the pipe fds and sends the child
+  # NO signal — it terminates only a program that exits on stdin EOF or dies to
+  # SIGPIPE, which is most but not all of them (GH #6681 proved the gap on the
+  # Codex runtime, where `Session.reap_port/1` now SIGKILLs the pid after the
+  # close). This watchdog has the same hole for a self-update child that ignores
+  # EOF; reaping here is filed, not done. Tolerate an already-closed port
+  # (ArgumentError) so the watchdog never crashes the Runner.
+  defp close_port(port) do
+    Port.close(port)
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
 
   defp initial_state do
     # `mode` records which verb the current/last run is — defaults to

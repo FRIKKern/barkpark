@@ -51,7 +51,7 @@ defmodule Barkpark.PortableDoc.Projection do
   """
 
   alias Barkpark.Preview
-  alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.{FromMarkdown, Render}
 
   @typedoc "A portable-doc block — a string-keyed map."
   @type block :: %{required(String.t()) => term()}
@@ -75,6 +75,27 @@ defmodule Barkpark.PortableDoc.Projection do
   def partition(blocks) when is_list(blocks) do
     Enum.split_with(blocks, &bound?/1)
   end
+
+  @doc """
+  Read the canonical block list from a Portable Doc content map.
+
+  A present top-level `"blocks"` list remains authoritative, including an
+  intentionally empty list. Historical projected documents that only retain
+  the free-block projection under `content["body"]["blocks"]` fall back to that
+  nested list. Any other shape has no readable block list.
+  """
+  @spec read_blocks(map()) :: [block()] | nil
+  def read_blocks(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+
+  def read_blocks(%{"body" => %{"blocks" => blocks}}) when is_list(blocks), do: blocks
+
+  def read_blocks(%{"body" => blocks}) when is_list(blocks), do: blocks
+
+  def read_blocks(%{"body" => markdown}) when is_binary(markdown) do
+    if String.trim(markdown) == "", do: nil, else: FromMarkdown.blocks(markdown)
+  end
+
+  def read_blocks(_content), do: nil
 
   @doc """
   The classic value a bound block projects into `content[fieldName]`.

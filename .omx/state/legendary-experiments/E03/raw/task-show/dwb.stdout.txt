@@ -1,0 +1,389 @@
+{
+  "child_count": 32,
+  "children": [
+    {
+      "criteria_progress": {
+        "met": 5,
+        "total": 5
+      },
+      "doc_id": "dwb-16",
+      "inserted_at": "2026-07-02T07:22:47.363962Z",
+      "lifecycle_status": "done",
+      "title": "Live provision console + connection honesty"
+    },
+    {
+      "criteria_progress": {
+        "met": 0,
+        "total": 3
+      },
+      "doc_id": "dwb-doc-lag-microfixes",
+      "inserted_at": "2026-07-11T10:41:41.431927Z",
+      "lifecycle_status": "open",
+      "title": "Doc-lag microfixes: stale builder-auth header in cloud router + stale example domain in provisioner main.go"
+    },
+    {
+      "criteria_progress": {
+        "met": 0,
+        "total": 2
+      },
+      "doc_id": "dwb-launch-flow-double-submit-test",
+      "inserted_at": "2026-07-11T10:41:42.659908Z",
+      "lifecycle_status": "open",
+      "title": "router_launch_flow_test.exs: add the missing explicit double-submit/409 launch test"
+    },
+    {
+      "doc_id": "gh-2",
+      "inserted_at": "2026-07-11T10:49:07.078094Z",
+      "lifecycle_status": "done",
+      "title": "GitHub seam + fake + installation store"
+    },
+    {
+      "doc_id": "gh-3",
+      "inserted_at": "2026-07-11T10:49:07.332136Z",
+      "lifecycle_status": "done",
+      "title": "Repo-from-template"
+    },
+    {
+      "doc_id": "gh-4",
+      "inserted_at": "2026-07-11T10:49:07.608135Z",
+      "lifecycle_status": "done",
+      "title": "Connect existing repo + webhook auto-registration"
+    },
+    {
+      "doc_id": "gh-5",
+      "inserted_at": "2026-07-11T10:49:07.867119Z",
+      "lifecycle_status": "done",
+      "title": "Push-to-deploy pipeline hardening + build-log console"
+    },
+    {
+      "doc_id": "gh-6",
+      "inserted_at": "2026-07-11T10:49:08.126579Z",
+      "lifecycle_status": "done",
+      "title": "Branch previews"
+    },
+    {
+      "doc_id": "dwb-1",
+      "inserted_at": "2026-07-11T10:49:16.619697Z",
+      "lifecycle_status": "done",
+      "title": "Template manifest spec + catalog (barkpark.template.json)"
+    },
+    {
+      "doc_id": "dwb-3",
+      "inserted_at": "2026-07-11T10:49:16.939022Z",
+      "lifecycle_status": "done",
+      "title": "Unify env-var convention across web/, starters, hundesteder"
+    },
+    {
+      "doc_id": "dwb-5",
+      "inserted_at": "2026-07-11T10:49:17.274838Z",
+      "lifecycle_status": "done",
+      "title": "Webhook auto-registration in bootstrap"
+    },
+    {
+      "doc_id": "dwb-8",
+      "inserted_at": "2026-07-11T10:49:17.556510Z",
+      "lifecycle_status": "done",
+      "title": "Decide free/trial tier for the public button"
+    },
+    {
+      "criteria_progress": {
+        "met": 0,
+        "total": 3
+      },
+      "doc_id": "dwb-vercel-token-gate",
+      "inserted_at": "2026-07-11T10:50:58.060550Z",
+      "lifecycle_status": "open",
+      "title": "VERCEL_PLATFORM_TOKEN wiring — zero-paste Vercel handoff goes live (HUMAN GATE)"
+    },
+    {
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "doc_id": "dwb-14",
+      "inserted_at": "2026-07-11T10:51:02.081698Z",
+      "lifecycle_status": "done",
+      "title": "Worker step-event narration to control plane (honest SSE progress)"
+    },
+    {
+      "criteria_progress": {
+        "met": 2,
+        "total": 2
+      },
+      "doc_id": "dwb-15",
+      "inserted_at": "2026-07-11T10:51:02.451681Z",
+      "lifecycle_status": "done",
+      "title": "Worker graceful shutdown releases in-flight claim immediately"
+    },
+    {
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "doc_id": "dwb-17",
+      "inserted_at": "2026-07-11T10:51:03.042808Z",
+      "lifecycle_status": "done",
+      "title": "Warm-image freshness: fresh instances boot stale code"
+    },
+    {
+      "criteria_progress": {
+        "met": 4,
+        "total": 4
+      },
+      "doc_id": "dwb-19",
+      "inserted_at": "2026-07-11T10:51:03.394039Z",
+      "lifecycle_status": "done",
+      "title": "Expressive step detail: live sub-caption under the active step"
+    },
+    {
+      "criteria_progress": {
+        "met": 4,
+        "total": 4
+      },
+      "doc_id": "dwb-20",
+      "inserted_at": "2026-07-11T10:51:03.743140Z",
+      "lifecycle_status": "done",
+      "title": "Provisioner mints ALL per-instance secrets (KEK blocker + shared-baked-secret hole)"
+    },
+    {
+      "doc_id": "dwb-builder-cross-tenant-auth",
+      "inserted_at": "2026-07-11T10:51:04.055996Z",
+      "lifecycle_status": "done",
+      "title": "SECURITY GATE (human): /v1/builder/* lets any self-registered user claim/transition ANY team's deployments — needs require_worker + token backfill coordination"
+    },
+    {
+      "doc_id": "gh-1",
+      "inserted_at": "2026-07-11T10:51:27.258277Z",
+      "lifecycle_status": "open",
+      "title": "GitHub App registration + credential wiring"
+    },
+    {
+      "criteria_progress": {
+        "met": 0,
+        "total": 5
+      },
+      "doc_id": "dwb-12",
+      "inserted_at": "2026-07-11T10:52:36.036415Z",
+      "lifecycle_status": "open",
+      "title": "E2E stopwatch gate — measure the contract"
+    },
+    {
+      "doc_id": "dwb-cancel-blocking-semantics",
+      "inserted_at": "2026-07-11T10:52:44.409185Z",
+      "lifecycle_status": "open",
+      "title": "Product decision: cancelled deployment blocking semantics — cancel-frees vs cancel-abandons"
+    },
+    {
+      "criteria_progress": {
+        "met": 4,
+        "total": 4
+      },
+      "doc_id": "dwb-6",
+      "inserted_at": "2026-07-11T10:53:25.954238Z",
+      "lifecycle_status": "done",
+      "title": "/new?template= flow"
+    },
+    {
+      "criteria_progress": {
+        "met": 1,
+        "total": 2
+      },
+      "doc_id": "dwb-9",
+      "inserted_at": "2026-07-11T10:53:41.937717Z",
+      "lifecycle_status": "open",
+      "title": "README badge + launch docs"
+    },
+    {
+      "criteria_progress": {
+        "met": 0,
+        "total": 2
+      },
+      "doc_id": "dwb-2",
+      "inserted_at": "2026-07-11T11:02:35.009476Z",
+      "lifecycle_status": "open",
+      "title": "Publish standalone template repos (template-blog, template-website)"
+    },
+    {
+      "doc_id": "dwb-webhook-deploy-artifact-gap",
+      "inserted_at": "2026-07-11T11:02:35.150904Z",
+      "lifecycle_status": "done",
+      "title": "Push-to-deploy cannot succeed: webhook-created deployments have artifact_url nil and the Go builder hard-fails on it — needs git-clone-at-sha builder"
+    },
+    {
+      "doc_id": "dwb-18",
+      "inserted_at": "2026-07-11T11:02:35.289002Z",
+      "lifecycle_status": "done",
+      "title": "Deploy/builder step narration — extend the provision-console standard (#798) to sites deploys"
+    },
+    {
+      "criteria_progress": {
+        "met": 4,
+        "total": 4
+      },
+      "doc_id": "dwb-11",
+      "inserted_at": "2026-07-11T11:02:35.421456Z",
+      "lifecycle_status": "done",
+      "title": "Failure-recovery + idempotency hardening across the button flow"
+    },
+    {
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "doc_id": "dwb-10",
+      "inserted_at": "2026-07-11T11:02:35.563170Z",
+      "lifecycle_status": "done",
+      "title": "Warm-pool instant provisioning (<=15s to live instance)"
+    },
+    {
+      "criteria_progress": {
+        "met": 2,
+        "total": 2
+      },
+      "doc_id": "dwb-4",
+      "inserted_at": "2026-07-11T11:02:35.712136Z",
+      "lifecycle_status": "done",
+      "title": "Post-provision bootstrap job step"
+    },
+    {
+      "criteria_progress": {
+        "met": 3,
+        "total": 3
+      },
+      "doc_id": "dwb-7",
+      "inserted_at": "2026-07-11T11:02:35.844859Z",
+      "lifecycle_status": "done",
+      "title": "Studio one-click entry"
+    },
+    {
+      "criteria_progress": {
+        "met": 5,
+        "total": 5
+      },
+      "doc_id": "dwb-13",
+      "inserted_at": "2026-07-11T11:02:36.002193Z",
+      "lifecycle_status": "done",
+      "title": "Trial-tier entitlement (14-day trial instance)"
+    }
+  ],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "README badge that takes a stranger from a template repo to a live Next.js site + editable Studio, Vercel-style. v1 chains Vercel for frontend hosting (Path A); own Sites/Deployments subsystem is the v2 differentiator. Design paper: deploy-with-barkpark. PARKED PRODUCT — honest state as of 2026-07-11 (reconcile wave): (i) PROVEN LIVE: the /new?template= flow shipped (773); README badge (795); provision console + live narration + captions + secrets (783/798/890/914). The INSTANCE WARM POOL is LIVE IN PROD — WARMPOOLSIZE=2 in /etc/barkpark-provisioner.env on CP 178.105.92.191, barkpark-provisioner.service active, re-confirmed 2026-07-11. (ii) MERGED BUT NOT DEPLOYED: the off-box SITE builder (internal/builder, cmd/barkpark-builder) — no systemd unit, no binary, no process on the CP host (only the uncompiled main.go at /opt/barkpark/cmd/barkpark-builder/). Deploying it is an OPS act (builder host + WORKERTOKEN backfill + unit), not engineering. NEVER conflate the two subsystems: the INSTANCE warm pool is live, the SITE builder is not deployed (charter D34). (iii) HUMAN GATES, each with a stranger-executable recipe on its task: gh-1 (GitHub App registration + GITHUBAPPID/GITHUBAPPPRIVATEKEY/GITHUBAPPWEBHOOKSECRET/GITHUBAPPSLUG wiring, INCLUDING the docker-compose passthrough gap — compose passes only GITHUBOAUTH today) and dwb-vercel-token-gate (VERCELPLATFORMTOKEN — compose passthrough already present at docker-compose.yml:55-58; absent token = 503 + clone-URL fallback, product keeps working). (iv) BLOCKED: dwb-2 (org template repos — transitively on gh-1; the content substrate already exists under js/packages/create-barkpark-app/templates) and dwb-12 (E2E stopwatch — the script is buildable today against /new, but its public-launch criterion waits on gh-1/dwb-2). (v) JUDGMENT GATE: dwb-cancel-blocking-semantics needs product authority (cancel-frees vs cancel-abandons at cloud/lib/barkparkcloud/registry/deployment.ex:43-50), not credentials. (vi) CARVE-OUT: lvd-t5-task was mis-parented LVD content, re-homed 2026-07-11 (S4). PARKED 2026-07-11, not abandoned — reconcile wave paper self-update-epic-wave-2026-07-11-reconcile."
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "open. No explicit acceptance criteria are recorded; use the title and purpose as the governing scope."
+              }
+            ],
+            "id": "state-copy",
+            "title": "open",
+            "tone": "note",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Complete the scoped outcome described by  + ((.title // ._id)|clean) +  and record verifiable evidence before closure."
+              }
+            ],
+            "id": "done-copy",
+            "type": "paragraph"
+          }
+        ],
+        "version": 1
+      },
+      "code_refs": {
+        "branch": null,
+        "commits": [],
+        "prs": [
+          748,
+          798,
+          890,
+          914
+        ],
+        "worktree": null
+      },
+      "description": "README badge that takes a stranger from a template repo to a live Next.js site + editable Studio, Vercel-style. v1 chains Vercel for frontend hosting (Path A); own Sites/Deployments subsystem is the v2 differentiator. Design paper: deploy-with-barkpark.\n\nPARKED PRODUCT — honest state as of 2026-07-11 (reconcile wave):\n\n(i) PROVEN LIVE: the /new?template= flow shipped (#773); README badge (#795); provision console + live narration + captions + secrets (#783/#798/#890/#914). The INSTANCE WARM POOL is LIVE IN PROD — WARM_POOL_SIZE=2 in /etc/barkpark-provisioner.env on CP 178.105.92.191, barkpark-provisioner.service active, re-confirmed 2026-07-11.\n\n(ii) MERGED BUT NOT DEPLOYED: the off-box SITE builder (internal/builder, cmd/barkpark-builder) — no systemd unit, no binary, no process on the CP host (only the uncompiled main.go at /opt/barkpark/cmd/barkpark-builder/). Deploying it is an OPS act (builder host + WORKER_TOKEN backfill + unit), not engineering. NEVER conflate the two subsystems: the INSTANCE warm pool is live, the SITE builder is not deployed (charter D34).\n\n(iii) HUMAN GATES, each with a stranger-executable recipe on its task: gh-1 (GitHub App registration + GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY/GITHUB_APP_WEBHOOK_SECRET/GITHUB_APP_SLUG wiring, INCLUDING the docker-compose passthrough gap — compose passes only GITHUB_OAUTH_* today) and dwb-vercel-token-gate (VERCEL_PLATFORM_TOKEN — compose passthrough already present at docker-compose.yml:55-58; absent token = 503 + clone-URL fallback, product keeps working).\n\n(iv) BLOCKED: dwb-2 (org template repos — transitively on gh-1; the content substrate already exists under js/packages/create-barkpark-app/templates) and dwb-12 (E2E stopwatch — the script is buildable today against /new, but its public-launch criterion waits on gh-1/dwb-2).\n\n(v) JUDGMENT GATE: dwb-cancel-blocking-semantics needs product authority (cancel-frees vs cancel-abandons at cloud/lib/barkpark_cloud/registry/deployment.ex:43-50), not credentials.\n\n(vi) CARVE-OUT: lvd-t5-task was mis-parented LVD content, re-homed 2026-07-11 (S4).\n\nPARKED 2026-07-11, not abandoned — reconcile wave paper self-update-epic-wave-2026-07-11-reconcile.",
+      "design_doc": "deploy-with-barkpark",
+      "github": {
+        "issue": 1299,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_fingerprint": 67682915,
+        "synced_rev": "bcb497c3d106b83069ef7ea48490015d"
+      },
+      "kind": "task",
+      "labels": [
+        "deploy-button",
+        "proj:deploy-button",
+        "phase:goal"
+      ],
+      "last_audited_at": "2026-07-04T14:35:00Z",
+      "last_worked_at": "2026-07-03T00:26:23Z",
+      "lifecycle_status": "open",
+      "papers": [
+        "deploy-with-barkpark"
+      ],
+      "priority": 1
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "dwb",
+    "execution_policy": null,
+    "id": "e2778b59-748f-4bf2-9b12-8cc4984f0e68",
+    "inserted_at": "2026-07-11T10:52:15.320678Z",
+    "kind": "task",
+    "labels": [
+      "deploy-button",
+      "proj:deploy-button",
+      "phase:goal"
+    ],
+    "lifecycle_status": "open",
+    "papers": [
+      "deploy-with-barkpark"
+    ],
+    "parent_id": null,
+    "priority": 1,
+    "rev": "d5f69f9d2dbf107fc6a2a162f01ad7db",
+    "status": "published",
+    "title": "Deploy with Barkpark — a stranger goes from template repo to a live site in one click",
+    "type": "task",
+    "updated_at": "2026-07-12T11:20:31.450229Z"
+  },
+  "ok": true
+}

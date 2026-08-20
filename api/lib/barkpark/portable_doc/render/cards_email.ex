@@ -341,10 +341,11 @@ defmodule Barkpark.PortableDoc.Render.CardsEmail do
   end
 
   # The card tone → its light hex, from the StatusVocab manifest (never hand-typed
-  # and never TokensGen.tone_*). Allowlist info|ok|warn|danger; anything else nil.
+  # and never TokensGen.tone_*). Allowlist info|ok|warn|danger|violet (violet is the
+  # thought-state hue — considering/researching, charter D9/D12); anything else nil.
   defp tone_hex(tone) when is_binary(tone) do
     case StatusVocab.tones() do
-      %{^tone => %{"light" => hex}} when tone in ~w(info ok warn danger) -> hex
+      %{^tone => %{"light" => hex}} when tone in ~w(info ok warn danger violet) -> hex
       _ -> nil
     end
   end

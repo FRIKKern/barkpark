@@ -1,0 +1,1779 @@
+{
+  "mutations": [
+    {
+      "createOrReplace": {
+        "_id": "entry-barkpark",
+        "_type": "entry",
+        "title": "Barkpark",
+        "status": "published",
+        "slug": "barkpark",
+        "kind": "concept",
+        "summary": "A headless CMS with one content model and many surfaces — the root of this field guide.",
+        "related": "entry-headless-cms",
+        "links": [
+          "entry-portabledoc",
+          "entry-search",
+          "entry-schema",
+          "entry-graph"
+        ],
+        "body": [
+          {
+            "id": "eb-1",
+            "type": "eyebrow",
+            "text": "Field guide"
+          },
+          {
+            "id": "h-2",
+            "type": "heading",
+            "level": 1,
+            "text": "Barkpark"
+          },
+          {
+            "id": "in-3",
+            "type": "ingress",
+            "text": "One content model, many surfaces. Author once; render everywhere — a Next.js site, an Astro site, a Go TUI, and the /papers reader all read the same documents."
+          },
+          {
+            "id": "p-4",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Barkpark is a headless CMS. Content lives as typed documents; every surface is a projection of the same graph. This starter seeds that graph so your search page has something worth searching on the first load."
+              }
+            ]
+          },
+          {
+            "id": "co-5",
+            "type": "callout",
+            "tone": "info",
+            "title": "Start here",
+            "content": [
+              {
+                "type": "text",
+                "value": "Every node in the graph you are looking at is an entry document. Follow the links and you are walking the reference edges Barkpark extracts from your schema."
+              }
+            ]
+          },
+          {
+            "id": "h-6",
+            "type": "heading",
+            "level": 2,
+            "text": "How the pieces fit"
+          },
+          {
+            "id": "ls-7",
+            "type": "list",
+            "ordered": false,
+            "items": [
+              "Documents are typed by a schema.",
+              "Reference fields become graph edges.",
+              "PortableDocument bodies render identically across surfaces."
+            ]
+          },
+          {
+            "id": "pq-8",
+            "type": "pullquote",
+            "content": [
+              {
+                "type": "text",
+                "value": "The fastest way to ship something premium is to start from a graph, not a blank page."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-headless-cms",
+        "_type": "entry",
+        "title": "Headless CMS",
+        "status": "published",
+        "slug": "headless-cms",
+        "kind": "concept",
+        "summary": "A content backend with no baked-in front end — you own the rendering.",
+        "related": "entry-barkpark",
+        "links": [
+          "entry-schema",
+          "entry-api",
+          "entry-static-generation"
+        ],
+        "body": [
+          {
+            "id": "h-9",
+            "type": "heading",
+            "level": 1,
+            "text": "Headless CMS"
+          },
+          {
+            "id": "p-a",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "A headless CMS stores structured content and serves it over an API. There is no theme layer — you decide how it renders, on whatever framework you like."
+              }
+            ]
+          },
+          {
+            "id": "tb-b",
+            "type": "table",
+            "head": [
+              "Coupled CMS",
+              "Headless CMS"
+            ],
+            "rows": [
+              [
+                "One templating engine",
+                "Any framework"
+              ],
+              [
+                "Content and view entangled",
+                "Content is portable"
+              ],
+              [
+                "Hard to reuse content",
+                "One model, many surfaces"
+              ]
+            ]
+          },
+          {
+            "id": "p-c",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Barkpark leans all the way into the model: the same document renders in Next, Astro, and a terminal."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-portabledoc",
+        "_type": "entry",
+        "title": "PortableDoc",
+        "status": "published",
+        "slug": "portabledoc",
+        "kind": "feature",
+        "summary": "Barkpark’s type-keyed block document format — render-identical across every surface.",
+        "related": "entry-barkpark",
+        "links": [
+          "entry-blocks",
+          "entry-render-parity",
+          "entry-react-renderer",
+          "entry-astro"
+        ],
+        "body": [
+          {
+            "id": "eb-d",
+            "type": "eyebrow",
+            "text": "Feature"
+          },
+          {
+            "id": "h-e",
+            "type": "heading",
+            "level": 1,
+            "text": "PortableDoc"
+          },
+          {
+            "id": "in-f",
+            "type": "ingress",
+            "text": "A PortableDocument is an ordered array of type-keyed blocks. One grammar, one renderer per surface, byte-identical output."
+          },
+          {
+            "id": "p-g",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Instead of storing HTML or Markdown, a PortableDoc stores intent: a heading is a heading, a callout is a callout. Each surface owns the rendering, so the same body looks native on Next, Astro, and the Phoenix reader."
+              }
+            ]
+          },
+          {
+            "id": "h-h",
+            "type": "heading",
+            "level": 2,
+            "text": "A block is just data"
+          },
+          {
+            "id": "cd-i",
+            "type": "code",
+            "value": "{ \"type\": \"callout\", \"tone\": \"success\", \"title\": \"Nice\", \"content\": [{ \"type\": \"text\", \"value\": \"Rendered everywhere the same way.\" }] }"
+          },
+          {
+            "id": "co-j",
+            "type": "callout",
+            "tone": "success",
+            "title": "Render parity",
+            "content": [
+              {
+                "type": "text",
+                "value": "The React, Astro, Elixir, and Go renderers all emit the same bp-* class vocabulary, so one stylesheet skins them all."
+              }
+            ]
+          },
+          {
+            "id": "ls-k",
+            "type": "list",
+            "ordered": true,
+            "items": [
+              "Author a block once.",
+              "Store it as data.",
+              "Render it faithfully on any surface."
+            ]
+          },
+          {
+            "id": "p-l",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "The renderer degrades unknown blocks to a visible placeholder rather than throwing — see "
+              },
+              {
+                "type": "link",
+                "href": "#",
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "render parity"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "value": " for the contract."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-blocks",
+        "_type": "entry",
+        "title": "Blocks",
+        "status": "published",
+        "slug": "blocks",
+        "kind": "concept",
+        "summary": "The type-keyed units a PortableDocument is built from: heading, paragraph, callout, code, and more.",
+        "related": "entry-portabledoc",
+        "links": [
+          "entry-render-parity",
+          "entry-schema"
+        ],
+        "body": [
+          {
+            "id": "h-m",
+            "type": "heading",
+            "level": 1,
+            "text": "Blocks"
+          },
+          {
+            "id": "p-n",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "A block is a small map with a \"type\" key and the fields that type needs. The renderer routes each block to its emitter."
+              }
+            ]
+          },
+          {
+            "id": "ls-o",
+            "type": "list",
+            "ordered": false,
+            "items": [
+              "heading — a title at level 1, 2, or 3",
+              "paragraph — inline prose",
+              "callout — a toned aside",
+              "code — a monospace slab",
+              "list — ordered or unordered",
+              "table — rows and an optional header band"
+            ]
+          },
+          {
+            "id": "p-p",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "New block types are additive: an older renderer degrades an unknown block instead of breaking the page."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-render-parity",
+        "_type": "entry",
+        "title": "Render parity",
+        "status": "published",
+        "slug": "render-parity",
+        "kind": "pattern",
+        "summary": "The same block array produces the same HTML on every surface — the parity contract.",
+        "related": "entry-portabledoc",
+        "links": [
+          "entry-react-renderer",
+          "entry-astro",
+          "entry-blocks"
+        ],
+        "body": [
+          {
+            "id": "h-q",
+            "type": "heading",
+            "level": 1,
+            "text": "Render parity"
+          },
+          {
+            "id": "in-r",
+            "type": "ingress",
+            "text": "One stylesheet, many surfaces. Every renderer emits the same bp-* classes."
+          },
+          {
+            "id": "p-s",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Parity is enforced by a cross-surface harness that compares each renderer against a golden output. If Astro drifts from Elixir, the harness fails."
+              }
+            ]
+          },
+          {
+            "id": "co-t",
+            "type": "callout",
+            "tone": "warning",
+            "title": "Why it matters",
+            "content": [
+              {
+                "type": "text",
+                "value": "Without parity, your premium design only looks right on one framework. With it, the same paper-surface.css skins them all."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-react-renderer",
+        "_type": "entry",
+        "title": "React renderer",
+        "status": "published",
+        "slug": "react-renderer",
+        "kind": "feature",
+        "summary": "The @barkpark/react PortableDoc component — a context-free, RSC-safe block renderer.",
+        "related": "entry-render-parity",
+        "links": [
+          "entry-portabledoc",
+          "entry-nextjs"
+        ],
+        "body": [
+          {
+            "id": "h-u",
+            "type": "heading",
+            "level": 1,
+            "text": "React renderer"
+          },
+          {
+            "id": "p-v",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "@barkpark/react ships a PortableDoc component that takes a block array and returns Phoenix-faithful HTML. No hooks, no context — it drops straight into a Server Component."
+              }
+            ]
+          },
+          {
+            "id": "cd-w",
+            "type": "code",
+            "value": "import { PortableDoc } from \"@barkpark/react\"\n\n<PortableDoc value={entry.body} />"
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-astro",
+        "_type": "entry",
+        "title": "Astro renderer",
+        "status": "published",
+        "slug": "astro",
+        "kind": "framework",
+        "summary": "Render PortableDocuments in Astro with a framework-free string emitter.",
+        "related": "entry-render-parity",
+        "links": [
+          "entry-portabledoc",
+          "entry-static-generation"
+        ],
+        "body": [
+          {
+            "id": "eb-x",
+            "type": "eyebrow",
+            "text": "Framework"
+          },
+          {
+            "id": "h-y",
+            "type": "heading",
+            "level": 1,
+            "text": "Astro renderer"
+          },
+          {
+            "id": "p-z",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Astro consumes the same PortableDocument grammar. The renderPortableDocument helper returns a plain HTML string, so an Astro component drops it in with set:html."
+              }
+            ]
+          },
+          {
+            "id": "cd-10",
+            "type": "code",
+            "value": "---\nimport { renderPortableDocument } from \"@barkpark/react\"\nconst html = renderPortableDocument(entry.body)\n---\n<article class=\"bp-paper-surface\" set:html={html} />"
+          },
+          {
+            "id": "co-11",
+            "type": "callout",
+            "tone": "info",
+            "title": "Same stylesheet",
+            "content": [
+              {
+                "type": "text",
+                "value": "Ship paper-surface.css and the Astro output looks identical to the Next and Phoenix output."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-nextjs",
+        "_type": "entry",
+        "title": "Next.js",
+        "status": "published",
+        "slug": "nextjs",
+        "kind": "framework",
+        "summary": "The default deployable surface — App Router, Server Components, ISR.",
+        "related": "entry-react-renderer",
+        "links": [
+          "entry-static-generation",
+          "entry-webhooks",
+          "entry-barkpark"
+        ],
+        "body": [
+          {
+            "id": "h-12",
+            "type": "heading",
+            "level": 1,
+            "text": "Next.js"
+          },
+          {
+            "id": "p-13",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "The starter deploys as a Next.js app. Server Components fetch published documents at build time; a webhook revalidates the cache when content changes."
+              }
+            ]
+          },
+          {
+            "id": "ls-14",
+            "type": "list",
+            "ordered": true,
+            "items": [
+              "Fetch published entries server-side.",
+              "Render bodies with PortableDoc.",
+              "Revalidate on the content webhook."
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-static-generation",
+        "_type": "entry",
+        "title": "Static generation",
+        "status": "published",
+        "slug": "static-generation",
+        "kind": "pattern",
+        "summary": "Pre-render pages at build time for instant loads and cheap hosting.",
+        "related": "entry-nextjs",
+        "links": [
+          "entry-edge-cache",
+          "entry-webhooks",
+          "entry-premium"
+        ],
+        "body": [
+          {
+            "id": "h-15",
+            "type": "heading",
+            "level": 1,
+            "text": "Static generation"
+          },
+          {
+            "id": "in-16",
+            "type": "ingress",
+            "text": "Do the work once, at build time. Serve HTML that was ready before the request arrived."
+          },
+          {
+            "id": "p-17",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Static pages are the fastest thing you can serve and the cheapest to host. Combined with a content webhook, they stay fresh without going dynamic."
+              }
+            ]
+          },
+          {
+            "id": "co-18",
+            "type": "callout",
+            "tone": "success",
+            "title": "Fast by default",
+            "content": [
+              {
+                "type": "text",
+                "value": "A pre-rendered page needs no database round-trip at request time — it is already HTML on a CDN."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-edge-cache",
+        "_type": "entry",
+        "title": "Edge cache",
+        "status": "published",
+        "slug": "edge-cache",
+        "kind": "pattern",
+        "summary": "Serve pre-rendered content from the network edge, close to every visitor.",
+        "related": "entry-static-generation",
+        "links": [
+          "entry-webhooks",
+          "entry-premium"
+        ],
+        "body": [
+          {
+            "id": "h-19",
+            "type": "heading",
+            "level": 1,
+            "text": "Edge cache"
+          },
+          {
+            "id": "p-1a",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "An edge cache puts your rendered pages in dozens of locations worldwide. The first byte arrives from a server near the visitor, not from a single origin."
+              }
+            ]
+          },
+          {
+            "id": "tb-1b",
+            "type": "table",
+            "head": [
+              "Origin only",
+              "Edge cache"
+            ],
+            "rows": [
+              [
+                "One location",
+                "Everywhere"
+              ],
+              [
+                "Cold on every miss",
+                "Warm near the user"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-webhooks",
+        "_type": "entry",
+        "title": "Webhooks",
+        "status": "published",
+        "slug": "webhooks",
+        "kind": "feature",
+        "summary": "Signed cache-revalidation callbacks fired when content changes.",
+        "related": "entry-static-generation",
+        "links": [
+          "entry-nextjs",
+          "entry-api"
+        ],
+        "body": [
+          {
+            "id": "h-1c",
+            "type": "heading",
+            "level": 1,
+            "text": "Webhooks"
+          },
+          {
+            "id": "p-1d",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "When a document is published, Barkpark POSTs a signed webhook to your site. The site verifies the HMAC signature and revalidates only what changed."
+              }
+            ]
+          },
+          {
+            "id": "co-1e",
+            "type": "callout",
+            "tone": "warning",
+            "title": "Verify the signature",
+            "content": [
+              {
+                "type": "text",
+                "value": "The webhook carries a shared secret minted at bootstrap. Reject any payload whose signature does not match."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-search",
+        "_type": "entry",
+        "title": "Search",
+        "status": "published",
+        "slug": "search",
+        "kind": "feature",
+        "summary": "Full-text search over your documents — the beating heart of this template.",
+        "related": "entry-barkpark",
+        "links": [
+          "entry-graph",
+          "entry-facets",
+          "entry-relevance",
+          "entry-fts"
+        ],
+        "body": [
+          {
+            "id": "eb-1f",
+            "type": "eyebrow",
+            "text": "Feature"
+          },
+          {
+            "id": "h-1g",
+            "type": "heading",
+            "level": 1,
+            "text": "Search"
+          },
+          {
+            "id": "in-1h",
+            "type": "ingress",
+            "text": "Type a word; get ranked documents. This starter puts search — and the graph behind it — front and centre."
+          },
+          {
+            "id": "p-1i",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Search is what makes a content site feel alive. Barkpark indexes your documents so a query returns ranked matches instantly, with facets to narrow and a graph to explore."
+              }
+            ]
+          },
+          {
+            "id": "h-1j",
+            "type": "heading",
+            "level": 2,
+            "text": "What powers it"
+          },
+          {
+            "id": "ls-1k",
+            "type": "list",
+            "ordered": false,
+            "items": [
+              "Postgres full-text search for ranking.",
+              "Facets from your schema fields.",
+              "A force graph from your reference edges."
+            ]
+          },
+          {
+            "id": "co-1l",
+            "type": "callout",
+            "tone": "info",
+            "title": "The graph is the demo",
+            "content": [
+              {
+                "type": "text",
+                "value": "Search results are useful; the constellation of linked results is what makes visitors say \"how did you build this so fast?\""
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-graph",
+        "_type": "entry",
+        "title": "Force graph",
+        "status": "published",
+        "slug": "graph",
+        "kind": "feature",
+        "summary": "A physics-driven map of your documents and the references between them.",
+        "related": "entry-search",
+        "links": [
+          "entry-references",
+          "entry-edges",
+          "entry-graph-endpoint",
+          "entry-portabledoc"
+        ],
+        "body": [
+          {
+            "id": "eb-1m",
+            "type": "eyebrow",
+            "text": "Feature"
+          },
+          {
+            "id": "h-1n",
+            "type": "heading",
+            "level": 1,
+            "text": "Force graph"
+          },
+          {
+            "id": "in-1o",
+            "type": "ingress",
+            "text": "Nodes are documents; edges are references. A physics simulation lays them out so structure becomes visible."
+          },
+          {
+            "id": "p-1p",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "The force graph reads /v1/graph and draws every document as a node and every reference as an edge. Hubs float to the centre; leaves drift to the rim. It is the single most striking thing on the page — and it comes for free the moment your content has references."
+              }
+            ]
+          },
+          {
+            "id": "co-1q",
+            "type": "callout",
+            "tone": "success",
+            "title": "Zero extra work",
+            "content": [
+              {
+                "type": "text",
+                "value": "You do not build the graph. You author references in your schema and the graph draws itself."
+              }
+            ]
+          },
+          {
+            "id": "pq-1r",
+            "type": "pullquote",
+            "content": [
+              {
+                "type": "text",
+                "value": "Give people a map and they explore. Give them a list and they bounce."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-references",
+        "_type": "entry",
+        "title": "Reference fields",
+        "status": "published",
+        "slug": "references",
+        "kind": "concept",
+        "summary": "Schema fields that point at other documents — scalar and arrayOf.",
+        "related": "entry-graph",
+        "links": [
+          "entry-schema",
+          "entry-edges",
+          "entry-arrayof"
+        ],
+        "body": [
+          {
+            "id": "h-1s",
+            "type": "heading",
+            "level": 1,
+            "text": "Reference fields"
+          },
+          {
+            "id": "p-1t",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "A reference field holds the id of another document. Barkpark supports a scalar reference (one target) and an arrayOf-of-reference (many targets). Both become edges in the graph."
+              }
+            ]
+          },
+          {
+            "id": "cd-1u",
+            "type": "code",
+            "value": "{ \"name\": \"related\", \"type\": \"reference\", \"refType\": \"entry\" }\n{ \"name\": \"links\", \"type\": \"arrayOf\", \"of\": { \"type\": \"reference\", \"refType\": \"entry\" } }"
+          },
+          {
+            "id": "co-1v",
+            "type": "callout",
+            "tone": "info",
+            "title": "Both are edges",
+            "content": [
+              {
+                "type": "text",
+                "value": "The edge extractor walks scalar and array reference fields alike — the kind of the edge is the field name."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-arrayof",
+        "_type": "entry",
+        "title": "arrayOf reference",
+        "status": "published",
+        "slug": "arrayof",
+        "kind": "concept",
+        "summary": "A field holding many references — every element becomes its own edge.",
+        "related": "entry-references",
+        "links": [
+          "entry-edges",
+          "entry-schema"
+        ],
+        "body": [
+          {
+            "id": "h-1w",
+            "type": "heading",
+            "level": 1,
+            "text": "arrayOf reference"
+          },
+          {
+            "id": "p-1x",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "An arrayOf-of-reference field stores a list of document ids. The edge extractor emits one edge per non-empty element, so a single field can wire a node to a dozen others."
+              }
+            ]
+          },
+          {
+            "id": "ls-1y",
+            "type": "list",
+            "ordered": true,
+            "items": [
+              "Store bare sibling ids in the array.",
+              "Each element is one outbound edge.",
+              "A missing target would render as a phantom node."
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-edges",
+        "_type": "entry",
+        "title": "Edges",
+        "status": "published",
+        "slug": "edges",
+        "kind": "concept",
+        "summary": "The directed links the graph draws, extracted from your reference fields.",
+        "related": "entry-references",
+        "links": [
+          "entry-graph",
+          "entry-graph-endpoint"
+        ],
+        "body": [
+          {
+            "id": "h-1z",
+            "type": "heading",
+            "level": 1,
+            "text": "Edges"
+          },
+          {
+            "id": "p-20",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "An edge is a directed link from one document to another. Barkpark extracts edges at read time from every reference field; the edge kind is the field name, so distinct fields colour distinctly in the graph."
+              }
+            ]
+          },
+          {
+            "id": "co-21",
+            "type": "callout",
+            "tone": "warning",
+            "title": "Dangling edges",
+            "content": [
+              {
+                "type": "text",
+                "value": "If a reference points at an id that does not exist, the graph shows a phantom node. This starter’s seed-lint refuses to ship a dangling reference."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-graph-endpoint",
+        "_type": "entry",
+        "title": "/v1/graph",
+        "status": "published",
+        "slug": "graph-endpoint",
+        "kind": "feature",
+        "summary": "The endpoint the force graph reads — nodes and edges for the Default workspace.",
+        "related": "entry-edges",
+        "links": [
+          "entry-api",
+          "entry-graph"
+        ],
+        "body": [
+          {
+            "id": "h-22",
+            "type": "heading",
+            "level": 1,
+            "text": "/v1/graph"
+          },
+          {
+            "id": "p-23",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "The flat /v1/graph endpoint returns the nodes and edges of the Default workspace. The force graph fetches it once and simulates from there."
+              }
+            ]
+          },
+          {
+            "id": "cd-24",
+            "type": "code",
+            "value": "GET /v1/graph  →  { nodes: [...], edges: [...] }"
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-facets",
+        "_type": "entry",
+        "title": "Facets",
+        "status": "published",
+        "slug": "facets",
+        "kind": "pattern",
+        "summary": "Narrow search results by schema fields like kind or tag.",
+        "related": "entry-search",
+        "links": [
+          "entry-relevance",
+          "entry-schema"
+        ],
+        "body": [
+          {
+            "id": "h-25",
+            "type": "heading",
+            "level": 1,
+            "text": "Facets"
+          },
+          {
+            "id": "p-26",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Facets turn a schema field into a filter. Group entries by kind, click a value, and the result set narrows without a new query."
+              }
+            ]
+          },
+          {
+            "id": "ls-27",
+            "type": "list",
+            "ordered": false,
+            "items": [
+              "concept",
+              "feature",
+              "pattern",
+              "framework",
+              "guide"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-relevance",
+        "_type": "entry",
+        "title": "Relevance ranking",
+        "status": "published",
+        "slug": "relevance",
+        "kind": "pattern",
+        "summary": "Order search results by how well they match — not just whether they match.",
+        "related": "entry-search",
+        "links": [
+          "entry-fts",
+          "entry-facets"
+        ],
+        "body": [
+          {
+            "id": "h-28",
+            "type": "heading",
+            "level": 1,
+            "text": "Relevance ranking"
+          },
+          {
+            "id": "p-29",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "A good search ranks a title match above a body match and a phrase match above a scattered one. Barkpark leans on Postgres full-text ranking so the best answer floats to the top."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-fts",
+        "_type": "entry",
+        "title": "Full-text search",
+        "status": "published",
+        "slug": "fts",
+        "kind": "feature",
+        "summary": "Postgres FTS over your documents — fast, ranked, and built in.",
+        "related": "entry-relevance",
+        "links": [
+          "entry-search",
+          "entry-api"
+        ],
+        "body": [
+          {
+            "id": "h-2a",
+            "type": "heading",
+            "level": 1,
+            "text": "Full-text search"
+          },
+          {
+            "id": "p-2b",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Barkpark indexes your document text with Postgres full-text search. Queries return ranked matches in milliseconds, with no external search service to run."
+              }
+            ]
+          },
+          {
+            "id": "co-2c",
+            "type": "callout",
+            "tone": "success",
+            "title": "No extra infrastructure",
+            "content": [
+              {
+                "type": "text",
+                "value": "The search index lives in the same database as your content — one fewer moving part to operate."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-schema",
+        "_type": "entry",
+        "title": "Schema",
+        "status": "published",
+        "slug": "schema",
+        "kind": "concept",
+        "summary": "The typed shape of a document — fields, references, and surfaces.",
+        "related": "entry-barkpark",
+        "links": [
+          "entry-references",
+          "entry-fields",
+          "entry-visibility"
+        ],
+        "body": [
+          {
+            "id": "h-2d",
+            "type": "heading",
+            "level": 1,
+            "text": "Schema"
+          },
+          {
+            "id": "in-2e",
+            "type": "ingress",
+            "text": "A schema declares what a document is: its fields, their types, and where they live."
+          },
+          {
+            "id": "p-2f",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "The entry schema in this starter declares a title, a PortableDocument body, a summary, a kind, a scalar reference, and an arrayOf reference. That is all the graph needs to come alive."
+              }
+            ]
+          },
+          {
+            "id": "tb-2g",
+            "type": "table",
+            "head": [
+              "Field",
+              "Type"
+            ],
+            "rows": [
+              [
+                "title",
+                "string"
+              ],
+              [
+                "body",
+                "portableDocument"
+              ],
+              [
+                "related",
+                "reference"
+              ],
+              [
+                "links",
+                "arrayOf reference"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-fields",
+        "_type": "entry",
+        "title": "Fields",
+        "status": "published",
+        "slug": "fields",
+        "kind": "concept",
+        "summary": "The named, typed slots of a schema.",
+        "related": "entry-schema",
+        "links": [
+          "entry-references",
+          "entry-visibility"
+        ],
+        "body": [
+          {
+            "id": "h-2h",
+            "type": "heading",
+            "level": 1,
+            "text": "Fields"
+          },
+          {
+            "id": "p-2i",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "A field has a name, a type, and an optional surface that tells Studio whether it belongs in the article body or the sidebar rail."
+              }
+            ]
+          },
+          {
+            "id": "ls-2j",
+            "type": "list",
+            "ordered": false,
+            "items": [
+              "body — reads as part of the article",
+              "sidebar — slugs, taxonomies, relations, dates"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-visibility",
+        "_type": "entry",
+        "title": "Visibility",
+        "status": "published",
+        "slug": "visibility",
+        "kind": "concept",
+        "summary": "Public documents answer anonymous reads; private ones need a token.",
+        "related": "entry-schema",
+        "links": [
+          "entry-api",
+          "entry-tokens"
+        ],
+        "body": [
+          {
+            "id": "h-2k",
+            "type": "heading",
+            "level": 1,
+            "text": "Visibility"
+          },
+          {
+            "id": "p-2l",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "A public schema answers anonymous reads; a private one returns 404 unless the caller carries a token. The entry type here is public, so your search page can read it without a secret."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-api",
+        "_type": "entry",
+        "title": "HTTP API",
+        "status": "published",
+        "slug": "api",
+        "kind": "feature",
+        "summary": "The scoped REST surface your site reads content from.",
+        "related": "entry-barkpark",
+        "links": [
+          "entry-tokens",
+          "entry-graph-endpoint",
+          "entry-sdk"
+        ],
+        "body": [
+          {
+            "id": "h-2m",
+            "type": "heading",
+            "level": 1,
+            "text": "HTTP API"
+          },
+          {
+            "id": "p-2n",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Every surface reads the same HTTP API. Queries, the graph, media, and webhooks are all plain scoped REST calls."
+              }
+            ]
+          },
+          {
+            "id": "cd-2o",
+            "type": "code",
+            "value": "GET /w/<ws>/p/default/v1/data/query/production/entry"
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-tokens",
+        "_type": "entry",
+        "title": "Tokens",
+        "status": "published",
+        "slug": "tokens",
+        "kind": "concept",
+        "summary": "Scoped bearer credentials — read-only public-read for the site.",
+        "related": "entry-api",
+        "links": [
+          "entry-visibility",
+          "entry-sdk"
+        ],
+        "body": [
+          {
+            "id": "h-2p",
+            "type": "heading",
+            "level": 1,
+            "text": "Tokens"
+          },
+          {
+            "id": "p-2q",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "The bootstrap mints a workspace-bound public-read token for your site. It is read-only and scoped, so shipping it server-side is safe."
+              }
+            ]
+          },
+          {
+            "id": "co-2r",
+            "type": "callout",
+            "tone": "warning",
+            "title": "Server-only",
+            "content": [
+              {
+                "type": "text",
+                "value": "Keep the read token on the server. It never needs to reach the browser."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-sdk",
+        "_type": "entry",
+        "title": "JS SDK",
+        "status": "published",
+        "slug": "sdk",
+        "kind": "feature",
+        "summary": "Typed client for reading Barkpark content from JavaScript.",
+        "related": "entry-api",
+        "links": [
+          "entry-react-renderer",
+          "entry-nextjs"
+        ],
+        "body": [
+          {
+            "id": "h-2s",
+            "type": "heading",
+            "level": 1,
+            "text": "JS SDK"
+          },
+          {
+            "id": "p-2t",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "The JS SDK wraps the HTTP API in a typed client. Fetch documents, follow references, and hand bodies straight to the PortableDoc renderer."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-studio",
+        "_type": "entry",
+        "title": "Studio",
+        "status": "published",
+        "slug": "studio",
+        "kind": "feature",
+        "summary": "The LiveView editing surface — where authors shape content.",
+        "related": "entry-barkpark",
+        "links": [
+          "entry-schema",
+          "entry-portabledoc",
+          "entry-tui"
+        ],
+        "body": [
+          {
+            "id": "h-2u",
+            "type": "heading",
+            "level": 1,
+            "text": "Studio"
+          },
+          {
+            "id": "p-2v",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Studio is the browser editing surface. Authors edit documents against the schema, arrange PortableDocument blocks, and publish — the site updates live."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-tui",
+        "_type": "entry",
+        "title": "Go TUI",
+        "status": "published",
+        "slug": "tui",
+        "kind": "feature",
+        "summary": "A terminal surface that renders the same documents and papers.",
+        "related": "entry-studio",
+        "links": [
+          "entry-portabledoc",
+          "entry-barkpark"
+        ],
+        "body": [
+          {
+            "id": "h-2w",
+            "type": "heading",
+            "level": 1,
+            "text": "Go TUI"
+          },
+          {
+            "id": "p-2x",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "The Go TUI renders the same PortableDocuments in a terminal. Proof that the content model is truly surface-independent — a paper looks right even in a shell."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-premium",
+        "_type": "entry",
+        "title": "Premium by default",
+        "status": "published",
+        "slug": "premium",
+        "kind": "guide",
+        "summary": "Why this stack ships high-quality sites fast, without worries.",
+        "related": "entry-barkpark",
+        "links": [
+          "entry-static-generation",
+          "entry-render-parity",
+          "entry-search",
+          "entry-deploy"
+        ],
+        "body": [
+          {
+            "id": "eb-2y",
+            "type": "eyebrow",
+            "text": "Guide"
+          },
+          {
+            "id": "h-2z",
+            "type": "heading",
+            "level": 1,
+            "text": "Premium by default"
+          },
+          {
+            "id": "in-30",
+            "type": "ingress",
+            "text": "High quality is not a phase you add at the end. It is what falls out of the right defaults."
+          },
+          {
+            "id": "p-31",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "This template hands you a fast, searchable, beautifully-typeset site on the first deploy. Static generation makes it quick; render parity makes it consistent; the graph makes it memorable."
+              }
+            ]
+          },
+          {
+            "id": "ls-32",
+            "type": "list",
+            "ordered": true,
+            "items": [
+              "Deploy the template.",
+              "The seed fills the graph.",
+              "Search and the constellation work immediately."
+            ]
+          },
+          {
+            "id": "co-33",
+            "type": "callout",
+            "tone": "success",
+            "title": "No worries",
+            "content": [
+              {
+                "type": "text",
+                "value": "You do not tune a search cluster or hand-build a graph. You author content and the premium experience is already there."
+              }
+            ]
+          },
+          {
+            "id": "pq-34",
+            "type": "pullquote",
+            "content": [
+              {
+                "type": "text",
+                "value": "The fastest way to look expensive is to start from a template that already is."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-deploy",
+        "_type": "entry",
+        "title": "Deploy",
+        "status": "published",
+        "slug": "deploy",
+        "kind": "guide",
+        "summary": "One button from the dashboard to a live, seeded, searchable site.",
+        "related": "entry-premium",
+        "links": [
+          "entry-nextjs",
+          "entry-webhooks",
+          "entry-barkpark"
+        ],
+        "body": [
+          {
+            "id": "h-35",
+            "type": "heading",
+            "level": 1,
+            "text": "Deploy"
+          },
+          {
+            "id": "in-36",
+            "type": "ingress",
+            "text": "Pick the template in the dashboard, click deploy, and land on a working site — not an empty box."
+          },
+          {
+            "id": "p-37",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "The deploy flow creates a workspace, installs the entry schema, seeds this corpus, publishes it, mints a read token, and wires a revalidation webhook. By the time the site is live, the graph is already glowing."
+              }
+            ]
+          },
+          {
+            "id": "co-38",
+            "type": "callout",
+            "tone": "info",
+            "title": "Available in the dashboard",
+            "content": [
+              {
+                "type": "text",
+                "value": "This template shows up when you create a site — no ad-hoc install script to run."
+              }
+            ]
+          },
+          {
+            "id": "dv-39",
+            "type": "divider"
+          },
+          {
+            "id": "p-3a",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "That is the whole point: the fastest way to set up something genuinely high quality, without worries."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-content-model",
+        "_type": "entry",
+        "title": "Content model",
+        "status": "published",
+        "slug": "content-model",
+        "kind": "concept",
+        "summary": "The single shape all your surfaces agree on.",
+        "related": "entry-schema",
+        "links": [
+          "entry-barkpark",
+          "entry-portabledoc"
+        ],
+        "body": [
+          {
+            "id": "h-3b",
+            "type": "heading",
+            "level": 1,
+            "text": "Content model"
+          },
+          {
+            "id": "p-3c",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "The content model is the contract between authors and surfaces. Define it once and every renderer honours it — that is what \"one model, many surfaces\" means in practice."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-publishing",
+        "_type": "entry",
+        "title": "Publishing",
+        "status": "published",
+        "slug": "publishing",
+        "kind": "concept",
+        "summary": "Drafts become public when you publish — the graph reads published only.",
+        "related": "entry-studio",
+        "links": [
+          "entry-visibility",
+          "entry-webhooks"
+        ],
+        "body": [
+          {
+            "id": "h-3d",
+            "type": "heading",
+            "level": 1,
+            "text": "Publishing"
+          },
+          {
+            "id": "p-3e",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Edits land as drafts. Publishing promotes a draft to the public record. Anonymous reads — and the force graph — see only published documents, so work-in-progress never leaks."
+              }
+            ]
+          },
+          {
+            "id": "co-3f",
+            "type": "callout",
+            "tone": "info",
+            "title": "Graph reads published",
+            "content": [
+              {
+                "type": "text",
+                "value": "Only published entries appear in /v1/graph, so the constellation always reflects what your visitors can actually see."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-media",
+        "_type": "entry",
+        "title": "Media",
+        "status": "published",
+        "slug": "media",
+        "kind": "feature",
+        "summary": "Images and assets that ride alongside your documents.",
+        "related": "entry-barkpark",
+        "links": [
+          "entry-portabledoc",
+          "entry-studio"
+        ],
+        "body": [
+          {
+            "id": "h-3g",
+            "type": "heading",
+            "level": 1,
+            "text": "Media"
+          },
+          {
+            "id": "p-3h",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Media assets live in their own library and drop into PortableDocument bodies as image blocks. The renderer skips an asset-less image on read, so scaffolding never leaks to visitors."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-workspace",
+        "_type": "entry",
+        "title": "Workspace",
+        "status": "published",
+        "slug": "workspace",
+        "kind": "concept",
+        "summary": "The tenant boundary — this starter seeds into Default.",
+        "related": "entry-barkpark",
+        "links": [
+          "entry-api",
+          "entry-graph-endpoint"
+        ],
+        "body": [
+          {
+            "id": "h-3i",
+            "type": "heading",
+            "level": 1,
+            "text": "Workspace"
+          },
+          {
+            "id": "p-3j",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "A workspace is a tenant boundary around a set of documents. The flat /v1/graph reads the Default workspace, which is exactly where this starter seeds — so the graph lights up with no extra scoping."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "createOrReplace": {
+        "_id": "entry-quality",
+        "_type": "entry",
+        "title": "Quality bar",
+        "status": "published",
+        "slug": "quality",
+        "kind": "guide",
+        "summary": "Honest states, safe actions, immediate feedback — the craft baseline.",
+        "related": "entry-premium",
+        "links": [
+          "entry-render-parity",
+          "entry-static-generation"
+        ],
+        "body": [
+          {
+            "id": "eb-3k",
+            "type": "eyebrow",
+            "text": "Guide"
+          },
+          {
+            "id": "h-3l",
+            "type": "heading",
+            "level": 1,
+            "text": "Quality bar"
+          },
+          {
+            "id": "p-3m",
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "value": "Premium is loading states that are honest, empty states that guide, and actions that feel instant. This template holds that bar so you start above it, not below."
+              }
+            ]
+          },
+          {
+            "id": "ls-3n",
+            "type": "list",
+            "ordered": false,
+            "items": [
+              "Honest loading, empty, and error states.",
+              "Safe, reversible actions.",
+              "Immediate visual feedback."
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

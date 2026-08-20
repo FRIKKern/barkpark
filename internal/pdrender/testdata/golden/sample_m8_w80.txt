@@ -1,16 +1,12 @@
 OVERFLOW BOUNDARY                                                               
 ─────────────────                                                               
                                                                                 
- artifactchecksum9f8e7d6c5b4a3f2e1d0c9b                                         
-────────────────────────────────────────────────────────────────────────────────
-Right.                                                                          
+ artifactchecksum9f8e7d6c5b4a3f2e1d0c9b  Right.                                 
                                                                                 
 ────────────────────────────────────────────────────────────────────────────────
 Grid cell overflow                                                              
                                                                                 
- artifactchecksum9f8e7d6c5b4a3f2e1d0c9b                                         
-                                                                                
-Second cell is short.                                                           
+ artifactchecksum9f8e7d6c5b4a3f2e1d0c9b  Second cell is short.                  
 ────────────────────────────────────────────────────────────────────────────────
                                                                                 
 Ready  1                                                                        

@@ -63,7 +63,7 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 		return exitOK
 	}
 
-	toolset, httpAddr, err := parseMCPServeArgs(tail)
+	toolset, nouns, httpAddr, err := parseMCPServeArgs(tail)
 	if err != nil {
 		return usageErrf(out, func() { printMCPServeHelp(out) }, "%v", err)
 	}
@@ -79,19 +79,19 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 	}
 
 	if httpAddr != "" {
-		return runMCPServeHTTP(out, g, ctx, m, toolset, httpAddr)
+		return runMCPServeHTTP(out, g, ctx, m, toolset, nouns, httpAddr)
 	}
 
 	// Stdio mode: one server instance, the process's own credential (env/config),
 	// papers enumerated once at startup for resources/list.
-	srv, err := buildMCPServer(out, g, ctx, m, toolset, true)
+	srv, err := buildMCPServer(out, g, ctx, m, toolset, nouns, true)
 	if err != nil {
 		out.userErr("mcp serve: %v", err)
 		return exitGeneric
 	}
 
 	// Announce readiness on stderr (never stdout — that pipe is the protocol).
-	out.errf("bp mcp serve: %s tools over stdio (server %s) — Ctrl-C to stop", toolset, ctx.Server)
+	out.errf("bp mcp serve: %s tools over stdio (server %s) — Ctrl-C to stop", toolsetLabel(toolset, nouns), ctx.Server)
 
 	// A signalled process (Ctrl-C, SIGTERM) cancels the context so Run returns
 	// cleanly instead of leaving a zombie on the pipe. Run also returns on its own
@@ -134,7 +134,15 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 // failure leaves NOTHING half-registered on srv; and bridgeShadowedIDs is inert
 // when the task verbs are absent (there is no twin to skip) — so continuing is
 // safe. out is stderr-only diagnostics (decision 4).
-func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, toolset string, enumeratePapers bool) (*mcp.Server, error) {
+//
+// Under the "subset" toolset (--tools <noun,noun>) the server is BRIDGE-ONLY,
+// filtered to the named nouns (registerBridgeToolsFiltered): the curated task
+// tools are NOT registered, and the bridgeShadowedIDs skip stays active (inert
+// for non-task nouns; a `--tools task` whose task verbs are all curated-shadowed
+// correctly yields zero). An unknown noun matches nothing → zero tools, the
+// honest 0-install surface. This is the connector-scoped Cloud surface (D24
+// knob 3, Go half): expose exactly the workspace's connected nouns, nothing else.
+func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, toolset string, nouns []string, enumeratePapers bool) (*mcp.Server, error) {
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "barkpark-tasks",
 		Title:   "Barkpark Tasks",
@@ -146,6 +154,19 @@ func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 	// stdin-reading confirm prompt would hang a server whose stdin is the
 	// protocol pipe (stdio) or does not exist (HTTP).
 	g.yes = true
+
+	if toolset == "subset" {
+		// Bridge-only, filtered to the named nouns — no curated task tools.
+		if err := registerBridgeToolsFiltered(srv, g, ctx, m, nouns); err != nil {
+			return nil, fmt.Errorf("register bridge tools: %w", err)
+		}
+		if enumeratePapers {
+			registerPaperResources(out, srv, g, ctx, m)
+		} else {
+			registerPaperResourceTemplateOnly(out, srv, g, ctx, m)
+		}
+		return srv, nil
+	}
 
 	if err := registerTaskTools(srv, g, ctx, m); err != nil {
 		if toolset != "all" {
@@ -159,6 +180,16 @@ func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 			return nil, fmt.Errorf("register bridge tools: %w", err)
 		}
 	}
+
+	// The four curated chat session tools (herd charter D74h) ride BOTH tasks
+	// and all — this single assembly is what `bp mcp serve` (default tasks) and
+	// the Studio loopback (`--tools all`, registered as "barkpark") build, so
+	// registering here is what puts them on both surfaces. Hardcoded /v1/chat
+	// wrappers, deliberately NOT manifest-backed (chat.* is existence-hidden at
+	// write tier — a Lookup would silently skip them on the loopback); infallible,
+	// so the batch-first invariant holds. The noun-subset surface above stays
+	// bridge-only by design and does not carry them.
+	registerChatTools(srv, ctx)
 
 	// Published papers as read-only MCP resources — independent of --tools (the
 	// 40-tool Cursor cap is about TOOLS, not resources). Wholly best-effort: on
@@ -213,8 +244,8 @@ func registerPaperResourceTemplateOnly(out *writer, srv *mcp.Server, g globals, 
 // signalled. Stateless mode: the SDK calls getServer for every request, and the
 // per-request server is built around THAT request's Authorization bearer — the
 // forward-through design (charter D18). Returns the exit code.
-func runMCPServeHTTP(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, toolset, addr string) int {
-	handler, err := newMCPHTTPHandler(out, g, ctx, m, toolset)
+func runMCPServeHTTP(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, toolset string, nouns []string, addr string) int {
+	handler, err := newMCPHTTPHandler(out, g, ctx, m, toolset, nouns)
 	if err != nil {
 		out.userErr("mcp serve: %v", err)
 		return exitGeneric
@@ -229,7 +260,7 @@ func runMCPServeHTTP(out *writer, g globals, ctx manifest.Context, m *manifest.M
 
 	// stderr for diagnostics, same discipline as stdio mode (decision 4) — and
 	// never a token byte: the process holds no credential to leak.
-	out.errf("bp mcp serve: %s tools over Streamable HTTP on %s (server %s, forward-through bearer) — Ctrl-C to stop", toolset, ln.Addr(), ctx.Server)
+	out.errf("bp mcp serve: %s tools over Streamable HTTP on %s (server %s, forward-through bearer) — Ctrl-C to stop", toolsetLabel(toolset, nouns), ln.Addr(), ctx.Server)
 
 	httpSrv := &http.Server{Handler: handler}
 	runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -276,7 +307,7 @@ func runMCPServeHTTP(out *writer, g globals, ctx manifest.Context, m *manifest.M
 // No RequireBearerToken pre-verify in v1 (charter D18): Barkpark has no
 // bearer-gated verify-only route, and the SDK middleware rejects TokenInfo
 // without an expiry while Barkpark tokens legitimately never expire.
-func newMCPHTTPHandler(out *writer, g globals, base manifest.Context, m *manifest.Manifest, toolset string) (http.Handler, error) {
+func newMCPHTTPHandler(out *writer, g globals, base manifest.Context, m *manifest.Manifest, toolset string, nouns []string) (http.Handler, error) {
 	// No ambient credential, ever: scrub the process token from the base context
 	// (belt-and-braces — getServer overwrites Token per request regardless).
 	base.Token = ""
@@ -284,7 +315,7 @@ func newMCPHTTPHandler(out *writer, g globals, base manifest.Context, m *manifes
 	// Fail fast at startup exactly like stdio: if the manifest cannot back the
 	// requested toolset, refuse to come up (and surface any bridge-only warning
 	// ONCE, here, instead of per request).
-	if _, err := buildMCPServer(out, g, base, m, toolset, false); err != nil {
+	if _, err := buildMCPServer(out, g, base, m, toolset, nouns, false); err != nil {
 		return nil, err
 	}
 
@@ -296,7 +327,7 @@ func newMCPHTTPHandler(out *writer, g globals, base manifest.Context, m *manifes
 	getServer := func(req *http.Request) *mcp.Server {
 		ctx := base
 		ctx.Token = bearerFromRequest(req)
-		srv, err := buildMCPServer(quiet, g, ctx, m, toolset, false)
+		srv, err := buildMCPServer(quiet, g, ctx, m, toolset, nouns, false)
 		if err != nil {
 			return nil // cannot happen after the startup probe; SDK answers 400
 		}
@@ -324,11 +355,15 @@ func bearerFromRequest(req *http.Request) string {
 	return ""
 }
 
-// parseMCPServeArgs reads the `--tools tasks|all` selector (default "tasks")
-// and the `--http <addr>` transport switch (default "" = stdio) from the
-// command tail. It accepts both `--flag val` and `--flag=val` forms. Any other
-// flag/positional is a usage error so a typo is not silently ignored.
-func parseMCPServeArgs(tail []string) (toolset, httpAddr string, err error) {
+// parseMCPServeArgs reads the `--tools` selector (default "tasks") and the
+// `--http <addr>` transport switch (default "" = stdio) from the command tail.
+// It accepts both `--flag val` and `--flag=val` forms. Any other flag/positional
+// is a usage error so a typo is not silently ignored.
+//
+// The `--tools` value is one of two reserved toolset words (tasks|all) or a
+// comma-separated NOUN subset (e.g. "github,linear") → the "subset" toolset,
+// whose nouns are returned in `nouns`; the reserved words return `nouns == nil`.
+func parseMCPServeArgs(tail []string) (toolset string, nouns []string, httpAddr string, err error) {
 	toolset = "tasks"
 	for i := 0; i < len(tail); i++ {
 		a := tail[i]
@@ -340,38 +375,83 @@ func parseMCPServeArgs(tail []string) (toolset, httpAddr string, err error) {
 		case "--tools":
 			if !hasInline {
 				if i+1 >= len(tail) {
-					return "", "", fmt.Errorf("flag --tools needs a value (tasks|all)")
+					return "", nil, "", fmt.Errorf("flag --tools needs a value (tasks|all|<noun>[,<noun>…])")
 				}
 				val = tail[i+1]
 				i++
 			}
-			switch val {
-			case "tasks", "all":
-				toolset = val
-			default:
-				return "", "", fmt.Errorf("invalid --tools %q (want tasks|all)", val)
+			ts, ns, perr := parseToolsSelector(val)
+			if perr != nil {
+				return "", nil, "", perr
 			}
+			toolset, nouns = ts, ns
 		case "--http":
 			if !hasInline {
 				if i+1 >= len(tail) {
-					return "", "", fmt.Errorf("flag --http needs a listen address (e.g. 127.0.0.1:4010)")
+					return "", nil, "", fmt.Errorf("flag --http needs a listen address (e.g. 127.0.0.1:4010)")
 				}
 				val = tail[i+1]
 				i++
 			}
 			if strings.TrimSpace(val) == "" {
-				return "", "", fmt.Errorf("flag --http needs a listen address (e.g. 127.0.0.1:4010)")
+				return "", nil, "", fmt.Errorf("flag --http needs a listen address (e.g. 127.0.0.1:4010)")
 			}
 			httpAddr = val
 		default:
-			return "", "", fmt.Errorf("unknown argument %q (mcp serve accepts --tools tasks|all and --http <addr>)", a)
+			return "", nil, "", fmt.Errorf("unknown argument %q (mcp serve accepts --tools tasks|all|<noun>[,<noun>…] and --http <addr>)", a)
 		}
 	}
-	return toolset, httpAddr, nil
+	return toolset, nouns, httpAddr, nil
+}
+
+// parseToolsSelector interprets a `--tools` value. "tasks" and "all" are the two
+// reserved toolset words (nouns == nil). Anything else is a comma-separated list
+// of manifest nouns → the "subset" toolset, which serves ONLY those nouns'
+// commands as generic bridge tools (no curated task tools; buildMCPServer).
+//
+// Validation is purely SYNTACTIC: an empty comma token is rejected and the
+// reserved words tasks/all may not be MIXED into a noun list, but a noun's
+// existence is NOT checked here — the manifest loads only after this parse
+// (runMCPServe), and an unknown noun degrades to zero tools (the honest
+// 0-install behaviour), never a usage error. (github/linear are Catalog
+// connector providers, not bp manifest nouns; this flag filters whatever nouns
+// the target manifest actually declares — it is not itself the transport by
+// which a cloud agent reaches those services.)
+func parseToolsSelector(val string) (toolset string, nouns []string, err error) {
+	if strings.TrimSpace(val) == "" {
+		return "", nil, fmt.Errorf("flag --tools needs a value (tasks|all|<noun>[,<noun>…])")
+	}
+	switch val {
+	case "tasks", "all":
+		return val, nil, nil
+	}
+	parts := strings.Split(val, ",")
+	ns := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p == "" {
+			return "", nil, fmt.Errorf("invalid --tools %q: empty noun between commas", val)
+		}
+		switch p {
+		case "tasks", "all":
+			return "", nil, fmt.Errorf("invalid --tools %q: reserved word %q cannot appear in a noun list", val, p)
+		}
+		ns = append(ns, p)
+	}
+	return "subset", ns, nil
+}
+
+// toolsetLabel renders the toolset for a stderr announce line. The reserved
+// words print verbatim ("tasks"/"all"); a subset prints its noun list so the
+// operator sees exactly which nouns the server was scoped to.
+func toolsetLabel(toolset string, nouns []string) string {
+	if toolset == "subset" {
+		return "connector-subset[" + strings.Join(nouns, ",") + "]"
+	}
+	return toolset
 }
 
 func printMCPServeHelp(out *writer) {
-	out.outf(`usage: bp mcp serve [--tools tasks|all] [--http <addr>]
+	out.outf(`usage: bp mcp serve [--tools tasks|all|<noun>[,<noun>…]] [--http <addr>]
   Run a Model-Context-Protocol server exposing Barkpark to MCP clients
   (Cursor, Claude Desktop, any MCP host). Path B for task tracking — the
   MCP-native counterpart to the shell-based .cursor/rules/barkpark-tasks.mdc
@@ -379,11 +459,17 @@ func printMCPServeHelp(out *writer) {
   subprocess from your MCP client config, never interactively).
 
 flags:
-  --tools tasks|all   Which tools to expose. "tasks" (default) is the curated
+  --tools <sel>       Which tools to expose. "tasks" (default) is the curated
                       eight — task_ready, task_next, task_show, task_close,
-                      task_create, task_prime, task_stamp, task_pulse. "all"
+                      task_create, task_prime, task_stamp, task_pulse — plus
+                      the four chat session tools (chat_spawn_session,
+                      chat_send, chat_read_tail, chat_wait_for_state). "all"
                       additionally bridges every other bp capability into a
-                      generic tool.
+                      generic tool. A comma-separated NOUN list (e.g.
+                      "media,doc") serves ONLY those nouns' commands as generic
+                      bridge tools — no curated task tools; an unknown noun
+                      simply exposes nothing. This scopes the surface to a
+                      chosen subset of the target manifest's nouns.
   --http <addr>       Serve Streamable HTTP on <addr> (e.g. 127.0.0.1:4010)
                       instead of stdio, for REMOTE MCP clients. Forward-through
                       auth: each request's "Authorization: Bearer <token>" is

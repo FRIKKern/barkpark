@@ -184,15 +184,18 @@ defmodule Barkpark.PortableDoc.Render.PanelsEmail do
     end
   end
 
-  # role → glyph colour, matching the reader's `.bp-g--*` tone map
-  # (paper-surface.css:522-527): done/progress/blocked take a status TONE, ready
-  # takes the ink, open/cancel take the muted ink (charter D2).
+  # role → glyph colour, matching the reader's `.bp-g--*` tone map: done/progress/
+  # blocked take a status TONE, ready takes the ink, open/cancel take the muted ink
+  # (charter D2). The thought states (charter D9/D12): researching carries the violet
+  # tone (its one new hue), considering is dim so it reads as the muted ink.
   defp role_glyph_hex("done", _sk), do: tone_hex("ok")
   defp role_glyph_hex("progress", _sk), do: tone_hex("info")
   defp role_glyph_hex("blocked", _sk), do: tone_hex("warn")
+  defp role_glyph_hex("researching", _sk), do: tone_hex("violet")
   defp role_glyph_hex("ready", sk), do: sk.ink
   defp role_glyph_hex("open", sk), do: sk.muted
   defp role_glyph_hex("cancel", sk), do: sk.muted
+  defp role_glyph_hex("considering", sk), do: sk.muted
   defp role_glyph_hex(_role, sk), do: sk.ink
 
   # ── skin + tones ─────────────────────────────────────────────────────────────

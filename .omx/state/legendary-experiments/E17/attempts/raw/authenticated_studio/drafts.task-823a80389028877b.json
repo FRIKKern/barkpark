@@ -1,0 +1,20 @@
+{
+  "accepted_capture": false,
+  "block_reason": "AUTHENTICATED_SESSION_UNAVAILABLE_AND_CANDIDATE_NOT_DEPLOYED",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "candidate_materialized": false,
+  "candidate_source_sha256": "7f112533586d7c794ecd6d480f4189cc486a7998cfdf3c232f9e3be2784dd269",
+  "capture_sha256": null,
+  "evidence_boundary": "REAL_SURFACE_ATTEMPT_ONLY_NOT_A_CAPTURE",
+  "fixture_id": "drafts.task-823a80389028877b",
+  "observation": {
+    "body_bytes": 21,
+    "body_sha256": "d2dfdc9511fbeaa0701d1f8730f4989313b062ca1b61a2bd8bed8f4f5d654b5d",
+    "content_type": "application/json; charset=utf-8",
+    "final_url": "https://api.barkpark.cloud/w/default/p/default/d/production/studio/production/paper/candidate-lossless-semantic-tree--drafts.task-823a80389028877b",
+    "http_status": 404
+  },
+  "schema_version": "legendary-e17-real-surface-attempt/v1",
+  "surface": "authenticated_studio",
+  "target": "https://api.barkpark.cloud/w/default/p/default/d/production/studio/production/paper/candidate-lossless-semantic-tree--drafts.task-823a80389028877b"
+}

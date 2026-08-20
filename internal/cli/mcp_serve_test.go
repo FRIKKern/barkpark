@@ -28,10 +28,10 @@ const mcpTestManifest = `{
   "etag": "e",
   "nouns": [{"name": "task", "summary": "tasks"}],
   "commands": [
-    {"id":"task.ready","noun":"task","verb":"ready","summary":"ready","http":{"method":"GET","path_template":"/v1/tasks/ready"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table"},
-    {"id":"task.prime","noun":"task","verb":"prime","summary":"prime","http":{"method":"GET","path_template":"/v1/tasks/prime"},"auth_tier":"read","args":[],"flags":[{"name":"worker","type":"string","summary":"w"},{"name":"limit","type":"int","summary":"l"}],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"json"},
+    {"id":"task.ready","noun":"task","verb":"ready","summary":"ready","http":{"method":"GET","path_template":"/v1/tasks/ready"},"auth_tier":"read","args":[],"flags":[{"name":"order","type":"string","summary":"o"}],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table"},
+    {"id":"task.prime","noun":"task","verb":"prime","summary":"prime","http":{"method":"GET","path_template":"/v1/tasks/prime"},"auth_tier":"read","args":[],"flags":[{"name":"worker","type":"string","summary":"w"},{"name":"limit","type":"int","summary":"l"},{"name":"order","type":"string","summary":"o"}],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"json"},
     {"id":"task.get","noun":"task","verb":"get","summary":"get","http":{"method":"GET","path_template":"/v1/tasks/:doc_id"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"}],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"},
-    {"id":"task.next","noun":"task","verb":"next","summary":"next","http":{"method":"POST","path_template":"/v1/tasks/claim"},"auth_tier":"read","args":[{"name":"worker_id","required":true,"type":"string","summary":"w"}],"flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
+    {"id":"task.next","noun":"task","verb":"next","summary":"next","http":{"method":"POST","path_template":"/v1/tasks/claim"},"auth_tier":"read","args":[{"name":"worker_id","required":true,"type":"string","summary":"w"}],"flags":[{"name":"order","type":"string","summary":"o"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
     {"id":"task.close","noun":"task","verb":"close","summary":"close","http":{"method":"POST","path_template":"/v1/tasks/:doc_id/close"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"},{"name":"worker_id","required":true,"type":"string","summary":"w"},{"name":"observed_epoch","required":true,"type":"int","summary":"e"},{"name":"lifecycle_status","required":false,"type":"string","summary":"s"},{"name":"reason","required":false,"type":"string","summary":"r"}],"flags":[{"name":"set","repeatable":true,"type":"string","summary":"extra close-body fields"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
     {"id":"task.stamp","noun":"task","verb":"stamp","summary":"stamp","http":{"method":"POST","path_template":"/v1/tasks/:doc_id/stamp"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"},{"name":"worker_id","required":true,"type":"string","summary":"w"},{"name":"observed_epoch","required":true,"type":"int","summary":"e"}],"flags":[{"name":"criterion","type":"int","summary":"idx"},{"name":"met","type":"bool","summary":"m"},{"name":"evidence","type":"string","summary":"ev"},{"name":"miss","type":"bool","summary":"x"},{"name":"note","type":"string","summary":"n"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
     {"id":"task.pulse","noun":"task","verb":"pulse","summary":"pulse","http":{"method":"POST","path_template":"/v1/tasks/:doc_id/pulse"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"},{"name":"worker_id","required":true,"type":"string","summary":"w"}],"flags":[{"name":"now","type":"string","summary":"nowline"},{"name":"criterion","type":"int","summary":"idx"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"}
@@ -64,7 +64,7 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	// test can prove the MCP→tail→seam translation placed every field in the
 	// request body exactly as `bp task close … --set criteria:=[…]` would.
 	var closeBody []byte
-	var primeQuery string
+	var primeQuery, readyQuery, showQuery, nextQuery string
 	// stamp/pulse capture: body proves the positionals landed in the JSON body,
 	// query proves the flags rode as query params — the whole tail→seam translation.
 	var stampBody, pulseBody []byte
@@ -77,10 +77,13 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 			primeQuery = req.URL.RawQuery
 			io.WriteString(rw, `{"result":{"primed":true}}`)
 		case req.URL.Path == "/v1/tasks/ready":
+			readyQuery = req.URL.RawQuery
 			io.WriteString(rw, `{"result":{"tasks":[{"doc_id":"t1"}]}}`)
 		case req.URL.Path == "/v1/tasks/t1":
+			showQuery = req.URL.RawQuery
 			io.WriteString(rw, `{"result":{"doc_id":"t1","title":"first"}}`)
 		case req.URL.Path == "/v1/tasks/claim":
+			nextQuery = req.URL.RawQuery
 			// Empty queue: 200 with ok:false — a valid outcome, not an error.
 			io.WriteString(rw, `{"ok":false,"reason":"no_ready"}`)
 		case strings.HasSuffix(req.URL.Path, "/stamp"):
@@ -177,7 +180,7 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	// query; the backing response comes straight back as content, no error.
 	res0, err := cs.CallTool(bg, &mcp.CallToolParams{
 		Name:      "task_prime",
-		Arguments: map[string]any{"worker_id": "cursor-test", "limit": 5},
+		Arguments: map[string]any{"worker_id": "cursor-test", "limit": 5, "order": "closure_nearest"},
 	})
 	if err != nil {
 		t.Fatalf("CallTool task_prime: %v", err)
@@ -188,8 +191,23 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	if !strings.Contains(mcpContentText(res0), `"primed":true`) {
 		t.Fatalf("task_prime content = %q, want the prime body", mcpContentText(res0))
 	}
-	if !strings.Contains(primeQuery, "worker=cursor-test") || !strings.Contains(primeQuery, "limit=5") {
-		t.Fatalf("task_prime query = %q, want worker+limit as query params", primeQuery)
+	if !strings.Contains(primeQuery, "worker=cursor-test") || !strings.Contains(primeQuery, "limit=5") || !strings.Contains(primeQuery, "order=closure_nearest") {
+		t.Fatalf("task_prime query = %q, want worker+limit+closure order as query params", primeQuery)
+	}
+
+	readyResult, err := cs.CallTool(bg, &mcp.CallToolParams{
+		Name:      "task_ready",
+		Arguments: map[string]any{"limit": 3, "order": "closure_nearest"},
+	})
+	if err != nil || readyResult.IsError {
+		t.Fatalf("task_ready closure order failed: err=%v result=%s", err, mcpContentText(readyResult))
+	}
+	if !strings.Contains(readyQuery, "view=brief") || !strings.Contains(readyQuery, "limit=3") || !strings.Contains(readyQuery, "order=closure_nearest") {
+		t.Fatalf("task_ready query = %q, want brief view + limit + closure order", readyQuery)
+	}
+	// An MCP consumer is an agent: prime requests the brief view (AXI R1).
+	if !strings.Contains(primeQuery, "view=brief") {
+		t.Fatalf("task_prime query = %q, want view=brief", primeQuery)
 	}
 
 	// tools/call task_show — the backing response body rides back as content.
@@ -206,11 +224,15 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	if !strings.Contains(mcpContentText(res), `"title":"first"`) {
 		t.Fatalf("task_show content = %q, want the task body", mcpContentText(res))
 	}
+	// task_show is the full-detail escape hatch: it must NEVER send a view param.
+	if strings.Contains(showQuery, "view=") {
+		t.Fatalf("task_show query = %q, want NO view param (full-only escape hatch)", showQuery)
+	}
 
 	// task_next on an empty queue: 200 {ok:false,reason:no_ready} is NOT an error.
 	res, err = cs.CallTool(bg, &mcp.CallToolParams{
 		Name:      "task_next",
-		Arguments: map[string]any{"worker_id": "cursor-test"},
+		Arguments: map[string]any{"worker_id": "cursor-test", "order": "closure_nearest"},
 	})
 	if err != nil {
 		t.Fatalf("CallTool task_next: %v", err)
@@ -220,6 +242,9 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	}
 	if !strings.Contains(mcpContentText(res), "no_ready") {
 		t.Fatalf("task_next content = %q, want no_ready", mcpContentText(res))
+	}
+	if !strings.Contains(nextQuery, "order=closure_nearest") {
+		t.Fatalf("task_next query = %q, want closure order", nextQuery)
 	}
 
 	// task_close hitting a 409: HTTP >= 400 must set IsError. Criteria ride the
@@ -567,16 +592,22 @@ func TestMCPTaskCreateSurfacesWarnings(t *testing.T) {
 	}
 
 	var receipt struct {
-		ID       string           `json:"id"`
-		Draft    string           `json:"draft"`
-		Status   string           `json:"status"`
-		Warnings []map[string]any `json:"warnings"`
+		ID              string           `json:"id"`
+		Draft           string           `json:"draft"`
+		Status          string           `json:"status"`
+		LifecycleStatus string           `json:"lifecycle_status"`
+		Warnings        []map[string]any `json:"warnings"`
 	}
 	if err := json.Unmarshal([]byte(mcpContentText(res)), &receipt); err != nil {
 		t.Fatalf("receipt did not parse: %v (%q)", err, mcpContentText(res))
 	}
 	if receipt.ID != "task-1" || receipt.Status != "published" {
 		t.Fatalf("receipt id/status wrong: %+v", receipt)
+	}
+	// tlv-s6: the receipt echoes the born lifecycle_status — the MCP create
+	// path injects "open", and the receipt must say so instead of assuming it.
+	if receipt.LifecycleStatus != "open" {
+		t.Fatalf("receipt.lifecycle_status = %q, want the born \"open\" echoed", receipt.LifecycleStatus)
 	}
 	if len(receipt.Warnings) != 1 {
 		t.Fatalf("receipt.warnings = %v, want the publish-step advisory folded in", receipt.Warnings)
@@ -597,33 +628,54 @@ func mcpContentText(res *mcp.CallToolResult) string {
 	return b.String()
 }
 
-// TestParseMCPServeArgs covers the --tools selector and --http transport parsing.
+// TestParseMCPServeArgs covers the --tools selector (tasks|all AND the D129
+// comma-noun subset) and the --http transport parsing. Validation of a noun
+// subset stays SYNTACTIC: tasks/all are reserved words, an empty comma token is
+// rejected, but a noun's EXISTENCE is never checked here (the manifest loads only
+// after parse; an absent noun degrades to zero tools, not a usage error).
 func TestParseMCPServeArgs(t *testing.T) {
 	cases := []struct {
-		in       []string
-		want     string
-		wantHTTP string
-		wantErr  bool
+		in        []string
+		want      string
+		wantNouns []string
+		wantHTTP  string
+		wantErr   bool
 	}{
-		{nil, "tasks", "", false},
-		{[]string{"--tools", "tasks"}, "tasks", "", false},
-		{[]string{"--tools", "all"}, "all", "", false},
-		{[]string{"--tools=all"}, "all", "", false},
-		{[]string{"--http", "127.0.0.1:4010"}, "tasks", "127.0.0.1:4010", false},
-		{[]string{"--http=127.0.0.1:4010"}, "tasks", "127.0.0.1:4010", false},
-		{[]string{"--tools", "all", "--http", ":4010"}, "all", ":4010", false},
-		{[]string{"--http"}, "", "", true},  // missing addr
-		{[]string{"--http="}, "", "", true}, // empty addr
-		{[]string{"--tools", "bogus"}, "", "", true},
-		{[]string{"--tools"}, "", "", true},
-		{[]string{"--nope"}, "", "", true},
-		{[]string{"stray"}, "", "", true},
+		{nil, "tasks", nil, "", false},
+		{[]string{"--tools", "tasks"}, "tasks", nil, "", false},
+		{[]string{"--tools", "all"}, "all", nil, "", false},
+		{[]string{"--tools=all"}, "all", nil, "", false},
+		{[]string{"--http", "127.0.0.1:4010"}, "tasks", nil, "127.0.0.1:4010", false},
+		{[]string{"--http=127.0.0.1:4010"}, "tasks", nil, "127.0.0.1:4010", false},
+		{[]string{"--tools", "all", "--http", ":4010"}, "all", nil, ":4010", false},
+		// D129 noun subsets — a single noun, a two-noun list, the inline form.
+		{[]string{"--tools", "github"}, "subset", []string{"github"}, "", false},
+		{[]string{"--tools", "github,linear"}, "subset", []string{"github", "linear"}, "", false},
+		{[]string{"--tools=github,linear"}, "subset", []string{"github", "linear"}, "", false},
+		// A subset composes with --http exactly like tasks|all.
+		{[]string{"--tools", "github,linear", "--http", ":4010"}, "subset", []string{"github", "linear"}, ":4010", false},
+		// An absent noun is NOT a parse error — it parses fine and degrades to
+		// zero tools once the manifest loads (proven in the session test).
+		{[]string{"--tools", "nosuchnoun"}, "subset", []string{"nosuchnoun"}, "", false},
+		// Reserved words may not be MIXED into a noun list.
+		{[]string{"--tools", "github,tasks"}, "", nil, "", true},
+		{[]string{"--tools", "all,github"}, "", nil, "", true},
+		// Empty comma tokens are rejected.
+		{[]string{"--tools", "github,"}, "", nil, "", true},
+		{[]string{"--tools", ",linear"}, "", nil, "", true},
+		{[]string{"--tools", "github,,linear"}, "", nil, "", true},
+		{[]string{"--http"}, "", nil, "", true},   // missing addr
+		{[]string{"--http="}, "", nil, "", true},  // empty addr
+		{[]string{"--tools="}, "", nil, "", true}, // empty --tools value
+		{[]string{"--tools"}, "", nil, "", true},
+		{[]string{"--nope"}, "", nil, "", true},
+		{[]string{"stray"}, "", nil, "", true},
 	}
 	for _, c := range cases {
-		got, gotHTTP, err := parseMCPServeArgs(c.in)
+		got, gotNouns, gotHTTP, err := parseMCPServeArgs(c.in)
 		if c.wantErr {
 			if err == nil {
-				t.Errorf("parseMCPServeArgs(%v) = %q,%q, want error", c.in, got, gotHTTP)
+				t.Errorf("parseMCPServeArgs(%v) = %q,%v,%q, want error", c.in, got, gotNouns, gotHTTP)
 			}
 			continue
 		}
@@ -633,6 +685,9 @@ func TestParseMCPServeArgs(t *testing.T) {
 		}
 		if got != c.want || gotHTTP != c.wantHTTP {
 			t.Errorf("parseMCPServeArgs(%v) = %q,%q, want %q,%q", c.in, got, gotHTTP, c.want, c.wantHTTP)
+		}
+		if strings.Join(gotNouns, ",") != strings.Join(c.wantNouns, ",") {
+			t.Errorf("parseMCPServeArgs(%v) nouns = %v, want %v", c.in, gotNouns, c.wantNouns)
 		}
 	}
 }

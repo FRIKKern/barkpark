@@ -20,7 +20,7 @@ The repo-side contract for the two net-new inline nodes (lvw-t1 valueref, lvw-t7
 
 ## Resolution (wire §5 as amended)
 
-NO per-node resolver in Elixir. `Papers.resolve_values_in_blocks/3` (grep `@canonical capability:valueref-resolve`) deep-walks via the shared `BodyWalk`, collects distinct `(target, field)` pairs, resolves targets in ONE batched typeless query (`Content.Query.resolve_docs_by_ids/3`), and threads `%{{target, field} => string}` as render opt `:values` → palette. Security (non-negotiable): render-then-read — `Envelope.render(doc, schema, caller_ctx)` then read the field off the REDACTED envelope; never `field_readable?` alone (caller-less returns true by design). `:caller_context` defaults to the anonymous `%CallerContext{}`; anything feeding body_html or delta frames stays anonymous. `published_only: true` on public surfaces (do NOT copy `Labels.reference_title`'s drafts-twin fallback — it leaks unpublished values). `_bpenc` FieldCipher envelopes stay redacted (maps never stringify).
+NO per-node resolver in Elixir. `Papers.resolve_values_in_blocks/3` (grep `@canonical capability:valueref-resolve`) deep-walks via the shared `BodyWalk`, collects distinct `(target, field)` pairs, resolves targets in ONE batched typeless query (`Content.Query.resolve_docs_by_ids/3`), and threads `%{{target, field} => string}` as render opt `:values` → palette. Security (non-negotiable): render-then-read — `Envelope.render(doc, schema, caller_ctx)` then read the field off the REDACTED envelope; never `field_readable?` alone (a nil caller now fails CLOSED). `:caller_context` defaults to the anonymous `%CallerContext{}`; anything feeding body_html or delta frames stays anonymous. `published_only: true` on public surfaces (do NOT copy `Labels.reference_title`'s drafts-twin fallback — it leaks unpublished values). `_bpenc` FieldCipher envelopes stay redacted (maps never stringify).
 
 Scalar rule (all three surfaces): non-empty string / number / boolean resolve; `""` counts as UNRESOLVED; maps/lists/nil → fallback.
 
@@ -51,5 +51,5 @@ Shared golden home: `fixtures/portable-doc-inline/` cases mirrored VERBATIM in `
 - `api/lib/barkpark/content/papers.ex` — `resolve_values_in_blocks/3` (valueref-resolve), `accept_valueref_baseline/6` (drift-accept), `resolve_wikilink/3` (task-chip-resolve)
 - `api/lib/barkpark_web/live/studio/studio_live/handlers/paper.ex` — `valueref_accept_baseline/2` (the Studio accept event)
 - `internal/pdrender/inline.go` — Go valueref case + `valuerefText`
-- `web/components/portable-doc.tsx` — React valueref case + unknown-inline degrade
+- `js/packages/react/src/inline.tsx` — React valueref case + unknown-inline degrade
 - `api/assets/paper-editor/src/convert.js` — editor node↔mark mapping (both directions)

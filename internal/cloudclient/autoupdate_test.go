@@ -101,6 +101,19 @@ func TestSetAutoupdateNotFoundIsRouteError(t *testing.T) {
 	}
 }
 
+// TestSetAutoupdateInvalidNestedIsRouteError pins the REAL 422 shape the
+// autoupdate route emits — {"error":{"code":"invalid"}}, nested, not the flat
+// {"error":"invalid"} string — so routeError's tolerant decode never regresses
+// back to swallowing this into a raw cloudError body dump.
+func TestSetAutoupdateInvalidNestedIsRouteError(t *testing.T) {
+	c, _ := fakeCP(t, 422, `{"error":{"code":"invalid"}}`)
+	_, err := c.SetAutoupdate(context.Background(), "i1", map[string]any{"pinned_release": "bad"})
+	var re *CloudRouteError
+	if err == nil || !asRoute(err, &re) || re.Code != "invalid" {
+		t.Fatalf("want CloudRouteError invalid, got %v", err)
+	}
+}
+
 func TestRolloutMethodsAndDecode(t *testing.T) {
 	c, rec := fakeCP(t, 200, `{"ok":true,"halted":true,"eligible":3,"behind":2,"in_flight":1}`)
 

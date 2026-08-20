@@ -3,6 +3,8 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +18,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/mattn/go-isatty"
 )
@@ -68,7 +72,7 @@ func (e *dispatchError) Error() string { return e.msg }
 // caller owns rendering. This is the build half of the dispatch seam — a pure
 // resolution step with one caveat: buildBody may consume os.Stdin for --file -,
 // so it must run exactly once per invocation.
-func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) (*manifestRequest, *dispatchError) {
+func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string, ownsProcessStdin bool) (*manifestRequest, *dispatchError) {
 	// Split tail into positional args and command-local flags.
 	posArgs, cmdFlags, err := splitArgs(cmd, tail)
 	if err != nil {
@@ -79,6 +83,15 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	argMap, err := bindArgs(cmd, posArgs)
 	if err != nil {
 		return nil, &dispatchError{msg: err.Error(), withUsage: true}
+	}
+
+	needsPerspectiveAuth := nonPublishedPerspectiveRequiresAuth(cmd, cmdFlags)
+	if needsPerspectiveAuth && ctx.Token == "" {
+		perspective := cmdFlags["perspective"][len(cmdFlags["perspective"])-1]
+		return nil, &dispatchError{
+			msg:       fmt.Sprintf("--perspective %s requires an API token", perspective),
+			withUsage: false,
+		}
 	}
 
 	// Build the absolute URL (fills :placeholders + prepends scoped_prefix).
@@ -92,15 +105,25 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	rawURL = applyQuery(rawURL, g, cmd, cmdFlags, argMap)
 
 	// Build the request body for writes. Declared non-path args seed the JSON
-	// object; --set merges over them; --file (or stdin) overrides everything; a
+	// object; --set merges over them; mutation commands merge a --file JSON
+	// object before --set, while other commands use --file as the whole body; a
 	// file-typed arg on a media route is sent as multipart/form-data instead.
-	body, stream, contentType, err := buildBody(cmd, cmdFlags, argMap)
+	body, stream, contentType, err := buildBodyWithStdinOwnership(cmd, cmdFlags, argMap, ownsProcessStdin)
 	if err != nil {
 		return nil, &dispatchError{msg: err.Error(), withUsage: false}
 	}
 
 	// Tier-appropriate credential.
 	headers := authHeaders(cmd, ctx)
+	if needsPerspectiveAuth {
+		// doc get/ls/query are public at their default published perspective,
+		// so their manifest tier must remain `none`. Drafts and raw are
+		// identity-sensitive, however: OptionalToken intentionally pins an
+		// anonymous request back to published. Attach the already-resolved bearer
+		// only for those explicit perspectives so the flag cannot be silently
+		// downgraded while the public published request stays byte-for-byte public.
+		headers["Authorization"] = "Bearer " + ctx.Token
+	}
 	if contentType != "" {
 		headers["Content-Type"] = contentType
 	}
@@ -112,6 +135,28 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 		body:    body,
 		stream:  stream,
 	}, nil
+}
+
+func nonPublishedPerspectiveRequiresAuth(cmd manifest.Command, flags map[string][]string) bool {
+	if cmd.AuthTier != "none" {
+		return false
+	}
+	switch cmd.ID {
+	case "doc.get", "doc.ls", "doc.query":
+	default:
+		return false
+	}
+
+	values := flags["perspective"]
+	if len(values) == 0 {
+		return false
+	}
+	switch values[len(values)-1] {
+	case "drafts", "raw":
+		return true
+	default:
+		return false
+	}
 }
 
 // sendManifestRequest is the send half of the dispatch seam: it performs the
@@ -134,7 +179,7 @@ func sendManifestRequest(req *manifestRequest) (int, []byte, error) {
 // raw body into a tool result. Headless callers must set g.yes so the prod guard
 // (which lives in runCommand, not here) never blocks them.
 func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) (int, []byte, error) {
-	req, derr := buildManifestRequest(g, ctx, m, cmd, tail)
+	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, false)
 	if derr != nil {
 		return 0, nil, derr
 	}
@@ -153,7 +198,12 @@ func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, 
 func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
 	out.resolveOutputForCommand(g, cmd.DefaultOutput)
 
-	req, derr := buildManifestRequest(g, ctx, m, cmd, tail)
+	// Resolve the request-side view HERE, with the writer in hand — never
+	// inside buildManifestRequest, which is pure/writer-less and shared by the
+	// headless MCP dispatch (the MCP handlers set g.view themselves).
+	g.view = resolveView(out, g, cmd)
+
+	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, true)
 	if derr != nil {
 		if !renderErrorEnvelope(out, "usage", derr.msg, "", "") {
 			out.userErr("%v", derr)
@@ -170,9 +220,11 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	}
 
 	// Prod write-guard: a write against a prod-looking target needs confirmation
-	// unless --yes. (scoped_admin still attempts — the guard is local UX, not the
-	// client preflight-refuse that rule #2 forbids.)
-	if cmd.Writes && isProd(ctx, m) && !g.yes {
+	// unless --yes, or unless the server itself advertises production:false on
+	// /v1/meta (absence of the field falls back fail-closed). (scoped_admin still
+	// attempts — the guard is local UX, not the client preflight-refuse that
+	// rule #2 forbids.)
+	if cmd.Writes && isProd(ctx, m) && !g.yes && !serverDeclaredNonProd(ctx.Server) {
 		if !confirmProdWrite(out, cmd, ctx) {
 			out.errf("aborted: prod write not confirmed")
 			return exitUsage
@@ -191,7 +243,313 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		}
 		return exitGeneric
 	}
+	if status >= 200 && status < 300 {
+		if code, refused := refuseUnreadableDefaultPage(out, cmd, status, respBody); refused {
+			return code
+		}
+		if code, handled := screenWriteReceipt(out, cmd, status, respBody); handled {
+			return code
+		}
+		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
+		emitHelpHints(out, respBody)
+	}
 	return handleResponse(out, cmd, status, respBody)
+}
+
+// resolveView decides the ?view= projection for a CLI invocation (AXI R1,
+// charter decision 5 — option B): brief only when ALL of (a) the resolved
+// output is machine-readable (json/yaml — folds the piped default and an
+// explicit -o json; an explicit -o table while piped stays FULL), (b) the user
+// did not force --full, and (c) the command's manifest declares a views
+// contract with an agent default. Commands without a views declaration never
+// get a view param — they are full-only by contract (task.get IS the escape
+// hatch). Empty string means "send no view param" (server default, full).
+func resolveView(out *writer, g globals, cmd manifest.Command) string {
+	if g.full || !out.machineOut() {
+		return ""
+	}
+	if cmd.Views == nil {
+		return ""
+	}
+	return cmd.Views.DefaultForAgents
+}
+
+// agentViewGlobals returns g with the command's manifest-declared agent-default
+// view applied — the ONE generic seam by which headless agent surfaces (the MCP
+// bridge) inherit brief views from the capabilities contract with zero
+// per-tool code. A command without a views declaration passes through
+// untouched (no view param, full-only by contract).
+func agentViewGlobals(g globals, cmd manifest.Command) globals {
+	if !g.full && cmd.Views != nil && cmd.Views.DefaultForAgents != "" {
+		g.view = cmd.Views.DefaultForAgents
+	}
+	return g
+}
+
+// emitHelpHints prints a success envelope's top-level {"help":[…]} entries —
+// concrete next-step command templates the server authors beside its mutation
+// emitters (AXI R5) — to STDERR, one "help: …" line each. It is called from
+// runCommand's post-2xx hook (the warnIfDefaultPageMayBeTruncated call-site
+// pattern), which fires in ALL four output modes; it must NEVER live inside
+// renderSuccess, whose json/yaml arms print the raw payload and are
+// structurally silent on advisory fields (see
+// TestRenderSuccessJSONSilentOnAdvisories). stdout stays one parseable
+// document; json/yaml consumers read the help field itself.
+func emitHelpHints(out *writer, respBody []byte) {
+	for _, h := range helpEntries(respBody) {
+		out.errf("help: %s", h)
+	}
+}
+
+// helpEntries extracts the non-empty string entries of a top-level "help"
+// array from a response envelope, looking first at the raw body (the tasks
+// endpoints emit flat envelopes) and then inside a {"result": …} wrapper.
+// Absent, empty, or malformed help never prints and never errors.
+func helpEntries(body []byte) []string {
+	if hs := topLevelHelpStrings(body); len(hs) > 0 {
+		return hs
+	}
+	return topLevelHelpStrings(unwrapResult(body))
+}
+
+func topLevelHelpStrings(body []byte) []string {
+	var env struct {
+		Help []any `json:"help"`
+	}
+	if json.Unmarshal(body, &env) != nil || len(env.Help) == 0 {
+		return nil
+	}
+	hs := make([]string, 0, len(env.Help))
+	for _, h := range env.Help {
+		if s, ok := h.(string); ok && s != "" {
+			hs = append(hs, s)
+		}
+	}
+	return hs
+}
+
+// unreadableListPageHint is the one wording both list-page refusals share —
+// the --all walk (runPaginatedAll) and the DEFAULT single page
+// (refuseUnreadableDefaultPage). It names the transport, not the query,
+// because that is what an unreadable 200 always means.
+const unreadableListPageHint = "the transport, not the query: a proxy/gateway page, a truncated or non-Barkpark response. Retry, then check the server URL and that the API is up."
+
+// refuseUnreadableDefaultPage is the DEFAULT-read half of the PDS reader law
+// (wave 28): no bp verb may report success on an exit code alone. Wave 27
+// taught the --all walk to refuse an HTTP-200 body it cannot read as a list
+// envelope, but that refusal sits behind `cmd.Paginated && g.all && !cmd.Writes`
+// and --all is the RARE invocation. The DEFAULT single-page read — what every
+// `bp task ready` / `bp doc ls` actually runs — laundered all nine of wave 27's
+// poisons into rc=0: `-o minimal` printed the literal word "ok" over `null`, an
+// unknown envelope and `{}`; `-o json` printed an ERROR ENVELOPE as a
+// successful body; `-o table` printed nothing at all for `{}`. Twenty-four of
+// twenty-seven poison×shape runs said nothing on any channel.
+//
+// The sentinel was already computed one line below and thrown away:
+// warnIfDefaultPageMayBeTruncated does `rows, _ := extractListRows(…)` and then
+// goes quiet on exactly these bodies, because an unreadable body yields 0 rows
+// and 0 < limit.
+//
+// PLACEMENT IS LOAD-BEARING (PDS-D396). It lives HERE, at runCommand's post-2xx
+// hook — the one site proven to fire in all four output shapes — and NOT:
+//
+//   - in renderMinimal, where extractListRows returns the "" sentinel for five
+//     of seven REAL write receipts (the mutate transaction receipt, the
+//     {ok,doc} claim receipt, {ok:false,reason}, the workspace-create slug
+//     receipt, the publish {rev,id} receipt), so a fence there would red every
+//     write verb in the CLI — measured, not feared
+//     (TestExtractListRowsBlindToWriteReceipts);
+//   - behind the neighbour's `g.limitSet` skip, which would let
+//     `bp task ready --limit 5` against a proxy 502 stay silent — the same lie
+//     one flag away;
+//   - behind `g.all`, which already returned at the runPaginatedAll branch.
+//
+// Honest reads are untouched: every one of the seven `paginated: true` commands
+// emits a key listEnvelopeKeys knows (TestPaginatedCommandsUseKnownEnvelopeKeys
+// re-derives that population from the API source), and an EMPTY array still
+// matches its key — a genuinely empty queue is readable, and stays rc=0.
+func refuseUnreadableDefaultPage(out *writer, cmd manifest.Command, status int, respBody []byte) (int, bool) {
+	if !cmd.Paginated || cmd.Writes {
+		return 0, false
+	}
+	if _, key := extractListRows(unwrapResult(respBody)); key != "" {
+		return 0, false
+	}
+
+	msg := fmt.Sprintf(
+		"unreadable list page: HTTP %d carried no known list envelope (%d bytes): %s",
+		status, len(respBody), bodyPreview(respBody),
+	)
+	if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", unreadableListPageHint) {
+		out.userErr("%s", msg)
+	}
+	return exitGeneric, true
+}
+
+// unreadableWriteReceiptHint is the one wording the write-receipt refusal
+// carries. It names the transport like its read-side sibling, but it must ALSO
+// say the thing a read never has to: an unconfirmable write is not a failed
+// write. The mutation may well have landed; the receipt is what did not arrive.
+const unreadableWriteReceiptHint = "the transport, not the write: a proxy/gateway page, a truncated or non-Barkpark response. The write may still have landed — re-read the target before retrying, then check the server URL and that the API is up."
+
+// screenWriteReceipt is the WRITE half of the PDS reader law (wave 29): no bp
+// verb may report success on an exit code alone. Waves 27 and 28 fenced the
+// --all walk and the DEFAULT single-page read, but BOTH are gated on
+// `cmd.Paginated && !cmd.Writes` — so every one of the 93 write verbs sat
+// outside them BY CONSTRUCTION. Measured on origin/main against a fake API:
+// `bp task next w1` printed `ok` at rc=0 over `null`, `{}`, `{"result":null}`
+// and `[]`; `-o table` over `{}` printed ZERO BYTES on both channels at rc=0;
+// an HTML 502 proxy page was echoed verbatim; and an ERROR envelope arriving on
+// a 2xx was printed as the SUCCESS body under `-o json`.
+//
+// PLACEMENT IS LOAD-BEARING (PDS-D407), and it is NOT where it looks. It lives
+// HERE, at runCommand's post-2xx hook — the one site proven to fire in all four
+// output shapes — and NOT inside renderMinimal, whose "ok" fallback was
+// instrumented on a clean build and found to be reached by three HONEST write
+// receipts as well as five poisons, ONLY in -o minimal: zero bytes, an HTML
+// page, an error envelope and plaintext never arrive there at all, and 26 of
+// the 93 write verbs never render through renderMinimal in the first place.
+//
+// THE DISCRIMINATOR IS "did the server say anything at all", NEVER "does the
+// body carry a key we recognise". An object under keys the CLI cannot summarise
+// PASSES by design (see TestWriteReceiptPassesUnknownKeys): on a write that is
+// a receipt the CLI cannot summarise, not a lie — and an allowlist there would
+// red `{"ok":true}` and `{"deleted":true,…}` TODAY.
+//
+// It returns (exit code, handled) and has TWO honest outcomes, not one:
+//
+//   - a refusal at exitGeneric for a body that said nothing;
+//   - a DECLARED empty receipt at exitOK for HTTP 204/205 with an empty body —
+//     `chat.approve` really does answer `send_resp(conn, :no_content, "")`, so a
+//     naive "empty body ⇒ refuse" would red an honest verb. That arm is not
+//     silence: main printed a BARE EMPTY LINE there, and it now names what
+//     happened. An UNDECLARED empty 200 still refuses.
+func screenWriteReceipt(out *writer, cmd manifest.Command, status int, respBody []byte) (int, bool) {
+	if !cmd.Writes {
+		return 0, false
+	}
+
+	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
+		len(bytes.TrimSpace(respBody)) == 0 {
+		reason := fmt.Sprintf("HTTP %d, no content returned — the server declared no receipt for this write", status)
+		if !out.emitStructured(map[string]any{"ok": true, "confirmed": false, "reason": reason}) {
+			out.outf("not confirmed: %s", reason)
+		}
+		return exitOK, true
+	}
+
+	reason := unreadableWriteReceipt(respBody)
+	if reason == "" {
+		return 0, false
+	}
+
+	msg := fmt.Sprintf(
+		"unreadable write receipt: HTTP %d %s (%d bytes): %s",
+		status, reason, len(respBody), bodyPreview(respBody),
+	)
+	if !renderErrorEnvelope(out, "unreadable_write_receipt", msg, "", unreadableWriteReceiptHint) {
+		out.userErr("%s", msg)
+	}
+	return exitGeneric, true
+}
+
+// unreadableWriteReceipt names WHY a 2xx write body said nothing, or "" when
+// the body is a receipt worth rendering. The refusals are exactly the bodies
+// that carry no statement about the write: non-JSON bytes (a proxy page, an
+// interstitial, plaintext), an empty body with no 204/205 declaration, the JSON
+// literal `null`, a `{"result":null}` envelope, an empty object, an empty
+// array, and an error envelope that arrived on a 2xx. Everything else — every
+// scalar, every non-empty array, every object regardless of its keys — passes.
+func unreadableWriteReceipt(body []byte) string {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return "returned an empty body without declaring one (no 204/205 no-content status)"
+	}
+	var raw any
+	if json.Unmarshal(body, &raw) != nil {
+		return "carried a body that is not JSON"
+	}
+	var payload any
+	if json.Unmarshal(unwrapResult(body), &payload) != nil {
+		return `carried a {"result": …} envelope whose payload is not JSON`
+	}
+	switch t := payload.(type) {
+	case nil:
+		if raw == nil {
+			return "carried the JSON literal null"
+		}
+		return `carried {"result":null} — the envelope was empty`
+	case map[string]any:
+		if len(t) == 0 {
+			return "carried an empty JSON object"
+		}
+		if code, isErr := errorEnvelopeOn2xx(t); isErr {
+			return fmt.Sprintf("carried an ERROR envelope (%s) on a success status", code)
+		}
+	case []any:
+		if len(t) == 0 {
+			return "carried an empty JSON array"
+		}
+	}
+	return ""
+}
+
+// errorEnvelopeOn2xx reports whether a 2xx payload is really the canonical
+// failure envelope — `ok:false` AND an `error` member. That CONJUNCTION is the
+// whole discriminator: `{"ok":false,"reason":"no_ready"}` is an HONEST 200 from
+// the task queue (an empty queue is an outcome, not an error) and must stay
+// rc=0, while `{"ok":false,"error":{…}}` on a 200 is a server contradicting
+// itself. The returned code names the error for the refusal message.
+func errorEnvelopeOn2xx(m map[string]any) (string, bool) {
+	if ok, present := m["ok"].(bool); !present || ok {
+		return "", false
+	}
+	switch e := m["error"].(type) {
+	case map[string]any:
+		if code, _ := e["code"].(string); code != "" {
+			return code, true
+		}
+		return "unnamed", true
+	case string:
+		if e != "" {
+			return e, true
+		}
+	}
+	return "", false
+}
+
+// warnIfDefaultPageMayBeTruncated keeps the normal single-page path honest: a
+// full default page cannot prove that the server has no next page. The notice is
+// stderr-only so JSON/YAML stdout stays machine-readable, and it is deliberately
+// suppressed when the caller chose an explicit limit (or --all), for writes, and
+// for non-paginated commands.
+func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Command, respBody []byte) {
+	if !cmd.Paginated || cmd.Writes || g.all || g.limitSet {
+		return
+	}
+
+	limit := defaultPageLimit(cmd)
+	if limit <= 0 {
+		return
+	}
+	rows, _ := extractListRows(unwrapResult(respBody))
+	if len(rows) < limit {
+		return
+	}
+
+	out.userErr("result page reached the default limit of %d; more may be available — re-run with --all", limit)
+}
+
+func defaultPageLimit(cmd manifest.Command) int {
+	for _, flag := range cmd.Flags {
+		if flag.Name != "limit" || flag.Default == nil {
+			continue
+		}
+		limit, err := strconv.Atoi(fmt.Sprint(flag.Default))
+		if err == nil && limit > 0 {
+			return limit
+		}
+	}
+	return 0
 }
 
 // authHeaders returns the tier-appropriate auth headers for cmd. Only `none`
@@ -258,6 +616,32 @@ var shortFlagAliases = map[string]string{
 	"-f": "file",
 }
 
+// flagShaped reports whether tok names a flag DECLARED on this command — long
+// form (--name, --name=val) or a dash-prefixed form (-name, or a registered
+// short alias like -f) whose resolved name is in byName. It exists solely to
+// stop a value-flag from silently swallowing the next flag as its value
+// (`--foo --bar` binding --foo="--bar"): a dash-prefixed token that does NOT
+// resolve to a declared flag (a negative number, an arbitrary literal) is left
+// alone and still binds as the value.
+func flagShaped(tok string, byName map[string]manifest.Flag) bool {
+	if tok == "-" || !strings.HasPrefix(tok, "-") {
+		return false
+	}
+	if long, aliased := shortFlagAliases[tok]; aliased {
+		_, ok := byName[long]
+		return ok
+	}
+	name := strings.TrimLeft(tok, "-")
+	if name == "" {
+		return false
+	}
+	if eq := strings.IndexByte(name, '='); eq >= 0 {
+		name = name[:eq]
+	}
+	_, ok := byName[name]
+	return ok
+}
+
 // splitArgs separates positional args from command-local flags in tail.
 // Command flags are looked up in cmd.Flags; an unknown -flag is an error so a
 // typo doesn't get silently swallowed as a positional. Long flags use
@@ -299,6 +683,9 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 					if i+1 >= len(tail) {
 						return nil, nil, fmt.Errorf("flag --%s needs a value", name)
 					}
+					if flagShaped(tail[i+1], byName) {
+						return nil, nil, fmt.Errorf("flag --%s needs a value", name)
+					}
 					val = tail[i+1]
 					i++
 				}
@@ -327,6 +714,9 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 			if i+1 >= len(tail) {
 				return nil, nil, fmt.Errorf("flag %s needs a value", a)
 			}
+			if flagShaped(tail[i+1], byName) {
+				return nil, nil, fmt.Errorf("flag %s needs a value", a)
+			}
 			flags[long] = append(flags[long], tail[i+1])
 			i += 2
 			continue
@@ -339,12 +729,15 @@ func splitArgs(cmd manifest.Command, tail []string) (pos []string, flags map[str
 }
 
 // bindArgs maps positional values onto the command's declared args by position,
-// enforcing required args. Extra positionals beyond the declared args are an
-// error.
+// enforcing required args. An empty-string positional counts as absent: a
+// required arg then yields the friendly missing-arg error (with the usage block)
+// instead of a cryptic unresolved-placeholder failure downstream, and an
+// optional arg simply produces no map key. Extra positionals beyond the declared
+// args are an error.
 func bindArgs(cmd manifest.Command, pos []string) (map[string]string, error) {
 	m := map[string]string{}
 	for i, arg := range cmd.Args {
-		if i < len(pos) {
+		if i < len(pos) && pos[i] != "" {
 			m[arg.Name] = pos[i]
 		} else if arg.Required {
 			return nil, fmt.Errorf("missing required argument <%s> for %s %s", arg.Name, cmd.Noun, cmd.Verb)
@@ -363,6 +756,13 @@ func bindArgs(cmd manifest.Command, pos []string) (map[string]string, error) {
 // placeholders are already consumed by BuildURL and are skipped here.
 func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string][]string, args map[string]string) string {
 	q := url.Values{}
+
+	// The resolved response projection (AXI brief views). g.view is set only by
+	// resolveView (CLI, gated on a manifest views declaration) or deliberately
+	// by an MCP handler — so a non-empty value is always intentional.
+	if g.view != "" {
+		q.Set("view", g.view)
+	}
 
 	if cmd.Paginated {
 		if g.limitSet {
@@ -388,7 +788,7 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 	// global (client-side pagination); `file`/`set`/`quiet` carry the request body.
 	clientOnly := map[string]bool{"file": true, "set": true, "quiet": true, "all": true}
 	for _, f := range cmd.Flags {
-		if clientOnly[f.Name] || f.Type == "file" {
+		if clientOnly[f.Name] || f.Type == "file" || commandFlagBelongsInBody(cmd, f.Name) {
 			continue
 		}
 		if f.Type == "bool" {
@@ -418,11 +818,13 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 // buildBody builds the request body for a write command. Sources, in increasing
 // precedence:
 //
-//  1. declared non-path positional args (arg name -> value) whose location
+//  1. --file <path> (or - for stdin) when this is a mutation command; the file
+//     must contain a JSON object and seeds the mutation payload. For other
+//     commands, --file remains the complete request body.
+//  2. declared non-path positional args (arg name -> value) whose location
 //     resolves to "body" — e.g. webhook.create `url` -> {"url":"…"},
 //     workspace.project-create `name` -> {"name":"…"}.
-//  2. --set k=v pairs, merged over the arg-seeded object.
-//  3. --file <path> (or - for stdin), which overrides everything and wins.
+//  3. --set k=v pairs, merged last so repeated --set values win per key.
 //
 // A file-typed arg on a media route is special-cased FIRST: it ships as
 // multipart/form-data with the file under the "file" form field, not as JSON —
@@ -431,6 +833,15 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 // Reads return nil; a write with no body source sends an empty JSON object so a
 // POST/PUT that expects JSON does not choke on an empty body.
 func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]string) (body []byte, stream io.Reader, contentType string, err error) {
+	return buildBodyWithStdinOwnership(cmd, flags, args, true)
+}
+
+// buildBodyWithStdinOwnership keeps process-stdin policy at the existing
+// human/headless dispatch seam. Direct CLI commands own stdin and therefore
+// reject redirected input unless --file - consumes it. Headless dispatchers
+// (MCP stdio and HTTP) do not own process stdin: it may be a protocol transport,
+// so they neither inspect nor consume it.
+func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string, args map[string]string, ownsProcessStdin bool) (body []byte, stream io.Reader, contentType string, err error) {
 	if !cmd.Writes {
 		return nil, nil, "", nil
 	}
@@ -442,9 +853,20 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 		return nil, r, ct, err
 	}
 
-	// --file (or stdin) wins outright when given.
+	stdinRedirected := ownsProcessStdin && stdinHasRedirectedInput()
+
+	// For ordinary writes, --file is the whole request body. Mutation commands
+	// instead treat it as the document object that declared args and --set merge
+	// into before the mutation wrapper is applied.
+	var obj map[string]any
 	if files, ok := flags["file"]; ok && len(files) > 0 {
 		path := files[len(files)-1]
+		if path == "-" && !ownsProcessStdin {
+			return nil, nil, "", fmt.Errorf("--file - is unavailable in headless dispatch")
+		}
+		if path != "-" && stdinRedirected {
+			return nil, nil, "", fmt.Errorf("piped stdin is unused; pass --file - to consume it")
+		}
 		var raw []byte
 		if path == "-" {
 			raw, err = io.ReadAll(os.Stdin)
@@ -454,17 +876,51 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 		if err != nil {
 			return nil, nil, "", fmt.Errorf("read --file %q: %w", path, err)
 		}
-		return raw, nil, "application/json", nil
+		// A plain (non-mutation) write with no body flags to merge ships the file
+		// verbatim. But when the command has body-membership flags set (e.g.
+		// bulldocs.patch --if-rev), the file is the base object those flags merge
+		// into — parse it so the guard joins the payload instead of being dropped.
+		if cmd.MutationOp == "" && !commandHasSetBodyFlags(cmd, flags) {
+			return raw, nil, "application/json", nil
+		}
+		bodyKind := "mutation body"
+		if cmd.MutationOp == "" {
+			bodyKind = "--file body"
+		}
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return nil, nil, "", fmt.Errorf("read --file %q: %s must be a JSON object: %w", path, bodyKind, err)
+		}
+		if obj == nil {
+			return nil, nil, "", fmt.Errorf("read --file %q: %s must be a JSON object", path, bodyKind)
+		}
+	} else if stdinRedirected {
+		// Recommend --file - only where the manifest actually declares the
+		// flag — `doc patch` declares [set] only, and telling its user to
+		// pass a flag the parser rejects with exit 2 is worse than no hint.
+		if commandHasFileFlag(cmd) {
+			return nil, nil, "", fmt.Errorf("piped stdin is unused; pass --file - to consume it")
+		}
+		return nil, nil, "", fmt.Errorf("piped stdin is unused and %s %s does not accept --file; remove the stdin redirect", cmd.Noun, cmd.Verb)
 	}
 
 	// Seed the body object from declared body-location args, then merge --set.
-	obj := map[string]any{}
+	if obj == nil {
+		obj = map[string]any{}
+	}
 	for _, a := range cmd.Args {
 		if cmd.ArgLocation(a) != "body" {
 			continue
 		}
 		if v, ok := args[a.Name]; ok && v != "" {
 			obj[a.Name] = v
+		}
+	}
+	for _, f := range cmd.Flags {
+		if !commandFlagBelongsInBody(cmd, f.Name) {
+			continue
+		}
+		if values := flags[f.Name]; len(values) > 0 {
+			obj[bodyFlagKey(f.Name)] = values[len(values)-1]
 		}
 	}
 	// --set fields target: nested under SetKey (e.g. patch's `set`) or, by
@@ -519,6 +975,118 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 	}
 	raw, _ := json.Marshal(obj)
 	return raw, nil, "application/json", nil
+}
+
+// commandFlagBelongsInBody reports whether a command-local flag rides in the
+// JSON request body instead of the query string. The rule is MANIFEST-DRIVEN,
+// not a table of command ids:
+//
+//   - A BATCH write command's payload IS a JSON body (the `ops` array), so its
+//     scalar control flags belong at the body head. bulldocs.patch's `--if-rev`
+//     optimistic-concurrency guard is the motivating case: the server reads
+//     `Map.get(params, "ifRev")`, so a `?if-rev=1` query param never matched and
+//     the guard was a silent no-op (a stale patch overwrote a newer paper
+//     instead of 412). Routed through the body (as camelCase `ifRev`, see
+//     bodyFlagKey) the guard fires. Client-consumed flags (`file` carries the
+//     payload via the --file path; `set`/`quiet`/`all` are consumed by the CLI
+//     itself) are excluded — this MUST mirror applyQuery's clientOnly set, or a
+//     batch write's own control flag (e.g. `doc mutate --quiet`) would both skip
+//     the query string AND leak into the wire body.
+//   - cycle.open predates the batch rule: it is a non-batch write whose *_json
+//     contract flags ride the body by id. Retained verbatim.
+func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
+	// clientConsumed mirrors applyQuery's clientOnly set: these flags never ride
+	// the wire (as query OR body) — the CLI consumes them locally.
+	switch name {
+	case "file", "set", "quiet", "all":
+		return false
+	}
+	if cmd.Writes && cmd.Batch {
+		return true
+	}
+	if cmd.ID == "cycle.open" {
+		switch name {
+		case "experiment_contract_json", "correction_of_json", "correction_of_digest", "release_gate_receipt_json":
+			return true
+		}
+	}
+	return false
+}
+
+// commandHasSetBodyFlags reports whether the caller actually set any body-membership
+// flag on cmd. When true, a --file payload for a non-mutation write must be parsed
+// and merged (so e.g. bulldocs.patch's --if-rev joins the ops object at the body
+// head) rather than shipped verbatim.
+func commandHasSetBodyFlags(cmd manifest.Command, flags map[string][]string) bool {
+	for _, f := range cmd.Flags {
+		if commandFlagBelongsInBody(cmd, f.Name) && len(flags[f.Name]) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// bodyFlagKey maps a hyphenated CLI flag name to the camelCase JSON key the API
+// reads for it (`if-rev` → `ifRev`). Names without a hyphen — cycle.open's
+// snake_case *_json contract flags, single-word flags — pass through unchanged,
+// so the server-side spelling is preserved exactly.
+func bodyFlagKey(name string) string {
+	if !strings.Contains(name, "-") {
+		return name
+	}
+	parts := strings.Split(name, "-")
+	var b strings.Builder
+	b.WriteString(parts[0])
+	for _, p := range parts[1:] {
+		if p == "" {
+			continue
+		}
+		b.WriteString(strings.ToUpper(p[:1]))
+		b.WriteString(p[1:])
+	}
+	return b.String()
+}
+
+// commandHasFileFlag reports whether cmd's manifest declares the --file body
+// flag (by name or file type — the same dual test applyQuery uses to keep the
+// flag client-side). The manifest is authoritative: help text and guard
+// messages must never mention --file for a command whose parser rejects it.
+func commandHasFileFlag(cmd manifest.Command) bool {
+	for _, f := range cmd.Flags {
+		if f.Name == "file" || f.Type == "file" {
+			return true
+		}
+	}
+	return false
+}
+
+// stdinHasRedirectedInput reports whether redirected (non-terminal) stdin
+// currently carries bytes that a write would silently discard. Redirection
+// alone is not enough: CI `run:` steps, cron, and Makefile pipelines routinely
+// hand the process an EMPTY pipe, and a guard against swallowing data must not
+// hard-error when there is no data. It deliberately never reads — --file -
+// remains the sole stdin consumer — and never blocks: the byte count comes
+// from a non-blocking readiness probe (see stdinPendingBytes), so an
+// open-but-empty pipe with a live writer proceeds without the warning rather
+// than hanging. Regular-file redirects are sized via Stat. When the probe
+// cannot answer (exotic file types, or platforms without one), it falls back
+// to the historical conservative answer: redirected means guarded.
+func stdinHasRedirectedInput() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	if info.Mode()&os.ModeCharDevice != 0 {
+		return false
+	}
+	if info.Mode().IsRegular() {
+		return info.Size() > 0
+	}
+	n, ok := stdinPendingBytes(os.Stdin)
+	if !ok {
+		return true
+	}
+	return n > 0
 }
 
 // mediaUploadFileArg returns the bound file path when cmd has a file-typed
@@ -685,18 +1253,25 @@ func readCapped(r io.Reader, max int64) ([]byte, error) {
 }
 
 // renderError renders a classified API error. Under -o json/yaml it emits the
-// canonical {ok:false, error:{code, message, request_id, hint}} envelope on
-// stdout (same contract as the cloud built-ins' useError, richer because apiError
-// carries request_id + hint) so a scripted `bp … -o json | jq` gets a parseable
-// body rather than empty stdout. For table/minimal it prints the human shape to
-// stderr: the message line, an indented fix-suggestion hint when one is
-// registered, and — under -v — the machine code and request id for support.
-// Centralised so every error path (single request, paginated reads) is identical.
+// canonical {ok:false, error:{code, message, request_id, hint, details}} envelope
+// on stdout (same contract as the cloud built-ins' useError, richer because
+// apiError carries request_id + hint + details) so a scripted `bp … -o json | jq`
+// gets a parseable body rather than empty stdout. For table/minimal it prints the
+// human shape to stderr: the message line, the server's `details` as sorted
+// `key: value` lines, an indented fix-suggestion hint when one is registered,
+// and — under -v — the machine code and request id for support. details comes
+// FIRST of the continuation lines because it is the specific fact (which filter,
+// which field, which rule) while the hint is the generic advice; a reader who
+// stops after one line should get the fact. Centralised so every error path
+// (single request, paginated reads) is identical.
 func renderError(out *writer, ae apiError) {
-	if renderErrorEnvelope(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint()) {
+	if renderErrorEnvelopeDetailed(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint(), ae.details) {
 		return
 	}
 	out.userErr("%s", ae.errorMessage())
+	for _, line := range detailLines(ae.details) {
+		out.errf("  %s", line)
+	}
 	if h := ae.hint(); h != "" {
 		out.errf("  hint: %s", h)
 	}
@@ -858,6 +1433,42 @@ func joinStrings(v any) string {
 		}
 	}
 	return strings.Join(parts, ",")
+}
+
+// emitTaskHelpLines is the TYPED twin of emitHelpHints (which parses raw JSON):
+// it prints a claim/close outcome's already-decoded help[] templates to stderr,
+// one "help: …" line each, exactly as runCommand does for the manifest path.
+// The typed-helper claim/close surfaces (frontier, cmux dispatch) hold the help
+// as a []string on the apiclient outcome, not raw bytes, so they call this rather
+// than re-marshalling. Empty/absent help prints nothing (charter D18).
+func emitTaskHelpLines(out *writer, help []string) {
+	for _, h := range help {
+		if h == "" {
+			continue
+		}
+		out.errf("help: %s", h)
+	}
+}
+
+// emitTaskNoticeLines is the TYPED twin of emitNotices: it renders a claim/close
+// outcome's already-decoded rail-awareness notices to stderr in the same
+// "notice: <type> …" shape emitNotices prints from raw JSON. The frontier/cmux
+// claim paths decode notices into []apiclient.TaskNotice but never surfaced them
+// — this closes that gap without a second decode. Unknown future notice types
+// print their bare type (never guessed); an empty/nil slice prints nothing.
+func emitTaskNoticeLines(out *writer, notices []apiclient.TaskNotice) {
+	for _, n := range notices {
+		switch n.Type {
+		case "":
+			continue
+		case "blocked_while_claimed":
+			out.errf("notice: blocked_while_claimed task=%s blockers=%s", n.TaskID, strings.Join(n.Blockers, ","))
+		case "rail_changed":
+			out.errf("notice: rail_changed parent=%s rail_rev=%s", n.ParentID, n.RailRev)
+		default:
+			out.errf("notice: %s", n.Type)
+		}
+	}
 }
 
 // unwrapResult strips a top-level {"result": X} envelope, returning X's raw
@@ -1048,6 +1659,7 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 	const pageSize = 100
 	offset := 0
 	var all []json.RawMessage
+	seenFullPages := map[string]int{}
 	// Detected on page 1, then held for every page and the final re-wrap so the
 	// renderer sees the envelope shape the command emits (docs/hits/… not just
 	// documents). Empty until the first page is extracted.
@@ -1067,8 +1679,39 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 			return ae.exit
 		}
 		docs, k := extractListRows(unwrapResult(respBody))
+		// PDS wave 27 — the reader half of the epic's law. extractListRows
+		// returns the "" sentinel for ANY body it cannot read as a list
+		// envelope, and an HTTP 200 is no proof the body came from Barkpark: a
+		// proxy 502 interstitial, a truncated write, `null`, `{}`, a bare array
+		// and plaintext all arrive at 200. This clause REVERSES the previous
+		// fallback (`if key == "" { key = "documents" }`), which laundered every
+		// one of those into a well-formed EMPTY SUCCESS envelope byte-identical
+		// to a genuinely empty queue — a reader lying to the worker who most
+		// needs the truth. Refuse PER PAGE (page 5 of a walk is as unreadable as
+		// page 1) with a named code, never a bare exit.
+		if k == "" {
+			msg := fmt.Sprintf(
+				"unreadable list page at offset %d: HTTP %d carried no known list envelope (%d bytes): %s",
+				offset, status, len(respBody), bodyPreview(respBody),
+			)
+			if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", unreadableListPageHint) {
+				out.userErr("%s", msg)
+			}
+			return exitGeneric
+		}
 		if key == "" {
 			key = k
+		}
+		if len(docs) == pageSize {
+			identity := paginatedPageIdentity(docs)
+			if firstOffset, seen := seenFullPages[identity]; seen {
+				msg := fmt.Sprintf("pagination stalled at offset %d: full page repeats offset %d", offset, firstOffset)
+				if !renderErrorEnvelope(out, "pagination_stalled", msg, "", "") {
+					out.userErr("%s", msg)
+				}
+				return exitGeneric
+			}
+			seenFullPages[identity] = offset
 		}
 		all = append(all, docs...)
 		if len(docs) < pageSize {
@@ -1077,14 +1720,23 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 		offset += pageSize
 	}
 
-	// Unknown envelope (no known key on page 1): fall back to the documents shape
-	// so nothing regresses.
-	if key == "" {
-		key = "documents"
-	}
+	// key is always set here: the loop runs at least once and refuses (above)
+	// any page it could not read a key from, so an unknown envelope can no
+	// longer reach the success renderer.
 	wrapped, _ := json.Marshal(map[string]any{key: json.RawMessage(mustArray(all))})
 	renderSuccess(out, cmd, mustResult(wrapped))
 	return exitOK
+}
+
+func paginatedPageIdentity(rows []json.RawMessage) string {
+	hash := sha256.New()
+	var length [8]byte
+	for _, row := range rows {
+		binary.BigEndian.PutUint64(length[:], uint64(len(row)))
+		_, _ = hash.Write(length[:])
+		_, _ = hash.Write(row)
+	}
+	return string(hash.Sum(nil))
 }
 
 func withOffsetLimit(rawURL string, offset, limit int) string {
@@ -1119,6 +1771,37 @@ func extractListRows(payload []byte) ([]json.RawMessage, string) {
 	return nil, ""
 }
 
+// bodyPreview renders a short, single-line, printable excerpt of a response
+// body for the unreadable_list_page message — enough to tell a proxy HTML page
+// from `null` from empty bytes without dumping an arbitrary payload into the
+// error envelope.
+func bodyPreview(body []byte) string {
+	const max = 120
+	if len(body) == 0 {
+		return "<empty body>"
+	}
+	// Truncate on a RUNE boundary: a body cut mid-sequence would render as
+	// U+FFFD noise in the very message meant to help identify it.
+	s := string(body)
+	if len(s) > max {
+		cut := max
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "…"
+	}
+	s = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		if r < 0x20 || r == 0x7f {
+			return '.'
+		}
+		return r
+	}, s)
+	return strings.TrimSpace(s)
+}
+
 func mustArray(items []json.RawMessage) []byte {
 	b, _ := json.Marshal(items)
 	return b
@@ -1150,18 +1833,70 @@ func confirmProdWrite(out *writer, cmd manifest.Command, ctx manifest.Context) b
 	return line == "y" || line == "yes"
 }
 
+// isLocalHost is THE pinned classifier for the prod write-guard: true only
+// when server dials a provably-loopback target, decided by EXACT host (hostOf)
+// — never substring. Both guard twins (isProd here, isProdServer in
+// tasks_create_cmd.go) collapse onto it; there must never be a second copy.
+//
+// EXACT-HOST (onb-backlog-isprod-localhost-substring-corner): the previous
+// shape substring-matched "localhost"/"127.0.0.1"/"0.0.0.0" anywhere in the
+// URL, so a hostile hostname that merely EMBEDS a local token
+// (localhost.evil.com, my-127.0.0.1.attacker.net) classified local and
+// skipped the destructive-write confirm — the last fail-open escape after the
+// #12033 fail-closed flip. Now the host is parsed out, lowercased, ONE
+// trailing dot stripped (DNS root form), and matched exactly:
+// {localhost, 0.0.0.0, ::1, [::1]} ∪ IPv4 127.0.0.0/8 (covers Debian's
+// 127.0.1.1). Empty/unparseable → NOT local (the guard fails closed).
+//
+// Deliberately NARROWER than ServerKind (config.go), which is a UX classifier:
+// RFC1918 LAN ranges, *.local mDNS names, and *.localhost stay PROD here —
+// those dial OTHER machines (or resolver-dependent names), and a false prompt
+// is the safe failure; --yes and /v1/meta production:false are the sanctioned
+// exits. Do NOT "unify" the two — the divergence pin test in
+// isprod_localhost_test.go reds if someone tries.
+func isLocalHost(server string) bool {
+	host := strings.ToLower(hostOf(server))
+	host = strings.TrimSuffix(host, ".")
+	if host == "" {
+		return false // fail closed: no provable host means PROD
+	}
+	switch host {
+	case "localhost", "0.0.0.0", "::1", "[::1]":
+		return true
+	}
+	if isIPv4(host) {
+		return atoiByte(strings.Split(host, ".")[0]) == 127 // loopback 127.0.0.0/8
+	}
+	return false
+}
+
 // isProd decides whether the target is production via a name/url heuristic on
-// the manifest's server identity and the resolved server URL.
+// the manifest's server identity and the dialed server URL.
+//
+// FAIL CLOSED (onb-backlog-isprod-custom-host-write-confirm): the old shape
+// defaulted to non-prod unless the host matched a substring allowlist
+// (api.barkpark.cloud / "prod"), so a custom production hostname like
+// cms.gyldendal.no skipped the destructive-write confirm entirely — and every
+// live fleet host emits the generic server.name "barkpark", so the name leg
+// caught no real prod either. Now any host that is not provably local IS prod:
+// localhost/loopback/0.0.0.0 stay unprompted, everything else confirms. The
+// two ways out are --yes (the sole client-side bypass — no env carve-out) and
+// the server itself advertising production:false on /v1/meta
+// (serverDeclaredNonProd — consulted by the write-guard call sites, not here,
+// so this stays a pure offline heuristic that whoami can always evaluate).
+//
+// Classification reads ctx.Server ALONE (D35): m.Server.BaseURL is the
+// server's own echo of the dialed host — display-only elsewhere — and letting
+// it into the classifier handed the server a guard-suppression channel (a
+// manifest base_url containing "localhost" masked a non-local ctx.Server).
+// The name leg below only ever ADDS prod, so a server can tighten the guard
+// on itself but never loosen it.
 func isProd(ctx manifest.Context, m *manifest.Manifest) bool {
 	name := strings.ToLower(m.Server.Name)
 	if name == "prod" || name == "production" {
 		return true
 	}
-	s := strings.ToLower(ctx.Server + " " + m.Server.BaseURL)
-	if strings.Contains(s, "localhost") || strings.Contains(s, "127.0.0.1") || strings.Contains(s, "0.0.0.0") {
-		return false
-	}
-	return strings.Contains(s, "api.barkpark.cloud") || strings.Contains(s, "prod")
+	return !isLocalHost(ctx.Server)
 }
 
 // dryRun prints the resolved method/path/headers(redacted)/body and exits 0

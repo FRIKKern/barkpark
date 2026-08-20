@@ -1,0 +1,15 @@
+/* __css_check.fixture.css — regression fixture for the E9 parse-completeness
+   guard (swallowedTokenErrors in __css_check.mjs). Reproduces the EXACT #4251
+   shape: a '*/' inside CSS comment TEXT ends the comment early, so the browser
+   consumes the garbage that follows as one malformed declaration up to the next
+   ';' — swallowing the real '--btn-bg: var(--primary);' declaration. The flat
+   token scan still 'sees' --btn-bg:, so only the ;-delimited parse (E9) catches
+   the drop. Proof: `node __css_check.mjs --swallow-check __css_check.fixture.css`
+   MUST print exactly one E9 error and exit 1. This file is a FIXTURE, never
+   served — it is not linked from index.html and app.js never loads it. */
+:root {
+  --primary: hsl(163 60% 32%);
+  /* status roles (--ok*/--warn*/--danger*/--info*/--warn-strong) share the ramp */
+  --btn-bg: var(--primary);
+  --btn-fg: #fff;
+}

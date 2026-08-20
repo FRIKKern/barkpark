@@ -13,7 +13,7 @@ defmodule Barkpark.Content.Papers.CompositionMigrationTest do
       migrates a legacy paper (re-rendering body_html like the real writer) and
       a second dry-run plans 0 (idempotent).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Document

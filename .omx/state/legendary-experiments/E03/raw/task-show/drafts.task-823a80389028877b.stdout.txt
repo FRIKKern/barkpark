@@ -1,0 +1,50 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "probe criterion",
+          "index": 0,
+          "met": false
+        }
+      ],
+      "description": "Scratch task to verify claim/stamp/pulse/close. Safe to delete.",
+      "github": {
+        "issue": 2556,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_rev": "e6fd76c307ee6540b380327c5129c423"
+      },
+      "kind": "task",
+      "lifecycle_status": "open"
+    },
+    "criteria_progress": {
+      "met": 0,
+      "total": 1
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "drafts.task-823a80389028877b",
+    "execution_policy": null,
+    "id": "e3466d89-ed76-43c4-8473-8a9704d7e135",
+    "inserted_at": "2026-07-11T11:31:23.452424Z",
+    "kind": "task",
+    "labels": [],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": null,
+    "priority": null,
+    "rev": "0236fc768a43314781b631c1fb2166b5",
+    "status": "draft",
+    "title": "SCRATCH wave1-verbs-truth probe 1783769482",
+    "type": "task",
+    "updated_at": "2026-07-11T11:31:59.562607Z"
+  },
+  "ok": true
+}

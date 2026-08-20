@@ -1,0 +1,37 @@
+{
+  "grip_id": "v-main-admin-token-scope-2026-07-24",
+  "verifier": "v-main-admin-token-scope",
+  "wave": "personal-dev-fleet-wave-mvp0-2026-07-24",
+  "assignment": "Does the CP-stored admin token (reveal_admin_token) authorize ALL FOUR main-side calls the server-side add-support job needs: GET /api/workspaces/:ws/export, POST /v1/data/mutate/:dataset, POST /v1/fleet/support-tokens, GET /v1/fleet/roster? Trace each route's exact auth pipeline; PROVE export+mutate legs by running their auth tests.",
+  "verdict": "GREEN. All four routes are satisfied by a single token carrying the global \"admin\" permission. The main's admin token is minted TODAY as [\"read\",\"write\",\"admin\"] (warmpool.go:544), which is byte-identical to the permission set the export test (200) and mutate write-gate test (passes) pin. CAVEAT: mix test could NOT be executed — no Elixir/Erlang toolchain on this Mac (server-only). Proof rests on verbatim test-assertion source + plug source + cloud-minting source + a live crown-proof run of the export leg.",
+  "recipes": [
+    {
+      "claim": "Route auth pipelines: (1) GET /api/workspaces/:ws/export -> [:api,:require_admin]; (3) POST /v1/fleet/support-tokens -> [:api,:require_admin]; (2) POST /v1/data/mutate/:dataset flat -> [:api,:require_token,:require_write,:idempotent]; (4) GET /v1/fleet/roster -> plugin route auth::token_root mounted under scope \"/v1\" pipe_through [:api,:require_token]",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark/api && sed -n '2525,2530p;1934,1938p;1780,1784p;1106,1110p' lib/barkpark_web/router.ex; grep -n 'fleet/roster' lib/barkpark/plugins/tasks.ex"
+    },
+    {
+      "claim": ":require_admin = RequireToken + RequireAdmin(has_permission?(token,\"admin\")); :require_write = RequireWritePermission(TenancyAuth.permits?(token,:write)); @write_perms = [write,admin], @admin_perms = [admin], @read_perms = [read,admin,public-read]. So an admin-perm token passes require_admin AND require_write AND require_token.",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark/api && sed -n '656,659p;731,733p' lib/barkpark_web/router.ex; grep -n 'has_permission?' lib/barkpark/auth.ex; sed -n '46,48p;285,294p' lib/barkpark/tenancy/auth.ex; sed -n '20,37p' lib/barkpark_web/plugs/require_write_permission.ex"
+    },
+    {
+      "claim": "workspace bundle export test PINS: token [\"read\",\"write\",\"admin\"] -> 200 (line 449/459); token [\"read\",\"write\"] (non-admin) -> 403 forbidden (line 573-583); unauthenticated -> 401 (line 586-590). This is the require_admin gate on GET /api/workspaces/:ws/export.",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark/api && sed -n '445,476p;573,591p' test/barkpark_web/controllers/workspace_controller_test.exs"
+    },
+    {
+      "claim": "mutate write-gate test PINS: read-only token -> 403 at RequireWritePermission BEFORE apply_mutations (line 34-40); write-capable token [\"read\",\"write\",\"admin\"] passes gate, reaches validation not 403 (line 42-48).",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark/api && sed -n '1,10p;30,50p' test/barkpark_web/controllers/mutate_controller_test.exs"
+    },
+    {
+      "claim": "The main's admin token is minted as [\"read\",\"write\",\"admin\"], bound to scope.workspace_id (Default), by the cloud provisioning adminTokenStep — this IS the token class the CP would store/reveal per main.",
+      "rerun": "cd /Users/frikkjarl/Documents/GitHub/barkpark && sed -n '528,545p' internal/cli/cloud/warmpool.go"
+    },
+    {
+      "claim": "BLOCKER: mix/elixir/erl absent from this Mac (server-only /root/.asdf); MUST-RUN 'CC=clang mix test ...' could not execute here. .tool-versions expects erlang 27.3.4 + elixir 1.18.4 via asdf, not installed locally.",
+      "rerun": "command -v mix elixir erl || echo NONE; cat /Users/frikkjarl/Documents/GitHub/barkpark/.tool-versions"
+    },
+    {
+      "claim": "Live corroboration: pds-w1-crown-proof (PDS-D91) established GET /api/workspaces/:ws/export (NOT /v1/...) as THE scrubbed-pull route and ran it against a real guerrilla dataset using the admin token; pds-w1-dev-export confirms bp-export-v1 profile=dev scrubbed export rides that same route.",
+      "rerun": "bp search query \"crown proof export /api/workspaces D91\" | python3 -c \"import json,sys;d=json.load(sys.stdin);print([x['id'] for x in d['documents'] if 'crown' in x['id'] or 'dev-export' in x['id']])\""
+    }
+  ]
+}

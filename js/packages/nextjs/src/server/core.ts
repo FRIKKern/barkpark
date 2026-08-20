@@ -120,42 +120,124 @@ function defaultHeaders(
   return out
 }
 
+function strOrUndefined(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length > 0 ? v : undefined
+}
+
+function pickRequestId(body: unknown): string | undefined {
+  if (body === null || typeof body !== 'object') return undefined
+  const b = body as Record<string, unknown>
+  return strOrUndefined(b['request_id']) ?? strOrUndefined(b['requestId'])
+}
+
+/**
+ * Decode a non-2xx Response into the right {@link BarkparkError} subclass,
+ * mirroring core's `decodeErrorAndThrow` (js/packages/core/src/transport.ts):
+ * extracts `code`/`message`/`hint`/`request_id` from the canonical
+ * `{error:{...}}` envelope (falling back to a bare string-valued `error`), sets
+ * `serverCode`+`hint` on every thrown error, maps 5xx to the generic
+ * `BarkparkAPIError` (NOT `BarkparkNetworkError`, which is reserved for
+ * `fetch()` itself throwing — see errors.ts), and maps 422 to
+ * `BarkparkValidationError` with `issues` built from the envelope's `details`
+ * field→message map.
+ */
 async function decodeAndThrow(response: Response, url: string): Promise<never> {
   const status = response.status
-  const requestId = response.headers.get('x-request-id') ?? undefined
-  let body: unknown = undefined
+  const requestIdHeader = response.headers.get('x-request-id') ?? undefined
   const raw = await response.text()
+
+  let parsed: unknown = undefined
   if (raw.length > 0) {
     try {
-      body = JSON.parse(raw)
+      parsed = JSON.parse(raw)
     } catch {
-      body = raw
+      const apiOpts: { status: number; body: unknown; url: string; requestId?: string } = {
+        status,
+        body: raw,
+        url,
+      }
+      if (requestIdHeader !== undefined) apiOpts.requestId = requestIdHeader
+      throw new BarkparkAPIError(`barkparkFetch: unexpected non-JSON response ${url}`, apiOpts)
     }
   }
-  const opts: { status: number; body: unknown; url: string; requestId?: string } = {
-    status,
-    body,
-    url,
-  }
-  if (requestId !== undefined) opts.requestId = requestId
-  if (status === 404) throw new BarkparkNotFoundError(`barkparkFetch: 404 ${url}`, opts)
-  if (status === 401 || status === 403)
-    throw new BarkparkAuthError(`barkparkFetch: ${status} ${url}`, opts)
+
+  const errorField =
+    parsed !== null && typeof parsed === 'object' && 'error' in parsed
+      ? (parsed as { error?: unknown }).error
+      : undefined
+
+  // Canonical envelope: `error` is an object ({code, message, request_id, hint}).
+  const envelope =
+    typeof errorField === 'object' && errorField !== null
+      ? (errorField as Record<string, unknown>)
+      : undefined
+
+  // Bare string-valued `error` (e.g. {"error":"not_found"} from legacy/admin
+  // endpoints) — the string is the machine `code`; the message unless a
+  // sibling `reason` is present.
+  const bareCode = strOrUndefined(errorField)
+  const bareReason =
+    parsed !== null && typeof parsed === 'object'
+      ? strOrUndefined((parsed as { reason?: unknown }).reason)
+      : undefined
+
+  const code = envelope ? strOrUndefined(envelope['code']) : bareCode
+  const message =
+    (envelope ? strOrUndefined(envelope['message']) : (bareReason ?? bareCode)) ??
+    `barkparkFetch: ${status} ${url}`
+  const requestId = pickRequestId(envelope) ?? requestIdHeader
+  const hint = envelope ? strOrUndefined(envelope['hint']) : undefined
+  // `!== null` is load-bearing: typeof null === 'object', so without it a
+  // `details: null` envelope (a normal Phoenix changeset-less 422) sets
+  // details = null, and Object.entries(details) below would throw a raw
+  // TypeError that escapes the error taxonomy.
+  const details =
+    envelope && typeof envelope['details'] === 'object' && envelope['details'] !== null
+      ? (envelope['details'] as Record<string, unknown>)
+      : undefined
+
+  const base: {
+    status: number
+    body: unknown
+    url: string
+    requestId?: string
+    hint?: string
+    serverCode?: string
+  } = { status, body: parsed, url }
+  if (requestId !== undefined) base.requestId = requestId
+  if (hint !== undefined) base.hint = hint
+  if (code !== undefined) base.serverCode = code
+
+  if (status === 404) throw new BarkparkNotFoundError(message, base)
+  if (status === 401 || status === 403) throw new BarkparkAuthError(message, base)
   if (status === 429) {
     const retryAfter = response.headers.get('retry-after') ?? undefined
-    const rlOpts: {
-      status: number
-      body: unknown
-      url: string
-      requestId?: string
-      retryAfterMs?: number
-    } = { ...opts }
+    const rlOpts: typeof base & { retryAfterMs?: number } = { ...base }
     const n = retryAfter !== undefined ? Number(retryAfter) : NaN
     if (Number.isFinite(n)) rlOpts.retryAfterMs = Math.max(0, n * 1000)
-    throw new BarkparkRateLimitError(`barkparkFetch: 429 ${url}`, rlOpts)
+    throw new BarkparkRateLimitError(message, rlOpts)
   }
-  if (status >= 500) throw new BarkparkNetworkError(`barkparkFetch: ${status} ${url}`, opts)
-  throw new BarkparkAPIError(`barkparkFetch: ${status} ${url}`, opts)
+  // 422 / validation_failed — Phoenix `details` is a field->[msg] map.
+  if (status === 422) {
+    const opts: typeof base & { issues?: unknown[] } = { ...base }
+    if (details !== undefined) {
+      const issues: unknown[] = []
+      for (const [field, msgs] of Object.entries(details)) {
+        if (Array.isArray(msgs)) {
+          for (const m of msgs) issues.push({ field, message: m })
+        } else {
+          issues.push({ field, message: msgs })
+        }
+      }
+      if (issues.length > 0) opts.issues = issues
+    }
+    throw new BarkparkValidationError(message, opts)
+  }
+  // Everything else (including 5xx) -> generic API error with body + status.
+  // 5xx is a real HTTP response from the server, not a `fetch()` failure, so
+  // it does NOT map to BarkparkNetworkError (reserved for DNS/offline/TLS —
+  // see errors.ts).
+  throw new BarkparkAPIError(message, base)
 }
 
 /**
@@ -290,7 +372,24 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
 
   if (!resp.ok) await decodeAndThrow(resp, input.url)
 
-  return (await resp.json()) as T
+  // Ok-path body decode — mirror core transport (js/packages/core/src/transport.ts
+  // ok-path): a 204 or an empty/non-JSON 2xx body must NOT reach resp.json(), which
+  // would throw a raw SyntaxError that escapes the Barkpark error taxonomy. 204 and
+  // empty bodies resolve to undefined (core treats them as success); a non-JSON body
+  // throws BarkparkAPIError so callers filtering on `instanceof BarkparkError` catch it.
+  if (resp.status === 204) return undefined as T
+  const text = await resp.text()
+  if (text.length === 0) return undefined as T
+  try {
+    return JSON.parse(text) as T
+  } catch (err) {
+    throw new BarkparkAPIError(`barkparkFetch: unexpected non-JSON response ${input.url}`, {
+      status: resp.status,
+      body: text,
+      url: input.url,
+      cause: err,
+    })
+  }
 }
 
 /**

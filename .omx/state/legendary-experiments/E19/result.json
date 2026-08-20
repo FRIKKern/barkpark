@@ -1,0 +1,42 @@
+{
+  "assignment_id": "E19",
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "capability_blocks": [
+    "A proven isolated expiring non-production deployment and teardown control were unavailable.",
+    "An authenticated Studio browser session was unavailable; login and API-only authentication were not substituted.",
+    "No public-reader or CLI/API record could be bound to an isolated deployment carrying the E16 candidate digest."
+  ],
+  "counts": {
+    "accepted_candidate_specific_captures": 0,
+    "attempts": 108,
+    "blocked_cells": 108,
+    "duplicate_cells": 0,
+    "fixtures": 36,
+    "missing_cells": 0,
+    "proxy_cells": 0,
+    "rollback_restored_or_untouched": 36,
+    "silent_blanks": 0,
+    "surfaces": 3
+  },
+  "deployment_id": null,
+  "evidence": {
+    "capture_index": "capture-index.json",
+    "deployment_manifest": "deployment-manifest.json",
+    "expected_output": "E19 REPLAY PASS verdict=BLOCKED captures=0 attempts=108 rollback=36/36",
+    "hard_gates": "hard-gates.json",
+    "preflight": "preflight.json",
+    "provenance_manifest": "provenance-manifest.json",
+    "rollback": "rollback.json",
+    "session_manifest": "session-manifest.json",
+    "validation_command": ".omx/state/legendary-experiments/E19/scripts/replay.sh"
+  },
+  "schema_version": "legendary-e19-result/v1",
+  "verdict": {
+    "action": "REWORK",
+    "pilot_authorized": false,
+    "quality": "BLOCKED",
+    "real_surface_gate_passed": false,
+    "winner_selected": false
+  }
+}

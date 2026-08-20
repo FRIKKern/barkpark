@@ -129,7 +129,7 @@ defmodule Barkpark.Scim do
     ws_ids = org |> workspace_ids()
 
     Repo.transaction(fn ->
-      Accounts.revoke_all_user_sessions(user)
+      {:ok, sessions_revoked} = Accounts.revoke_all_user_sessions(user)
 
       {dropped, _} =
         Repo.delete_all(
@@ -144,15 +144,42 @@ defmodule Barkpark.Scim do
 
       audit(org, user, "user_deprovisioned", %{
         "hard" => hard,
+        "sessions_revoked" => sessions_revoked,
         "memberships_dropped" => dropped,
         "tokens_revoked" => tokens_revoked
       })
 
       if hard, do: Repo.delete!(user)
 
-      %{memberships_dropped: dropped, tokens_revoked: tokens_revoked, hard: hard}
+      %{
+        sessions_revoked: sessions_revoked,
+        memberships_dropped: dropped,
+        tokens_revoked: tokens_revoked,
+        hard: hard
+      }
     end)
   end
+
+  @doc """
+  Is `user` still ACTIVE in `org`, READ BACK FROM STORAGE?
+
+  SCIM's `active` has no column of its own: a user is active in an org exactly
+  while their row exists AND they hold a membership in one of the org's
+  workspaces — the same pair `get_org_user/2` and `list_org_users/2` resolve.
+  Deprovision drops those memberships, so this read is the STORED answer to
+  "did the deprovision take", not a literal the caller chose (PDS-D503).
+  """
+  @spec org_user_active?(Organization.t(), User.t() | binary()) :: boolean()
+  def org_user_active?(%Organization{} = org, %User{id: id}), do: org_user_active?(org, id)
+
+  def org_user_active?(%Organization{} = org, user_id) when is_binary(user_id) do
+    case Repo.uuid_or_nil(user_id) do
+      nil -> false
+      uuid -> Repo.exists?(from(u in User, where: u.id == ^uuid)) and member_of_org?(org, uuid)
+    end
+  end
+
+  def org_user_active?(_org, _), do: false
 
   # Stamp `revoked_at` on every LIVE api_token owned by this user, so
   # `Auth.verify_token/1` rejects it immediately. Owner-bound PATs ONLY: share
@@ -397,29 +424,56 @@ defmodule Barkpark.Scim do
   @doc """
   Reconcile a group's membership to EXACTLY `user_ids` (SCIM `PUT` members
   full-replace). Users newly present gain the mapped role; users dropped from the
-  set revert to the default `member` role. Non-UUID ids are ignored (an IdP only
-  ever sends resolved resource ids). Every add/remove is audited via
-  `add_group_member`/`remove_group_member`. Returns `{:ok, %{added, removed}}`.
+  set revert to the default `member` role. Every add/remove is audited via
+  `add_group_member`/`remove_group_member`.
+
+  Returns `{:ok, %{added, removed, unmatched}}`, where `added`/`removed` count
+  the users whose stored membership the write ACTUALLY moved and `unmatched`
+  lists the supplied ids that named nobody this org can see — a malformed
+  (non-UUID) id, a user never provisioned into the org, or a user belonging to
+  ANOTHER organization. The previous shape counted set arithmetic (`MapSet.size`
+  of the intended diff) rather than writes, so "granted three" and "granted
+  nobody" reached the caller as the same number: a caller could not answer
+  honestly over it, however carefully it matched (PDS-D551).
   """
   @spec replace_group_members(Organization.t(), Group.t(), [binary()]) ::
-          {:ok, %{added: non_neg_integer(), removed: non_neg_integer()}}
+          {:ok, %{added: non_neg_integer(), removed: non_neg_integer(), unmatched: [binary()]}}
   def replace_group_members(%Organization{} = org, %Group{} = group, user_ids)
       when is_list(user_ids) do
-    desired =
-      user_ids |> Enum.map(&Repo.uuid_or_nil/1) |> Enum.reject(&is_nil/1) |> MapSet.new()
+    {valid, malformed} = Enum.split_with(user_ids, &(Repo.uuid_or_nil(&1) != nil))
 
-    current = current_group_members(org, group)
+    desired = valid |> Enum.map(&Repo.uuid_or_nil/1) |> MapSet.new()
+    current = group_member_ids(org, group)
     to_add = MapSet.difference(desired, current)
     to_remove = MapSet.difference(current, desired)
 
-    Enum.each(to_add, &add_group_member(org, group, &1))
-    Enum.each(to_remove, &remove_group_member(org, group, &1))
+    {added, unmatched} =
+      Enum.reduce(to_add, {0, malformed}, fn uid, {n, miss} ->
+        case add_group_member(org, group, uid) do
+          {:ok, _} -> {n + 1, miss}
+          {:error, :no_membership} -> {n, miss ++ [uid]}
+        end
+      end)
 
-    {:ok, %{added: MapSet.size(to_add), removed: MapSet.size(to_remove)}}
+    removed =
+      Enum.reduce(to_remove, 0, fn uid, n ->
+        case remove_group_member(org, group, uid) do
+          {:ok, _} -> n + 1
+          {:error, :no_membership} -> n
+        end
+      end)
+
+    {:ok, %{added: added, removed: removed, unmatched: unmatched}}
   end
 
-  # Users in the org's workspaces currently holding this group's mapped role.
-  defp current_group_members(org, %Group{role_name: role_name}) do
+  @doc """
+  The org's user ids currently holding `group`'s mapped role — the group's
+  membership as STORED, not as requested. A write receipt that claims members
+  must be computed from this, never from the request body or from a group
+  struct read before the write.
+  """
+  @spec group_member_ids(Organization.t(), Group.t()) :: MapSet.t(binary())
+  def group_member_ids(%Organization{} = org, %Group{role_name: role_name}) do
     ws_ids = workspace_ids(org)
 
     from(m in Membership,
@@ -432,60 +486,144 @@ defmodule Barkpark.Scim do
   end
 
   @doc """
+  The same STORED-row authority as `group_member_ids/2`, for MANY roles in ONE
+  query: `%{role_name => MapSet.t(user_id)}`.
+
+  A list response renders every group on the page, and every group's `members`
+  must come from stored rows — asking per group is a query per group on a path
+  whose page size is unbounded (`ScimResponse.paging/1` returns `count: nil`
+  when the client sends none, and `Scim.paginate/2` applies no limit for nil,
+  so an unpaged list answers for every group in the org). Batching keeps the
+  cost of a page at one membership query regardless of how many groups it
+  carries.
+
+  Roles with no holders are ABSENT from the map rather than mapped to an empty
+  set — callers pass their own default — and two groups may legitimately map to
+  the SAME role, so each role's set fans out to every group carrying it.
+  """
+  @spec group_member_ids_by_role(Organization.t(), [binary()]) :: %{
+          binary() => MapSet.t(binary())
+        }
+  def group_member_ids_by_role(%Organization{}, []), do: %{}
+
+  def group_member_ids_by_role(%Organization{} = org, role_names) when is_list(role_names) do
+    ws_ids = workspace_ids(org)
+
+    from(m in Membership,
+      where: m.principal_type == "user" and m.workspace_id in ^ws_ids and m.role in ^role_names,
+      select: {m.role, m.principal_id},
+      distinct: true
+    )
+    |> Repo.all()
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Map.new(fn {role, ids} -> {role, MapSet.new(ids)} end)
+  end
+
+  @doc """
   Delete `group` from `org`. Tenancy-scoped: the delete is filtered by
   `organization_id`, so a token for org A can never remove a group in org B.
-  Returns `{:ok, deleted_count}` (0 when the group is not in this org).
+
+  Returns `{:ok, deleted_count}` only when the write actually removed this org's
+  own row, and `{:error, :not_found}` when it matched nothing — a cross-org id,
+  or a row that vanished between a caller's read and this write.
+
+  The previous unconditional `{:ok, n}` could not be matched honestly by any
+  caller: `{:ok, 0}` satisfies a bare `{:ok, _} =`, so "removed the group" and
+  "removed nothing" reached the receipt as the same value (PDS-D523). The
+  outcome now lives in the tag, so a caller cannot answer success over a count
+  it never read.
   """
-  @spec delete_group(Organization.t(), Group.t()) :: {:ok, non_neg_integer()}
+  @spec delete_group(Organization.t(), Group.t()) :: {:ok, pos_integer()} | {:error, :not_found}
   def delete_group(%Organization{id: oid} = org, %Group{} = group) do
     {n, _} =
       Repo.delete_all(from g in Group, where: g.id == ^group.id and g.organization_id == ^oid)
 
-    # Only audit a delete that actually removed the org's own group (n > 0) — a
-    # cross-org delete attempt matches nothing and is a no-op, not a lifecycle event.
-    if n > 0, do: audit_group_lifecycle(org, group, "scim_group_deleted")
-
-    {:ok, n}
+    if n > 0 do
+      # Only audit a delete that actually removed the org's own group — a
+      # cross-org delete attempt matches nothing and is a no-op, not a
+      # lifecycle event.
+      audit_group_lifecycle(org, group, "scim_group_deleted")
+      {:ok, n}
+    else
+      {:error, :not_found}
+    end
   end
 
   @doc """
   Add `user_id` to `group`: set that user's membership role (in the org's
-  workspaces) to the group's mapped role. No-op if the user isn't provisioned
-  into the org. Audited.
+  workspaces) to the group's mapped role. Audited.
+
+  Returns `{:ok, n}` only when the write actually re-roled at least one stored
+  membership, and `{:error, :no_membership}` when the id named nobody this org
+  can see: a user never provisioned into the org, a user belonging to ANOTHER
+  organization (the update is scoped to this org's workspaces, so a cross-org
+  id matches zero rows), or a malformed non-UUID member value an IdP sent (it
+  binds to a `:binary_id` column, so it folds instead of raising).
+
+  The previous unconditional `{:ok, non_neg_integer()}` could not be matched
+  honestly by any caller — `{:ok, 0}` satisfies a bare `{:ok, _} =`, so
+  "granted the role" and "granted nobody" reached the receipt as the same
+  value, exactly the shape `delete_group/2` was widened out of (PDS-D523). The
+  outcome now lives in the tag. A grant that matched nobody is also no longer
+  audited: an audit row is a claim that a role changed hands, and none did.
   """
-  @spec add_group_member(Organization.t(), Group.t(), binary()) :: {:ok, non_neg_integer()}
+  @spec add_group_member(Organization.t(), Group.t(), binary()) ::
+          {:ok, pos_integer()} | {:error, :no_membership}
   def add_group_member(%Organization{} = org, %Group{} = group, user_id) do
-    n = set_member_role(org, user_id, group.role_name)
-    audit_group(org, user_id, group, "group_member_added", group.role_name)
-    {:ok, n}
+    with user_id when not is_nil(user_id) <- Repo.uuid_or_nil(user_id),
+         n when n > 0 <- set_member_role(org, user_id, group.role_name) do
+      audit_group(org, user_id, group, "group_member_added", group.role_name)
+      {:ok, n}
+    else
+      _ -> {:error, :no_membership}
+    end
   end
 
   @doc """
   Remove `user_id` from `group`: revert that user's membership role (in the
   org's workspaces) to the default `member`, revoking the mapped grant. Audited.
+
+  Returns `{:ok, n}` only when the write actually reverted at least one stored
+  membership, and `{:error, :no_membership}` when the id named nobody this org
+  can see — same three cases as `add_group_member/3`, and un-audited for the
+  same reason: no grant was revoked.
   """
-  @spec remove_group_member(Organization.t(), Group.t(), binary()) :: {:ok, non_neg_integer()}
+  @spec remove_group_member(Organization.t(), Group.t(), binary()) ::
+          {:ok, pos_integer()} | {:error, :no_membership}
   def remove_group_member(%Organization{} = org, %Group{} = group, user_id) do
-    n = set_member_role(org, user_id, @provision_role)
-    audit_group(org, user_id, group, "group_member_removed", @provision_role)
-    {:ok, n}
+    with user_id when not is_nil(user_id) <- Repo.uuid_or_nil(user_id),
+         n when n > 0 <- set_member_role(org, user_id, @provision_role) do
+      audit_group(org, user_id, group, "group_member_removed", @provision_role)
+      {:ok, n}
+    else
+      _ -> {:error, :no_membership}
+    end
   end
 
   # Set the user's role on every membership it holds in the org's workspaces.
+  # `user_id` binds to the `:binary_id` principal_id — a non-UUID would raise
+  # Ecto.Query.CastError, so it folds to 0 (defense in depth; public callers
+  # already guard via Repo.uuid_or_nil).
   defp set_member_role(org, user_id, role_name) do
-    ws_ids = workspace_ids(org)
+    case Repo.uuid_or_nil(user_id) do
+      nil ->
+        0
 
-    {n, _} =
-      Repo.update_all(
-        from(m in Membership,
-          where:
-            m.principal_type == "user" and m.principal_id == ^user_id and
-              m.workspace_id in ^ws_ids
-        ),
-        set: [role: role_name, updated_at: DateTime.utc_now()]
-      )
+      user_id ->
+        ws_ids = workspace_ids(org)
 
-    n
+        {n, _} =
+          Repo.update_all(
+            from(m in Membership,
+              where:
+                m.principal_type == "user" and m.principal_id == ^user_id and
+                  m.workspace_id in ^ws_ids
+            ),
+            set: [role: role_name, updated_at: DateTime.utc_now()]
+          )
+
+        n
+    end
   end
 
   # A role name is known if it's a built-in or a Role row that's global or

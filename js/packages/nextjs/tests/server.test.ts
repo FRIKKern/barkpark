@@ -7,7 +7,13 @@ vi.mock('next/headers', () => ({
   draftMode: draftModeMock,
 }))
 
-import { BarkparkAuthError } from '@barkpark/core'
+import {
+  BarkparkAPIError,
+  BarkparkAuthError,
+  BarkparkNetworkError,
+  BarkparkNotFoundError,
+  BarkparkValidationError,
+} from '@barkpark/core'
 import { barkparkFetch, createBarkparkServer, defineLive } from '../src/server/index'
 import type { BarkparkServerConfig } from '../src/server/index'
 
@@ -327,6 +333,54 @@ describe('barkparkFetch — cache-tag namespace (scoped vs flat)', () => {
     const tags = nextTags(fetchSpy.mock.calls[0]![1])
     expect(tags).toContain('bp:ds:production:_all')
     for (const t of tags) expect(t).not.toContain('bp:ws:')
+  })
+})
+
+describe('barkparkFetch — error decoding', () => {
+  it('surfaces the server error code + message on a 404 (not a bare "barkparkFetch: 404" string)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'not_found', message: 'Post not found' } }), {
+        status: 404,
+      }),
+    )
+    const err = await barkparkFetch(makeCfg(), { type: 'post', id: 'missing' }).catch((e) => e)
+    expect(err).toBeInstanceOf(BarkparkNotFoundError)
+    expect((err as BarkparkNotFoundError).message).toBe('Post not found')
+    expect((err as BarkparkNotFoundError).serverCode).toBe('not_found')
+  })
+
+  it('classifies a 500 as BarkparkAPIError, not BarkparkNetworkError (fetch() itself did not throw)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'internal_error', message: 'boom' } }), {
+        status: 500,
+      }),
+    )
+    const err = await barkparkFetch(makeCfg(), { type: 'post' }).catch((e) => e)
+    expect(err).toBeInstanceOf(BarkparkAPIError)
+    expect(err).not.toBeInstanceOf(BarkparkNetworkError)
+    expect((err as BarkparkAPIError).message).toBe('boom')
+    expect((err as BarkparkAPIError).serverCode).toBe('internal_error')
+  })
+
+  it('populates BarkparkValidationError.issues from a 422 envelope\'s details map', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'validation_failed',
+            message: 'Validation failed',
+            details: { title: ['is required'] },
+          },
+        }),
+        { status: 422 },
+      ),
+    )
+    const err = await barkparkFetch(makeCfg(), { type: 'post' }).catch((e) => e)
+    expect(err).toBeInstanceOf(BarkparkValidationError)
+    expect((err as BarkparkValidationError).issues).toEqual([
+      { field: 'title', message: 'is required' },
+    ])
+    expect((err as BarkparkValidationError).serverCode).toBe('validation_failed')
   })
 })
 

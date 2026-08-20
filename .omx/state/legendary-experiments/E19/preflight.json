@@ -1,0 +1,43 @@
+{
+  "assignment_id": "E19",
+  "bounded_probe": {
+    "candidate_capsule_count": 36,
+    "credential_values_observed": false,
+    "external_commands_executed": 0,
+    "fixture_count": 36,
+    "input_hashes": {
+      "E03/fixture-manifest.json": {
+        "actual_sha256": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df",
+        "expected_sha256": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df",
+        "matches": true
+      },
+      "E03/thresholds.json": {
+        "actual_sha256": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b",
+        "expected_sha256": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b",
+        "matches": true
+      },
+      "E16/result.json": {
+        "actual_sha256": "b02c3a5e4ef7abe3bdef7eb2a97c536fe8b0fafb0b54ab013beb1136964e62c6",
+        "expected_sha256": "b02c3a5e4ef7abe3bdef7eb2a97c536fe8b0fafb0b54ab013beb1136964e62c6",
+        "matches": true
+      }
+    },
+    "network_requests_made": 0,
+    "production_targets_contacted": 0,
+    "runtime_control_presence": {
+      "E19_DEPLOY_COMMAND": false,
+      "E19_EXPIRY_MINUTES": false,
+      "E19_ISOLATED_BASE_URL": false,
+      "E19_STUDIO_SESSION_SECRET": false,
+      "E19_TEARDOWN_COMMAND": false
+    },
+    "secrets_persisted": false
+  },
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "deployment_authorized": false,
+  "input_gate_passed": true,
+  "schema_version": "legendary-e19-preflight/v1",
+  "stop_reason": "ISOLATION_EXPIRY_TEARDOWN_OR_AUTH_BROWSER_CONTROL_UNAVAILABLE",
+  "verdict": "BLOCKED"
+}

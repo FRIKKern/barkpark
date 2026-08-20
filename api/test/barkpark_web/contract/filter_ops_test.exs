@@ -377,4 +377,75 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
     assert error["details"]["field"] == "tags"
     assert error["details"]["op"] == "hasStrong"
   end
+
+  test "flat filter 'tags hasStrong tag:min' filters end to end (CLI --filter form, D75)",
+       %{conn: conn} do
+    content =
+      Barkpark.LabelFixtures.with_named_labels(%{}, "fops_http", [{"wired", 80}])
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        Map.merge(%{"_id" => "hs2", "title" => "Flat Wired"}, content),
+        "fops_http"
+      )
+
+    {:ok, _} = Content.publish_document("hs2", "post", "fops_http")
+
+    # Mutation-proof: drop parse_scalar_has_strong from the keyword chain and
+    # the string becomes an invalid_flat_filter 400 — json_response(200) reds.
+    %{"result" => hit} =
+      conn
+      |> get(
+        "/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("tags hasStrong wired:50")}"
+      )
+      |> json_response(200)
+
+    assert hit["count"] == 1
+    assert hd(hit["documents"])["_id"] == "hs2"
+
+    # Above the stored strength -> no match — proves the filter APPLIED
+    # (before D75 this exact shape silently returned the unfiltered set).
+    %{"result" => miss} =
+      conn
+      |> get(
+        "/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("tags hasStrong wired:90")}"
+      )
+      |> json_response(200)
+
+    assert miss["count"] == 0
+
+    # A malformed hasStrong VALUE routes through the shared fail-closed guard.
+    error =
+      conn
+      |> get(
+        "/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("tags hasStrong wired")}"
+      )
+      |> json_response(400)
+      |> Map.fetch!("error")
+
+    assert error["code"] == "invalid_filter"
+    assert error["details"]["field"] == "tags"
+    assert error["details"]["op"] == "hasStrong"
+  end
+
+  test "an unparseable flat filter is a 400 naming the grammar — NEVER the unfiltered set (D75)",
+       %{conn: conn} do
+    # Mutation-proof: re-open the passthrough (normalize_filter_map falling
+    # back to %{}) and this request is a 200 carrying every fixture row — the
+    # 400 assertion reds. A refusal beats a silent passthrough.
+    resp =
+      get(
+        conn,
+        "/v1/data/query/fops_http/post?filter=#{URI.encode_www_form("epic weighted nonsense")}"
+      )
+
+    assert resp.status == 400
+    error = json_response(resp, 400)["error"]
+    assert error["code"] == "invalid_filter"
+    assert error["details"]["filter"] == "epic weighted nonsense"
+    # The message names the accepted flat grammar, hasStrong included.
+    assert error["message"] =~ "hasStrong <tag>:<min>"
+    assert is_binary(error["hint"]) and error["hint"] != ""
+  end
 end

@@ -82,6 +82,15 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --filter @barkpark/core build
 
+      # web's canonical PortableDoc reader is a `file:../js/packages/react` link
+      # (document-detail.tsx / paper-editor-doc.tsx), so its dist must exist for
+      # the Next build to resolve `@barkpark/react`. Built AFTER core because
+      # react's DTS build imports core's declarations.
+      - name: Build @barkpark/react (web's linked dependency)
+        if: steps.detect.outputs.present == 'true'
+        working-directory: js
+        run: pnpm --filter @barkpark/react build
+
       - name: Install web/ deps
         if: steps.detect.outputs.present == 'true'
         working-directory: web
@@ -179,6 +188,15 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm --filter @barkpark/core build
+
+      # web's canonical PortableDoc reader (`@barkpark/react`) is a file: link
+      # whose dist must exist for the app to typecheck and for the renderer-import
+      # test modules (section-grid-render / component-golden-parity) to load
+      # `renderPortableDocument`. Built AFTER core (react's DTS imports core).
+      - name: Build @barkpark/react (web's linked dependency)
+        if: steps.detect.outputs.present == 'true'
+        working-directory: js
+        run: pnpm --filter @barkpark/react build
 
       - name: Install web/ deps
         if: steps.detect.outputs.present == 'true'

@@ -1,0 +1,1463 @@
+{
+  "prediction_id": "spd-round-trip-prediction-2026-07-21",
+  "format_version": 1,
+  "title": "The bracketed deployed terminal run returns the reading column unchanged through default -> open -> dismiss",
+  "registered_at": "2026-07-21",
+  "registered_by": "spd-w13-prediction-registered",
+  "wave_paper": "spd-round-trip-fidelity-wave-2026-07-21",
+  "checker": "scripts/measurements/check-prediction.mjs",
+  "frozen": true,
+  "freeze_contract": "This file is FROZEN at registration and is never edited again \u2014 not to correct a figure, not to widen a claim, not after seeing a result. A prediction that can be amended after the run is a result read backwards. Its CHECKER is a separate file and stays fixable: the checker is logic and will have bugs (the prototype had a real misattribution bug within minutes of being written), while this file is data and its whole value is that it cannot move. If this prediction turns out to be WRONG, that is the finding \u2014 record it in the wave Paper and file a NEW prediction with a new id.",
+  "claim": "Against the deployed build, the round trip runs at all nine swept widths; at every one of the 27 cells (9 reached widths x 3 faces) all six compared fields come back byte-for-byte equal to their pre-open values, at tolerance ZERO; and the absolute figures still match the committed 2026-07-20 default-state table.",
+  "this_prediction_can_fail": "Three named ways, each readable apart from the others by the `basis` on the field that misses. (1) The round trip does not return the column \u2014 before and after disagree in some cell. That is the wave's claim refuted and the whole point of firing the run. (2) A per-face ch constant moves (basis `arithmetic`): the face resolved to a different family, which is instrument/font drift, not a desk fact about dismissal. (3) An absolute px figure moves while before and after still agree (basis `prior-observation`): the desk changed shape since 2026-07-20 \u2014 the round trip is still clean and the reading column is still honest, but the registered numbers are stale.",
+  "bases": {
+    "arithmetic": "Fixed by the per-face 18px ch math registered in face_constants. A miss is REAL FONT DRIFT \u2014 the declared stack resolved to a family other than the forced face.",
+    "recomputed": "Not read from the artefact at all: the checker DERIVES it from that same row's raw fields. A miss is an internal contradiction in the artefact itself.",
+    "ruling": "Fixed by a decision rather than by measurement \u2014 the instrument's contract, or a charter ruling such as `a fully covered column reports NULL, never FALSE`. A miss means the shipped code no longer matches what was decided.",
+    "prior-observation": "Read off the committed 2026-07-20 table. A miss is same-build non-determinism or a genuine change in the desk since that run \u2014 never, on its own, a round-trip failure."
+  },
+  "row_key": {
+    "grammar": "viewport {viewport_px} / {inspector_state} / face {face}",
+    "example": "viewport 1440 / default / face native",
+    "note": "The composite key, never an index \u2014 a sweep reordering would silently compare unrelated cells. It keys on `viewport_px`. It does NOT key on `width`: the round trip's own per-width records name the field `viewport_px`, and tooling written against `r.width` indexes nothing at all and reports a clean empty run.",
+    "inspector_state_note": "Every round-trip row is keyed `default`, and that is exact rather than a convenience: BOTH legs the checker compares are default-state readings \u2014 the pre-open one and the post-dismiss one. The opened state is the trip, not a measured endpoint."
+  },
+  "face_constants": {
+    "native": {
+      "font_size_px": 18,
+      "px_per_ch": 10.0,
+      "px_per_ch_basis": "arithmetic",
+      "px_per_ch_source": "row.ch.probe_px_per_ch \u2014 the probe span measured under THIS forced face. The floor-derived ch figure is deliberately not used anywhere in this file: it is unstable per row and carries empty-string values on some rows.",
+      "ch55_px": 550.0,
+      "ch55_derivation": "55 x 10.0000 px-per-ch, WITHIN THIS FACE ONLY. No figure in this file is ever produced by dividing one face's pixels by another face's ch span."
+    },
+    "georgia": {
+      "font_size_px": 18,
+      "px_per_ch": 11.0469,
+      "px_per_ch_basis": "arithmetic",
+      "px_per_ch_source": "row.ch.probe_px_per_ch \u2014 the probe span measured under THIS forced face. The floor-derived ch figure is deliberately not used anywhere in this file: it is unstable per row and carries empty-string values on some rows.",
+      "ch55_px": 607.58,
+      "ch55_derivation": "55 x 11.0469 px-per-ch, WITHIN THIS FACE ONLY. No figure in this file is ever produced by dividing one face's pixels by another face's ch span."
+    },
+    "source-serif-4": {
+      "font_size_px": 18,
+      "px_per_ch": 9.1719,
+      "px_per_ch_basis": "arithmetic",
+      "px_per_ch_source": "row.ch.probe_px_per_ch \u2014 the probe span measured under THIS forced face. The floor-derived ch figure is deliberately not used anywhere in this file: it is unstable per row and carries empty-string values on some rows.",
+      "ch55_px": 504.45,
+      "ch55_derivation": "55 x 9.1719 px-per-ch, WITHIN THIS FACE ONLY. No figure in this file is ever produced by dividing one face's pixels by another face's ch span."
+    }
+  },
+  "no_cross_face_division": "Every ch figure in this file divides one face's own pixels by that same face's own probe span. There is no quotient anywhere whose numerator and denominator come from different faces.",
+  "round_trip": {
+    "ran": {
+      "predicted": true,
+      "basis": "ruling",
+      "note": "A failing open or dismiss leg RETURNS out of the round trip by name, so the run yields either a complete set of cells or none at all. `ran:false` is therefore not a wrong prediction \u2014 it is NO EVIDENCE, and the checker reports it as UNEVALUATED with its own exit code. Recording a reachability failure as a refuted fidelity claim would be a lie."
+    },
+    "reached_widths": {
+      "predicted": [
+        1440,
+        1280,
+        1024,
+        900,
+        800,
+        764,
+        700,
+        640,
+        500
+      ],
+      "basis": "ruling",
+      "note": "the instrument's swept width list, descending"
+    },
+    "reached_width_count": {
+      "predicted": 9,
+      "basis": "ruling",
+      "note": "STATED, never assumed. The cell total below is meaningless without it: 27 is a bare number that could describe a partial sweep double-counted, and the reached count is what makes it checkable."
+    },
+    "faces_per_width": {
+      "predicted": 3,
+      "basis": "ruling",
+      "value": [
+        "native",
+        "georgia",
+        "source-serif-4"
+      ]
+    },
+    "fields_per_cell": {
+      "predicted": 6,
+      "basis": "ruling"
+    },
+    "cells_expected": {
+      "predicted": 27,
+      "basis": "arithmetic",
+      "derivation": "9 reached widths x 3 faces"
+    },
+    "cells_expected_unchanged": {
+      "predicted": 27,
+      "basis": "recomputed",
+      "derivation": "the count of cells whose before[] and after[] agree on all six fields, recomputed by the checker from raw values. The artefact's own summary counters are never read."
+    },
+    "field_comparisons_expected": {
+      "predicted": 162,
+      "basis": "arithmetic",
+      "derivation": "27 cells x 6 fields"
+    },
+    "compared_fields": {
+      "predicted": [
+        "content_px",
+        "content_ch",
+        "px_per_ch",
+        "visible_content_px",
+        "visible_ch",
+        "gutter_px"
+      ],
+      "basis": "ruling",
+      "note": "the instrument's compared-field contract, in order. A different set means a different experiment ran and no cell verdict here is meaningful."
+    },
+    "dismiss_control_one_of": {
+      "predicted": [
+        "[data-test-id=\"sidebar-toggle-panel\"]",
+        "[data-test-id=\"sidebar-dismiss\"]"
+      ],
+      "basis": "ruling",
+      "note": "the two ruled dismissal affordances. A third selector would be an unruled affordance \u2014 the trip happened, but not through a grammar anyone decided on."
+    },
+    "rows": {
+      "viewport 1440 / default / face native": {
+        "viewport_px": 1440,
+        "inspector_state": "default",
+        "face": "native",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1440 / default / face native`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 64.0,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 10.0,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1440 / default / face native`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 64.0,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1440 / default / face native`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 1440 / default / face georgia": {
+        "viewport_px": 1440,
+        "inspector_state": "default",
+        "face": "georgia",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1440 / default / face georgia`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 57.93,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 11.0469,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1440 / default / face georgia`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 57.93,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1440 / default / face georgia`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 1440 / default / face source-serif-4": {
+        "viewport_px": 1440,
+        "inspector_state": "default",
+        "face": "source-serif-4",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1440 / default / face source-serif-4`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 69.78,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 9.1719,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1440 / default / face source-serif-4`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 69.78,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1440 / default / face source-serif-4`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 1280 / default / face native": {
+        "viewport_px": 1280,
+        "inspector_state": "default",
+        "face": "native",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 596,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1280 / default / face native`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 59.6,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (596 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 10.0,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 596,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1280 / default / face native`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 59.6,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (596 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1280 / default / face native`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 1280 / default / face georgia": {
+        "viewport_px": 1280,
+        "inspector_state": "default",
+        "face": "georgia",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 596,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1280 / default / face georgia`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 53.95,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (596 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 11.0469,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 596,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1280 / default / face georgia`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 53.95,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (596 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1280 / default / face georgia`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 1280 / default / face source-serif-4": {
+        "viewport_px": 1280,
+        "inspector_state": "default",
+        "face": "source-serif-4",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 596,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1280 / default / face source-serif-4`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 64.98,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (596 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 9.1719,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 596,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1280 / default / face source-serif-4`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 64.98,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (596 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1280 / default / face source-serif-4`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 1024 / default / face native": {
+        "viewport_px": 1024,
+        "inspector_state": "default",
+        "face": "native",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 599,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1024 / default / face native`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 59.9,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (599 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 10.0,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 599,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1024 / default / face native`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 59.9,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (599 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1024 / default / face native`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 1024 / default / face georgia": {
+        "viewport_px": 1024,
+        "inspector_state": "default",
+        "face": "georgia",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 599,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1024 / default / face georgia`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 54.22,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (599 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 11.0469,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 599,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1024 / default / face georgia`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 54.22,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (599 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1024 / default / face georgia`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 1024 / default / face source-serif-4": {
+        "viewport_px": 1024,
+        "inspector_state": "default",
+        "face": "source-serif-4",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 599,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1024 / default / face source-serif-4`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 65.31,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (599 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 9.1719,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 599,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1024 / default / face source-serif-4`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 65.31,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (599 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 1024 / default / face source-serif-4`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 900 / default / face native": {
+        "viewport_px": 900,
+        "inspector_state": "default",
+        "face": "native",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 900 / default / face native`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 64.0,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 10.0,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 900 / default / face native`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 64.0,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 900 / default / face native`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 900 / default / face georgia": {
+        "viewport_px": 900,
+        "inspector_state": "default",
+        "face": "georgia",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 900 / default / face georgia`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 57.93,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 11.0469,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 900 / default / face georgia`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 57.93,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 900 / default / face georgia`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 900 / default / face source-serif-4": {
+        "viewport_px": 900,
+        "inspector_state": "default",
+        "face": "source-serif-4",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 900 / default / face source-serif-4`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 69.78,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 9.1719,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 640,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 900 / default / face source-serif-4`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 69.78,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (640 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 900 / default / face source-serif-4`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 800 / default / face native": {
+        "viewport_px": 800,
+        "inspector_state": "default",
+        "face": "native",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 635,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 800 / default / face native`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 63.5,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (635 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 10.0,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 635,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 800 / default / face native`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 63.5,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (635 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 800 / default / face native`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 800 / default / face georgia": {
+        "viewport_px": 800,
+        "inspector_state": "default",
+        "face": "georgia",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 635,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 800 / default / face georgia`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 57.48,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (635 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 11.0469,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 635,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 800 / default / face georgia`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 57.48,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (635 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 800 / default / face georgia`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 800 / default / face source-serif-4": {
+        "viewport_px": 800,
+        "inspector_state": "default",
+        "face": "source-serif-4",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 635,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 800 / default / face source-serif-4`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 69.23,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (635 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 9.1719,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 635,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 800 / default / face source-serif-4`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 69.23,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (635 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 80,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 800 / default / face source-serif-4`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 764 / default / face native": {
+        "viewport_px": 764,
+        "inspector_state": "default",
+        "face": "native",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 631,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 764 / default / face native`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 63.1,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (631 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 10.0,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 631,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 764 / default / face native`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 63.1,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (631 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 764 / default / face native`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 764 / default / face georgia": {
+        "viewport_px": 764,
+        "inspector_state": "default",
+        "face": "georgia",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 631,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 764 / default / face georgia`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 57.12,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (631 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 11.0469,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 631,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 764 / default / face georgia`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 57.12,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (631 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 764 / default / face georgia`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 764 / default / face source-serif-4": {
+        "viewport_px": 764,
+        "inspector_state": "default",
+        "face": "source-serif-4",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 631,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 764 / default / face source-serif-4`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 68.8,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (631 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 9.1719,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 631,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 764 / default / face source-serif-4`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 68.8,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (631 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 764 / default / face source-serif-4`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 700 / default / face native": {
+        "viewport_px": 700,
+        "inspector_state": "default",
+        "face": "native",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 567,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 700 / default / face native`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 56.7,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (567 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 10.0,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 567,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 700 / default / face native`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 56.7,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (567 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 700 / default / face native`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 700 / default / face georgia": {
+        "viewport_px": 700,
+        "inspector_state": "default",
+        "face": "georgia",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 567,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 700 / default / face georgia`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 51.33,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (567 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 11.0469,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 567,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 700 / default / face georgia`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 51.33,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (567 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 700 / default / face georgia`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 700 / default / face source-serif-4": {
+        "viewport_px": 700,
+        "inspector_state": "default",
+        "face": "source-serif-4",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 567,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 700 / default / face source-serif-4`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 61.82,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (567 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 9.1719,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 567,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 700 / default / face source-serif-4`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 61.82,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (567 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 700 / default / face source-serif-4`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 640 / default / face native": {
+        "viewport_px": 640,
+        "inspector_state": "default",
+        "face": "native",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 507,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 640 / default / face native`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 50.7,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (507 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 10.0,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 507,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 640 / default / face native`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 50.7,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (507 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 640 / default / face native`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 640 / default / face georgia": {
+        "viewport_px": 640,
+        "inspector_state": "default",
+        "face": "georgia",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 507,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 640 / default / face georgia`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 45.9,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (507 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 11.0469,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 507,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 640 / default / face georgia`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 45.9,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (507 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 640 / default / face georgia`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 640 / default / face source-serif-4": {
+        "viewport_px": 640,
+        "inspector_state": "default",
+        "face": "source-serif-4",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 507,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 640 / default / face source-serif-4`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 55.28,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (507 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 9.1719,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 507,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 640 / default / face source-serif-4`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 55.28,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (507 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 640 / default / face source-serif-4`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 500 / default / face native": {
+        "viewport_px": 500,
+        "inspector_state": "default",
+        "face": "native",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 411,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 500 / default / face native`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 41.1,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (411 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 10.0,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 411,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 500 / default / face native`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 41.1,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (411 px / 10.0000 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 500 / default / face native`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 500 / default / face georgia": {
+        "viewport_px": 500,
+        "inspector_state": "default",
+        "face": "georgia",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 411,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 500 / default / face georgia`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 37.21,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (411 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 11.0469,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 411,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 500 / default / face georgia`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 37.21,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (411 px / 11.0469 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 500 / default / face georgia`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      },
+      "viewport 500 / default / face source-serif-4": {
+        "viewport_px": 500,
+        "inspector_state": "default",
+        "face": "source-serif-4",
+        "round_trip_returns_unchanged": {
+          "predicted": true,
+          "basis": "recomputed",
+          "derivation": "the checker compares this cell's own before[] and after[] field by field. TRUE means all six matched exactly. A miss here IS the wave's claim failing: the reading column did not come back from default -> open -> dismiss."
+        },
+        "fields": {
+          "content_px": {
+            "predicted": 411,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 500 / default / face source-serif-4`, content_px",
+            "miss_reads_as": "same-build non-determinism or a real layout move since the 2026-07-20 table; NOT a round-trip failure unless before and after also disagree"
+          },
+          "content_ch": {
+            "predicted": 44.81,
+            "basis": "recomputed",
+            "derivation": "content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (411 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the box moved or the face's ch span moved; the checker names which"
+          },
+          "px_per_ch": {
+            "predicted": 9.1719,
+            "basis": "arithmetic",
+            "source_path": "row.ch.probe_px_per_ch at font-size 18px",
+            "derivation": "fixed by the per-face 18px ch math registered in face_constants; the same constant in all nine widths of this face",
+            "miss_reads_as": "REAL FONT DRIFT \u2014 the face resolved to a different family"
+          },
+          "visible_content_px": {
+            "predicted": 411,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 500 / default / face source-serif-4`, visible_content_px",
+            "miss_reads_as": "occlusion changed, or same-build non-determinism in the hit-test scan"
+          },
+          "visible_ch": {
+            "predicted": 44.81,
+            "basis": "recomputed",
+            "derivation": "visible_content_px / px_per_ch, rounded to 2dp, WITHIN THIS FACE ONLY (411 px / 9.1719 px-per-ch)",
+            "miss_reads_as": "either the visible box moved or the face's ch span moved"
+          },
+          "gutter_px": {
+            "predicted": 48,
+            "basis": "prior-observation",
+            "source": "scripts/measurements/spd-visible-table-2026-07-20.json, row `viewport 500 / default / face source-serif-4`, gutter.total_px",
+            "miss_reads_as": "the surface padding rule changed at this width bucket"
+          }
+        }
+      }
+    }
+  },
+  "conditional_rulings": [
+    {
+      "id": "covered-column-reports-null",
+      "basis": "ruling",
+      "applies_when": "a matrix row reads visible_content_px == 0",
+      "predicate": "visible_meets_55ch is null, never false",
+      "rationale": "A fully covered column has no visible width to judge, so the honest report is NULL \u2014 absence of a verdict. FALSE would assert the reader was handed a column narrower than the criterion, which is a different and unmeasured claim.",
+      "applicability_note": "This ruling matched ZERO rows of the 2026-07-20 table, so it may well match zero rows of the terminal run too. The checker therefore reports how many rows it applied to and NEVER counts an unexercised ruling as a pass. A guard that reports success from zero applicable rows is the exact defect this whole file exists to refuse."
+    }
+  ],
+  "what_the_checker_may_not_do": "The checker RECOMPUTES every verdict from raw values and never reads a row's own verdict field. This is the entire reason the file exists: the wave's existing differ copies the artefact's summary counters straight out of the artefact without recomputing them (studio-desk-compare.mjs:216-218), so it structurally cannot catch a row whose stated verdict contradicts its own raw numbers. Here, a cell claiming it came back unchanged while its own before[] and after[] disagree is caught by name as SELF_INCONSISTENT. The checker also refuses any prediction that leans on the artefact's summary counters at all \u2014 on a skipped run those counters read as a clean pass over zero applicable rows, which proves nothing while looking green."
+}

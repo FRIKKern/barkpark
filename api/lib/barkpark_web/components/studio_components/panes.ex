@@ -11,6 +11,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   """
   use Phoenix.Component
 
+  alias Phoenix.LiveView.JS
+
   attr :status, :string, required: true
 
   def status_badge(assigns) do
@@ -24,13 +26,20 @@ defmodule BarkparkWeb.StudioComponents.Panes do
 
   @doc """
   Flex container for one or more `<.pane_column>` children.
+
+  `:phx_hook` is an optional LiveView client-hook name mounted on the container
+  — used by the responsive space-priority desk to report the viewport width
+  bucket back to StudioLive. It renders NO `phx-hook` attribute when nil, so
+  every legacy call site stays byte-identical. A caller that passes it must also
+  pass `:id` (LiveView requires a stable DOM id on a hooked element).
   """
   attr :id, :string, default: nil
+  attr :phx_hook, :string, default: nil
   slot :inner_block, required: true
 
   def pane_layout(assigns) do
     ~H"""
-    <div class="pane-layout" id={@id}>
+    <div class="pane-layout" id={@id} phx-hook={@phx_hook}>
       <%= render_slot(@inner_block) %>
     </div>
     """
@@ -39,13 +48,75 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   @doc """
   A single pane column with a header row and a body area.
 
-  Attrs: title (required), flex (e.g. "1.1"), last (boolean), collapsed
-  (boolean), phx_click / phx_value_idx (for collapsed click target), id.
+  Attrs: title (required), last (boolean), collapsed (boolean),
+  phx_click / phx_value_idx (for collapsed click target), id.
+
+  Column sizing is CSS-only: the default width comes from `.pane-column`, and
+  a caller that needs a different proportion passes a `marker_class` whose
+  rule lives in that caller's own stylesheet (see `.api-col-docs` /
+  `.api-col-response` in `api_tester_live.ex`). There is deliberately no
+  inline sizing style — an inline `min-width: 0` would override the
+  space-priority protections the width buckets rely on.
 
   Slots: :header_actions (optional inline right-aligned), :inner_block (body).
+
+  ## The collapsed strip is a real button (spd-s6)
+
+  `collapsed: true` renders a `<button type="button">`, not a `<div>`. spd-s4
+  promoted this 44px strip to the desk's PRIMARY back-navigation at narrow
+  widths (`PaneBuilder.display_state/4` collapses the whole nav row to it), and
+  a `phx-click` div is unreachable by keyboard and silent to a screen reader —
+  a nav dead end for anyone not using a mouse. It therefore carries an explicit
+  `aria-label` alongside the hover `title`, and `aria-hidden` on the decorative
+  chevron — which points LEFT, the direction the action actually goes.
+
+  ## The strip is NAVIGATION, not a disclosure (spd-w5, charter D79)
+
+  It shipped with `aria-expanded="false"`, and a live browser reading of the
+  authenticated desk found `[aria-expanded="true"]` returning **zero elements
+  across the whole document in every state** — the attribute never flipped and
+  carried no `aria-controls`, so it was decorative.
+
+  That is structural, not an oversight. A disclosure button PERSISTS through
+  both of its states — it is a control *beside* the region it shows and hides.
+  This strip **is the pane, collapsed**: it and the expanded pane are ONE
+  control in two states (same server-side pane, same `id`), and activating it
+  DESTROYS it — the `<button>` is replaced by the expanded `<div>`, so no
+  element survives to carry `aria-expanded="true"`. Making the attribute
+  truthful would mean inventing a second, persistent toggle on every expanded
+  pane; making it *appear* truthful (e.g. `aria-expanded` on the plain
+  container `<div>`) would be invalid ARIA, since the attribute is only
+  supported on a handful of roles. An ARIA state that can never change is a
+  lie to assistive technology and is worse than its absence, so it is REMOVED.
+
+  What remains is a navigation control that re-composes the pane row: it
+  truncates `nav_path` and replaces the row's contents. `aria-controls`
+  therefore names the region whose contents it changes — the pane row
+  (`#studio-panes`), passed by the caller via `:controls`, an ancestor that
+  provably exists in the DOM at the moment the attribute is read. It does NOT
+  point at the pane's own `id`: the strip and the expanded pane share that id,
+  so a self-reference would be the same decoration wearing a new name.
+
+  ## Focus return (`:focus_on_mount`)
+
+  Because the strip is destroyed by its own activation, the browser drops focus
+  to `<body>` — measured live: a keyboard user who tabs to the only route back
+  out of a drilled pane is thrown to the top of the tab order the moment they
+  use it (D79; same defect class D54 recorded for the inspector). The expanded
+  pane therefore renders `tabindex="-1" phx-mounted={JS.focus()}` when the
+  caller passes `focus_on_mount: true` — LiveView's own declarative mount hook,
+  not an imperative `element.focus()` grab and no JS hook of our own. The
+  caller sets it only for the pane a just-handled `expand-pane` named, so an
+  initial page load (where every pane mounts) never steals focus.
+
+  Its `class` attribute is FROZEN byte-identical at
+  `class="pane-column pane-column--collapsed"` (charter D55): the width-bucket
+  suite counts strips with an exact regex including the closing quote, and
+  `.pane-column` / `.pane-column--collapsed` are the selectors the button UA
+  reset and the `:focus-visible` ring hang off in root.html.heex. Add
+  ATTRIBUTES freely; never add, reorder or interpolate a class token here.
   """
   attr :title, :string, required: true
-  attr :flex, :string, default: nil
   attr :last, :boolean, default: false
   attr :collapsed, :boolean, default: false
   attr :phx_click, :string, default: nil
@@ -60,6 +131,25 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # `bp-doc-list` on the document-list pane so Beta focus mode can hide it
   # via CSS). nil leaves the legacy class string byte-identical.
   attr :marker_class, :string, default: nil
+  # Pane anatomy stamps (spd-s3 model, spd-s4 wiring): `data-role` is the
+  # pane's structural kind (`nav` on the root desk pane, `list` on every
+  # drilled pane) and `data-priority` its squeeze order (`0` root, index on
+  # intermediates, `active` on the drilled-to leaf). Both render only when
+  # supplied, so every legacy call site stays byte-identical. Any CSS written
+  # against them MUST be scoped (charter D30) — `.pane-layout > [data-role=…]`
+  # or `html[data-width-bucket=…] […]`, never a bare attribute selector: 130
+  # foreign `data-role` values already live on the Tasks board surface.
+  attr :data_role, :any, default: nil
+  attr :data_priority, :any, default: nil
+  # Collapsed strip only: the DOM id of the region whose contents this control
+  # replaces (the pane row). Rendered as `aria-controls`; nil renders nothing,
+  # so every legacy call site stays byte-identical. See the moduledoc — it is
+  # deliberately NOT this pane's own id, which the strip already carries.
+  attr :controls, :string, default: nil
+  # Expanded column only: land keyboard focus on this pane when it mounts.
+  # Set by the caller for the pane a just-handled `expand-pane` named, so the
+  # initial page load (where every pane mounts) never steals focus.
+  attr :focus_on_mount, :boolean, default: false
 
   slot :header_actions
   slot :inner_block, required: true
@@ -68,7 +158,6 @@ defmodule BarkparkWeb.StudioComponents.Panes do
     extra_classes =
       [
         assigns[:last] && "pane-column--last",
-        assigns[:flex] && "pane-column--flex",
         assigns[:marker_class]
       ]
       |> Enum.filter(& &1)
@@ -79,31 +168,43 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         do: "pane-column",
         else: "pane-column #{extra_classes}"
 
-    assigns = assign(assigns, :col_class, col_class)
+    assigns =
+      assigns
+      |> assign(:col_class, col_class)
+      |> assign(:role_attr, assigns[:data_role] && to_string(assigns[:data_role]))
+      |> assign(:priority_attr, assigns[:data_priority] && to_string(assigns[:data_priority]))
 
     ~H"""
     <%= if @collapsed do %>
-      <div
+      <button
+        type="button"
         class="pane-column pane-column--collapsed"
         id={@id}
+        data-role={@role_attr}
+        data-priority={@priority_attr}
         phx-click={@phx_click}
         phx-value-idx={@phx_value_idx}
         title={"Back to #{@title}"}
+        aria-label={"Back to #{@title}"}
+        aria-controls={@controls}
       >
         <div class="pane-header">
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="display:inline-block;vertical-align:middle;flex-shrink:0;">
-            <path d="m9 18 6-6-6-6"/>
+            style="display:inline-block;vertical-align:middle;flex-shrink:0;" aria-hidden="true">
+            <path d="m15 18-6-6 6-6"/>
           </svg>
         </div>
         <div class="pane-column-collapsed-label"><%= @title %></div>
-      </div>
+      </button>
     <% else %>
       <div
         class={@col_class}
         id={@id}
-        style={@flex && "flex: #{@flex}; width: auto; min-width: 0;"}
+        data-role={@role_attr}
+        data-priority={@priority_attr}
+        tabindex={@focus_on_mount && "-1"}
+        phx-mounted={@focus_on_mount && JS.focus()}
       >
         <div class="pane-header">
           <span class="pane-header-titlewrap">
@@ -237,11 +338,17 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   @doc """
   Clickable row inside a pane column.
 
-  Renders a `<div class="pane-item">` (NOT a `<button>` — matches the
-  Studio convention). The `:inner_block` goes inside a
-  `.pane-item-label` span. Optional `:icon`, `:badge`, and `:trailing`
-  slots fill their respective positions. Source order in the rendered
-  HTML: icon → label → badge → trailing.
+  Renders a `<button type="button" class="pane-item">` — a desk row is an
+  activatable control, so it must be a real button: keyboard-reachable by
+  Tab, activatable by Enter/Space, and announced as a button by assistive
+  tech. (It used to be a `<div phx-click>`, which no keyboard could ever
+  reach.) The `:inner_block` goes inside a `.pane-item-label` span.
+  Optional `:icon`, `:badge`, and `:trailing` slots fill their respective
+  positions. Source order in the rendered HTML: icon → label → badge →
+  trailing. The accessible name comes from the button's own content.
+
+  Selection is exposed as `aria-current="true"` (never `aria-selected`,
+  which is only meaningful inside a listbox/tab/grid container).
 
   ## Attributes
 
@@ -270,11 +377,13 @@ defmodule BarkparkWeb.StudioComponents.Panes do
 
   def pane_item(assigns) do
     ~H"""
-    <div
+    <button
+      type="button"
       id={@id}
       phx-click={@phx_click}
       phx-value-id={@phx_value_id}
       phx-value-pane={@phx_value_pane}
+      aria-current={@selected && "true"}
       class={["pane-item", @selected && "selected"] |> Enum.filter(& &1) |> Enum.join(" ")}
     >
       <%= if @icon != [] do %>
@@ -287,7 +396,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       <%= if @trailing != [] do %>
         <span class="pane-item-chevron"><%= render_slot(@trailing) %></span>
       <% end %>
-    </div>
+    </button>
     """
   end
 
@@ -301,6 +410,15 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   the trailing edge. Optional trailing slot for inline content (e.g. presence
   dots). `is_draft: true` overrides the status dot's class to `"draft"`
   regardless of the `status` string.
+
+  The outer `.pane-doc-item` stays a `<div>` — it hosts the bulk-publish
+  checkbox as a SIBLING of the row body, and a button may not contain a
+  button. The inner `.bp-doc-row-body` is the activatable control and is a
+  real `<button type="button">`, so the row is Tab-reachable and
+  Enter/Space-activatable; its children are `<span>`s because button
+  content is phrasing content. Its accessible name is composed from the
+  title (see `doc_row_label/1`), never from the `title={@doc_id}` tooltip.
+  Selection is `aria-current="true"`.
 
   ## Attributes
 
@@ -355,6 +473,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   slot :trailing
 
   def pane_doc_item(assigns) do
+    assigns = assign(assigns, :aria_label, doc_row_label(assigns))
+
     ~H"""
     <div
       id={@id}
@@ -376,15 +496,18 @@ defmodule BarkparkWeb.StudioComponents.Panes do
           </span>
         </span>
       <% end %>
-      <div
+      <button
+        type="button"
         class="bp-doc-row-body"
         title={@doc_id}
+        aria-label={@aria_label}
+        aria-current={@selected && "true"}
         phx-click={@phx_click}
         phx-value-pane={@phx_value_pane}
         phx-value-id={@phx_value_id}
       >
-        <div class="pane-doc-main">
-          <div class="pane-doc-title">
+        <span class="pane-doc-main">
+          <span class="pane-doc-title">
             <span class={"pane-doc-dot #{if @is_draft, do: "draft", else: @status}"}></span>
             <%= @title %>
             <%= if @trailing != [] do %>
@@ -393,11 +516,11 @@ defmodule BarkparkWeb.StudioComponents.Panes do
             <%= if @badge do %>
               <span class={"pane-doc-badge pane-doc-badge--#{badge_slug(@badge)}"}><%= @badge %></span>
             <% end %>
-          </div>
+          </span>
           <%= if @meta do %>
-            <div class="pane-doc-sub"><%= @meta %></div>
+            <span class="pane-doc-sub"><%= @meta %></span>
           <% end %>
-        </div>
+        </span>
         <span class="pane-doc-chevron" aria-hidden="true">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
@@ -405,9 +528,25 @@ defmodule BarkparkWeb.StudioComponents.Panes do
             <path d="m9 18 6-6-6-6"/>
           </svg>
         </span>
-      </div>
+      </button>
     </div>
     """
+  end
+
+  # Accessible name for a doc row, composed FROM THE TITLE plus the state
+  # a sighted reader gets from the row's other glyphs: the status dot, the
+  # list_preview badge, and the :meta subtitle. Composing is not optional —
+  # the row carries `title={@doc_id}` as its sighted tooltip, and `title=`
+  # is the accname fallback of last resort, so a button with no explicit
+  # label would announce the raw draft id ("drafts.paper-7780f97…") instead
+  # of the document. The `:trailing` slot (presence dots) is decorative and
+  # deliberately not spoken.
+  defp doc_row_label(assigns) do
+    status = if assigns.is_draft, do: "draft", else: assigns.status
+
+    [assigns.title, status, assigns[:badge], assigns[:meta]]
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.join(", ")
   end
 
   # Generic CSS-modifier slug for a badge value: downcase, any run of

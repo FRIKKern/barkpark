@@ -22,9 +22,10 @@ defmodule Barkpark.Content.Papers.Hollow do
   **Content** is any non-skeleton block that is:
 
     * a TEXT-BEARING type (paragraph/heading/list/quote/…) whose recursively
-      flattened, trimmed text is non-blank — a whitespace-only paragraph
-      never counts (`maybe_seed` gives every fresh paper an empty `tpl-body`
-      paragraph, so block-COUNT predicates are wrong both ways); or
+      flattened text contains a Unicode letter, number, or symbol — whitespace
+      and punctuation-only placeholders never count (`maybe_seed` gives every
+      fresh paper an empty `tpl-body` paragraph, so block-COUNT predicates are
+      wrong both ways); or
     * any other (inherently non-text) type with a REAL payload — an image
       with a `src`, a table with rows, code with source, a diagram, a sheet
       ref, a task-list query… An empty ghost (e.g. `{"type":"image"}` with a
@@ -79,6 +80,13 @@ defmodule Barkpark.Content.Papers.Hollow do
 
   def hollow?(_no_blocks_list), do: false
 
+  @doc "Whether visible prose contains a letter, number, or semantic symbol."
+  @spec semantic_text?(term()) :: boolean()
+  def semantic_text?(text) when is_binary(text),
+    do: Regex.match?(~r/[\p{L}\p{N}\p{S}]/u, text)
+
+  def semantic_text?(_), do: false
+
   # ── internals ──────────────────────────────────────────────────────────
 
   defp content_block?(block, index) when is_map(block) do
@@ -96,9 +104,20 @@ defmodule Barkpark.Content.Papers.Hollow do
   defp role_of(%{"role" => role}) when is_binary(role), do: role
   defp role_of(_), do: nil
 
-  # divider never counts; text-bearing types count on non-blank flattened
-  # text; every other type counts on any substantive (non-structural) payload.
+  # divider never counts; text-bearing types count on semantic flattened text;
+  # every other type counts on any substantive (non-structural) payload.
   defp substantive?(%{"type" => "divider"}), do: false
+
+  # Image dimensions and editor metadata are not reader content. The renderer
+  # deliberately emits nothing for an image without an asset, so the quality
+  # gate must require the same real `src` payload instead of accepting width,
+  # height, or booleans that never reach a reader.
+  defp substantive?(%{"type" => "image"} = block) do
+    case Map.get(block, "src") do
+      src when is_binary(src) -> String.trim(src) != ""
+      _ -> false
+    end
+  end
 
   defp substantive?(%{"type" => type} = block) when type in @text_types,
     do: any_text?(block)
@@ -107,13 +126,13 @@ defmodule Barkpark.Content.Papers.Hollow do
 
   # Recursively flatten a text-bearing block: a bare binary item (legacy flat
   # list items), the @text_keys of any map, and the @container_keys recursed.
-  defp any_text?(text) when is_binary(text), do: String.trim(text) != ""
+  defp any_text?(text) when is_binary(text), do: semantic_text?(text)
   defp any_text?(list) when is_list(list), do: Enum.any?(list, &any_text?/1)
 
   defp any_text?(%{} = node) do
     Enum.any?(@text_keys, fn key ->
       case Map.get(node, key) do
-        text when is_binary(text) -> String.trim(text) != ""
+        text when is_binary(text) -> semantic_text?(text)
         _ -> false
       end
     end) or

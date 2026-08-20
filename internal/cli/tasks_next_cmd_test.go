@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
+	"github.com/FRIKKern/barkpark/internal/taskboard"
 )
 
 // claimReply is the scripted response for one task's /claim endpoint.
@@ -189,6 +190,100 @@ func TestNextFrontierExhaustedAfterBoundedRounds(t *testing.T) {
 	}
 }
 
+// TestNextFrontierClaimRendersHelpAndNotices pins charter D18: the frontier
+// claim BYPASSES runCommand, so the server's help[] next-command templates and
+// rail-awareness notices — decoded on the claim outcome but silently dropped
+// before this slice — must be surfaced explicitly. Human mode routes them to
+// stderr (the emitHelpHints / emitNotices house pattern), leaving stdout the
+// clean claim receipt.
+func TestNextFrontierClaimRendersHelpAndNotices(t *testing.T) {
+	srv := nextFrontierServer(t, map[string]claimReply{
+		"task-a": {body: `{"ok":true,"doc":{"claim":{"epoch":7}},` +
+			`"help":["bp task pulse task-a worker-1 --now \"...\"","bp task close task-a worker-1 7 done \"...\""],` +
+			`"notices":[{"type":"blocked_while_claimed","task_id":"task-q","blockers":["dep-1"]}]}`},
+	}, nil)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	code := runTaskNextFrontierArgs(w, dispatchCtx(srv.URL), []string{"worker-1", "--frontier"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr=%s", code, se.String())
+	}
+	// The claim receipt stays on stdout, clean.
+	if !strings.Contains(so.String(), "claimed task-a") {
+		t.Fatalf("stdout missing the claim receipt:\n%s", so.String())
+	}
+	// help[] + notices ride stderr, one line each.
+	if !strings.Contains(se.String(), "help: bp task pulse task-a worker-1") {
+		t.Errorf("stderr missing the server help template:\n%s", se.String())
+	}
+	if !strings.Contains(se.String(), "help: bp task close task-a worker-1 7 done") {
+		t.Errorf("stderr missing the second help template:\n%s", se.String())
+	}
+	if !strings.Contains(se.String(), "notice: blocked_while_claimed task=task-q blockers=dep-1") {
+		t.Errorf("stderr missing the rail-awareness notice:\n%s", se.String())
+	}
+	// The advisories must NOT leak onto stdout — it stays one parseable receipt.
+	if strings.Contains(so.String(), "help:") || strings.Contains(so.String(), "notice:") {
+		t.Errorf("advisories leaked onto stdout (must be stderr):\n%s", so.String())
+	}
+}
+
+// TestNextFrontierClaimJSONCarriesHelpAndNotices: in machine mode the frontier
+// claim's hand-built JSON must ALSO carry help/notices as fields (the frontier
+// bypasses renderSuccess, which would otherwise echo them from the raw body), so
+// a piped agent reads them off stdout — parity with every runCommand verb.
+func TestNextFrontierClaimJSONCarriesHelpAndNotices(t *testing.T) {
+	srv := nextFrontierServer(t, map[string]claimReply{
+		"task-a": {body: `{"ok":true,"doc":{"claim":{"epoch":7}},"help":["do X next"],` +
+			`"notices":[{"type":"rail_changed","parent_id":"epic-1","rail_rev":"r9"}]}`},
+	}, nil)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "json"}
+	code := runTaskNextFrontier(w, globals{}, dispatchCtx(srv.URL), "worker-1", taskboard.FrontierOpts{})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr=%s", code, se.String())
+	}
+	var env struct {
+		OK      bool     `json:"ok"`
+		Help    []string `json:"help"`
+		Notices []struct {
+			Type string `json:"type"`
+		} `json:"notices"`
+		Claimed struct {
+			ID     string `json:"id"`
+			Worker string `json:"worker"`
+			Epoch  *int   `json:"epoch"`
+		} `json:"claimed"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("json stdout not parseable: %v\n%s", err, so.String())
+	}
+	// The claim receipt must carry the GRANTED epoch. It is the CAS token
+	// `bp task close <id> <worker> <epoch>` requires and the one the tasks rules
+	// promise `bp task next` returns — yet deleting `"epoch": epoch` from
+	// emitFrontierClaim reddened NOTHING repo-wide (go test ./... rc=0, 29 ok
+	// packages) before this assertion existed: the human line prints the epoch
+	// separately, and no JSON test decoded `claimed`. A pointer, not an int, so
+	// an ABSENT key fails here rather than reading as the zero epoch.
+	if env.Claimed.Epoch == nil {
+		t.Fatalf("claim receipt carried no claimed.epoch — the close CAS token is missing:\n%s", so.String())
+	}
+	if *env.Claimed.Epoch != 7 {
+		t.Errorf("claimed.epoch = %d, want 7 (the epoch the server granted):\n%s", *env.Claimed.Epoch, so.String())
+	}
+	if env.Claimed.ID != "task-a" || env.Claimed.Worker != "worker-1" {
+		t.Errorf("claimed id/worker drifted from the granted claim:\n%s", so.String())
+	}
+	if !env.OK || len(env.Help) != 1 || env.Help[0] != "do X next" {
+		t.Errorf("json payload missing help[]:\n%s", so.String())
+	}
+	if len(env.Notices) != 1 || env.Notices[0].Type != "rail_changed" {
+		t.Errorf("json payload missing notices[]:\n%s", so.String())
+	}
+}
+
 // The `bp task ready` capacity header names the frontier size from the SAME
 // taskboard.Frontier the `frontier` verb reads (two distinct-neighborhood ready
 // tasks → 2 independent). A fetch error would drop the header silently.
@@ -259,4 +354,40 @@ func runTaskNextFrontierArgs(w *writer, ctx manifest.Context, tail []string) int
 		return exitUsage
 	}
 	return runTaskNextFrontier(w, globals{}, ctx, worker, opts)
+}
+
+// TestNextFrontierFetchFailureEmitsJSONEnvelope pins the fetchSnapshotErr fix
+// (wbqs-go-board-fetch-error-envelope): before the fix, a failed
+// taskboard.FetchSnapshotFull hit `out.userErr(...); return exitGeneric` with
+// no machineOut() check, so `bp task next <worker> --frontier -o json | jq` on
+// a broken board fetch got EMPTY stdout. It must now emit a parseable
+// {"ok":false,"error":{"code":...,"message":...}} envelope on stdout.
+func TestNextFrontierFetchFailureEmitsJSONEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "json"}
+	code := runTaskNextFrontier(w, globals{}, dispatchCtx(srv.URL), "worker-1", taskboard.FrontierOpts{})
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want exitGeneric (%d)", code, exitGeneric)
+	}
+	if se.Len() != 0 {
+		t.Errorf("json mode must not also leak the human stderr line:\n%s", se.String())
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("json stdout not parseable (empty stdout is exactly the pre-fix bug): %v\n%s", err, so.String())
+	}
+	if env.OK || env.Error.Code == "" || env.Error.Message == "" {
+		t.Errorf("bad fetch-failure envelope:\n%s", so.String())
+	}
 }

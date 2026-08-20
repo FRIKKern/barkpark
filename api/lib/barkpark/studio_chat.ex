@@ -1,7 +1,7 @@
 defmodule Barkpark.StudioChat do
   @moduledoc """
-  The **Studio Claude chat** context — the session index + display history behind
-  the `/studio/chat` tab (epic studio-claude-chat, charter D6-D8/D13).
+  The provider-neutral Studio chat context — the session index + display history
+  behind the `/studio/chat` tab (epic studio-claude-chat, charter D6-D8/D13).
 
   Two tables, `chat_sessions` + `chat_messages`, with **no HTTP route ever**: the
   admin LiveView reads `Repo` directly, so transcripts (cwd, tool inputs, host
@@ -10,10 +10,10 @@ defmodule Barkpark.StudioChat do
 
   ## Identity + resume (D8)
 
-  A session's primary key is the minted claude session UUID. We generate it
-  before the first byte (`--session-id`), and the SAME value is the `--resume`
-  key — one identity, no cursor column. `create_session/1` is called on the
-  FIRST user send, never on mount (no empty rows).
+  A session's primary key is Barkpark's public UUID. The independent,
+  provider-owned resume cursor lives in `provider_session_id`; legacy Claude
+  rows intentionally use the public UUID for both. `create_session/1` is called
+  on the FIRST user send, never on mount (no empty rows).
 
   ## Display history (D7)
 
@@ -45,18 +45,19 @@ defmodule Barkpark.StudioChat do
       plan awaits approval).
     * `:working` — a turn is running (live overlay `:working`, or persisted
       status `"working"` on a cold mount).
-    * `:finished_while_away` — the session settled (persisted status `"active"`
-      or `"exited"`) and `last_active_at > last_visited_at`: something happened
-      after you last looked. Visiting (`mark_visited/1`) clears it.
 
   The three needs-you kinds map 1:1 onto the `@needs_you_roles` ask roles
-  (charter D31); `:finished_while_away` is the new away axis carried by the
-  `last_visited_at` column. A session in none of these states has no strip entry.
+  (charter D31). A session in none of these states has no strip entry — a
+  settled session is simply quiet (the wave-12 unseen-finish read tracking
+  was retired by the herd layer: no read receipts; the idle `agent_state`
+  pill is the successor signal).
   """
   import Ecto.Query, warn: false
 
+  alias Barkpark.Content.Document
   alias Barkpark.Repo
   alias Barkpark.StudioChat.{Message, Session}
+  alias Barkpark.StudioChat.Runtime
 
   # Longest sidebar preview we keep denormalised on the session row.
   @summary_max 140
@@ -65,39 +66,169 @@ defmodule Barkpark.StudioChat do
   # sessions
   # ---------------------------------------------------------------------------
 
+  # ---------------------------------------------------------------------------
+  # Tenant scope (Connectors epic wave 1, charter D15/D17) — the store seal.
+  #
+  # Every read/list/mutate funnel takes a `scope` argument that is either
+  # `:global` or a `workspace_id` binary, defaulting to `:global` so no non-chat
+  # caller (Recorder, internal helpers, admin LiveView) breaks:
+  #
+  #   * `:global`     → NO filter (the admin superuser path, mirrors
+  #                     `Content.Scope.scope_to_workspace_global/1`).
+  #   * a workspace id → `owner_workspace_id == ^ws` — the fail-closed semantics
+  #                     of `Content.Scope.scope_to_workspace/3`, applied DIRECTLY
+  #                     to `chat_sessions.owner_workspace_id` (the table has no
+  #                     `workspace_id` column, so we cannot call Scope, which
+  #                     keys on `workspace_id`). A NULL `owner_workspace_id` never
+  #                     matches an equality, so legacy/`:global` rows stay
+  #                     invisible to a scoped caller.
+  #   * anything else (a `nil` workspace) → `where: false`, zero rows, fail-closed
+  #                     (mirrors `scope_to_workspace(query, nil, _)`). NOT the
+  #                     `scope_to_owner` OR-is_nil carve-out, NOT a dataset
+  #                     OR-fallback — chat_sessions never had a prior tenant id.
+  # ---------------------------------------------------------------------------
+  defp scope_sessions(query, :global), do: query
+
+  defp scope_sessions(query, workspace_id) when is_binary(workspace_id),
+    do: where(query, [s], s.owner_workspace_id == ^workspace_id)
+
+  defp scope_sessions(query, _fail_closed), do: where(query, false)
+
   @doc """
-  Create a session from `attrs`. `id` (the minted claude session UUID) is
-  REQUIRED — the caller mints it so it doubles as the `--resume` key.
+  The in-memory TERM TWIN of `scope_sessions/2` (herd wave 1, charter D43h): does
+  a session owned by `owner_ws` fall inside the caller's store `scope`? The fleet
+  wire (`FleetHub` + `GET /v1/chat/events`) can never run a per-flip DB query, so
+  the live-flip and ring-replay seams reuse THIS predicate against the
+  `owner_workspace_id` carried on the broadcast, while the snapshot seam runs the
+  Ecto `scope_sessions/2`. The three clauses are byte-faithful to that query:
+
+    * `:global` — instance-wide authority sees every session (the identity clause).
+    * a workspace binary — confined to `owner_ws == ws`; a `nil` (NULL-owner /
+      admin/global) session never equals a binary, so it is INVISIBLE to every
+      workspace scope — the same NULL-owner invisibility `scope_sessions/2` gets
+      from SQL `= NULL` never being true.
+    * anything else — fail closed (no match), mirroring the `where(false)` clause.
+  """
+  @spec scope_match?(binary() | nil, :global | binary() | term()) :: boolean()
+  def scope_match?(_owner_ws, :global), do: true
+  def scope_match?(owner_ws, ws) when is_binary(ws), do: owner_ws == ws
+  def scope_match?(_owner_ws, _fail_closed), do: false
+
+  # Attention order for `rollup/1` (herd charter D64h): `blocked > working >
+  # idle > unknown` — unknown ranks LAST, byte-matching the shipped Go TUI
+  # `herdRank` (internal/chat/herd.go, `TestHerdAttentionSort`) so the rollup
+  # can never disagree with `bp chat` for a workspace mixing idle + unknown.
+  @rollup_precedence [:blocked, :working, :idle, :unknown]
+
+  @doc """
+  The workspace fleet rollup (herd layer, charter D64h): ONE grouped count over
+  `chat_sessions.agent_state` — the single herd column every surface reads —
+  plus the ONE state that summarises the herd. Serves `GET /v1/chat/rollup`.
+
+  Returns `%{counts: %{working: n, blocked: n, idle: n, unknown: n},
+  precedence: state}` where `precedence` is the highest-attention state with a
+  nonzero count in the order `blocked > working > idle > unknown`. All four
+  keys are always present (zero-filled — `agent_state` is CHECK-constrained to
+  exactly these four values). An EMPTY in-scope fleet rolls up to `:unknown`
+  with all-zero counts: no sessions is no information, never a synthetic idle.
+
+  `scope` is the controller's `chat_scope` (`:global | {:workspace, ws}`) or
+  the store funnel's bare form (`:global | workspace_id`); `{:workspace, ws}`
+  unwraps onto the SAME fail-closed `scope_sessions/2` gate every other read
+  funnel uses — `:global` unfiltered, a workspace binary confined to its own
+  `owner_workspace_id` rows (NULL-owner sessions invisible), anything else
+  `where: false` (zero rows).
+  """
+  @spec rollup(:global | {:workspace, binary()} | binary() | term()) :: %{
+          counts: %{
+            working: non_neg_integer(),
+            blocked: non_neg_integer(),
+            idle: non_neg_integer(),
+            unknown: non_neg_integer()
+          },
+          precedence: :blocked | :working | :idle | :unknown
+        }
+  def rollup({:workspace, ws}), do: rollup(ws)
+
+  def rollup(scope) do
+    counts =
+      Session
+      # Archived sessions leave the rollup (charter D28): every other read
+      # funnel (list_sessions, fleet_snapshot) already filters the shelf; an
+      # archived blocked session must not light the needs-you badge forever.
+      |> archived_filter(false)
+      |> scope_sessions(scope)
+      |> group_by([s], s.agent_state)
+      |> select([s], {s.agent_state, count(s.id)})
+      |> Repo.all()
+      |> Enum.reduce(Map.new(@rollup_precedence, &{&1, 0}), fn {state, n}, acc ->
+        # CHECK-constrained to the four states, so the atom always exists.
+        Map.replace(acc, String.to_existing_atom(state), n)
+      end)
+
+    precedence = Enum.find(@rollup_precedence, :unknown, &(counts[&1] > 0))
+
+    %{counts: counts, precedence: precedence}
+  end
+
+  # The owner_workspace_id to STAMP on a new session from the create scope. The
+  # controller threads the resolved `chat_scope` (`:global | {:workspace, ws}`,
+  # charter D18); a bare workspace binary is also accepted defensively. Anything
+  # else (`:global`, nil) stamps NULL — the admin/global session.
+  defp owner_ws_from_scope({:workspace, ws}) when is_binary(ws), do: ws
+  defp owner_ws_from_scope(ws) when is_binary(ws), do: ws
+  defp owner_ws_from_scope(_), do: nil
+
+  @doc """
+  Create a session from `attrs`. `id` is Barkpark's REQUIRED public UUID;
+  provider-native resume identity is persisted separately and set at most once.
+
+  `scope` (charter D17) stamps `owner_workspace_id`: `{:workspace, ws}` (or a
+  bare `ws` binary) stamps that workspace; `:global` (the default) stamps NULL —
+  the admin/global session. The scope is authoritative — it overrides any
+  `owner_workspace_id` in `attrs`.
 
   Returns `{:ok, %Session{}}` or `{:error, changeset}`.
   """
-  @spec create_session(map()) :: {:ok, Session.t()} | {:error, Ecto.Changeset.t()}
-  def create_session(attrs) do
+  @spec create_session(map(), :global | {:workspace, binary()} | binary()) ::
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t()}
+  def create_session(attrs, scope \\ :global) do
     %Session{}
-    |> Session.create_changeset(attrs)
+    |> Session.create_changeset(Map.put(attrs, :owner_workspace_id, owner_ws_from_scope(scope)))
     |> Repo.insert()
   end
 
   @doc """
-  Fetch a session by id. Returns `nil` for a missing id AND for a non-UUID
-  string (UUID-guarded — never a 500).
+  Fetch a session by id, within `scope` (charter D17). Returns `nil` for a
+  missing id, a non-UUID string (UUID-guarded — never a 500), AND for a session
+  the scope cannot see (a workspace-scoped caller reading a foreign/`:global`
+  session gets `nil` — fail-closed, indistinguishable from missing).
   """
-  @spec get_session(String.t() | nil) :: Session.t() | nil
-  def get_session(id) when is_binary(id) do
+  @spec get_session(String.t() | nil, :global | binary()) :: Session.t() | nil
+  def get_session(id, scope \\ :global)
+
+  def get_session(id, scope) when is_binary(id) do
     case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> Repo.get(Session, uuid)
-      :error -> nil
+      {:ok, uuid} ->
+        Session
+        |> where([s], s.id == ^uuid)
+        |> scope_sessions(scope)
+        |> Repo.one()
+
+      :error ->
+        nil
     end
   end
 
-  def get_session(_), do: nil
+  def get_session(_, _), do: nil
 
   @doc """
-  Fetch a session and its messages (ordered by `seq`). Returns `nil` if missing.
+  Fetch a session and its messages (ordered by `seq`), within `scope`. Returns
+  `nil` if missing OR invisible to the scope (fail-closed).
   """
-  @spec get_session_with_messages(String.t() | nil) :: Session.t() | nil
-  def get_session_with_messages(id) do
-    case get_session(id) do
+  @spec get_session_with_messages(String.t() | nil, :global | binary()) :: Session.t() | nil
+  def get_session_with_messages(id, scope \\ :global) do
+    case get_session(id, scope) do
       nil -> nil
       session -> Repo.preload(session, :messages)
     end
@@ -116,20 +247,35 @@ defmodule Barkpark.StudioChat do
     * `:archived` — `false` (default) lists the active side of the shelf
       (`archived_at IS NULL`, the partial-indexed hot path); `true` lists the
       archived shelf (`archived_at IS NOT NULL`).
+
+  `scope` (charter D17) narrows the list: `:global` (default) lists every
+  session (admin sidebar, behaviour identical to today); a `workspace_id` lists
+  only that workspace's sessions (fail-closed — the tenant-scoped sidebar served
+  by the `owner_workspace_id, last_active_at` partial index).
   """
-  @spec list_sessions(keyword()) :: [Session.t()]
-  def list_sessions(opts \\ []) do
+  @spec list_sessions(keyword(), :global | binary()) :: [Session.t()]
+  def list_sessions(opts \\ [], scope \\ :global) do
     archived? = Keyword.get(opts, :archived, false)
 
     Session
     |> archived_filter(archived?)
+    |> scope_sessions(scope)
     |> order_by([s], desc: s.last_active_at, desc: s.inserted_at)
     |> limit(^@sidebar_cap)
     |> select([s], %Session{
       id: s.id,
+      provider: s.provider,
+      execution_target: s.execution_target,
+      execution_host_id: s.execution_host_id,
+      provider_session_id: s.provider_session_id,
       title: s.title,
       title_source: s.title_source,
       status: s.status,
+      # The herd column pair (charter D38/D40): the pill and the needs-you
+      # strip derive from `agent_state`, so omitting it here would silently
+      # feed them the schema default ("idle") for every row.
+      agent_state: s.agent_state,
+      agent_state_at: s.agent_state_at,
       summary: s.summary,
       message_count: s.message_count,
       pending_approvals: s.pending_approvals,
@@ -137,10 +283,14 @@ defmodule Barkpark.StudioChat do
       output_tokens: s.output_tokens,
       total_cost_usd: s.total_cost_usd,
       last_active_at: s.last_active_at,
-      last_visited_at: s.last_visited_at,
       archived_at: s.archived_at,
       inserted_at: s.inserted_at,
-      updated_at: s.updated_at
+      updated_at: s.updated_at,
+      # Select-widen is SERVER-SIDE only (wsc charter D7): the snapshot is
+      # folded to the compact `workflow_summary/1` before any assign or JSON —
+      # the raw rail never leaves the app layer on a list path (the D14
+      # sidebar-wire law holds; DB→app on localhost is cheap).
+      rail_snapshot: s.rail_snapshot
     })
     |> Repo.all()
   end
@@ -149,27 +299,91 @@ defmodule Barkpark.StudioChat do
   defp archived_filter(query, false), do: where(query, [s], is_nil(s.archived_at))
 
   @doc """
-  List a session's messages in `seq` order.
+  The scoped fleet snapshot (herd wave 1, charter D45h): every in-scope session's
+  current `{session_id, agent_state, ts, title}` — the herd-wire state tuple, NO
+  content, NO `owner_workspace_id`. Reuses the SAME `scope_sessions/2` seam as
+  `list_sessions/2` (so a workspace caller sees only its own owned rows and NULL
+  owners stay invisible), ordered newest-active-first and capped at the sidebar
+  cap. `ts` is `agent_state_at` — the D42h liveness stamp, so a consumer can age
+  a stale `working`/`blocked` into a stall badge exactly as the sweep does. This
+  is fail-closed SEAM 1 of the three fleet-scope seams (live-flip + ring-replay
+  reuse the `scope_match?/2` term twin above).
   """
-  @spec list_messages(String.t()) :: [Message.t()]
-  def list_messages(session_id) do
+  @spec fleet_snapshot(:global | binary() | term()) :: [
+          %{
+            session_id: binary(),
+            agent_state: binary(),
+            ts: DateTime.t() | nil,
+            title: binary() | nil
+          }
+        ]
+  def fleet_snapshot(scope \\ :global) do
+    Session
+    |> archived_filter(false)
+    |> scope_sessions(scope)
+    |> order_by([s], desc: s.last_active_at, desc: s.inserted_at)
+    |> limit(^@sidebar_cap)
+    |> select([s], %{
+      session_id: s.id,
+      agent_state: s.agent_state,
+      ts: s.agent_state_at,
+      title: s.title
+    })
+    |> Repo.all()
+  end
+
+  @doc """
+  List a session's messages in `seq` order, within `scope` (charter D17).
+
+  `chat_messages` carries no `owner_workspace_id` of its own, so the scope gate
+  is the PARENT session's visibility: a workspace-scoped caller that cannot see
+  the session (foreign / `:global` owner) gets `[]` — fail-closed, never a
+  foreign tenant's transcript. `:global` (default) is unfiltered. A `pos_integer`
+  second arg is the LEGACY limit form (see the 3-arity for a scoped limit).
+  """
+  @spec list_messages(String.t(), :global | binary() | pos_integer()) :: [Message.t()]
+  def list_messages(session_id, scope_or_limit \\ :global)
+
+  def list_messages(session_id, :global), do: do_messages_all(session_id)
+
+  def list_messages(session_id, ws) when is_binary(ws) do
+    if scoped_session_visible?(session_id, ws), do: do_messages_all(session_id), else: []
+  end
+
+  def list_messages(session_id, limit) when is_integer(limit) and limit > 0 do
+    do_messages_last(session_id, limit)
+  end
+
+  def list_messages(session_id, limit) when is_integer(limit), do: do_messages_all(session_id)
+
+  @doc """
+  List the LAST `limit` messages of a session (ascending `seq`), within `scope`.
+
+  The transcript reopen path (`ChatLive`) caps the socket to a bounded window
+  (task-9e21c3f285b3d7d0), so a multi-hundred-turn session no longer loads its
+  entire history into memory just to display the tail. The DB `LIMIT` bounds
+  both the query result and the initial socket heap; the durable store is
+  untouched. A non-positive `limit` falls back to the full list. `scope`
+  threads the tenant gate: a workspace-scoped caller that cannot see the session
+  gets `[]` (fail-closed); `:global` is unfiltered.
+  """
+  @spec list_messages(String.t(), pos_integer(), :global | binary()) :: [Message.t()]
+  def list_messages(session_id, limit, scope) when is_integer(limit) and limit > 0 do
+    if scoped_session_visible?(session_id, scope),
+      do: do_messages_last(session_id, limit),
+      else: []
+  end
+
+  def list_messages(session_id, _limit, scope), do: list_messages(session_id, scope)
+
+  defp do_messages_all(session_id) do
     Message
     |> where([m], m.session_id == ^session_id)
     |> order_by([m], asc: m.seq)
     |> Repo.all()
   end
 
-  @doc """
-  List the LAST `limit` messages of a session, still in ascending `seq` order.
-
-  The transcript reopen path (`ChatLive`) caps the socket to a bounded window
-  (task-9e21c3f285b3d7d0), so a multi-hundred-turn session no longer loads its
-  entire history into memory just to display the tail. The DB `LIMIT` bounds
-  both the query result and the initial socket heap; the durable store is
-  untouched. A non-positive/absent `limit` falls back to the full list.
-  """
-  @spec list_messages(String.t(), pos_integer()) :: [Message.t()]
-  def list_messages(session_id, limit) when is_integer(limit) and limit > 0 do
+  defp do_messages_last(session_id, limit) do
     Message
     |> where([m], m.session_id == ^session_id)
     |> order_by([m], desc: m.seq)
@@ -178,7 +392,10 @@ defmodule Barkpark.StudioChat do
     |> Enum.reverse()
   end
 
-  def list_messages(session_id, _limit), do: list_messages(session_id)
+  # A session is visible to `:global` always; to a workspace scope only when the
+  # scoped `get_session` resolves it (fail-closed on a foreign / NULL owner).
+  defp scoped_session_visible?(_session_id, :global), do: true
+  defp scoped_session_visible?(session_id, scope), do: get_session(session_id, scope) != nil
 
   # ---------------------------------------------------------------------------
   # lifecycle: archive + delete (wave 2 — the sidebar as a managed resource list)
@@ -193,15 +410,41 @@ defmodule Barkpark.StudioChat do
   chat-owned dir keyed by the session id and must not outlive the row. Archiving
   keeps files; only a permanent delete purges them. The file purge runs AFTER a
   successful row delete and never raises (a stray FS error can't fail the delete).
+
+  ## RESTRICT children (managed-codex runtime ledgers)
+
+  Two append-only ledgers reference `chat_sessions.id` with `on_delete: :restrict`
+  — `chat_runtime_usage_receipts` (migration 20260715000900) and
+  `epic_assignment_runtime_attempts` (migration 20260715001300). A managed-codex
+  session that ever recorded a runtime attempt or usage receipt therefore CANNOT
+  be hard-deleted: a bare `Repo.delete` would raise an unhandled
+  `Ecto.ConstraintError` and crash the admin chat LiveView. The delete goes
+  through a changeset that maps BOTH RESTRICT constraints, so the violation comes
+  back as `{:error, %Ecto.Changeset{}}` the caller can render — never a crash.
+  Callers offer archive instead (`archive_session/2`), which leaves the ledgers
+  intact.
   """
-  @spec delete_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
-  def delete_session(id) do
-    case get_session(id) do
+  @spec delete_session(String.t(), :global | binary()) ::
+          {:ok, Session.t()} | {:error, term()} | :noop
+  def delete_session(id, scope \\ :global) do
+    case get_session(id, scope) do
       nil ->
         :noop
 
       session ->
-        case Repo.delete(session) do
+        changeset =
+          session
+          |> Ecto.Changeset.change()
+          |> Ecto.Changeset.foreign_key_constraint(:id,
+            name: "chat_runtime_usage_receipts_session_id_fkey",
+            message: "has recorded runtime usage receipts and cannot be deleted"
+          )
+          |> Ecto.Changeset.foreign_key_constraint(:id,
+            name: "epic_assignment_runtime_attempts_session_id_fkey",
+            message: "has a recorded runtime attempt and cannot be deleted"
+          )
+
+        case Repo.delete(changeset) do
           {:ok, _} = ok ->
             delete_session_attachments(session.id)
             ok
@@ -217,18 +460,21 @@ defmodule Barkpark.StudioChat do
   onto the archived shelf. Orthogonal to `status`: a working/exited session can
   be archived without touching its liveness. `:noop` if the session is gone.
   """
-  @spec archive_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
-  def archive_session(id), do: set_archived_at(id, DateTime.utc_now())
+  @spec archive_session(String.t(), :global | binary()) ::
+          {:ok, Session.t()} | {:error, term()} | :noop
+  def archive_session(id, scope \\ :global),
+    do: set_archived_at(id, DateTime.utc_now(), scope)
 
   @doc """
   Unarchive a session — clear `archived_at` so it returns to the active sidebar.
-  `:noop` if the session is gone.
+  `:noop` if the session is gone or invisible to `scope` (fail-closed).
   """
-  @spec unarchive_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
-  def unarchive_session(id), do: set_archived_at(id, nil)
+  @spec unarchive_session(String.t(), :global | binary()) ::
+          {:ok, Session.t()} | {:error, term()} | :noop
+  def unarchive_session(id, scope \\ :global), do: set_archived_at(id, nil, scope)
 
-  defp set_archived_at(id, value) do
-    case get_session(id) do
+  defp set_archived_at(id, value, scope) do
+    case get_session(id, scope) do
       nil ->
         :noop
 
@@ -412,6 +658,144 @@ defmodule Barkpark.StudioChat do
       session
       |> Ecto.Changeset.change(status: status, last_active_at: DateTime.utc_now())
       |> Ecto.Changeset.validate_inclusion(:status, Session.statuses())
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Persist the herd-layer agent state (chat-tui charter D38): the Recorder's
+  flips-only write at its `publish_activity` seam. Its OWN single-round-trip
+  `Repo.update_all` (the `bump_on_append` pattern) — deliberately NEVER part of
+  `append_message`'s transaction, because most flips have no message insert to
+  piggyback on (offline ×3, working-on-init, idle-on-result). A flip is always
+  a fresh heartbeat, so `agent_state_at` stamps alongside (D41h). Returns the
+  `Repo.update_all` result (`{count, nil}`).
+
+  ## Blocked-source guard (herd-s6, charter D80h)
+
+  `source` is REQUIRED and names WHO is writing: `:derived` (the Recorder's
+  activity mapping and its hand-back re-assert), `:ask` (the two ask-driven
+  `:needs_you` publish sites — both persist the ask row FIRST), or `:reported`
+  (a fenced external reporter via `ChatHosts.report_state/4`). Writing
+  `"blocked"` is the guarded transition — a false blocked trains humans to
+  ignore the signal — so it demands a listed source AND in-WHERE corroboration
+  the caller cannot fake by declaration:
+
+    * `:ask` → the row's denormalised `pending_approvals` counter must be > 0
+      (the same store truth `unblock_if_resolved/1` keys on);
+    * `:reported` → a LIVE execution-lease fence must exist for the session
+      (`ChatHosts.live_fence_subquery/1` — the fence IS the corroboration).
+
+  Observed-not-declared: a blocked write whose corroboration fails returns
+  `{0, nil}` — nothing written. Any OTHER source (or blocked with `:derived`)
+  raises `FunctionClauseError`: no heuristic path can ever set blocked.
+  """
+  @spec set_agent_state(String.t(), String.t(), :derived | :ask | :reported, DateTime.t()) ::
+          {non_neg_integer(), nil}
+  def set_agent_state(session_id, agent_state, source, now \\ DateTime.utc_now())
+
+  def set_agent_state(session_id, "blocked", source, now) when source in [:ask, :reported] do
+    from(s in Session, as: :session)
+    |> where([s], s.id == ^session_id)
+    |> corroborate_blocked(source, now)
+    |> Repo.update_all(set: [agent_state: "blocked", agent_state_at: now, updated_at: now])
+  end
+
+  def set_agent_state(session_id, agent_state, source, now)
+      when agent_state in ["working", "idle", "unknown"] and
+             source in [:derived, :ask, :reported] do
+    Session
+    |> where([s], s.id == ^session_id)
+    |> Repo.update_all(set: [agent_state: agent_state, agent_state_at: now, updated_at: now])
+  end
+
+  # In-WHERE corroboration for the blocked write (D80h): the predicate rides the
+  # SAME UPDATE, so there is no check-then-write race — a caller whose evidence
+  # vanished between read and write simply writes nothing.
+  defp corroborate_blocked(query, :ask, _now),
+    do: where(query, [s], s.pending_approvals > 0)
+
+  defp corroborate_blocked(query, :reported, now),
+    do: where(query, [s], exists(Barkpark.ChatHosts.live_fence_subquery(now)))
+
+  @doc """
+  The staleness-scoped agent-state convergence sweep (charter D42h, fence-aware
+  since herd-s6/D79h): flip `working`/`blocked` rows whose `agent_state_at` is
+  NULL or older than `cutoff` to `"unknown"` — EXCEPT rows currently covered by
+  a live report fence (a live execution lease means the reporter/host is still
+  heartbeating; its lease expiring within the 60s TTL is exactly what makes a
+  DEAD reporter's value sweepable again — never sweep-proof). Owned here so the
+  census invariant holds: every `agent_state` `update_all` lives in this module.
+  """
+  @spec sweep_stale_agent_states(DateTime.t(), DateTime.t()) :: {non_neg_integer(), nil}
+  def sweep_stale_agent_states(cutoff, now) do
+    from(s in Session, as: :session)
+    |> where([s], s.agent_state in ["working", "blocked"])
+    |> where([s], is_nil(s.agent_state_at) or s.agent_state_at < ^cutoff)
+    |> where([s], not exists(Barkpark.ChatHosts.live_fence_subquery(now)))
+    |> Repo.update_all(set: [agent_state: "unknown", updated_at: now])
+  end
+
+  @doc """
+  Heartbeat bump (chat-tui charter D41h): refresh `agent_state_at` WITHOUT
+  touching `agent_state` — no flip happened, the session is just provably
+  alive, so the D42h staleness sweep can tell a long tool call from a dead
+  BEAM. At most every 60s (the Recorder owns the timer), never per-delta.
+  """
+  @spec touch_agent_state_at(String.t(), DateTime.t()) :: {non_neg_integer(), nil}
+  def touch_agent_state_at(session_id, now \\ DateTime.utc_now()) do
+    Session
+    |> where([s], s.id == ^session_id)
+    |> Repo.update_all(set: [agent_state_at: now])
+  end
+
+  @doc "Persist the opaque provider-native session id once; later changes are rejected."
+  @spec set_provider_session_id(String.t(), String.t()) ::
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found | :immutable}
+  def set_provider_session_id(session_id, provider_session_id)
+      when is_binary(provider_session_id) and provider_session_id != "" do
+    with %Session{} = session <- get_session(session_id) do
+      case session.provider_session_id do
+        nil ->
+          session
+          |> Ecto.Changeset.change(provider_session_id: provider_session_id)
+          |> Repo.update()
+
+        ^provider_session_id ->
+          {:ok, session}
+
+        _other ->
+          {:error, :immutable}
+      end
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Persist the session-scoped Cloud sandbox binding (charter D137/D139).
+
+  Deliberately NOT write-once, unlike `set_provider_session_id/2`: the :cloud
+  execution profile's sandbox legitimately expires and a fresh one is created,
+  so this SETS, OVERWRITES, and CLEARS (`nil`). The Barkpark Chat Session row is
+  the durable owner of the binding the next one-shot turn resumes. NEVER stores a
+  transcript — only the opaque sandbox id. Returns `{:ok, session}`,
+  `{:error, changeset}` (a blank string trips the non-empty DB check), or
+  `{:error, :not_found}`.
+  """
+  @spec set_cloud_sandbox_id(String.t(), String.t() | nil) ::
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found}
+  def set_cloud_sandbox_id(session_id, cloud_sandbox_id)
+      when is_binary(cloud_sandbox_id) or is_nil(cloud_sandbox_id) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(cloud_sandbox_id: cloud_sandbox_id)
+      |> Ecto.Changeset.check_constraint(:cloud_sandbox_id,
+        name: :chat_sessions_cloud_sandbox_id_check,
+        message: "must be non-empty"
+      )
       |> Repo.update()
     else
       nil -> {:error, :not_found}
@@ -728,11 +1112,34 @@ defmodule Barkpark.StudioChat do
   # ticks every frame. `phaseIndex` rides the signature (charter D57) so the
   # newly-rendered phase-journey grouping re-signs on a regrouping while a token
   # tick still does not; a phase flip re-renders, a token tick never does.
+  #
+  # AGENT-DETAIL (wsc-ad, D26 — LOAD-BEARING): the per-agent drill-down renders
+  # `lastToolName`/`lastToolSummary`/`resultPreview`/`attempt`/`promptPreview` off
+  # the persisted node, so those fields MUST ride the signature — else a
+  # detail-only frame (a new tool line, a settled result) yields an EQUAL term,
+  # the change-only guard swallows it, the live pane FREEZES, and the frame is
+  # never persisted. `lastProgressAt`/`tokens`/`durationMs` are DELIBERATELY
+  # excluded: they tick on every heartbeat and would defeat the guard — the NOW
+  # age refreshes only when a tool/summary/state/attempt change re-signs (the
+  # accepted D13 ceiling).
   defp strip_workflow(nodes) when is_list(nodes), do: Enum.map(nodes, &strip_workflow_node/1)
   defp strip_workflow(_), do: nil
 
   defp strip_workflow_node(node) when is_map(node),
-    do: Map.take(node, ["type", "title", "label", "phaseIndex", "model", "state"])
+    do:
+      Map.take(node, [
+        "type",
+        "title",
+        "label",
+        "phaseIndex",
+        "model",
+        "state",
+        "lastToolName",
+        "lastToolSummary",
+        "resultPreview",
+        "attempt",
+        "promptPreview"
+      ])
 
   defp strip_workflow_node(other), do: other
 
@@ -798,6 +1205,70 @@ defmodule Barkpark.StudioChat do
 
   def rail_apply_background(rail, _ev), do: rail
 
+  @doc "Fold a Codex app-server collaboration item into the shared agent rail."
+  def rail_apply_codex_item(rail, item, lifecycle)
+      when is_map(rail) and is_map(item) and lifecycle in [:started, :completed] do
+    case item["type"] do
+      type when type in ["collabAgentToolCall", "collab_agent_tool_call"] ->
+        ids =
+          case item["receiverThreadIds"] || item["receiver_thread_ids"] do
+            ids when is_list(ids) -> Enum.filter(ids, &is_binary/1)
+            _ -> []
+          end
+
+        Enum.reduce(ids, rail, fn thread_id, acc ->
+          entry =
+            acc
+            |> rail_entry(thread_id)
+            |> Map.put("row", %{
+              "task_type" => item["tool"] || "codex_subagent",
+              "description" => item["prompt"] || "Codex subagent"
+            })
+            |> Map.put("origin", "codex")
+            |> Map.put("model", item["model"])
+            |> Map.put("status", codex_agent_status(item["status"], lifecycle))
+
+          Map.put(acc, thread_id, entry)
+        end)
+        |> cap_rail()
+
+      type when type in ["subAgentActivity", "sub_agent_activity"] ->
+        case item["agentThreadId"] || item["agent_thread_id"] do
+          thread_id when is_binary(thread_id) ->
+            entry =
+              rail
+              |> rail_entry(thread_id)
+              |> Map.put("row", %{
+                "task_type" => "codex_subagent",
+                "description" => item["agentPath"] || item["agent_path"] || "Codex subagent"
+              })
+              |> Map.put("origin", "codex")
+              |> Map.put("status", codex_activity_status(item["kind"], lifecycle))
+
+            rail |> Map.put(thread_id, entry) |> cap_rail()
+
+          _ ->
+            rail
+        end
+
+      _ ->
+        rail
+    end
+  end
+
+  def rail_apply_codex_item(rail, _item, _lifecycle), do: rail
+
+  defp codex_agent_status(status, :completed)
+       when status in ["completed", "failed", "cancelled", "interrupted"],
+       do: if(status == "completed", do: "completed", else: "interrupted")
+
+  defp codex_agent_status(_, :completed), do: "completed"
+  defp codex_agent_status(_, :started), do: "running"
+
+  defp codex_activity_status("subagentStop", _), do: "completed"
+  defp codex_activity_status(_, :completed), do: "completed"
+  defp codex_activity_status(_, _), do: "running"
+
   # A rail entry only earns the vanish→completed flip when a
   # `background_tasks_changed` snapshot is its provenance — workflow and
   # foreground entries never ride that frame, so their absence is not a signal.
@@ -839,17 +1310,29 @@ defmodule Barkpark.StudioChat do
   Stamp a terminal/transition status onto a rail entry — but ONLY when the
   task_id already has one (charter D47). A lifecycle frame for a task the rail
   never listed leaves the map untouched. PURE.
+
+  The optional fourth arg is the terminal `end_time` a settled `task_updated`
+  carries (charter D5): when present it is stamped as the entry's `"end_time"`
+  so `workflow_summary/1`'s `ended_at` becomes real for a finished wave. `nil`
+  (the default, and every non-terminal transition) never adds the key.
   """
-  @spec rail_stamp_status(map(), any(), any()) :: map()
-  def rail_stamp_status(rail, tid, status)
+  @spec rail_stamp_status(map(), any(), any(), any()) :: map()
+  def rail_stamp_status(rail, tid, status, end_time \\ nil)
+
+  def rail_stamp_status(rail, tid, status, end_time)
       when is_map(rail) and is_binary(tid) and is_binary(status) do
     case Map.get(rail, tid) do
-      entry when is_map(entry) -> Map.put(rail, tid, Map.put(entry, "status", status))
-      _ -> rail
+      entry when is_map(entry) ->
+        entry = Map.put(entry, "status", status)
+        entry = if is_nil(end_time), do: entry, else: Map.put(entry, "end_time", end_time)
+        Map.put(rail, tid, entry)
+
+      _ ->
+        rail
     end
   end
 
-  def rail_stamp_status(rail, _tid, _status), do: rail
+  def rail_stamp_status(rail, _tid, _status, _end_time), do: rail
 
   # Existing entry, or a fresh one seeded "running" with the next insertion seq
   # (the cap prunes oldest-terminal by seq).
@@ -1040,6 +1523,167 @@ defmodule Barkpark.StudioChat do
 
   def workflow_journey(_), do: %{phases: [], summary: empty_journey_summary()}
 
+  @doc """
+  Card-level SUMMARY of a rail's active workflow — the pinned cross-surface D3
+  shape the session-card surfaces (S2–S5) consume. PURE, render-time.
+
+  Input is the whole `rail_snapshot` map (`task_id => entry`). Picks the
+  HIGHEST-SEQ entry that carries a `"workflow"` node list, folds it ONCE through
+  `workflow_journey/1`, and projects the journey summary into the card fields.
+  This is a THIN projection — every count, status, and lifecycle read comes from
+  `workflow_journey/1` + `workflow_node_terminal?/failed?`; there is NO second
+  truth table and NO parallel state counting here (the wire carries non-terminal
+  `progress` beyond `start`, so agent states are NEVER enumerated — the
+  terminal/failed helper sets are the only classifier). Timestamps are READ off
+  the persisted node/entry payloads, never stamped.
+
+  Returns `nil` when the rail is not a map, is empty, or has NO workflow-bearing
+  entry — a plain chat costs nothing.
+
+  Pinned shape (the `m/n` counter is `agents_done/agents_total`):
+
+      %{
+        label:        row.description — one opaque composite string (never split) | nil,
+        ticks:        [phase.status, …] in phase order (the journey spine),
+        phase:        active/interrupted phase title | nil (a completed cycle collapses),
+        phase_index:  active/interrupted phase index | nil,
+        phases_total: phase count,
+        agents_done:  settled = done + failed (failures count honestly — the "13" in 13/17),
+        agents_total: agents across all phases,
+        running:      non-terminal agents,
+        terminal?:    the entry has settled (:completed | :interrupted),
+        outcome:      :completed | :interrupted | :live (entry lifecycle),
+        tokens:       settle-on-state token floor summed from node payloads,
+        started_at:   min agent startedAt across nodes | nil (background/codex carry none),
+        ended_at:     entry "end_time" when present (S2 stamps it later) | nil
+      }
+  """
+  @spec workflow_summary(any()) :: map() | nil
+  def workflow_summary(rail) when is_map(rail) do
+    rail
+    |> Map.values()
+    |> Enum.filter(&workflow_bearing?/1)
+    |> case do
+      [] -> nil
+      entries -> entries |> Enum.max_by(&rail_seq/1) |> summarize_workflow_entry()
+    end
+  end
+
+  def workflow_summary(_), do: nil
+
+  # The wire fields that MAKE a workflow_agent node worth expanding (wsc-ad D27):
+  # the agent's brief, its live tool line, its settled result, its retry counter.
+  # A node carrying NONE of these (a background/codex rail node, a thin phase
+  # marker) yields no detail and thus no expand affordance — the gate is CONTENT,
+  # never origin (D27: every committed rail fixture is origin=background yet
+  # carries full detail).
+  @agent_detail_signal_keys ~w(promptPreview lastToolName lastToolSummary resultPreview attempt)
+
+  # The keys the normalized detail map carries, in the shared cross-surface shape
+  # the TUI sibling consumes. Absent keys are OMITTED by `Map.take`. Timestamps
+  # (`startedAt`/`lastProgressAt`/`durationMs`) pass through as RAW epoch-ms — each
+  # surface formats its own age (D28).
+  @agent_detail_keys ~w(agentId label state promptPreview lastToolName lastToolSummary
+                        resultPreview attempt startedAt lastProgressAt durationMs)
+
+  @doc """
+  Per-agent DETAIL of ONE workflow_agent node (wsc-ad D27/D28) — pure, total.
+
+  Returns the normalized detail map when the node carries at least one
+  detail-signal field (`promptPreview`/`lastToolName`/`lastToolSummary`/
+  `resultPreview`/`attempt`), else `%{}` — the empty map IS the "no affordance"
+  gate the rail render reads (a detail-less node never expands). `terminal`/
+  `failed` are DERIVED from the shared `workflow_node_terminal?/failed?` sets so
+  the NOW/DONE split reads one truth table; every other field passes through
+  VERBATIM (`resultPreview` uncapped — each surface caps at render), absent
+  fields omitted, `startedAt`/`lastProgressAt`/`durationMs` raw epoch-ms.
+  """
+  @spec workflow_agent_node_detail(any()) :: map()
+  def workflow_agent_node_detail(node) when is_map(node) do
+    if Map.take(node, @agent_detail_signal_keys) == %{} do
+      %{}
+    else
+      node
+      |> Map.take(@agent_detail_keys)
+      |> Map.put("terminal", workflow_node_terminal?(node))
+      |> Map.put("failed", workflow_node_failed?(node))
+    end
+  end
+
+  def workflow_agent_node_detail(_), do: %{}
+
+  @doc """
+  Per-agent DETAIL list for a rail_snapshot (wsc-ad D28) — pure, total. Picks the
+  HIGHEST-SEQ workflow-bearing entry (same selector as `workflow_summary/1`),
+  folds each of its `workflow_agent` nodes through `workflow_agent_node_detail/1`,
+  and drops the detail-less ones. Returns `[]` when the rail is not a map, is
+  empty, or has no workflow-bearing entry. This is the SHARED shape mirrored
+  byte-identical to the Go testdata so the TUI sibling reads identical truth.
+  """
+  @spec workflow_agent_detail(any()) :: [map()]
+  def workflow_agent_detail(rail) when is_map(rail) do
+    rail
+    |> Map.values()
+    |> Enum.filter(&workflow_bearing?/1)
+    |> case do
+      [] ->
+        []
+
+      entries ->
+        entries
+        |> Enum.max_by(&rail_seq/1)
+        |> Map.get("workflow")
+        |> List.wrap()
+        |> Enum.filter(&(is_map(&1) and &1["type"] == "workflow_agent"))
+        |> Enum.map(&workflow_agent_node_detail/1)
+        |> Enum.reject(&(&1 == %{}))
+    end
+  end
+
+  def workflow_agent_detail(_), do: []
+
+  # A rail entry is workflow-bearing when it carries a non-empty node list.
+  defp workflow_bearing?(entry) when is_map(entry), do: List.wrap(entry["workflow"]) != []
+  defp workflow_bearing?(_), do: false
+
+  # Fold ONE entry into the card shape — journey does all the truth work.
+  defp summarize_workflow_entry(entry) do
+    %{phases: phases, summary: s} = workflow_journey(entry)
+
+    %{
+      label: get_in(entry, ["row", "description"]),
+      ticks: Enum.map(phases, & &1.status),
+      phase: s.active && s.active.title,
+      phase_index: s.active && s.active.index,
+      phases_total: s.phase_total,
+      # settled counter includes failures — reuses journey's done/failed, no re-count
+      agents_done: s.done + s.failed,
+      agents_total: s.agents_total,
+      running: s.running,
+      # lifecycle is journey's own entry_status — one truth table, no fork
+      terminal?: s.entry_status in [:completed, :interrupted],
+      outcome: s.entry_status,
+      tokens: s.tokens,
+      started_at: min_started_at(entry["workflow"]),
+      ended_at: entry["end_time"]
+    }
+  end
+
+  # Earliest agent start across the tree (epoch-ms integers, read verbatim off the
+  # persisted nodes — never stamped). nil when no agent carries one.
+  defp min_started_at(nodes) when is_list(nodes) do
+    nodes
+    |> Enum.filter(&(is_map(&1) and &1["type"] == "workflow_agent"))
+    |> Enum.map(& &1["startedAt"])
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> nil
+      xs -> Enum.min(xs)
+    end
+  end
+
+  defp min_started_at(_), do: nil
+
   # Entry lifecycle from the rail-entry status: "interrupted" is its own dead
   # frontier; any other terminal (completed/done/…) means the cycle finished;
   # everything else (running) is live.
@@ -1120,6 +1764,83 @@ defmodule Barkpark.StudioChat do
       tokens: 0
     }
   end
+
+  @doc """
+  The epic-goal line for a chat session's worker (wsc charter D9): resolve the
+  session's provider-scoped worker id, find a bp task it currently HOLDS that
+  carries a `parent_id`, hop that ONE parent to the epic, and read
+  `title · slices done/total · wave_status` off the published ledger. Returns
+  `nil` whenever any hop is missing (no claim, an orphan slice, a vanished
+  parent) — the card renders nothing rather than inventing. "PRs open" is
+  deliberately ABSENT (D8 — no data source exists anywhere). Rides existing
+  plumbing only: plain Repo reads, zero new PubSub topics.
+
+  `slices_done` counts terminal children (`done` + `cancelled` — the
+  compactor's terminal set): a cancelled slice no longer blocks the wave, so
+  the line converges to n/n instead of sticking forever short.
+  """
+  @spec epic_goal(String.t() | nil, String.t()) :: map() | nil
+  def epic_goal(provider, session_id) do
+    with worker when is_binary(worker) <- Runtime.worker_id(provider, session_id),
+         parent_id when is_binary(parent_id) <- held_task_parent_id(worker),
+         %Document{} = epic <- published_task_doc(parent_id) do
+      {done, total} = epic_slice_counts(parent_id)
+      content = epic.content || %{}
+
+      %{
+        id: parent_id,
+        title: epic.title || content["title"] || parent_id,
+        slices_done: done,
+        slices_total: total,
+        wave_status: string_presence(content["wave_status"])
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  # The newest published in_progress claim this worker holds that carries a
+  # parent hop. Draft twins never count (the claim lives on the published row).
+  defp held_task_parent_id(worker) do
+    from(d in Document,
+      where: d.type == "task",
+      where: not like(d.doc_id, "drafts.%"),
+      where: fragment("?->'claim'->>'worker'", d.content) == ^worker,
+      where: fragment("?->>'lifecycle_status'", d.content) == "in_progress",
+      where: fragment("(?->>'parent_id') IS NOT NULL", d.content),
+      order_by: [desc: d.updated_at],
+      limit: 1,
+      select: fragment("?->>'parent_id'", d.content)
+    )
+    |> Repo.one()
+  end
+
+  defp published_task_doc(doc_id) do
+    from(d in Document,
+      where: d.type == "task" and d.doc_id == ^doc_id,
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp epic_slice_counts(parent_id) do
+    rows =
+      from(d in Document,
+        where: d.type == "task",
+        where: not like(d.doc_id, "drafts.%"),
+        where: fragment("?->>'parent_id'", d.content) == ^parent_id,
+        group_by: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content),
+        select: {fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content), count(d.id)}
+      )
+      |> Repo.all()
+
+    total = rows |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+    done = for {s, n} <- rows, s in ["done", "cancelled"], reduce: 0, do: (acc -> acc + n)
+    {done, total}
+  end
+
+  defp string_presence(s) when is_binary(s) and s != "", do: s
+  defp string_presence(_), do: nil
 
   @doc """
   Split a workflow-agent label into its two rendered parts (charter D59) — a
@@ -1231,18 +1952,18 @@ defmodule Barkpark.StudioChat do
 
   def update_approval_status(session_id, request_id, status) do
     Repo.transaction(fn ->
-      case find_approval(session_id, request_id) do
+      case find_pending_approval(session_id, request_id) do
         nil ->
           Repo.rollback(:not_found)
 
         %Message{} = message ->
-          was_pending? = approval_pending?(message)
           meta = Map.put(message.metadata || %{}, "approval_status", status)
 
           {:ok, updated} =
             message |> Ecto.Changeset.change(metadata: meta) |> Repo.update()
 
-          if was_pending?, do: dec_pending(session_id)
+          dec_pending(session_id)
+          unblock_if_resolved(session_id)
           updated
       end
     end)
@@ -1387,8 +2108,20 @@ defmodule Barkpark.StudioChat do
     |> Repo.one()
   end
 
-  defp approval_pending?(%Message{metadata: meta}),
-    do: Map.get(meta || %{}, "approval_status") == "pending"
+  # Terminal resolution is a one-way transition. Locking the matching pending
+  # row makes duplicate/opposite answers serialize: after the first commit, a
+  # later resolver sees no pending row and cannot overwrite terminal truth or
+  # decrement the session counter twice.
+  defp find_pending_approval(session_id, request_id) do
+    Message
+    |> where([m], m.session_id == ^session_id and m.role in ^@needs_you_roles)
+    |> where([m], fragment("?->>'request_id' = ?", m.metadata, ^request_id))
+    |> where([m], fragment("?->>'approval_status' = 'pending'", m.metadata))
+    |> order_by([m], desc: m.seq)
+    |> limit(1)
+    |> lock("FOR UPDATE")
+    |> Repo.one()
+  end
 
   # Guarded decrement — the counter never underflows if a resolve races a
   # cancel-all that already zeroed it.
@@ -1398,14 +2131,32 @@ defmodule Barkpark.StudioChat do
     |> Repo.update_all(inc: [pending_approvals: -1], set: [updated_at: DateTime.utc_now()])
   end
 
+  # The LAST pending ask just resolved: nothing needs the human anymore, so the
+  # persisted herd state flips blocked→working in the SAME transaction (both
+  # Studio's resolve_permission and the /v1/chat approval route funnel through
+  # `update_approval_status/3`). The turn WAS paused mid-flight on the ask, so
+  # "working" is the honest post-answer state; the Recorder's next
+  # `publish_activity` write remains the authority for every later transition
+  # (it re-asserts working idempotently on the next frame). Guarded twice:
+  # only a `blocked` row, and only once the pending counter reaches zero — a
+  # session with a second ask still pending stays honestly blocked.
+  defp unblock_if_resolved(session_id) do
+    now = DateTime.utc_now()
+
+    Session
+    |> where([s], s.id == ^session_id)
+    |> where([s], s.pending_approvals == 0 and s.agent_state == "blocked")
+    |> Repo.update_all(set: [agent_state: "working", agent_state_at: now, updated_at: now])
+  end
+
   # ---------------------------------------------------------------------------
   # the needs-you strip (wave 12 — sidebar inbox; kinds documented in @moduledoc)
   # ---------------------------------------------------------------------------
 
   # Strip kinds in STRICT priority order (the moduledoc vocabulary). The order
   # IS the sort: an approval outranks a question outranks a plan outranks a
-  # running turn outranks an unseen finish.
-  @strip_kinds [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+  # running turn.
+  @strip_kinds [:pending_approval, :awaiting_input, :plan_ready, :working]
 
   # Ask role → strip kind (charter D31 roles). Precedence inside one session
   # with SEVERAL pending asks follows @strip_kinds: approval > question > plan.
@@ -1415,36 +2166,12 @@ defmodule Barkpark.StudioChat do
     {"plan", :plan_ready}
   ]
 
-  # The persisted statuses that mean "nothing is running": `active` (turn
-  # settled — the Recorder flips it on every result frame) and `exited` (the
-  # process died). `working` deliberately is NOT here — a mid-turn session is
-  # `:working`, never `:finished_while_away`.
-  @settled_statuses ~w(active exited)
-
   @doc """
   The strip-kind vocabulary in strict priority order (wave 12; see the
   moduledoc). S7's notification seam consumes these EXACT atoms.
   """
   @spec strip_kinds() :: [atom()]
   def strip_kinds, do: @strip_kinds
-
-  @doc """
-  Stamp `last_visited_at = now` — the admin just looked at this session (opened
-  it, switched away from it, or watched it settle on screen). Clears the session
-  from the needs-you strip's `:finished_while_away` state. Deliberately does NOT
-  bump `last_active_at` (visiting must not reorder the sidebar — the `set_draft/2`
-  precedent). Returns `{:ok, session}` or `{:error, :not_found}`.
-  """
-  @spec mark_visited(String.t() | nil) :: {:ok, Session.t()} | {:error, :not_found}
-  def mark_visited(session_id) do
-    with %Session{} = session <- get_session(session_id) do
-      session
-      |> Ecto.Changeset.change(last_visited_at: DateTime.utc_now())
-      |> Repo.update()
-    else
-      nil -> {:error, :not_found}
-    end
-  end
 
   @doc """
   The PENDING ask roles per session, for a list of session ids — the store-truth
@@ -1509,51 +2236,28 @@ defmodule Barkpark.StudioChat do
   @doc """
   One session's strip kind (wave 12) — or nil (no entry). PURE; the per-session
   half of `needs_you_strip/2`, public so the derivation is unit-testable kind by
-  kind. Precedence: a pending ask (any needs-you role) beats a running turn
-  beats an unseen finish.
+  kind. Precedence: a pending ask (any needs-you role) beats a running turn.
 
   `pending_roles` is this session's pending ask roles (`pending_ask_roles/1`);
   `activity` is its live overlay entry or nil. The overlay only ADDS liveness
-  (`:working`/`:needs_you` between store writes) — the persisted row alone
-  yields the same kinds on a cold mount.
+  (`:working`/`:needs_you` between store reads) — the persisted `agent_state`
+  column (herd wave 1, charter D38/D40) alone yields the same kinds on a cold
+  mount: the Recorder writes it at every flip, so store and overlay are the
+  SAME derivation at two freshnesses, never two parallel ones.
   """
   @spec strip_kind(Session.t(), [String.t()], map() | nil) :: atom() | nil
   def strip_kind(session, pending_roles, activity) do
-    pending = is_integer(session.pending_approvals) and session.pending_approvals > 0
-
     cond do
-      pending or activity_state(activity) == :needs_you ->
+      session.agent_state == "blocked" or activity_state(activity) == :needs_you ->
         needs_you_kind(pending_roles)
 
-      activity_state(activity) == :working or session.status == "working" ->
+      session.agent_state == "working" or activity_state(activity) == :working ->
         :working
-
-      finished_while_away?(session) ->
-        :finished_while_away
 
       true ->
         nil
     end
   end
-
-  @doc """
-  True when a session settled AFTER the admin last looked (wave 12): persisted
-  status is a settled one (`active` — the Recorder flips it on every result
-  frame — or `exited`) AND `last_active_at > last_visited_at`. STRICT
-  comparison + a nil `last_visited_at` reads false: a freshly-created row
-  (stamped visited at birth) and a pre-migration row (never stamped) both stay
-  honestly quiet — the strip never fakes an unseen finish.
-  """
-  @spec finished_while_away?(Session.t()) :: boolean()
-  def finished_while_away?(%Session{
-        status: status,
-        last_active_at: %DateTime{} = active,
-        last_visited_at: %DateTime{} = visited
-      })
-      when status in @settled_statuses,
-      do: DateTime.compare(active, visited) == :gt
-
-  def finished_while_away?(_), do: false
 
   # Highest-priority kind among this session's pending ask roles. A needs-you
   # signal with NO known pending row (an overlay :needs_you racing the store

@@ -53,7 +53,11 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
           "title" => "Wire the bridge",
           "content" => %{
             "kind" => "task",
-            "lifecycle_status" => "open",
+            # A CLAIMED task is in_progress — the Writer-seam transition gate
+            # (this PR) refuses a raw open→in_progress write (claim is the
+            # sanctioned verb), so the old open+claim seed made every editor
+            # save an illegal transition. in_progress+claim is the honest state.
+            "lifecycle_status" => "in_progress",
             "assignee" => "agent-7",
             "dependencies" => @deps,
             "claim" => @claim
@@ -89,7 +93,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
              "expected lifecycle option #{inspect(status)}"
     end
 
-    assert html =~ ~r{<option value="open"[^>]*selected}
+    assert html =~ ~r{<option value="in_progress"[^>]*selected}
   end
 
   test "dependencies/claim render read-only JSON with no form input", %{conn: conn} do

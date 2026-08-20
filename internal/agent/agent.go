@@ -14,13 +14,30 @@ import (
 // DefaultInterval is the report+poll cadence when Agent.Interval is zero.
 const DefaultInterval = 60 * time.Second
 
+// DefaultSpaceInterval is the SPACE cadence when Agent.SpaceInterval is zero —
+// deliberately 15x the health beat. Space is a slow-moving fact (a site's
+// deploy tree does not change size between two 60s beats), the du that measures
+// it walks a real tree (2.03s cold on a loaded 2-core box), and every space row
+// is a stored jsonb payload on the control plane. One row per 15 minutes is
+// 96/day/box: enough to see a disk fill over hours, cheap enough that the
+// 14-day retention window stays small (charter D58).
+const DefaultSpaceInterval = 15 * time.Minute
+
 // reportPath / commandsPath / resultsPath are the control-plane endpoints. The
 // agent POSTs a report, GETs the approved-command queue, runs the allowlisted
 // ones, and POSTs results back. Poll-based by design — no websocket/streaming.
+//
+// spacePath is SEPARATE from reportPath on purpose. The report route lands its
+// body as a `health` agent-event, and the metrics chart reads exactly those; a
+// per-slug space payload folded into the beat would be detoasted by every chart
+// render and inflate the retained window (D58). The space payload therefore
+// travels on its own route, at its own cadence, carrying its own event type
+// (SpaceEventType) inline.
 const (
 	reportPath   = "/v1/agent/report"
 	commandsPath = "/v1/agent/commands"
 	resultsPath  = "/v1/agent/results"
+	spacePath    = "/v1/agent/space"
 )
 
 // Agent reports health/status to the control plane and runs approved commands
@@ -46,14 +63,24 @@ type Agent struct {
 	// size, backup, health gate). Its Runner is defaulted to Agent.Runner when
 	// left nil so the two stay consistent.
 	ReportProbes ReportConfig
+
+	// SpaceProbes wires the space payload's probes (df / journalctl / pg / du).
+	// Left zero, every consumer reports its unmeasured sentinel — a box with no
+	// space probes still beats, it just says so.
+	SpaceProbes SpaceConfig
+	// SpaceInterval is the space cadence for Run. Zero means
+	// DefaultSpaceInterval. It is independent of Interval by design (D58).
+	SpaceInterval time.Duration
 }
 
-// httpClient returns the injected client or http.DefaultClient.
+// httpClient returns the injected client, or a Timeout-bearing fallback (30s)
+// so a hung control-plane connection can't freeze the report+poll loop with
+// no crash and no log — http.DefaultClient has Timeout 0 (no deadline).
 func (a *Agent) httpClient() *http.Client {
 	if a.HTTPClient != nil {
 		return a.HTTPClient
 	}
-	return http.DefaultClient
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 // runner returns the injected runner or the real ExecRunner.
@@ -105,6 +132,28 @@ func (a *Agent) RunOnce(ctx context.Context) error {
 	return nil
 }
 
+// ReportSpaceOnce gathers the space payload from the wired probes and POSTs it
+// to spacePath. It is a SEPARATE cycle from RunOnce — a slower one — and it is
+// deliberately non-fatal to the caller's loop: a control plane that predates the
+// space route answers 404, which returns an honest error here and is logged, not
+// retried into a hot loop and never mistaken for a measurement (the same
+// version-skew honesty NewReqStatsProbe applies to the instance stats route).
+func (a *Agent) ReportSpaceOnce(ctx context.Context) error {
+	space := gatherSpace(a.SpaceProbes)
+	if err := a.postJSON(ctx, spacePath, space, nil); err != nil {
+		return fmt.Errorf("post space: %w", err)
+	}
+	return nil
+}
+
+// spaceInterval is SpaceInterval or DefaultSpaceInterval.
+func (a *Agent) spaceInterval() time.Duration {
+	if a.SpaceInterval > 0 {
+		return a.SpaceInterval
+	}
+	return DefaultSpaceInterval
+}
+
 // Run loops RunOnce on Interval until ctx is done, returning ctx.Err(). A cycle
 // error is non-fatal — the loop logs nothing here (the caller decides) and keeps
 // going, so a transient control-plane blip doesn't kill the agent. The first
@@ -117,30 +166,46 @@ func (a *Agent) Run(ctx context.Context) error {
 // carrying that cycle's error so a caller can log/observe without the agent
 // package importing a logger. Used by main() for stderr logging and by tests to
 // count cycles.
+//
+// It drives TWO independent cadences: the 60s report+poll beat and the slower
+// space cycle (spaceInterval). Both fire immediately at start and then on their
+// own tickers, and a space failure never interrupts the beat — the box's health
+// signal must not depend on whether its disk could be measured.
 func (a *Agent) RunWith(ctx context.Context, onCycle func(error)) error {
 	interval := a.Interval
 	if interval <= 0 {
 		interval = DefaultInterval
 	}
 
-	// Fire immediately, then on each tick.
-	if err := a.RunOnce(ctx); err != nil && onCycle != nil {
-		onCycle(err)
-	} else if onCycle != nil {
-		onCycle(nil)
+	report := func() {
+		err := a.RunOnce(ctx)
+		if onCycle != nil {
+			onCycle(err)
+		}
 	}
+	space := func() {
+		err := a.ReportSpaceOnce(ctx)
+		if onCycle != nil {
+			onCycle(err)
+		}
+	}
+
+	// Fire both immediately, then on each tick.
+	report()
+	space()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	spaceTicker := time.NewTicker(a.spaceInterval())
+	defer spaceTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			err := a.RunOnce(ctx)
-			if onCycle != nil {
-				onCycle(err)
-			}
+			report()
+		case <-spaceTicker.C:
+			space()
 		}
 	}
 }

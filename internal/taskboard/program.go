@@ -63,7 +63,8 @@ const (
 	// not a tunable — tests drive determinism through the injected clock + an
 	// explicit Frame, never real wall-clock timing, so there is nothing to shrink.
 	// The budget discipline is unchanged: zero ticks at rest (idle byte-stable).
-	frameCadence = 100 * time.Millisecond
+	frameCadence     = 100 * time.Millisecond
+	hoverSettleDelay = 75 * time.Millisecond
 )
 
 // rowKind identifies what a flattened visible row is, which is all the cursor
@@ -122,6 +123,21 @@ type Model struct {
 	// so a tmux resize never flaps. Updated ONLY on tea.WindowSizeMsg; Compose
 	// reads it and the pure frame renderers never see the mode.
 	wide bool
+	// In wide mode the pane last clicked or wheeled owns keyboard navigation.
+	// The divider is pointer-draggable. wideDetailsRatio is persisted across
+	// launches; wideBoardCols holds the exact in-progress drag position.
+	wideFocus        widePaneFocus
+	wideBoardCols    int
+	wideDetailsRatio float64
+	wideDragging     bool
+	wideDividerHover bool
+	// Hover motion is coalesced behind one bounded timer. Rapid cell-motion
+	// streams only replace these pending values; the settled message commits the
+	// latest target once, avoiding a detail-preview render for every crossed row.
+	hoverPendingTarget string
+	hoverPendingVerb   rune
+	hoverTimerOn       bool
+	hoverGen           int
 
 	// Repo correlation inputs, gathered ONCE by Run's gatherGit(".") and held so
 	// applySnapshot can recompute m.repo against every fresh task set (pure +
@@ -137,6 +153,14 @@ type Model struct {
 	// snapshot; newModel reads through them once to prime the very first frame.
 	cacheDir string
 	cacheKey string
+
+	// Wide depth-0 preview scroll (the right info pane): previewScroll is the
+	// wheel-driven line offset previewLines windows at, valid only while the
+	// preview still shows previewRef — a preview that moves to another task
+	// (cursor step, hover) renders from the top again, and the stale offset is
+	// re-seeded on the next wheel. Never persisted; zero on every launch.
+	previewRef    string
+	previewScroll int
 
 	// live-loop state
 	dirty         bool
@@ -197,13 +221,14 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 			CollapsedEpics: map[string]bool{},
 			Flashes:        map[string]time.Time{},
 			Conn:           ConnPolling,
+			HoverStop:      -1, // -1 = no reading-frame stop under the pointer (charter D99)
 		},
 		// The board is ALWAYS stack level 0 (charter D11/D29) — enter descends onto
 		// it, esc no-ops at this root. papers caches async FramePaper fetches by slug.
 		stack:         []Frame{{Kind: FrameBoard, Title: "tasks"}},
 		papers:        map[string]PaperState{},
 		cacheDir:      cfg.CacheDir,
-		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project),
+		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset),
 		fetch:         FetchSnapshotFull,
 		build:         BuildBoard,
 		doClaim:       DoClaim,
@@ -212,6 +237,9 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		debounceDelay: defaultDebounceDelay,
 		backstopEvery: defaultBackstopEvery,
 		liveStale:     defaultLiveStale,
+	}
+	if prefs, ok := loadTaskboardPreferences(cfg.CacheDir); ok {
+		m.wideDetailsRatio = prefs.DetailsPaneRatio
 	}
 	// Paint from a best-effort cached snapshot BEFORE the first fetch lands, so
 	// frame one is never blank (charter decision #9). A miss (no cache, empty
@@ -287,7 +315,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) reduce(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		oldWidth := m.width
 		m.width, m.height = msg.Width, msg.Height
+		// A stored ratio, unlike a raw column count, scales to the new terminal.
+		// Clear the exact drag width only after a real resize; the first size
+		// message merely establishes geometry.
+		if oldWidth > 0 && oldWidth != msg.Width && m.wideDetailsRatio > 0 {
+			m.wideBoardCols = 0
+		}
+		m.wideDragging = false
+		m.wideDividerHover = false
+		m.cancelHover(true)
 		// Adaptive-compositor hysteresis (charter D12/D27): two-pane at width>=110,
 		// full-frame push below 106; the deadband [106,110) holds the previous mode
 		// so a tmux drag across the boundary never flaps.
@@ -311,6 +349,8 @@ func (m Model) reduce(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleBackstop()
 	case frameMsg:
 		return m.handleFrame(msg)
+	case hoverDebounceMsg:
+		return m.handleHoverDebounce(msg)
 	case snapshotMsg:
 		return m.applySnapshot(msg)
 	case paperLoadedMsg:
@@ -401,21 +441,80 @@ func (m Model) handleFrame(msg frameMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// setHoverTarget is the whole flicker discipline for the mouse hover tint
-// (charter D95, the never-flickers law). It stores the ttm-s1-resolved pointer
-// target (a selectable row's Ref, "" when the pointer is over nothing
-// selectable) and reports whether it CHANGED. The hover-changed guard IS the
-// debounce: bubbletea's cell-motion reporting fires one Motion MouseMsg per cell
-// the pointer crosses, but every Motion that resolves to the SAME row returns
-// changed=false, so the caller short-circuits the re-render — no timer, no new
-// cadence, the 100ms heartbeat stays armed only while Alive(). A "" target
-// clears the tint (the pointer left every selectable row, or a key was pressed).
+// setHoverTarget is the pure commit seam for the mouse hover tint. Runtime mouse
+// motion reaches it through queueHover/handleHoverDebounce, while render tests
+// use it directly to pin the one-field mutation contract.
 func setHoverTarget(st UIState, target string) (UIState, bool) {
 	if target == st.HoverTarget {
 		return st, false
 	}
 	st.HoverTarget = target
 	return st, true
+}
+
+// setHoverStop is setHoverTarget's reading-frame twin (charter D95/D99, the
+// never-flickers law) for the rail-stop tint. It stores the resolved stop index
+// under the pointer (-1 when the pointer is over prose, the dead gutter, chrome,
+// an ↑/↓ overflow marker, or the stop-less depth-0 preview) and reports whether
+// it CHANGED. The change guard IS the debounce for the stop tint: a rail repaint
+// is cheap, so unlike the hover TARGET (which rides queueHover's settle timer for
+// the expensive wide preview) every Motion resolving to the SAME stop returns
+// changed=false and the caller short-circuits. A -1 clears the tint.
+func setHoverStop(st UIState, stop int) (UIState, bool) {
+	if stop == st.HoverStop {
+		return st, false
+	}
+	st.HoverStop = stop
+	return st, true
+}
+
+type hoverDebounceMsg struct{ gen int }
+
+func (m Model) scheduleHover(gen int) tea.Cmd {
+	return tea.Tick(hoverSettleDelay, func(time.Time) tea.Msg { return hoverDebounceMsg{gen: gen} })
+}
+
+// queueHover is a bounded trailing debounce: one timer at most is live. Motion
+// across additional rows only replaces the pending target, so the expensive
+// wide preview never renders intermediate rows. Leaving all targets clears
+// immediately so a highlight cannot linger over chrome.
+func (m Model) queueHover(target string, verb rune) (Model, tea.Cmd) {
+	if target == "" && verb == 0 {
+		m.cancelHover(true)
+		return m, nil
+	}
+	m.hoverPendingTarget = target
+	m.hoverPendingVerb = verb
+	if m.hoverTimerOn {
+		return m, nil
+	}
+	if target == m.ui.HoverTarget && verb == m.ui.HoverFooterVerb {
+		return m, nil
+	}
+	m.hoverGen++
+	m.hoverTimerOn = true
+	return m, m.scheduleHover(m.hoverGen)
+}
+
+func (m Model) handleHoverDebounce(msg hoverDebounceMsg) (Model, tea.Cmd) {
+	if !m.hoverTimerOn || msg.gen != m.hoverGen {
+		return m, nil
+	}
+	m.hoverTimerOn = false
+	m.ui, _ = setHoverTarget(m.ui, m.hoverPendingTarget)
+	m.ui.HoverFooterVerb = m.hoverPendingVerb
+	return m, nil
+}
+
+func (m *Model) cancelHover(clearVisible bool) {
+	m.hoverGen++
+	m.hoverTimerOn = false
+	m.hoverPendingTarget = ""
+	m.hoverPendingVerb = 0
+	if clearVisible {
+		m.ui, _ = setHoverTarget(m.ui, "")
+		m.ui.HoverFooterVerb = 0
+	}
 }
 
 // handleKey is the navigation-shell dispatcher (charter D29): two navigation
@@ -430,6 +529,9 @@ func setHoverTarget(st UIState, target string) (UIState, bool) {
 // that confirms a close; anything else cancels it).
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	m.wideDragging = false
+	m.wideDividerHover = false
+	m.cancelHover(true)
 	if key != "x" {
 		m.pendingClose = ""
 	}
@@ -438,22 +540,75 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// pointer's highlight clears the moment the user reaches for the keyboard, so
 	// the two input modes never fight over the selection. Routed through the same
 	// guard the pointer uses, so a board with no active hover pays nothing.
-	m.ui, _ = setHoverTarget(m.ui, "")
+	m.ui, _ = setHoverStop(m.ui, -1)
 
 	switch key {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "esc", "backspace":
 		(&m).popFrame()
+		// Wide mode: esc back to the depth-0 board hands j/k to the board cursor
+		// again. enterTask (and any mouse preview-pane press) sets wideFocus=reader,
+		// but popFrame never touched it — so before this, Enter→Esc stranded j/k in
+		// the preview scroll with only a mouse board-pane click to recover. esc
+		// always returning you to list navigation is the invariant lazygit and k9s
+		// share; no new pane key, no new mode (charter D117).
+		if m.wide && len(m.stack) == 1 {
+			m.wideFocus = wideFocusBoard
+		}
 		return m, nil
 	case "M":
 		return m.toggleMouse()
 	}
 
+	if m.wide && m.wideFocus == wideFocusBoard {
+		return m.handleBoardKey(key)
+	}
 	if m.topFrame().Kind == FrameBoard {
+		if m.wide {
+			return m.handlePreviewKey(key)
+		}
 		return m.handleBoardKey(key)
 	}
 	return m.handleReadingKey(key)
+}
+
+// handlePreviewKey gives the focused depth-0 right pane the same direct reading
+// grammar as its wheel: line, half-page, page and boundary scrolling. Enter
+// promotes the preview to a full reading frame; task verbs keep their meaning.
+func (m Model) handlePreviewKey(key string) (tea.Model, tea.Cmd) {
+	t, ok := m.taskUnderCursor()
+	if !ok {
+		return m, nil
+	}
+	_, innerW, inner := m.wideGeom()
+	delta := 0
+	switch key {
+	case "j", "down":
+		delta = 1
+	case "k", "up":
+		delta = -1
+	case " ", "space":
+		delta = inner - 1
+	case "d", "pgdown":
+		delta = inner / 2
+	case "u", "pgup":
+		delta = -inner / 2
+	case "g", "home":
+		m.previewRef, m.previewScroll = t.DocID, 0
+		return m, nil
+	case "G", "end":
+		(&m).scrollPreview(t, 1<<20, innerW, inner, m.now())
+		return m, nil
+	case "enter":
+		return m.enterTask(t.DocID), nil
+	case "c", "x", "o":
+		return m.handleBoardKey(key)
+	default:
+		return m, nil
+	}
+	(&m).scrollPreview(t, delta, innerW, inner, m.now())
+	return m, nil
 }
 
 // handleBoardKey is the board's native grammar (charter D29): visibleRows +
@@ -601,6 +756,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.ui.MouseReleased {
 		return m, nil
 	}
+	if msg.Action != tea.MouseActionMotion && msg.Action != tea.MouseActionRelease {
+		m.cancelHover(true)
+	}
 	if m.wide {
 		// ttm-s5: the ≥110-col two-pane frame routes by pure X/Y over the SAME
 		// geometry composeAt paints — board pane / dead gutter / right pane.
@@ -632,17 +790,20 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 // mouseMotion is pointer hover: resolve the pointer against the footer-verb
-// X-spans (ttm-s4) and the compose-level hit map's selectable row (ttm-s3, the
-// row's Ref into UIState.HoverTarget). Board frame only this wave (reading
-// rails have no hover tint yet — an honest gap, not a bug). Change-only
-// mutation IS the debounce (charter D95): the all-motion firehose emits one
-// event per cell crossed, but a Motion that resolves to the same row AND the
-// same verb returns the model unchanged, so the renderer diff repaints
-// nothing. Anything that is not a selectable board row or a footer verb —
-// chrome, separators, scroll affordances, a reading frame — resolves to
-// ""/0 and clears the tint.
+// X-spans (ttm-s4) and the compose-level hit map's selectable row (ttm-s3). Two
+// mutually-exclusive tints, one per frame kind (narrow shows exactly one frame),
+// mirroring wideMouseMotion's dual paths (compose.go): the BOARD frame tints the
+// spine row's Ref into UIState.HoverTarget; a pushed READING frame
+// (FrameTask/FramePaper) tints the rail stop's index into UIState.HoverStop
+// (charter D99 / D105 — the narrow residue). The stop commits change-only through
+// setHoverStop (a cheap rail repaint, charter D95); the target and footer verb
+// ride queueHover's settle timer so the all-motion firehose never renders
+// intermediate rows. Anything that is not a selectable row or a footer verb —
+// chrome, separators, scroll affordances, prose — resolves to ""/-1/0 and clears
+// the tint.
 func (m Model) mouseMotion(x, y int) (tea.Model, tea.Cmd) {
 	target := ""
+	stop := -1
 	if m.topFrame().Kind == FrameBoard {
 		hits := m.ComposeHitMap()
 		if y >= 0 && y < len(hits) && hits[y].Kind == LineSpineRow {
@@ -651,21 +812,23 @@ func (m Model) mouseMotion(x, y int) (tea.Model, tea.Cmd) {
 				target = rows[idx].docID
 			}
 		}
+	} else {
+		// Reading frame: ComposeHitMap tags each rail stop's body line as
+		// LineSpineRow carrying the stop index straight in HoverStop's index space
+		// (D105) — msg.Y indexes it directly, chrome rows are chromeTarget-padded.
+		// setHoverStop is reused unmodified (the D95 change-only debounce).
+		hits := m.ComposeHitMap()
+		if y >= 0 && y < len(hits) && hits[y].Kind == LineSpineRow {
+			stop = hits[y].CursorIndex
+		}
 	}
 	verb := rune(0)
 	if v, ok := m.footerVerbAt(x, y); ok {
 		verb = v
 	}
-	ui, changed := setHoverTarget(m.ui, target)
-	if verb != ui.HoverFooterVerb {
-		ui.HoverFooterVerb = verb
-		changed = true
-	}
-	if !changed {
-		return m, nil
-	}
-	m.ui = ui
-	return m, nil
+	m.ui, _ = setHoverStop(m.ui, stop)
+	nm, cmd := m.queueHover(target, verb)
+	return nm, cmd
 }
 
 // mouseWheel is one wheel notch: on the board it steps the cursor (moveCursor),
@@ -684,8 +847,9 @@ func (m Model) mouseWheel(delta int) (tea.Model, tea.Cmd) {
 }
 
 // mouseLeftPress resolves a click's Y through the compose-level hit map and acts:
-// a scroll affordance = one wheel step; a spine row = select-then-activate. An out
-// -of-range Y or a chrome/none line is an honest no-op.
+// a scroll affordance = one wheel step; a spine row = move the cursor there and
+// activate it, exactly like Enter. An out-of-range Y or chrome/none line is an
+// honest no-op.
 func (m Model) mouseLeftPress(y int) (tea.Model, tea.Cmd) {
 	hits := m.ComposeHitMap()
 	if y < 0 || y >= len(hits) {
@@ -698,45 +862,38 @@ func (m Model) mouseLeftPress(y int) (tea.Model, tea.Cmd) {
 		return m.mouseWheel(1)
 	case LineSpineRow:
 		if m.topFrame().Kind == FrameBoard {
-			return m.boardClickSelect(tgt.CursorIndex)
+			return m.boardClickActivate(tgt.CursorIndex)
 		}
-		return m.readingClickSelect(tgt.CursorIndex)
+		return m.readingClickActivate(tgt.CursorIndex)
 	}
 	return m, nil
 }
 
-// boardClickSelect is a left press on a board spine row: select it, or — if it is
-// ALREADY the cursor row — activate it (activateBoard: descend a task, fold/unfold
-// a section header). A double-click is two presses, so the second press lands on
-// the now-selected row and activates for free.
-func (m Model) boardClickSelect(idx int) (tea.Model, tea.Cmd) {
+// boardClickActivate is a left press on a board spine row: move the cursor to
+// the clicked row, then use Enter's activation reducer. Task rows descend and
+// section headers fold/unfold in one click.
+func (m Model) boardClickActivate(idx int) (tea.Model, tea.Cmd) {
 	rows := m.visibleRows()
 	if idx < 0 || idx >= len(rows) {
 		return m, nil
 	}
-	if m.ui.Cursor == idx {
-		return m.activateBoard(), nil
-	}
 	m.ui.Cursor = idx
-	return m, nil
+	return m.activateBoard(), nil
 }
 
-// readingClickSelect is a left press on a reading-frame rail stop: select it, or
-// — if it is ALREADY the cursor stop — descend onto it (the same as enter). The
+// readingClickActivate is a left press on a reading-frame rail stop: move the
+// stop cursor there, then use Enter's descend reducer in the same gesture. The
 // stop index comes from the hit map (built at the paint width), and the stop
-// count is width-independent, so it is a valid cursor for setTopCursor.
-func (m Model) readingClickSelect(idx int) (tea.Model, tea.Cmd) {
+// count is width-independent, so it is valid for setTopCursor.
+func (m Model) readingClickActivate(idx int) (tea.Model, tea.Cmd) {
 	if len(m.stack) == 0 {
 		return m, nil
 	}
 	if idx < 0 || idx >= m.frameStopCount() {
 		return m, nil
 	}
-	if m.topFrame().Cursor == idx {
-		return m.descend()
-	}
 	(&m).setTopCursor(idx)
-	return m, nil
+	return m.descend()
 }
 
 // ── Mouse: clickable footer verbs + the M mouse-mode toggle (charter D96) ─────
@@ -768,14 +925,34 @@ func (m Model) clickFooterVerb(verb rune) (tea.Model, tea.Cmd) {
 }
 
 // footerVerbAt maps an absolute terminal click (x,y) to the board footer verb
-// whose span contains it, or (0,false). NARROW board mode only — the portrait
-// primary surface: wide two-pane and the reading frames expose no footer verb
-// targets (the reading footer omits c/x/o by charter). The geometry mirrors
-// Compose byte-for-byte: the footer is the last painted row (Y == height-1 after
-// Compose's clamps and its one blank top row), inset by the left gutter gl, and
-// the spans are computed at the same inner width renderFooter paints at.
+// whose span contains it, or (0,false). Both board frames now expose the verbs
+// (charter D111): the reading frames still omit c/x/o, so a pushed frame bails.
+// The geometry mirrors Compose byte-for-byte — the footer is the last painted
+// row, inset by the left gutter gl, and the spans are computed at the exact
+// inner width renderFooter paints at:
+//
+//   - NARROW: the footer spans the whole portrait inner width (width-gl-gr), so
+//     the ladder sheds against that.
+//   - WIDE (D111): the footer is the LEFT board pane, so it sheds against the
+//     live dragged/persisted boardPaneCols — one grammar, two widths. The pad is
+//     the same gl; the footer row is the pane's last row (Y == wideGeom's inner).
 func (m Model) footerVerbAt(x, y int) (rune, bool) {
-	if m.wide || m.topFrame().Kind != FrameBoard {
+	if m.topFrame().Kind != FrameBoard {
+		return 0, false
+	}
+	if m.wide {
+		gl, innerW, inner := m.wideGeom()
+		if y != inner {
+			return 0, false
+		}
+		boardW := m.boardPaneCols(innerW)
+		col := x - gl
+		_, spans := buildBoardFooter(boardW, m.ui.MouseReleased)
+		for _, s := range spans {
+			if col >= s.start && col < s.end {
+				return s.verb, true
+			}
+		}
 		return 0, false
 	}
 	width, height := m.width, m.height
@@ -818,8 +995,10 @@ func (m Model) toggleMouse() (tea.Model, tea.Cmd) {
 		return m, tea.EnableMouseAllMotion
 	}
 	m.ui.MouseReleased = true
-	m.ui.HoverFooterVerb = 0
-	m.ui, _ = setHoverTarget(m.ui, "")
+	m.cancelHover(true)
+	m.ui, _ = setHoverStop(m.ui, -1)
+	m.wideDragging = false
+	m.wideDividerHover = false
 	return m, tea.DisableMouse
 }
 
@@ -1060,12 +1239,37 @@ func (m Model) activateBoard() Model {
 		m.ui.CollapsedEpics[r.docID] = m.sectionExpandedByKey(r.docID)
 		m.clampCursor()
 	case rowChild, rowClusterMember, rowOrphan:
-		title := r.docID
-		if t, found := m.taskByID(r.docID); found && t.Title != "" {
-			title = t.Title
-		}
-		(&m).pushFrame(Frame{Kind: FrameTask, Ref: r.docID, Title: title})
+		m = m.enterTask(r.docID)
 	}
+	return m
+}
+
+// enterTask is the SINGLE-OPEN task entry (board activate, preview click): at
+// most one task is entered at a time, so entering a task from the board REPLACES
+// any task frame already open instead of stacking a second one (the stack
+// resets to the root board first, then pushes). A task that is ALREADY on the
+// stack takes the D11 cycle-guard path instead — pushFrame pops back to the
+// existing frame with its saved Cursor/Scroll intact, so re-entering the open
+// task never loses your place. Trails grown INSIDE a frame (task → paper →
+// child task via descend) are untouched — this governs entry from the board.
+func (m Model) enterTask(docID string) Model {
+	if m.wide {
+		m.wideFocus = wideFocusReader
+	}
+	for _, ex := range m.stack {
+		if ex.Kind == FrameTask && ex.Ref == docID {
+			(&m).pushFrame(Frame{Kind: FrameTask, Ref: docID})
+			return m
+		}
+	}
+	title := docID
+	if t, found := m.taskByID(docID); found && t.Title != "" {
+		title = t.Title
+	}
+	if len(m.stack) > 1 {
+		m.stack = m.stack[:1]
+	}
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: docID, Title: title})
 	return m
 }
 
@@ -1489,20 +1693,37 @@ func (m *Model) freeScroll(delta int) {
 	top.Scroll = nt
 }
 
-// readingWidth is the width a pushed frame renders at: full width in narrow
-// push mode, the right-pane width in wide two-pane mode (charter D24: the
-// renderers cap the reading measure at 72 internally, so extra width is margin).
+// readingWidth is the width a pushed frame renders at: the pane width capped by
+// docLayout at the paper-standard 100-col document column (charter D24: the
+// renderers additionally cap the prose measure at 72 internally). It MUST
+// mirror the width composeAt paints at, or scroll clamps and paint disagree
+// about how lines wrap.
 func (m Model) readingWidth() int {
 	w := m.width
 	if w < 20 {
 		w = 20
 	}
+	// Compose spends its outer breathing gutter before composeAt renders. Mirror
+	// that subtraction so long purpose prose wraps identically in scroll clamps
+	// and paint (wide: 1 left + 3 right; narrow <56: 1 + 2).
+	if w < 56 {
+		w -= 3
+	} else {
+		w -= 4
+	}
+	// composeAt re-floors the post-gutter width at 20 (compose.go:234-237) BEFORE
+	// docLayout; mirror that floor or the scroll clamp under-counts the true paint
+	// at tiny widths (narrow, m.width 19..22: the measure lagged paint by 3/3/2/1).
+	if w < 20 {
+		w = 20
+	}
 	if m.wide {
-		w = w - boardPaneWidth - paneGutter2
+		w = w - m.boardPaneCols(w) - paneGutter2
 		if w < minReadingWidth {
 			w = minReadingWidth
 		}
 	}
+	w, _ = docLayout(w)
 	return w
 }
 
@@ -1525,9 +1746,9 @@ func (m Model) readingViewportHeight() int {
 		h = 8 // composeAt re-floors, so short panes never over-report
 	}
 	if m.wide {
-		return h - 1
+		return h - 1 // the sheet's ─ top edge (renderDocPane)
 	}
-	return h - 2
+	return h - 2 // the reading footer + the sheet's ─ top edge
 }
 
 // readingSubjectTask resolves the task the act verbs (c/x/o) target in a pushed

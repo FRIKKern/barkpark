@@ -107,15 +107,15 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
 
       # AC5: emitted evergreen --primary-hover, both themes (darker in light,
       # lighter in dark). The hand-authored blue --primary-hover is gone.
-      assert html =~ "--primary-hover: hsl(163 46% 16%);"
-      assert html =~ "--primary-hover: hsl(160 42% 70%);"
+      assert html =~ "--primary-hover: hsl(151.96 71.81% 23.22%);"
+      assert html =~ "--primary-hover: hsl(152.92 60% 60.94%);"
       refute html =~ "--primary-hover: hsl(217.2 91.2% 50%);"
       refute html =~ "--primary-hover: hsl(240 5.9% 22%);"
 
       # -hsl/-soft machinery so blue accent tints bind to an evergreen soft token.
-      assert html =~ "--primary-hsl: 163 46% 22%;"
+      assert html =~ "--primary-hsl: 151.96 71.81% 29.22%;"
       assert html =~ "--primary-soft: hsl(var(--primary-hsl) / 0.15);"
-      assert html =~ "--primary-hsl: 160 42% 62%;"
+      assert html =~ "--primary-hsl: 152.92 60% 52.94%;"
       assert html =~ "--primary-soft: hsl(var(--primary-hsl) / 0.2);"
     end
 

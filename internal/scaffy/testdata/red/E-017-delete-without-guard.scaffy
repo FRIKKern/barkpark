@@ -1,0 +1,3 @@
+# expect: E-017 3
+DIRECTION "remove"
+DELETE FILE IF PRESENT "internal/widgets/old.go"

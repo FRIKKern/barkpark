@@ -1,0 +1,85 @@
+{
+  "run_id": "grip-20260722T231225Z",
+  "recipes": [
+    {
+      "subject": "cmd:grep",
+      "quantity": "grep:-n:references(:chat_sessions",
+      "rerun": "grep -n 'references(:chat_sessions' api/lib/../priv/repo/migrations/20260715000200_add_runtime_telemetry.exs",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-22T23:12:25Z"
+    },
+    {
+      "subject": "api/priv/repo/migrations/20260715000900_add_runtime_usage_receipts.exs",
+      "quantity": "grep:-n:add :cycle_id\\|add :assignment_id\\|refer",
+      "rerun": "grep -n 'add :cycle_id\\|add :assignment_id\\|references' api/priv/repo/migrations/20260715000900_add_runtime_usage_receipts.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/priv/repo/migrations/20260715000900_add_runtime_usage_receipts.exs"
+      ],
+      "observed_at": "2026-07-22T23:12:25Z"
+    },
+    {
+      "subject": "api/priv/repo/migrations/20260715001300_add_assignment_runtime_attempts.exs",
+      "quantity": "grep:-n:references\\|on_delete",
+      "rerun": "grep -n 'references\\|on_delete' api/priv/repo/migrations/20260715001300_add_assignment_runtime_attempts.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/priv/repo/migrations/20260715001300_add_assignment_runtime_attempts.exs"
+      ],
+      "observed_at": "2026-07-22T23:12:25Z"
+    },
+    {
+      "subject": "api/priv/repo/migrations/20260715001100_bind_epic_assignments_to_tasks.exs",
+      "quantity": "grep:-n:references\\|on_delete",
+      "rerun": "grep -n 'references\\|on_delete' api/priv/repo/migrations/20260715001100_bind_epic_assignments_to_tasks.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/priv/repo/migrations/20260715001100_bind_epic_assignments_to_tasks.exs"
+      ],
+      "observed_at": "2026-07-22T23:12:25Z"
+    },
+    {
+      "subject": "api/lib",
+      "quantity": "grep:-rn:StudioChat.delete_session\\|delete_sessio",
+      "rerun": "grep -rn 'StudioChat.delete_session\\|delete_session(id' api/lib",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib"
+      ],
+      "observed_at": "2026-07-22T23:12:25Z"
+    },
+    {
+      "subject": "api/priv/repo/migrations/20260709120000_create_chat_sessions_and_messages.exs",
+      "quantity": "grep:-rn:references(:chat_sessions\\|references(:w",
+      "rerun": "grep -rn 'references(:chat_sessions\\|references(:workspaces\\|references(:users' api/priv/repo/migrations/20260709120000_create_chat_sessions_and_messages.exs api/priv/repo/migrations/20260713140000_add_owner_workspace_id_to_chat_sessions.exs",
+      "derived_level": "L3",
+      "deps": [
+        "api/priv/repo/migrations/20260709120000_create_chat_sessions_and_messages.exs",
+        "api/priv/repo/migrations/20260713140000_add_owner_workspace_id_to_chat_sessions.exs"
+      ],
+      "observed_at": "2026-07-22T23:12:25Z"
+    },
+    {
+      "subject": "api/lib/barkpark/studio_chat/runtime_usage.ex",
+      "quantity": "grep:-n:lock: \"FOR",
+      "rerun": "grep -n 'lock: \"FOR' api/lib/barkpark/studio_chat/runtime_usage.ex api/lib/barkpark/cycle_fleet.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/studio_chat/runtime_usage.ex",
+        "api/lib/barkpark/cycle_fleet.ex"
+      ],
+      "observed_at": "2026-07-22T23:12:25Z"
+    },
+    {
+      "subject": "api/priv/repo/migrations",
+      "quantity": "grep:2026071500\\|2026071501",
+      "rerun": "ls api/priv/repo/migrations/ | grep '2026071500\\|2026071501'",
+      "derived_level": "L3",
+      "deps": [
+        "api/priv/repo/migrations"
+      ],
+      "observed_at": "2026-07-22T23:12:25Z"
+    }
+  ]
+}

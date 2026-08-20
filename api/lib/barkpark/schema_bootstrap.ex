@@ -32,7 +32,12 @@ defmodule Barkpark.SchemaBootstrap do
 
   @spec start_link(term()) :: :ignore
   def start_link(_opts) do
-    GenServer.start_link(__MODULE__, :ok)
+    # Registration is intentionally synchronous so Oban cannot start before
+    # every schema is available. A large production corpus can legitimately
+    # take longer than GenServer's default five-second init deadline; without
+    # an explicit infinite deadline the caller brutally kills this process and
+    # the root application exits with the otherwise opaque reason `:killed`.
+    GenServer.start_link(__MODULE__, :ok, timeout: :infinity)
   end
 
   @impl true

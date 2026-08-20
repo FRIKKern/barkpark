@@ -253,11 +253,13 @@ func (w *writer) info(format string, a ...any) {
 	}
 }
 
-// renderJSON pretty-prints v as stable JSON to stdout.
+// renderJSON emits v as compact single-line JSON to stdout. Machine output
+// carries no indentation — a 23-25% pure-whitespace tax every scripted consumer
+// paid for nothing (AXI wave 2, charter decision 14). json.Encoder.Encode still
+// appends a trailing newline, so the stream stays line-delimited.
 func (w *writer) renderJSON(v any) {
 	enc := json.NewEncoder(w.stdout)
 	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
 }
 
@@ -291,12 +293,21 @@ func (w *writer) emitStructured(payload map[string]any) bool {
 	return false
 }
 
-// renderRaw prints already-serialized JSON bytes, re-indented for stability. If
-// the bytes are not valid JSON it prints them verbatim.
+// renderRaw prints already-serialized JSON bytes, re-serialized compact for
+// stability. Under an -o json contract stdout MUST always be valid JSON: a
+// scripted caller piping to `jq`/`json.loads` breaks the moment a single invalid
+// escape reaches the stream. So the not-JSON branch never dumps the bytes
+// verbatim (the old behaviour, which handed jq an "Invalid escape" on any payload
+// carrying an unescaped backslash sequence — bp-json-escape-emit-bug). Instead it
+// re-encodes the raw payload as a JSON string — valid JSON, byte-for-byte
+// recoverable — and flags the anomaly on stderr so the human still sees it while
+// stdout stays parseable. renderJSON owns the escaping, so this round-trips every
+// backslash/quote/control char into a legal document.
 func (w *writer) renderRaw(b []byte) {
 	var v any
 	if err := json.Unmarshal(b, &v); err != nil {
-		fmt.Fprintln(w.stdout, string(b))
+		w.errf("warning: response body was not valid JSON (%v); emitting it as a JSON string so -o json stays parseable", err)
+		w.renderJSON(string(b))
 		return
 	}
 	w.renderJSON(v)

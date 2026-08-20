@@ -129,6 +129,9 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Auth do
         headers: [{"content-type", "application/x-www-form-urlencoded"}],
         body: body,
         receive_timeout: 30_000,
+        # Route the Bokbasen OAuth client-credentials fetch onto the dedicated
+        # auth-outbound Finch pool (Felix W10) instead of the global default.
+        finch: Barkpark.Auth.Finch,
         retry: false
       )
 

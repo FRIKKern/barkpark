@@ -1,0 +1,12 @@
+{
+  "name": "form_response",
+  "title": "Form responses",
+  "icon": "clipboard-list",
+  "visibility": "private",
+  "fields": [
+    { "name": "title", "title": "Title", "type": "string", "surface": "body" },
+    { "name": "paper_slug", "title": "Paper", "type": "string", "surface": "sidebar" },
+    { "name": "submitted_at", "title": "Submitted at", "type": "datetime", "surface": "sidebar" },
+    { "name": "answers", "title": "Answers", "type": "text", "surface": "body" }
+  ]
+}
