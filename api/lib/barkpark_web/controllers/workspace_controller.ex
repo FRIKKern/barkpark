@@ -13,10 +13,17 @@ defmodule BarkparkWeb.WorkspaceController do
       workspace exists. `:require_token` already 401s an absent/invalid token.
 
     * `DELETE /api/workspaces/:workspace_slug` — permanently delete a workspace
-      and everything scoped to it. This one is ADMIN-gated (the `:require_admin`
-      pipeline), NOT membership-scoped — it is the destructive primitive eject /
-      backup / abuse-isolation build on, so it needs the global `admin`
-      permission, not mere membership.
+      and everything scoped to it. Gated on BOTH halves: the `:require_admin`
+      pipeline proves the global `admin` permission (the VERB), and the action
+      proves `TenancyAuth.workspace_admin?/2` against the workspace the URL
+      names (the TENANT). The global permission alone is not enough — it is
+      workspace-blind by construction, so on its own it let any admin token
+      destroy any tenant's workspace (task-a5636ad31304b23a).
+
+    * `GET /api/workspaces/:workspace_slug/export` — stream that workspace's
+      complete bundle. Same two-part gate, same reason: on the global
+      permission alone it streamed any tenant's whole workspace to any admin
+      token (task-f416f96ef0860f47).
 
   Token is assigned to `conn.assigns[:api_token]` by the `:require_token`
   pipeline. The JSON envelope mirrors the flat `/v1` controllers — a plain map
@@ -92,10 +99,11 @@ defmodule BarkparkWeb.WorkspaceController do
 
   Admin-gated by the router's `:require_admin` pipeline (RequireToken +
   RequireAdmin — a caller without the global `admin` permission is refused 403
-  before this action runs; NOT membership-scoped like the LIST/create surface).
-  This is the HTTP primitive the destructive keystone consumers (eject, backup,
-  abuse-isolation) assume; `Tenancy.delete_workspace/1` already exists and is
-  tested but was unreachable over HTTP until now.
+  before this action runs) AND bound to the target workspace by this action —
+  see TENANT BINDING below. This is the HTTP primitive the destructive keystone
+  consumers (eject, backup, abuse-isolation) assume;
+  `Tenancy.delete_workspace/1` already exists and is tested but was unreachable
+  over HTTP until now.
 
   Delegates to `Tenancy.delete_workspace/1`, which cascades inside a single
   transaction — media blobs (File.rm + CDN purge via `Media.delete_file/2`),
@@ -105,9 +113,33 @@ defmodule BarkparkWeb.WorkspaceController do
   Unknown slug → 404 (`{:error, :not_found}` via the FallbackController). On
   success → 200 echoing the deleted workspace so the caller has immediate,
   concrete confirmation of exactly what was removed.
+
+  ## TENANT BINDING (task-a5636ad31304b23a)
+
+  `:require_admin` proves a GLOBAL permission and never reads a workspace —
+  `Auth.has_permission?/2` is literally `permission in (token.permissions ||
+  [])`. So the pipeline alone let ANY admin-permissioned token destroy ANY
+  workspace on the instance by slug, cascading to media blobs and a CDN purge,
+  irreversibly. The verb gate stays where it is; what was missing is the
+  binding of that verb to the workspace the URL names, so the action now runs
+  `TenancyAuth.workspace_admin?/2` against the RESOLVED target.
+
+  `workspace_admin?/2`, not `member?/2`: deleting a whole workspace is a
+  scoped-ADMIN act, and this is the predicate `RequireWorkspaceRole` already
+  enforces on every other scoped-admin surface and the one #12701 landed on
+  `/v1/shares`. One corridor, one tenancy rule. Nor `authorize/3` — its
+  api_token arm ORs membership with the token's GLOBAL `permissions[]`, so a
+  global-admin holding a plain `member` row in B would pass it.
+
+  Denial shape follows the shipped path-addressed law (`ResolveWorkspace` 404
+  unknown / `RequireWorkspaceRole` 403 unauthorized): an unknown slug is 404,
+  a real workspace the caller does not administer is 403.
   """
   def delete(conn, %{"workspace_slug" => slug}) do
+    token = conn.assigns[:api_token]
+
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         true <- TenancyAuth.workspace_admin?(token, workspace.id),
          {:ok, deleted} <- Tenancy.delete_workspace(workspace) do
       json(conn, %{workspace: render_workspace(deleted), deleted: true})
     else
@@ -115,6 +147,10 @@ defmodule BarkparkWeb.WorkspaceController do
       # both collapse to 404. A rollback term ({:error, reason}) flows to the
       # FallbackController, which maps it to the structured error envelope.
       nil -> {:error, :not_found}
+      # The tenant boundary. Ordered ABOVE the `{:error, _}` catch-all because
+      # `false` matches none of the tuple clauses — without its own arm this is
+      # a WithClauseError (500), not a denial.
+      false -> {:error, :forbidden}
       {:error, :not_found} -> {:error, :not_found}
       {:error, _} = err -> err
     end
@@ -122,7 +158,30 @@ defmodule BarkparkWeb.WorkspaceController do
 
   @doc """
   GET /api/workspaces/:workspace_slug/export — stream the complete bp-export-v1
-  bundle for a workspace as an `application/x-tar` attachment (admin-gated).
+  bundle for a workspace as an `application/x-tar` attachment.
+
+  ## TENANT BINDING (task-f416f96ef0860f47)
+
+  Two-part gate, identical to `delete/2`'s and for the identical reason: the
+  `:require_admin` pipeline proves the global `admin` permission and never
+  reads a workspace, so on its own it streamed ANY tenant's complete bundle to
+  ANY admin-permissioned token. The action therefore runs
+  `TenancyAuth.workspace_admin?/2` against the resolved target BEFORE any
+  bundle is materialized — a denial never spends a COPY, never writes a temp
+  tar, and never opens a socket to the caller.
+
+  `workspace_admin?/2` rather than `member?/2` bites harder here than on
+  delete: a `profile=full` bundle is the whole workspace INCLUDING the
+  secret / credential / PII classes that `profile=dev` exists to scrub, so a
+  read-only `member` must not be able to walk out with it. And unlike a
+  destructive act there is no undo for a read — remediation cannot take the
+  bytes back.
+
+  Denial shape matches `delete/2` and the shipped path-addressed law: unknown
+  slug 404, real-but-not-administered 403. The pair is distinguishable to an
+  admin caller — the same ACCEPTED signal #12701 recorded on `/v1/shares`,
+  and the narrower of the two exposures by a wide margin (the existence of a
+  slug, versus the workspace's entire contents).
 
   SYNC, but CONSTANT-MEMORY: `WorkspaceBundle.export_to_file/2` streams the
   bundle to a per-request temp tar and this action `send_file/3`s it, so a
@@ -162,7 +221,10 @@ defmodule BarkparkWeb.WorkspaceController do
   # request input reaches the path, so it shares the SendFile argument above.
   # sobelow_skip ["Traversal.SendFile", "Traversal.FileModule"]
   def export(conn, %{"workspace_slug" => slug} = params) do
+    token = conn.assigns[:api_token]
+
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         true <- TenancyAuth.workspace_admin?(token, workspace.id),
          {:ok, path} <- export_bundle(workspace, params) do
       # The engine hands ownership of the tar to us. `send_file/3` has finished
       # writing to the socket by the time it returns, so deleting here is safe —
@@ -183,6 +245,13 @@ defmodule BarkparkWeb.WorkspaceController do
     else
       nil ->
         {:error, :not_found}
+
+      # The tenant boundary (task-f416f96ef0860f47). Needs its own arm: `false`
+      # matches none of the tuple clauses below, so without it a denial is a
+      # WithClauseError (500) rather than a 403. Ordered before every
+      # `{:error, _}` arm for the same reason.
+      false ->
+        {:error, :forbidden}
 
       {:error, {:export_scope, reason, message}} ->
         conn

@@ -440,6 +440,73 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert orphans == [],
              "zero-orphan violated — rows survived the HTTP delete: #{inspect(orphans)}"
     end
+
+    # ── CROSS-TENANT CONFINEMENT (task-a5636ad31304b23a) ──────────────────
+    # The arms above (200 own / 403 non-admin / 401 anonymous) ALL pass against
+    # a workspace-blind gate, because the 200 arm's admin CREATED its own
+    # target. The arm that was missing is the only one the defect could ever
+    # fail: caller and target in DIFFERENT tenants.
+    test "CROSS-TENANT: a ws-A admin cannot delete ws-B — B survives", %{conn: conn} do
+      raw_a = "ws-xtenant-a-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      # A's OWN workspace — the caller is an `owner` here and nowhere else.
+      {:ok, _own} = Tenancy.create_workspace_with_owner(%{name: "A Home WS"}, admin_token(raw_a))
+
+      # B — a different tenant, owned by a different admin token.
+      raw_b = "ws-xtenant-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      {:ok, victim} =
+        Tenancy.create_workspace_with_owner(%{name: "B Victim WS"}, admin_token(raw_b))
+
+      # FIXTURE HONESTY: the caller holds NO membership row in B at all, so this
+      # is a genuine cross-tenant request and not a same-workspace vacuity.
+      refute TenancyAuth.member?(admin_token(raw_a), victim.id)
+
+      resp =
+        conn
+        |> authed(raw_a)
+        |> delete("/api/workspaces/#{victim.slug}")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+
+      # STATE, not the status code: B is still there.
+      assert Tenancy.get_workspace_by_slug(victim.slug)
+    end
+
+    # PREDICATE STRENGTH. `member?/2` is existence-only, so it would ADMIT this
+    # caller. Deleting a whole workspace — irreversible, cascading to media
+    # blobs and a CDN purge — is a scoped-ADMIN act, so the shipped predicate is
+    # `workspace_admin?/2`: the same one #12701 landed on `/v1/shares` and the
+    # same one `RequireWorkspaceRole` enforces. This arm is what pins that
+    # choice — it reds the moment the gate is weakened to bare membership.
+    test "CROSS-TENANT predicate strength: a global admin holding a plain `member` row in B cannot delete B",
+         %{conn: conn} do
+      raw_a = "ws-xtenant-mem-a-#{System.unique_integer([:positive])}"
+      {:ok, token_a} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      raw_b = "ws-xtenant-mem-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      {:ok, victim} =
+        Tenancy.create_workspace_with_owner(%{name: "B Member-Only WS"}, admin_token(raw_b))
+
+      # A is granted the LOWEST membership role in B.
+      {:ok, _m} = TenancyAuth.create_membership(victim.id, token_a.id, "member")
+
+      assert TenancyAuth.member?(admin_token(raw_a), victim.id)
+      refute TenancyAuth.workspace_admin?(admin_token(raw_a), victim.id)
+
+      resp =
+        conn
+        |> authed(raw_a)
+        |> delete("/api/workspaces/#{victim.slug}")
+
+      assert resp.status == 403
+      assert Tenancy.get_workspace_by_slug(victim.slug)
+    end
   end
 
   describe "GET /api/workspaces/:workspace_slug/export" do
@@ -588,6 +655,71 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
       assert resp.status == 401
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
+    end
+
+    # ── CROSS-TENANT CONFINEMENT (task-f416f96ef0860f47) ──────────────────
+    # Same omission as the DELETE block above: every existing arm's admin
+    # created its own target, so none of them crosses a tenant boundary. This
+    # one does — and it asserts on the BYTES, not on the status code, because a
+    # status cannot tell you whether the bundle leaked.
+    test "CROSS-TENANT: a ws-A admin cannot export ws-B — and not one byte of B reaches the wire",
+         %{conn: conn} do
+      raw_a = "ws-xexport-a-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      {:ok, _own} =
+        Tenancy.create_workspace_with_owner(%{name: "A Home Export WS"}, admin_token(raw_a))
+
+      raw_b = "ws-xexport-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      sentinel = "B Secret Export WS #{System.unique_integer([:positive])}"
+      {:ok, victim} = Tenancy.create_workspace_with_owner(%{name: sentinel}, admin_token(raw_b))
+
+      refute TenancyAuth.member?(admin_token(raw_a), victim.id)
+
+      # THE ORACLE IS NOT VACUOUS: B's own admin exports B and the sentinel IS
+      # in the tar. So the `refute` below is a real absence, not a string that
+      # never appears in a bundle in the first place.
+      allowed = conn |> authed(raw_b) |> get("/api/workspaces/#{victim.slug}/export")
+      assert allowed.status == 200
+      assert allowed.resp_body =~ sentinel
+
+      denied = conn |> authed(raw_a) |> get("/api/workspaces/#{victim.slug}/export")
+
+      assert denied.status == 403
+      assert Jason.decode!(denied.resp_body)["error"]["code"] == "forbidden"
+
+      # No attachment, and — the thing that actually matters — none of B's
+      # bundle. There is no undo for a read.
+      assert Plug.Conn.get_resp_header(denied, "content-disposition") == []
+      refute denied.resp_body =~ sentinel
+    end
+
+    # PREDICATE STRENGTH, and it bites harder here than on delete: a FULL
+    # profile bundle is the whole workspace, including the secret / credential /
+    # PII classes that `profile=dev` exists to scrub. A plain `member` must not
+    # be able to walk out with it, so the gate is `workspace_admin?/2`.
+    test "CROSS-TENANT predicate strength: a global admin holding a plain `member` row in B cannot export B",
+         %{conn: conn} do
+      raw_a = "ws-xexport-mem-a-#{System.unique_integer([:positive])}"
+      {:ok, token_a} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      raw_b = "ws-xexport-mem-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      sentinel = "B Member-Only Export WS #{System.unique_integer([:positive])}"
+      {:ok, victim} = Tenancy.create_workspace_with_owner(%{name: sentinel}, admin_token(raw_b))
+
+      {:ok, _m} = TenancyAuth.create_membership(victim.id, token_a.id, "member")
+
+      assert TenancyAuth.member?(admin_token(raw_a), victim.id)
+      refute TenancyAuth.workspace_admin?(admin_token(raw_a), victim.id)
+
+      denied = conn |> authed(raw_a) |> get("/api/workspaces/#{victim.slug}/export")
+
+      assert denied.status == 403
+      refute denied.resp_body =~ sentinel
     end
   end
 

@@ -2622,11 +2622,19 @@ defmodule BarkparkWeb.Router do
   # ── Workspace DELETE — admin-gated destructive teardown ─────────────────
   # Separate scope (NOT the membership-scoped switcher above) because delete is
   # the destructive primitive eject / backup / abuse-isolation build on: it
-  # requires the GLOBAL `admin` permission, not mere membership. The
-  # `:require_admin` pipeline (RequireToken + RequireAdmin) 401s an absent token
-  # and 403s a non-admin BEFORE the action runs; the action delegates to
-  # `Tenancy.delete_workspace/1`, which cascades across every workspace_id-scoped
-  # table inside one rollback-on-failure transaction (zero orphans).
+  # requires the GLOBAL `admin` permission. The `:require_admin` pipeline
+  # (RequireToken + RequireAdmin) 401s an absent token and 403s a non-admin
+  # BEFORE the action runs; the action delegates to `Tenancy.delete_workspace/1`,
+  # which cascades across every workspace_id-scoped table inside one
+  # rollback-on-failure transaction (zero orphans).
+  #
+  # THE PIPELINE IS ONLY HALF THE GATE (task-a5636ad31304b23a). `:require_admin`
+  # proves a global permission and never reads a workspace, so it cannot say
+  # WHICH workspace the caller may destroy — on its own it let any admin token
+  # delete any tenant's workspace by slug. `WorkspaceController.delete/2` binds
+  # the verb to the URL's workspace with `TenancyAuth.workspace_admin?/2`.
+  # Do NOT read "admin-gated" here as "tenancy-gated": that inference is exactly
+  # what shipped the hole.
   scope "/api", BarkparkWeb do
     pipe_through([:api, :require_admin])
 
@@ -2655,7 +2663,24 @@ defmodule BarkparkWeb.Router do
   # engine (bp-export-v1): a complete, self-describing, round-trippable dump of
   # every workspace-scoped table. Same admin gate as delete above — the bundle
   # is the raw byte carrier that backup / eject / migration build on, so it
-  # requires the GLOBAL `admin` permission, not mere membership.
+  # requires the GLOBAL `admin` permission.
+  #
+  # AND, like delete, the pipeline is only half the gate (task-f416f96ef0860f47):
+  # `export/2` binds to the URL's workspace with `TenancyAuth.workspace_admin?/2`,
+  # because `:require_admin` alone streamed any tenant's complete bundle to any
+  # admin-permissioned token.
+  #
+  # `import` is DELIBERATELY not bound the same way, and that asymmetry is the
+  # reason this binding lives in the two ACTIONS rather than in a plug on this
+  # shared scope. `import/2` ignores its `workspace_slug` (it is underscored);
+  # the target comes from the uploaded bundle's manifest, and the normal restore
+  # case is a workspace that does NOT exist yet. A `ResolveWorkspace`-style plug
+  # on this pipeline would 404 exactly those legitimate restores before the
+  # action ran. Its own collision paths fail closed instead — clean mode's bare
+  # `COPY FROM STDIN` is a PK violation on a duplicate id, `unique_index(
+  # :workspaces, [:slug])` refuses a slug squat, and both roll back; merge mode
+  # sits behind the fail-closed `:allow_bundle_import` opt-in and
+  # `adopt_or_refuse_root_slug!/1`.
   #
   # DELIBERATELY a bare router+controller route with NO capabilities manifest
   # command: `docs/openapi.json` is manifest-derived, so a bare route is invisible
