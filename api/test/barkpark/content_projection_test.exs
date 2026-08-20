@@ -164,6 +164,65 @@ defmodule Barkpark.ContentProjectionTest do
     end
   end
 
+  describe "project-on-write through upsert_document/4" do
+    test "uses the row title when free blocks provide no preview title" do
+      slug = "exp-row-preview-#{System.unique_integer([:positive])}"
+
+      blocks = [
+        %{
+          "id" => "h",
+          "type" => "heading",
+          "level" => 1,
+          "text" => "A visual heading that is not the canonical title"
+        },
+        %{
+          "id" => "p",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Lead paragraph."}]
+        }
+      ]
+
+      attrs = %{
+        "doc_id" => slug,
+        "title" => "Canonical row title",
+        "content" => %{"blocks" => blocks}
+      }
+
+      {:ok, created} = Content.create_document("paper", attrs, @dataset)
+      assert created.content["preview"]["title"] == "Canonical row title"
+
+      {:ok, doc} = Content.upsert_document("paper", attrs, @dataset)
+
+      assert doc.content["preview"]["title"] == "Canonical row title"
+
+      {:ok, resaved} = Content.upsert_document("paper", attrs, @dataset)
+      assert resaved.content["preview"] == doc.content["preview"]
+    end
+
+    test "a title-role block keeps precedence over the row-title fallback" do
+      slug = "exp-role-preview-#{System.unique_integer([:positive])}"
+
+      attrs = %{
+        "doc_id" => slug,
+        "title" => "Canonical row fallback",
+        "content" => %{
+          "blocks" => [
+            %{
+              "id" => "h",
+              "type" => "heading",
+              "level" => 1,
+              "role" => "title",
+              "text" => "Authored title block"
+            }
+          ]
+        }
+      }
+
+      {:ok, doc} = Content.upsert_document("paper", attrs, @dataset)
+      assert doc.content["preview"]["title"] == "Authored title block"
+    end
+  end
+
   describe "editing a bound title block via apply_paper_block_op/3" do
     test "updates content[\"title\"] and the query returns the new value" do
       slug = "exp-edit-#{System.unique_integer([:positive])}"
