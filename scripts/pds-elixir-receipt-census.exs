@@ -218,13 +218,36 @@ defmodule PDS.Census do
   # aarch64-apple-darwin24.6.0, printed live by report_engine/0. command
   # `elixir scripts/pds-elixir-receipt-census.exs` from the repo root, 2026-08-17,
   # in the SAME commit as the create-on-push arm that moved the rows.
+  # RE-DERIVED AT THE SELF-SERVICE PASSWORD-CHANGE WAVE (4 rows, rides #9530) —
+  # the tree moved, same lens: PATCH /v1/auth/password adds ONE `ok: true`
+  # receipt site (AuthController.change_password/2, the success arm after
+  # Accounts.update_user_password/3) on a NEW routed-write route.
+  #
+  #   textual   107 -> 108   one new occurrence; LENS-LOSES-NOTHING holds
+  #                          (108 == ast 99 + phantom 9).
+  #   ast        98 ->  99   the same one, as an AST-literal pair.
+  #   emitted    94 ->  95   the site emits on the wire.
+  #   write      57 ->  58   patch /v1/auth/password joins the routed-write set;
+  #                          the depth-6 relation reaches update_user_password/3's
+  #                          Repo write. Its ROUTED-WRITE arrival is disposed by
+  #                          the register row authored for it, not by an
+  #                          @routed_excluded entry — a judged site needs no
+  #                          exclusion.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 14, unrouted 23 read `==`
+  # in the same run. Lens unchanged (build-free AST, :binary.matches/2, depth 6,
+  # @write_verbs without `transaction`, corpus api/lib/**/*.ex = 815 files);
+  # engine of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) ·
+  # aarch64-apple-darwin24.6.0, printed live by report_engine/0. command
+  # `elixir scripts/pds-elixir-receipt-census.exs` from the repo root, 2026-08-20,
+  # in the SAME commit as the endpoint that moved the rows.
   @rederived %{
-    textual: 107,
-    ast: 98,
+    textual: 108,
+    ast: 99,
     phantom: 9,
     consumer: 4,
-    emitted: 94,
-    write: 57,
+    emitted: 95,
+    write: 58,
     read: 14,
     unrouted: 23
   }
@@ -597,11 +620,11 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{393, 393}],
+      basis_spans: [{439, 439}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
-      basis: "inline comment :393 — \"Always 200 — never reveal whether the email is registered.\"",
+      basis: "inline comment :439 — \"Always 200 — never reveal whether the email is registered.\"",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -610,18 +633,18 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{402, 407}],
+      basis_spans: [{448, 453}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
       basis:
-        "@doc :402-407, the anti-enumeration sentence at :403-406 (the token `anti-enumeration` on :405)",
+        "@doc :448-453, the anti-enumeration sentence at :449-452 (the token `anti-enumeration` on :451)",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
           "line — no anti-enumeration text in it; PDS-D453b cites :410-417, which is pure code. " <>
-          "Both are phantom bases. This row SUPPRESSES NOTHING — the site's ok:true sits at :417, " <>
-          "after the case closes at :415, so no clause contains it and no shipping configuration " <>
+          "Both are phantom bases. This row SUPPRESSES NOTHING — the site's ok:true sits at :463, " <>
+          "after the case closes at :461, so no clause contains it and no shipping configuration " <>
           "of the arm can fire on it. It is registered as documentation of a control the lens " <>
           "wrongly accused for two waves."
     },
@@ -953,6 +976,23 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.erase/2", "14672314", "70062513"},
       verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:214
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.change_password/2", "44848654", "17468236"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "AUTHORED, not inherited: PATCH /v1/auth/password is a new door on the existing " <>
+        "Accounts.update_user_password/3 primitive. NOT DEMOTED FOR WEAKNESS — the cited " <>
+        "suite (auth_password_test.exs:30) is a genuine behavioural end-to-end: it drives " <>
+        "the route, then certifies the post-condition through a SECOND route, asserting the " <>
+        "old password 401s on /v1/auth/login while the new one 201s, and that the acting " <>
+        "session is revoked. What it does not do is read the stored row, and end_to_end's " <>
+        "falsifier is spelled as a @repo_tokens hit in the cited block or its same-file " <>
+        "helpers, so that basis would be REFUSED here and claiming it would be a lie about " <>
+        "the lens, not about the test. The honest sentence: the receipt-vs-STORED-ROW " <>
+        "question is unjudged; the receipt-vs-OBSERVABLE-BEHAVIOUR question is answered and " <>
+        "answered well. Upgrading this row to end_to_end needs one Repo read of " <>
+        "hashed_password beside the existing assertions, not a better argument."},
     # barkpark_web/controllers/auth_controller.ex:329
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.revoke_session/2", "14482306", "17656195"},
