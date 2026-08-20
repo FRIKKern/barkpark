@@ -212,6 +212,10 @@ fi
 REPO_ROOT="${DOCS_ANCHORS_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$REPO_ROOT"
 
+# §8b marker→symbol pin. Overridable so a harness can point it at a temp file
+# and prove the arm REDs without planting anything in the real checkout.
+CANON_PIN="${CANON_PIN:-$REPO_ROOT/scripts/canonical-marker-bindings.pin}"
+
 FAIL=0
 WARN=0
 
@@ -577,6 +581,16 @@ canon_scan() {
     slug=$(printf '%s' "$hit" | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/')
     if sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null | grep -qE '^[[:space:]]*(def |func |export )'; then
       echo "OK $cf:$cl $slug"
+      # WHICH symbol the marker actually landed on — the 8b pin's payload.
+      # "a public def within 6 lines" is an EXISTENCE test, and an inserted def
+      # satisfies it while stealing the marker from the one below it. Recording
+      # the NAME is what turns that into a comparison. `|| true` throughout: this
+      # file runs under `set -euo pipefail`, and a grep that matches nothing must
+      # yield an empty symbol, not kill the scan.
+      sym=$(sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null \
+        | grep -m1 -E '^[[:space:]]*(def |func |export )' 2>/dev/null \
+        | sed -E 's/^[[:space:]]*(def|func|export)[[:space:]]+//; s/^(async|function|const|let|var|class|default)[[:space:]]+//; s/[^A-Za-z0-9_?!].*$//' || true)
+      [ -n "$sym" ] && echo "PAIR $slug $sym"
     else
       echo "PRIVATE $cf:$cl $slug"
     fi
@@ -608,6 +622,48 @@ if printf '%s\n' "$CANON_OUT" | grep -qE '^(PRIVATE|DOCMISS) '; then FAIL=1; fi
 # markers are demand-driven and get removed as dedup lands — so this reports the
 # count rather than asserting on it. 8a is what makes a zero here trustworthy.
 echo "ok:   §8 scanned $CANON_N @canonical marker(s) in the repo corpus"
+
+# --- 8b. marker→symbol PIN (task-51400f894d40abdf) ---------------------------
+# §8 above asks "is there a public def within 6 lines below this marker?" — an
+# EXISTENCE test, and existence is exactly what a thief satisfies. Define a new
+# public function between a marker and the function it names, and the marker now
+# certifies the WRONG implementation while §8 still prints ok: the slug is still
+# unique, and there is still a public def below it. Same hole as the sobelow
+# annotation reassignment fixed in api/scripts/sobelow-inline-overlap-check.sh,
+# and it is the same fix: record the PAIRING and compare, because "the symbol the
+# author meant" is not recoverable from the current tree.
+#
+# The pin is `slug<TAB>symbol`, sorted, NO line numbers — a marker that moves
+# down a file must not churn the pin, only one that changes what it points AT.
+# Regenerate deliberately with --regen-canonical-pin and READ THE DIFF: a changed
+# symbol means the canonical pointer now names different code.
+CANON_PAIRS=$(printf '%s\n' "$CANON_OUT" | grep '^PAIR ' | sed 's/^PAIR //' \
+  | awk '{ print $1 "\t" $2 }' | LC_ALL=C sort || true)
+CANON_PAIR_N=$(printf '%s' "$CANON_PAIRS" | grep -c . || true)
+
+if [ "${REGEN_CANON_PIN:-0}" = "1" ]; then
+  printf '%s\n' "$CANON_PAIRS" > "$CANON_PIN"
+  echo "regenerated $CANON_PIN ($CANON_PAIR_N pairing(s)) — READ THE DIFF:"
+  echo "      a changed symbol means the canonical pointer now names different code."
+elif [ ! -f "$CANON_PIN" ]; then
+  echo "FAIL: §8b marker→symbol pin missing: $CANON_PIN (regenerate: REGEN_CANON_PIN=1 $0)"
+  FAIL=1
+elif [ "$CANON_PAIR_N" -eq 0 ]; then
+  # Same fail-closed posture as §1: a scan that compared nothing has not passed.
+  echo "FAIL: §8b compared ZERO marker pairings — the scan did not run, so this is not a pass"
+  FAIL=1
+elif ! printf '%s\n' "$CANON_PAIRS" | diff -u "$CANON_PIN" - >/dev/null 2>&1; then
+  echo "FAIL: §8b a @canonical marker now names a DIFFERENT symbol than the pin records."
+  echo "      < pinned (the impl the marker was written for)   > current"
+  printf '%s\n' "$CANON_PAIRS" | diff -u "$CANON_PIN" - | tail -n +3 | sed 's/^/      /'
+  echo "      A public def inserted between a marker and its function STEALS the"
+  echo "      marker — slug uniqueness and the within-6-lines rule both still pass."
+  echo "      Move the marker back onto its entry point. If the rename is intended:"
+  echo "        REGEN_CANON_PIN=1 $0    # then READ THE DIFF"
+  FAIL=1
+else
+  echo "ok:   §8b all $CANON_PAIR_N marker pairing(s) match the pin — none has migrated"
+fi
 
 # --- summary ------------------------------------------------------------------
 echo ""

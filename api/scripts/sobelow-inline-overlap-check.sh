@@ -79,16 +79,21 @@
 #                every one was a trivial `, do: :ok` fallback. See the full
 #                measurement at the predicate itself.
 #
-# KNOWN LIMITS, pinned rather than papered over — each has a --selftest case
-# asserted GREEN on purpose, so the day it reds the limit has been closed and
-# the case is what says so. (1) A displacement that lands a WELL-FORMED
-# annotation squarely on another def at the same indent in a DIFFERENT function
-# is not decidable from source text; only the waived TYPE says which def the
-# waiver was for. (2) MULTI-CLAUSE keys on qualified `Module.function(` tokens,
-# so an imported `send_resp/3` is invisible to it. Both close the same way, with
-# the detector-to-token table sobelow-baseline-staleness-check.sh already
-# DERIVES from api/deps/sobelow — tracked at
-# felix-w24-bl-binding-transfer-needs-detector-map.
+# LIMIT (1), NOW CLOSED — BY A THIRD RATCHET, NOT BY A FIFTH PREDICATE. A
+# displacement that lands a WELL-FORMED annotation squarely on another def at the
+# same indent in a DIFFERENT function is STILL not decidable from source text, and
+# the four predicates above still wave it through — `--selftest` keeps that case
+# asserted GREEN, because it is the honest statement of what they can see. What
+# closed the hole is the PAIRING PIN below (task-51400f894d40abdf): the question
+# "which def did the AUTHOR mean" has no answer in the current tree, so the answer
+# is recorded when it is known and compared afterwards. Two --selftest arms assert
+# it in both directions on the same fixture the predicates miss.
+#
+# KNOWN LIMIT (2), still open and still pinned GREEN: MULTI-CLAUSE keys on
+# qualified `Module.function(` tokens, so an imported `send_resp/3` is invisible
+# to it. It closes with the detector-to-token table
+# sobelow-baseline-staleness-check.sh already DERIVES from api/deps/sobelow —
+# tracked at felix-w24-bl-binding-transfer-needs-detector-map.
 #
 # HEREDOC STATE IS TRACKED because Sobelow's own rewrite is not comment-aware —
 # parse.ex:61 is applied as a whole-file `String.replace`, so it would happily
@@ -146,9 +151,15 @@ SKIP_ATTR_ERE='^[[:space:]]*@sobelow_skip[[:space:]]*\\['
 API_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 BASELINE="$API_DIR/.sobelow-skips"
 LIB_DIR="$API_DIR/lib"
+# Overridable so --selftest can point the pin arm at a temp tree and prove it
+# REDs without planting anything in the real checkout.
+BINDINGS_PIN="${SOBELOW_BINDINGS_PIN:-$API_DIR/.sobelow-annotation-bindings}"
 SELFTEST=0
 BINDING_ONLY=0
 OVERLAP_ONLY=0
+REGEN_PIN=0
+LIB_OVERRIDDEN=0
+PIN_EXPLICIT=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -160,6 +171,7 @@ while [[ $# -gt 0 ]]; do
     --lib)
       [[ $# -ge 2 ]] || { echo "error: --lib needs a value" >&2; exit 2; }
       LIB_DIR=$2
+      LIB_OVERRIDDEN=1
       shift 2
       ;;
     --binding)
@@ -172,6 +184,17 @@ while [[ $# -gt 0 ]]; do
       ;;
     --selftest)
       SELFTEST=1
+      shift
+      ;;
+    --bindings-pin)
+      [[ $# -ge 2 ]] || { echo "error: --bindings-pin needs a value" >&2; exit 2; }
+      BINDINGS_PIN=$2
+      PIN_EXPLICIT=1
+      shift 2
+      ;;
+    --regen-bindings-pin)
+      REGEN_PIN=1
+      BINDING_ONLY=1
       shift
       ;;
     -h | --help)
@@ -404,6 +427,12 @@ scan_binding() {
 
             printf "OK\t%s\t%d\t%s\n", rel, i, ann_kind[n]
 
+            # The PAIRING, for the pin arm below: which def this annotation is
+            # ACTUALLY bound to, by name. Deliberately carries no line number —
+            # a line-anchored pin churns on every edit above it and gets
+            # regenerated unread, which is how a pin stops being a pin.
+            printf "PAIR\t%s\t%s\n", rel, defname(line[target])
+
             if (indent_of(line[i]) != indent_of(line[target])) {
               printf "INDENT\t%s\t%d\t%s\n", rel, i,
                      sprintf("indented %d columns, but its def on line %d is at %d",
@@ -527,6 +556,9 @@ run_binding_check() {
       kind[$4]++
       next
     }
+    # Consumed by the pin arm in the shell, not a violation. Without this
+    # branch every PAIR row would fall through and be counted as a finding.
+    $1 == "PAIR" { next }
     {
       violations++
       printf "%s %s:%d — %s\n", $1, $2, $3, $4 > "/dev/stderr"
@@ -552,10 +584,128 @@ run_binding_check() {
         print  "      MULTICLAUSE: give each clause its own annotation." > "/dev/stderr"
         exit 1
       }
-      print "PASS: every sobelow annotation is bound to the def its author wrote it for"
+      # DELIBERATELY NARROWER THAN THE SENTENCE THAT USED TO STAND HERE. It read
+      # "every sobelow annotation is bound to the def its author wrote it for",
+      # and these four predicates do not test that: an annotation displaced onto
+      # a NEIGHBOURING def is still adjacent to a def, still at the same indent,
+      # and still passes all four. A checker that prints a stronger claim than
+      # it tests converts a real signal into false reassurance, which is worse
+      # than printing nothing. The authorial-intent claim is now made by the PIN
+      # arm below, which is the only part that can actually see displacement.
+      print "PASS: every sobelow annotation is well-formed and attached to a def"
     }
   ' "$rows" || status=$?
+  [[ $status -ne 0 ]] && return "$status"
+
+  run_binding_pin "$rows" || status=$?
   return "$status"
+}
+
+# ---------------------------------------------------------------------------
+# THIRD RATCHET: --bindings-pin (runs as part of --binding).
+#
+# THE HOLE THE OTHER FOUR CANNOT SEE (task-51400f894d40abdf). Defining a new
+# function between a comment block and the def it protects silently REASSIGNS
+# any annotation in that block to the new function. Two-sided: the original def
+# loses its waiver, and the new function silently INHERITS a reviewed waiver
+# nobody weighed. The second half is the dangerous one.
+#
+# MEASURED, NOT ARGUED. On the real incident (PR #12837 head e51c3d49bd, an
+# `operator_grant/1` defined between the spill comment block and
+# `with_spilled_body/2`) this file exited 0 and printed its PASS line, while the
+# advisory static-analysis job — held OUT of the required set — failed naming
+# `with_spilled_body`. So the class shipped green on everything that blocks.
+# DETACHED sees a def; INDENT sees a matching indent; MULTICLAUSE sees no clause
+# group. All four predicates are satisfied by the theft.
+#
+# WHY A PIN AND NOT A CLEVERER PREDICATE. The question "is this annotation on
+# the def its AUTHOR meant" has no answer in the current tree — intent is not in
+# the source text. Two self-contained alternatives were built and rejected on
+# measurement, not taste:
+#
+#   RELEVANCE ("the bound def must make a call the waived category is about",
+#   e.g. Traversal.FileModule => a `File.` call). It DOES catch the incident:
+#   `operator_grant/1` makes no File call. But run over api/lib it reports 2
+#   rows on a clean origin/main — `prune_build_logs/1` and `cleanup_mcp/1`,
+#   whose File work happens in helpers they call. Those are plausibly inert
+#   waivers worth their own look, but they are NOT displacement, and a gate that
+#   reds main on them would be turned off within a day.
+#
+#   BEFORE/AFTER DIFF, the shape that found this in the first place: compute the
+#   pairing, compare against the previous tree. In CI there IS no "before"
+#   unless you fetch the merge base, which makes the gate depend on clone depth
+#   (this repo already has an `Elixir CI needs git tags` scar from exactly that)
+#   and on main being correct at that moment. A COMMITTED pin is the same
+#   before/after comparison with the "before" checked in, so it works on a
+#   shallow clone, offline, and on a branch whose base has moved.
+#
+# WHAT IS PINNED: one `path<TAB>defname` row per bound annotation, sorted, NO
+# line numbers — a line-anchored pin churns on every edit above it and gets
+# regenerated unread. Moving an annotation onto a different def changes the
+# name and reds; editing prose around it does not.
+#
+# REGENERATION IS A REVIEWED ACT. `--regen-bindings-pin` rewrites the file and
+# says READ THE DIFF, exactly like scripts/check-doc-budgets.sh's onramp golden.
+# A regenerated pin blesses a PAIRING, and the count ratchet below bounds the
+# blessing: an emptied or truncated pin fails closed instead of verdicting on
+# nothing.
+run_binding_pin() {
+  # THE PIN IS ABOUT THE REAL CORPUS. A synthetic `--lib` tree (every --selftest
+  # arm, and any ad-hoc scan of a fixture) has pairings that cannot match the
+  # committed pin, and reddening there would be a FALSE red that says nothing
+  # about the repo. Skip unless the caller either scans the real tree or brings
+  # its own pin — the pairing that arm asserts is then the one it supplied.
+  if [[ $LIB_OVERRIDDEN -eq 1 && $PIN_EXPLICIT -eq 0 ]]; then
+    echo "skip: pairing pin not applicable to a custom --lib tree (pass --bindings-pin to assert one)"
+    return 0
+  fi
+
+  local rows=$1 scanned
+  scanned=$(mktemp "${TMPDIR:-/tmp}/sobelow-pairs.XXXXXX")
+  # shellcheck disable=SC2064
+  trap "rm -f -- '$scanned'" RETURN
+
+  grep '^PAIR	' "$rows" | cut -f2,3 | LC_ALL=C sort > "$scanned"
+
+  local n_scanned
+  n_scanned=$(wc -l < "$scanned" | tr -d ' ')
+
+  if [[ $REGEN_PIN -eq 1 ]]; then
+    cp -- "$scanned" "$BINDINGS_PIN"
+    echo "regenerated $BINDINGS_PIN ($n_scanned pairing(s)) — READ THE DIFF:"
+    echo "  a changed name means an annotation now waives a DIFFERENT function."
+    return 0
+  fi
+
+  if [[ ! -f $BINDINGS_PIN ]]; then
+    echo "error: annotation-binding pin not found: $BINDINGS_PIN" >&2
+    echo "       regenerate with: $0 --regen-bindings-pin" >&2
+    return 2
+  fi
+
+  # Fail closed on an empty population, same posture as the arm above: a pin
+  # with no rows has not passed, it has failed to run.
+  if [[ $n_scanned -eq 0 ]]; then
+    echo "error: scanned ZERO annotation pairings — refusing to report a pass" >&2
+    return 2
+  fi
+
+  if ! diff -u "$BINDINGS_PIN" "$scanned" > /dev/null 2>&1; then
+    echo "FAIL: an annotation is bound to a DIFFERENT def than the pin records." >&2
+    echo "      < pinned (what the author wrote it for)   > current (what it waives now)" >&2
+    diff -u "$BINDINGS_PIN" "$scanned" | tail -n +3 >&2
+    echo "" >&2
+    echo "      A def defined between a comment block and its def STEALS the" >&2
+    echo "      annotation: the original loses its waiver and the new function" >&2
+    echo "      silently inherits one nobody reasoned about. Move the annotation" >&2
+    echo "      back down onto its def. If the pairing changed on purpose (a" >&2
+    echo "      rename, a genuinely new annotation), re-pin with:" >&2
+    echo "        $0 --regen-bindings-pin   # then READ THE DIFF" >&2
+    return 1
+  fi
+
+  echo "PASS: all $n_scanned annotation pairing(s) match $BINDINGS_PIN — none has migrated to another def"
+  return 0
 }
 
 run_check() {
@@ -869,6 +1019,22 @@ defmodule Barkpark.BindTransferBlindSpot do
 end
 BIND_BLIND
 
+  # The same module BEFORE the transfer — the annotation still on `alpha`. This
+  # is the "before" the pin arm needs: pinned here, the blind-spot fixture above
+  # is the identical tree with the waiver moved one function down.
+  binding_fixture "$b" bind_transfer_pinned <<'BIND_PINNED'
+defmodule Barkpark.BindTransferBlindSpot do
+  # sobelow_skip ["Traversal.FileModule"]
+  def alpha(path) do
+    File.read!(path)
+  end
+
+  def beta(path) do
+    File.read!(path)
+  end
+end
+BIND_PINNED
+
   binding_fixture "$b" bind_none <<'BIND_NONE'
 defmodule Barkpark.BindNone do
   def read_it(path) do
@@ -890,8 +1056,44 @@ BIND_NONE
     "$b/bind_multi_shared/lib" || failures=1
   expect_binding "MULTICLAUSE 4b — waiver on the empty clause" 1 "MULTICLAUSE" \
     "$b/bind_displaced/lib" || failures=1
-  expect_binding "KNOWN LIMIT: clean transfer is NOT caught" 0 "PASS:" \
+  expect_binding "KNOWN LIMIT: 4 predicates cannot see a clean transfer" 0 "PASS:" \
     "$b/bind_transfer_blind_spot/lib" || failures=1
+
+  # THE LIMIT ABOVE, CLOSED BY THE PIN — the two arms that matter for
+  # task-51400f894d40abdf. Same fixture the four predicates wave through, now
+  # compared against a pin taken BEFORE the transfer. Both directions asserted:
+  # a checker that only reds is as useless as one that only greens.
+  local xpin
+  xpin="$b/transfer.pin"
+  "${BASH_SOURCE[0]}" --regen-bindings-pin --lib "$b/bind_transfer_pinned/lib" \
+    --bindings-pin "$xpin" >/dev/null 2>&1 || true
+  if [[ ! -s $xpin ]]; then
+    printf 'SELFTEST FAIL: could not pin the pre-transfer fixture\n' >&2
+    failures=1
+  fi
+
+  local xrc=0 xout
+  xout=$("${BASH_SOURCE[0]}" --binding --lib "$b/bind_transfer_blind_spot/lib" \
+    --bindings-pin "$xpin" 2>&1) || xrc=$?
+  case "$xrc:$xout" in
+    1:*"DIFFERENT def"*)
+      printf '  ok  %-40s exit %d\n' "PIN — transferred waiver REDs" "$xrc" ;;
+    *)
+      printf 'SELFTEST FAIL: pin did not red on the transferred waiver — expected exit 1 + "DIFFERENT def", got %d\n%s\n' \
+        "$xrc" "$xout" >&2
+      failures=1 ;;
+  esac
+
+  xrc=0
+  xout=$("${BASH_SOURCE[0]}" --binding --lib "$b/bind_transfer_pinned/lib" \
+    --bindings-pin "$xpin" 2>&1) || xrc=$?
+  if [[ $xrc -eq 0 ]]; then
+    printf '  ok  %-40s exit %d\n' "PIN — untransferred tree stays green" "$xrc"
+  else
+    printf 'SELFTEST FAIL: pin reddened its OWN pinned tree — expected exit 0, got %d\n%s\n' \
+      "$xrc" "$xout" >&2
+    failures=1
+  fi
   expect_binding "zero annotations fails closed" 2 "ZERO binding" \
     "$b/bind_none/lib" || failures=1
 
