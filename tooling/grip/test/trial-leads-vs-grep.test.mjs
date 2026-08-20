@@ -11,7 +11,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync, writeFileSync, readFileSync, rmSync,
+  openSync, ftruncateSync, writeSync, closeSync, statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +29,10 @@ import {
   FILEPATH_QUERIES,
   runLeadsJson,
   runGrep,
+  runGrepCount,
+  countNewlinesInBuffer,
+  countLinesInFile,
+  MAX_STRING_LENGTH,
   scoreQuery,
   honestEmptyRate,
   buildReport,
@@ -189,6 +196,99 @@ test("runGrep treats no-match and missing-dir as empty, never as a throw", () =>
   assert.equal(none.count, 0);
   const missing = runGrep("anything", join(tmpdir(), "grip-no-such-dir-zzzz"));
   assert.equal(missing.count, 0);
+});
+
+// ── the capture must not die on V8's string ceiling ──────────────────────────
+//
+// The repo-wide grep emits hundreds of megabytes on this tree. Reading that back
+// with `readFileSync(path, "utf8")` throws ERR_STRING_TOO_LONG once it crosses
+// MAX_STRING_LENGTH (0x1fffffe8) — which is exactly how this suite went red: the
+// repo-wide arm failed on the READ, never on the measurement. These arms pin the
+// byte-counting path that replaced it.
+
+test("countNewlinesInBuffer counts newline bytes, honours the end bound, ignores everything else", () => {
+  assert.equal(countNewlinesInBuffer(Buffer.from("")), 0);
+  assert.equal(countNewlinesInBuffer(Buffer.from("a\nb\nc\n")), 3);
+  assert.equal(countNewlinesInBuffer(Buffer.from("no newline here")), 0);
+  // NUL bytes and CR are not newlines; only 0x0a is
+  assert.equal(countNewlinesInBuffer(Buffer.from([0x00, 0x0d, 0x0a, 0x00])), 1);
+  // the bound is respected — bytes past `end` are stale buffer content, not data
+  const buf = Buffer.from("x\ny\nZZZZ\n\n\n");
+  assert.equal(countNewlinesInBuffer(buf, 4), 2, "only the first 4 bytes are read");
+});
+
+test("countLinesInFile matches a whole-file string read, across chunk boundaries", () => {
+  const dir = mkdtempSync(join(tmpdir(), "grip-count-"));
+  try {
+    const path = join(dir, "out");
+    // 5000 grep-shaped lines — far more than one 64-byte chunk, so a counter that
+    // loses the bytes straddling a chunk edge cannot pass.
+    const text = Array.from({ length: 5000 }, (_, i) => `some/file.ex:${i}:a match`).join("\n") + "\n";
+    writeFileSync(path, text);
+    const viaString = readFileSync(path, "utf8").split("\n").filter((l) => l !== "").length;
+    assert.equal(viaString, 5000);
+    assert.equal(countLinesInFile(path), 5000, "default chunk size");
+    assert.equal(countLinesInFile(path, { chunkSize: 64 }), 5000, "a chunk size that splits lines");
+    assert.equal(countLinesInFile(path, { chunkSize: 1 }), 5000, "one byte at a time");
+
+    // A FINAL PARTIAL CHUNK, chosen so the read buffer's unwritten tail holds
+    // newline bytes left over from the previous chunk: 8 bytes read 3 + 3 + 2
+    // leaves one stale "\n" past the end of the last read. A counter that walks
+    // the whole buffer instead of stopping at the bytes actually read counts 5.
+    const partial = join(dir, "partial");
+    writeFileSync(partial, "a\nb\nc\nd\n");
+    assert.equal(countLinesInFile(partial, { chunkSize: 3 }), 4, "stale bytes past the read length are not data");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("countLinesInFile survives a capture LARGER than V8's max string length", () => {
+  // The fixture is sparse: ftruncate reserves the length without writing blocks,
+  // so this costs ~4 KB of disk and no measurable time while still being a real
+  // file past the ceiling. Seven newlines are written PAST the ceiling offset, so
+  // a counter that quietly stops early returns the wrong number rather than a
+  // lucky zero.
+  const dir = mkdtempSync(join(tmpdir(), "grip-huge-"));
+  try {
+    const path = join(dir, "out");
+    const fd = openSync(path, "w");
+    try {
+      ftruncateSync(fd, MAX_STRING_LENGTH + 1024);
+      const tail = Buffer.from("\n".repeat(7));
+      writeSync(fd, tail, 0, tail.length, MAX_STRING_LENGTH + 1024);
+    } finally {
+      closeSync(fd);
+    }
+
+    // The fixture must actually be past the ceiling — otherwise this arm proves
+    // nothing and would keep passing after the fix regressed. Assert the ceiling
+    // is real by watching the OLD read shape fail on this very file.
+    assert.ok(statSync(path).size > MAX_STRING_LENGTH, "the fixture exceeds MAX_STRING_LENGTH");
+    assert.throws(
+      () => readFileSync(path, "utf8"),
+      (err) => err.code === "ERR_STRING_TOO_LONG",
+      "reading this capture as a string is exactly what used to throw",
+    );
+
+    // and the counting path returns the right number without ever building one
+    assert.equal(countLinesInFile(path), 7);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runGrepCount returns the same number as runGrep's count, and the same honest zeros", () => {
+  // Same command, same definition of a line — the counted path is a swap, not a
+  // new metric. Proved against the real store rather than a fixture.
+  const read = runGrep("internal", REAL_STORE);
+  const counted = runGrepCount("internal", REAL_STORE);
+  assert.ok(read.count > 0, "the real store matches this term, so the comparison is not 0 === 0");
+  assert.equal(counted.count, read.count);
+  assert.equal(counted.status, read.status);
+  // no-match and missing-dir stay honest zeros, never throws
+  assert.equal(runGrepCount("zzz-no-such-token-anywhere-zzz", REAL_STORE).count, 0);
+  assert.equal(runGrepCount("anything", join(tmpdir(), "grip-no-such-dir-zzzz")).count, 0);
 });
 
 // ── scoreQuery classifies and never averages the off-band classes ────────────
