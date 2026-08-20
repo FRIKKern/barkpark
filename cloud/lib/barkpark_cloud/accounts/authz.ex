@@ -66,6 +66,14 @@ defmodule BarkparkCloud.Accounts.Authz do
     end
   end
 
+  @doc """
+  The role literals `team_admin?/2` accepts. Exists so a census can DERIVE its
+  role domain from `@admin_roles` instead of re-typing it — a re-typed literal
+  pins itself and catches nothing when a role is added to one ladder only.
+  """
+  @spec admin_roles() :: [String.t()]
+  def admin_roles, do: @admin_roles
+
   @doc "True when the actor's role confers team-admin authority (owner or admin)."
   @spec team_admin?(actor(), team()) :: boolean()
   def team_admin?(actor, team), do: role(actor, team) in @admin_roles

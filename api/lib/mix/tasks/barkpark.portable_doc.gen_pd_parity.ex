@@ -469,6 +469,17 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       ],
       "axes" => %{"xLabels" => ["W1", "W2", "W3", "W4"]}
     },
+    # route (sport track): a small fixed loop — encoded polyline is DATA, so the
+    # golden freezes the projection + marker geometry alongside the meta row.
+    "route" => %{
+      "type" => "route",
+      "sport" => "sykling",
+      "distance" => "4.2 km",
+      "elevation" => "61 m",
+      "duration" => "12m",
+      "caption" => "Testrunden",
+      "polyline" => "}ujlJgxgcAyPqOgO~JsLc[wF{aAdJ{[hSeE~MzTbInh@aB~e@"
+    },
     # duel + lineage (jdf-bl-historiene-renderer-reconciliation): the jarl figure
     # family, with THE KILDE LAW exercised — per-row/node `source` refs plus a
     # `sourceDefault` fallback, deduped into the «kilde» stamp.

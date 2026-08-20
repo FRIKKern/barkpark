@@ -173,6 +173,70 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
 
   defp maybe_put_revision(conn, _revision), do: conn
 
+  # ── CITED SAFE (NOT FIXED) — class C, a WINDOW KEY that keys no shared
+  # mutable state (clock-semantics wave, 2026-08-19). Read this before
+  # re-deriving it, and before re-sourcing this clock.
+  #
+  # Provenance: swept as a sibling of the cloud rate-limiter defect closed by
+  # #12628 (8598c4efe7), where a window derived from a non-monotonic wall clock
+  # was used as a BUCKET KEY, so a caller holding a stale window could DELETE a
+  # newer bucket and reset the budget (the earlier atomicity fix was #12579,
+  # e45f1377bb). `bucket = div(System.os_time(:second), @bucket_seconds)` below
+  # is genuinely that quantiser shape, which is why it is class C and not
+  # class A — so the verdict is CITED, not "not a candidate".
+  #
+  # (a) STRUCTURAL, stated before any argument about consequences: there is no
+  #     shared mutable state for a stale bucket to address. `weak_etag/1` is
+  #     private, has exactly ONE caller (`respond/2` above), and its value is
+  #     interpolated into a response header and discarded. Nothing is stored
+  #     under the bucket, nothing is swept by it, nothing is deleted. #12628's
+  #     stale-writer-deletes-a-newer-bucket shape has NO analogue here: the
+  #     worst a bucket-boundary straddle can do is emit a tag the client does
+  #     not hold, which costs exactly one extra full 200.
+  #
+  # (b) CONSUMER CENSUS. The bucket has one reader: the tag string. The tag has
+  #     one comparator: `if_none_match?/2` below, which weak-compares the
+  #     client's candidates against the tag the server JUST computed in this
+  #     same request — so a client cannot present an OLDER bucket and be served
+  #     a 304 from it (pinned by paper_revision_headers_test.exs, "an adjacent
+  #     bucket window flips the 304 back to 200"). The bucket is never parsed,
+  #     never persisted, never used as a map or ETS key: `grep -n bucket` in
+  #     this file returns only `@bucket_seconds` and the two lines here.
+  #
+  # The bound the bucket exists to hold is real and config-unreachable:
+  # phoenix_live_view is LOCKED at 1.1.28 in api/mix.lock, whose
+  # `@max_session_age` is the compile-time constant 1_209_600 (14 days) with no
+  # option or config seam, and api/config carries no live_view max_age
+  # override. A 7-day bucket under a 14-day token is 7 days of slack.
+  # CLOCK STEP, both directions: a FORWARD step TIGHTENS the bound — the tag
+  # changes early and the cost is extra 200s. A BACKWARD step is the only
+  # direction that can loosen it, and it must be at least ONE FULL BUCKET WIDTH
+  # (604_800 s) before a body older than 14 days could revalidate.
+  #
+  # RESIDUAL, named in the safe direction and accepted: what a full-width
+  # backward step would breach is a LIVENESS bound (revived HTML carrying an
+  # expired LiveView token dead-loops the client), on an anonymously reachable
+  # public reader — not authorization, not a quota. It is unreachable without a
+  # host clock event, and a caller has ZERO influence on the timing: no request
+  # value feeds this read.
+  #
+  # THE REFUSAL IS PART OF THE VERDICT: re-keying this bucket to
+  # `System.monotonic_time` would be WRONG, for the same reason the incarnation
+  # class exists (see `Barkpark.StudioChat.FleetHub`). Monotonic RESETS on
+  # restart — exactly the moment body turnover must still be guaranteed — so a
+  # monotonic bucket would silently stop bounding staleness across every deploy.
+  # A correct monotonic-anchored bucket would need a persisted watermark, i.e. a
+  # new mechanism, which this wave explicitly forbids. Wall clock is the right
+  # source here; the class-C label is a warning to future readers, not a TODO.
+  #
+  # WHAT THIS VERDICT DOES NOT REST ON: the fact that this plug already shipped
+  # with a green suite and a second review. A prior green stamp is not evidence
+  # about clock semantics — the reviews that passed this code graded it on HTTP
+  # conditional-request correctness (the weak-validator, 304 and If-None-Match
+  # rows of the http-edge-truth charter named in the moduledoc above), never on
+  # what a clock step does to the bucket. The two grounds above are structural
+  # (no shared mutable state) and a consumer census; neither leans on that
+  # history.
   defp weak_etag(content) do
     bucket = div(System.os_time(:second), @bucket_seconds)
     ~s(W/"sha256:#{EpicFleet.canonical_digest(content)}.#{bucket}")
