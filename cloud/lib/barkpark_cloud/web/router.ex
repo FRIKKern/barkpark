@@ -8285,17 +8285,62 @@ defmodule BarkparkCloud.Web.Router do
     site = if artifactless?, do: Registry.get_site(deployment.site_id)
 
     case site do
-      %{github_repo: repo} when is_binary(repo) ->
+      %{github_repo: repo} = s when is_binary(repo) ->
         %{
-          source: %{
-            kind: "git",
-            url: "https://github.com/#{repo}.git",
-            ref: deployment.git_ref
-          }
+          source:
+            put_clone_token(
+              %{
+                kind: "git",
+                url: "https://github.com/#{repo}.git",
+                ref: deployment.git_ref
+              },
+              s
+            )
         }
 
       _ ->
         %{}
+    end
+  end
+
+  # dwb-webhook-deploy-artifact-gap: the AUTHENTICATED half of the clone lane.
+  #
+  # The anonymous URL above can only ever clone a PUBLIC repo — which made
+  # push-to-deploy structurally impossible for exactly the repos the product
+  # creates (`POST /v1/github/repos {"private": true}`) and imports (the picker
+  # lists private repos). When the site's team has a connected GitHub App
+  # installation, mint a short-lived installation token and hand it to the
+  # builder as its OWN field.
+  #
+  # `token` is a separate field, NOT credentials spliced into `url`, on purpose:
+  # a credential inside a remote URL is written into the clone workdir's config
+  # by `git remote add`, echoed back by git's own error messages, and would ride
+  # every console line that narrates the URL. A separate field keeps exactly one
+  # consumer (the builder's git auth env) and keeps the URL loggable.
+  #
+  # Minting is BEST-EFFORT, and the catch-all arm is load-bearing: this runs
+  # inside the builder's claim, so ANY unhandled shape here would 500 the claim
+  # and stall the whole build queue for every tenant — strictly worse than the
+  # gap it is fixing. A failure (unwired App, no installation, GitHub down,
+  # tampered handle, an unexpected seam return) leaves the anonymous source
+  # untouched, so a public repo keeps deploying and a private one fails at the
+  # builder with the honest terminal repo-inaccessible reason.
+  defp put_clone_token(source, site) do
+    case GitHub.installation_token_for(site.team_id) do
+      {:ok, token} when is_binary(token) and token != "" ->
+        Map.put(source, :token, token)
+
+      {:error, reason} when reason in [:not_configured, :no_installation] ->
+        # The ordinary un-connected shapes — not worth a log line per claim.
+        source
+
+      other ->
+        Logger.warning(
+          "builder clone token mint failed for site #{site.id}: #{inspect(other)} — " <>
+            "falling back to an anonymous clone (a private repo will fail at fetch)"
+        )
+
+        source
     end
   end
 
