@@ -470,19 +470,27 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
 
   ## THIS GUARD'S OWN BLINDNESS — read it before trusting a green (D459)
 
-  This census inherits the go-tag census's hole and does not close it.
-  `Go.all_tags/1` is a file-global union of NAMES, so it measures vocabulary,
-  not coverage: turning `SiteDeleteResult.Status` (`internal/cloudclient/client.go:1701`,
-  a name declared at 11 sites) into `json:"-"` — the reader STOPS DECODING a
-  live envelope key — leaves that census at 13 tests, 0 failures AND
-  `go test ./internal/cloudclient/...` green, mutation-proved on main. 82 of 228
-  names (36.0%) and 190 of 418 tag sites (45.5%) are silently deletable.
-  THE SAME HOLE IS HERE, in the same shape: this file asks whether the NAME
-  appears anywhere in the corpus, so a struct field that still carries the name
-  but has stopped decoding the key still scores as a reader. A green row here
-  means "some code path names this key", never "this key is decoded". The only
-  fix that can lose is `dr-w23-s6-register-per-struct-unread`, and it is NOT
-  this wave — so the blindness is written down instead of covered over.
+  This census asks whether the NAME appears anywhere in the corpus, so a struct
+  field that still carries the name but has stopped decoding the key still
+  scores as a reader. A green row here means "some code path names this key",
+  never "this key is decoded". THE HOLE IS STILL HERE and this file does not
+  close it.
+
+  What HAS changed is that the go-tag census next door no longer shares it.
+  `Go.all_tags/1` is a file-global union of NAMES, so `@go_tag_floor` measured
+  vocabulary and not coverage: turning `SiteDeleteResult.Status` into
+  `json:"-"` — the reader STOPS DECODING a live envelope key — left that census
+  green with `go test ./internal/cloudclient/...` green too, mutation-proved.
+  `payload_key_set_census_test.exs` now carries a SITE arm
+  (`@go_tag_sites`, dr-w26-bl-go-tag-arm-is-36-percent-blind): every name
+  declared more than once is pinned at its exact multiplicity, and the register
+  plus the name floor are asserted to partition all 516 tag sites, so no tag
+  site in internal/cloudclient can be deleted without a red. That closes the
+  DECLARATION half — a key that stops being declared is now seen. It does NOT
+  close this file's half: a key still declared but never read is invisible to
+  both. `dr-w23-s6-register-per-struct-unread` remains the slice for pinning a
+  key to the struct that is supposed to decode it, and it is not this wave — so
+  the remaining blindness is written down instead of covered over.
 
   Two further limits, stated rather than discovered later:
 
