@@ -42,6 +42,62 @@ defmodule BarkparkWeb.ShareController do
   against OVER-confinement instead: raising the role floor to `owner`, and
   refusing to honour a Default-workspace membership, each turn it red (403
   where 201 is expected).
+
+  ## Tenancy confinement on the `/v1/shares` WRITE half (arpss-w8, slice 2)
+
+  Confining mint/list/revoke while `POST`/`DELETE /v1/shares` stayed
+  workspace-blind was DECORATIVE, because the share registry is the mint's
+  PRECONDITION. `create/2` and `delete/2` therefore run the SAME predicate
+  (`workspace_admin?/2` above — one helper, not a second mechanism), against
+  the workspace the SCOPE names, BEFORE `Sharing.add_share/1` /
+  `remove_share/3` touch the store.
+
+  Three holes close, all reproduced on clean origin/main before the fix:
+
+    * THE FORGE — a ws-A-bound admin POSTed `{scope: "<ws-B scope>", access:
+      "edit"}` and got 201, manufacturing the very `:edit` share that
+      `Auth.create_share_token/5` requires. Now 403.
+    * THE DoS — the same actor `DELETE`d ws-B's share and `remove_share/3`
+      hard-revoked every live ws-B edit token (`revoked_at` stamped,
+      `Auth.verify_token/1` → `:error`). Now 403, with the victim row reloaded
+      in the test rather than the status being trusted.
+    * THE GHOST SHARE — `POST /v1/shares` for a workspace that does not exist
+      returned 201 and PERSISTED a `StoredShare`, pre-planting a foreign
+      `:edit` share that goes live the moment someone registers that slug.
+      Now 422.
+
+  WHY 422 AND NOT 404 FOR THE GHOST (the ruling, recorded here because the
+  merge carries this file): `Auth.create_share_token/5` already answers
+  `:unknown_scope` for exactly this condition and the controller already
+  renders that as a 422 "the workspace/project does not exist"
+  (`describe_token_error/1`), so the write half now says the same thing in the
+  same words on the same status. Every other `create/2` rejection is already a
+  422 — an unknown workspace is a bad ATTRIBUTE of the submitted entity, not a
+  missing route or row, and 404 would additionally imply `POST /v1/shares`
+  itself does not exist. No new error CODE is invented; it stays
+  `validation_failed`.
+
+  ACCEPTED SIGNAL, identical to the mint action's: an existing foreign
+  workspace answers 403 and a nonexistent slug answers 422, so the pair
+  distinguishes them. Answering 422 for both would mean confirming nothing —
+  but it would also mean a caller could not tell a typo'd slug from a real
+  denial, and the same signal is already public via `ResolveWorkspace`
+  (404 unknown / 403 unreachable).
+
+  `Barkpark.Sharing.add_share/1` and `remove_share/3` stay ACTOR-FREE library
+  functions — no conn, no token, no membership lookup entered either (charter
+  D10, same reason `Auth.revoke_token/1` stays unscoped). The authorization
+  lives here, at the HTTP edge, where the actor exists.
+
+  MUTATION RECEIPTS for this half (run in the builder's worktree, quoted in the
+  commit body and the test moduledoc): deleting the `create/2` predicate turns
+  the forge test RED (201 where 403 is expected, and the foreign `:edit` share
+  goes live); deleting the `delete/2` predicate turns the DoS test RED with the
+  victim's `revoked_at` stamped. NOTE the honest limit on the forge's last
+  step: with slice 1 merged, `mint_token/2` independently denies the ws-B mint,
+  so removing THIS predicate alone no longer produces a live `bpshare_` token —
+  it takes removing BOTH predicates. That measured pair is recorded in the test
+  moduledoc.
   """
   use BarkparkWeb, :controller
 
@@ -71,7 +127,14 @@ defmodule BarkparkWeb.ShareController do
   Body/params: `scope` (required, `"ws[/project[/dataset]]"`), `surfaces`
   (required, comma list of `papers,docs,media`), `access` (optional,
   `read|edit`, default `read`). 201 on success, 422 on an invalid scope /
-  surface / access.
+  surface / access; 403 when the caller is not a workspace admin of the
+  SCOPE's workspace; 422 when that workspace does not exist at all (see the
+  tenancy-confinement note above).
+
+  ORDER: grammar → resolve → AUTHORIZE → write. The tenancy check runs before
+  `Sharing.add_share/1` ever touches the store, so no denied request can leave
+  a row behind and the decision never depends on whether a share already
+  exists (an upsert is indistinguishable from an insert to the caller).
   """
   def create(conn, params) do
     scope = params["scope"]
@@ -86,19 +149,42 @@ defmodule BarkparkWeb.ShareController do
         unprocessable(conn, "surfaces is required (comma list of papers,docs,media)")
 
       true ->
-        case Sharing.add_share("#{scope}:#{surfaces}:#{access}") do
-          {:ok, share} ->
-            conn |> put_status(:created) |> json(%{share: share_json(share, "stored")})
+        case scope_workspace(scope) do
+          {:ok, ws_id} ->
+            if workspace_admin?(conn, ws_id),
+              do: do_create(conn, scope, surfaces, access),
+              else: forbidden(conn)
 
-          {:error, :invalid} ->
-            unprocessable(
-              conn,
-              "invalid share — check scope, surfaces (papers,docs,media), access (read,edit)"
-            )
+          :unknown_workspace ->
+            # GHOST SHARE, fail-closed. Same vocabulary the token surface
+            # already uses for `:unknown_scope` (`describe_token_error/1`), and
+            # the same 422 family every other create rejection uses — a new
+            # denial CODE is not invented here.
+            unprocessable(conn, "could not add share: the workspace/project does not exist")
 
-          {:error, %Ecto.Changeset{} = changeset} ->
-            unprocessable(conn, changeset_errors(changeset))
+          :invalid_scope ->
+            # Grammar failure (wildcard, empty segment, …). Hand it to
+            # `add_share/1` so the EXISTING 422 message is preserved verbatim;
+            # a malformed scope names no tenant, so nothing is leaked by
+            # answering before the tenancy check.
+            do_create(conn, scope, surfaces, access)
         end
+    end
+  end
+
+  defp do_create(conn, scope, surfaces, access) do
+    case Sharing.add_share("#{scope}:#{surfaces}:#{access}") do
+      {:ok, share} ->
+        conn |> put_status(:created) |> json(%{share: share_json(share, "stored")})
+
+      {:error, :invalid} ->
+        unprocessable(
+          conn,
+          "invalid share — check scope, surfaces (papers,docs,media), access (read,edit)"
+        )
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        unprocessable(conn, changeset_errors(changeset))
     end
   end
 
@@ -108,19 +194,43 @@ defmodule BarkparkWeb.ShareController do
   Body/params: `scope` (required). Applies the same default project/dataset as
   the parser, so `"gyldendal"` deletes `gyldendal/default/production`. Returns
   the count removed (0 if none / if the scope was env-only). 422 on a malformed
-  scope.
+  scope; 403 when the caller is not a workspace admin of the SCOPE's workspace.
+
+  THIS VERB IS DESTRUCTIVE BEYOND THE ROW: `Sharing.remove_share/3` also calls
+  `Auth.revoke_share_tokens/3`, which stamps `revoked_at` on EVERY live edit
+  token under the scope. Unconfined, one request hard-revoked another tenant's
+  editing credentials — the cross-tenant DoS this closes.
+
+  UNRESOLVABLE WORKSPACE IS NOT A DENIAL HERE (asymmetric with `create/2`, on
+  purpose): a scope whose workspace does not exist has no tenant to protect,
+  and this is the only surface that can clean up the GHOST rows planted by the
+  permissive create that shipped before this change. It can never reach a live
+  tenant's share — a live tenant has a resolvable workspace and is therefore
+  403-confined above. `:require_admin` still gates the verb.
   """
   def delete(conn, params) do
     scope = params["scope"]
 
     case scope && Sharing.scope_triple(scope) do
       {:ok, {ws, proj, dataset}} ->
-        {:ok, count} = Sharing.remove_share(ws, proj, dataset)
-        json(conn, %{removed: count, scope: "#{ws}/#{proj}/#{dataset}"})
+        case Tenancy.get_workspace_by_slug(ws) do
+          %Tenancy.Workspace{id: ws_id} ->
+            if workspace_admin?(conn, ws_id),
+              do: do_delete(conn, ws, proj, dataset),
+              else: forbidden(conn)
+
+          nil ->
+            do_delete(conn, ws, proj, dataset)
+        end
 
       _ ->
         unprocessable(conn, "scope is required and must be ws[/project[/dataset]]")
     end
+  end
+
+  defp do_delete(conn, ws, proj, dataset) do
+    {:ok, count} = Sharing.remove_share(ws, proj, dataset)
+    json(conn, %{removed: count, scope: "#{ws}/#{proj}/#{dataset}"})
   end
 
   @doc """
@@ -284,6 +394,23 @@ defmodule BarkparkWeb.ShareController do
       workspace_admin?(conn, ws_id)
     else
       _ -> false
+    end
+  end
+
+  # Resolve a caller-supplied scope STRING to the id of the workspace it names.
+  #   {:ok, ws_id}        the workspace exists — authorize against it
+  #   :unknown_workspace  well-formed scope, no such workspace (ghost share)
+  #   :invalid_scope      the scope does not parse at all (wildcard, empty, …)
+  defp scope_workspace(scope) do
+    case Sharing.scope_triple(scope) do
+      {:ok, {ws, _proj, _dataset}} ->
+        case Tenancy.get_workspace_by_slug(ws) do
+          %Tenancy.Workspace{id: id} -> {:ok, id}
+          nil -> :unknown_workspace
+        end
+
+      _ ->
+        :invalid_scope
     end
   end
 
