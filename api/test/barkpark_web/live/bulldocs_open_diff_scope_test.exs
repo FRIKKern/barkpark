@@ -120,6 +120,25 @@ defmodule BarkparkWeb.BulldocsOpenDiffScopeTest do
       assert assigns.flash["error"] == "One of the selected events no longer exists."
     end
 
+    # SYMMETRY ARM. The test above probes a foreign `to` with a legitimate `from`,
+    # so it only ever exercises the `to` fence — mutation-proven: deleting ONLY the
+    # `from` fence leaves that test GREEN while the `from` arm leaks again. Both
+    # ids are client-supplied and independently attacker-controlled, so each fence
+    # needs its own arm or half the guard can be removed silently.
+    test "a foreign event as the FROM id is fenced too — the other half of the guard",
+         %{conn: conn, slug: slug, own_b: own_b, foreign: foreign} do
+      {:ok, view, _html} = live(conn, "/papers/#{slug}")
+
+      html = render_hook(view, "open-diff", %{"from" => foreign.id, "to" => own_b.id})
+
+      refute html =~ @foreign_secret
+
+      assigns = :sys.get_state(view.pid).socket.assigns
+      refute assigns.diff_open
+      refute (assigns.diff_html || "") =~ @foreign_secret
+      assert assigns.flash["error"] == "One of the selected events no longer exists."
+    end
+
     test "two events on the paper's own rail still diff — the modal renders both payloads",
          %{conn: conn, slug: slug, own_a: own_a, own_b: own_b} do
       {:ok, view, _html} = live(conn, "/papers/#{slug}")
