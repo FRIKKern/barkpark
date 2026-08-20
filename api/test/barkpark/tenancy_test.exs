@@ -261,4 +261,150 @@ defmodule Barkpark.TenancyTest do
       assert ws.slug in (Tenancy.list_workspaces_for(u) |> Enum.map(& &1.slug))
     end
   end
+
+  describe "create_workspace_with_owner/2 binds the human behind an owning token (M4)" do
+    alias Barkpark.Accounts
+    alias Barkpark.Auth.ApiToken
+    alias Barkpark.Tenancy.Auth
+
+    defp human(prefix) do
+      {:ok, u} =
+        Accounts.register_user(%{
+          email: prefix <> "-" <> Ecto.UUID.generate() <> "@example.com",
+          password: "correct horse battery"
+        })
+
+      u
+    end
+
+    defp bare_token(attrs) do
+      {:ok, t} =
+        %ApiToken{}
+        |> ApiToken.changeset(
+          Map.merge(
+            %{
+              token_hash: ApiToken.hash_token("r-" <> Ecto.UUID.generate()),
+              permissions: ["read", "write"]
+            },
+            attrs
+          )
+        )
+        |> Repo.insert()
+
+      t
+    end
+
+    test "an OWNED token writes BOTH owner rows — the token's and its human's" do
+      u = human("bound")
+      token = bare_token(%{owner_user_id: u.id})
+
+      {:ok, ws} = Tenancy.create_workspace_with_owner(%{name: "Bound WS"}, token)
+
+      assert Auth.membership(token, ws.id).principal_type == "api_token"
+      assert %Membership{role: "owner", principal_type: "user"} = Auth.membership(u, ws.id)
+
+      # The human is not locked out of the workspace their token just made.
+      assert Auth.member?(u, ws.id)
+      assert Auth.workspace_admin?(u, ws.id)
+      assert ws.slug in (Tenancy.list_workspaces_for(u) |> Enum.map(& &1.slug))
+    end
+
+    test "an UNOWNED token writes the token row ONLY — never a NULL/placeholder user row" do
+      token = bare_token(%{})
+
+      {:ok, ws} = Tenancy.create_workspace_with_owner(%{name: "CI Owned WS"}, token)
+
+      assert Auth.membership(token, ws.id).principal_type == "api_token"
+
+      assert Repo.all(
+               from(m in Membership,
+                 where: m.workspace_id == ^ws.id and m.principal_type == "user"
+               )
+             ) == []
+    end
+  end
+
+  describe "backfill_user_owner_memberships/0 (the repair no product verb can perform)" do
+    alias Barkpark.Accounts
+    alias Barkpark.Auth.ApiToken
+    alias Barkpark.Tenancy.Auth
+
+    defp backfill_human(prefix) do
+      {:ok, u} =
+        Accounts.register_user(%{
+          email: prefix <> "-" <> Ecto.UUID.generate() <> "@example.com",
+          password: "correct horse battery"
+        })
+
+      u
+    end
+
+    defp backfill_token(attrs) do
+      {:ok, t} =
+        %ApiToken{}
+        |> ApiToken.changeset(
+          Map.merge(
+            %{
+              token_hash: ApiToken.hash_token("r-" <> Ecto.UUID.generate()),
+              permissions: ["read", "write"]
+            },
+            attrs
+          )
+        )
+        |> Repo.insert()
+
+      t
+    end
+
+    # The gyldendal shape, seeded by hand: an api_token-ONLY owner membership,
+    # which is what every workspace created over HTTP looked like.
+    defp legacy_workspace(slug, token) do
+      {:ok, ws} = Tenancy.create_workspace(%{slug: slug, name: slug})
+      {:ok, _} = Auth.create_membership(ws.id, token.id, "owner", "api_token")
+      ws
+    end
+
+    test "grants the resolvable owner, reports it, and a SECOND run writes nothing" do
+      u = backfill_human("gyldendal")
+      token = backfill_token(%{owner_user_id: u.id})
+      ws = legacy_workspace("bf-resolvable-#{System.unique_integer([:positive])}", token)
+
+      # The state the customer is in right now.
+      refute Auth.member?(u, ws.id)
+
+      report = Tenancy.backfill_user_owner_memberships()
+
+      assert {ws.id, u.id} in report.granted
+      assert Auth.member?(u, ws.id)
+      assert Auth.workspace_admin?(u, ws.id)
+      assert ws.slug in (Tenancy.list_workspaces_for(u) |> Enum.map(& &1.slug))
+
+      # IDEMPOTENT: nothing left to grant, and no duplicate row.
+      second = Tenancy.backfill_user_owner_memberships()
+      refute Enum.any?(second.granted, fn {w, _} -> w == ws.id end)
+
+      assert Repo.aggregate(
+               from(m in Membership,
+                 where: m.workspace_id == ^ws.id and m.principal_type == "user"
+               ),
+               :count
+             ) == 1
+    end
+
+    test "reports an UNOWNED token's workspace as unresolved and writes nothing for it" do
+      token = backfill_token(%{})
+      ws = legacy_workspace("bf-unowned-#{System.unique_integer([:positive])}", token)
+
+      report = Tenancy.backfill_user_owner_memberships()
+
+      assert {ws.id, :no_owner_user} in report.unresolved
+      refute Enum.any?(report.granted, fn {w, _} -> w == ws.id end)
+
+      assert Repo.all(
+               from(m in Membership,
+                 where: m.workspace_id == ^ws.id and m.principal_type == "user"
+               )
+             ) == []
+    end
+  end
 end

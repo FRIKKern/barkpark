@@ -13,6 +13,8 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.{Auth, Repo, Tenancy, TenancyFixtures}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
@@ -98,7 +100,9 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert member_proj.slug in project_slugs
     end
 
-    test "404 for a real workspace the caller is NOT a member of (no existence leak)", %{
+    # D13 Tier A: a REFUSAL is a refusal. This test asserted 404 before the
+    # denial-shape change — it is the one that flips.
+    test "403 for a real workspace the caller is NOT a member of (a refusal, not a lie)", %{
       conn: conn,
       raw_token: raw,
       other_ws: other_ws
@@ -108,8 +112,10 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
         |> authed(raw)
         |> get("/api/workspaces/#{other_ws.slug}/projects")
 
-      assert resp.status == 404
-      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+      # …and the refusal carries no interior detail about the workspace.
+      refute Jason.decode!(resp.resp_body)["projects"]
     end
 
     test "404 for an unknown workspace slug", %{conn: conn, raw_token: raw} do
@@ -153,7 +159,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert dataset.slug in dataset_slugs
     end
 
-    test "404 for a workspace the caller is NOT a member of (no existence leak)", %{
+    test "403 for a workspace the caller is NOT a member of (a refusal, not a lie)", %{
       conn: conn,
       raw_token: raw,
       other_ws: other_ws
@@ -162,6 +168,37 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
         conn
         |> authed(raw)
         |> get("/api/workspaces/#{other_ws.slug}/projects/other-proj/datasets")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+    end
+
+    test "404 for an unknown WORKSPACE slug (existence, not membership)", %{
+      conn: conn,
+      raw_token: raw
+    } do
+      resp =
+        conn
+        |> authed(raw)
+        |> get("/api/workspaces/no-such-ws/projects/whatever/datasets")
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+    end
+
+    # TIER B, deliberately NOT widened: interior existence. The caller here is
+    # already a member — it could list these project slugs — so 404 on an
+    # unknown project confirms nothing, and 403 would be a lie in the other
+    # direction ("you may not", when in fact there is nothing there).
+    test "404 for an unknown PROJECT inside a workspace the caller IS a member of", %{
+      conn: conn,
+      raw_token: raw,
+      member_ws: member_ws
+    } do
+      resp =
+        conn
+        |> authed(raw)
+        |> get("/api/workspaces/#{member_ws.slug}/projects/no-such-proj/datasets")
 
       assert resp.status == 404
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
@@ -246,6 +283,60 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert resp.status == 401
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
     end
+
+    # M4 — the creator binding. Before this, POST /api/workspaces wrote exactly
+    # one membership row, principal_type "api_token", and the HUMAN who made
+    # the workspace was not a member of it: member?/2 false, workspace_admin?/2
+    # false, list_workspaces_for/1 empty. gyldendal is in that state on prod.
+    test "201 — an OWNED token also binds its human: BOTH an api_token and a user owner row",
+         %{conn: conn} do
+      user = owner_user("creator")
+      {raw, _token} = owned_token(user)
+      slug = "owned-ws-#{System.unique_integer([:positive])}"
+
+      resp = conn |> authed(raw) |> post("/api/workspaces", %{"name" => "Owned", "slug" => slug})
+
+      assert resp.status == 201
+      ws = Tenancy.get_workspace_by_slug(slug)
+      assert ws
+
+      # The token row, exactly as before.
+      token_membership = TenancyAuth.membership(body_token_id(raw), ws.id)
+      assert token_membership.role == "owner"
+      assert token_membership.principal_type == "api_token"
+
+      # …and the human's own row, which is what was missing.
+      user_membership = TenancyAuth.membership(user, ws.id)
+      assert user_membership, "the creator's user-typed owner membership was not written"
+      assert user_membership.role == "owner"
+      assert user_membership.principal_type == "user"
+
+      # The claim that actually matters to a human: they can reach it.
+      assert TenancyAuth.member?(user, ws.id)
+      assert TenancyAuth.workspace_admin?(user, ws.id)
+      assert slug in (Tenancy.list_workspaces_for(user) |> Enum.map(& &1.slug))
+    end
+
+    test "201 — an UNOWNED (CI/bootstrap) token creates the workspace and writes NO user row",
+         %{conn: conn, raw_token: raw} do
+      slug = "unowned-ws-#{System.unique_integer([:positive])}"
+
+      resp = conn |> authed(raw) |> post("/api/workspaces", %{"name" => "CI", "slug" => slug})
+
+      assert resp.status == 201
+      ws = Tenancy.get_workspace_by_slug(slug)
+      assert TenancyAuth.membership(body_token_id(raw), ws.id).principal_type == "api_token"
+
+      # CONDITIONAL, never unconditional: no NULL/placeholder membership row.
+      user_rows =
+        Repo.all(
+          from(m in Barkpark.Tenancy.Membership,
+            where: m.workspace_id == ^ws.id and m.principal_type == "user"
+          )
+        )
+
+      assert user_rows == []
+    end
   end
 
   describe "POST /api/workspaces/:workspace_slug/projects" do
@@ -272,7 +363,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert Tenancy.get_dataset(project, "production")
     end
 
-    test "404 for a NON-member workspace (no existence leak)", %{
+    test "403 for a NON-member workspace — and still writes nothing", %{
       conn: conn,
       raw_token: raw,
       other_ws: other_ws
@@ -282,9 +373,10 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
         |> authed(raw)
         |> post("/api/workspaces/#{other_ws.slug}/projects", %{"name" => "Sneaky"})
 
-      assert resp.status == 404
-      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
-      # The leak guard: no project was created in the workspace we don't own.
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+      # The guard that matters is unchanged by the denial SHAPE: no project was
+      # created in the workspace we are not a member of.
       refute Tenancy.get_project(other_ws.slug, "sneaky")
     end
 
@@ -1191,6 +1283,28 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
   defp body_token_id(raw) do
     {:ok, token} = Auth.verify_token(raw)
     token.id
+  end
+
+  # A registered human, and a bearer token that NAMES them as its owner —
+  # the `api_tokens.owner_user_id` seam `Plugs.ResolveTokenOwner` reads.
+  defp owner_user(prefix) do
+    {:ok, u} =
+      Barkpark.Accounts.register_user(%{
+        email: "#{prefix}-#{System.unique_integer([:positive])}@example.com",
+        password: "correct horse battery"
+      })
+
+    u
+  end
+
+  defp owned_token(user) do
+    raw = "owned-token-#{System.unique_integer([:positive])}"
+    {:ok, token} = Auth.create_token(raw, "owned", "test", ["read", "write"])
+
+    {:ok, token} =
+      token |> Ecto.Changeset.change(%{owner_user_id: user.id}) |> Repo.update()
+
+    {raw, token}
   end
 
   # The verified %ApiToken{} struct behind a raw bearer — the shape
