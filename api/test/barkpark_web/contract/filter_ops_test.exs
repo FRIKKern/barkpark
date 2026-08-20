@@ -577,4 +577,208 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
       assert body["count"] == 2
     end
   end
+
+  # Helpers for the AND-composition describes below. Rows are compared by _id
+  # because the point is WHICH rows came back, not how they render.
+  defp and_ids(body), do: body["documents"] |> Enum.map(& &1["_id"]) |> Enum.sort()
+
+  defp and_query(conn, qs) do
+    conn
+    |> get("/v1/data/query/fops_http/post?" <> qs)
+    |> json_response(200)
+    |> Map.fetch!("result")
+  end
+
+  defp flat(clause), do: "filter%5B%5D=" <> URI.encode_www_form(clause)
+
+  describe "a REPEATED filter param ANDs, end to end (Gyldendal #16)" do
+    setup %{conn: conn} do
+      # Two dimensions, and titles disjoint from the outer fixture, so an AND
+      # can return STRICTLY FEWER rows than either clause alone — the
+      # customer's actual ask, which merely REFUSING the second --filter would
+      # not have answered.
+      for {id, title, tier} <- [
+            {"and1", "Omega", "gold"},
+            {"and2", "Omega", "silver"},
+            {"and3", "Sigma", "gold"}
+          ] do
+        {:ok, _} =
+          Content.create_document(
+            "post",
+            %{"_id" => id, "title" => title, "tier" => tier},
+            "fops_http"
+          )
+
+        {:ok, _} = Content.publish_document(id, "post", "fops_http")
+      end
+
+      {:ok, conn: conn}
+    end
+
+    test "filter[]=a&filter[]=b returns the INTERSECTION, strictly fewer than either alone",
+         %{conn: conn} do
+      # MUTATION PROOF: delete the `when is_list(list)` clause from
+      # normalize_filter_map/1 and the pair falls through to the catch-all —
+      # before the seal that meant 200 with EVERY row, after the seal a 400.
+      # Either way this assertion reds; it cannot pass unpatched.
+      only_title = and_query(conn, flat("title=Omega"))
+      assert and_ids(only_title) == ["and1", "and2"]
+
+      only_tier = and_query(conn, flat("tier=gold"))
+      assert and_ids(only_tier) == ["and1", "and3"]
+
+      both = and_query(conn, flat("title=Omega") <> "&" <> flat("tier=gold"))
+
+      assert and_ids(both) == ["and1"]
+      assert both["count"] < only_title["count"]
+      assert both["count"] < only_tier["count"]
+    end
+
+    test "ORDER of the two clauses does not change the answer", %{conn: conn} do
+      # The reported defect: the same pair returned 3 rows or 17 depending
+      # PURELY on which value Plug's duplicate-scalar-key decode kept.
+      a = and_query(conn, flat("title=Omega") <> "&" <> flat("tier=gold"))
+      b = and_query(conn, flat("tier=gold") <> "&" <> flat("title=Omega"))
+      assert and_ids(a) == and_ids(b)
+      assert and_ids(a) == ["and1"]
+    end
+
+    test "the bracket form still ANDs (this slice did not touch the query builder)",
+         %{conn: conn} do
+      both = and_query(conn, "filter%5Btitle%5D%5Beq%5D=Omega&filter%5Btier%5D%5Beq%5D=gold")
+      assert and_ids(both) == ["and1"]
+    end
+
+    test "two clauses on ONE field with different ops AND into a range window", %{conn: conn} do
+      window = and_query(conn, flat("title>=Omega") <> "&" <> flat("title<Sigma"))
+      assert and_ids(window) == ["and1", "and2"]
+    end
+
+    test "the SAME field+op twice is a 400 that teaches `in`, not a silent pick", %{conn: conn} do
+      resp =
+        get(
+          conn,
+          "/v1/data/query/fops_http/post?" <> flat("title=Omega") <> "&" <> flat("title=Sigma")
+        )
+
+      assert resp.status == 400
+      error = json_response(resp, 400)["error"]
+      assert error["code"] == "invalid_filter"
+      assert error["details"] == %{"field" => "title", "op" => "eq"}
+      assert error["message"] =~ "in a,b"
+    end
+
+    test "ONE unparseable clause fails the WHOLE request, never half a filter", %{conn: conn} do
+      resp =
+        get(
+          conn,
+          "/v1/data/query/fops_http/post?" <>
+            flat("title=Omega") <> "&" <> flat("total garbage!!!")
+        )
+
+      assert resp.status == 400
+      assert json_response(resp, 400)["error"]["code"] == "invalid_filter"
+    end
+  end
+
+  describe "every other filter-param shape fails CLOSED" do
+    test "a list-valued filter param that parses to nothing is a 400, NOT the full page",
+         %{conn: conn} do
+      # Unpatched main: the LIST hit `normalize_filter_map(_) -> %{}`, the
+      # fail-closed op guard found nothing wrong with an empty map, and the
+      # caller got 200 + every row. This was the only HTTP shape still
+      # over-returning.
+      resp = get(conn, "/v1/data/query/fops_http/post?" <> flat("nonsense!!"))
+
+      assert resp.status == 400
+      assert json_response(resp, 400)["error"]["code"] == "invalid_filter"
+
+      # Prove what the alternative WAS, so the 400 is load-bearing rather than
+      # a refusal of something that would have returned nothing anyway.
+      all = conn |> get("/v1/data/query/fops_http/post") |> json_response(200)
+      assert all["result"]["count"] == 3
+    end
+
+    test "filter[title][eq][]=a is a real invalid_filter 400, not internal_error + 'Retry shortly'",
+         %{conn: conn} do
+      # Measured before: HTTP 400 with code `internal_error`, message "unknown
+      # error (Ecto.Query.CastError)" and a "Retry shortly" hint — a
+      # permanently malformed request dressed as a transient server fault,
+      # telling the caller to retry forever. The scalar-value guard covered
+      # gt/gte/lt/lte only, so `eq` slipped through into Ecto.
+      resp = get(conn, "/v1/data/query/fops_http/post?filter%5Btitle%5D%5Beq%5D%5B%5D=a")
+
+      assert resp.status == 400
+      error = json_response(resp, 400)["error"]
+      assert error["code"] == "invalid_filter"
+      assert error["details"] == %{"field" => "title", "op" => "eq"}
+      assert error["message"] =~ "takes a single value"
+      refute error["message"] =~ "CastError"
+      refute (error["hint"] || "") =~ "Retry"
+    end
+
+    test "a bare filter[title][]=a is refused too", %{conn: conn} do
+      resp = get(conn, "/v1/data/query/fops_http/post?filter%5Btitle%5D%5B%5D=a")
+
+      assert resp.status == 400
+      assert json_response(resp, 400)["error"]["code"] == "invalid_filter"
+    end
+  end
+
+  describe "refusal messages no longer contradict themselves" do
+    test "a malformed hasStrong VALUE is not reported as an unknown OPERATOR", %{conn: conn} do
+      # Before: `unknown filter operator "hasStrong" on field "tags"; valid
+      # operators: eq, neq, in, nin, has, hasStrong, …` — one sentence calling
+      # hasStrong unknown and then listing it as valid.
+      error =
+        conn
+        |> get("/v1/data/query/fops_http/post?filter%5Btags%5D%5BhasStrong%5D=wired")
+        |> json_response(400)
+        |> Map.fetch!("error")
+
+      assert error["code"] == "invalid_filter"
+      assert error["details"]["op"] == "hasStrong"
+      refute error["message"] =~ "unknown filter operator"
+      assert error["message"] =~ "<tag>:<min_strength>"
+    end
+
+    test "$or is refused as an unsupported GROUP, never with its index as the operator",
+         %{conn: conn} do
+      # Before: `unknown filter operator "0" on field "$or"` — "0" was never an
+      # operator; the caller wrote a boolean group this route has no form for.
+      error =
+        conn
+        |> get("/v1/data/query/fops_http/post?filter%5B%24or%5D%5B0%5D%5Btitle%5D%5Beq%5D=Alpha")
+        |> json_response(400)
+        |> Map.fetch!("error")
+
+      assert error["code"] == "invalid_filter"
+      assert error["details"] == %{"field" => "$or"}
+      assert error["message"] =~ "boolean filter groups are not supported"
+      refute error["message"] =~ ~s(operator "0")
+    end
+
+    test "an out-of-range `is` value says what `is` takes", %{conn: conn} do
+      error =
+        conn
+        |> get("/v1/data/query/fops_http/post?filter%5Bstatus%5D%5Bis%5D=published")
+        |> json_response(400)
+        |> Map.fetch!("error")
+
+      assert error["code"] == "invalid_filter"
+      refute error["message"] =~ "unknown filter operator"
+      assert error["message"] =~ ~s("null" or "notnull")
+    end
+
+    test "a genuinely unknown operator STILL says unknown operator", %{conn: conn} do
+      # The split must not swallow the case the old message was right about.
+      error =
+        conn
+        |> get("/v1/data/query/fops_http/post?filter%5Btitle%5D%5Bbogus%5D=Alpha")
+        |> json_response(400)
+        |> Map.fetch!("error")
+
+      assert error["message"] =~ ~s(unknown filter operator "bogus")
+    end
+  end
 end

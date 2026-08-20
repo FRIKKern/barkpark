@@ -7,8 +7,13 @@ defmodule BarkparkWeb.QueryControllerFilterTest do
   defp invalid(m), do: QueryController.invalid_filter_op_for_test(m)
 
   describe "invalid_filter_op/1 — is value validation" do
-    test "an out-of-range is value is reported as {field, \"is\"}" do
-      assert invalid(%{"status" => %{"is" => "x"}}) == {"status", "is"}
+    test "an out-of-range is value is a CLAUSE refusal that says what `is` takes" do
+      # It used to return {field, "is"}, rendered as `unknown filter operator
+      # "is"` by a message that then listed `is` among the valid operators.
+      assert {:clause, message, details} = invalid(%{"status" => %{"is" => "x"}})
+      assert details == %{field: "status", op: "is"}
+      assert message =~ ~s(filter[status][is] takes "null" or "notnull")
+      refute message =~ "unknown filter operator"
     end
 
     test "is=null is accepted" do
@@ -38,16 +43,33 @@ defmodule BarkparkWeb.QueryControllerFilterTest do
     end
 
     for bad <- ["epic", "epic:", ":50", "epic:high", ""] do
-      test "malformed value #{inspect(bad)} is rejected as {field, \"hasStrong\"}" do
-        assert invalid(%{"tags" => %{"hasStrong" => unquote(bad)}}) == {"tags", "hasStrong"}
+      test "malformed value #{inspect(bad)} is refused by a message that names the GRAMMAR" do
+        # Gyldendal: this used to render as `unknown filter operator "hasStrong"`
+        # — inside a message that listed hasStrong as a valid operator. The
+        # operator was never the problem; the VALUE was.
+        assert {:clause, message, details} =
+                 invalid(%{"tags" => %{"hasStrong" => unquote(bad)}})
+
+        assert details == %{field: "tags", op: "hasStrong"}
+        assert message =~ ~s(filter[tags][hasStrong] takes "<tag>:<min_strength>")
+        refute message =~ "unknown filter operator"
       end
     end
   end
 
-  describe "invalid_filter_op/1 — scalar-value guard for range ops" do
-    for op <- ~w(gt gte lt lte) do
+  describe "invalid_filter_op/1 — scalar-value guard, now for EVERY non-list op" do
+    # The guard used to cover gt/gte/lt/lte only, so `?filter[title][eq][]=a`
+    # reached Ecto and raised a CastError — surfaced to the caller as a 400
+    # `internal_error` reading "unknown error (Ecto.Query.CastError)" with a
+    # "Retry shortly" hint: a permanently-malformed request dressed as a
+    # transient server fault. in/nin are the only list-binding ops.
+    for op <- ~w(gt gte lt lte eq neq contains startsWith endsWith has) do
       test "#{op} with a LIST value (array-bracket syntax) is rejected" do
-        assert invalid(%{"price" => %{unquote(op) => ["1"]}}) == {"price", unquote(op)}
+        assert {:clause, message, details} =
+                 invalid(%{"price" => %{unquote(op) => ["1"]}})
+
+        assert details == %{field: "price", op: unquote(op)}
+        assert message =~ "takes a single value, not a list or object"
       end
 
       test "#{op} with a scalar value is accepted" do
@@ -56,7 +78,45 @@ defmodule BarkparkWeb.QueryControllerFilterTest do
     end
 
     test "a nested-map value for a range op is also rejected" do
-      assert invalid(%{"price" => %{"gt" => %{"x" => 1}}}) == {"price", "gt"}
+      assert {:clause, _msg, %{field: "price", op: "gt"}} =
+               invalid(%{"price" => %{"gt" => %{"x" => 1}}})
+    end
+
+    test "in/nin still take their LIST value (the widened guard didn't over-reject)" do
+      assert invalid(%{"title" => %{"in" => ["a", "b"]}}) == nil
+      assert invalid(%{"title" => %{"nin" => ["a"]}}) == nil
+    end
+
+    test "in with a nested OBJECT value is refused instead of silently no-opping" do
+      # apply_field_op/4's in-clause is is_list-guarded, so a map value would
+      # skip straight past it and return every row.
+      assert {:clause, message, %{field: "title", op: "in"}} =
+               invalid(%{"title" => %{"in" => %{"k" => "v"}}})
+
+      assert message =~ "takes a comma list"
+    end
+
+    test "a bare LIST value (filter[title][]=a) is refused, not cast into eq" do
+      assert {:clause, message, %{field: "title"}} = invalid(%{"title" => ["a"]})
+      assert message =~ "filter[title] takes a single value"
+    end
+  end
+
+  describe "invalid_filter_op/1 — boolean groups ($or) name the real problem" do
+    test "$or is refused as an unsupported GROUP, never with its index as an operator" do
+      # Gyldendal: `filter[$or][0][title][eq]=x` reported `unknown filter
+      # operator "0" on field "$or"` — the caller was told to fix an operator
+      # that was never one.
+      assert {:clause, message, details} =
+               invalid(%{"$or" => %{"0" => %{"title" => %{"eq" => "x"}}}})
+
+      assert details == %{field: "$or"}
+      assert message =~ "boolean filter groups are not supported"
+      refute message =~ ~s(operator "0")
+    end
+
+    test "$and is refused the same way, whatever its value shape" do
+      assert {:clause, _msg, %{field: "$and"}} = invalid(%{"$and" => ["a=1"]})
     end
   end
 
@@ -83,7 +143,9 @@ defmodule BarkparkWeb.QueryControllerFilterTest do
       # Grammar and value validation are separate layers: the flat parser emits
       # the canonical op; invalid_filter_op/1 (via parse_has_strong) rejects it.
       assert normalize("tags hasStrong wired") == %{"tags" => %{"hasStrong" => "wired"}}
-      assert invalid(%{"tags" => %{"hasStrong" => "wired"}}) == {"tags", "hasStrong"}
+
+      assert {:clause, _msg, %{field: "tags", op: "hasStrong"}} =
+               invalid(%{"tags" => %{"hasStrong" => "wired"}})
     end
   end
 
@@ -108,6 +170,59 @@ defmodule BarkparkWeb.QueryControllerFilterTest do
       assert normalize("title in a,b") == %{"title" => %{"in" => ["a", "b"]}}
       assert normalize("category is null") == %{"category" => %{"is" => "null"}}
       assert normalize("price>=10") == %{"price" => %{"gte" => "10"}}
+    end
+  end
+
+  describe "normalize_filter_map/1 — a REPEATED filter param AND-composes (Gyldendal #16)" do
+    # `?filter[]=a&filter[]=b` reaches Plug as a LIST. It used to hit the `%{}`
+    # catch-all and mean NO FILTER AT ALL: the one HTTP shape that still
+    # answered 200 with the unfiltered set, and invisible to the fail-closed
+    # op guard, which inspects an empty map and finds nothing wrong with it.
+    test "two clauses on DIFFERENT fields compose into one AND-ed map" do
+      assert normalize(["status=published", "title=Alpha"]) ==
+               %{"status" => "published", "title" => "Alpha"}
+    end
+
+    test "two clauses on the SAME field with different ops merge into one op map" do
+      assert normalize(["price>10", "price<20"]) ==
+               %{"price" => %{"gt" => "10", "lt" => "20"}}
+    end
+
+    test "a bare eq-sugar clause is promoted when it has to merge" do
+      assert normalize(["title=Alpha", "title*=lph"]) ==
+               %{"title" => %{"eq" => "Alpha", "contains" => "lph"}}
+    end
+
+    test "the SAME field+op twice is REFUSED — under AND no row satisfies both" do
+      assert {:error, {:invalid_filter_clause, message, details}} =
+               normalize(["title=Alpha", "title=Beta"])
+
+      assert details == %{field: "title", op: "eq"}
+      assert message =~ "cannot carry two"
+      assert message =~ "in a,b"
+    end
+
+    test "ONE unparseable element fails the WHOLE request — half a filter is the defect" do
+      assert {:error, {:invalid_flat_filter, "total garbage!!!"}} =
+               normalize(["status=published", "total garbage!!!"])
+    end
+
+    test "a single-element list behaves exactly like the lone param" do
+      assert normalize(["status=published"]) == %{"status" => "published"}
+    end
+
+    test "an empty list is a no-filter no-op, like an absent param" do
+      assert normalize([]) == %{}
+    end
+  end
+
+  describe "normalize_filter_map/1 — the catch-all is SEALED" do
+    test "an unrecognised shape is an error sentinel, never the empty (no-filter) map" do
+      # MUTATION PROOF: restore `defp normalize_filter_map(_), do: %{}` and this
+      # reds — and, over HTTP, the request answers 200 with every row.
+      assert {:error, {:invalid_filter_clause, message, _details}} = normalize(42)
+      assert message =~ "unsupported filter param shape"
+      assert message =~ "filter[]="
     end
   end
 end
