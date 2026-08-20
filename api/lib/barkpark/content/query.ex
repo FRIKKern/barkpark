@@ -176,11 +176,15 @@ defmodule Barkpark.Content.Query do
   # would let a desk chip pass write-validation and then raise at render.
   @doc_id_only_ops ~w(starts_with not_starts_with)
 
-  # Range/comparison ops bind a SCALAR param. Array-bracket syntax
-  # (`?filter[price][gt][]=1`) delivers a LIST, which `parse_number/1` cannot read
-  # and Postgrex cannot bind into a scalar SQL compare — a bare 500 rather than a
-  # refusal. Non-scalar values for these ops are therefore invalid, not unsupported.
-  @scalar_value_ops ~w(gt gte lt lte)
+  # `in`/`nin` are the ONLY ops with an `is_list` clause in `apply_field_op/4`;
+  # every other op binds a SCALAR param. Array-bracket syntax
+  # (`?filter[price][gt][]=1`, `?filter[tags][has][]=x`) delivers a LIST, which
+  # `parse_number/1` cannot read and Postgrex cannot bind into a scalar SQL
+  # compare — a bare 500 rather than a refusal. Stating the rule from the LIST
+  # side rather than enumerating the scalar ops is deliberate: an op added later
+  # is scalar-checked by default, and enumerating gt/gte/lt/lte was exactly how
+  # `has` kept its 500 after the range ops were fixed.
+  @list_value_ops ~w(in nin)
 
   # The columns the prefix ops above are spelled against.
   @id_fields ~w(doc_id _id)
@@ -258,13 +262,16 @@ defmodule Barkpark.Content.Query do
       Map.has_key?(ops, "hasStrong") and parse_has_strong(Map.get(ops, "hasStrong")) == :error ->
         {field, "hasStrong"}
 
-      op = Enum.find(@scalar_value_ops, fn op -> non_scalar_op_value?(ops, op) end) ->
+      op =
+          Enum.find(Map.keys(ops), fn op ->
+            op not in @list_value_ops and non_scalar_op_value?(ops, op)
+          end) ->
         {field, op}
 
       # `in`/`nin` bind a LIST (the HTTP door splits its comma string into one
       # via `normalize_filter_op/1`); a scalar has no clause and would fall to
       # the catch-all.
-      op = Enum.find(["in", "nin"], fn op -> non_list_op_value?(ops, op) end) ->
+      op = Enum.find(@list_value_ops, fn op -> non_list_op_value?(ops, op) end) ->
         {field, op}
 
       true ->

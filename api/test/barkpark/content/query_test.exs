@@ -308,6 +308,22 @@ defmodule Barkpark.Content.QueryTest do
       assert Query.validate_filter_map(%{"price" => %{"gt" => ["1"]}}) ==
                {:error, {"price", "gt"}}
 
+      # EVERY op except in/nin binds a scalar, not just the four range ops.
+      # `?filter[tags][has][]=x` bound a LIST into the `has` fragment and
+      # Postgrex raised — a 500 one op over from the shape the door already
+      # guarded (filed as gfr-w1-filter-door-validator-drift; closed here).
+      assert Query.validate_filter_map(%{"tags" => %{"has" => ["x"]}}) ==
+               {:error, {"tags", "has"}}
+
+      assert Query.validate_filter_map(%{"title" => %{"contains" => %{"a" => "b"}}}) ==
+               {:error, {"title", "contains"}}
+
+      assert Query.validate_filter_map(%{"title" => %{"eq" => ["a"]}}) ==
+               {:error, {"title", "eq"}}
+
+      # …and in/nin keep their list, so the widening did not swallow them.
+      assert Query.validate_filter_map(%{"title" => %{"in" => ["a", "b"]}}) == :ok
+
       # in/nin bind a LIST; a bare scalar has no clause.
       assert Query.validate_filter_map(%{"title" => %{"in" => "a,b"}}) ==
                {:error, {"title", "in"}}
