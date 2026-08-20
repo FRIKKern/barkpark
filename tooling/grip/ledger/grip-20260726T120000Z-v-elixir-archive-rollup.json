@@ -1,0 +1,41 @@
+{
+  "grip_id": "v-elixir-archive-rollup-2026-07-26",
+  "verifier": "elixir-archive-rollup",
+  "wave": "barkpark-tasks-mobile-wave-2026-07-26",
+  "assignment": "(a) Run api/test/barkpark/studio_chat_test.exs and quote the archive/:noop cross-tenant assertions passing (the 404-oracle contract the new POST verbs inherit). (b) PROVE the rollup badge divergence: StudioChat.rollup/1 counts an archived blocked session while list_sessions and fleet_snapshot exclude it. (c) Confirm the fleet stream emits nothing on the archive path so the optimistic-removal client contract is correct.",
+  "verdict": "ALL THREE CONFIRMED. (a) 178/178 green; the four archive/:noop/cross-tenant tests (L#615, L#676, L#758, L#3148) pass by name. (b) DIVERGENCE PROVEN by a run probe: rollup/1 (studio_chat.ex:153-168) applies scope_sessions/2 ONLY — it never calls archived_filter/2, whereas list_sessions/2 (:257) and fleet_snapshot/1 (:318) both do. An archived blocked session stays counted blocked:1 with precedence :blocked while both list funnels drop it. USER-VISIBLE: apps/mobile/src/ui/TabBar.tsx feeds its needs-you badge from counts.blocked on GET /v1/chat/rollup (60s poll) -> S7 swipe-to-archive would leave the tab badge permanently lit. The one-line fix (|> archived_filter(false) in rollup/1) is a WIRE-SEMANTICS fix, not scope creep, and is regression-free: rollup_test.exs contains zero 'archiv' occurrences. (c) NO broadcast on archive: set_archived_at/3 (:472-482) is get_session + Ecto.Changeset.change + Repo.update, no PubSub; FleetHub only broadcasts from handle_info on {:chat_activity,…}/{:chat_reported_state,…}/{:chat_heartbeat,…}/{:chat_title,…}. Proven NON-VACUOUSLY: same test refutes fleet_flip/title/heartbeat across archive AND unarchive, then a POSITIVE CONTROL on the same live subscription asserts a :fleet_flip DOES arrive from a real {:chat_reported_state} frame. Optimistic client removal is therefore REQUIRED — no server frame will ever confirm it. SIDE FINDING: archive_session/unarchive_session have NO HTTP route today (only chat_live.ex:938/945 call them), confirming S5 must add both POST verbs from scratch.",
+  "recipes": [
+    {
+      "claim": "studio_chat_test.exs is fully green and the four archive/:noop/cross-tenant tests pass by name",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && CC=clang mix test test/barkpark/studio_chat_test.exs:615 test/barkpark/studio_chat_test.exs:676 test/barkpark/studio_chat_test.exs:757 test/barkpark/studio_chat_test.exs:3148 --trace 2>&1 | tail -8"
+    },
+    {
+      "claim": "rollup/1 has NO archived_filter; only list_sessions/2 (:257) and fleet_snapshot/1 (:318) call it",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'archived_filter' api/lib/barkpark/studio_chat.ex; sed -n '153,168p' api/lib/barkpark/studio_chat.ex"
+    },
+    {
+      "claim": "RUN PROOF of the divergence + the no-broadcast contract with a live positive control (probe test, scratchpad, not committed)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/api && CC=clang mix test /private/tmp/claude-501/-Volumes-SATECHI-github-barkpark/8ce1252b-3b98-4bab-8d0f-b207b927ac12/scratchpad/rollup_archived_probe_test.exs --trace 2>&1 | tail -10"
+    },
+    {
+      "claim": "set_archived_at/3 emits no PubSub; StudioChat has no broadcast call at all",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && sed -n '472,482p' api/lib/barkpark/studio_chat.ex; grep -n 'Phoenix.PubSub\\|broadcast(' api/lib/barkpark/studio_chat.ex || echo NO-BROADCAST"
+    },
+    {
+      "claim": "FleetHub broadcasts only from the four Recorder-sourced frame kinds; archive is not among them",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'def handle_info\\|Phoenix.PubSub.broadcast' api/lib/barkpark/studio_chat/fleet_hub.ex"
+    },
+    {
+      "claim": "the rollup badge divergence is user-visible on mobile: TabBar needs-you badge = counts.blocked from GET /v1/chat/rollup",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -rn 'chat/rollup' apps/mobile/src | head"
+    },
+    {
+      "claim": "adding archived_filter(false) to rollup/1 breaks no existing test: rollup_test.exs has zero archived coverage",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -c 'archiv' api/test/barkpark/studio_chat/rollup_test.exs"
+    },
+    {
+      "claim": "archive_session/unarchive_session have NO HTTP route — S5 adds both POST verbs from scratch; only chat_live.ex calls them today",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -rn 'archive_session\\|unarchive_session' api/lib/ | grep -v 'studio_chat.ex'"
+    }
+  ]
+}

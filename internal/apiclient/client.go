@@ -268,14 +268,25 @@ type ConditionalGetResult struct {
 // Callers whose responses legitimately grow past that (the task board's corpus
 // fetch crossed it at 9.1 MB) use GetConditionalBounded with their own cap.
 func (c *Client) GetConditional(url, ifNoneMatch string) (*ConditionalGetResult, error) {
-	return c.GetConditionalBounded(url, ifNoneMatch, maxManifestBytes)
+	return c.getConditionalBounded(url, ifNoneMatch, maxManifestBytes, "capabilities manifest response")
 }
 
-// GetConditionalBounded is GetConditional with a caller-chosen body cap. A
-// response larger than maxBytes errors instead of being silently truncated —
-// a truncated JSON body would parse as garbage or, worse, as a plausible
-// prefix. The cap is a refusal, never a trim.
+// GetConditionalBounded is GetConditional with a caller-owned body cap. It
+// exists for authenticated APIs whose valid payloads are larger than the
+// capabilities manifest while still requiring a hard memory-safety ceiling. A
+// response larger than maxBytes errors instead of being silently truncated — a
+// truncated JSON body would parse as garbage or, worse, as a plausible prefix.
+// The cap is a refusal, never a trim; callers must choose a positive,
+// contract-specific maxBytes, and the manifest's established 8 MiB limit is
+// unchanged.
 func (c *Client) GetConditionalBounded(url, ifNoneMatch string, maxBytes int64) (*ConditionalGetResult, error) {
+	return c.getConditionalBounded(url, ifNoneMatch, maxBytes, "response")
+}
+
+func (c *Client) getConditionalBounded(url, ifNoneMatch string, maxBytes int64, subject string) (*ConditionalGetResult, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("%s limit must be positive", subject)
+	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -303,7 +314,7 @@ func (c *Client) GetConditionalBounded(url, ifNoneMatch string, maxBytes int64) 
 			return nil, err
 		}
 		if int64(len(body)) > maxBytes {
-			return nil, fmt.Errorf("response exceeds %d bytes — refusing to parse a truncated body", maxBytes)
+			return nil, fmt.Errorf("%s exceeds %d bytes — refusing to parse a truncated body", subject, maxBytes)
 		}
 		res.Body = body
 	}
@@ -1260,6 +1271,58 @@ func (c *Client) TaskRelabel(docID string, add, remove []string) error {
 			"remove": remove,
 		})
 	return err
+}
+
+// TaskGetContent RE-READS one task via GET /v1/tasks/:doc_id and returns its
+// `doc.content` object verbatim (the flat, token-scoped task route — tenancy
+// rides the bearer token, exactly like the claim/close/stamp POSTs above).
+//
+// It exists for the PDS success-claim law (charter PDS-D359/D361): a ledger
+// writer may not report a write it never read back. `bp task stamp` POSTs and
+// then calls this to ask the STORE what it now holds, so a write dropped by a
+// transport ceiling, a second door, or a bad minute on the box cannot be
+// reported as a success. The content is returned RAW rather than decoded here
+// because the criteria decode (with the server's exact tolerance contract)
+// belongs to internal/taskboard, which owns that shape.
+//
+// An ok:false envelope surfaces the server's reason string VERBATIM as the
+// error; a non-200 carries the status. Both are honest read failures — the
+// caller must NOT read them as "the write landed".
+func (c *Client) TaskGetContent(docID string) (json.RawMessage, error) {
+	resp, err := c.authGet(c.flatURL("/v1/tasks/" + url.PathEscape(docID)))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, fmt.Errorf("task read-back %s: %w", docID, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("task read-back %s: status %d", docID, resp.StatusCode)
+	}
+	var env struct {
+		OK     bool   `json:"ok"`
+		Reason string `json:"reason"`
+		Doc    struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"doc"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("task read-back %s: %w", docID, err)
+	}
+	if !env.OK {
+		reason := env.Reason
+		if reason == "" {
+			reason = "task read-back returned ok:false with no reason"
+		}
+		return nil, fmt.Errorf("%s", reason)
+	}
+	if len(bytes.TrimSpace(env.Doc.Content)) == 0 {
+		return nil, fmt.Errorf("task read-back %s: envelope carried no doc.content", docID)
+	}
+	return env.Doc.Content, nil
 }
 
 // GraphNode is one node of a GET /v1/graph/:id response — the id ↔ doc_id join

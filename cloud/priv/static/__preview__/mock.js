@@ -100,7 +100,27 @@
     };
   }
 
+  // A structural copy of a fixture body, so nothing the app holds can be mutated
+  // later by the shared state bag below. Fixtures are plain JSON; a body that
+  // somehow is not round-trips to itself rather than throwing.
+  function snapshot(body) {
+    if (body === null || typeof body !== "object") return body;
+    try { return JSON.parse(JSON.stringify(body)); } catch (e) { return body; }
+  }
+
   var realFetch = window.fetch ? window.fetch.bind(window) : null;
+
+  // 4c) cch-bl-mockjs-revoke-stateless — the per-boot mutable fixture bag.
+  //     route(name, method, path, state) takes an OPTIONAL 4th arg; omitting it
+  //     keeps every route stateless, which is exactly what made the browser
+  //     preview report a successful revoke over a session list that never
+  //     changed: the DELETE splice is guarded by `if (state)`, so the row
+  //     vanished from the optimistic re-render and REAPPEARED on the refetch
+  //     app.js fires right after the success toast. smoke.mjs already passes a
+  //     bag (smoke.mjs:317); this is the browser twin, so both harnesses now
+  //     answer the same destructive routes the same way. Per page load is the
+  //     correct lifetime — a reload is a fresh fixture, a refetch is not.
+  var fixtureState = {};
 
   window.fetch = function (input, init) {
     var url = typeof input === "string" ? input : (input && input.url) || "";
@@ -111,8 +131,12 @@
 
     return scenariosReady.then(function (mod) {
       if (mod && typeof mod.route === "function") {
-        var res = mod.route(scen, method, path);
-        if (res) return jsonResponse(res.status, res.body);
+        var res = mod.route(scen, method, path, fixtureState);
+        // route() hands back the LIVE state array by reference (sessionsOf
+        // returns state.sessions itself), so a body handed to the app earlier
+        // would mutate under it on the next revoke — a rendered list that
+        // silently rewrites itself is the same lie one level down. Snapshot.
+        if (res) return jsonResponse(res.status, snapshot(res.body));
       }
       // Not modelled: fall back to the network for real assets, else 404 JSON.
       if (realFetch && path.indexOf("/v1/") !== 0) return realFetch(input, init);
@@ -208,7 +232,12 @@
         // on-state render from real data instead of the placeholder.
         var chip = document.getElementById("acct-email");
         var ready = chip && chip.textContent;
-        if ((ready || tries > 40) && appHooks && appHooks.openAccountModal) {
+        // `>= 40`, not `> 40`: the increment below lives inside `tries++ < 40`,
+        // so `tries` never exceeds 40 and the give-up branch was UNREACHABLE —
+        // a scenario whose /v1/me does not land simply stopped, silently, with
+        // no modal to photograph. Fixed with cch-w39-s2, which is the first
+        // change to make that path worth reaching.
+        if ((ready || tries >= 40) && appHooks && appHooks.openAccountModal) {
           appHooks.openAccountModal();
           // Scenario-specific post-open drive. Keyed on the scenario NAME, the
           // same convention shoot.sh uses to derive ?modal=account at all.

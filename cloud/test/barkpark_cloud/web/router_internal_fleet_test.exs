@@ -97,7 +97,9 @@ defmodule BarkparkCloud.Web.RouterInternalFleetTest do
   end
 
   describe "POST /v1/internal/barkparks (adopt)" do
-    test "registers a live managed row, admin token encrypted at rest" do
+    # cch-w34-s2: adoption records an operator's intent, not a measurement —
+    # the row lands with health "unknown" until an agent report arrives.
+    test "registers a managed row (health unknown), admin token encrypted at rest" do
       team = team_fixture()
 
       conn =
@@ -119,7 +121,7 @@ defmodule BarkparkCloud.Web.RouterInternalFleetTest do
       body = json_body(conn)["barkpark"]
       assert body["slug"] == "guerrilla"
       assert body["host"] == "203.0.113.30"
-      assert body["health_status"] == "up"
+      assert body["health_status"] == "unknown"
       assert body["mode"] == "managed"
 
       bp = Registry.get_barkpark(body["id"])

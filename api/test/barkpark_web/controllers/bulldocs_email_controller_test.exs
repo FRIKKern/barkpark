@@ -67,6 +67,21 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
             "content" => [%{"type" => "text", "value" => "The gate is green."}]
           },
           %{
+            "type" => "list",
+            "items" => [
+              [%{"type" => "text", "value" => "First semantic bullet"}],
+              [%{"type" => "text", "value" => "Second semantic bullet"}]
+            ]
+          },
+          %{
+            "type" => "list",
+            "ordered" => true,
+            "items" => [
+              [%{"type" => "text", "value" => "First semantic step"}],
+              [%{"type" => "text", "value" => "Second semantic step"}]
+            ]
+          },
+          %{
             "type" => "task-list",
             "snapshot" => [%{"title" => "ship the email view", "status" => "done"}]
           }
@@ -102,6 +117,16 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
     assert html =~ "The full deck, mailed"
     assert html =~ "#e7f2ec"
     assert html =~ "ship the email view"
+
+    # Canonical PortableDoc lists retain semantic structure in the actual email
+    # endpoint, rather than degrading to presentation-only flex rows.
+    assert html =~ "<ul"
+    assert html =~ "<ol"
+    assert length(Regex.scan(~r/<li(?:\s|>)/, html)) == 4
+    assert html =~ "First semantic bullet"
+    assert html =~ "First semantic step"
+    refute html =~ "• "
+    refute html =~ "flex-direction"
   end
 
   test "unknown slug is a plain 404", %{conn: conn} do
@@ -249,6 +274,72 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
 
     refute rendered =~ "evil.example"
     assert rendered =~ "<a>Unsafe</a>"
+  end
+
+  # `dataset` is query-string sourced on `/papers/:slug/email` (and on its
+  # scoped `/w/:ws/p/:project` twin) — only `/d/:dataset/papers/:slug/...`
+  # carries it as a path segment. Plug decodes `?dataset[]=x` to a LIST and
+  # `?dataset[a]=b` to a MAP, and either one reaching `x.dataset == ^dataset`
+  # on a :string column raises Ecto.Query.CastError. Nothing implements
+  # Plug.Exception for that struct, so it escaped as a raw 500 where the paper
+  # is simply not found. These three lock the guard in both controllers: the
+  # malformed selector fails soft to the default dataset (404 here, because the
+  # fixture paper lives elsewhere) while a real binary selector is still honored.
+  @other_dataset "staging"
+
+  defp paper_in_other_dataset! do
+    slug = "dataset-cast-guard-#{System.unique_integer([:positive])}"
+    Barkpark.LabelFixtures.register_tags!(@other_dataset)
+
+    {:ok, _paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "dataset" => @other_dataset,
+          "blocks" => [%{"type" => "paragraph", "content" => ["Only in staging."]}]
+        })
+      )
+
+    slug
+  end
+
+  test "a list-valued ?dataset[]= is 404, not an Ecto.Query.CastError 500", %{conn: conn} do
+    slug = paper_in_other_dataset!()
+
+    # The honest selector finds it...
+    assert conn |> get("/papers/#{slug}/email?dataset=#{@other_dataset}") |> response(200) =~
+             "Only in staging."
+
+    # ...the malformed one falls back to the default dataset and 404s.
+    assert build_conn()
+           |> get("/papers/#{slug}/email?dataset[]=#{@other_dataset}")
+           |> response(404)
+
+    assert build_conn()
+           |> put_req_header("accept", "*/*")
+           |> get("/papers/#{slug}/source?dataset[]=#{@other_dataset}")
+           |> response(404)
+  end
+
+  test "a map-valued ?dataset[k]= is 404, not an Ecto.Query.CastError 500", %{conn: conn} do
+    slug = paper_in_other_dataset!()
+
+    assert conn |> get("/papers/#{slug}/email?dataset[a]=b") |> response(404)
+
+    assert build_conn()
+           |> put_req_header("accept", "*/*")
+           |> get("/papers/#{slug}/source?dataset[a]=b")
+           |> response(404)
+  end
+
+  test "a binary ?dataset= still selects that dataset on the source route", %{conn: conn} do
+    slug = paper_in_other_dataset!()
+
+    assert %{"source" => %{"kind" => "blocks"}} =
+             conn
+             |> put_req_header("accept", "*/*")
+             |> get("/papers/#{slug}/source?dataset=#{@other_dataset}")
+             |> json_response(200)
   end
 
   test "email finalizer normalizes sanitizer-valid spaced and bare href grammar", %{} do

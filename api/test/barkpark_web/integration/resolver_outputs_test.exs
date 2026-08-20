@@ -139,7 +139,7 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
   # ── Block 1 — /api/schemas (legacy, public) ──────────────────────────────
 
   describe "GET /api/schemas — legacy public schema list" do
-    test "includes the OnixEdit-contributed book schema", %{conn: conn} = ctx do
+    test "withholds the private OnixEdit-contributed book schema", %{conn: conn} = ctx do
       if skip_unless_loaded(ctx) do
         conn = get(conn, ~p"/api/schemas")
         assert conn.status == 200
@@ -149,8 +149,20 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
 
         names = Enum.map(schemas, & &1["name"])
 
-        assert "book" in names,
-               "expected plugin-contributed `book` schema in /api/schemas, got: #{inspect(names)}"
+        # AMENDED (api-read-path-security-sweep w2): this case used to assert
+        # `"book" in names` — plugin CONTRIBUTION was the invariant, and the
+        # route proved it by serving every schema, private ones included, to an
+        # anonymous caller with full `fields`. `priv/plugins/onixedit/schemas/
+        # book.json:5` declares `"visibility": "private"`, so the public-schema
+        # filter in `LegacyController.schemas/2` correctly withholds it now.
+        # The plugin-contribution invariant itself is still enforced — on the
+        # ADMIN index (`GET /v1/schemas/production`, Block 2 below), which is
+        # where a private schema legitimately appears.
+        refute "book" in names,
+               "private plugin schema `book` must not reach the anonymous /api/schemas index, got: #{inspect(names)}"
+
+        # Not vacuous: the route still serves a non-empty public list.
+        refute names == []
       end
     end
   end

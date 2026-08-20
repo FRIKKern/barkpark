@@ -63,17 +63,20 @@ defmodule Barkpark.Plugins.Pulse do
       at a human cadence — the read bucket assumes seconds, not milliseconds,
       between polls.
 
-  ## Trust caveat: X-Forwarded-For is spoofable
+  ## Trust boundary: X-Forwarded-For is believed only from a trusted front
 
-  Per-IP buckets key on the first `x-forwarded-for` hop when present (Caddy
-  fronts prod and sets it), else the peer address. A client that sends its
-  own `X-Forwarded-For` can rotate the apparent IP and sidestep the per-IP
-  caps — so these caps raise the cost of abuse, they do not make it
-  impossible. The per-channel `daily_cap` is the spoof-proof backstop: it is
-  global to the channel, indifferent to source IP, and bounds total damage to
-  a vanity counter and a 24h ephemeral feed regardless of how many IPs a
-  hostile client forges. In prod, terminate XFF at the trusted edge (Caddy)
-  so only its hop is believed.
+  Per-IP buckets key on `Barkpark.RateLimiter.client_ip/1`, which believes the
+  `x-forwarded-for` chain only when the immediate peer is trusted (loopback, or
+  an address in `BARKPARK_TRUSTED_PROXIES`) and then takes the RIGHTMOST hop
+  that is not itself a known proxy. Caddy appends the address it actually saw,
+  so a client-supplied prefix is discarded and a client reaching the box
+  directly cannot rotate its apparent IP to sidestep the per-IP caps — the
+  earlier first-hop read could be, and this doc said so.
+
+  The per-channel `daily_cap` remains the source-independent backstop: global
+  to the channel, indifferent to source IP, bounding total damage to a vanity
+  counter and a 24h ephemeral feed even from a genuine botnet of distinct IPs
+  that no per-IP cap can catch.
   """
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"

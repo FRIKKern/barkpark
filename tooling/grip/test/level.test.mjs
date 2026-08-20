@@ -629,6 +629,86 @@ test("bp pointed at a LOOPBACK server is a local read: L3, mirroring loopback cu
 });
 
 // =============================================================================
+// bp scaffy LOCAL verbs are L3, not L2 — anchored to the SUBCOMMAND (tgw13-s1)
+// =============================================================================
+//
+// `bp` heads to the remote content server, so it derives L2 — UNLESS the URL is
+// loopback (already tested above). But five scaffy verbs are PURE LOCAL:
+// scaffy_cmd.go's header says so verbatim ("no network, no auth, no manifest —
+// this file never touches the server"), and the engine (internal/scaffy)
+// parses/formats/applies .scaffy files against the cwd tree. Their fact is
+// re-derived from the LOCAL CHECKOUT, so the honest ceiling is L3. Filing them
+// L2 let checkCeiling accept an L2 claim on a local-only fact — a level-skip.
+//
+// The demotion is anchored to the SUBCOMMAND position (level.mjs
+// isLocalScaffyInvocation): `scaffy` must be the first token after `bp` that is
+// not a global flag or the value a value-taking global consumed — NOT a bare
+// indexOf("scaffy") anywhere in the stream. A bare indexOf over-refused a whole
+// class of genuine remote reads that merely carry 'scaffy' as an argument.
+
+test("URL-free local bp scaffy verbs derive L3 — they touch only the cwd tree", () => {
+  assert.equal(deriveLevel("bp scaffy validate x.scaffy"), "L3");
+  assert.equal(deriveLevel("bp scaffy fmt --check f.scaffy"), "L3");
+  assert.equal(deriveLevel("bp scaffy run x.scaffy"), "L3");
+  assert.equal(deriveLevel("bp scaffy discover --since HEAD~5"), "L3");
+  // `remove` is the fifth pure-local verb per scaffy_cmd.go's header — same class.
+  assert.equal(deriveLevel("bp scaffy remove x.scaffy"), "L3");
+  // --var flags after the verb do not change the verb classification.
+  assert.equal(deriveLevel("bp scaffy run make-command.scaffy --var Name=Foo"), "L3");
+  // A value-taking global BEFORE the subcommand (`-o json`) must be skipped
+  // WITH its value or the anchor lands on `json` and fails to demote. `--json`
+  // is boolean and must NOT eat the following `scaffy`. Both are load-bearing:
+  // getting either arity wrong reopens the OPPOSITE over-refusal (tgw3).
+  assert.equal(deriveLevel("bp -o json scaffy validate x.scaffy"), "L3");
+  assert.equal(deriveLevel("bp --json scaffy validate x.scaffy"), "L3");
+  assert.equal(deriveLevel("bp -w main scaffy run x.scaffy"), "L3");
+});
+
+test("the ceiling now REJECTS an L2 claim on a local scaffy verb", () => {
+  // The bug this slice fixes: checkCeiling('L2', deriveLevel('bp scaffy validate …'))
+  // returned ok:true because the verb derived L2. It now derives L3, so an L2
+  // claim is a LEVEL-SKIP.
+  const verdict = checkCeiling("L2", deriveLevel("bp scaffy validate x.scaffy"));
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.reason, "LEVEL-SKIP");
+  assert.equal(verdict.claimed, "L2");
+  assert.equal(verdict.derived, "L3");
+  // An honest L3 claim is accepted.
+  assert.equal(checkCeiling("L3", deriveLevel("bp scaffy validate x.scaffy")).ok, true);
+});
+
+test("the demotion is SUBCOMMAND-scoped — remote scaffy verbs and other bp verbs stay L2", () => {
+  // `pull` and `ls --remote` live in scaffy_remote_cmd.go, carry a Server and
+  // hit /v1/data/query — they are genuine remote reads and must keep L2.
+  assert.equal(deriveLevel("bp scaffy ls --remote"), "L2");
+  assert.equal(deriveLevel("bp scaffy pull post"), "L2");
+  // A local verb with an EXPLICIT remote server still reaches the server on -s,
+  // so the URL keeps it at L2 — the demotion is URL-free only.
+  assert.equal(deriveLevel("bp scaffy pull note -s https://guerrilla.barkpark.cloud"), "L2");
+  assert.equal(deriveLevel("bp scaffy validate x.scaffy -s https://guerrilla.barkpark.cloud"), "L2");
+  // Every OTHER bp verb is unaffected — bp still heads to the remote server.
+  assert.equal(deriveLevel("bp search query x -o json"), "L2");
+  assert.equal(deriveLevel("bp task get foo -o json"), "L2");
+  assert.equal(deriveLevel("bp doc ls tag -o json"), "L2");
+  // DURABLE GUARD — the over-refusal this slice closes. A remote bp read that
+  // carries 'scaffy' as an ARGUMENT (not the subcommand) must stay L2. A bare
+  // indexOf("scaffy") demoted these L2→L3 and made checkCeiling refuse an
+  // honest L2 claim; the subcommand anchor keeps them L2. Do not remove.
+  assert.equal(deriveLevel("bp task get scaffy validate x.scaffy"), "L2");
+  assert.equal(deriveLevel("bp search query scaffy validate -o json"), "L2");
+  // And the ceiling must ACCEPT an L2 claim on these — the anchor's whole point.
+  assert.equal(checkCeiling("L2", deriveLevel("bp task get scaffy validate x.scaffy")).ok, true);
+  assert.equal(checkCeiling("L2", deriveLevel("bp search query scaffy validate -o json")).ok, true);
+});
+
+test("a loopback-server local scaffy verb stays L3 by the loopback rule, not the carve-out", () => {
+  // Belt and braces: the loopback branch already returns L3, and the carve-out
+  // must not disturb it.
+  assert.equal(deriveLevel("bp -s http://localhost:4001 scaffy validate x.scaffy"), "L3");
+  assert.equal(deriveLevel("cd /Volumes/SATECHI/github/barkpark && bp scaffy fmt --check f.scaffy"), "L3");
+});
+
+// =============================================================================
 // THE PARSEABILITY FLOOR — prose can never be graded as evidence (D30 (d))
 // =============================================================================
 //
@@ -762,7 +842,15 @@ test("the review's floor fix costs the corpus distribution nothing", () => {
   const dist = {};
   for (const c of commands) dist[deriveLevel(c)] = (dist[deriveLevel(c)] || 0) + 1;
   assert.equal(commands.length, 651);
-  assert.deepEqual(dist, { L1: 32, L2: 93, L3: 380, L6: 146 });
+  // tgw13-s1 moved exactly ONE frozen row: `bp scaffy run
+  // classify-block-type.scaffy …` was over-promoted L2 (bp → remote server) and
+  // is now L3 (pure-local scaffy verb, no url). That correction — L2 93→92,
+  // L3 380→381 — is the fix landing on real evidence, not a floor regression.
+  // The corpus is BLIND to the subcommand-anchor bug (the incidental-scaffy
+  // class has zero corpus occurrences): buggy indexOf and the correct anchor
+  // give a bit-identical distribution here, so this pin is NOT the merge
+  // instrument — the hand-run bidirectional matrix is.
+  assert.deepEqual(dist, { L1: 32, L2: 92, L3: 381, L6: 146 });
 });
 
 test("KNOWN L1 SHAPES: the ssh forms the corpus actually uses are never demoted", () => {
@@ -782,4 +870,86 @@ test("KNOWN L1 SHAPES: the ssh forms the corpus actually uses are never demoted"
   // direction — and belongs in a ruling, not in a review. Filed as
   // tgw3-bl-ssh-bare-host-alias. Pinned here so the gap is visible, not silent.
   assert.equal(deriveLevel("ssh guerrilla systemctl status barkpark"), "L6");
+});
+
+// --- mention-immunity for the OTHER blessed remote tokens --------------------
+// The curl/wget branch was deliberately head-gated (see the https:// mention
+// test above). SSH_READ / GIT_SHOW_REMOTE / GH_API were not: they were tested
+// against the RAW segment, so a local grep that merely QUOTES a production
+// command was promoted to L1/L2 — and record.mjs's admitFact then ACCEPTED an
+// author's false L1 claim, defeating the ceiling. These pin the symmetry.
+
+test("MENTION-IMMUNITY: a grep quoting an ssh command is L3, not L1", () => {
+  assert.equal(deriveLevel(`grep -rn "ssh root@89.167.28.206" docs/ops/PROD_OPS.md`), "L3");
+  assert.equal(deriveLevel(`rg -n 'ssh root@prod' docs/`), "L3");
+  // unquoted, too — quote-masking alone cannot see this one
+  assert.equal(deriveLevel(`grep -rn ssh root@host docs/`), "L3");
+});
+
+test("MENTION-IMMUNITY: a grep quoting `gh api` or `git show origin/…` is L3, not L2", () => {
+  assert.equal(deriveLevel(`grep -n "gh api repos/x/y/pulls" docs/ops/merge-gates.md`), "L3");
+  assert.equal(deriveLevel(`grep -n "git show origin/main:api/lib/foo.ex" docs/cards/js-sdk.md`), "L3");
+  assert.equal(deriveLevel(`rg -n "git show origin/main:" docs/`), "L3");
+});
+
+test("MENTION-IMMUNITY does not demote a real invocation", () => {
+  // the standing zero-false-demotion bar, for exactly the shapes now gated
+  assert.equal(deriveLevel(`ssh root@89.167.28.206 "cd /opt/barkpark && git pull"`), "L1");
+  assert.equal(deriveLevel(`cd /opt && ssh root@h uptime`), "L1");
+  assert.equal(deriveLevel(`timeout 30 ssh root@h uptime`), "L1");
+  assert.equal(deriveLevel(`gh api repos/o/r/pulls --jq .`), "L2");
+  assert.equal(deriveLevel(`git show origin/main:api/mix.exs | head -20`), "L2");
+  // a reader head with a PROCESS SUBSTITUTION really does read origin — the
+  // corpus contains this shape and it must keep its L2.
+  assert.equal(deriveLevel(`diff <(git show origin/main:a.md) a.md`), "L2");
+});
+
+test("MENTION-IMMUNITY: a QUOTED destination is still a real invocation, not a mention", () => {
+  // REVIEW ADDITION (wave 11). Reading these through the quote mask demoted
+  // three live shapes — measured against origin/main 072978af0, `ssh
+  // "root@host" uptime` went L1→L6 and `git show 'origin/main:…'` went L2→L3.
+  // Quoting a HOST or a REF is quoting an argument, not naming a command
+  // inside prose, and a false DEMOTION is as much a defect as a false
+  // promotion: it makes an honest L1 claim unstampable.
+  //
+  // The rule is head-keyed: a segment headed by the command ITSELF reads its
+  // raw bytes; every other head still reads the mask. `headToken` unwraps
+  // PREFIX_WRAPPERS, so the `timeout` form is covered by the same line.
+  assert.equal(deriveLevel(`ssh "root@89.167.28.206" uptime`), "L1");
+  assert.equal(deriveLevel(`ssh 'root@89.167.28.206' systemctl is-active barkpark`), "L1");
+  assert.equal(deriveLevel(`timeout 30 ssh "root@h" uptime`), "L1");
+  assert.equal(deriveLevel(`git show "origin/main:api/mix.exs" | wc -l`), "L2");
+  assert.equal(deriveLevel(`git show 'origin/main:api/mix.exs'`), "L2");
+  assert.equal(deriveLevel(`gh api "repos/o/r/pulls" --jq .`), "L2");
+
+  // …and the mask still governs every other head, so the mention stays demoted.
+  assert.equal(deriveLevel(`echo "ssh root@89.167.28.206 uptime"`), "L6");
+  assert.equal(deriveLevel(`echo "git show origin/main:api/mix.exs"`), "L6");
+
+  // KNOWN RESIDUAL, pinned so it is visible rather than silent: an UNQUOTED
+  // mention under a NON-reader head still promotes. Quote-masking cannot see it
+  // and the READER_HEADS gate does not cover `echo`. Measured: ZERO of the 631
+  // rerun-bearing committed ledger rows have this shape, and the QUOTED form is
+  // correctly L6 — latent, not live, which is why the review did not widen the
+  // head set inside this slice's fence (that is a rule change, not a bug fix).
+  //
+  // NOT FILED AS A TASK, and that is a fact rather than an omission: guerrilla's
+  // /v1/data/mutate doc-CREATE was returning 500/timeout throughout the wave-11
+  // review (request ids GMZYbJhOxSPzcsMACkxR, GMZYdmeCBah-FP4ACz6y), the same
+  // fault tgw9-s1's builder hit. No id is cited here, because citing a task that
+  // does not exist is the dangling pointer this epic refuses. This assertion IS
+  // the pin: whoever fixes the rule gets a failing test that names the decision.
+  assert.equal(deriveLevel(`echo ssh root@89.167.28.206`), "L1");
+});
+
+test("MENTION-IMMUNITY: the ceiling holds — admitFact rejects a false L1 on a quoting grep", () => {
+  const admitted = admitFact({
+    subject: "docs/ops/PROD_OPS.md",
+    claim: "the documented prod deploy host appears at docs/ops/PROD_OPS.md:17",
+    evidence: "read the doc",
+    rerun: `grep -rn "ssh root@89.167.28.206" docs/ops/PROD_OPS.md`,
+    level: "L1",
+  });
+  assert.equal(admitted.ok, false);
+  assert.equal(admitted.rejections[0].reason, "LEVEL-SKIP");
 });

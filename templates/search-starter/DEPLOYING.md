@@ -9,7 +9,8 @@ folder-wide golden path (workspace / schema / token mechanics) lives in
 ## TL;DR — the one command
 
 ```sh
-bp cloud site create --template search-starter --barkpark <id> --kind node
+bp cloud site create --name my-search --dataset default/default/production \
+  --instance <your-box> --kind node --framework nextjs --template search-starter
 bp cloud site deploy <slug>          # streams PLAN→BUILD→STAGE→HEALTH→SWITCH→RETIRE, prints the URL
 ```
 
@@ -18,12 +19,10 @@ long-lived Node SSR process (not static HTML). `deploy` health-gates the build
 before flipping the Caddy upstream. If `HEALTH` fails, nothing switches and
 visitors keep seeing the previous build.
 
-> **Template selection is landing across this epic.** The deploy engine already
-> materializes the `search-starter` tree (the `template` axis shipped in Wave 1),
-> but the `--template` / `--barkpark` flags on `bp cloud site create` (and the
-> dashboard picker) are the epic's next surface (Wave 2). Today's create binds by
-> instance: `bp cloud site create --name <name> --dataset <ws/proj/ds>
-> --instance <id> --kind node --framework nextjs`.
+> `--template` is live today — it is in `bp cloud site create`'s own usage, and
+> the dashboard picker offers **Search Starter** too. `--name`, `--dataset` and
+> `--instance` are all required. There is no `--barkpark` flag; that spelling was
+> printed here until it was checked against the CLI.
 
 ## Prerequisites (all live today)
 
@@ -35,7 +34,9 @@ bp login --device      # device flow; --device-start / --device-poll for headles
 ```
 
 `install-cli.sh` installs `bp` 1.15.0 (fix #2797). You need a Barkpark instance
-id (`bp cloud barkpark ls`) and admin on it to seed the corpus.
+id (`bp cloud status` lists your fleet) and admin on it to seed the corpus.
+This line used to print a "barkpark ls" subcommand that `runCloud` has never
+dispatched.
 
 ## Seed the corpus (why the graph is a constellation)
 
@@ -79,9 +80,24 @@ curl -X POST "$SCOPED/v1/tokens" -H "Authorization: Bearer $TOKEN" \
      --data '{"label":"public-read","permissions":"public-read"}'
 ```
 
-The deploy engine wires this into `NEXT_PUBLIC_BARKPARK_WS_TOKEN`. Without both
-`NEXT_PUBLIC_BARKPARK_WS_URL` and `NEXT_PUBLIC_BARKPARK_WS_TOKEN`, live search
-degrades to server-side search (no crash — it fails soft).
+Pass that token as **`BARKPARK_TOKEN`**. The engine does *not* — and structurally
+*cannot* — set `NEXT_PUBLIC_BARKPARK_WS_TOKEN`: its env allowlist is closed over
+`BARKPARK_*` names at all three layers. Instead `next.config.mjs` **derives** the
+three browser values at build time and Next inlines them into the client bundle:
+
+| Derived | From |
+|---|---|
+| `NEXT_PUBLIC_BARKPARK_WS_URL` | `origin(BARKPARK_API_URL)` + `/socket` (the scoped `/w/:ws/p/:proj` suffix is stripped) |
+| `NEXT_PUBLIC_BARKPARK_WS_TOKEN` | `BARKPARK_TOKEN` |
+| `NEXT_PUBLIC_BARKPARK_DATASET` (+ `_WORKSPACE`, `_PROJECT`) | `BARKPARK_DATASET` / `_WORKSPACE` / `_PROJECT` |
+
+All three matter. The channel topic is `search:<ws>:<proj>:<dataset>`, so a build
+that inlines the URL and token but not the dataset joins
+`search:default:default:docs` — the join **succeeds**, the LIVE badge lights, and
+every keystroke returns zero hits with no error surfaced anywhere.
+
+With `BARKPARK_TOKEN` unset, live search degrades to the server-side HTTP path
+(no crash — it fails soft, and the socket isn't even built into the bundle).
 
 ## The six stages, and rollback
 

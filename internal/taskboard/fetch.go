@@ -2,8 +2,10 @@ package taskboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -76,6 +78,65 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 	}
 }
 
+// inflightFetchPath is the D120 third fetch: the SAME /v1/tasks route with the
+// server-side lifecycle filter, so the response is the same {ok,docs} envelope
+// decodeTaskListFull already decodes — and, crucially, the same twin-COLLAPSED
+// projection (api tasks/query.ex collapses lifecycle-divergent twins; prime's
+// lifecycle_counts do not, D115). The filter param is read optionally by the
+// controller — an older server ignores it and answers the full window, which
+// the union dedup (mergeInflight) degrades to window-truth, never garbage.
+const inflightFetchPath = "/v1/tasks?lifecycle_status=in_progress&limit=1000"
+
+// mergeInflight unions the in-flight fetch's rows into the window list, deduped
+// by doc_id with the LIST (window) copy winning on overlap — two copies of one
+// doc differ only by fetch timing, and the window copy is the one whose
+// lifecycle the rest of the corpus was fetched against. Union-only rows append
+// AFTER the window rows, before composeSnapshot: the ready overlay ignores
+// them (an in-flight row is never stored open|blocked), board.Now picks them
+// up via its unchanged predicate, and syncDetails embeds them with zero
+// special-casing. The detail indexes merge the same way (list wins) so a
+// rescued NOW row opens at full depth — the thin-frame fallback stays the
+// safety net, not the plan.
+func mergeInflight(tasks []Task, details DetailIndex, inflight []Task, inflightDetails DetailIndex) ([]Task, DetailIndex) {
+	seen := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		seen[t.DocID] = true
+	}
+	for _, t := range inflight {
+		if seen[t.DocID] {
+			continue
+		}
+		seen[t.DocID] = true
+		tasks = append(tasks, t)
+	}
+	if details == nil && len(inflightDetails) > 0 {
+		details = make(DetailIndex, len(inflightDetails))
+	}
+	for id, d := range inflightDetails {
+		if _, ok := details[id]; !ok {
+			details[id] = d
+		}
+	}
+	return tasks, details
+}
+
+// countInProgress is the collapsed in-flight denominator: the count of
+// lifecycle==in_progress rows over the DEDUPED UNION mergeInflight built —
+// never len(third-fetch) (a stale filtered copy whose window twin already
+// moved on must not count) and never prime's raw bucket (twin-doubled, the
+// D115 lie). Deriving from the union also makes the number immune to an old
+// server that ignored the filter and to param drift: a 200-empty in-flight
+// body degrades the count to window-truth.
+func countInProgress(tasks []Task) int {
+	n := 0
+	for _, t := range tasks {
+		if t.Lifecycle == lifeInProgress {
+			n++
+		}
+	}
+	return n
+}
+
 // maxBoardFetchBytes bounds the board's task-corpus fetch. The generic
 // GetConditional cap (8 MiB, sized for the capabilities manifest) went dark on
 // guerrilla when /v1/tasks?limit=1000 crossed 9.1 MB (2026-07-24). 32 MiB buys
@@ -84,22 +145,67 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 // flagship), which shrinks this fetch instead of chasing it with a bigger cap.
 const maxBoardFetchBytes = 32 << 20
 
-// getJSON issues an authenticated GET to a top-level path, reusing the Client's
-// configured http.Client and bearer token (via the public GetConditionalBounded
-// helper, called with no If-None-Match so it always fetches the body, and the
-// board's own maxBoardFetchBytes cap). It does not modify apiclient. Every
-// error carries the path, and a non-200 carries the status plus a one-line body
-// hint, so the shell's degraded banner can say WHICH call failed and why
-// ("GET /v1/tasks/prime: status 401: …").
+// snapshotFetchTimeout is the snapshot path's OWN request budget, carried as a
+// per-request context deadline (see snapshotHTTP below). It is deliberately NOT
+// a raise of the apiclient's Timeout: the one shared Client also serves the
+// interactive claim/close verbs, where the 5s DefaultTimeout is right — a
+// keystroke must fail fast, never hang half a minute. The heavy corpus GET
+// (/v1/tasks?limit=1000, ~9 MB live) and prime routinely see 2.0-2.4s of server
+// TTFB on guerrilla, so the inherited 5s left ~2x margin and blew under load —
+// which the old path then mislabeled "offline" (a lie; the server answers).
+// 30s is a snapshot-shaped budget: generous enough that a slow-but-alive server
+// completes, finite so a genuinely dead read still surfaces.
+const snapshotFetchTimeout = 30 * time.Second
+
+// snapshotHTTP is the snapshot path's transport. It carries NO client-level
+// Timeout — the deadline rides each request's context (getJSONCtx), so the
+// budget is scoped to the snapshot fetch alone and can never leak into the
+// apiclient the interactive verbs share. A plain shared http.Client is safe for
+// concurrent use (the list and prime GETs fly concurrently, charter D113b).
+var snapshotHTTP = &http.Client{}
+
+// getJSON is getJSONCtx under the snapshot path's own default budget. Kept as
+// the two-arg convenience so every snapshot-path caller gets the scoped
+// deadline even when it has no context of its own to thread.
 func getJSON(c *apiclient.Client, path string) ([]byte, error) {
-	res, err := c.GetConditionalBounded(c.BaseURL()+path, "", maxBoardFetchBytes)
+	ctx, cancel := context.WithTimeout(context.Background(), snapshotFetchTimeout)
+	defer cancel()
+	return getJSONCtx(ctx, c, path)
+}
+
+// getJSONCtx issues an authenticated GET to a top-level path with the caller's
+// context deadline, the Client's bearer token, and the board's own
+// maxBoardFetchBytes cap. It does not modify apiclient — the request runs on
+// snapshotHTTP precisely so the apiclient's interactive 5s Timeout cannot clamp
+// a snapshot-sized read (and the snapshot budget cannot slow a keystroke).
+// Every error carries the path, and a non-200 carries the status plus a
+// one-line body hint, so the shell's degraded banner can say WHICH call failed
+// and why ("GET /v1/tasks/prime: status 401: …"). The cap is a refusal, never a
+// trim — a truncated JSON body would parse as garbage or a plausible prefix.
+func getJSONCtx(ctx context.Context, c *apiclient.Client, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL()+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %d%s", path, res.StatusCode, bodyHint(res.Body))
+	if token := c.Token(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	return res.Body, nil
+	resp, err := snapshotHTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBoardFetchBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	if int64(len(body)) > maxBoardFetchBytes {
+		return nil, fmt.Errorf("GET %s: response exceeds %d bytes — refusing to parse a truncated body", path, maxBoardFetchBytes)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET %s: status %d%s", path, resp.StatusCode, bodyHint(body))
+	}
+	return body, nil
 }
 
 // bodyHint condenses an error body into a short single-line ": …" suffix so a
@@ -120,9 +226,11 @@ func bodyHint(body []byte) string {
 // fetchPrime asks for prime at the clamp maximum — which buys the deepest ready
 // head and event tail one call allows. The ticker only renders a short tail, but
 // the ready overlay wants every claimable row it can get (past the clamp the
-// overlay covers the top of the queue only, which composeSnapshot flags).
-func fetchPrime(c *apiclient.Client) (primeExtras, error) {
-	body, err := getJSON(c, fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit))
+// overlay covers the top of the queue only, which composeSnapshot flags). The
+// context carries FetchSnapshotFull's shared snapshot budget, so both halves of
+// one snapshot expire together.
+func fetchPrime(ctx context.Context, c *apiclient.Client) (primeExtras, error) {
+	body, err := getJSONCtx(ctx, c, fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit))
 	if err != nil {
 		return primeExtras{}, err
 	}
@@ -138,16 +246,42 @@ func decodeTaskList(body []byte) ([]Task, error) {
 // decodeTaskListFull is the one-pass dual decode: each render_doc envelope
 // becomes both its board Task and its TaskDetail reading model, keyed by
 // doc_id. One json.Unmarshal of the body, one walk of the docs.
+//
+// ENVELOPE FENCE (epic law: no verb reports success on an exit code alone). A
+// VALUE-typed `Docs []taskWire` decodes `null`, `{}`, `{"error":…}` and
+// `{"ok":false,"error":{…}}` to zero rows with a NIL error — a plausible,
+// silent, EMPTY BOARD for a 200 that said nothing. The POINTER field below
+// distinguishes "key absent/null" from `{"docs":[]}` (a legitimate empty
+// board, which stays err=nil) inside the SAME single Unmarshal — no second
+// pass. `[]`, zero bytes and HTML already fail the Unmarshal itself, so this
+// fence covers strictly the well-formed-JSON-object-without-the-key class.
+//
+// This does NOT cross detail_data.go's 'Tolerance contract (frozen wave-5)':
+// that contract is FIELD-scoped (one odd task's content must never break the
+// whole list decode) and remains untouched — every per-doc field stays as
+// permissive as it was. What is fenced here is the ENVELOPE, one level above
+// it: whether the server answered with a task list at all.
+//
+// The error text carries "decode", which snapshotErrorLabel already maps to
+// "invalid snapshot" on the existing ConnOffline+ConnProblem channel
+// (live.go) — the refusal reuses the honest transport path, inventing nothing.
 func decodeTaskListFull(body []byte) ([]Task, DetailIndex, error) {
 	var env struct {
-		Docs []taskWire `json:"docs"`
+		Docs *[]taskWire `json:"docs"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
 		return nil, nil, fmt.Errorf("decode tasks list: %w", err)
 	}
-	tasks := make([]Task, 0, len(env.Docs))
-	details := make(DetailIndex, len(env.Docs))
-	for _, w := range env.Docs {
+	// Nil check STRICTLY before any deref: a reordering here turns the silent
+	// lie into a nil-pointer panic, which is worse. TestDecodeEnvelopeFence
+	// covers every poison, so a reorder fails the suite rather than shipping.
+	if env.Docs == nil {
+		return nil, nil, fmt.Errorf("decode tasks list: response carried no %q key%s", "docs", bodyHint(body))
+	}
+	docs := *env.Docs
+	tasks := make([]Task, 0, len(docs))
+	details := make(DetailIndex, len(docs))
+	for _, w := range docs {
 		t := w.toTask()
 		tasks = append(tasks, t)
 		details[t.DocID] = w.toDetail(t)
@@ -171,10 +305,20 @@ type primeExtras struct {
 // decodePrime pulls the counts, recent events and ready-queue ids out of a
 // prime body. The ready entries are full render_docs on the wire; only their
 // doc_id matters here — the authoritative task rows come from the list fetch.
+//
+// ENVELOPE FENCE, same law as decodeTaskListFull. The prime predicate is
+// deliberately NOT "counts is present": the controller branches on view, and
+// counts is one key in one shape of the envelope, so keying on it alone would
+// red a future brief view that legitimately omits it. The predicate is
+// therefore `counts` present OR `ok` asserted TRUE — which still refuses all
+// four poisons, because `{"ok":false,"error":{…}}` asserts the opposite and
+// `null`/`{}`/`{"error":…}` assert nothing. `{"ok":true,"counts":{}}` and a
+// counts-bearing body both pass. Field-level tolerance below is unchanged.
 func decodePrime(body []byte) (primeExtras, error) {
 	var env struct {
-		Counts       map[string]int `json:"counts"`
-		RecentEvents []eventWire    `json:"recent_events"`
+		OK           *bool           `json:"ok"`
+		Counts       *map[string]int `json:"counts"`
+		RecentEvents []eventWire     `json:"recent_events"`
 		Ready        []struct {
 			DocID string `json:"doc_id"`
 		} `json:"ready"`
@@ -182,8 +326,16 @@ func decodePrime(body []byte) (primeExtras, error) {
 	if err := json.Unmarshal(body, &env); err != nil {
 		return primeExtras{}, fmt.Errorf("decode prime: %w", err)
 	}
+	// Nil check STRICTLY before the deref below — see decodeTaskListFull.
+	if env.Counts == nil && (env.OK == nil || !*env.OK) {
+		return primeExtras{}, fmt.Errorf("decode prime: response carried neither %q nor an affirmative %q%s", "counts", "ok", bodyHint(body))
+	}
+	counts := map[string]int(nil)
+	if env.Counts != nil {
+		counts = *env.Counts
+	}
 	extras := primeExtras{
-		counts:     env.Counts,
+		counts:     counts,
 		events:     make([]Event, 0, len(env.RecentEvents)),
 		readyIDs:   make(map[string]bool, len(env.Ready)),
 		readyCount: len(env.Ready),
@@ -346,7 +498,8 @@ func decodeCriterion(raw json.RawMessage) CriterionItem {
 		return CriterionItem{}
 	}
 	crit, _ := m["criterion"].(string)
-	return CriterionItem{Criterion: crit, Met: m["met"] == true, Attempts: decodeAttempts(m["attempts"])}
+	ev, _ := m["evidence"].(string)
+	return CriterionItem{Criterion: crit, Met: m["met"] == true, Evidence: ev, Attempts: decodeAttempts(m["attempts"])}
 }
 
 // decodeAttempts reads a criterion's honest-miss trail — the D8 attempts[]
@@ -447,14 +600,63 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	d.BlockedReason = strField(m, "blocked_reason")
 	d.CloseReason = strField(m, "close_reason")
 	d.ResolutionNote = strField(m, "resolution_note")
+	d.Disposition = strField(m, "disposition")
+	d.DispositionReason = strField(m, "disposition_reason")
+	d.ReopenTrigger = strField(m, "reopen_trigger")
 	d.CodeRefs = flattenCodeRefs(m["code_refs"])
 	d.Assignee = strField(m, "assignee")
 	d.LastWorkedAt = timeField(m, "last_worked_at")
+	d.Purpose = decodeTaskPurpose(m["purpose"])
 	if w.Claim != nil {
 		d.PreviousWorker = rawString(w.Claim.PreviousWorker)
 		d.ClaimExpiredAt = rawTime(w.Claim.ExpiredAt)
 	}
 	return d
+}
+
+func decodeTaskPurpose(v any) TaskPurpose {
+	m, _ := v.(map[string]any)
+	if m == nil {
+		return TaskPurpose{}
+	}
+	return TaskPurpose{
+		PartOf:     strField(m, "part_of"),
+		Impact:     strField(m, "impact"),
+		Statement:  strField(m, "statement"),
+		Why:        strField(m, "why"),
+		Endgame:    strField(m, "endgame"),
+		Importance: decodePurposeScore(m["importance"]),
+		Relevance:  decodePurposeScore(m["relevance"]),
+		Proof:      decodePurposeProof(m["proof"]),
+	}
+}
+
+func decodePurposeScore(v any) PurposeScore {
+	m, _ := v.(map[string]any)
+	if m == nil {
+		return PurposeScore{}
+	}
+	score, set := 0, false
+	if n, ok := m["score"].(float64); ok && n >= 0 && n <= 100 {
+		score, set = int(n), true
+	}
+	return PurposeScore{Score: score, Reason: strField(m, "reason"), Set: set}
+}
+
+func decodePurposeProof(v any) []PurposeProof {
+	rows, _ := v.([]any)
+	out := make([]PurposeProof, 0, len(rows))
+	for _, row := range rows {
+		m, _ := row.(map[string]any)
+		if m == nil {
+			continue
+		}
+		p := PurposeProof{Claim: strField(m, "claim"), Evidence: strField(m, "evidence"), Source: strField(m, "source")}
+		if p.Claim != "" || p.Evidence != "" || p.Source != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // rawPortableDoc preserves a task's inline PortableDoc value for pdrender.

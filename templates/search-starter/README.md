@@ -38,18 +38,18 @@ curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/inst
 bp login --device
 
 # 3. spawn the site from this template, bound to your Barkpark instance
-bp cloud site create --template search-starter --barkpark <id> --kind node
+#    (`bp cloud status` lists your instances and their ids)
+bp cloud site create --name my-search --dataset default/default/production \
+  --instance <your-box> --kind node --framework nextjs --template search-starter
 
 # 4. deploy it — streams the six stages, prints the live URL
 bp cloud site deploy <slug>
 ```
 
-> **Template selection is landing across this epic.** The deploy engine already
-> materializes `search-starter` (the `template` axis ships in Wave 1); the
-> `--template` flag on `bp cloud site create` and the dashboard picker are the
-> epic's next surface (Wave 2). Until then, bind the site with `--instance <id>`
-> (`bp cloud site create --name <name> --dataset <ws/proj/ds> --instance <id>
-> --kind node --framework nextjs`) and select the template on deploy.
+> `--template` is live today — it is in `bp cloud site create`'s own usage. The
+> site is bound by `--instance`, and `--name` / `--dataset` / `--instance` are
+> all required. There is no `--barkpark` flag; that spelling was printed here
+> until it was checked against the CLI.
 
 `create` registers the site (node runtime target) against your instance;
 `deploy` enqueues the build and **streams the six visible stages live**:
@@ -84,9 +84,10 @@ the demo's `portable-doc.tsx` fork.
 
 ## Env contract
 
-Server-only vars drive the SSR fetch; the two `NEXT_PUBLIC_BARKPARK_WS_*` vars
-(and only those) reach the browser to power live search. `bp cloud site deploy`
-injects these for you; `.env.example` is the annotated list for local dev.
+You set `BARKPARK_*` vars only. Everything the browser needs is **derived from
+them at build time** by `next.config.mjs` — including live search's websocket
+URL, token, and dataset (see below). `bp cloud site deploy` injects the
+`BARKPARK_*` set for you; `.env.example` is the annotated list for local dev.
 
 | Var | Reach | Meaning |
 |---|---|---|
@@ -96,13 +97,32 @@ injects these for you; `.env.example` is the annotated list for local dev.
 | `BARKPARK_WORKSPACE` / `BARKPARK_PROJECT` | server | Only if `BARKPARK_API_URL` is a bare origin |
 | `BARKPARK_DOC_TYPE` | server | Which type the finder indexes and details |
 | `BARKPARK_SITE_BASE` | build | The `/sites/<slug>/` path baked as `basePath` (see below) |
-| `NEXT_PUBLIC_BARKPARK_WS_URL` | **browser** | Phoenix socket, e.g. `wss://api.barkpark.cloud/socket` |
-| `NEXT_PUBLIC_BARKPARK_WS_TOKEN` | **browser** | Read-only token scoped to the site's public workspace |
 
-Both WS vars must be set or live search silently degrades to server-side
-search — the socket path is gated on `Boolean(WS_URL && WS_TOKEN)`. A public-read
-site token satisfies both the search channel and the flat `/v1/graph` corpus
-route.
+### Live search: three derived vars, and why the third one decides everything
+
+The keystroke path is a browser→Phoenix websocket, so its config has to be
+**inlined into the client bundle**. The managed deploy path can't carry
+`NEXT_PUBLIC_*` names at all (its env allowlist is closed over `BARKPARK_*`), so
+`next.config.mjs` derives them instead — nothing to configure:
+
+| Derived (browser) | From | Note |
+|---|---|---|
+| `NEXT_PUBLIC_BARKPARK_WS_URL` | `origin(BARKPARK_API_URL) + /socket` | `origin` strips any `/w/:ws/p/:proj` suffix — the socket lives at the bare origin |
+| `NEXT_PUBLIC_BARKPARK_WS_TOKEN` | `BARKPARK_TOKEN` | Reaches the browser by design; must be **public-read** only |
+| `NEXT_PUBLIC_BARKPARK_DATASET` | `BARKPARK_DATASET` | The channel topic is `search:<ws>:<proj>:<dataset>` |
+| `NEXT_PUBLIC_BARKPARK_WORKSPACE` / `_PROJECT` | same names, unprefixed | Portability — the topic must not lean on the `default` fallback |
+
+The dataset is the one that bites. Wire the URL and the token but not the
+dataset, and the browser falls back to the `docs` default: it joins
+`search:default:default:docs`, the join **succeeds**, the LIVE badge lights —
+and every keystroke comes back with zero hits, forever, with no error anywhere.
+Live search looks fixed and finds nothing. Hence: all three, or none.
+
+With `BARKPARK_TOKEN` empty the live path ships **dark** — the socket is never
+constructed (it's dead-code-eliminated from the bundle) and every keystroke
+rides the same-origin HTTP `/api/find` route. That's a soft degrade, not a
+failure. One public-read site token satisfies both the search channel and the
+flat `/v1/graph` corpus route.
 
 ## Serving under `/sites/<slug>/`
 

@@ -8,9 +8,11 @@ defmodule Barkpark.PortableDoc.Render.ReaderDarkTokenParityTest do
       so they pick up the DARK values from paper-surface.css's
       `html[data-theme="dark"] .bp-paper-surface` block.
 
-    * The `/papers` READER never stamps `data-theme` — it theme-swaps purely via
-      `prefers-color-scheme` in the inline `<style>` of
-      `layouts/bulldocs.html.heex`.
+    * The `/papers` READER defaults to `prefers-color-scheme` in the inline
+      `<style>` of `layouts/bulldocs.html.heex`. Its dark/light pill stamps
+      `data-theme` pre-paint (localStorage `barkpark_theme`), but the @media
+      blocks remain the no-JS / first-paint owner of reader dark mode — so
+      their token coverage must stay COMPLETE, which is what this guard pins.
 
   Because the two paths are separate, a DARK token defined only on
   `html[data-theme="dark"]` is invisible to an OS-dark reader unless the reader's
@@ -106,7 +108,10 @@ defmodule Barkpark.PortableDoc.Render.ReaderDarkTokenParityTest do
   # `{ }` don't end it early.
   defp brace_body(s), do: brace_body(s, 1, [])
   defp brace_body(<<>>, _depth, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
-  defp brace_body(<<?}, _rest::binary>>, 1, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+
+  defp brace_body(<<?}, _rest::binary>>, 1, acc),
+    do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+
   defp brace_body(<<?{, rest::binary>>, depth, acc), do: brace_body(rest, depth + 1, [?{ | acc])
   defp brace_body(<<?}, rest::binary>>, depth, acc), do: brace_body(rest, depth - 1, [?} | acc])
   defp brace_body(<<c, rest::binary>>, depth, acc), do: brace_body(rest, depth, [c | acc])

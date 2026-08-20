@@ -95,6 +95,18 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
     scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
     scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
 
+    # W10 schema-visibility gate: the anonymous (no caller_context) searches in
+    # these cases are restricted to PUBLIC schema types — seed "post" as one in
+    # each tenant; the workspace-scope isolation stays the behaviour under test.
+    for scope <- [scope_a, scope_b] do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "post", "visibility" => "public"},
+          @ds,
+          scope
+        )
+    end
+
     {:ok, _} =
       Content.create_document(
         "post",

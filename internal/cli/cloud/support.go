@@ -2,14 +2,18 @@
 // (Personal Dev Fleet Wave C, PDF-D56..D62).
 //
 // A SUPPORT is a subordinate runner box for the developer's MAIN Barkpark
-// (charter PDF-D1: hub-and-spoke — supports serve the main, they get no public
-// identity of their own). Its bring-up reuses the warm-pool go-live chain but
-// deliberately REDUCED (PDF-D59): a support has no public FQDN, so the
-// dns/caddy/public-health/tenant-register steps are DROPPED and the health gate
-// is a LOCAL curl on the box. This file owns the two cloud-seam halves —
-// creating the box and configuring it — while the orchestration (roster row,
-// bind, dataset pull, runtime install, systemd unit) lives in the CLI surface
-// (internal/cli/cloud_support_cmd.go), which narrates each named state.
+// (charter PDF-D1: hub-and-spoke — supports serve the main). Its bring-up
+// reuses the warm-pool go-live chain but deliberately REDUCED (PDF-D59): this
+// configure subset drops the dns/caddy/public-health/tenant-register steps and
+// gates on a LOCAL curl on the box. WHO adds the public identity differs by
+// chain: the CP worker chain (internal/provisioner/support.go) wraps this
+// subset with the full DNS → Caddy/TLS → public-health legs so a provisioned
+// support fronts <label>.barkpark.cloud like a main does (Open Studio works);
+// the laptop `bp cloud support add` chain still ships the box headless. This
+// file owns the two cloud-seam halves — creating the box and configuring it —
+// while the orchestration (roster row, bind, dataset pull, runtime install,
+// systemd unit) lives in the CLI surface (internal/cli/cloud_support_cmd.go),
+// which narrates each named state.
 //
 // This is NOT a rival provision chain: every step here IS the warm-pool step
 // (CreateWarmServer, EnsureFresh, secretsInstallStep, defaultMigrateArgv,
@@ -123,7 +127,9 @@ type SupportConfigureOpts struct {
 //	admin-token → LOCAL health probe (curl localhost:4000/api/schemas)
 //
 // DROPPED vs configureHost: dns, caddy/TLS, the public health poll, and the
-// control-plane tenant register — a support has no public identity. NEVER
+// control-plane tenant register — the CP worker chain layers dns/caddy + the
+// public health poll AROUND this subset itself (supports carry a full public
+// identity now); the CLI chain runs it bare. NEVER
 // authored here: barkpark.service (baked into the warm image). The minted
 // Secrets are returned so the caller can drive the on-box admin API (dataset
 // import) with the box's own admin token. Every failure is fail-closed except
@@ -207,6 +213,82 @@ func ConfigureSupportHost(ctx context.Context, runner SupportRunner, opts Suppor
 	narrate("health-local", "ok")
 
 	return secrets, nil
+}
+
+// SupportDefaultWorkspaceSlug is the migrate-seeded root workspace slug every
+// baked box ships. It is the ONE import target that can be PRE-POLLUTED: the
+// warm image's baked Postgres carries the seed lineage forward across bake
+// generations (deploy/bake-server-image.sh snapshots the data dir; the lineage
+// was originally seeded SEED_PROFILE=demo, ~27 docs), so the box's "default"
+// workspace is NOT the empty shell the merge engine's fail-closed PDS-D9 proof
+// requires — a scrubbed default-workspace bundle 409s workspace_slug_conflict
+// (three live provision_support failures on 2026-07-26). Both support chains
+// gate the reset + re-mint bracket below on exactly this slug.
+const SupportDefaultWorkspaceSlug = "default"
+
+// SupportResetDefaultWorkspaceStep deletes the box's seeded "default"
+// workspace so the ensure-workspace step that follows creates a PROVABLY empty
+// shell and the merge-import lands on the live-proven PDS-D9 adopt branch
+// (empty shell → adopt-delete → import) instead of 409ing on the baked seed
+// docs. The engine's empty-shell proof (adopt_or_refuse_root_slug! +
+// empty_shell?) is correct and fail-closed — this step satisfies it, never
+// weakens it. Mechanics are adminTokenStep's verbatim (the admin plane on a
+// box IS `mix run -e` under the app's release env, asdf sourced because the
+// SSH runner's `bash -l` is non-interactive): Tenancy.delete_workspace/1 on
+// the slug-resolved workspace, TOLERATING absent (nil → no-op success) so
+// re-runs converge. FAIL LOUD on a delete error — a half-reset box must never
+// reach the import. No token rides this step (mix run is DB-direct), but it
+// sources .env, so env secrets are pattern-scrubbed from any captured output.
+//
+// The step REPORTS the document count it is about to delete (one
+// Repo.aggregate on documents.workspace_id before the delete): the seed size
+// was unmeasured folklore ("~27 docs", never observed), and this line is the
+// only observation of the image seed that survives the reset — it converts
+// the folklore into a measured number at zero cost (PDF-D103's second half).
+//
+// CASCADE WARNING for callers: the box admin token is scoped to the default
+// workspace (api_tokens.workspace_id is ON DELETE CASCADE since migration
+// 20260527140000), so this delete KILLS it — always follow with
+// SupportAdminTokenStep before the next token-authenticated on-box call.
+func SupportResetDefaultWorkspaceStep() CaddyStep {
+	const elixir = `case Barkpark.Tenancy.get_workspace_by_slug("default") do ` +
+		`nil -> IO.puts("default workspace already absent - reset is a no-op"); ` +
+		`ws -> require Ecto.Query; ` +
+		`doc_count = Barkpark.Repo.aggregate(Ecto.Query.where(Barkpark.Content.Document, workspace_id: ^ws.id), :count); ` +
+		`IO.puts("default workspace carries #{doc_count} document(s) - deleting them with the workspace"); ` +
+		`case Barkpark.Tenancy.delete_workspace(ws) do ` +
+		`{:ok, _} -> IO.puts("default workspace deleted - #{doc_count} document(s) destroyed (measured, not folklore)"); ` +
+		`other -> IO.inspect(other, label: "default workspace reset failed"); System.halt(1) end end`
+	script := `set -a; . /opt/barkpark/.env; set +a; . /root/.asdf/asdf.sh && cd /opt/barkpark/api && mix run -e '` + elixir + `'`
+	return CaddyStep{
+		Title: "reset the seeded default workspace to a provably-empty import target (Tenancy.delete_workspace — reports the measured doc count; absent is a no-op)",
+		Cmd:   "mix run -e 'Tenancy.delete_workspace(default)' (counts docs first; tolerates absent)",
+		Argv:  []string{"bash", "-lc", script},
+		// This step sources /opt/barkpark/.env — a failure could echo the DB
+		// password / SECRET_KEY_BASE / cloak key. Pattern-scrub those.
+		RedactEnvSecrets: true,
+	}
+}
+
+// SupportAdminTokenStep re-runs the go-live admin-token step (adminTokenStep —
+// revoke existing admin tokens, ensure_default_scope, mint the SAME secret
+// value; re-running converges). Exported because BOTH support chains must
+// restore the box credential after a default-workspace delete cascades it
+// (api_tokens.workspace_id :delete_all), TWICE on the ws=="default" path:
+//
+//  1. right after SupportResetDefaultWorkspaceStep — the ensure + import HTTP
+//     calls need a live bearer, and Seeds.Shared.ensure_default_scope inside
+//     the step get-or-creates the empty default workspace/project/dataset the
+//     adopt branch then replaces (no separate scope-recreation step needed);
+//  2. right after the merge-import — the engine's PDS-D9 adopt branch deletes
+//     the empty shell IN-TRANSACTION (Tenancy.delete_workspace again), which
+//     cascades the token minted in (1). Post-import, ensure_default_scope
+//     resolves slug "default" to the freshly-IMPORTED workspace, so the
+//     restored token is scoped to the content it must govern — the credential
+//     the chain holds and reports to the CP at succeed (mint_studio_link)
+//     stays live, restored verbatim.
+func SupportAdminTokenStep(boxAdminToken string) CaddyStep {
+	return adminTokenStep(boxAdminToken)
 }
 
 // SupportMergeImportStep builds the on-box merge-import step BOTH support

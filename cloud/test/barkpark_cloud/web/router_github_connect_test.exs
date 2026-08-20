@@ -322,7 +322,7 @@ defmodule BarkparkCloud.Web.RouterGithubConnectTest do
       assert is_binary(stored_secret) and byte_size(stored_secret) >= 32
     end
 
-    test "a SIGNED push to the linked branch records a born-FAILED Deployment (fail-fast interim)" do
+    test "a SIGNED push to the linked branch mints a QUEUED buildable Deployment (git-ref clone lane)" do
       configure_github()
       {user, team} = user_with_team("owner")
       {:ok, _} = GitHub.record_installation(team, "4242")
@@ -343,17 +343,17 @@ defmodule BarkparkCloud.Web.RouterGithubConnectTest do
       conn = webhook_call(site.id, "push", push, secret)
       assert conn.status == 201
       assert body(conn)["branch"] == "main"
-      # dwb-webhook fail-fast interim: building a push from source needs gh-1 (the
-      # GitHub App integration), which isn't wired yet — recording an installation
-      # id does NOT enable source builds. So the row is born terminal-FAILED with a
-      # human reason instead of a source-less "queued" zombie the builder never
-      # claims. gh-1 flips github_build_available?/1 back to the enqueue path.
-      assert body(conn)["status"] == "failed"
+      # git-ref clone lane: the connect flow linked a repo, so
+      # github_build_available?/1 (repo-present) routes the push to the enqueue
+      # path — a QUEUED artifact-less row the builder claims and clones at
+      # git_ref via the claim-envelope source.
+      assert body(conn)["status"] == "queued"
 
       [dep] = Registry.list_deployments(site)
       assert dep.git_ref == sha
-      assert dep.status == "failed"
-      assert dep.failure_reason =~ "github push builds"
+      assert dep.status == "queued"
+      assert dep.failure_reason == nil
+      assert dep.artifact_url == nil
     end
 
     test "gh-6: a push to a NON-production branch creates a PREVIEW, not a production deploy" do

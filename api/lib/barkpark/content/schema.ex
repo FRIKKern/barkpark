@@ -143,21 +143,24 @@ defmodule Barkpark.Content.Schema do
   def upsert_schema(attrs, dataset, opts \\ []) do
     name = Map.get(attrs, "name") || Map.get(attrs, :name)
 
-    attrs =
-      attrs
-      |> Map.put("dataset", dataset)
-      |> Content.put_scope_attrs(opts)
+    # Fail-closed scope stamp (felix-w26): a refused dataset resolution errors
+    # out of the with (SchemaController's action_fallback funnels it through
+    # Errors.to_envelope) instead of silently stamping dataset_id=NULL.
+    with {:ok, attrs} <-
+           attrs
+           |> Map.put("dataset", dataset)
+           |> Content.put_scope_attrs(opts) do
+      case name && get_schema(name, dataset, opts) do
+        {:ok, existing} ->
+          existing
+          |> SchemaDefinition.changeset(attrs)
+          |> Repo.update()
 
-    case name && get_schema(name, dataset, opts) do
-      {:ok, existing} ->
-        existing
-        |> SchemaDefinition.changeset(attrs)
-        |> Repo.update()
-
-      _ ->
-        %SchemaDefinition{}
-        |> SchemaDefinition.changeset(attrs)
-        |> Repo.insert()
+        _ ->
+          %SchemaDefinition{}
+          |> SchemaDefinition.changeset(attrs)
+          |> Repo.insert()
+      end
     end
   end
 
@@ -250,6 +253,53 @@ defmodule Barkpark.Content.Schema do
       {:ok, %{visibility: "public"}} -> true
       _ -> false
     end
+  end
+
+  @doc """
+  The visibility invariant applied to a schema ROW (struct or map) instead of a
+  `(type, dataset)` pair — `schema_public?/3` with the read already done.
+
+  ONE predicate, four enforcement points: the query route's `schema_public?/3`,
+  the anonymous search allowlist (`DocumentsRetriever.public_type_names/2`), the
+  corpus graph's per-caller type list (`TasksController.graph_corpus/2`) and the
+  ungated legacy schema index (`LegacyController.schemas/2`, which serves
+  `fields` to anonymous readers and must show public types only).
+  EXPLICITLY `"public"` only — `nil`, `"private"` and any future value are NOT
+  public, so a new visibility value fails CLOSED on every surface at once.
+  """
+  def public_schema?(%{visibility: v}), do: v == "public"
+  def public_schema?(%{"visibility" => v}), do: v == "public"
+  def public_schema?(_), do: false
+
+  @doc """
+  The allowlist of schema type NAMES a public-tier caller may see, derived at
+  READ TIME from `public_schema?/1`.
+
+  Two shapes, same invariant: pass an ALREADY-READ schema list (the corpus graph
+  has one in hand and must not pay a second query for it), or a dataset +
+  tenancy `opts` (the search read path, which has none). Never a hardcoded type
+  list — a schema flipped to private, or a private schema created seconds ago,
+  must drop out of the allowlist on the very next read.
+
+  Fails closed: an empty allowlist means the caller sees nothing, not everything.
+  """
+  def public_type_names(schemas) when is_list(schemas) do
+    schemas
+    |> Enum.filter(&public_schema?/1)
+    |> Enum.map(fn
+      %{name: name} -> name
+      %{"name" => name} -> name
+      _ -> nil
+    end)
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+  end
+
+  # No default `opts` here: `public_type_names/1` above already owns arity 1
+  # (the already-read list), so a defaulted second argument would collide.
+  def public_type_names(dataset, opts) when is_binary(dataset) do
+    dataset
+    |> list_schemas(opts)
+    |> public_type_names()
   end
 
   @doc """

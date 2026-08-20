@@ -1,10 +1,14 @@
 <.studio_shell>
-  <%!-- Self-update bar: admins only (shares_admin? chrome flag), and only when
-        SelfUpdate reports the instance is behind. Pinned ABOVE the topbar as a
-        slim strip; driven by the vanilla `bp-update-bar` initialiser in
-        root.html.heex (this bar is layout chrome, outside the LiveView diff). --%>
+  <%!-- Self-update bar: INSTANCE admins only (instance_admin? chrome flag —
+        HOST-level, deliberately NOT the workspace-scoped shares_admin?: this
+        bar offers to upgrade the BEAM every workspace runs on, so a host
+        operator must keep it while browsing a workspace they merely belong
+        to), and only when SelfUpdate reports the instance is behind. Pinned
+        ABOVE the topbar as a slim strip; driven by the vanilla `bp-update-bar`
+        initialiser in root.html.heex (this bar is layout chrome, outside the
+        LiveView diff). --%>
   <BarkparkWeb.StudioComponents.Nav.studio_update_banner
-    admin?={assigns[:shares_admin?] == true}
+    admin?={assigns[:instance_admin?] == true}
     api_token_raw={assigns[:api_token_raw]}
   />
 
@@ -113,6 +117,17 @@
   {@inner_content}
 
   <%!-- Build-version footer: last child of the shell flex column, so it
-        pins to the bottom on every Studio + admin surface. --%>
-  <BarkparkWeb.StudioComponents.Nav.studio_footer />
+        pins to the bottom on every Studio + admin surface. The vitals slot
+        carries live host stats (Barkpark.HostVitals.Sampler): an embedded
+        sticky LiveView in a live context, a static snapshot on dead views
+        (controller-rendered admin pages have no @socket). --%>
+  <BarkparkWeb.StudioComponents.Nav.studio_footer>
+    <:vitals>
+      <%= if assigns[:socket] do %>
+        <%= live_render(@socket, BarkparkWeb.ServerVitalsLive, id: "server-vitals", sticky: true) %>
+      <% else %>
+        <BarkparkWeb.ServerVitalsLive.line vitals={Barkpark.HostVitals.Sampler.snapshot()} />
+      <% end %>
+    </:vitals>
+  </BarkparkWeb.StudioComponents.Nav.studio_footer>
 </.studio_shell>

@@ -55,9 +55,19 @@ defmodule Barkpark.Accounts.Webauthn do
   """
   @spec verify_registration(User.t(), binary(), binary(), binary(), keyword()) ::
           {:ok, WebauthnCredential.t()} | {:error, term()}
-  def verify_registration(%User{} = user, attestation_object, client_data_json, challenge_bytes, opts \\ []) do
+  def verify_registration(
+        %User{} = user,
+        attestation_object,
+        client_data_json,
+        challenge_bytes,
+        opts \\ []
+      ) do
     challenge =
-      Wax.new_registration_challenge(rp_id: rp_id(opts), origin: origin(opts), bytes: challenge_bytes)
+      Wax.new_registration_challenge(
+        rp_id: rp_id(opts),
+        origin: origin(opts),
+        bytes: challenge_bytes
+      )
 
     with {:ok, {auth_data, _attestation}} <-
            Wax.register(attestation_object, client_data_json, challenge) do
@@ -91,9 +101,20 @@ defmodule Barkpark.Accounts.Webauthn do
   """
   @spec verify_authentication(binary(), binary(), binary(), binary(), binary(), keyword()) ::
           {:ok, WebauthnCredential.t()} | {:error, term()}
-  def verify_authentication(credential_id, auth_data_bin, sig, client_data_json, challenge_bytes, opts \\ []) do
+  def verify_authentication(
+        credential_id,
+        auth_data_bin,
+        sig,
+        client_data_json,
+        challenge_bytes,
+        opts \\ []
+      ) do
     challenge =
-      Wax.new_authentication_challenge(rp_id: rp_id(opts), origin: origin(opts), bytes: challenge_bytes)
+      Wax.new_authentication_challenge(
+        rp_id: rp_id(opts),
+        origin: origin(opts),
+        bytes: challenge_bytes
+      )
 
     case Repo.get_by(WebauthnCredential, credential_id: credential_id) do
       nil ->
@@ -103,9 +124,16 @@ defmodule Barkpark.Accounts.Webauthn do
         case load_cose(cred) do
           {:ok, cose_key} ->
             with {:ok, auth_data} <-
-                   Wax.authenticate(credential_id, auth_data_bin, sig, client_data_json, challenge, [
-                     {credential_id, cose_key}
-                   ]),
+                   Wax.authenticate(
+                     credential_id,
+                     auth_data_bin,
+                     sig,
+                     client_data_json,
+                     challenge,
+                     [
+                       {credential_id, cose_key}
+                     ]
+                   ),
                  :ok <- counter_ok?(cred.sign_count, auth_data.sign_count) do
               advance_counter(cred, auth_data.sign_count)
             end
@@ -153,7 +181,9 @@ defmodule Barkpark.Accounts.Webauthn do
   @doc "A user's registered credentials, newest first."
   @spec list_credentials(User.t()) :: [WebauthnCredential.t()]
   def list_credentials(%User{id: uid}) do
-    Repo.all(from c in WebauthnCredential, where: c.user_id == ^uid, order_by: [desc: c.inserted_at])
+    Repo.all(
+      from c in WebauthnCredential, where: c.user_id == ^uid, order_by: [desc: c.inserted_at]
+    )
   end
 
   @doc "True when `user` has at least one passkey — i.e. it can serve as a factor."

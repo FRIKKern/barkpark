@@ -4,8 +4,10 @@ defmodule BarkparkWeb.AuthController do
 
   Public: register, login (with TOTP second factor), verify-email, request-reset,
   reset. Session-gated (`RequireUserSession`): me, logout, mfa/enroll, mfa/verify,
-  mfa/disable. The three mfa/* routes additionally require the current password
-  (re-auth) so a hijacked-but-unlocked session cannot silently alter MFA.
+  mfa/disable, erase, change_password. The mfa/* routes, erase, and
+  change_password all additionally require the current password (re-auth) so a
+  hijacked-but-unlocked session cannot silently alter MFA, erase the account, or
+  change the password.
 
   Login returns the session token as a bearer in the body AND sets a signed
   `user_session` cookie, so both API clients and browsers are served. Anti-
@@ -186,6 +188,50 @@ defmodule BarkparkWeb.AuthController do
   end
 
   def erase(conn, _), do: error(conn, 400, "bad_request", "password is required")
+
+  @doc """
+  Self-service password change. Sensitive: requires the CURRENT password
+  (reauth), same shape as `erase/2` above. Delegates to
+  `Accounts.update_user_password/3`, which already exists and is tested —
+  this action is its first HTTP door. That function revokes every session
+  for the user on success (including this one), same contract as a
+  token-based `reset/2`; unlike `reset/2` it reports no sessions-revoked
+  count (see the function's own doc for why), so the response is a plain
+  `{"ok": true}` and the caller signs in again afterwards.
+  """
+  def change_password(conn, %{"current_password" => current_password, "password" => password}) do
+    user = conn.assigns.current_user
+
+    case Accounts.update_user_password(user, current_password, %{password: password}) do
+      {:ok, _user} ->
+        audit(%{
+          category: "auth",
+          action: "password_changed",
+          subject: user.id,
+          actor_type: "user",
+          actor_id: user.id,
+          metadata: %{"via" => "self_service"}
+        })
+
+        conn
+        |> configure_session(drop: true)
+        |> json(%{ok: true})
+
+      {:error, :invalid_current} ->
+        error(
+          conn,
+          403,
+          "invalid_password",
+          "the current password is required to change your password"
+        )
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        error(conn, 422, "invalid_password", changeset_errors(cs))
+    end
+  end
+
+  def change_password(conn, _),
+    do: error(conn, 400, "bad_request", "current_password and password are required")
 
   def me(conn, _params) do
     user = conn.assigns.current_user
@@ -443,21 +489,24 @@ defmodule BarkparkWeb.AuthController do
   def magic_login(conn, _), do: error(conn, 400, "bad_request", "token is required")
 
   def reset(conn, %{"token" => token, "password" => password}) do
-    case Accounts.reset_user_password(token, %{password: password}) do
-      {:ok, user} ->
-        # A token-based reset also revokes every session ("sign out everywhere")
-        # and, on the recovery path, wipes MFA — a high-value account-recovery
-        # event worth recording on the tamper-evident trail.
+    case Accounts.reset_user_password_counting(token, %{password: password}) do
+      {:ok, user, sessions_revoked} ->
+        # A token-based reset revokes every session ("sign out everywhere") and,
+        # on the recovery path, wipes MFA — a high-value account-recovery event
+        # worth recording on the tamper-evident trail. `sessions_revoked` is the
+        # COUNT the revoke actually stamped, carried from
+        # Accounts.revoke_all_user_sessions/1 — the receipt reports the number
+        # rather than re-asserting the claim (PDS-D503).
         audit(%{
           category: "auth",
           action: "password_reset",
           subject: user.id,
           actor_type: "user",
           actor_id: user.id,
-          metadata: %{"via" => "reset_token"}
+          metadata: %{"via" => "reset_token", "sessions_revoked" => sessions_revoked}
         })
 
-        json(conn, %{ok: true})
+        json(conn, %{ok: true, sessionsRevoked: sessions_revoked})
 
       {:error, cs} ->
         error(conn, 422, "invalid_password", changeset_errors(cs))

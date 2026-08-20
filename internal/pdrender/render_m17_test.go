@@ -79,6 +79,173 @@ func TestM17StripComplete(t *testing.T) {
 	})
 }
 
+// TestHeatMatrixPreservesLabelsAtGridWidth is derived from the production
+// constraint-frontier Paper. A two-track section gives this matrix 39 columns;
+// every row/column label must survive by wrapping instead of becoming "cap…".
+func TestHeatMatrixPreservesLabelsAtGridWidth(t *testing.T) {
+	block := Block{Type: "heatmap", Attrs: map[string]any{
+		"type":      "heatmap",
+		"values":    true,
+		"max":       3,
+		"cells":     []any{[]any{0, 0, 0, 0}, []any{1, 1, 1, 0}},
+		"colLabels": []any{"capital", "skill", "network", "violence"},
+		"rowLabels": []any{"cultivation", "distribution"},
+	}}
+	out := ansi.Strip(strings.Join(heatmapRenderer{}.Render(
+		block,
+		RenderCtx{Width: 39, Theme: DarkTheme(), Profile: NoColor},
+	), "\n"))
+
+	if strings.Contains(out, "…") {
+		t.Fatalf("heat matrix introduced an ellipsis:\n%s", out)
+	}
+	compact := semanticCompact(out)
+	for _, label := range []string{
+		"capital", "skill", "network", "violence", "cultivation", "distribution",
+	} {
+		if !strings.Contains(compact, semanticCompact(label)) {
+			t.Errorf("missing complete label %q:\n%s", label, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if ansi.StringWidth(line) > 39 {
+			t.Errorf("line width %d exceeds 39: %q", ansi.StringWidth(line), line)
+		}
+	}
+}
+
+// TestHeatMatrixHighCardinalityFallsBackToCompleteLedger proves a matrix that
+// cannot keep all columns aligned in 39 cells changes representation instead of
+// relying on the document boundary to wrap rows and sever header/value mapping.
+func TestHeatMatrixHighCardinalityFallsBackToCompleteLedger(t *testing.T) {
+	block := Block{Type: "heatmap", Attrs: map[string]any{
+		"type":   "heatmap",
+		"values": true,
+		"cells": []any{
+			[]any{100, 200, 300, 400, 500, 600, 700, 800},
+		},
+		"colLabels": []any{
+			"admission", "billing", "catalog", "delivery",
+			"evidence", "fulfilment", "governance", "handoff",
+		},
+		"rowLabels": []any{"a deliberately long production row"},
+	}}
+	out := ansi.Strip(strings.Join(heatmapRenderer{}.Render(
+		block,
+		RenderCtx{Width: 39, Theme: DarkTheme(), Profile: NoColor},
+	), "\n"))
+
+	if !strings.Contains(out, "Matrix ledger") {
+		t.Fatalf("expected explicit complete-ledger fallback:\n%s", out)
+	}
+	if strings.Contains(out, "…") {
+		t.Fatalf("matrix ledger introduced an ellipsis:\n%s", out)
+	}
+	compact := semanticCompact(out)
+	for _, want := range []string{
+		"admission", "billing", "catalog", "delivery", "evidence",
+		"fulfilment", "governance", "handoff",
+		"a deliberately long production row",
+		"1 100", "2 200", "3 300", "4 400",
+		"5 500", "6 600", "7 700", "8 800",
+	} {
+		if !strings.Contains(compact, semanticCompact(want)) {
+			t.Errorf("ledger missing %q:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if ansi.StringWidth(line) > 39 {
+			t.Errorf("line width %d exceeds 39: %q", ansi.StringWidth(line), line)
+		}
+	}
+}
+
+// TestHeatMatrixShadeLedgerKeepsValuesPrivate preserves the author contract:
+// values:false stays a shade-only matrix even when cardinality forces the narrow
+// ledger representation.
+func TestHeatMatrixShadeLedgerKeepsValuesPrivate(t *testing.T) {
+	cells := make([]any, 20)
+	labels := make([]any, 20)
+	for i := range cells {
+		cells[i] = 9876 + i
+		labels[i] = "dimension-" + itoa(i+1)
+	}
+	block := Block{Type: "heatmap", Attrs: map[string]any{
+		"type":      "heatmap",
+		"marginals": true,
+		"values":    false,
+		"cells":     []any{cells},
+		"colLabels": labels,
+		"rowLabels": []any{"production row"},
+	}}
+	out := ansi.Strip(strings.Join(heatmapRenderer{}.Render(
+		block,
+		RenderCtx{Width: 39, Theme: DarkTheme(), Profile: NoColor},
+	), "\n"))
+
+	if !strings.Contains(out, "Matrix ledger") {
+		t.Fatalf("expected explicit complete-ledger fallback:\n%s", out)
+	}
+	if strings.Contains(out, "9876") || strings.Contains(out, "9895") {
+		t.Fatalf("shade-only ledger exposed exact values:\n%s", out)
+	}
+	if !strings.ContainsAny(out, "░▒▓█") {
+		t.Fatalf("shade-only ledger lost quantile geometry:\n%s", out)
+	}
+	for i := 1; i <= 20; i++ {
+		if !strings.Contains(semanticCompact(out), semanticCompact("dimension-"+itoa(i))) {
+			t.Errorf("shade ledger lost column label %d:\n%s", i, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if ansi.StringWidth(line) > 39 {
+			t.Errorf("line width %d exceeds 39: %q", ansi.StringWidth(line), line)
+		}
+	}
+}
+
+// TestHeatMatrixLedgerKeepsRaggedMappingAndIgnoresExtraLabels locks three narrow
+// fallback edges: no phantom label beyond nCols, no omitted trailing mapping for
+// a short row, and the heat-scale key remains visible.
+func TestHeatMatrixLedgerKeepsRaggedMappingAndIgnoresExtraLabels(t *testing.T) {
+	labels := make([]any, 11)
+	for i := range labels {
+		labels[i] = "dimension-" + itoa(i+1)
+	}
+	block := Block{Type: "heatmap", Attrs: map[string]any{
+		"type":   "heatmap",
+		"values": true,
+		"cells": []any{
+			[]any{100, 200, 300, 400, 500, 600, 700, 800, 900, 1000},
+			[]any{7, 8},
+		},
+		"colLabels": labels,
+		"rowLabels": []any{"complete row", "ragged row"},
+	}}
+	out := ansi.Strip(strings.Join(heatmapRenderer{}.Render(
+		block,
+		RenderCtx{Width: 39, Theme: DarkTheme(), Profile: NoColor},
+	), "\n"))
+	compact := semanticCompact(out)
+
+	if !strings.Contains(out, "Matrix ledger") {
+		t.Fatalf("expected explicit complete-ledger fallback:\n%s", out)
+	}
+	if strings.Contains(compact, semanticCompact("dimension-11")) {
+		t.Fatalf("ledger rendered phantom label beyond nCols:\n%s", out)
+	}
+	for _, want := range []string{"dimension-10", "ragged row", "10=0", "less", "more"} {
+		if !strings.Contains(compact, semanticCompact(want)) {
+			t.Errorf("ledger missing %q:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if ansi.StringWidth(line) > 39 {
+			t.Errorf("line width %d exceeds 39: %q", ansi.StringWidth(line), line)
+		}
+	}
+}
+
 // TestHeatQuantileBins pins the quantile binning contract: zero → -1 (the special
 // dim bin), and a single dominating spike does NOT flatten the ordinary values into
 // the floor (the whole reason quantile beats linear value/max).

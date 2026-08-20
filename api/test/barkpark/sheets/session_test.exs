@@ -1478,7 +1478,10 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
           ct_tab("Sheet2", %{"A1" => %{"v" => 5}})
         ])
 
-      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("ct-prop", @dataset, doc.workspace_id))
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("ct-prop", @dataset, doc.workspace_id)
+      )
 
       # Edit Sheet2!A1 (tab 1). Sheet1 (tab 0) references it by name, so the
       # session must dirty AND broadcast tab 0 too — the founding "other tabs

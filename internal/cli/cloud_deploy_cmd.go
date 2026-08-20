@@ -29,12 +29,16 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 )
@@ -204,6 +208,25 @@ func runCloudDeploy(out *writer, g globals, args []string) int {
 	out.outf("→ deploying %s to %s (ssh %s, via %s)", ref, healthHost, host, via)
 	out.outf("  streaming %s to the box — this can take a few minutes…", path)
 
+	// THE EXPECTATION, resolved BEFORE the box is touched. Before/after alone
+	// cannot separate a coalesce (exit 0, no rebuild) from a stall (exit 0, no
+	// advance) — both leave the served sha untouched — and a MISMATCH is not
+	// derivable at all without knowing what SHOULD be running. `git ls-remote`
+	// answers that unauthenticated for both ref shapes.
+	//
+	// The --host path is decided BEFORE any of it runs: --host INVENTS the health
+	// FQDN (deriveHealthHost) while the box gates itself with curl --resolve, so
+	// the CLI cannot confirm it would be reading the same box. That path performs
+	// no reads at all and says so at the end.
+	var expected, expectedProblem string
+	var before deployCommitRead
+	if via != "--host" {
+		expected, expectedProblem = resolveExpectedDeploySha(ref)
+		// The BEFORE read, so "advanced" can name what it advanced FROM and a
+		// coalesce can be told apart from a stall.
+		before = readDeployCommit(healthHost)
+	}
+
 	feeder := newDeployFeeder(host)
 	output, derr := feeder.RunFeed(cloudCtx(), "instance-deploy", remoteScript, strings.NewReader(script))
 	if s := strings.TrimRight(output, "\n"); strings.TrimSpace(s) != "" {
@@ -213,13 +236,278 @@ func runCloudDeploy(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "deploy failed: "+derr.Error(), exitGeneric)
 	}
 
+	// The ssh exit code is NOT the success claim — the box's own /status.json is.
+	rb := performDeployReadback(via, healthHost, expected, expectedProblem, before)
+
 	out.outf("")
-	out.outf("✓ %s deployed — https://%s", target, healthHost)
+	switch rb.outcome {
+	case deployStall, deployMismatch:
+		// A NAMED non-zero. The run exited 0; the box did not advance.
+		return useError(out, "deploy-"+rb.outcome, rb.line(target, healthHost), exitGeneric)
+	default:
+		out.outf("%s", rb.line(target, healthHost))
+	}
 	out.outf("  smoke:")
 	for _, u := range deploySmokeURLs(healthHost) {
 		out.outf("    %s", u)
 	}
 	return exitOK
+}
+
+// ─── the read-back: proving the box advanced ────────────────────────────────
+//
+// `bp cloud deploy` used to gate its entire success message on `if derr != nil`
+// over the ssh feed and then print a checkmark. Nothing read the box. This is
+// the post-condition read that backs the claim — and, where it CANNOT be
+// performed, says so in the same breath instead of printing a bare ✓.
+
+// The four named outcomes. Nothing else may be printed as a success.
+const (
+	deployAdvanced      = "advanced"
+	deployAlreadyAt     = "already-at"
+	deployStall         = "stall"
+	deployMismatch      = "mismatch"
+	deployUnperformable = "unperformable"
+)
+
+// deployReadbackTries / deployReadbackWait: the AFTER read retries before it is
+// willing to call a stall. instance-deploy.sh flips Caddy ~290 lines before it
+// exits 0, so the window should be negative — but that conclusion is read off
+// the script, not measured on a live deploy, so the retry is kept as cheap
+// insurance against calling a healthy deploy a failure.
+var (
+	deployReadbackTries = 3
+	deployReadbackWait  = 5 * time.Second
+	deploySleep         = time.Sleep
+)
+
+// deployCommitRead is one /status.json read. Exactly one of commit / problem is
+// set: problem carries the reason the read-back could not be performed, phrased
+// for the owner, and there are FOUR distinct live shapes (see readDeployCommit).
+type deployCommitRead struct {
+	commit  string
+	problem string
+}
+
+// deployStatusFetch GETs https://<host>/status.json. A package var so tests
+// point it at an httptest server without any network.
+var deployStatusFetch = func(host string) (status int, body string, err error) {
+	req, rerr := http.NewRequestWithContext(cloudCtx(), http.MethodGet, "https://"+host+"/status.json", nil)
+	if rerr != nil {
+		return 0, "", rerr
+	}
+	resp, derr := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if derr != nil {
+		return 0, "", derr
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, string(b), nil
+}
+
+// readDeployCommit reads the box's running commit out of /status.json and
+// classifies every way that read can fail to produce a usable sha. The four
+// shapes get four DISTINCT sentences — collapsing them to "couldn't read it" is
+// itself a mild information-lie, because three of them are actionable and only
+// one is "the box is unreachable":
+//
+//	host unreachable  — DNS/TLS/connect error (or a non-2xx that is not 404)
+//	route 404         — this box serves no /status.json at all
+//	key ABSENT        — a post-dependency build renders "unknown" rather than
+//	                    omitting the key, so an ABSENT key PROVES a build from
+//	                    before the status-commit read path landed
+//	literal "unknown" — a current build that has no git metadata to report
+func readDeployCommit(healthHost string) deployCommitRead {
+	code, body, err := deployStatusFetch(healthHost)
+	switch {
+	case err != nil:
+		return deployCommitRead{problem: fmt.Sprintf("could not reach https://%s/status.json (%v)", healthHost, err)}
+	case code == http.StatusNotFound:
+		return deployCommitRead{problem: fmt.Sprintf("https://%s/status.json is not served (404) — this box has no status route", healthHost)}
+	case code < 200 || code > 299:
+		return deployCommitRead{problem: fmt.Sprintf("https://%s/status.json answered HTTP %d", healthHost, code)}
+	}
+	var doc map[string]any
+	if jerr := json.Unmarshal([]byte(body), &doc); jerr != nil {
+		return deployCommitRead{problem: fmt.Sprintf("https://%s/status.json did not parse as JSON (%v)", healthHost, jerr)}
+	}
+	raw, ok := doc["commit"]
+	if !ok || raw == nil {
+		return deployCommitRead{problem: fmt.Sprintf("https://%s/status.json carries no `commit` key — this box predates the status-commit build; deploy it once and the read-back works from then on", healthHost)}
+	}
+	commit := strings.TrimSpace(fmt.Sprintf("%v", raw))
+	switch {
+	case commit == "" || commit == "unknown":
+		return deployCommitRead{problem: fmt.Sprintf("https://%s/status.json reports commit \"unknown\" — the running build carries no git sha to compare", healthHost)}
+	case len(commit) < 7:
+		return deployCommitRead{problem: fmt.Sprintf("https://%s/status.json reports commit %q — too short to compare against a full sha", healthHost, commit)}
+	}
+	return deployCommitRead{commit: commit}
+}
+
+// resolveExpectedDeploySha asks the REMOTE what the deployed ref points at.
+// Both DEPLOY_REF shapes are queried FULLY QUALIFIED — `git ls-remote <url> main`
+// suffix-matches and returns TWO lines when a tag path also ends in /main.
+// A missing ref EXITS 0 WITH EMPTY OUTPUT, so gating on err != nil would be a
+// success-claim on an exit code inside the slice whose whole point is refusing
+// those: empty output routes to a problem, never to a comparison against "".
+func resolveExpectedDeploySha(ref string) (sha, problem string) {
+	fq := qualifyDeployRef(ref)
+	out, err := deployLsRemote(fq)
+	if err != nil {
+		return "", fmt.Sprintf("could not resolve %s on origin (%v) — no expected sha to compare against", fq, err)
+	}
+	sha = pickLsRemoteSha(out, fq)
+	if sha == "" {
+		return "", fmt.Sprintf("origin has no %s (git ls-remote returned nothing) — no expected sha to compare against", fq)
+	}
+	return sha, ""
+}
+
+// qualifyDeployRef maps a DEPLOY_REF onto its fully-qualified remote ref:
+// pull/N/head → refs/pull/N/head, anything else → refs/heads/<branch>. An
+// already-qualified ref is passed through.
+func qualifyDeployRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	switch {
+	case strings.HasPrefix(ref, "refs/"):
+		return ref
+	case strings.HasPrefix(ref, "pull/"):
+		return "refs/" + ref
+	default:
+		return "refs/heads/" + ref
+	}
+}
+
+// deployLsRemote runs `git ls-remote origin <fully-qualified-ref>`. A package
+// var so tests supply output without a network round-trip. The repo is public,
+// so this needs no credentials.
+var deployLsRemote = func(fqref string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", "origin", fqref)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	b, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// pickLsRemoteSha takes the sha whose ref column EXACTLY equals the requested
+// ref — never "the first line", because ls-remote can answer with more than one.
+func pickLsRemoteSha(out, fqref string) string {
+	for _, ln := range strings.Split(out, "\n") {
+		f := strings.Fields(strings.TrimSpace(ln))
+		if len(f) == 2 && f[1] == fqref {
+			return f[0]
+		}
+	}
+	return ""
+}
+
+// deployReadback is the classified verdict plus everything its sentence needs.
+type deployReadback struct {
+	outcome  string
+	served   string
+	previous string
+	expected string
+	problem  string
+}
+
+// performDeployReadback runs the AFTER read (with retries) and classifies. The
+// --host path never gets here with a real answer: --host INVENTS the health FQDN
+// (deriveHealthHost) while the box's own gate curls with --resolve, so the CLI
+// and the box do not resolve the same name — that path declares UNPERFORMABLE
+// rather than borrowing the script's confidence.
+func performDeployReadback(via, healthHost, expected, expectedProblem string, before deployCommitRead) deployReadback {
+	if via == "--host" {
+		return deployReadback{
+			outcome:  deployUnperformable,
+			expected: expected,
+			problem: fmt.Sprintf("--host was used, so %s is a GUESSED health FQDN — the box gates itself with curl --resolve and the CLI cannot confirm it is reading the same box; re-run by fleet name for a proven read-back",
+				healthHost),
+		}
+	}
+	after := readDeployCommit(healthHost)
+	for i := 1; i < deployReadbackTries; i++ {
+		if rb := classifyDeployReadback(expected, expectedProblem, before, after); rb.outcome != deployStall && rb.outcome != deployMismatch {
+			break
+		}
+		deploySleep(deployReadbackWait)
+		after = readDeployCommit(healthHost)
+	}
+	return classifyDeployReadback(expected, expectedProblem, before, after)
+}
+
+// classifyDeployReadback is the PURE verdict. Comparison is prefix-based in ONE
+// direction — the SERVED sha must be a prefix of the EXPECTED full sha — because
+// short-sha length is adaptive (7 in a depth-1 clone, 9 elsewhere, 40 from
+// ls-remote) for the SAME commit; `==` would manufacture a false MISMATCH, and
+// the reverse direction would compare a 40-char expectation against a 9-char
+// prefix and never match.
+func classifyDeployReadback(expected, expectedProblem string, before, after deployCommitRead) deployReadback {
+	rb := deployReadback{expected: expected, served: after.commit, previous: before.commit}
+	switch {
+	case expectedProblem != "":
+		rb.outcome, rb.problem = deployUnperformable, expectedProblem
+		return rb
+	case after.problem != "":
+		rb.outcome, rb.problem = deployUnperformable, after.problem
+		return rb
+	}
+	if deployShaMatches(after.commit, expected) {
+		if before.problem == "" && deployShaMatches(before.commit, expected) {
+			rb.outcome = deployAlreadyAt
+			return rb
+		}
+		rb.outcome = deployAdvanced
+		return rb
+	}
+	if before.problem == "" && before.commit == after.commit {
+		rb.outcome = deployStall
+		return rb
+	}
+	rb.outcome = deployMismatch
+	return rb
+}
+
+// deployShaMatches is served-is-a-prefix-of-expected, the only safe direction.
+func deployShaMatches(served, expected string) bool {
+	if served == "" || expected == "" {
+		return false
+	}
+	return strings.HasPrefix(expected, served)
+}
+
+// line renders the outcome. There is no bare checkmark anywhere: every ✓ names
+// the sha the box actually serves, and an unperformable read-back is stated in
+// the same breath as the deploy that could not be verified.
+func (rb deployReadback) line(target, healthHost string) string {
+	switch rb.outcome {
+	case deployAdvanced:
+		was := rb.previous
+		if was == "" {
+			was = "unknown"
+		}
+		return fmt.Sprintf("✓ %s ADVANCED — now serves %s (was %s) — https://%s", target, rb.served, was, healthHost)
+	case deployAlreadyAt:
+		return fmt.Sprintf("✓ %s already at %s — the box did not rebuild (coalesce); pass --clean to force one — https://%s", target, rb.served, healthHost)
+	case deployStall:
+		return fmt.Sprintf("STALL: the deploy exited 0 but %s still serves %s (expected %s) — nothing advanced", target, rb.served, shortSha(rb.expected))
+	case deployMismatch:
+		return fmt.Sprintf("MISMATCH: %s serves %s, not the requested %s", target, rb.served, shortSha(rb.expected))
+	default:
+		return fmt.Sprintf("→ %s deploy ran and exited 0, but the read-back is UNPERFORMABLE, so this is NOT a proof it advanced: %s", target, rb.problem)
+	}
+}
+
+// shortSha trims a full sha to 12 for reading; anything shorter is untouched.
+func shortSha(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }
 
 // resolveDeployRef maps the ref flags onto the DEPLOY_REF the box fetches:
@@ -402,6 +690,16 @@ REF
   --branch <x>   deploy branch x           (DEPLOY_REF=x)
   --pr <n>       deploy PR n's head        (DEPLOY_REF=pull/n/head)
   (neither)      deploy main               (DEPLOY_REF=main)
+
+PROOF (the ssh exit code is not the success claim)
+  After the run it resolves the ref's sha with ` + "`git ls-remote`" + ` and reads the box's
+  own https://<health-host>/status.json. Exactly one of four outcomes is printed:
+    ADVANCED        now serves <sha> (was <old>)
+    already at      the box already ran that sha — no rebuild happened (--clean forces one)
+    STALL/MISMATCH  the run exited 0 but the box did not advance — a NAMED non-zero
+    UNPERFORMABLE   the read-back could not be done (said outright, never a bare ✓)
+  --host makes the health FQDN a guess, so that path is always UNPERFORMABLE —
+  deploy by fleet name for a proven read-back.
 
 FLAGS
   --clean        remove .instance-deploy-last first (force a rebuild, no coalesce)

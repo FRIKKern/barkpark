@@ -2,16 +2,34 @@
 // Base layout — bakes the HEALTH markers (bp-build-id / bp-content-rev /
 // bp-doc-id) the deploy engine asserts by value, plus the two-axis theme
 // bootstrap (data-theme mode × data-bp-theme identity, deploy-pinned default).
+import { ClientRouter } from 'astro:transitions'
 import { env } from '../lib/bp'
 interface Props {
   title: string
   docId?: string
 }
 const { title, docId } = Astro.props
+// The two-axis theme is applied to <html> at RUNTIME, so it lives nowhere in
+// the static markup. Astro's ClientRouter replaces the root element's
+// attributes on every swap, which drops both axes and drops the page to its
+// light default mid-session (live-caught: navigating from the landing to a
+// document flipped a dark session white).
+//
+// So the applier is a NAMED function bound to `astro:after-swap` as well as run
+// inline. `after-swap` — not `page-load` — because it fires BEFORE the new
+// document is painted; `page-load` would repaint and show a flash of the wrong
+// theme on every navigation.
 const themeBoot =
-  "(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;document.documentElement.dataset.bpTheme=localStorage.getItem('bp_theme')||" +
+  '(function(){function apply(){try{' +
+  "var t=localStorage.getItem('theme');" +
+  "if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}" +
+  'document.documentElement.dataset.theme=t;' +
+  "document.documentElement.dataset.bpTheme=localStorage.getItem('bp_theme')||" +
   JSON.stringify(env.theme) +
-  ';}catch(e){}})();'
+  ';}catch(e){}}' +
+  'apply();' +
+  "document.addEventListener('astro:after-swap',apply);" +
+  '})();'
 ---
 
 <!doctype html>
@@ -25,6 +43,14 @@ const themeBoot =
     <meta name="bp-site-base" content={env.siteBase} />
     {docId && <meta name="bp-doc-id" content={docId} />}
     <script set:html={themeBoot} />
+    {/* Client-side navigation: opening a document must NOT reload the page —
+        the finder rail has to keep its typed query, its results and its scroll
+        exactly as the Next edition does (Next swaps only the `children`
+        segment of a single mounted layout). ClientRouter intercepts same-origin
+        link clicks, fetches the target, swaps the DOM, and REUSES any element
+        marked `transition:persist` — which is how the finder island survives
+        the navigation instead of remounting. */}
+    <ClientRouter />
   </head>
   <body>
     <slot />

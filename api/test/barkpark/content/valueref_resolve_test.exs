@@ -180,7 +180,10 @@ defmodule Barkpark.Content.ValuerefResolveTest do
     assert Content.resolve_values_in_blocks(blocks_for("m-shape", "nested.deep"), @dataset) ==
              %{}
 
-    assert Content.resolve_values_in_blocks(blocks_for("m-shape", "content.launch_delay"), @dataset) ==
+    assert Content.resolve_values_in_blocks(
+             blocks_for("m-shape", "content.launch_delay"),
+             @dataset
+           ) ==
              %{}
   end
 
@@ -214,7 +217,12 @@ defmodule Barkpark.Content.ValuerefResolveTest do
         "id" => "b1",
         "type" => "paragraph",
         "content" => [
-          %{"type" => "valueref", "target" => "m-a", "field" => "launch_delay", "fallback" => "?"},
+          %{
+            "type" => "valueref",
+            "target" => "m-a",
+            "field" => "launch_delay",
+            "fallback" => "?"
+          },
           %{"type" => "valueref", "target" => "m-a", "field" => "title", "fallback" => "?"},
           %{"type" => "valueref", "target" => "m-b", "field" => "launch_delay", "fallback" => "?"}
         ]

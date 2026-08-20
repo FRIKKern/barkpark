@@ -11,6 +11,8 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Content.Expand
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
+  alias BarkparkWeb.AnonPerspective
+  alias BarkparkWeb.ErrorResponse
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -19,7 +21,7 @@ defmodule BarkparkWeb.QueryController do
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
     if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) do
       t0 = System.monotonic_time(:microsecond)
-      perspective = resolve_perspective(conn, params)
+      perspective = AnonPerspective.resolve(conn, params)
       # Clamp to the same bounds Content.list_documents enforces (limit [1,1000],
       # offset [0,100_000] — see Content.Query) so the echoed limit/offset in the
       # response body match what the query actually used. Otherwise a paginator
@@ -76,7 +78,7 @@ defmodule BarkparkWeb.QueryController do
             |> Expand.expand(
               expand_spec,
               dataset,
-              [published_only: anon_pinned?(conn), caller_context: caller_context] ++
+              [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
                 scope_opts(conn)
             )
             |> project_fields(parse_fields(params["fields"]))
@@ -161,8 +163,15 @@ defmodule BarkparkWeb.QueryController do
   (index-covered by `documents_workspace_project_type_dataset_id_index`).
 
   Perspective is fixed to `:published` (the single perspective agents care
-  about; per-perspective counts change the query shape). FROZEN response shape,
-  which the CLI slice consumes verbatim:
+  about; per-perspective counts change the query shape) and a `?perspective`
+  naming anything else is REFUSED with a 400 (PDS-D303). It used to be read and
+  silently discarded: `?perspective=raw` and `?perspective=zzzbogus` both
+  returned 200 with a byte-identical published body still labelled
+  `"perspective":"published"` — a caller counting drafts got the published
+  number and no way to know. Honouring `raw` here would change a frozen shape
+  AND widen an existence-count surface this design deliberately hides, so the
+  endpoint says no instead of lying. FROZEN response shape, which the CLI slice
+  consumes verbatim:
 
       {"ok": true, "dataset": "<ds>", "perspective": "published",
        "counts": {"<type>": N, ...}}
@@ -175,17 +184,49 @@ defmodule BarkparkWeb.QueryController do
   (existence-hiding, like `backlinks`) — a per-type census across ALL types
   must not surface private-type existence to an anonymous caller.
   """
-  def counts(conn, %{"dataset" => dataset}) do
-    if preview?(conn) or authed?(conn) do
-      json(conn, %{
-        ok: true,
-        dataset: dataset,
-        perspective: "published",
-        counts: published_type_counts(conn, dataset)
-      })
-    else
-      {:error, :not_found}
+  def counts(conn, %{"dataset" => dataset} = params) do
+    cond do
+      # Existence-hiding FIRST: an anonymous caller gets the same 404 whatever
+      # perspective it names, so the refusal below never becomes a probe.
+      not (preview?(conn) or authed?(conn)) ->
+        {:error, :not_found}
+
+      unsupported_perspective(params) ->
+        refuse_perspective(conn, unsupported_perspective(params))
+
+      true ->
+        json(conn, %{
+          ok: true,
+          dataset: dataset,
+          perspective: "published",
+          counts: published_type_counts(conn, dataset)
+        })
     end
+  end
+
+  # `nil` (absent) and "published" are the honoured inputs; anything else comes
+  # back so the refusal can name the value the caller actually sent.
+  defp unsupported_perspective(params) do
+    case Map.get(params, "perspective") do
+      nil -> nil
+      "published" -> nil
+      other -> other
+    end
+  end
+
+  # Canonical 400 `malformed` envelope (code/hint/request_id owned by
+  # Content.Errors), with a message that names the parameter and the one value
+  # this endpoint honours — a refusal a caller can act on, unlike the silent
+  # published body it used to get.
+  defp refuse_perspective(conn, value) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "unsupported perspective #{inspect(value)} on /v1/data/counts — this endpoint " <>
+        "counts the published perspective only; omit ?perspective or pass published",
+      %{parameter: "perspective", supported: ["published"], received: value}
+    )
   end
 
   # ONE grouped aggregate: published docs (drafts.-prefixed ids excluded, the
@@ -327,7 +368,7 @@ defmodule BarkparkWeb.QueryController do
       # definition). Rejected as not-found BEFORE any get_document call — the
       # same 404 path the controller already returns for a missing doc. An
       # `:edit` share and any token/preview caller pass through unchanged.
-      anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
+      AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
         {:error, :not_found}
 
       preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) ->
@@ -351,7 +392,7 @@ defmodule BarkparkWeb.QueryController do
         |> Expand.expand(
           expand_spec,
           dataset,
-          [published_only: anon_pinned?(conn), caller_context: caller_context] ++
+          [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
             scope_opts(conn)
         )
         |> project_fields(parse_fields(params["fields"]))
@@ -508,12 +549,27 @@ defmodule BarkparkWeb.QueryController do
   # workspace_id filter decides WHICH rows come back.
 
   # Resolve the type's schema (for field-visibility redaction in Envelope.render)
-  # under the SAME tenant scope as the document read. Nil on miss — redaction
-  # then falls back to the schema-free encrypted-field guard only.
+  # under the SAME tenant scope as the document read. On a scoped miss, fall back
+  # to the GLOBAL schema (mirroring content/papers.ex value_schema/3) so a
+  # globally-declared non-encrypted private field still redacts — without this
+  # fallback the schema misses at the render site and the private field renders
+  # PUBLIC (Envelope.render is lenient on a nil schema). Nil on miss otherwise.
+  #
+  # TENANCY GUARD (LOAD-BEARING): the stripped-scope query reads cross-tenant
+  # rows, so accept the fallback ONLY when its workspace_id is nil — the global
+  # schema. Any non-nil workspace_id would substitute a FOREIGN tenant's schema.
   defp fetch_schema(conn, type, dataset) do
-    case Content.get_schema(type, dataset, scope_opts(conn)) do
-      {:ok, schema} -> schema
-      _ -> nil
+    opts = scope_opts(conn)
+
+    case Content.get_schema(type, dataset, opts) do
+      {:ok, schema} ->
+        schema
+
+      _ ->
+        case Content.get_schema(type, dataset, Keyword.drop(opts, [:workspace_id, :project_id])) do
+          {:ok, %{workspace_id: nil} = schema} -> schema
+          _ -> nil
+        end
     end
   end
 
@@ -596,37 +652,40 @@ defmodule BarkparkWeb.QueryController do
 
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])
 
-  defp authed?(conn), do: not is_nil(conn.assigns[:api_token])
-
-  defp resolve_perspective(conn, params) do
-    if anon_pinned?(conn) do
-      # EVERY plain anonymous caller is pinned to the published perspective:
-      # the `?perspective=drafts|raw` param is IGNORED so a tokenless reader
-      # can never pull unpublished/draft content — neither via a read-only
-      # public share NOR via an ordinary public-visibility schema read (found
-      # live 2026-06-10: `curl …?perspective=drafts` with no token returned
-      # every draft). A token, a preview token (forced_perspective) or an
-      # `:edit` share falls through to the unchanged forced/param logic.
-      :published
-    else
-      case conn.assigns[:forced_perspective] do
-        nil -> parse_perspective(Map.get(params, "perspective", "published"))
-        forced -> parse_perspective(forced)
-      end
-    end
+  # "May this caller read at all" — a token or a preview JWT, EXCEPT the
+  # public-read tier, which is treated exactly like an anonymous caller here.
+  #
+  # The parity partner of `DocumentsRetriever.restrict_anonymous_to_public_types/3`,
+  # moved in the SAME commit: both used to key on "is authenticated"
+  # (`not is_nil(:api_token)` / `principal_type in [:api_token, :user]`), and a
+  # public-read token satisfies both. Tightening one alone reproduces the leak
+  # one layer up, so they move together or not at all.
+  #
+  # STILL REACHABLE, which is why this is not cosmetic: the flat reads ride
+  # `:api_grant_read` and the scoped `/v1/data/*` reads ride `:shared_docs_api`,
+  # both of which mount `Plugs.PublicRead` — but the SCOPED PREVIEW block rides
+  # bare `:scoped_api` with no PublicRead, so `authed?/1` was the ONLY thing
+  # between a public-read token and `GET /w/:ws/p/:proj/v1/preview/query/:ds/:type`
+  # on a private type (plus the five preview siblings). Post-clamp those fall to
+  # the same 404 an anonymous caller gets — existence-hiding, not a 403, so the
+  # refusal never becomes a probe. `index`/`show` keep their `schema_public?`
+  # arm, so a public-read token still reads PUBLIC types normally.
+  #
+  # ONE definition of the tier: `Plugs.PublicRead.public_read_token?/1` is public
+  # on purpose (its own comment: "a second copy in the controller is exactly how
+  # a clamp and its downstream filter drift apart"). Never re-derive it here.
+  defp authed?(conn) do
+    not is_nil(conn.assigns[:api_token]) and
+      not BarkparkWeb.Plugs.PublicRead.public_read_token?(conn)
   end
 
-  # True when the caller is pinned to published-only reads: no token, no
-  # preview token, and not an `:edit` share. This covers BOTH the read-only
-  # public share AND the plain tokenless read of a public-visibility schema —
-  # the two anonymous read paths must enforce the same invariant (an anonymous
-  # caller can never pull drafts; publish is the act of making content
-  # public). An `:edit` share is deliberately exempt: it is an anonymous
-  # editing surface, and its draft visibility is part of that contract.
-  defp anon_pinned?(conn) do
-    not authed?(conn) and not preview?(conn) and
-      not (conn.assigns[:share_public] == true and conn.assigns[:share_access] == :edit)
-  end
+  # Perspective resolution + the anon/public-read pin live in ONE place —
+  # `BarkparkWeb.AnonPerspective` (error-emitters-duplicated: this controller
+  # carried private twins of resolve/anon_pinned? that drifted from the shared
+  # chokepoint the search controllers use; stw7-backlog-drafts-clamp-gap
+  # deleted them). `preview?/1` and `authed?/1` stay: they gate
+  # backlinks/related/tag_browse/tag_docs above, a different question
+  # ("may this caller read at all") from perspective pinning.
 
   defp parse_int(nil, d), do: d
 
@@ -692,10 +751,6 @@ defmodule BarkparkWeb.QueryController do
   end
 
   defp parse_order(_), do: :updated_at_desc
-
-  defp parse_perspective("drafts"), do: :drafts
-  defp parse_perspective("raw"), do: :raw
-  defp parse_perspective(_), do: :published
 
   defp parse_expand(nil), do: []
   defp parse_expand(""), do: []

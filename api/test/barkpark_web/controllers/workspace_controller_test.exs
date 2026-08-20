@@ -648,6 +648,121 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
     end
 
+    # ── the bounded body (PDS wave 23, pds-bl-bounded-import-unpack) ───────────
+    #
+    # The ceiling that ships is DERIVED (2x the measured 2,605.5 MiB bundle =
+    # 5,464,203,264 B). No test posts 5.46 GB, so the refusal is exercised
+    # through the `:max_import_body_bytes` override — the mechanism, not the
+    # number, is what these prove.
+    test "413 import_body_too_large refuses an over-ceiling body in CLEAN mode — the mode " <>
+           "that had NO gate at all",
+         %{conn: conn} do
+      raw_admin = "ws-import-413-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      Application.put_env(:barkpark, :max_import_body_bytes, 1_024)
+
+      try do
+        resp =
+          conn
+          |> authed(raw_admin)
+          |> put_req_header("content-type", "application/x-tar")
+          |> post("/api/workspaces/whatever/import", String.duplicate("x", 4_096))
+
+        assert resp.status == 413
+        body = Jason.decode!(resp.resp_body)
+        assert body["error"]["code"] == "import_body_too_large"
+        # The limit is NAMED, not merely enforced.
+        assert body["error"]["details"]["limit_bytes"] == 1_024
+        assert body["error"]["message"] =~ "1024-byte ceiling"
+        assert body["error"]["message"] =~ "2,605.5 MiB"
+      after
+        Application.delete_env(:barkpark, :max_import_body_bytes)
+      end
+    end
+
+    test "the ceiling can be exercised BOTH ways: the same body under a high ceiling is " <>
+           "NOT refused (the 413 is not a constant)",
+         %{conn: conn} do
+      raw_admin = "ws-import-413b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      # Same 4 KB body, ceiling above it: it gets past the gate and dies on the
+      # engine's honest invalid_bundle instead (4 KB of "x" is not a tar).
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/whatever/import", String.duplicate("x", 4_096))
+
+      assert resp.status == 422
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_bundle"
+    end
+
+    test "413 also gates mode=merge", %{conn: conn} do
+      raw_admin = "ws-import-413m-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      Application.put_env(:barkpark, :max_import_body_bytes, 1_024)
+
+      try do
+        resp =
+          conn
+          |> authed(raw_admin)
+          |> put_req_header("content-type", "application/x-tar")
+          |> post("/api/workspaces/whatever/import?mode=merge", String.duplicate("x", 4_096))
+
+        assert resp.status == 413
+        assert Jason.decode!(resp.resp_body)["error"]["code"] == "import_body_too_large"
+      after
+        Application.delete_env(:barkpark, :max_import_body_bytes)
+        Application.delete_env(:barkpark, :allow_bundle_import)
+      end
+    end
+
+    test "the success receipt says whether the disk precondition actually RAN", %{conn: conn} do
+      raw_admin = "ws-import-disk-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Disk RX WS"}, admin_token(raw_admin))
+
+      project = Tenancy.get_project(target.slug, "default")
+      {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, "test")
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+      ws_slug = target.slug
+
+      {:ok, _} = Tenancy.delete_workspace(target)
+      {:ok, ws_bin} = Ecto.UUID.dump(target.id)
+      purge_fkless_audit!(ws_bin)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{ws_slug}/import", bundle)
+
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert body["body_bytes"] == byte_size(bundle),
+             "the receipt must report the bytes actually spilled"
+
+      # Checked or not, it SAYS which — never a checkmark for a check that did
+      # not run. Plug.Test sets content-length, so on a normal box this is a
+      # real, performed check carrying the free-space number it measured.
+      assert is_map(body["disk_precondition"])
+      assert is_boolean(body["disk_precondition"]["checked"])
+
+      if body["disk_precondition"]["checked"] do
+        assert body["disk_precondition"]["free_bytes"] > 0
+      else
+        assert is_binary(body["disk_precondition"]["reason"])
+      end
+    end
+
     test "unauthenticated → 401", %{conn: conn, member_ws: member_ws} do
       resp =
         conn

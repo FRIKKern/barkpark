@@ -338,11 +338,17 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   @doc """
   Clickable row inside a pane column.
 
-  Renders a `<div class="pane-item">` (NOT a `<button>` — matches the
-  Studio convention). The `:inner_block` goes inside a
-  `.pane-item-label` span. Optional `:icon`, `:badge`, and `:trailing`
-  slots fill their respective positions. Source order in the rendered
-  HTML: icon → label → badge → trailing.
+  Renders a `<button type="button" class="pane-item">` — a desk row is an
+  activatable control, so it must be a real button: keyboard-reachable by
+  Tab, activatable by Enter/Space, and announced as a button by assistive
+  tech. (It used to be a `<div phx-click>`, which no keyboard could ever
+  reach.) The `:inner_block` goes inside a `.pane-item-label` span.
+  Optional `:icon`, `:badge`, and `:trailing` slots fill their respective
+  positions. Source order in the rendered HTML: icon → label → badge →
+  trailing. The accessible name comes from the button's own content.
+
+  Selection is exposed as `aria-current="true"` (never `aria-selected`,
+  which is only meaningful inside a listbox/tab/grid container).
 
   ## Attributes
 
@@ -371,11 +377,13 @@ defmodule BarkparkWeb.StudioComponents.Panes do
 
   def pane_item(assigns) do
     ~H"""
-    <div
+    <button
+      type="button"
       id={@id}
       phx-click={@phx_click}
       phx-value-id={@phx_value_id}
       phx-value-pane={@phx_value_pane}
+      aria-current={@selected && "true"}
       class={["pane-item", @selected && "selected"] |> Enum.filter(& &1) |> Enum.join(" ")}
     >
       <%= if @icon != [] do %>
@@ -388,7 +396,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       <%= if @trailing != [] do %>
         <span class="pane-item-chevron"><%= render_slot(@trailing) %></span>
       <% end %>
-    </div>
+    </button>
     """
   end
 
@@ -402,6 +410,15 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   the trailing edge. Optional trailing slot for inline content (e.g. presence
   dots). `is_draft: true` overrides the status dot's class to `"draft"`
   regardless of the `status` string.
+
+  The outer `.pane-doc-item` stays a `<div>` — it hosts the bulk-publish
+  checkbox as a SIBLING of the row body, and a button may not contain a
+  button. The inner `.bp-doc-row-body` is the activatable control and is a
+  real `<button type="button">`, so the row is Tab-reachable and
+  Enter/Space-activatable; its children are `<span>`s because button
+  content is phrasing content. Its accessible name is composed from the
+  title (see `doc_row_label/1`), never from the `title={@doc_id}` tooltip.
+  Selection is `aria-current="true"`.
 
   ## Attributes
 
@@ -456,6 +473,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   slot :trailing
 
   def pane_doc_item(assigns) do
+    assigns = assign(assigns, :aria_label, doc_row_label(assigns))
+
     ~H"""
     <div
       id={@id}
@@ -477,15 +496,18 @@ defmodule BarkparkWeb.StudioComponents.Panes do
           </span>
         </span>
       <% end %>
-      <div
+      <button
+        type="button"
         class="bp-doc-row-body"
         title={@doc_id}
+        aria-label={@aria_label}
+        aria-current={@selected && "true"}
         phx-click={@phx_click}
         phx-value-pane={@phx_value_pane}
         phx-value-id={@phx_value_id}
       >
-        <div class="pane-doc-main">
-          <div class="pane-doc-title">
+        <span class="pane-doc-main">
+          <span class="pane-doc-title">
             <span class={"pane-doc-dot #{if @is_draft, do: "draft", else: @status}"}></span>
             <%= @title %>
             <%= if @trailing != [] do %>
@@ -494,11 +516,11 @@ defmodule BarkparkWeb.StudioComponents.Panes do
             <%= if @badge do %>
               <span class={"pane-doc-badge pane-doc-badge--#{badge_slug(@badge)}"}><%= @badge %></span>
             <% end %>
-          </div>
+          </span>
           <%= if @meta do %>
-            <div class="pane-doc-sub"><%= @meta %></div>
+            <span class="pane-doc-sub"><%= @meta %></span>
           <% end %>
-        </div>
+        </span>
         <span class="pane-doc-chevron" aria-hidden="true">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
@@ -506,9 +528,25 @@ defmodule BarkparkWeb.StudioComponents.Panes do
             <path d="m9 18 6-6-6-6"/>
           </svg>
         </span>
-      </div>
+      </button>
     </div>
     """
+  end
+
+  # Accessible name for a doc row, composed FROM THE TITLE plus the state
+  # a sighted reader gets from the row's other glyphs: the status dot, the
+  # list_preview badge, and the :meta subtitle. Composing is not optional —
+  # the row carries `title={@doc_id}` as its sighted tooltip, and `title=`
+  # is the accname fallback of last resort, so a button with no explicit
+  # label would announce the raw draft id ("drafts.paper-7780f97…") instead
+  # of the document. The `:trailing` slot (presence dots) is decorative and
+  # deliberately not spoken.
+  defp doc_row_label(assigns) do
+    status = if assigns.is_draft, do: "draft", else: assigns.status
+
+    [assigns.title, status, assigns[:badge], assigns[:meta]]
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.join(", ")
   end
 
   # Generic CSS-modifier slug for a badge value: downcase, any run of

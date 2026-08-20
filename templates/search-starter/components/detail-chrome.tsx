@@ -53,7 +53,7 @@ export function DetailChrome({ title, type, standaloneHref }: DetailChromeProps)
       <Link
         href={closeHref}
         aria-label="Close"
-        className="shrink-0 rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+        className="shrink-0 rounded-md p-1 text-muted-text transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
       >
         <svg
           width="18"

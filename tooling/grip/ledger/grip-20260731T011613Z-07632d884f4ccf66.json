@@ -1,0 +1,59 @@
+{
+  "run_id": "grip-20260731T011613Z",
+  "recipes": [
+    {
+      "subject": "cmd:bp",
+      "quantity": "bp:schema",
+      "rerun": "bp schema get quiz -o json",
+      "derived_level": "L2",
+      "deps": [],
+      "observed_at": "2026-07-31T01:16:13Z"
+    },
+    {
+      "subject": "api/lib/barkpark/content/schema_definition.ex",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '487,516p' api/lib/barkpark/content/schema_definition.ex",
+      "derived_level": "L3",
+      "deps": [
+        "api/lib/barkpark/content/schema_definition.ex"
+      ],
+      "observed_at": "2026-07-31T01:16:13Z"
+    },
+    {
+      "subject": "cmd:sed",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '29,66p' /Users/frikkjarl/Documents/GitHub/jarl-website/src/content/sections.ts",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-31T01:16:13Z"
+    },
+    {
+      "subject": "js/packages/react/src/blocks/dataviz.ts",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '100,118p;627,636p' js/packages/react/src/blocks/dataviz.ts",
+      "derived_level": "L3",
+      "deps": [
+        "js/packages/react/src/blocks/dataviz.ts"
+      ],
+      "observed_at": "2026-07-31T01:16:13Z"
+    },
+    {
+      "subject": "cmd:grep",
+      "quantity": "grep:-n:artworkDataUri\\|sections",
+      "rerun": "grep -n 'artworkDataUri\\|sections' /Users/frikkjarl/Documents/GitHub/jarl-website/src/lib/og.tsx",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-31T01:16:13Z"
+    },
+    {
+      "subject": "js/packages/react/src/toPlainText.ts",
+      "quantity": "sed:-n",
+      "rerun": "sed -n '230,240p' js/packages/react/src/toPlainText.ts",
+      "derived_level": "L3",
+      "deps": [
+        "js/packages/react/src/toPlainText.ts"
+      ],
+      "observed_at": "2026-07-31T01:16:13Z"
+    }
+  ]
+}

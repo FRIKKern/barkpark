@@ -27,8 +27,40 @@ defmodule BarkparkCloud.Workers.PushDeliveryWorker do
   could first land — 600s covers the full replayable lifetime of one signed
   request. Uniqueness spans Oban's default states (completed included, within
   the period), so a replay arriving AFTER the original delivered still
-  dedupes. NOTE: enforcement relies on the fan-out using `Oban.insert/2`
+  dedupes — and that `:completed` inclusion is correct ONLY BECAUSE
+  `blocked_since` makes every genuine event's args distinct; if a future
+  payload shape ever drops or trims that field, two DIFFERENT blocks can
+  produce identical args and this ruling FLIPS (a genuinely new notification
+  would be swallowed by an already-delivered one). The pin that holds it is
+  `push_relay_receiver_test.exs`'s "a replay arriving AFTER the first job
+  COMPLETED still enqueues ZERO new jobs" — the only test that reaches
+  `:completed`. NOTE: enforcement relies on the fan-out using `Oban.insert/2`
   per job — OSS `Oban.insert_all/2` skips unique checks.
+
+  ### Two known edges, RE-RECORDED as still accepted (wave-2 relay build)
+
+  Both were raised on `mob-bl-relay-build-notes` and are deliberately still
+  open, with the reason stated rather than quietly dropped:
+
+    1. **Sub-second re-block collides.** A session that blocks, is answered, and
+       re-blocks within the SAME second produces an identical `blocked_since`
+       and therefore identical args — the second, genuinely-new notification
+       dedupes away. Accepted: `blocked_since` comes from the box's
+       `BlockedSweeper`, which fires on a `blocked_threshold_s` debounce of at
+       least one second (the changeset's `greater_than: 0` on a second-grained
+       column), so the window cannot be re-entered inside one second by the
+       only producer that exists. Fixing it would mean widening the D59h
+       payload with a delivery id — a bound ruling this build does not reopen.
+
+    2. **600 s sits exactly on the max replayable lifetime.** A signature
+       future-dated by the full +300 s tolerance first becomes acceptable at
+       t−300 and stops at t+300, so the last possible replay lands 600 s after
+       the earliest first landing — the boundary, not inside it. A replay
+       arriving at exactly the 600 s edge could miss the window. Accepted:
+       widening to, say, 900 s costs nothing but would trade a boundary case
+       nobody can hit (it needs a clock-skewed sender AND a replay timed to the
+       second) for a longer window in which a LEGITIMATE re-block dedupes —
+       which is edge 1, made worse. The tighter window is the safer error.
 
   Verdicts (delegated to `Push.deliver/3`):
 

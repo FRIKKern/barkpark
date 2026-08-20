@@ -1,0 +1,96 @@
+{
+  "run_id": "grip-20260730T230000Z",
+  "note": "cch wave 10 verifier [ledger-truth-and-closes] — re-derivation recipes for every load-bearing ledger fact. All git reads are against origin/main dc17c949e (the primary checkout is 110 commits behind; never read the worktree).",
+  "recipes": [
+    {
+      "subject": "cloud-console-hardening-epic roster census",
+      "quantity": "count:lifecycle_status",
+      "rerun": "bp task get cloud-console-hardening-epic -o json > /tmp/roster.json && python3 -c \"import json;from collections import Counter;d=json.load(open('/tmp/roster.json'));print(Counter(c['lifecycle_status'] for c in d['children']), d['child_count'])\"",
+      "derived_level": "L2",
+      "deps": ["guerrilla.barkpark.cloud /v1/tasks"],
+      "observed_at": "2026-07-30T23:00:00Z",
+      "observed": "done=70 open=68 cancelled=12 considering=1 child_count=151"
+    },
+    {
+      "subject": "live-row count (open minus drafts.* twins)",
+      "quantity": "count",
+      "rerun": "python3 -c \"import json;d=json.load(open('/tmp/roster.json'));o=[c['doc_id'] for c in d['children'] if c['lifecycle_status']=='open'];print(len(o), [x for x in o if x.startswith('drafts.')])\"",
+      "derived_level": "L2",
+      "deps": ["/tmp/roster.json"],
+      "observed_at": "2026-07-30T23:00:00Z",
+      "observed": "68 open, 2 drafts.* (gr-backlog-css-brace-detector, cch-bl-floor-blind-to-readme-and-uncalled) => 66 live + 1 considering"
+    },
+    {
+      "subject": "standing law 1 done-set ancestry sweep",
+      "quantity": "git:merge-base --is-ancestor",
+      "rerun": "for f in /tmp/doneset/*.json; do python3 -c \"import json,re,sys;print('\\n'.join(set(re.findall(r'\\\\b[0-9a-f]{7,40}\\\\b', json.dumps(json.load(open(sys.argv[1]))['doc']['content'])))))\" $f; done | sort -u | while read s; do git cat-file -t $s 2>/dev/null | grep -q commit && { git merge-base --is-ancestor $s origin/main || echo \"NOT-ANCESTOR $s $(git log -1 --format=%s $s)\"; }; done",
+      "derived_level": "L3",
+      "deps": ["origin/main", "/tmp/doneset/*.json (bp task get per done row)"],
+      "observed_at": "2026-07-30T23:00:00Z",
+      "observed": "242 hex candidates over 66 rows; 50 NOT-ANCESTOR, ALL branch-SHA artifacts of the squash chain; 0 rows whose work is genuinely absent from origin/main"
+    },
+    {
+      "subject": "branch-SHA -> squash-SHA reconciliation by content anchor",
+      "quantity": "git:log -S",
+      "rerun": "git log origin/main --oneline -S'<a distinctive added line from git show --unified=0 <branchsha>>' -- <path>",
+      "derived_level": "L3",
+      "deps": ["origin/main"],
+      "observed_at": "2026-07-30T23:00:00Z",
+      "observed": "subject-matching resolves 19/50; content-anchor grep resolves the rest. Subject matching alone FALSE-NEGATIVES because squash titles are rewritten."
+    },
+    {
+      "subject": "gr-blk-console-refetch-storm successor merge SHA",
+      "quantity": "git:log -S",
+      "rerun": "git log origin/main --oneline -S'a cold Overview paint issues each of the five endpoints EXACTLY once' -- cloud/priv/static/__app.test.mjs",
+      "derived_level": "L3",
+      "deps": ["origin/main:cloud/priv/static/__app.test.mjs"],
+      "observed_at": "2026-07-30T23:00:00Z",
+      "observed": "481d6f231 fix(cloud): clear the Overview snapshot on sign-out (cch-w1-refetch-storm review) (#5308); anchor lands at __app.test.mjs:384"
+    },
+    {
+      "subject": "gr-blk-revoke-harness-gap successor merge SHAs",
+      "quantity": "git:merge-base --is-ancestor",
+      "rerun": "git merge-base --is-ancestor 8c9c116c5 origin/main && git merge-base --is-ancestor 0ed73651f origin/main && git merge-base --is-ancestor 99e3ee823 origin/main && echo ALL-ANCESTORS",
+      "derived_level": "L3",
+      "deps": ["origin/main"],
+      "observed_at": "2026-07-30T23:00:00Z",
+      "observed": "8c9c116c5 (#5379) + 0ed73651f (#5436) + 99e3ee823 (#6697) all ancestors; anchors scenarios.mjs:3136/3151, smoke.mjs:461/518, app.js:1021 (success) vs :1030 (failure)"
+    },
+    {
+      "subject": "task-ffd9625205f3c1a9 (cloud GET census baseline)",
+      "quantity": "git:show",
+      "rerun": "git grep -n '@baseline_' origin/main -- cloud/test/barkpark_cloud/web/router_head_fence_census_test.exs",
+      "derived_level": "L3",
+      "deps": ["origin/main:cloud/test/barkpark_cloud/web/router_head_fence_census_test.exs"],
+      "observed_at": "2026-07-30T23:00:00Z",
+      "observed": "@baseline_total 64 / session 45 / machine 7 / public 12 at :131-134, landed by dc17c949e (#8216). Row is still lifecycle=open and carries NO acceptance_criteria."
+    },
+    {
+      "subject": "cch-bl-ability-matrix-red-on-main duplicate check",
+      "quantity": "git:grep",
+      "rerun": "git grep -n 'artifact' origin/main -- cloud/test/barkpark_cloud/web/router_ability_matrix_test.exs",
+      "derived_level": "L3",
+      "deps": ["origin/main:cloud/test/barkpark_cloud/web/router_ability_matrix_test.exs"],
+      "observed_at": "2026-07-30T23:00:00Z",
+      "observed": "POST /v1/sites/:id/artifact is GONE; :135 names the #7867 deletion; @driven_routes pin at :148. Paid by ce8d85516 (#8139) under the DUPLICATE row task-b5ae203ee8a5dcb2 (done)."
+    },
+    {
+      "subject": "destroy-verb census (14 / 8 / 2)",
+      "quantity": "grep:-c",
+      "rerun": "git show origin/main:cloud/priv/static/app.js | grep -c 'api(\"DELETE\"' ; git show origin/main:cloud/priv/static/__preview__/scenarios.mjs | grep -cE 'method === \"DELETE\"'",
+      "derived_level": "L3",
+      "deps": ["origin/main:cloud/priv/static/app.js", "origin/main:cloud/priv/static/__preview__/scenarios.mjs"],
+      "observed_at": "2026-07-30T23:00:00Z",
+      "observed": "14 DELETE call sites in app.js; 8 DELETE handlers in scenarios.mjs; exactly 2 consult `state` (sessOne :3136, sessions-all :3151)"
+    },
+    {
+      "subject": "cch-w2-revoke-oracle-round2 app.js line citations",
+      "quantity": "grep:-n",
+      "rerun": "git show origin/main:cloud/priv/static/app.js | grep -n 'api(\"DELETE\"'",
+      "derived_level": "L3",
+      "deps": ["origin/main:cloud/priv/static/app.js"],
+      "observed_at": "2026-07-30T23:00:00Z",
+      "observed": "ALL SIX cited line numbers in the row are STALE: 1027->1050, 2295->2409, 5430->5674, 5474->5718, 7381->8115, 9991->10739"
+    }
+  ]
+}

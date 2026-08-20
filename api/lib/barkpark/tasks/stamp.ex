@@ -40,11 +40,10 @@ defmodule Barkpark.Tasks.Stamp do
   # (`index`, `result` "met"|"miss", `worker`) so the events feed and every
   # board can render the stamp without diffing content.
 
-  import Ecto.Query, only: [from: 2]
-
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       insert_mutation_event!: 5,
       caller_stamp: 1,
       check_holder: 2,
@@ -225,15 +224,9 @@ defmodule Barkpark.Tasks.Stamp do
     with {:ok, new_content} <- merge_criteria(doc.content, [update]) do
       new_rev = generate_rev()
 
-      {rows, _} =
-        from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)
-        |> Repo.update_all(
-          set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-        )
-
-      case rows do
-        1 -> {:ok, %{doc | content: new_content, rev: new_rev}}
-        0 -> {:error, :stale_claim}
+      case fenced_content_write(doc, doc.rev, new_content, new_rev) do
+        {:ok, updated} -> {:ok, updated}
+        :stale -> {:error, :stale_claim}
       end
     end
   end

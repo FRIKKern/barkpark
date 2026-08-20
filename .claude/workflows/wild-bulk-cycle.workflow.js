@@ -3,24 +3,24 @@ export const meta = {
   description: 'Wild bulk development cycle: 1 Fable plans 3 codebase domains → 3 Opus leads fan out 10-20 Sonnet surveyors each → 1 Fable digests → 3 Opus task-cutters file 10-60 bp tasks → Sonnet preflight per task → 1 Fable HARMONIZES the whole roster (blast-radius + collision control) → 1 Sonnet builder per task → 3 Opus domain reviewers → polish Sonnets ONLY where needed → 1 Fable grades the whole cycle.',
   whenToUse:
     'A bulk sweep-and-fix across the codebase — wider and wilder than bp-epic-cycle (10-60 tasks, Sonnet builders), so it spends MORE on mid-planning: every task is preflighted against reality and one Fable harmonizes the full roster before any builder flies. INVOKE: Workflow({scriptPath: ".claude/workflows/wild-bulk-cycle.workflow.js", args: {wish: "<the user\'s request, verbatim — REQUIRED>", epic_task_id: "<task-… slug if the parent exists>", charter_path: "<optional charter to respect>", lead_notes: "<optional>"}}). Launch via scriptPath, not name (the name registry is a session-start snapshot).',
+  // EXACTLY the phase() titles the body announces, in call order. A title declared
+  // here but never announced leaves a phantom progress group open for the whole run,
+  // so the fan-out stages that ride inside these six (Recon/Survey, Build,
+  // Review/Polish) are described in their host phase's detail instead of claiming a
+  // group of their own.
   phases: [
-    { title: 'Plan', detail: '1 Fable (xhigh-adjacent): partition the codebase into exactly 3 blast-radius-aware domains, open the cycle Paper, ensure the epic parent task', model: 'fable' },
-    { title: 'Recon', detail: '3 Opus domain leads (pipelined): each designs 10-20 Sonnet survey probes for its domain', model: 'opus' },
-    { title: 'Survey', detail: '30-60 Sonnet surveyors, read-only, coverage-accounted — the wide cheap sweep', model: 'sonnet' },
-    { title: 'Digest', detail: '1 Fable (xhigh): synthesize ALL survey reports, dedup cross-domain, cut 3 finding bundles, fold into the Paper', model: 'fable' },
+    { title: 'Plan', detail: '1 Fable (high): partition the codebase into exactly 3 blast-radius-aware domains, open the cycle Paper, ensure the epic parent task — then 3 Opus recon leads design 10-20 probes each and 30-60 Sonnet surveyors sweep them read-only', model: 'fable' },
+    { title: 'Digest', detail: '1 Fable (high): synthesize ALL survey reports, dedup cross-domain, cut 3 finding bundles, fold into the Paper', model: 'fable' },
     { title: 'Cut', detail: '3 Opus task-cutters: 4-20 published rubric-quality bp tasks each — 10-60 total', model: 'opus' },
     { title: 'Preflight', detail: '1 cheap Sonnet per task: verify the brief against reality — files exist, evidence still true, gate runnable', model: 'sonnet' },
-    { title: 'Harmonize', detail: '1 Fable (xhigh): the blast-radius gate — holds ALL tasks + script-computed overlap matrix + preflight reports; merges/patches/defers until the roster is disjoint and coherent', model: 'fable' },
-    { title: 'Build', detail: '1 Sonnet builder per rostered task, worktree-isolated: claim → fix → stamp evidence → gate → commit branch', model: 'sonnet' },
-    { title: 'Review', detail: '3 Opus domain reviewers (pipelined per domain): adversarial diff review of every build; dispatch polish ONLY where needed', model: 'opus' },
-    { title: 'Polish', detail: '0-60 Sonnet polishers: fix exactly what the reviewer named, re-gate, commit on a -p branch', model: 'sonnet' },
-    { title: 'Verdict', detail: '1 Fable (xhigh): whole-cycle review — ledger audit, merge-ready list, Cody grade, close the Paper', model: 'fable' },
+    { title: 'Harmonize', detail: '1 Fable (high): the blast-radius gate — holds ALL tasks + script-computed overlap matrix + preflight reports; merges/patches/defers until the roster is disjoint and coherent — then 1 worktree-isolated Sonnet builder per rostered task, 3 Opus domain reviewers, and 0-60 Sonnet polishers where a reviewer names a gap', model: 'fable' },
+    { title: 'Verdict', detail: '1 Fable (high): whole-cycle review — ledger audit, merge-ready list, Cody grade, close the Paper', model: 'fable' },
   ],
 }
 
 // args = { wish, epic_task_id?, charter_path?, lead_notes?, builder_model?, survey_model?, lead_model?, cutter_model?, reviewer_model? }
 // Model doctrine (lead mandate): Fable holds ONLY the four critical-thinking
-// joints — Plan, Digest, Harmonize, Verdict — at high/xhigh effort. Opus takes
+// joints — Plan, Digest, Harmonize, Verdict — at high effort. Opus takes
 // the well-scoped design/judge seats (recon leads, task-cutters, domain
 // reviewers). Sonnet is the fleet (survey, preflight, build, polish). Never Haiku.
 // Same defensive parse as bp-epic-cycle: args can arrive as a JSON STRING.
@@ -37,6 +37,16 @@ const SURVEY_MODEL = A.survey_model || 'sonnet'
 const LEAD_MODEL = A.lead_model || 'opus'
 const CUTTER_MODEL = A.cutter_model || 'opus'
 const REVIEWER_MODEL = A.reviewer_model || 'opus'
+// FABLE OUTAGE SWITCH (mirrors bp-epic-cycle). When Fable is unreachable (spend
+// limit, retention tier, refusal class), every fable-selecting site must dispatch
+// Opus INSTEAD — not merely fall back to it after burning attempts. Identity by
+// default, so passing nothing changes nothing. The four joints below are the only
+// fable sites; the fleet models are already args-overridable.
+const NO_FABLE = A.no_fable === true
+const M = (m) => (NO_FABLE && m === 'fable' ? 'opus' : m)
+// TWO SETTINGS ONLY, cycle-wide: fable@high for the thinking joints, opus/sonnet at
+// their own depth for everything else. Nothing above 'high', and no 'max', anywhere
+// — a joint that wants more depth gets a better brief, not a bigger effort knob.
 // Fan-out FLOORS. Every maxItems below is an upper bound; nothing but a floor stops
 // a thinking phase from returning one item, or zero. The ratified anti-goal — a
 // cycle must never spend FEWER agents to look decisive — was prose, and prose does
@@ -85,8 +95,10 @@ ${WISH}
 
 const GATES_BLOCK = `Local gates available (every task must name at least one that proves it):
 - Cloud SPA: node --check cloud/priv/static/app.js AND node cloud/priv/static/__app.test.mjs (node:vm harness over __bpTestHook — extend it for new pure helpers)
-- Go CLI: CC=clang go build ./... && go vet ./internal/cli/... && go test ./internal/cli/...
-- Elixir control plane: targeted unit tests only (CC=clang mix test <file>), no DB/boot, never prod compile
+- Go CLI: go build ./... && go vet ./internal/cli/... && go test ./internal/cli/...
+- Elixir control plane: targeted unit tests only (mix test <file>), no DB/boot, never prod compile
+  (CC=clang is HOST-CONDITIONAL, not part of the gate: prefix it only where \`cc\` is shadowed by a
+   wrapper — check with \`type cc\`; on a clean host the bare command is the gate you quote.)
 - JS SDK: pnpm --filter <pkg> build/typecheck/test (+ js/.changeset/ entry for any public API change)`
 
 const TASKS_BLOCK = `THE BP TASK CONTRACT (the ledger is the spine — every phase reads and writes it):
@@ -103,7 +115,13 @@ const TASKS_BLOCK = `THE BP TASK CONTRACT (the ledger is the spine — every pha
 const PAPER_BLOCK = `THE CYCLE PAPER (the cycle's living story — one Barkpark Paper, opened at Plan, closed at Verdict):
 - style=article is MANDATORY. bp doc create ignores stdin — write/extend the body via the HTTP /v1/data/mutate path (patch merges into content), then bp doc publish; \`bp capabilities -o json\` shows the verbs.
 - ONLY the single-Fable phases (Plan, Digest, Harmonize, Verdict) write the Paper; multi-agent phases and every fan-out worker NEVER write it (concurrent patches clobber each other) — they write their OWN bp tasks, and the next single-Fable phase folds their reports in.
-- Link both ways: the Paper's id lives on the epic task (flat wave_paper field) and on every cycle task; the Paper names the task ids it drives.`
+- Link both ways: the Paper's id lives on the epic task (flat wave_paper field) and on every cycle task; the Paper names the task ids it drives.
+- WALL DIALECT (what the publish wall ENFORCES — the cycle Paper carries tag epic-cycle-wave-paper and is gated by api/lib/barkpark/content/papers/epic_quality.ex on origin/main):
+  - NEVER author an empty paragraph block anywhere — hard failure :empty_paragraph_spacer, checked over the NESTED block tree.
+  - Opening, within the first 8 meaningful blocks: exactly one h1 in the whole document, one \`ingress\` block, and one orientation block of byline|stats|toc|list|steps. No heading-level jumps.
+  - Ceilings: 80 top-level blocks, 16 top-level headings, 5000 primary words (closed expandables excluded). Tables carry \`head\`.
+  - A refused publish answers 422 code=invalid_epic_paper_quality with details.failures naming every failed gate — fix and re-publish (the bp CLI renders details).
+  - The spacer-doctrine ruling is owned by open task cchi-w67-bl-the-epic-paper-floor-forbids-the-spacing-doctrine (cch-instruments-epic): teach the ENFORCED dialect and cite that task; do NOT edit the wall.`
 
 const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system, never an afterthought):
 - Stamp state changes the MOMENT they happen — claim when you start, evidence the second a criterion is proven, a note the second you deviate or stall. Never batch honesty to the end of your run.
@@ -230,6 +248,53 @@ if (!SURVEY_SCHEMA.properties?.facts?.items?.properties?.rerun) {
 }
 if ((SURVEY_SCHEMA.properties.facts.items.required || []).includes('rerun')) {
   throw new Error('SURVEY_SCHEMA.facts[].rerun must stay OPTIONAL (charter D3: a missing command DEMOTES to L6, it never rejects).')
+}
+
+// THE FACT-PROVENANCE GATE — ported from bp-epic-cycle.workflow.js, semantics
+// unchanged. The schema check above only proves the CARRIER exists; it says
+// nothing about whether a returned fact filled it. Without this, a fact with no
+// rerun command — an unverified belief at the level of agent memory — is
+// serialised into the Digest prompt indistinguishable from a measured one, and
+// the Fable downstream of that prompt cuts up to 60 tasks on it.
+//
+// DEMOTE, NEVER REJECT (charter D3): a missing command lowers the fact's
+// authority level, it does not throw the fact away — the cheapest fix is for
+// the reader to add a one-line command, and a rejected fact never gets read.
+//
+// The reports are mutated IN PLACE, at the single barrier where the survey
+// resolves. That is deliberate: gating each JSON.stringify site separately is
+// the copies-that-must-agree defect in miniature, and the next serialisation
+// someone adds would silently be the ungated one.
+function gateFactProvenance(reports) {
+  let total = 0
+  let demoted = 0
+  for (const report of reports || []) {
+    const facts = (report && report.facts) || []
+    for (const fact of facts) {
+      if (!fact || typeof fact !== 'object') continue
+      total++
+      const rerun = typeof fact.rerun === 'string' ? fact.rerun.trim() : ''
+      if (rerun) continue
+      demoted++
+      // Annotated on the RESOLVED object, never in the schema: FACT_ITEMS is
+      // additionalProperties:false, and that constraint governs what the MODEL
+      // may return — it says nothing about what we may add after the fact.
+      fact.provenance = 'DEMOTED-NO-RERUN'
+      fact.provenance_note = 'no rerun command on this fact — it cannot be re-derived, so treat it as an unverified belief and never quote it above the level of agent memory (charter D3: demote, never reject; add a one-line rerun command and it levels up in ten seconds).'
+    }
+  }
+  return { total, demoted }
+}
+
+// Renders the gate's COUNT into the prompt of the phase that receives the facts,
+// so the reader sees how much of its own input was demoted rather than having to
+// notice the per-fact markers. Zero renders as an explicit all-clear, never as
+// nothing: a gate that is silent when clean is indistinguishable from a gate
+// that was deleted, and one that shouts when clean gets tuned out.
+function gripBlock(grip) {
+  if (!grip.total) return '\nFACT PROVENANCE GATE: no facts were returned at all — that is itself a signal about this sweep, not a clean bill of health.'
+  if (!grip.demoted) return `\nFACT PROVENANCE GATE: 0/${grip.total} fact(s) demoted — every fact below carries a rerun command that re-derives it.`
+  return `\n⚠ FACT PROVENANCE GATE: ${grip.demoted}/${grip.total} fact(s) are marked \`provenance: "DEMOTED-NO-RERUN"\`. Those facts carry NO command that re-derives them: treat each as an unverified belief at the level of agent memory, never as a settled measurement, and do not cut a task on one without first giving it a rerun command. The other ${grip.total - grip.demoted} are re-derivable as claimed.`
 }
 
 const DIGEST_SCHEMA = {
@@ -445,7 +510,7 @@ Your job:
 4. EPIC PARENT TASK: ${EPIC_TASK_ID ? `verify ${EPIC_TASK_ID} exists and is published; stamp its flat wave_status ("wild-bulk: surveying — <one-line direction>") + wave_paper (the Paper's id) and re-publish.` : 'ensure ONE published epic parent task exists for this cycle (create it if missing — slug it from the topic); stamp wave_status + wave_paper on it.'} Report its slug in epic_task_id.
 ${PAPER_BLOCK}
 ${TASKS_BLOCK}${LEAD_NOTES}`,
-  { label: 'planner', phase: 'Plan', schema: PLAN_SCHEMA, model: 'fable', effort: 'high' }
+  { label: 'planner', phase: 'Plan', schema: PLAN_SCHEMA, model: M('fable'), effort: 'high' }
 )
 if (!planner) throw new Error('Plan phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
 // Floor 1/4 — the partition. Fires before Recon spends a single domain lead.
@@ -526,7 +591,12 @@ if (surveyed.length < DOMAIN_FLOOR) {
   throw new Error(`Domain survival floor: only ${surveyed.length} of ${DOMAIN_FLOOR} domains survived Recon+Survey. A domain drops out here when its lead died or its probe floor fired, and pipeline() swallows both into a silent null — so the cycle would digest a partial sweep and report it as whole. Check the pipeline[] failure lines above for the real cause, then resume the run rather than proceeding on ${surveyed.length}/${DOMAIN_FLOOR} of the codebase.`)
 }
 const totalCandidates = surveyed.reduce((n, s) => n + s.reports.reduce((m, r) => m + (r.fix_candidates || []).length, 0), 0)
-log(`Survey complete: ${surveyed.length}/3 domains, ${totalCandidates} raw fix candidates`)
+// ONE interception, in place, at the barrier where the survey resolves — BEFORE
+// the first JSON.stringify in this file, so every downstream serialisation of a
+// survey report (Digest today, whatever a later wave adds) reads gated facts.
+const surveyGrip = gateFactProvenance(surveyed.flatMap((s) => s.reports || []))
+const SURVEY_GRIP = gripBlock(surveyGrip)
+log(`Survey complete: ${surveyed.length}/3 domains, ${totalCandidates} raw fix candidates; provenance gate: ${surveyGrip.demoted}/${surveyGrip.total} fact(s) DEMOTED (no rerun command)`)
 
 // ── Phase 4: Digest — one Fable holds ALL reports (barrier: cross-domain dedup) ──
 phase('Digest')
@@ -543,6 +613,7 @@ ${JSON.stringify(planner.domains.map((d) => ({ slug: d.slug, name: d.name, scope
 
 SURVEY REPORTS BY DOMAIN (trust file:line evidence over prose; treat unanchored claims as rumors):
 ${JSON.stringify(surveyed.map((s) => ({ domain: s.domain.slug, reports: s.reports })), null, 2)}
+${SURVEY_GRIP}
 
 Your job:
 1. SYNTHESIZE: defect themes across domains, contradictions between scouts, what the sweep established and what stayed dark.
@@ -550,7 +621,7 @@ Your job:
 3. UPDATE THE CYCLE PAPER (${CYCLE_PAPER}) — append, then re-publish, BEFORE the cutters fly: the synthesis, a coverage map distilled from the scouts' coverage[] (found AND not-found, plus corners no scout reached), and the 3 bundles in summary form. Set paper_updated=true only after you re-published and read it back.
 4. HEARTBEAT: stamp the epic task ${EPIC_TASK}'s flat wave_status ("wild-bulk: cutting tasks — <one-line synthesis>") and re-publish.
 ${PAPER_BLOCK}${LEAD_NOTES}`,
-  { label: 'digest', phase: 'Digest', schema: DIGEST_SCHEMA, model: 'fable', effort: 'xhigh' }
+  { label: 'digest', phase: 'Digest', schema: DIGEST_SCHEMA, model: M('fable'), effort: 'high' }
 )
 if (!digest) throw new Error('Digest phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
 // Floor 3/4 — one bundle per domain, one Opus task-cutter per bundle. Fires before
@@ -687,7 +758,7 @@ Your job — every cut task gets exactly one roster row with a final action:
 6. HEARTBEAT: stamp the epic task ${EPIC_TASK}'s wave_status ("wild-bulk: building <n> tasks — <one-line>") and re-publish.
 ${TASKS_BLOCK}
 ${PAPER_BLOCK}${LEAD_NOTES}`,
-  { label: 'harmonizer', phase: 'Harmonize', schema: HARMONIZE_SCHEMA, model: 'fable', effort: 'xhigh' }
+  { label: 'harmonizer', phase: 'Harmonize', schema: HARMONIZE_SCHEMA, model: M('fable'), effort: 'high' }
 )
 if (!harmonizer) throw new Error('Harmonize phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
 const roster = (harmonizer.roster || []).filter((r) => r.action === 'build')
@@ -853,7 +924,7 @@ Your job:
 6. next_cycle: what the next cycle (bulk or epic) should take and why.
 ${TASKS_BLOCK}
 ${PAPER_BLOCK}${LEAD_NOTES}`,
-  { label: 'final-review', phase: 'Verdict', schema: FINAL_SCHEMA, model: 'fable', effort: 'xhigh' }
+  { label: 'final-review', phase: 'Verdict', schema: FINAL_SCHEMA, model: M('fable'), effort: 'high' }
 )
 
 return {

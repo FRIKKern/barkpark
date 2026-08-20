@@ -12,6 +12,21 @@ Requires=postgresql.service
 [Service]
 Type=simple
 User=root
+# NAME-ENCODING PIN. The VM's filename encoding mode is pinned here instead of
+# inherited from the host image: on the live box file:native_name_encoding() is
+# utf8 only by a host-image accident — this unit used to set no Environment= at
+# all, and LANG=en_US.UTF-8 arrived from /etc/default/locale through systemd's
+# MANAGER environment (measured in /proc/<MainPID>/environ; `systemctl show -p
+# Environment` prints an empty Environment= that answers nothing). Replaying
+# that environ under `env -i` returns utf8; stripping LANG returns latin1 from
+# the same erl, with Elixir printing "the VM is running with native name
+# encoding of latin1 which may cause Elixir to malfunction" (LANG=C is latin1
+# too) — so a fresh image without /etc/default/locale boots this code in latin1.
+# C.UTF-8 needs no locale package on Ubuntu 24.04. It sits BEFORE
+# EnvironmentFile= on purpose: a per-slot env file (or an operator export in
+# .env, see api/start.sh) still overrides it. THIS IS NOT A STAGING FIX — see
+# api/start.sh for what it is and is not for, and for the measurement trap.
+Environment=LANG=C.UTF-8
 EnvironmentFile=/opt/barkpark/.slots/%i.env
 ExecStart=/opt/barkpark/api/start.sh
 Restart=on-failure

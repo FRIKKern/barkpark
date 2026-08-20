@@ -2,7 +2,7 @@ export const meta = {
   name: 'bp-epic-cycle',
   description: 'One epic wave: strategize → survey → digest → verify → decide → build → review, with the bp task ledger + wave Paper as the live spine.',
   whenToUse:
-    'Run one wave of a Barkpark epic. INVOKE: Workflow({name: "bp-epic-cycle", args: {wish: "<the user\'s request, verbatim — REQUIRED, the run refuses to start without it (charter D68)>", charter_path: "<.claude/workflows/<epic>-charter.md — REQUIRED for any epic with a charter; default is the cloud charter>", charter_exists: true|false, epic_task_id: "<task-… slug, when the epic task exists>"}}). TWO SETTINGS ONLY — fable@high for thinking-focused work and for visual design/interface; opus@medium for everything else. Effort derives from the model; no xhigh, no max, anywhere. Shape: 1 Fable strategizes + OPENS the wave Paper → 5-20 Opus surveyors sweep (coverage-accounted) → 1 Fable digests + designs the verify fleet → mostly-Opus verifiers PROVE claims with run output → 1 Fable decides + files/perfects bp tasks → Opus builders (Fable on hard or visually-designed slices) claim their task, build in worktrees, stamp evidence, gate, commit → 1 Fable reviews everything, fixes in place, grades, closes the Paper as the debrief.',
+    'Run one wave of a Barkpark epic. INVOKE: Workflow({scriptPath: ".claude/workflows/bp-epic-cycle.workflow.js", args: {wish: "<the user\'s request, verbatim — REQUIRED, the run refuses to start without it (charter D68)>", charter_path: "<.claude/workflows/<epic>-charter.md — REQUIRED for any epic with a charter; default is the cloud charter>", charter_exists: true|false, epic_task_id: "<task-… slug, when the epic task exists>"}}). Launch from the repo root or pass an absolute scriptPath (it resolves against the session cwd); never launch by name (the name registry is a session-start snapshot). TWO SETTINGS ONLY — fable@high for thinking-focused work and for visual design/interface; opus@medium for everything else. Effort derives from the model; no xhigh, no max, anywhere. Shape: 1 Fable strategizes + OPENS the wave Paper → 5-20 Opus surveyors sweep (coverage-accounted) → 1 Fable digests + designs the verify fleet → mostly-Opus verifiers PROVE claims with run output → 1 Fable decides + files/perfects bp tasks → Opus builders (Fable on hard or visually-designed slices) claim their task, build in worktrees, stamp evidence, gate, commit → 1 Fable reviews everything, fixes in place, grades, closes the Paper as the debrief.',
   phases: [
     { title: 'Strategize', detail: '1 Fable @ high — thinking-focused, the highest-leverage judgment in the wave: reads until reading stops changing its mind, weighs rival directions and commits to one, stress-tests it, sets 5-20 broad survey questions, OPENS the wave strategy Paper, searches prior wave Papers first (answered questions become drift-checks)', model: 'fable' },
     { title: 'Survey', detail: '5-20 Opus surveyors @ medium, read-only, ~5 min each: wide sweep — bp search first, then the repo; report COVERAGE (every file checked, what for, found/not-found)', model: 'opus' },
@@ -86,6 +86,21 @@ const VERIFY_FLOOR = 3
 const STRAT_MODEL = A.strategist_model || 'fable'
 const SURVEY_MODEL = A.survey_model || 'opus'
 const REVIEW_MODEL = A.review_model || 'fable'
+// Decide's own knob, defaulting to STRAT_MODEL so behaviour is unchanged unless
+// asked. It exists so a run that dies at Decide on Fable exhaustion can be
+// RESUMED onto Opus without touching STRAT_MODEL — moving that constant would
+// change the strategist's and digest's cache keys too, re-buying an entire
+// survey round to fix a joint that runs once.
+const ARCH_MODEL = A.architect_model || STRAT_MODEL
+// FABLE OUTAGE SWITCH. When Fable is unreachable (spend limit, retention tier,
+// refusal class), every fable-selecting site must dispatch Opus INSTEAD — not
+// merely fall back to it. The distinction is load-bearing at the builder
+// fan-out, which is deliberately NOT wrapped in neverLose: a fable-assigned
+// slice dispatches once, returns null, and the slice is LOST with no retry. The
+// joints only waste three attempts; the builders lose work outright.
+// Identity by default, so passing nothing changes nothing.
+const NO_FABLE = A.no_fable === true
+const M = (m) => (NO_FABLE && m === 'fable' ? 'opus' : m)
 // The single source of depth in this workflow. Every agent() call derives its
 // effort from its model through this, so no call site can quietly acquire a
 // different depth than its tier implies — and adding an xhigh anywhere means
@@ -111,9 +126,10 @@ ${WISH}
 
 const GATES_BLOCK = `Local gates available (a slice must name at least one that proves it):
 - Cloud SPA: node --check cloud/priv/static/app.js AND node cloud/priv/static/__app.test.mjs (node:vm harness over __bpTestHook — extend it for new pure helpers)
-- Go CLI: CC=clang go build ./... && go vet ./internal/cli/... && go test ./internal/cli/...
-- Elixir control plane: targeted unit tests only (CC=clang mix test <file>), no DB/boot, never prod compile
-- JS SDK: pnpm --filter <pkg> build/typecheck/test (+ js/.changeset/ entry for any public API change)`
+- Go CLI: go build ./... && go vet ./internal/cli/... && go test ./internal/cli/...
+- Elixir control plane: targeted unit tests only (mix test <file>), no DB/boot, never prod compile
+- JS SDK: pnpm --filter <pkg> build/typecheck/test (+ js/.changeset/ entry for any public API change)
+- CC=clang is HOST-CONDITIONAL, not part of the gate: prefix it only on hosts where \`cc\` is shadowed by a wrapper (some dev Macs alias cc to a Claude launcher, which breaks cgo); on a clean host the plain commands above are the gate.`
 
 const TASKS_BLOCK = `THE BP TASK CONTRACT (the ledger is the spine — every phase reads and writes it):
 - Tasks are type:task documents in Barkpark, driven via the bp CLI. Try \`bp task create\` first; if this binary lacks the verb, the fallback is:
@@ -121,6 +137,7 @@ const TASKS_BLOCK = `THE BP TASK CONTRACT (the ledger is the spine — every pha
     bp doc publish task <slug> --yes        # tasks MUST be published — gates and boards read the published ledger only. tags are weighted [{tag,strength 1–100,rationale}] with DISTINCT strengths (max = main tag); each tag MUST be a registered tag doc (bp doc ls tag) or publish 422s unknown_tag
 - Fields are FLAT top-level in content. priority 0=highest..4. parent_id is a slug. Typed values use key:=json.
 - Acceptance criteria to the authoring rubric: concrete, evidence-bearing, one per real proof obligation — {criterion, met, evidence}.
+- A CRITERION NAMES THE CLAIM, NEVER THE CONTAINER. Word it "the claim <X> is recorded in a durable venue the merge carries, and the evidence NAMES WHICH" — and accept ANY such venue: the commit message body, a test \`@moduledoc\` or a header comment on a shipped file, the instrument's own printed output, a comment at the site it describes, the task's own stamped ledger evidence, or the PR body. Never write "the PR body says <X>". The mechanical reason: builders are told not to push and do not open pull requests, so at stamp time NO PR body exists and none can — and the later \`gh pr create\` always passes \`--body\`, never \`--fill\`, and \`--body\` overwrites autofill entirely, so a commit message NEVER becomes the PR body on this harness. A venue-presuming criterion is therefore unmeetable the moment the builder finishes. Equally: NEVER demand PROSE for what the merged artifact already proves — if a file list, a diff, or a test name settles it, ask for THAT instead of a sentence restating it. EXEMPT from this rule: the lead-owned merge-gated row described below ("PR merged"), which the lead closes on merge and may name the PR.
 - DECIDE phases: author \`files:\` labels on each wave slice — the exact paths it will touch (one repo-relative path per label; trailing \`/\` = directory prefix; no globs). This feeds the dispatch frontier's file-truth collision check so slices with disjoint file sets dispatch in parallel. Grammar + semantics: docs/contracts/dispatch-areas.md.
 - Claim BEFORE working: \`bp task claim <task-id> <worker>\` — the claim epoch is at doc.claim.epoch in the JSON response.
 - Stamp each criterion the MOMENT it is proven (mid-claim, never batched): \`bp task stamp <task-id> <worker> <epoch> --criterion N --criterion-text "<the criterion's exact stored wording>" --met --evidence "…"\` — \`--met\` REQUIRES non-empty \`--evidence\` (a met flip without proof is rejected) AND \`--criterion-text\` (the row's wording, copied verbatim from acceptance_criteria[N].criterion). \`--criterion N\` is 0-BASED — the FIRST criterion is 0 — and the index alone is UNVERIFIABLE: an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping a NEIGHBOURING criterion, and a text that does not match the row at N is REJECTED too (409 criteria_mismatch). \`--miss --note "…"\` records an honest attempt WITHOUT flipping the lock and needs no text. Close stays the SEAL, validating the full set: \`bp task close <task-id> <worker> <epoch> done "reason" --set 'criteria:=[{"index":N,"met":true,"evidence":"...","criterion":"<that row's exact wording>"}]'\` (the \`criterion\` key is REQUIRED on every met:true entry, same guard).
@@ -129,11 +146,20 @@ const TASKS_BLOCK = `THE BP TASK CONTRACT (the ledger is the spine — every pha
 
 const PAPER_BLOCK = `THE WAVE PAPER (the wave's living story — one Barkpark Paper, opened at Strategize, closed at Review):
 - style=article is MANDATORY (without it the render falls back to the ugly email look). bp doc create ignores stdin — write/extend the body via the HTTP /v1/data/mutate path (patch merges into content), then bp doc publish; \`bp capabilities -o json\` shows the verbs.
+- THE BODY IS A TOP-LEVEL \`blocks\` ARRAY — nothing else renders. Set/extend \`blocks\` at the ROOT of the document's content: NEVER \`body.content\`, NEVER a root \`content\` node array. \`body: {blocks, html}\` is what the SERVER synthesises on publish — authoring INTO \`body\` yourself publishes 200 and renders EMPTY.
+- THE INLINE TEXT LEAF IS KEYED \`value\`, NEVER \`text\`. The renderer reads \`Map.get(n, "value", "")\` and has NO \`"text"\` fallback (api/lib/barkpark/portable_doc/render/inline.ex), so a \`text\`-keyed leaf renders as the EMPTY STRING — and a paragraph left empty is DROPPED, so the prose disappears with no error anywhere. A real paragraph block therefore reads:
+    {"type":"paragraph","content":[{"type":"text","value":"Six verifiers re-ran the console gates; two claims did not survive."}]}
+  MIXED dialects are the nastiest shape on the board: the Paper still looks fine while a subset of its prose is silently gone.
+- READ-BACK OBLIGATION — a guard that can LOSE. After EVERY publish or patch of the Paper, re-read it FROM THE SERVER and prove BOTH:
+    (a) DERIVE the public host first — \`bp capabilities -o json\` and read \`.server.base_url\` from the JSON — then \`curl -s -o /dev/null -w '%{http_code}' <base_url>/papers/<slug>\` prints 200. Never hardcode a host: this engine runs against whatever server the local bp config points at, and a host baked into this file is wrong on every other machine. Trust FIELDS, never exit codes — \`bp whoami\` exits 0 even when the server is unreachable, so only the value read from the JSON counts as a derivation; AND
+    (b) the SERVER-DERIVED body contains the Paper's own prose — pick a distinctive sentinel sentence you just wrote, fetch the paper (the doc TYPE is \`paper\`, not \`bulldoc\`: \`bp doc get paper <slug> -o json\` — \`bulldoc\` answers not_found and reads like a missing Paper — or curl the /papers/<slug> URL) and confirm the sentinel appears at least once AND the rendered body's stripped text length is > 0.
+  A 200 with ZERO prose characters is precisely the defect this obligation exists to catch, so status alone proves NOTHING and a paragraph count proves nothing either. If either check fails the Paper is unreadable memory: fix the body, re-publish, re-read. Ending the phase over a failed read-back is a PHASE FAILURE, not a note — do not report the phase complete.
 - Fable phases OWN the Paper; fan-out workers NEVER write it (20 concurrent patches clobber each other) — workers write their OWN bp task, and the next Fable folds their reports into the Paper.
 - The Paper always states what is IN FLIGHT: Digest appends the survey digest + verify plan BEFORE the verifiers fly; Decide appends decisions + the wave plan BEFORE the builders fly; Review closes the story as the debrief. Someone opening the Paper mid-wave must see exactly where the wave stands.
+- Link both ways: the Paper's id lives on the epic task (flat wave_paper field) and on every slice task; the Paper names the task ids it drives.
+- THE WALL DIALECT (enforced at publish, not a style preference): the wave Paper carries tag \`epic-cycle-wave-paper\`, and that exact tag puts it behind the epic paper publish wall (api/lib/barkpark/content/papers/epic_quality.ex on origin/main). The enforced set: NEVER author an empty paragraph spacer ANYWHERE — hard failure :empty_paragraph_spacer, checked over the NESTED block tree, not just top level (this REPLACES the retired spacing doctrine for this cohort; the ruling is owned by open task cchi-w67-bl-the-epic-paper-floor-forbids-the-spacing-doctrine — teach the wall, never author spacers). Opening, within the first 8 meaningful blocks: an h1 (exactly one h1 in the WHOLE document), one \`ingress\` block, and one orientation block of byline|stats|toc|list|steps. No heading-level jumps (h2 followed by h4 fails). Ceilings: 80 top-level blocks, 16 top-level headings, 5000 primary words — closed expandables are EXCLUDED from the word count, so long evidence goes behind a collapsed expandable. Every table with rows carries a non-empty \`head\`. A refused publish answers 422 code=invalid_epic_paper_quality and details.failures names EVERY failed gate — fix each named failure and re-publish (the bp CLI renders details); a publish that keeps failing is a Paper defect, never a reason to drop the tag.
 - BEAUTIFUL BY CONTRACT (epic-memory D2): compose with real components, never walls of paragraphs — eyebrow/byline/ingress open the Paper; stat-grid for headline numbers; journey CARDS per agent (cards block: mission → what they figured out → what it means); decisions as callout blocks; proofs as code blocks quoting REAL output; load-bearing facts as a table WITH their rerun commands; diagram (mermaid) where flow beats prose; divider between phase sections. Block-shape crib: .claude/skills/bp-epic-debrief/helpers/blocks.md.
-- CURATE, DON'T DUMP: keep turning points, surprises, refuted premises, real output; drop boilerplate. The Paper is the ONLY durable carrier of the wave's story (no dossiers, no per-agent papers — D3): what you leave out is gone.
-- Link both ways: the Paper's id lives on the epic task (flat wave_paper field) and on every slice task; the Paper names the task ids it drives.`
+- CURATE, DON'T DUMP: keep turning points, surprises, refuted premises, real output; drop boilerplate. The Paper is the ONLY durable carrier of the wave's story (no dossiers, no per-agent papers — D3): what you leave out is gone.`
 
 const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system, never an afterthought):
 - Stamp state changes the MOMENT they happen — claim when you start, evidence the second a criterion is proven, a note the second you deviate or stall. Never batch honesty to the end of your run.
@@ -466,9 +492,11 @@ function gateFactProvenance(reports) {
 
 const PLAN_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['charter_written', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'doc_facts_routed', 'wave', 'journey', 'started_at', 'ended_at'],
+  required: ['charter_written', 'charter_pr', 'wave_referent_task', 'paper_updated', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'doc_facts_routed', 'wave', 'journey', 'started_at', 'ended_at'],
   properties: {
-    charter_written: { type: 'boolean', description: `true only after you actually wrote/updated ${CHARTER_PATH}` },
+    charter_written: { type: 'boolean', description: `true only after the docs-only PR carrying ${CHARTER_PATH} is OPEN and reporting its checks — a charter that never reached a PR is not published, and a direct push to main is REJECTED (GH006)` },
+    charter_pr: { type: 'string', description: 'the docs-only charter PR — its number or URL (e.g. "#6123"); if no PR could be opened, the one-line reason instead, and charter_written stays false' },
+    wave_referent_task: { type: 'string', description: 'the PER-WAVE referent task (`<epic-slug>-wave-<N>-log`, parented under the epic) that you filed, CLAIMED, and pulsed BEFORE opening the charter PR, and whose id is on that PR\'s `Task:` line. The gate freezes its verdict at PR-open time (`claim.expired_at >= pull_request.created_at`), so a referent claimed after the fact is worth nothing. Never the epic Goal — that misrepresents a multi-wave Goal\'s lifecycle. If no PR was opened, the one-line reason instead' },
     paper_updated: { type: 'boolean', description: 'true only after you appended verification results + decisions + the wave plan (with task ids) to the wave Paper and re-published it' },
     epic_task_id: { type: 'string', description: 'slug of the PUBLISHED epic parent task (created this wave or pre-existing)' },
     tasks_verified: { type: 'boolean', description: 'true only after you re-read every wave task from the server and confirmed each is published, parented, and rubric-quality' },
@@ -626,7 +654,7 @@ ${PREMISE_SMOKE_BLOCK}
 ${PAPER_BLOCK}
 ${LEAD_NOTES}`,
   { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: m, effort: EFFORT_FOR(m) }
-), { label: 'strategist', model: STRAT_MODEL, other: JOINT_FALLBACK })
+), { label: 'strategist', model: M(STRAT_MODEL), other: M(JOINT_FALLBACK) })
 if (!strategist) throw new Error(`Strategize returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK}. There is no partial wave to salvage — nothing has been surveyed, decided, or written. Resume the run rather than restarting.`)
 const surveyAssignments = (strategist.survey || []).slice(0, 20)
 if (surveyAssignments.length < SURVEY_FLOOR) {
@@ -658,7 +686,7 @@ Search Barkpark FIRST (\`bp search query "<terms>"\` — the \`query\` sub-verb 
 COVERAGE ACCOUNTING (your report is only trustworthy if its edges are visible): list EVERY file/paper/task you checked in coverage[] — the path, what you checked it for, and found / not_found / partial. NOT-FOUND IS A FINDING ("no existing rate limiter in api/" changes the plan as much as finding one). Anything you did not list is treated as unchecked — do not imply coverage you don't have. The wave Paper (${WAVE_PAPER}) will carry your coverage map; you do NOT write the Paper yourself.
 ${JOURNEY_BLOCK}`,
       { label: `survey:${q.key}`, phase: 'Survey', schema: SURVEY_SCHEMA, model: m, effort: EFFORT_FOR(m) }
-    ), { label: `survey:${q.key}`, model: SURVEY_MODEL, other: 'fable' })
+    ), { label: `survey:${q.key}`, model: M(SURVEY_MODEL), other: M('fable') })
   )
 )).filter(Boolean)
 // ONE interception, in place, right at the resolve — `surveys` is serialised
@@ -712,7 +740,7 @@ ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'digest', phase: 'Digest', schema: AIM_SCHEMA, model: m, effort: EFFORT_FOR(m) }
-), { label: 'digest', model: STRAT_MODEL, other: JOINT_FALLBACK })
+), { label: 'digest', model: M(STRAT_MODEL), other: M(JOINT_FALLBACK) })
 if (!aim) throw new Error(`Digest returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). The survey reports are intact; resume the run rather than restarting so they are not re-bought.`)
 const verifyAssignments = (aim.verification || []).slice(0, 15)
 if (verifyAssignments.length < VERIFY_FLOOR) {
@@ -769,7 +797,7 @@ ${JOURNEY_BLOCK}`,
       { label: `verify:${q.key}`, phase: 'Verify', schema: VERIFY_SCHEMA, model: m, effort: EFFORT_FOR(m), ...(q.needs_worktree ? { isolation: 'worktree' } : {}) }
     // Recovery hops the OTHER way for a fable-assigned verifier, so a lost
     // judgment-heavy dig retries on opus rather than giving up on the question.
-    ), { label: `verify:${q.key}`, model: q.model === 'fable' ? 'fable' : 'opus', other: q.model === 'fable' ? 'opus' : 'fable' })
+    ), { label: `verify:${q.key}`, model: M(q.model === 'fable' ? 'fable' : 'opus'), other: M(q.model === 'fable' ? 'opus' : 'fable') })
   )
 )).filter(Boolean)
 // Same single interception for the verify round, at its own resolve.
@@ -818,9 +846,25 @@ Your job:
 1. DECIDE: finalize the key choices (decide them — don't list options). Where verification contradicted the direction, follow the evidence.
 2. ${CHARTER_EXISTS
       ? `UPDATE the charter at ${CHARTER_PATH} (Read then Edit): reconcile with what landed, fold in decision changes, set the wave plan.`
-      : `WRITE the epic charter to ${CHARTER_PATH} (Write tool): ## Vision, ## Decisions (each with a one-line why), ## Roadmap (all slices, ordered, sized), ## Wave log (empty). This file is the epic's memory — every future wave reads it.`} Then COMMIT it (one docs-only conventional commit, this file by explicit path only — never git add -A, other sessions share this checkout) AND PUBLISH it to origin: builder worktrees branch from origin/main — committed AND PUSHED state — so a charter that is only committed to your local main is STILL INVISIBLE to every builder AND strands the shared primary checkout's local main (learned the hard way twice: first a wave cited decisions that lived only in a working copy; then decisions that lived only in an unpushed local commit). To publish: after committing, run \`git pull --rebase origin main\` then \`git push\`; if the push is rejected as non-fast-forward (~40 sessions share this branch and a concurrent duplicate wave can land first), re-run \`git pull --rebase origin main\` then \`git push\` again — NEVER \`--force\`, NEVER a blind push. Set charter_written=true only after the push SUCCEEDS (a commit that never reached origin is not published).
-   THEN COMMIT THIS RUN'S LEDGER ROWS: the verify fleet may have written re-derivation recipe rows under tooling/grip/ledger/ and it is forbidden to commit them — that is YOUR step. Run \`git status --porcelain tooling/grip/ledger/\`; for each untracked *.json it names, \`git add\` that file BY EXPLICIT PATH (same commit as the charter, or a second docs-only commit — either is fine) — never git add -A, never a directory, never a glob you did not first expand and read, because other sessions share this checkout. If you make it a second commit AFTER the charter push, publish it too (\`git pull --rebase origin main\` then \`git push\`, same race-safe retry) — an unpushed ledger commit is as invisible to builder worktrees as an unpushed charter. If it names nothing, skip the step silently; touch nothing else under tooling/grip/.
-2b. ROUTE DURABLE REPO-FACTS INTO DOCS (epic-memory D5): from this wave's verified facts, the FEW that are durable repo-truths (not wave-local findings) go into their OWNING docs/ card per the CLAUDE.md routing table — corrections and gap-fills only, never additive research dumps; byte budgets and the 7-card cap are sovereign. Gate before committing: bash scripts/check-doc-budgets.sh && bash scripts/docs-anchors-check.sh. Commit rides the charter commit (explicit paths). A fact that deserves docs but misses budget becomes a published backlog task instead. Record everything in doc_facts_routed.
+      : `WRITE the epic charter to ${CHARTER_PATH} (Write tool): ## Vision, ## Decisions (each with a one-line why), ## Roadmap (all slices, ordered, sized), ## Wave log (empty). This file is the epic's memory — every future wave reads it.`} Then PUBLISH IT AS A DOCS-ONLY PULL REQUEST — never a direct push to main. \`main\` is protected: a direct push is rejected server-side with \`remote: error: GH006: Protected branch update failed for refs/heads/main.\`, exit 1, EVEN FOR A REPO ADMIN, and the contents API returns 409 with the same sentence, so there is no API detour (honest-gates charter D39, measured on live GitHub). The primary checkout also stays on \`main\` — never \`git switch\`/\`checkout -b\` there, ~40 sessions share it and a branch jump strands their uncommitted work — so the branch lives in ITS OWN WORKTREE:
+   \`\`\`
+   git fetch origin main
+   BR=epic-charter/<epic-slug>-<UTC stamp: run \`date -u +%Y%m%dT%H%M%SZ\`>       # unique — a duplicate concurrent wave must not collide
+   git worktree add ../bp-charter-wt-<same stamp> -b "$BR" origin/main
+   \`\`\`
+   Copy the charter you just wrote into that worktree BY EXPLICIT PATH (one \`cp\` of one named file), then INSIDE the worktree: \`git add <that one explicit path>\` — never \`git add -A\`, never a directory, never a glob you did not first expand and read — one docs-only conventional commit, then \`git push -u origin "$BR"\`, NEVER \`--force\` and NEVER a blind push (if the push is rejected, \`git pull --rebase origin main\` inside the worktree and push again; the branch is yours alone, so this should not happen).
+   FILE AND CLAIM THE WAVE REFERENT **BEFORE** YOU OPEN THE PR — this is a step, not a formality, and doing it after \`gh pr create\` is already too late. The pr-task-gate's predicate is \`claim.expired_at >= pull_request.created_at\` (honest-gates charter D58): the verdict is FROZEN at PR-open time, so a task whose lease had ALREADY lapsed when the PR was created fails permanently. Measured live 2026-07-28 against the real ledger: a charter PR naming the epic parent at 21:30Z FAILS with \`had ALREADY lapsed 19979s before this PR was opened\`, while the SAME task with the PR opened at 15:00Z PASSES. Nothing rescues the losing side — not a re-run, not a re-claim, not close/reopen — because none of them move \`created_at\`; only a NEW PR opened under a live claim (or the \`hotfix!\` label) escapes. So, first:
+   \`\`\`
+   # a PER-WAVE referent, parented under the epic — published, then claimed
+   bp task create --id <epic-slug>-wave-<N>-log --parent ${EPIC_TASK_ID || '<the epic parent task id>'} --title "Wave <N> paperwork: charter PR + wave log" ...   # or the bp doc create task + bp doc publish fallback
+   bp task claim <epic-slug>-wave-<N>-log <this run's worker id>        # doc.claim.epoch comes back here
+   \`\`\`
+   THE REFERENT IS PER-WAVE, AND THE REJECTED ALTERNATIVE IS RECORDED HERE SO NO LATER PHASE RE-DERIVES IT: claiming the long-lived epic parent Goal (${EPIC_TASK_ID || '<the epic parent task id>'}) would also satisfy the gate, and it is WRONG — it misrepresents that Goal's lifecycle for the whole wave, parking a multi-wave Goal in \`in_progress\` under one Decide agent's name for hours, and it makes the Goal's claim state a hostage of PR timing. A \`<epic-slug>-wave-<N>-log\` child is exactly as long-lived as this wave's paperwork, which is what the gate should be vouching for.
+   THEN PULSE IT UNTIL THE PR IS OPEN: \`bp task pulse <referent> <worker> --now "…"\` at least every 30 MINUTES from the claim until \`gh pr create\` returns, and once more immediately after with the PR number. The lease is 2700s — \`api/lib/barkpark/tasks/ttl_sweeper.ex:158 @default_ttl_seconds 2700\`, i.e. 45 minutes — so 30 leaves margin for a slow push or a rebase. PULSE IS A KEEP-ALIVE AND NEVER A RESURRECT: \`api/lib/barkpark/tasks/pulse.ex:130-136\` \`check_live/1\` refuses anything not \`in_progress\` with \`:not_holder\`, so once the lease is reaped you cannot pulse your way back — you must re-claim, and if the PR is already open by then, that PR is dead and you open a new one.
+   THEN OPEN THE PR: \`gh pr create --base main --head "$BR"\`, and its body MUST carry the line \`Task: <the wave referent id you just claimed>\` ON ITS OWN LINE — that is exactly what the pr-task-gate reads, and it reads it on EVERY pull request: \`.github/workflows/pr-task-gate.yml:43\` says verbatim "No paths filter: any change needs a task, so every PR is checked." THERE IS NO DOCS-ONLY SKIP FOR THIS GATE — a \`.md\`-only diff does NOT clear it (the paths-filtered skip you may be remembering belongs to the Elixir gate's dispatcher, a different workflow), so a charter PR carrying a lapsed or missing referent is unmergeable, permanently. Then \`git worktree remove\` the worktree (the primary checkout keeps its working copy of the charter, uncommitted, so THIS run can still read it — leave it alone, do not commit it to main).
+   REPORT, DO NOT PUSH: set charter_written=true, charter_pr=<the PR number or URL>, and wave_referent_task=<the referent id you claimed and pulsed> once the PR is OPEN and reporting its checks. The success condition of this phase is THE PR EXISTING AND REPORTING, not a push succeeding — do not block the wave waiting on the merge; the lead merges it. And because the charter therefore may NOT be on origin/main while the builders fly, name the PR in decisions_summary and make sure this wave's decisions are in the wave Paper IN FULL (step 7) — the Paper is what a builder can read today.
+   THE SAME PR CARRIES THIS RUN'S LEDGER ROWS: the verify fleet may have written re-derivation recipe rows under tooling/grip/ledger/ and it is forbidden to commit them — that is YOUR step. Run \`git status --porcelain tooling/grip/ledger/\` in the PRIMARY checkout; for each untracked *.json it names, copy that file into the charter worktree BY EXPLICIT PATH and \`git add\` it there — never \`git add -A\`, never a directory, never a glob you did not first expand and read, because other sessions share this checkout. Same commit as the charter, or a second docs-only commit on the same branch — either is fine, both ride the one PR, and nothing here ever touches main directly. If it names nothing, skip the step silently; touch nothing else under tooling/grip/.
+2b. ROUTE DURABLE REPO-FACTS INTO DOCS (epic-memory D5) — do this WHILE THE CHARTER WORKTREE STILL EXISTS, i.e. before the \`git worktree remove\` in step 2 (if it is already gone, \`git worktree add\` a fresh one on \`$BR\`): from this wave's verified facts, the FEW that are durable repo-truths (not wave-local findings) go into their OWNING docs/ card per the CLAUDE.md routing table — corrections and gap-fills only, never additive research dumps; byte budgets and the 7-card cap are sovereign. Gate before committing: bash scripts/check-doc-budgets.sh && bash scripts/docs-anchors-check.sh. The edit RIDES THE CHARTER PR — never a direct push to main: make the edit in the primary checkout, then copy the card into the charter worktree BY EXPLICIT PATH and \`git add\` it there, on the same branch and in the same PR as the charter (same commit or a second docs-only one, either is fine). A fact that deserves docs but misses budget becomes a published backlog task instead. Record everything in doc_facts_routed.
 3. FILE THE TASKS: ${EPIC_TASK_LINE} Every slice gets a published bp task with rubric-quality acceptance criteria (include a merge-gated criterion the lead closes) and the wave Paper's id on it (flat wave_paper field) so task → story is one hop. A slice without a published task does not exist — wave[].task_id is required.
 4. SEED THE BACKLOG: everything exploration surfaced that is real but NOT this wave gets filed now as a published child task (honest description, sane priority) — record the ids in backlog_filed. The ledger must show the future, not just the present.
 5. PERFECT THE TASKS (you are also the task reviewer — there is no one behind you): after filing, re-read every wave task back from the server and verify it is published (not a stranded draft), parented under the epic task, linked to the wave Paper, and reads to the rubric — outcome-shaped title, description a cold builder could start from, concrete evidence-bearing criteria, sane priority. Fix every defect via bp (patch, publish, re-parent, dedup stranded drafts). Set tasks_verified=true only after this read-back pass is clean.
@@ -841,11 +885,11 @@ ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: m, effort: EFFORT_FOR(m) }
-), { label: 'architect', model: STRAT_MODEL, other: JOINT_FALLBACK })
+), { label: 'architect', model: M(ARCH_MODEL), other: M(JOINT_FALLBACK) })
 
-if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; resume the run rather than restarting so neither round is re-bought.`)
+if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${ARCH_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; resume the run rather than restarting so neither round is re-bought.`)
 const wave = (architect.wave || []).slice(0, 8)
-log(`Architect cut ${wave.length} slices (${wave.filter((w) => w.builder_model === 'fable').length} fable); charter_written=${architect.charter_written}; tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}; backlog=${architect.backlog_filed}`)
+log(`Architect cut ${wave.length} slices (${wave.filter((w) => w.builder_model === 'fable').length} fable); charter_written=${architect.charter_written} (PR ${architect.charter_pr || 'NONE — the charter is not published'}, referent ${architect.wave_referent_task || 'NONE — that PR cannot pass the task gate'}); tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}; backlog=${architect.backlog_filed}`)
 SPENT.decide = budget.spent()
 if (wave.length === 0) {
   return {
@@ -890,7 +934,7 @@ const built = (await parallel(
 
 ${USER_WISH_BLOCK}
 
-Read the epic charter at ${CHARTER_PATH} first — your slice must respect its decisions. The wave Paper (${WAVE_PAPER}) carries this wave's story — decisions, verification proofs, the other slices; read it for context, NEVER write it (your bp task is your voice).
+Read the epic charter at ${CHARTER_PATH} first — your slice must respect its decisions. ${architect.charter_pr ? `HEADS UP, and this is not a formality: THIS wave's charter is still an OPEN PULL REQUEST (${architect.charter_pr}), because \`main\` is protected and Decide no longer pushes to it. Your worktree branched from origin/main, so the ${CHARTER_PATH} on your disk is the PREVIOUS wave's — it will read as plausible and be silently out of date. Get this wave's decisions from the wave Paper (${WAVE_PAPER}), which is current, and from your bp task brief; if you need the charter diff itself, \`gh pr diff ${String(architect.charter_pr).replace(/[^0-9]/g, '') || architect.charter_pr}\`.` : ''} The wave Paper (${WAVE_PAPER}) carries this wave's story — decisions, verification proofs, the other slices; read it for context, NEVER write it (your bp task is your voice).
 
 SLICE: ${item.title}
 BP TASK: ${item.task_id}
@@ -922,7 +966,7 @@ Catalog-first (measured law, /papers/scaffy-benchmark): before hand-editing a re
     // builder to STOP on a failed claim — so a rescue could turn a lost slice
     // into a stuck one. The IIFE exists only to bind the slice's model so
     // EFFORT_FOR can derive depth from it, exactly as every other call site.
-    ))(item.builder_model === 'fable' ? 'fable' : 'opus')
+    ))(M(item.builder_model === 'fable' ? 'fable' : 'opus'))
   )
 )).filter(Boolean)
 
@@ -978,7 +1022,7 @@ if (built.length > 0) {
 
 ${USER_WISH_BLOCK}
 
-Read the epic charter at ${CHARTER_PATH} first. Epic parent task: ${architect.epic_task_id}.
+Read the epic charter at ${CHARTER_PATH} first. Epic parent task: ${architect.epic_task_id}.${architect.charter_pr ? ` NOTE: this wave's charter is an OPEN PR (${architect.charter_pr}) — \`main\` is protected and Decide publishes by PR, so the copy on your disk is the PREVIOUS wave's. Read this wave's decisions from the wave Paper (${WAVE_PAPER}) and from \`gh pr diff\` on that PR. Your step-8 wave-log entry therefore belongs on the CHARTER PR's branch, not on a copy of main: check the PR out into your own worktree, append there, and push — appending to the stale local file silently drops this wave's charter changes.` : ''}
 
 BUILT SLICES (review every green one):
 ${JSON.stringify(greenBuilt.map((b) => ({ task_id: b.task_id, branch: b.branch, gate: b.gate_command, summary: b.summary, builder_review: b.review, files: b.files_changed })), null, 2)}
@@ -1005,11 +1049,13 @@ Then, once, for the wave:
 6. LEDGER AUDIT: for every slice task, verify the builder claimed it, stamped honest evidence AS THEY WORKED (their ledger_stamps claim vs the task's actual state), and left lifecycle truthful (in_progress, not done — merge-gated criteria stay open for the lead). Not-green slices' tasks must say so. Verify tasks NOT in this wave weren't touched. Fix ledger lies/omissions directly via bp and record them in ledger_fixes.
 7. GRADE (Cody mandate): a letter grade A+..F for the wave as it will merge, judged against the WISH — correctness, completeness, bloat, aesthetics; tree-tidiness has no value. The commentary must EARN the grade: name what is genuinely strong AND what falls short. Never a bare number. Do not manufacture criticism to look rigorous.
 8. WAVE LOG: APPEND a '### Wave <today>' entry to the charter's ## Wave log (Edit tool): what landed, what stalled, what the next wave should take. Set wave_log_appended=true only after you actually wrote it.
-9. CLOSE THE WAVE PAPER (${WAVE_PAPER}): append the final DEBRIEF section and re-publish — what shipped (per slice: task, final branch, verdict), what stalled and why, the grade + commentary, the ledger audit outcome, what the next wave should take. Read the Paper top to bottom first: it now tells the whole wave's story (direction → survey coverage → verification proofs → decisions → outcome) — fix any section a later phase invalidated (a decision reversed, a proof superseded) with a dated correction note rather than silent rewriting. Report the Paper id in paper_closed. The debrief section MUST carry builder journey cards (from every builder's journey{}, including not-green slices — a stall is a story), your own journey, and the telemetry + retro sections (see WAVE TELEMETRY above). Include the RETRO: one verdict per phase in retro[], mirrored into the Paper's debrief section.
-10. HEARTBEAT + HANDOFF: stamp the epic task's wave_status ("wave: complete — grade <g>, paper ${WAVE_PAPER}") and re-publish; set heartbeat_stamped accordingly. Put the direction handoff in next_wave; per slice report final_branch (the -r branch if you changed anything), gate_passed on your final state, and an honest verdict incl. anything the lead must know before merging (the lead closes merge-gated criteria on merge — name them).
+9. CLOSE THE WAVE PAPER (${WAVE_PAPER}): append the final DEBRIEF section and re-publish — what shipped (per slice: task, final branch, verdict), what stalled and why, the grade + commentary, the ledger audit outcome, what the next wave should take. Read the Paper top to bottom first: it now tells the whole wave's story (direction → survey coverage → verification proofs → decisions → outcome) — fix any section a later phase invalidated (a decision reversed, a proof superseded) with a dated correction note rather than silent rewriting. Report the Paper id in paper_closed. The debrief section MUST carry builder journey cards (from every builder's journey{}, including not-green slices — a stall is a story), your own journey, and the telemetry + retro sections (see WAVE TELEMETRY above). Include the RETRO: one verdict per phase in retro[], mirrored into the Paper's debrief section. If a session is open, log the seal: \`bp session log <session-slug> --kind epic-wave-complete --ref ${WAVE_PAPER}\` — a failed log never blocks the wave.
+10. HEARTBEAT + HANDOFF: stamp the epic task's wave_status ("wave: complete — grade <g>, paper ${WAVE_PAPER}") and re-publish; set heartbeat_stamped accordingly.
+   CLOSE THE WAVE REFERENT — it is the one task in this wave whose work IS finished when you finish, and nothing else will ever close it. Decide filed \`<epic-slug>-wave-<N>-log\`, claimed it so the charter PR could pass the task gate, and left it \`in_progress\`; you are the phase that appends the wave log and seals the Paper, i.e. the phase that completes exactly that paperwork. Left alone it is reaped by the TTL sweeper 45 minutes later and reads on the board as a STALLED claim rather than as finished work — a lie about a live system, filed by the machinery built to stop lying. The claim is Decide's and \`close\` is a CAS on the CURRENT claim, so: \`bp task claim <referent> <your worker id>\` (this returns a fresh \`doc.claim.epoch\`), then \`bp task close <referent> <your worker id> <that epoch> done "wave <N> paperwork complete: charter PR <#>, wave log appended, Paper ${WAVE_PAPER} sealed"\`. This is the ONE task Review closes outright — every SLICE task stays \`in_progress\` with its merge-gated criteria open for the lead. If the charter PR is still unmerged that is fine and changes nothing: the referent vouches for the paperwork being DONE, not for it being merged. Put the direction handoff in next_wave; per slice report final_branch (the -r branch if you changed anything), gate_passed on your final state, and an honest verdict incl. anything the lead must know before merging (the lead closes merge-gated criteria on merge — name them).
 11. **PUSH EVERY FINAL BRANCH AND OPEN ITS PR. THE WAVE IS NOT DONE UNTIL YOU DO.** This is step 11 because SIX consecutive waves ended with built, reviewed, gate-passing work sitting on local-only branches in a SHARED multi-session checkout that other cycles reset — roughly 20 slices that existed only because a human went looking for them. A branch you do not push is work this wave did not do. For each green slice, from your worktree:
+   RE-CLAIM (OR PULSE) THE SLICE TASK IMMEDIATELY BEFORE ITS PR IS OPENED — one command per slice, in the same breath as the push, and NEVER in a batch at the start of step 11. You are opening these PRs HOURS after the builders stopped pulsing, and the pr-task-gate freezes its verdict at PR-open time (\`claim.expired_at >= pull_request.created_at\`, honest-gates charter D58): a slice claim that lapsed in the gap between "builder done" and "Review opens the PR" reds that PR PERMANENTLY — no re-run, no later claim, no close/reopen moves \`created_at\`, so the only escape is a brand-new PR. The lease is 2700s (\`api/lib/barkpark/tasks/ttl_sweeper.ex:158 @default_ttl_seconds 2700\`), and builders finish well outside that window. So per slice: \`bp task pulse <task_id> <your worker id> --now "opening the slice PR"\` if the task is still \`in_progress\` and held — pulse is a KEEP-ALIVE, never a resurrect (\`api/lib/barkpark/tasks/pulse.ex:130-136\` \`check_live/1\` refuses anything not \`in_progress\` with \`:not_holder\`) — otherwise \`bp task claim <task_id> <your worker id>\` first and pulse after. Then push and open the PR, and only then move to the next slice.
    \`git push -u origin <final_branch>\` then \`gh pr create --head <final_branch> --title "<conventional-commit title>" --body "<what it does + the gate you re-ran + Task: <task_id>>"\`.
-   The body MUST carry a single canonical \`Task: <task_id>\` line (not \`Tasks: a + b\`) or the PR↔task gate fails. Do NOT merge — the lead merges. Report per slice \`pushed: true\` and \`pr\`; if a push or PR genuinely fails, report \`pushed: false\` with the verbatim error, and say so in overall_verdict — never silently. A wave that grades A with unpushed branches has not earned it, and you must say that in the commentary.
+   The body MUST carry a single canonical \`Task: <task_id>\` line (not \`Tasks: a + b\`) or the PR↔task gate fails — and it is checked on EVERY PR regardless of what the diff touches (\`.github/workflows/pr-task-gate.yml:43\`: "No paths filter: any change needs a task, so every PR is checked"). Do NOT merge — the lead merges. Report per slice \`pushed: true\` and \`pr\`; if a push or PR genuinely fails, report \`pushed: false\` with the verbatim error, and say so in overall_verdict — never silently. A wave that grades A with unpushed branches has not earned it, and you must say that in the commentary.
 CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
 ${JOURNEY_BLOCK}
 ${TASKS_BLOCK}
@@ -1017,7 +1063,7 @@ ${PAPER_BLOCK}
 ${LIVENESS_BLOCK}
 ${FLIP_RISK_BLOCK}`,
     { label: 'review', phase: 'Review', schema: REVIEW_SCHEMA, model: m, effort: EFFORT_FOR(m), isolation: 'worktree' }
-  ), { label: 'review', model: REVIEW_MODEL, other: JOINT_FALLBACK })
+  ), { label: 'review', model: M(REVIEW_MODEL), other: M(JOINT_FALLBACK) })
   // No throw here, and that is deliberate: by this point green branches EXIST on
   // disk. A lost Review costs the grade, the debrief, and the PR push — real
   // losses the lead must pick up (the downstream `review ? … : null` reads
@@ -1042,6 +1088,7 @@ return {
   proofs: verifications.reduce((n, v) => n + (v.proofs || []).length, 0),
   decisions: architect.decisions_summary,
   charter_written: architect.charter_written,
+  charter_pr: architect.charter_pr,
   epic_task_id: architect.epic_task_id,
   tasks_verified: architect.tasks_verified,
   backlog_filed: architect.backlog_filed,

@@ -29,6 +29,18 @@ config :barkpark_cloud,
 config :barkpark_cloud,
   studio_link_http_client: BarkparkCloud.StudioLinkFakeHttpClient
 
+# deploy-reliability W21 (S2): the commit-distance compare client is UNSET in
+# test, so the whole suite fails CLOSED on the network. The module's default is
+# the real verified-TLS Billing.HttpClient (deliberate — the hourly sweep must
+# work in prod with no config change), which means any test that PERFORMS
+# UpdateStatusWorker without programming its own responder would otherwise make
+# a live, rate-limited call to api.github.com. With this seam nil, such a test
+# gets `{:error, :http_client_not_configured}` -> the "unknown" rung, and
+# commit_distance_test.exs's own cases keep injecting per-test as they already
+# do. nil is the SAFE reading here: the module treats an unconfigured client as
+# unmeasured, never as distance 0.
+config :barkpark_cloud, BarkparkCloud.GitHub.CommitDistance, http_client: nil
+
 # hetzner-proxy: swap the server-side Hetzner API fan-out for the in-process
 # per-path fake (same seam shape as notifications/studio-link above).
 config :barkpark_cloud,
@@ -95,6 +107,14 @@ config :barkpark_cloud, :worker_token, "worker-token-test-fixed"
 # verdict and records sends in the TEST process's dictionary (no global state,
 # async-safe).
 config :barkpark_cloud, :push_adapter, BarkparkCloud.PushFakeAdapter
+
+# push-relay BUILD: the HTTP BOUNDARY fake, one level below the adapter seam
+# above. The REAL APNs/FCM adapters are exercised through this — their JWTs,
+# URLs, headers and status→verdict mapping run for real; only the socket is
+# fake. Adapter tests set :push_adapter to the real module for their own
+# duration (the line above stays the default so the worker suite is untouched)
+# and program responses per request. Process-dictionary backed, so async-safe.
+config :barkpark_cloud, :push_http_client, BarkparkCloud.PushFakeHttpClient
 
 # oban-substrate: manual testing mode — Oban inserts jobs but its queue pollers
 # and Cron plugin do NOT auto-execute, so the SQL.Sandbox stays deterministic.

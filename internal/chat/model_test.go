@@ -32,6 +32,11 @@ type fakeTransport struct {
 	approveErr  error
 	listErr     error
 	getErr      error
+
+	archived     []string
+	unarchived   []string
+	archiveErr   error
+	archivedList []SessionSummary
 }
 
 type approvalCall struct {
@@ -46,6 +51,17 @@ type getCall struct {
 func (f *fakeTransport) CreateSession() (Session, error) { return f.created, nil }
 func (f *fakeTransport) ListSessions() ([]SessionSummary, error) {
 	return f.summaries, f.listErr
+}
+func (f *fakeTransport) ListArchivedSessions() ([]SessionSummary, error) {
+	return f.archivedList, f.listErr
+}
+func (f *fakeTransport) Archive(id string) error {
+	f.archived = append(f.archived, id)
+	return f.archiveErr
+}
+func (f *fakeTransport) Unarchive(id string) error {
+	f.unarchived = append(f.unarchived, id)
+	return f.archiveErr
 }
 func (f *fakeTransport) GetSession(id string, since int) (Session, error) {
 	f.getCalls = append(f.getCalls, getCall{id: id, since: since})
@@ -244,6 +260,45 @@ func TestFetchTailEffectGetsSince(t *testing.T) {
 	}
 	if len(f.getCalls) != 1 || f.getCalls[0].since != 5 {
 		t.Fatalf("FetchTailEffect must GET with the since cursor, got %+v", f.getCalls)
+	}
+}
+
+// TestFetchTailEffectThreadsGen proves the settle-race token (charter D77) rides
+// the shell: execEffect stamps the FetchTailEffect's issuing generation onto the
+// tailFetchedMsg it returns, so the reducer can prove the landing GET still owns
+// the live tail.
+func TestFetchTailEffectThreadsGen(t *testing.T) {
+	f := &fakeTransport{full: Session{ID: "s1"}}
+	m := newTestModel(f)
+	m.st.SessionID = "s1"
+	msg := runCmd(m.execEffect(FetchTailEffect{SinceSeq: 3, Gen: 7}))
+	tf, ok := msg.(tailFetchedMsg)
+	if !ok {
+		t.Fatalf("FetchTailEffect must produce tailFetchedMsg, got %T", msg)
+	}
+	if tf.gen != 7 {
+		t.Fatalf("execEffect must thread the issuing generation, got gen=%d want 7", tf.gen)
+	}
+}
+
+// TestTailFetchedMsgGenGuardsTailClear proves the full shell path (charter D77):
+// Update maps tailFetchedMsg.gen → TailFetchedEvent.Gen, so a stale-generation
+// GET landing over a live tail leaves it intact while a matching one clears it.
+func TestTailFetchedMsgGenGuardsTailClear(t *testing.T) {
+	m := newTestModel(&fakeTransport{})
+	m.screen = screenChat
+	m.st = State{SessionID: "s1", Tail: "live", TailGen: 5}
+
+	// A stale GET (older generation) must NOT clear the live tail.
+	nm, _ := m.Update(tailFetchedMsg{session: Session{ID: "s1"}, gen: 4})
+	if got := nm.(Model).st.Tail; got != "live" {
+		t.Fatalf("a stale-gen tailFetchedMsg must not clear the tail, got %q", got)
+	}
+
+	// A matching GET clears it.
+	nm, _ = nm.(Model).Update(tailFetchedMsg{session: Session{ID: "s1"}, gen: 5})
+	if got := nm.(Model).st.Tail; got != "" {
+		t.Fatalf("a matching-gen tailFetchedMsg must clear the tail, got %q", got)
 	}
 }
 
@@ -487,6 +542,35 @@ func TestWorkflowEnterExpandsEscCollapses(t *testing.T) {
 	}
 	if got.st.Phase == TurnInterrupting {
 		t.Fatal("Esc inside the panel must never interrupt the turn")
+	}
+}
+
+// TestWorkflowExpandRefetchNeverClearsLiveTail pins the D42 hydration
+// refetch's charter-D77 semantics: expanding the workflow panel fires a
+// turn-boundary-shaped GET that is NOT a settle boundary, so its landing must
+// never clear a live streamed tail. The adversarial case is attach-mid-turn —
+// this client saw no init frame, so Gen and TailGen are both still 0 and a
+// zero-valued effect Gen would (wrongly) match; the emit site carries the -1
+// sentinel instead. Reverting keys.go to `Gen: 0` (or dropping the field)
+// makes this test fail.
+func TestWorkflowExpandRefetchNeverClearsLiveTail(t *testing.T) {
+	st := liveWorkflowState(t)
+	st.Tail = "attached mid-turn, streaming"
+	st.Phase = TurnStreaming // deltas arriving; no init observed → Gen==TailGen==0
+	m := wfTestModel(t, st)
+	m.focus = focusWorkflow
+
+	nm, cmd := m.handleChatKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := nm.(Model)
+	if !got.wfExpanded {
+		t.Fatal("Enter on the focused strip must expand the detail")
+	}
+	if cmd == nil {
+		t.Fatal("the expand edge must fire the D42 refetch")
+	}
+	nm2, _ := got.Update(runCmd(cmd))
+	if tail := nm2.(Model).st.Tail; tail != "attached mid-turn, streaming" {
+		t.Fatalf("the hydration refetch must never clear a live tail, got %q", tail)
 	}
 }
 

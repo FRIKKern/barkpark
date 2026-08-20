@@ -1,0 +1,397 @@
+{
+  "_id": "mechanical-spacing-doctrine",
+  "blocks": [
+    {
+      "id": "rsd-eyebrow",
+      "text": "BARKPARK PAPERS · REPAIRED DOCTRINE",
+      "type": "eyebrow"
+    },
+    {
+      "id": "rsd-h1",
+      "level": 1,
+      "text": "The Reader-Owned Spacing Doctrine — rhythm belongs to semantic blocks",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A blank paragraph is not meaning. It is editor scaffolding that became visible because Barkpark once asked content to carry a reader’s layout job. The repaired law keeps keyboard intent while making every reader responsible for the same semantic cadence."
+        }
+      ],
+      "id": "rsd-ingress",
+      "type": "ingress"
+    },
+    {
+      "id": "rsd-byline",
+      "items": [
+        "Semantic blocks",
+        "Shared cadence",
+        "Five-reader parity"
+      ],
+      "type": "byline"
+    },
+    {
+      "id": "rsd-stats",
+      "items": [
+        {
+          "label": "blank spacers in 3 canonical Papers",
+          "value": "351"
+        },
+        {
+          "label": "Site Spawner Wave 10",
+          "value": "127→0"
+        },
+        {
+          "label": "reader contracts",
+          "value": "5"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Readers own vertical rhythm between emitted semantic blocks. Authors own structure, order, emphasis and deliberate inline breaks. An exact empty paragraph is never published layout."
+        }
+      ],
+      "id": "rsd-decision",
+      "title": "Decision",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "rsd-h2-failure",
+      "level": 2,
+      "text": "Why the old doctrine failed",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The old rule treated Enter, Enter as a portable unit of vertical space. That looked deterministic, but it made layout data indistinguishable from missing prose. Authors multiplied blank nodes, public HTML emitted <p></p>, terminal rendering accumulated blank rows, and long Papers looked hollow even when their evidence was present."
+        }
+      ],
+      "id": "rsd-p-failure",
+      "type": "paragraph"
+    },
+    {
+      "id": "rsd-notes-failure",
+      "items": [
+        {
+          "label": "meaning",
+          "lead": "Empty content cannot explain why a gap exists.",
+          "text": "It carries no purpose, hierarchy, provenance or reader value."
+        },
+        {
+          "label": "parity",
+          "lead": "One stored blank did not produce one perceptual gap.",
+          "text": "HTML margins, terminal rows, email tables and editor chrome still resolved it differently."
+        },
+        {
+          "label": "density",
+          "lead": "Spacer volume hid the real editorial defects.",
+          "text": "Site Spawner Wave 10 had populated lists, but 127 blanks and paragraph-sized bullets made the page feel empty and broken."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "id": "rsd-h2-keyboard",
+      "level": 2,
+      "text": "The keyboard contract",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "gesture"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "document meaning"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "reader result"
+          }
+        ]
+      ],
+      "id": "rsd-table-keyboard",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Shift+Enter"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "soft break inside the current semantic block"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the next line, still inside that block"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Enter"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "finish this block and begin the next block"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "shared cadence between two visible blocks"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Enter, Enter"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "an editable empty scaffold before the next block"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "no published visual content"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Section / divider / typed layout block"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "an intentional structural transition"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the block’s explicit semantic treatment"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "rsd-h2-invariant",
+      "level": 2,
+      "text": "The invariant",
+      "type": "heading"
+    },
+    {
+      "id": "rsd-steps-invariant",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "A fresh editor may carry an exact empty PdParagraph while the author is composing."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Compose preserves authoring intent."
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Public HTML, Studio View, email, TUI and CLI/API skip zero-content paragraph groups."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Published readers emit only visible semantic groups."
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The renderer never derives spacing from the raw array index, so skipped scaffolds cannot add gaps."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Cadence is inserted between emitted groups."
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Suppression is exact and narrow: authored text, marks, links and soft breaks are unchanged."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Non-empty paragraphs remain byte-faithful."
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "id": "rsd-h2-proof",
+      "level": 2,
+      "text": "What proves the repair",
+      "type": "heading"
+    },
+    {
+      "id": "rsd-notes-proof",
+      "items": [
+        {
+          "label": "reference",
+          "lead": "criminality-constraint-frontiers-draft scores 100.",
+          "text": "It uses zero empty spacers and earns rhythm through semantic hierarchy."
+        },
+        {
+          "label": "case",
+          "lead": "Site Spawner Wave 10 moved from 224 to 100 blocks.",
+          "text": "All 127 blanks were removed, dense lists became notes, and the factual evidence remained."
+        },
+        {
+          "label": "tests",
+          "lead": "1,128 Phoenix/PortableDoc tests pass.",
+          "text": "The full Go terminal suite and deterministic Python structure/quality suites pass too."
+        },
+        {
+          "label": "reader",
+          "lead": "The doctrine now carries a revision-pinned multi-reader seal.",
+          "text": "paper:important-paper-quality-wave-paper-2026-07-31 records the exact public, Studio-equivalent standalone, TUI80, email, source/API, and CLI evidence; future reader changes must renew that proof rather than inheriting it."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "id": "rsd-h2-migration",
+      "level": 2,
+      "text": "How existing Papers migrate",
+      "type": "heading"
+    },
+    {
+      "id": "rsd-steps-migration",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Every repair is optimistic-lock guarded; a changed revision stops the mutation."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Freeze the Paper id and revision."
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "No prose, marks, tables, evidence or authored soft breaks are deleted."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Remove only exact empty paragraph scaffolds."
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Add an editorial opening; reframe prose-sized bullets and oversized prose tables where meaning requires it."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Repair the composition the blanks were hiding."
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "A Paper passes only when its public, Studio, TUI, email and CLI/API evidence is current."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Capture every declared reader at the repaired revision."
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Store meaning; render rhythm. Empty editor scaffolds stay editable and disappear from every published reader."
+        }
+      ],
+      "id": "rsd-final",
+      "title": "The doctrine in one line",
+      "tone": "info",
+      "type": "callout"
+    }
+  ],
+  "source_rev": "cfd37b579f30d754ab59298491fe944e",
+  "style": "article",
+  "title": "The Reader-Owned Spacing Doctrine — rhythm belongs to semantic blocks"
+}

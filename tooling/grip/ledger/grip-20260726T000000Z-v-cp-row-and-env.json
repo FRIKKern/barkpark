@@ -1,0 +1,45 @@
+{
+  "grip_id": "v-cp-row-and-env-2026-07-26",
+  "verifier": "v-cp-row-and-env",
+  "wave": "search-template-wave-9-2026-07-26",
+  "assignment": "CP sites rows + box webhook registry + box git sha (perf-trio) + where the scoped BARKPARK_API_URL and BARKPARK_DOC_TYPE are composed",
+  "verdict": "All four answered. NEW FINDING that changes the freshness slice: content-auto is dead FLEET-WIDE — all 8 site-autodeploy webhooks on guerrilla are active=false, auto-disabled 2026-07-21T08:24:58Z after 20 consecutive delivery failures. The perf-trio template bytes ARE already on the box (HEAD 924b04d18 contains 3a4d213bf), so the missing piece is purely the trigger — but the double-scope bug is in those same on-box bytes, so a redeploy alone still ships a broken first paint. The prepend site is cloud/lib/barkpark_cloud/sites/deploy.ex:371-374.",
+  "recipes": [
+    {
+      "claim": "The CP composes BARKPARK_API_URL as ALREADY-SCOPED: barkpark.url + /w/<ws>/p/<proj>. This is the root of the double-scope class.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && sed -n '295,320p;368,378p' cloud/lib/barkpark_cloud/sites/deploy.ex"
+    },
+    {
+      "claim": "BARKPARK_DOC_TYPE is site.doc_type verbatim (column default \"post\"); search-ember/astro-search are both doc_type=paper.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'BARKPARK_DOC_TYPE' cloud/lib/barkpark_cloud/sites/deploy.ex && sed -n '104,110p' cloud/lib/barkpark_cloud/registry/site.ex"
+    },
+    {
+      "claim": "search-ember: kind=node, doc_type=paper, theme=ember, content_webhook_secret_encrypted IS NULL (no_secret=t). astro-search: kind=static, no_secret=f. The mint gate is kind==\"static\".",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@178.105.92.191 'docker exec cloud-db-1 psql -U barkpark_cloud -d barkpark_cloud_prod -c \"SELECT slug,kind,doc_type,theme,framework,bootstrap_dataset,(content_webhook_secret_encrypted IS NULL) AS no_secret,current_deployment_id FROM sites ORDER BY inserted_at\"'"
+    },
+    {
+      "claim": "search-ember's live deployment is 2026-07-17 05:01 trigger=manual; astro-search's is 2026-07-21 07:56 trigger=content-auto.",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@178.105.92.191 'docker exec cloud-db-1 psql -U barkpark_cloud -d barkpark_cloud_prod -c \"SELECT s.slug,d.status,d.build_id,d.content_rev,d.inserted_at,d.trigger FROM sites s JOIN deployments d ON d.id=s.current_deployment_id ORDER BY d.inserted_at\"'"
+    },
+    {
+      "claim": "All 8 site-autodeploy-* webhooks on guerrilla dataset=production are active=false, consecutive_failures=20, auto-disabled 2026-07-21T08:24:58Z; only 2 of the 8 map to live sites (astro-search, live-auto) — the other 6 are orphans of deleted sites.",
+      "rerun": "TOK=$(python3 -c \"import json;print(json.load(open('$HOME/.config/barkpark/config.json'))['token'])\"); curl -s -H \"Authorization: Bearer $TOK\" https://guerrilla.barkpark.cloud/v1/webhooks/production | python3 -c \"import json,sys;[print(w['active'],w['name'],w.get('consecutive_failures'),w.get('disable_reason')) for w in json.load(sys.stdin)['webhooks']]\""
+    },
+    {
+      "claim": "The CP content-publish receiver is ALIVE today (401 bad_signature, not 500/404) — the 07-21 500s were a transient CP window that latched a permanent auto-disable; re-enable is manual only.",
+      "rerun": "curl -s -X POST https://api.barkpark.cloud/v1/sites/webhooks/content-publish/15684026-93e9-4287-87fe-34a881ae8e6d -H 'content-type: application/json' -d '{}'"
+    },
+    {
+      "claim": "webhooks.name has NO unique index (only :dataset, :active, :organization_id) — a naive backfill re-POST would DUPLICATE site-autodeploy-<id> for astro-search/live-auto.",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -rn 'create .*index(:webhooks' api/priv/repo/migrations/*.exs && grep -n 'unique_constraint' api/lib/barkpark/webhooks/webhook.ex"
+    },
+    {
+      "claim": "The build box's checkout is at 924b04d18 and CONTAINS 1dde75820 / 8cdcefb81 / 3a4d213bf; Provisioner reads templates/search-starter from that same repo root, so the perf-trio bytes are already on the box.",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 'cd /opt/barkpark && git log --oneline -1 && for c in 1dde75820 8cdcefb81 3a4d213bf; do git merge-base --is-ancestor $c HEAD && echo HAS $c; done && ls -la templates/search-starter/lib | head -3'"
+    },
+    {
+      "claim": "The double-scope bug is present in the ON-BOX bytes: templates/search-starter/lib/find-search.ts:111 = `const base = useIndx && TOKEN ? `${API_URL}${SCOPE}` : API_URL;`",
+      "rerun": "ssh -i ~/.ssh/barkpark_indx root@157.180.90.121 'grep -n \"API_URL}\\${SCOPE\" /opt/barkpark/templates/search-starter/lib/find-search.ts'"
+    }
+  ]
+}

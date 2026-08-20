@@ -192,3 +192,257 @@ func TestFleetWatchLineFlipsOnly(t *testing.T) {
 		}
 	}
 }
+
+// ── bp chat ls --archived (charter D28, t3w2-s7) ─────────────────────────────
+
+// chatShelfServer records the archived= query it was asked for and answers with
+// a shelf-specific roster, so a test can prove WHICH list was requested rather
+// than merely that something printed.
+func chatShelfServer(t *testing.T, gotArchived *string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/sessions" {
+			http.NotFound(rw, r)
+			return
+		}
+		*gotArchived = r.URL.Query().Get("archived")
+		rw.Header().Set("Content-Type", "application/json")
+		if *gotArchived == "true" {
+			_, _ = rw.Write([]byte(`{"sessions":[{"id":"shelved-1","title":"old work","agent_state":"idle"}]}`))
+			return
+		}
+		_, _ = rw.Write([]byte(`{"sessions":[{"id":"live-1","title":"current","agent_state":"working"}]}`))
+	}))
+}
+
+// TestChatLsArchivedRequestsTheShelf: --archived asks for the archived list and
+// prints it. The shelf IS the archived truth — no row carries a flag — so the
+// query parameter is the only thing that can be wrong here, and it is exactly
+// what this asserts.
+func TestChatLsArchivedRequestsTheShelf(t *testing.T) {
+	var asked string
+	srv := chatShelfServer(t, &asked)
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	code := runChat(w, globals{}, manifest.Context{Server: srv.URL, Token: "tok"},
+		[]string{"ls", "--archived"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if asked != "true" {
+		t.Errorf("--archived must request archived=true, server saw %q", asked)
+	}
+	if !strings.Contains(stdout.String(), "shelved-1") {
+		t.Errorf("the shelf rows must print, got %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "live-1") {
+		t.Errorf("the ACTIVE herd must not leak into the shelf listing, got %q", stdout.String())
+	}
+}
+
+// TestChatLsDefaultsToTheActiveHerd: the flag's absence is not "unset" — the
+// client always states which shelf it wants, so the server never guesses.
+func TestChatLsDefaultsToTheActiveHerd(t *testing.T) {
+	var asked string
+	srv := chatShelfServer(t, &asked)
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := runChat(newWriter(&stdout, &stderr), globals{},
+		manifest.Context{Server: srv.URL, Token: "tok"}, []string{"ls"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d", code, exitOK)
+	}
+	if asked != "false" {
+		t.Errorf("bare `ls` must request archived=false EXPLICITLY, server saw %q", asked)
+	}
+}
+
+// TestChatLsArchivedEmptyIsNamed: "no chat sessions" on the shelf would read as
+// "you have no sessions at all". The empty line names the shelf it describes.
+func TestChatLsArchivedEmptyIsNamed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		_, _ = rw.Write([]byte(`{"sessions":[]}`))
+	}))
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	runChat(newWriter(&stdout, &stderr), globals{},
+		manifest.Context{Server: srv.URL, Token: "tok"}, []string{"ls", "--archived"})
+	if !strings.Contains(stdout.String(), "no archived chat sessions") {
+		t.Errorf("an empty shelf must name itself, got %q", stdout.String())
+	}
+}
+
+// TestChatLsArchivedRejectsWatch: there is no live stream for the shelf (an
+// archived session emits no flips), so the combination would silently hang on
+// an empty stream instead of failing.
+func TestChatLsArchivedRejectsWatch(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runChat(newWriter(&stdout, &stderr), globals{},
+		manifest.Context{Server: "http://127.0.0.1:1", Token: "tok"},
+		[]string{"ls", "--archived", "--watch"})
+	if code == exitOK {
+		t.Fatal("--archived --watch must be a usage error, not a silent hang")
+	}
+	if !strings.Contains(stderr.String(), "no live stream") {
+		t.Errorf("the refusal must say why, got %q", stderr.String())
+	}
+}
+
+// TestChatLsUnknownArgNamesBothFlags: the stray-arg message is the discovery
+// surface for the flag set — a stale "takes only --watch" would hide --archived
+// from every user who typos.
+func TestChatLsUnknownArgNamesBothFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runChat(newWriter(&stdout, &stderr), globals{},
+		manifest.Context{Server: "http://127.0.0.1:1", Token: "tok"}, []string{"ls", "--nope"})
+	if code == exitOK {
+		t.Fatal("an unknown ls argument must not succeed")
+	}
+	for _, want := range []string{"--watch", "--archived"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("the stray-arg message must name %s, got %q", want, stderr.String())
+		}
+	}
+}
+
+// TestChatHelpAdvertisesShelfAndArchiveKey: both the CLI flag and the TUI key
+// are discoverable from `bp chat --help` alone.
+func TestChatHelpAdvertisesShelfAndArchiveKey(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	printChatHelp(newWriter(&stdout, &stderr))
+	if !strings.Contains(stdout.String(), "--archived") {
+		t.Error("bp chat help must advertise the archived shelf")
+	}
+	if !strings.Contains(stdout.String(), "archive the row") {
+		t.Error("bp chat help must advertise the TUI archive key")
+	}
+
+	stdout.Reset()
+	printChatLsHelp(newWriter(&stdout, &stderr))
+	if !strings.Contains(stdout.String(), "--archived") {
+		t.Error("bp chat ls help must document --archived")
+	}
+	// The word that keeps `a` from reading as "delete".
+	if !strings.Contains(stdout.String(), "DISMISSAL") {
+		t.Error("the shelf help must say archiving is dismissal, not deletion")
+	}
+}
+
+// ── bp chat unarchive (the shelf's way BACK, t3w2 lifecycle residuals) ───────
+
+// chatUnarchiveServer records the path+method of the flip it was asked for and
+// answers with the refreshed session, so a test can prove WHICH verb went over
+// the wire rather than merely that the command exited 0.
+func chatUnarchiveServer(t *testing.T, gotPath, gotMethod *string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		*gotPath = r.URL.Path
+		*gotMethod = r.Method
+		if r.URL.Path != "/v1/chat/sessions/shelved-1/unarchive" {
+			http.NotFound(rw, r)
+			return
+		}
+		rw.Header().Set("Content-Type", "application/json")
+		_, _ = rw.Write([]byte(`{"id":"shelved-1","title":"old work","status":"active"}`))
+	}))
+}
+
+// TestChatUnarchivePostsTheVerb: the door is two-way from a pipe. Before this
+// verb existed, `a` in the TUI could shelve a row and NOTHING outside a terminal
+// could put it back — the dismissal was permanent for every script.
+func TestChatUnarchivePostsTheVerb(t *testing.T) {
+	var path, method string
+	srv := chatUnarchiveServer(t, &path, &method)
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := runChat(newWriter(&stdout, &stderr), globals{},
+		manifest.Context{Server: srv.URL, Token: "tok"}, []string{"unarchive", "shelved-1"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if method != http.MethodPost || path != "/v1/chat/sessions/shelved-1/unarchive" {
+		t.Errorf("server saw %s %s, want POST /v1/chat/sessions/shelved-1/unarchive", method, path)
+	}
+	// The confirmation names the row: "unarchived" alone leaves the operator
+	// checking `ls --archived` to find out whether the right session moved.
+	if !strings.Contains(stdout.String(), "unarchived shelved-1") ||
+		!strings.Contains(stdout.String(), "old work") {
+		t.Errorf("the confirmation must name the session, got %q", stdout.String())
+	}
+}
+
+// TestChatUnarchiveJSONEmitsTheSession: `-o json` is the scripting contract —
+// the refreshed wire row, under `session`.
+func TestChatUnarchiveJSONEmitsTheSession(t *testing.T) {
+	var path, method string
+	srv := chatUnarchiveServer(t, &path, &method)
+	defer srv.Close()
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "json"
+	if code := runChatUnarchive(w, globals{}, manifest.Context{Server: srv.URL, Token: "tok"},
+		[]string{"shelved-1"}); code != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	var got struct {
+		Session struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("-o json is not JSON (%v): %q", err, stdout.String())
+	}
+	if got.Session.ID != "shelved-1" || got.Session.Title != "old work" {
+		t.Errorf("-o json must carry the refreshed session, got %+v", got.Session)
+	}
+}
+
+// TestChatUnarchiveNeedsExactlyOneID: a lifecycle write takes one id — a batch
+// that half-succeeds leaves the caller guessing which rows moved.
+func TestChatUnarchiveNeedsExactlyOneID(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no id":   {"unarchive"},
+		"two ids": {"unarchive", "a", "b"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := runChat(newWriter(&stdout, &stderr), globals{},
+			manifest.Context{Server: "http://127.0.0.1:1", Token: "tok"}, args)
+		if code != exitUsage {
+			t.Errorf("%s: exit = %d, want %d", name, code, exitUsage)
+		}
+		if !strings.Contains(stderr.String(), "exactly one session id") {
+			t.Errorf("%s: the refusal must say why, got %q", name, stderr.String())
+		}
+	}
+}
+
+// TestChatUnarchiveHelpIsReachable: `-h` must answer BEFORE the id check, and it
+// must say archiving is dismissal — the word that keeps "unarchive" from reading
+// as "restart the session".
+func TestChatUnarchiveHelpIsReachable(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runChat(newWriter(&stdout, &stderr), globals{help: true},
+		manifest.Context{}, []string{"unarchive"}); code != exitOK {
+		t.Fatalf("help exit = %d, want %d", code, exitOK)
+	}
+	if !strings.Contains(stdout.String(), "usage: bp chat unarchive") {
+		t.Fatalf("help missing its usage line: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "DISMISSAL") {
+		t.Error("the unarchive help must say archiving is dismissal, not a lifecycle restart")
+	}
+	// And the top-level help advertises the verb at all — an unadvertised verb
+	// is one nobody finds.
+	stdout.Reset()
+	printChatHelp(newWriter(&stdout, &stderr))
+	if !strings.Contains(stdout.String(), "bp chat unarchive") {
+		t.Error("bp chat help must advertise the unarchive verb")
+	}
+}

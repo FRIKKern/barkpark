@@ -17,7 +17,14 @@
 //                     at,detail?} with status ∈ started|done|failed|progress and
 //                     step ∈ create|secure|configure|content|verify|ready
 //                     (SERVER_STEP_ORDER in app.js).
-//   • provision_console[] entries ⇐ append_provision_console: {line,at}.
+//   • provision_console[] entries ⇐ append_provision_console: {line,at}, plus
+//                     the OPTIONAL cch-w33-s3 disclosure keys the server writes
+//                     when it discarded something: truncated_from (this line is
+//                     a 2 KB prefix of an original of that many chars) and
+//                     dropped_before (the oldest SURVIVING entry, cumulative
+//                     count dropped by the 300-line ring). A deployment
+//                     console[] entry carries the same keys, and additionally
+//                     stage + status when the builder stamped them.
 //   • subscription  ⇐ subscription_json (plan,status,past_due,
 //                     cancel_at_period_end,current_period_end,canceled_at,
 //                     started_at,is_trial,trial_days_remaining).
@@ -35,6 +42,8 @@ export const IDS = {
   provisioningInstance: "5b2c1e00-0000-4000-8000-0000000000a3",
   failedInstance: "5b2c1e00-0000-4000-8000-0000000000a4",
   suspendedInstance: "5b2c1e00-0000-4000-8000-0000000000a5",
+  // cch-w61-s2: the box that answered our stored admin credential with a 401.
+  refusedInstance: "5b2c1e00-0000-4000-8000-0000000000a6",
   // The single-instance provisioning / failed scenarios reuse their own ids.
   soloProvisioning: "5b2c1e00-0000-4000-8000-0000000000b1",
   soloFailed: "5b2c1e00-0000-4000-8000-0000000000b2",
@@ -72,10 +81,38 @@ function bpBase(over) {
       team_id: IDS.team,
       suspended: false,
       suspended_reason: null,
+      // cch-w21-s3: `barkpark_json` (web/router.ex:8371) serializes `custom_host`
+      // on EVERY row — null until a team attaches a domain. It belongs in the
+      // envelope because `publicUrl()` (`grep -n "function publicUrl" app.js`)
+      // PREFERS it over `url`, so a row that merely OMITS the key is a row no
+      // fixture can make cruel.
+      custom_host: null,
       update_state: null,
       update_running_release: null,
       update_latest_release: null,
       update_checked_at: null,
+      // cch-w61-s2: `barkpark_json` serializes the update probe's typed refusal
+      // reason on EVERY row (Registry.persist_update_unknown/2 writes it; the
+      // whitelist is Barkpark.update_unavailable_reasons/0). It is null on a box
+      // that answered. A fixture that OMITS the key is a fixture in which the
+      // refused state cannot exist at all — the whole corpus rendered the Updates
+      // panel in exactly ONE state before this row was added.
+      update_unavailable_reason: null,
+      // cch-w47-s2 (D529/D515): `barkpark_json` serializes the autoupdate policy
+      // block on EVERY row, so a fixture that OMITS these keys makes
+      // `hasAutoupdatePolicy` false for the whole corpus — the policy chip and
+      // the four policy buttons then render in NO scenario at all, and any
+      // guard on them is one that structurally cannot fail. The values are the
+      // MIGRATIONS' OWN COLUMN DEFAULTS (20260710160000_add_channel_and_fleet_settings):
+      // enabled true, paused false, channel "prod" — never nulls, which are a
+      // third state no control plane has ever serialized and which paint a bare
+      // "Auto" chip that withholds the channel that IS the policy. Only
+      // pinned_release and autoupdate_triggered_at are genuinely nullable.
+      autoupdate_enabled: true,
+      autoupdate_paused: false,
+      channel: "prod",
+      pinned_release: null,
+      autoupdate_triggered_at: null,
       inserted_at: tMinus(86400),
       provision_status: null,
       provision_error: null,
@@ -97,7 +134,22 @@ const liveInstance = bpBase({
   id: IDS.liveInstance,
   name: "Production",
   slug: "production",
-  url: "production-5b2c1e.barkpark.cloud",
+  // cch-w18-s4 — `url` CARRIES ITS SCHEME, because the column does. The server
+  // writes this field as `"https://" <> provisioning_fqdn` at go-live
+  // (registry/barkpark.ex `provisioning_url/1`, and `clean_url/1` the same way),
+  // so a bare host here was never the envelope — it was a fixture that could not
+  // be told apart from one until somebody read the RESOLVED href.
+  // WHAT THE BARE HOST DID, DRIVEN (not a code reading): `siteLiveUrl` returns
+  // `bp.url` verbatim and `siteOpenLink` drops it into `href`, so every one of
+  // the four "Visit ↗" doors on `?scen=sites#sites` and on the instance Sites
+  // card emitted `href="production-5b2c1e.barkpark.cloud/sites/acme-web/"` — a
+  // RELATIVE reference, which the browser resolved against the page: measured
+  // `.href` = `http://localhost:4271/production-5b2c1e.barkpark.cloud/sites/
+  // acme-web/`, 4 of 4 doors on THE CONSOLE'S OWN ORIGIN. A person clicking
+  // "Open the live site" did not reach the site; they reached a 404 on the
+  // console. `host` below stays bare — it IS a hostname, and it is rendered as
+  // text, never as an href.
+  url: "https://production-5b2c1e.barkpark.cloud",
   host: "production-5b2c1e.barkpark.cloud",
   health_status: "up",
   agent_status: "online",
@@ -115,7 +167,8 @@ const behindInstance = bpBase({
   id: IDS.behindInstance,
   name: "Staging",
   slug: "staging",
-  url: "staging-5b2c1e.barkpark.cloud",
+  // cch-w18-s4: schemed, same reason as liveInstance above.
+  url: "https://staging-5b2c1e.barkpark.cloud",
   host: "staging-5b2c1e.barkpark.cloud",
   health_status: "up",
   agent_status: "online",
@@ -192,14 +245,51 @@ const suspendedInstance = bpBase({
   id: IDS.suspendedInstance,
   name: "Marketing",
   slug: "marketing",
-  url: "marketing-5b2c1e.barkpark.cloud",
+  // cch-w18-s4: schemed, same reason as liveInstance above.
+  url: "https://marketing-5b2c1e.barkpark.cloud",
   host: "marketing-5b2c1e.barkpark.cloud",
   health_status: "up",
   agent_status: "online",
   version: "0.9.2",
   last_seen_at: tMinus(3600),
   suspended: true,
-  suspended_reason: "Payment failed — subscription past due",
+  // cch-w55-s3 — a PLANE-LEGAL reason slug. This fixture used to carry the human
+  // sentence "Payment failed — subscription past due", which no producer in
+  // cloud/lib can ever write: the only three values written are `billing_lapsed`
+  // (Billing.cancel_subscription/1), `billing_past_due` (maybe_enforce/1) and
+  // `quota_exceeded` (Billing.reconcile_plan_limit/1), and router.ex:9383 ships
+  // the raw column. A fixture vouching for copy the plane cannot emit certifies
+  // nothing.
+  suspended_reason: "billing_past_due",
+  provision_status: "succeeded",
+});
+
+// cch-w61-s2 — THE BOX THAT REFUSED OUR CREDENTIAL. A HOSTED row (the Updates
+// panel only renders when a box has a host, which is why the corpus's two
+// hostless deep-links rendered no panel at all), carrying the state the hourly
+// update probe writes when the box answers our stored admin credential with a
+// 401: update_state "unknown" + update_unavailable_reason "identity_refused",
+// stamped 45 minutes ago.
+//
+// KEYED ON id AND host, NEVER ON NAME OR SLUG. The live subject shares its name
+// with two other rows on the fleet; a reader that picks by name picks an
+// arbitrary one of the three, and the assertion silently becomes a statement
+// about the wrong box. `167.233.194.23` is a bare-IP host on purpose — that is
+// what the subject actually serves on, and it also proves publicUrl() renders a
+// schemeless host without inventing a domain.
+const credentialRefusedInstance = bpBase({
+  id: IDS.refusedInstance,
+  name: "Gyldendal",
+  slug: "gyldendal",
+  url: "https://167.233.194.23",
+  host: "167.233.194.23",
+  health_status: "unknown",
+  agent_status: "offline",
+  version: "0.9.1",
+  last_seen_at: tMinus(45 * 60),
+  update_state: "unknown",
+  update_unavailable_reason: "identity_refused",
+  update_checked_at: tMinus(45 * 60),
   provision_status: "succeeded",
 });
 
@@ -216,6 +306,29 @@ function site(over) {
       domains: [],
       scale_mode: "always_on",
       port: 3000,
+      // ssw8 (charter D82): the ELEVEN binding fields site_json/2 serializes.
+      // The factory emitted 21 fields and NOT ONE of them was a binding field,
+      // so no fixture could express binding truth at all. Shape derived from
+      // router.ex site_json/2, not invented:
+      //   kind · framework's runtime target      template · the starter it deploys
+      //   doc_type · the featured type           port_base · node-slot base (static → null)
+      //   bootstrap_{workspace,project,dataset} + the CLI spelling of the SAME
+      //   three columns (workspace/project/dataset) — one row, both vocabularies
+      //   content_bound · `not is_nil(read_token_encrypted)`, i.e. A READ TOKEN
+      //     EXISTS. NOT "this site has content".
+      // Defaults are the UNBOUND site (a plain GitHub-repo deploy): no triple,
+      // no token. Bound rows override.
+      kind: "node",
+      template: null,
+      doc_type: null,
+      port_base: null,
+      bootstrap_workspace: null,
+      bootstrap_project: null,
+      bootstrap_dataset: null,
+      workspace: null,
+      project: null,
+      dataset: null,
+      content_bound: false,
       current_deployment_id: null,
       github_repo: null,
       github_branch: null,
@@ -245,6 +358,52 @@ const blogSite = site({
   framework: "astro",
 });
 
+// ── ssw8 (charter D82): the three content-binding cases ──────────────────────
+// A spawned static site's whole reason to exist is the dataset it reads. These
+// three rows are the states that binding can actually be in, all expressible
+// from site_json/2's own fields:
+//
+//   BOUND     — the triple agrees with itself and a read token exists.
+//   UNKNOWN   — an OLDER control plane: no triple, and `content_bound` is
+//               ABSENT (not false). The surface must say "unknown", never
+//               "default/default/production" — the plausible-default lie.
+//   MISMATCH  — site_json/2 sends the SAME three columns twice (bootstrap_* and
+//               the CLI spelling). Here they DISAGREE, which is exactly what a
+//               stranger's mistyped `--dataset` looks like after a partial
+//               rebind. The surface must show BOTH and resolve neither.
+const boundSite = site({
+  id: "5b2c1e00-0000-4000-8000-0000000000cb",
+  name: "acme-docs", slug: "acme-docs", domains: ["docs.acme.com"],
+  framework: "astro", kind: "static", template: "astro-starter",
+  doc_type: "paper",
+  bootstrap_workspace: "acme", bootstrap_project: "site", bootstrap_dataset: "production",
+  workspace: "acme", project: "site", dataset: "production",
+  content_bound: true,
+});
+// `content_bound` is DELETED, not false: a control plane that predates the field
+// says nothing, and "nothing" must not be read as "no".
+const unknownBindingSite = (() => {
+  const s = site({
+    id: "5b2c1e00-0000-4000-8000-0000000000cc",
+    name: "acme-legacy", slug: "acme-legacy", domains: [],
+    framework: "astro", kind: "static",
+  });
+  delete s.content_bound;
+  return s;
+})();
+const mismatchedBindingSite = site({
+  id: "5b2c1e00-0000-4000-8000-0000000000cd",
+  name: "acme-typo", slug: "acme-typo", domains: [],
+  framework: "astro", kind: "static", doc_type: "post",
+  // The rebind wrote the CLI spelling; the bootstrap columns still hold the old
+  // dataset. A 201 was returned for this site and every surface has agreed with
+  // it ever since.
+  bootstrap_workspace: "acme", bootstrap_project: "site", bootstrap_dataset: "producton",
+  workspace: "acme", project: "site", dataset: "production",
+  content_bound: true,
+});
+const bindingSites = [boundSite, unknownBindingSite, mismatchedBindingSite];
+
 // E-01 (#sites list): the LIST endpoint embeds a slim `last_deployment`
 // (status · trigger · stamps — never content_rev, HONESTY LAW) via
 // put_last_deployment, which the row's freshness pill reads. Detail fixtures
@@ -258,19 +417,71 @@ const lastDeploy = (status, trigger, ago) => ({
   updated_at: tMinus(ago),
   inserted_at: tMinus(ago + 120),
 });
+// cch-w16-s4 (charter D199) — THE FIXTURE FIDELITY REPAIR. Until this slice
+// `site()` defaulted `current_deployment_id: null` and NOT ONE list row
+// overrode it, so the corpus asserted a state the SERVER CANNOT PRODUCE: pill
+// "Live" beside a null production pointer. The server moves that pointer only
+// after the box confirms a live flip, so ANY row whose deploy history reached
+// live once — live, rebuilding-over-a-previous-build, failed-over-a-last-good,
+// cancelled-over-a-last-good — carries a non-null pointer. Only a site that has
+// never served a build has null.
+// D182's census RESTATED with this diff: the corpus held 44 site rows, 40 of
+// them null-pointered, and ZERO preview-only sites. This diff sets the pointer
+// on the four deployed list rows and adds the first preview-only row, so the
+// list corpus is now 6 site rows / 2 null (acme-labs never-deployed +
+// acme-previews preview-only) / 1 preview-only.
+const depOf = (n) => "5b2c1e00-0000-4000-8000-0000000000e" + n;
+
+// cch-w24-s7 — the cruel site strings, built by concatenation so the lengths
+// that make them cruel are auditable in the source rather than counted by eye.
+// `atLength` is the guard that can lose: shorten any of these back to a
+// comfortable string and every consumer of this module refuses on load, naming
+// the constant and both numbers. A cruel fixture that quietly stops being cruel
+// is the exact failure mode this slice exists to prevent.
+function atLength(what, s, n) {
+  if (s.length !== n) {
+    throw new Error(
+      "cruel fixture " + what + " is " + s.length + " chars, must be exactly " + n +
+      " — that length IS the derivation (see the cruel site row's header); fix the string, not the number",
+    );
+  }
+  return s;
+}
+// 255 = Site.changeset/2 validate_length(:name, max: 255). One token, no space.
+const CRUEL_SITE_NAME = atLength("site name",
+  "AcmeCorporateMarketingPlatformProductionContentDeliveryEdgeGateway" +
+  "CustomerFacingExperienceClusterPrimaryIngressNode" +
+  "NorthernEuropeanRegionalStaticAssetOriginForAcmeCommerce" +
+  "InternalGroupHoldingsInfrastructureRenderedWithoutOneSingleSpaceCharacterAnywhere260", 255);
+// 63 = the DNS label ceiling, and Barkpark.changeset/2's validate_length(:slug,
+// max: 63) — the slug POST /v1/launch hands to clean_url/1 UNSUFFIXED.
+const CRUEL_SITE_SLUG = atLength("site slug",
+  "acmecorporateplatformproductioncontentdeliveryedgegatewaynode01", 63);
+// 253 = validate_domains/1's cap, as 63 + 63 + 63 + 61 unbroken labels.
+const CRUEL_SITE_DOMAIN = atLength("site domain", [
+  CRUEL_SITE_SLUG,
+  "northerneuropeanregionalstaticassetoriginforacmecommerceeu0231x",
+  "customerfacingmarketingexperienceclusterprimaryingressnodea19x1",
+  "internalacmegroupholdingsinfrastructureexampledomainnamecorpg",
+].join("."), 253);
+
 const sitesListRows = [
   site({
     id: "5b2c1e00-0000-4000-8000-0000000000c3",
     name: "acme-web", slug: "acme-web", domains: ["acme.com", "www.acme.com"],
     framework: "nextjs", github_repo: "acme/web", github_branch: "main",
     github_webhook_configured: true,
+    current_deployment_id: depOf(3),
     last_deployment: lastDeploy("live", "content-auto", 900),
   }),
   site({
     id: "5b2c1e00-0000-4000-8000-0000000000c4",
     name: "acme-blog", slug: "acme-blog", domains: ["blog.acme.com"],
     framework: "astro", github_webhook_configured: true,
-    // A content publish is rebuilding this static site right now.
+    // A content publish is rebuilding this static site right now — the PREVIOUS
+    // build is still being served, so the production pointer still names it.
+    // This row is why the gate cannot be `last_deployment.status === "live"`.
+    current_deployment_id: depOf(4),
     last_deployment: lastDeploy("building", "content-auto", 20),
   }),
   site({
@@ -278,6 +489,9 @@ const sitesListRows = [
     name: "acme-shop", slug: "acme-shop", domains: ["shop.acme.com"],
     framework: "nextjs", github_repo: "acme/shop", github_branch: "main",
     github_webhook_configured: true,
+    // A failed deploy never moves the pointer: the last good build is still
+    // serving. Its door is WORKING and must stay.
+    current_deployment_id: depOf(5),
     last_deployment: lastDeploy("failed", "manual", 3600),
   }),
   site({
@@ -286,6 +500,111 @@ const sitesListRows = [
     framework: "nextjs", github_webhook_configured: false,
     // Never deployed — no last_deployment, so the pill reads a neutral
     // "Not deployed" (no invented green).
+  }),
+  // cch-w14-s6: the CANCELLED freshness label #8608 shipped had never been
+  // rendered by any harness — lastDeploy() covered live/building/failed/never
+  // only. A production deploy CAN end cancelled (the reaper, an operator
+  // cancel), and freshnessModel spells it "Cancelled" with a neutral pill:
+  // no invented green, no invented red. (After cch-w14-s6 the embed is
+  // production-only, so this row is a cancelled PRODUCTION deploy — a torn-down
+  // branch preview can no longer reach this slot.)
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000c7",
+    name: "acme-guides", slug: "acme-guides", domains: ["guides.acme.com"],
+    framework: "astro", github_webhook_configured: true,
+    // A cancel does not tear down what is already serving, so the pointer holds.
+    current_deployment_id: depOf(7),
+    last_deployment: lastDeploy("cancelled", "manual", 1800),
+  }),
+  // cch-w64-s6: the SEVENTH server status, and the one the corpus could not
+  // render at all — `lastDeploy()` had covered live/building/failed/cancelled/
+  // never, so the state a live head-of-stream census found on 3 of 12 production
+  // sites (oldest 93s old, all three carrying the box's 409 sentence) had never
+  // reached a pixel here. `deferred` means the BOX refused this build and the
+  // plane re-queued the rebuild; the previous build is still being served, so
+  // the production pointer holds and this row keeps its door — the same rule
+  // the failed and rebuilding rows above follow.
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000ca",
+    name: "acme-media", slug: "acme-media", domains: ["media.acme.com"],
+    framework: "astro", github_webhook_configured: true,
+    current_deployment_id: depOf(8),
+    last_deployment: lastDeploy("deferred", "content-auto", 240),
+  }),
+  // cch-w15-bl-preview-only-site-fixture-missing, closed HERE: the corpus held
+  // ZERO preview-only sites, so the population the Visit-link defect was widest
+  // on — a site with branch previews and no production release — could not be
+  // driven at all. It has previews on, a slug (so siteLiveUrl MANUFACTURES a
+  // production URL for it out of the instance host), and NO production
+  // deployment: null pointer, no last_deployment. It must read "Not deployed"
+  // AND offer no production door, even though a URL is derivable for it. This
+  // is the row that proves the gate is the DEPLOYMENT fact and not "has a URL".
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000c8",
+    name: "acme-previews", slug: "acme-previews", domains: [],
+    framework: "nextjs", github_repo: "acme/previews", github_branch: "main",
+    github_webhook_configured: true, previews_enabled: true,
+  }),
+  // cch-w24-s7 — THE CRUEL SITE ROW. Every string below is DERIVED from a cap a
+  // non-admin caller can actually reach; nothing here is invented cruelty.
+  //
+  //   NAME, 255 chars, ONE unbroken token — `Site.changeset/2`'s own
+  //     `validate_length(:name, min: 1, max: 255)`. A pasted title with the
+  //     spaces eaten is the realistic producer, so this is a FORMAT-legal
+  //     generator (a readable phrase concatenated), not `"x".repeat(255)`.
+  //     Re-derive: grep -n 'validate_length(:name' cloud/lib/barkpark_cloud/registry/site.ex
+  //
+  //   DOMAIN, 253 chars, FOUR unbroken labels of 63/63/63/61 — `validate_domains/1`
+  //     accepts any string `String.length(d) <= 253` matching `@domain_format`,
+  //     whose per-label shape is `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?` i.e. 63.
+  //     It is a `validate_change`, so a `validate_length` census cannot see it.
+  //     Re-derive: grep -n '@domain_format\|defp validate_domains' cloud/lib/barkpark_cloud/registry/site.ex
+  //     Reached by a plain team member through `POST /v1/sites/:id/domains`
+  //     (`with_team_site`, no admin gate). FORMAT-legal, not registrable — the
+  //     harness renders hostnames, it does not resolve them.
+  //
+  //   WHY A 63-CHAR UNBROKEN LABEL IS NOT HYPOTHETICAL: the platform MINTS them.
+  //     `POST /v1/launch` / `POST /v1/go-live` (non-admin — a team owner/admin
+  //     session or a `deploy` PAT) runs `slugify/1`, which lowercases and joins
+  //     on hyphens but NEVER truncates and NEVER inserts one into an already
+  //     alphanumeric name; `Barkpark.changeset/2` caps the slug at 63; and
+  //     `Barkpark.clean_url/1` then emits `https://<slug>.barkpark.cloud`
+  //     verbatim, hyphen-free. So a 63-char unbroken first label is a string the
+  //     product itself produces. Re-derive:
+  //       grep -n 'def clean_url' cloud/lib/barkpark_cloud/registry/barkpark.ex
+  //       grep -n 'validate_length(:slug' cloud/lib/barkpark_cloud/registry/barkpark.ex
+  //       grep -n 'defp slugify' cloud/lib/barkpark_cloud/web/router.ex
+  //     NOT `provisioning_subdomain/1`: it spends `@max_label_len - short - 1` on
+  //     the slug and then appends `"-" <> short`, so it ALWAYS carries a hyphen
+  //     at char 55 and can emit at most 54 unbroken characters. Citing it for a
+  //     63-char token would assert a string that cannot be emitted.
+  //
+  // WHAT THIS ROW IS FOR: it is a REGRESSION PIN, and its expected finding yield
+  // on today's CSS is ZERO — the `.site-name` / `.site-host` wrap already
+  // shipped, and driven, this row reads scrollWidth == clientWidth exactly. The
+  // value is that DELETING that wrap now reds an existing sweep cell naming
+  // `div.site-name` and `div.site-host`, instead of being guarded by a comment.
+  //
+  // NO HEIGHT IS ASSERTED ANYWHERE FOR THIS ROW, deliberately: `Q3 BELOW THE
+  // FOLD` reads `.content`'s own top offset and is structurally blind to a row
+  // displacing its siblings; breakpoint-sweep's narrowest width is 619, so the
+  // phone band where this row is tallest is measured by nothing; and a bare
+  // pixel pin was already deleted from this epic once (cch-w15-s1). A height
+  // claim here would have to be a reachability claim at a defended viewport
+  // height, and this slice does not have one to defend.
+  //
+  // DEPLOYED ON PURPOSE: a 253-char host that is merely queued is a hostname
+  // nobody has yet had to read. This row has served a build, so it keeps its
+  // door and its host line is the one a person is actually looking at.
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000c9",
+    name: CRUEL_SITE_NAME,
+    slug: CRUEL_SITE_SLUG,
+    domains: [CRUEL_SITE_DOMAIN],
+    framework: "nextjs", github_repo: "acme/platform", github_branch: "main",
+    github_webhook_configured: true,
+    current_deployment_id: depOf(9),
+    last_deployment: lastDeploy("live", "manual", 1200),
   }),
 ];
 
@@ -408,6 +727,145 @@ const webSiteMigrated = Object.assign({}, webSite, {
   current_deployment_id: depNowLive.id,
 });
 
+// ── cch-w25-s3: THE DEPLOY RAIL'S FAILURE FOOTER, derived from its producers ─
+//
+// No scenario in this file has ever carried a rail STAGE entry, so
+// `deployRailLedgerFromConsole` (app.js) dropped every console line and the
+// whole `.deploy-rail` — head, step list, and the `.deploy-rail-fail` footer —
+// has never rendered in this harness. These two lists are the fixture that
+// makes it render, and the cruel string below is COMPOSED from the shell that
+// actually emits it rather than transcribed from a screenshot.
+//
+// THE PRODUCERS, both read-only from here:
+//   `build_failure_reason` — deploy/site-deploy-node.sh. On a failed
+//     `npm ci && npm run build` it hands back the LAST line matching
+//     `npm ERR!|[Ee]rror:` out of the build log, verbatim and unbounded. A Next
+//     build's last error line is routinely a module-resolution path: one
+//     unbreakable run carrying the person's own slug and the build id.
+//   `emit()` — deploy/lib/site-deploy-common.sh. It collapses the detail's
+//     tabs/newlines/quotes to spaces, squeezes runs, trims, and CUTS it —
+//     `cut -c1-<N>`. That N is a SHELL CONVENTION IN ONE PRODUCER, not a
+//     contract: nothing in the control plane re-asserts it (the provision-step
+//     twin has no cap at all), so it is mirrored here as a NUMBER TO DERIVE,
+//     never as an invariant to assert. `__app.test.mjs` reads the cut out of
+//     the shell and reds when it moves — that test, not this comment, is what
+//     keeps the fixture honest.
+//
+// RE-DERIVE THE WHOLE STRING:
+//   grep -n 'build_failure_reason' deploy/site-deploy-node.sh
+//   grep -n 'cut -c1-' deploy/lib/site-deploy-common.sh
+//   node -e 'import("./cloud/priv/static/__preview__/scenarios.mjs").then(m=>console.log(m.RAIL_FAIL_EMIT_CUT, m.RAIL_FAIL_CRUEL_DETAIL.length))'
+export const RAIL_FAIL_EMIT_CUT = 240;
+// emit()'s own normalisation, in JS: tabs/newlines/quotes → space, squeeze,
+// trim, cut. Applied to the stem so the fixture is the string a person would
+// actually receive, not a hand-shortened idea of it.
+export function railEmitDetail(stem, cut = RAIL_FAIL_EMIT_CUT) {
+  return String(stem).replace(/[\n\r\t"]/g, " ").replace(/ +/g, " ").trim().slice(0, cut);
+}
+// The stem: a real `next build` module-resolution failure on THIS fixture's own
+// site (slug `acme-web`, the pnpm store layout Next standalone builds produce).
+// It is deliberately longer than the cut, so the fixture exercises the cut
+// instead of merely fitting under it.
+const railCruelStem =
+  "npm ERR! Error: Cannot find module '/opt/barkpark/sites/acme-web/releases/" +
+  "20260802T094118Z-9c1f2ab/.next/standalone/node_modules/.pnpm/@acme+design-system@4.2.1_react@18.3.1_" +
+  "next@15.1.6/node_modules/@acme/design-system/dist/tokens/index.js' imported from /opt/barkpark/sites/acme-web";
+export const RAIL_FAIL_CRUEL_DETAIL = railEmitDetail(railCruelStem);
+// THE KIND CONTROL — the ordinary HEALTH failure a person sees most days.
+// Derived from `HEALTH_DETAIL` in deploy/site-deploy-node.sh (the
+// "slot … returned <code> (want 200)" branch): word-broken, ordinary
+// punctuation, nothing unbreakable in it. It is short and probably fine, which
+// is exactly why it is MEASURED — a remedy that buys the cruel string by
+// shredding this one reds on it.
+export const RAIL_FAIL_KIND_DETAIL = railEmitDetail(
+  "slot blue on :8081 returned 502 (want 200) at /healthz after 12 attempts " +
+  "(last: curl exit 0, 30.2s) — boot failed, live slot untouched",
+);
+// cch-w27-s2 — THE CLASSIFYING CONTROL, and the reason it had to be added.
+//
+// Neither string above CLASSIFIES: run both through `FailureCopy.humanize/1`
+// (cloud/lib/barkpark_cloud/failure_copy.ex) and they come back byte-identical,
+// because neither carries a token any `classify_atomic/1` clause matches. So a
+// guard asserting "the rail caption and the row's failure_reason tell ONE story"
+// is GREEN BY CONSTRUCTION on the wave-26 pair — the two strings agree for the
+// same reason a broken clock agrees twice a day, and the guard could not have
+// caught the live divergence it exists to catch. That is standing-test clause 4
+// (a fixture that cannot produce the defect), and this constant is the fix.
+//
+// THE PRODUCER, read-only from here: `build_failure_reason()` —
+// deploy/site-deploy.sh:1939 (and its byte-identical node twin,
+// deploy/site-deploy-node.sh:1372). Its FIRST and highest-priority arm is
+// `grep -a 'FATAL' <build-log> | tail -1`, and the FATAL line the header at
+// site-deploy.sh:57 documents (emitted by the e2e's own npm at :935, asserted
+// onto the stage line at :1062) is this one, verbatim. It reaches the rail as
+// `BPSTAGE name=BUILD status=failed detail="…"`.
+//
+// It classifies: `unauthorized` → "A credential was rejected. This capture
+// doesn't say whose credential it was — the raw error line names it." — which
+// is what the settled row shows, and what the rail showed NOTHING of before
+// this slice.
+//
+// The copy is deliberately vague about WHOSE credential (wave 40 S6): the
+// credential this very line reports is the USER'S OWN site read token, and the
+// sentence that used to sit here ("The hosting provider rejected our
+// credentials. We're on it — try again shortly.") named a party, an owner and
+// a remedy that `humanize/1` — arity 1, a substring test — cannot see.
+//
+// RE-DERIVE THE WHOLE STRING:
+//   grep -n 'FATAL: 401 Unauthorized' deploy/site-deploy.sh
+//   grep -n '@credential_rejected' cloud/lib/barkpark_cloud/failure_copy.ex
+// `sites_deploy_stage_caption_test.exs` reads BOTH ends and reds when either
+// moves — that test, not this comment, is what keeps the fixture honest.
+//
+// NOT YET ROUTED INTO A SCENARIO: `smoke.mjs`'s cch-w10 census guard hard-fails
+// on any scenario with no paired EXPECTATIONS row, and smoke.mjs is outside this
+// slice's file fence. Wiring a third rail-fail scenario onto it is filed as
+// task-877bfc465162e104.
+export const RAIL_FAIL_CLASSIFYING_DETAIL = railEmitDetail(
+  "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog" +
+  " — the site read token is invalid",
+);
+
+// The CRUEL rail: a deployment the control plane still calls `building` whose
+// SSE narration already carries BUILD failed. That pairing is the honest
+// TRANSIENT window this box lives in — `deployIsActive` (app.js) gates the rail
+// to queued/building/pushing, so the footer is on screen from the stage-failed
+// event until the control plane settles the row, and not one second longer.
+const depRailFailedCruel = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d6",
+  site_id: IDS.siteWeb,
+  status: "building",
+  git_ref: "7f31c0d5ba9e4c218d63a07f5e1b8c94a2d60f3b",
+  branch: "main",
+  detail: "building",
+  inserted_at: tMinus(74),
+  updated_at: tMinus(3),
+  console: [
+    { stage: "PLAN", status: "done", detail: "release 20260802T094118Z-9c1f2ab, blue → green", at: tMinus(74) },
+    { stage: "BUILD", status: "started", detail: "", at: tMinus(70) },
+    { stage: "BUILD", status: "failed", detail: RAIL_FAIL_CRUEL_DETAIL, at: tMinus(6) },
+  ],
+});
+// The KIND rail: same shape, same stage machine, an ordinary detail. Lives on
+// the OTHER site of the same fixture (acme-blog) so one scenario carries both
+// the cruel string and its control — see `deploymentsBySite` in route().
+const depRailFailedKind = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d7",
+  site_id: IDS.siteBlog,
+  status: "building",
+  git_ref: "aa10ff2c4b7e8d6a1f0925c3b8e7d6c5b4a39281",
+  branch: "main",
+  detail: "building",
+  inserted_at: tMinus(120),
+  updated_at: tMinus(5),
+  console: [
+    { stage: "PLAN", status: "done", detail: "release 20260802T093902Z-aa10ff2, green → blue", at: tMinus(120) },
+    { stage: "BUILD", status: "done", detail: "npm ci && npm run build (astro static)", at: tMinus(40) },
+    { stage: "STAGE", status: "done", detail: "", at: tMinus(30) },
+    { stage: "HEALTH", status: "failed", detail: RAIL_FAIL_KIND_DETAIL, at: tMinus(8) },
+  ],
+});
+
 // ── invitations (GET /v1/invitations/:token preview + POST accept) ──────────
 // Preview envelope from router.ex: {team:{name,slug}, email, role, expires_at}.
 // The accept POST answers 200 {team_id} | 404 invalid_or_expired | 403
@@ -493,10 +951,8 @@ const ev = (id, type, payload, at) => ({ id, type, payload, inserted_at: at });
 const liveInstanceEvents = [
   ev(9, "verify", verifyPass, tMinus(120)),
   ev(8, "health", { health: "up", disk_used_pct: 41, pg_size_mb: 212, uptime_s: 86000 }, tMinus(300)),
-  ev(7, "backup", { status: "ok", size_mb: 88, took_s: 12 }, tMinus(4100)),
   ev(6, "health", { health: "up", disk_used_pct: 41, pg_size_mb: 211 }, tMinus(7300)),
   ev(5, "status", { transition: "online", reason: "agent_report" }, tMinus(80000)),
-  ev(4, "tls", { domain: "production-5b2c1e.barkpark.cloud", status: "issued" }, tMinus(86000)),
 ];
 const liveInstanceEventsOneFail = [ev(10, "verify", verifyOneFail, tMinus(60))].concat(liveInstanceEvents.slice(1));
 const liveInstanceEventsNoVerify = liveInstanceEvents.slice(1);
@@ -573,7 +1029,19 @@ const accountSessionsRevoke = [
 // Add e.g. `membersDenied`/`envDenied` fixtures + the matching flag branch in the
 // endpoint switch, then set the flag on the member scenario. Keep the DEFAULT
 // path (owner, no flag) so no existing scenario changes behaviour.
-function me(teamName, onb, role) {
+// cch-w45-s1: `actorId` is the fourth parameter because rank is NOT identity.
+// Until this wave `me()` threaded `role` into FOUR authority fields and ZERO
+// identity fields, so a role-only "admin" scenario rendered BYTE-IDENTICALLY to
+// the owner one (4220 vs 4220): every rank-relative predicate in the members
+// panel compares the actor to the ROSTER ROW, and the roster row it was
+// compared against was always the actor's own (teamMembers[0] IS usr_ada).
+// Every guard over that comparison was green by construction. Passing an
+// `actorId` moves `user.id` — and, inseparably, `user.email`, because an actor
+// whose two halves name different people is a fixture that could never exist on
+// the wire. Omit it and the corpus's default actor (usr_ada, the owner) is
+// unmoved: moving that default globally is forbidden (it reds the members
+// remove-click leg and the 2FA/invite copy, which read me().user.email).
+function me(teamName, onb, role, actorId) {
   onb = onb || {};
   const steps = [
     // Every scenario that is logged-in carries a subscription fixture, so the
@@ -582,10 +1050,42 @@ function me(teamName, onb, role) {
     { key: "instance", done: !!onb.instance },
     { key: "published_doc", done: !!onb.published_doc },
   ];
+  // cch-w43-s1: the envelope is the one the SERVER mints, key for key. The
+  // shape is DERIVED from /v1/me's own response map (router.ex, the
+  // `get "/v1/me"` clause): user{id,email,confirmed,two_factor_enabled,
+  // platform_operator} · team{id,name,slug} · teams[]{id,name,slug,role} ·
+  // role · team_authority{team_id,role,admin,owner} · onboarding.
+  // __me_envelope_census.mjs re-derives that map at test time and diffs it
+  // against what route(name,"GET","/v1/me") actually serves, so this comment
+  // is not the guard — the census is, and it reds by key path when the two
+  // drift. Until wave 43 the corpus emitted FOUR of those six keys, which is
+  // why every rendered scenario ran on app.js's compatibility floors and the
+  // `grant` band had never been painted by any instrument.
+  //
+  // `platform_operator` is deliberately NOT set here: it is the operator axis,
+  // and operatorMe() (below) is the ONE producer that raises it, exactly as
+  // GR39 requires. The census unions over the whole corpus, so those scenarios
+  // are what prove the key is served at all.
+  const actorRole = role || "owner";
+  const actorUserId = actorId || "usr_ada";
   return {
-    user: { id: "usr_ada", email: "ada@acme.com", confirmed: true, two_factor_enabled: false },
+    user: { id: actorUserId, email: corpusActorEmail(actorUserId), confirmed: true, two_factor_enabled: false },
     team: { id: IDS.team, name: teamName, slug: "acme" },
-    role: role || "owner",
+    // EVERY membership, the server's words. The corpus's actor belongs to the
+    // one team it is scoped to — a SECOND team here would be a scenario-level
+    // claim (a switcher with somewhere to switch to) that no fixture asks for.
+    teams: [{ id: IDS.team, name: teamName, slug: "acme", role: actorRole }],
+    role: actorRole,
+    // The authority the GATE enforces, stated on the wire. Scoped to the SAME
+    // team as `team:` and `role:` above — one resolved team, never a role from
+    // one team beside an id from another. admin/owner mirror Authz: owner is
+    // both, admin is admin-not-owner, everyone else is neither.
+    team_authority: {
+      team_id: IDS.team,
+      role: actorRole,
+      admin: actorRole === "owner" || actorRole === "admin",
+      owner: actorRole === "owner",
+    },
     onboarding: {
       completed: !!onb.completed,
       completed_at: onb.completed ? tMinus(80000) : null,
@@ -642,6 +1142,26 @@ const teamMembers = [
   { user_id: "usr_lin", email: "lin@acme.com", role: "admin", joined_at: tMinus(120 * 86400) },
   { user_id: "usr_rex", email: "rex@acme.com", role: "member", joined_at: tMinus(20 * 86400) },
 ];
+// cch-w45-s1: a SECOND owner, appended by CONCAT so `teamMembers` — and every
+// count assertion, every residue line and every wire leg standing on its three
+// rows — is byte-for-byte unmoved. This is the one roster cell where the two
+// server verbs DISAGREE: `Accounts.remove_member_as/3` carries an owner escape
+// hatch (`actor_role == "owner" or outranks?/2`, accounts.ex:1722) while
+// `update_member_role_as/4` does not (strict `outranks?`, accounts.ex:1801) —
+// so an owner MAY remove a peer owner and may NOT re-role one. No cell of the
+// corpus could paint that disagreement before, because there was no peer owner.
+const teamMembersPeerOwner = teamMembers.concat([
+  { user_id: "usr_ozz", email: "ozz@acme.com", role: "owner", joined_at: tMinus(200 * 86400) },
+]);
+// The corpus's actors, id → email, read STRAIGHT off the roster fixtures so the
+// two halves of an identity can never be edited apart. Unknown id is FATAL, not
+// a silent fallback to ada: a typo'd actor that quietly renders as the owner is
+// exactly the vacuous green this fixture exists to end.
+function corpusActorEmail(userId) {
+  const row = teamMembersPeerOwner.find((m) => m.user_id === userId);
+  if (!row) throw new Error("preview corpus has no actor " + userId + " — id and email move together");
+  return row.email;
+}
 const teamInvites = [
   { id: "inv_sky", email: "sky@partner.io", role: "member", expires_at: tPlus(6 * 86400), inserted_at: tMinus(86400) },
   { id: "inv_max", email: "max@acme.com", role: "admin", expires_at: tPlus(3 * 86400), inserted_at: tMinus(3 * 86400) },
@@ -650,8 +1170,27 @@ const teamInvites = [
 // whole grammar: DATABASE_URL (team secret, commented), STRIPE_SECRET_KEY (team,
 // write-once → sealed-and-unreplaceable note), PUBLIC_SITE_URL (team, non-secret,
 // commented), WORKER_TOKEN (instance-scoped secret).
+// cch-w24-s7 — THE CRUEL ENV COMMENT, on the row that already carried one, so
+// the row census and every count assertion over these four rows is unmoved.
+// ADMISSIBILITY: `EnvVar.changeset/2` does `validate_length(:comment, max: 255)`
+// — 255 and NOT 1000, because the column is a bare `add :comment, :string`
+// (varchar(255)) that no migration ever widened. Re-derive:
+//   grep -n 'validate_length(:comment' cloud/lib/barkpark_cloud/registry/env_var.ex
+// So 255 unbroken characters is the WIDEST string the server will store here,
+// and it is server data painted verbatim into `.set-row-note` by the env row
+// builder (grep -n 'set-row-note' cloud/priv/static/app.js) — a user typed it,
+// so it wraps or it escapes. The realistic producer is a paste: an operator
+// documenting a rotation by dropping the whole reference in, spaces and all
+// eaten by the paste. Same regression-pin logic as the cruel site row: on
+// today's CSS the `.set-row-note` wrap already shipped and the yield is ZERO;
+// deleting that wrap is what this string exists to make red.
+const CRUEL_ENV_COMMENT = atLength("env comment",
+  "rotatedbyplatformautomationduringthenortherneuropeanregionalfailover" +
+  "exerciseandthenrecordedhereverbatimbecausethecommentfieldwastheonly" +
+  "placetheoperatorcouldreachwithoutanadmingrantseerunbookentrytwenty" +
+  "sixzeroeightzerotwoacmegroupholdingsinfrastructure2026", 255);
 const teamEnvVars = [
-  { id: "env_db", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: "Primary Postgres connection string", inserted_at: tMinus(90 * 86400), updated_at: tMinus(10 * 86400) },
+  { id: "env_db", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: CRUEL_ENV_COMMENT, inserted_at: tMinus(90 * 86400), updated_at: tMinus(10 * 86400) },
   { id: "env_stripe", key: "STRIPE_SECRET_KEY", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: true, comment: null, inserted_at: tMinus(60 * 86400), updated_at: tMinus(60 * 86400) },
   { id: "env_url", key: "PUBLIC_SITE_URL", scope: "team", barkpark_id: null, is_secret: false, is_shown_once: false, comment: "Canonical URL used in outbound emails", inserted_at: tMinus(30 * 86400), updated_at: tMinus(30 * 86400) },
   { id: "env_worker", key: "WORKER_TOKEN", scope: "barkpark", barkpark_id: IDS.liveInstance, is_secret: true, is_shown_once: false, comment: null, inserted_at: tMinus(5 * 86400), updated_at: tMinus(5 * 86400) },
@@ -670,7 +1209,13 @@ const quotaBarsUsage = {
     seats: m(8, { quota: 10, warn_at: 8, source: "control-plane.team_members", pending_invitations: 1 }), // warn — at warn_at
     documents: m(1240, { quota: 1000, warn_at: 900, source: "instance.documents" }),                       // over — recovery action
     datasets: m(4, { source: "instance.datasets" }),                // metered but unlimited (quota nil) → bar-less
-    webhooks: m("unmetered", { source: "instance.webhooks" }),
+    // w29 — the two UNMETERED states, side by side in one shot: webhooks was
+    // MEASURED AND THE READ CRASHED (`unavailable_reason`, so it reads "Could
+    // not measure · the read crashed" and tints warn), while db_size / p95_ms /
+    // api_requests / bandwidth below are the DELIBERATE non-measurements that
+    // still read "Not yet metered". Before the reason field existed these two
+    // truths rendered byte-identically.
+    webhooks: m("unmetered", { source: "instance.webhooks", unavailable_reason: "exception" }),
     db_size: m("unmetered", { source: "telemetry.pg_size_bytes" }),
     disk: m(58, { quota: 100, warn_at: 70, over_at: 90, source: "telemetry.disk_used_percent", measured_at: T }), // healthy 0-100 bar
     // Machine meters (OC23/OC26): cpu OVER its red line (94 ≥ 90, bar not full),
@@ -771,7 +1316,7 @@ const lifecycleCapabilities = {
     hetzner: {
       tier: "prod",
       capabilities: { archive: true, resurrect: true, adopt: true, audit: true, pause: false },
-      gaps: { pause: "Hetzner has no pause primitive — a stopped server still bills, so archive it instead." },
+      gaps: { pause: "A Hetzner server bills for as long as it exists, powered on or off — we can't pause it. Deleting the instance is the only thing that stops the charge." },
     },
   },
   default_gap: "Not supported by this provider.",
@@ -793,7 +1338,7 @@ const settingsProviderCapabilities = {
         core: true, catalog: false, labels: true, pause: false,
         archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
       },
-      gaps: { pause: "Hetzner has no pause primitive — a stopped server still bills, so archive it instead." },
+      gaps: { pause: "A Hetzner server bills for as long as it exists, powered on or off — we can't pause it. Deleting the instance is the only thing that stops the charge." },
     },
     azure: {
       tier: "prod",
@@ -923,8 +1468,9 @@ const theaterFailedConsole = [
 // ── gr-p3-site-detail (E-02): the states-complete v4 ladder fixtures ─────────
 // One site whose history shows every settled deployment state at once — live
 // (current), crash-failed (red panel + console), born-failed github-push
-// (blocked amber panel), cancelled (neutral pill) and a prior live row
-// (rollback affordance) — plus branch previews (one live, one failed) and the
+// (blocked amber panel), cancelled (hollow dashed pill: terminal and
+// deliberately stopped, NOT the filled grey of a queued row) and a prior live
+// row (rollback affordance) — plus branch previews (one live, one failed) and the
 // domains rungs (a proxied custom apex + a www still waiting on TLS).
 // Triggers are ONLY the backend vocabulary (manual | content-auto — GR27).
 const stLive = deployment({
@@ -952,6 +1498,62 @@ const stCrash = deployment({
     { line: "build: exited with code 1", at: tMinus(21581) },
   ],
 });
+// ── cch-w26-s2: THE CRUEL DEPLOY ROW, derived from its producers ────────────
+//
+// WHY IT HAD TO BE COMMITTED. A census of every `failure_reason` in this file
+// before this row returned NINE values reducing to TWO distinct strings —
+// "npm run build exited 1" (22 chars, longest unbreakable run 9) and the
+// humanized github-push copy (122 chars, word-broken throughout). Neither can
+// clip: the widest `.deploy-fail` any committed fixture could paint fits inside
+// the `.deploys` card at every width this epic drives. So the panel's missing
+// wrap rule was UNREACHABLE by any instrument in this tree — a leg written
+// against the old corpus would have printed a perfect table on the defective
+// bytes. THE FIXTURE IS THE PRECONDITION OF THE LEG, not an extra.
+//
+// THE PRODUCER CHAIN, read-only from here, one hop LONGER than the rail's:
+//   `build_failure_reason` (deploy/site-deploy-node.sh:1372) — the last
+//     `npm ERR!|[Ee]rror:` line of the build log, verbatim and unbounded. On a
+//     Next build that is routinely a module-resolution path: ONE unbreakable
+//     run carrying the person's own slug and the release id.
+//   `emit()` (deploy/lib/site-deploy-common.sh) — normalises and CUTS it. This
+//     is the same string the deploy rail's footer holds, so it is reused here
+//     as RAIL_FAIL_CRUEL_DETAIL rather than re-derived (one producer, one
+//     fixture: if the shell's cut moves, __app.test.mjs reds and BOTH strings
+//     move together).
+//   `stage_failure_copy/1` (cloud/lib/barkpark_cloud/sites/deploy.ex:994) —
+//     the control-plane hop the RAIL DOES NOT TAKE. When the box reports a
+//     failed stage with a detail, the DEPLOYMENT ROW's `failure_reason` column
+//     is stamped `"<STAGE> failed — <detail>"`, and `FailureCopy.humanize/1`
+//     passes an unrecognised reason through verbatim. That prefix is why this
+//     is a DIFFERENT string from the rail's footer even though the cruel part
+//     is shared — and it is composed here, never pasted.
+//
+// RE-DERIVE:
+//   grep -n 'defp stage_failure_copy' -A 6 cloud/lib/barkpark_cloud/sites/deploy.ex
+//   node -e 'import("./cloud/priv/static/__preview__/scenarios.mjs").then(m=>console.log(m.DEPLOY_FAIL_CRUEL_REASON.length))'
+export function deployStageFailureCopy(stage, detail) {
+  return `${stage} failed — ${detail}`;
+}
+export const DEPLOY_FAIL_CRUEL_REASON = deployStageFailureCopy("BUILD", RAIL_FAIL_CRUEL_DETAIL);
+// The row itself: a SECOND crash on the same site's history, one stage-report
+// hop from the box. It is added rather than substituted because `stCrash`
+// above is the KIND crash every other harness asserts verbatim — replacing it
+// would have bought this leg its cruelty by deleting somebody else's control.
+const stCrashCruel = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000f8",
+  status: "failed",
+  git_ref: "e91b47c05d3a8f26b1c4d907e5a3f28b60c1d4e7",
+  branch: "main",
+  trigger: "manual",
+  failure_reason: DEPLOY_FAIL_CRUEL_REASON,
+  inserted_at: tMinus(30600),
+  updated_at: tMinus(30541),
+  console: [
+    { line: "cloning acme/web @ e91b47c", at: tMinus(30600) },
+    { line: "npm ci — ok (41s)", at: tMinus(30560) },
+    { line: "next build — module resolution failed", at: tMinus(30541) },
+  ],
+});
 const stBlocked = deployment({
   id: "5b2c1e00-0000-4000-8000-0000000000f3",
   status: "failed",
@@ -972,6 +1574,35 @@ const stCancelled = deployment({
   inserted_at: tMinus(172800),
   updated_at: tMinus(172740),
 });
+// cch-w28-bl: THE REFUSAL SENTENCE, byte-identical to
+// `Sites.AutoDeployWorker`'s @refusal_detail (auto_deploy_worker.ex:162). It
+// reaches the browser UNTRANSFORMED — FailureCopy.humanize/1 is the identity on
+// it and no classifier token matches — so the fixture is allowed to carry the
+// server's own bytes, and MUST carry exactly those bytes. This is the only copy
+// of the string outside the Elixir module; __app.test.mjs pins the two together
+// by reading the .ex file, so a reworded refusal reds the console gate instead
+// of quietly leaving this fixture asserting a sentence nobody ships.
+export const REFUSAL_DETAIL =
+  "refused: this site's live release was uploaded (prebuilt), so a content publish must not trigger a box rebuild — it would replace bytes this fleet cannot reproduce. Ship new bytes with `bp cloud site deploy <site> --prebuilt <dir>`.";
+
+// cch-w28-bl: THE REFUSED AUTO-DEPLOY — the row the corpus could not express.
+// A content editor publishes; the auto-deploy DECLINES because the live release
+// is uploaded bytes the fleet cannot reproduce; refuse/1 mints this row. It is
+// `cancelled`, NOT `failed` (so every `st === "failed"` render gate misses it),
+// `trigger: "content-auto"` (nobody pressed anything), `source: "prebuilt"`
+// (what was PROTECTED, not what was built), and it carries the same actionable
+// sentence in BOTH channels — which is exactly why the row must say it once.
+const stRefused = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000f6",
+  status: "cancelled",
+  branch: "main",
+  trigger: "content-auto",
+  source: "prebuilt",
+  failure_reason: REFUSAL_DETAIL,
+  detail: REFUSAL_DETAIL,
+  inserted_at: tMinus(3600),
+  updated_at: tMinus(3599),
+});
 const stPrior = deployment({
   id: "5b2c1e00-0000-4000-8000-0000000000f5",
   status: "live",
@@ -983,10 +1614,120 @@ const stPrior = deployment({
   inserted_at: tMinus(259244),
   updated_at: tMinus(259200),
 });
-const siteStatesDeployments = [stLive, stCrash, stBlocked, stCancelled, stPrior];
+// cch-w26-s2: the cruel crash sits BETWEEN the two failures already here, so a
+// single screen carries the 255-char stage-report crash under measurement, the
+// 22-char crash, and the 122-char blocked copy that is this leg's KIND control
+// — one route, the defect and its control in the same paint.
+// cch-w28-bl adds stRefused directly ABOVE the bare stCancelled: the two
+// cancelled rows now sit adjacent, one with something to say and one without,
+// so a screenshot shows the rule (copy → panel, silence → pill only) rather
+// than one specimen of it. Row count for this scenario: 6 → 7, and cch-w33-s3's
+// cut-narration row (below) takes it to 8.
+// ── cch-w33-s3: THE CUT NARRATION — the row the console count used to lie about
+//
+// The population: 2,881 failed production deployments across NINE distinct
+// sites whose LAST console entry's own status is still "running" on a row the
+// control plane calls failed. The panel printed a bare "3 lines" for those, as
+// though the builder had finished talking. Every other committed deploy fixture
+// in this file carries a status-less {line, at} console, so no instrument here
+// could paint the disclosure — the fixture IS the precondition of the leg.
+//
+// It carries all three disclosures at once, so one screen shows the whole
+// vocabulary:
+//   • the ring drop     — `dropped_before` on the OLDEST surviving entry, as
+//                         registry.ex's cap_console/1 writes it;
+//   • the line chop     — `truncated_from` on a line stored as a 2 KB prefix,
+//                         as console_line_meta/1 writes it (the `line` here is
+//                         itself a stand-in, not 2,000 literal chars — the
+//                         MARKER is what the renderer reads);
+//   • the cut narration — a trailing BUILD/running entry under status "failed".
+// Neither marker may inflate the count: this console has FOUR entries and the
+// panel must read "4 lines · …".
+const stCutNarration = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000f9",
+  status: "failed",
+  git_ref: "7d41f0e39a2b5c6d8e0f1a2b3c4d5e6f70819a2b",
+  branch: "main",
+  trigger: "manual",
+  failure_reason: "BUILD failed — the builder stopped reporting",
+  inserted_at: tMinus(46800),
+  updated_at: tMinus(46702),
+  console: [
+    { line: "…5 earlier lines dropped by the 300-line cap", at: tMinus(46800), dropped_before: 5, stage: "PLAN", status: "done" },
+    { line: "PLAN: resolved acme/web @ 7d41f0e", at: tMinus(46790), stage: "PLAN", status: "done" },
+    { line: "npm ERR! " + "…", at: tMinus(46740), stage: "BUILD", status: "running", truncated_from: 5000 },
+    { line: "BUILD: nixpacks still working", at: tMinus(46702), stage: "BUILD", status: "running" },
+  ],
+});
+const siteStatesDeployments = [stLive, stCrash, stCrashCruel, stBlocked, stRefused, stCutNarration, stCancelled, stPrior];
 const siteStatesSite = Object.assign({}, webSite, {
   current_deployment_id: stLive.id,
 });
+// ── cch-w26-bl-deploy-row-siblings-unwrapped (charter D322): THE PREVIEW
+//    HOSTNAME IS PRODUCED, NEVER TYPED ───────────────────────────────────────
+//
+// THE SHAPE THIS FILE CARRIED WAS ONE PRODUCTION CANNOT ISSUE. The committed
+// fixture read `draft-nav--acme-web.preview.barkpark.cloud`: branch FIRST, site
+// slug SECOND, and a `.preview.` label that no producer emits. The real host is
+// `Registry.preview_host_for/2` = `preview_slug_for/2` <> "." <>
+// `Barkpark.base_domain()`, i.e. `<site_slug>--<branch_slug>-<hash>` <>
+// ".barkpark.cloud" — SLUG FIRST, no `.preview.` label. A fixture with the
+// halves swapped is not a cosmetic error: it puts the BREAKABLE hyphen-rich
+// slug where the producer puts the branch part, so any geometry measured on it
+// is geometry of a string the control plane never sends.
+//
+// THE TWO CAPS ARE NOT THE SAME CAP, and this is the whole premise of the leg
+// that measures these rows (overflow-guard.mjs, W27-deploy-ref-branch-bounded):
+//   preview_host IS BOUNDED — `preview_slug_for/2`
+//     (cloud/lib/barkpark_cloud/registry.ex) clamps the DNS label to 63 by
+//     giving the branch part only `63 - len(base) - 9` characters, so the host
+//     can never exceed 63 + len(".barkpark.cloud") = 78.
+//   THE BRANCH BESIDE IT IS UNCAPPED — `cloud/lib/barkpark_cloud/registry/
+//     deployment.ex` declares ZERO `validate_length` on `:branch`, and the
+//     webhook path writes `branch_from_ref("refs/heads/" <> branch)` verbatim,
+//     whatever GitHub sent. `previewRow()` (app.js) renders that raw branch in
+//     `.deploy-ref` on the SAME LINE as the bounded host.
+//
+// THE ALGORITHM IS MIRRORED HERE, NOT ITS OUTPUT PASTED — the clamp arithmetic
+// is the part that decides whether 78 is reachable, so it stays live. Only the
+// 6-hex digest is pinned (SubtleCrypto is async and node:crypto is not
+// available to the browser that also loads this file). Both digests below are
+// the real `:crypto.hash(:sha256, branch) |> Base.encode16(:lower) |>
+// binary_part(0, 6)`.
+//
+// RE-DERIVE (all four numbers this file states):
+//   grep -n 'def preview_slug_for' -A 22 cloud/lib/barkpark_cloud/registry.ex
+//   node -e 'const c=require("crypto");for(const b of ["draft/nav","renovate_lockfile_maintenance_all_ecosystems_2026_08_03_retry_after_registry_timeout"])console.log(b, c.createHash("sha256").update(b).digest("hex").slice(0,6))'
+//   node -e 'import("./cloud/priv/static/__preview__/scenarios.mjs").then(m=>console.log(m.PREVIEW_CRUEL_BRANCH.length, m.PREVIEW_CRUEL_HOST.length))'
+export function previewSlugFor(siteSlug, branch, sha6) {
+  const base = siteSlug.slice(0, 40);
+  const branchRoom = Math.max(63 - base.length - 9, 1);
+  const branchSlug = branch
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, branchRoom)
+    .replace(/^-+|-+$/g, "");
+  const branchPart = branchSlug === "" ? sha6 : branchSlug + "-" + sha6;
+  return base + "--" + branchPart;
+}
+export function previewHostFor(siteSlug, branch, sha6) {
+  return previewSlugFor(siteSlug, branch, sha6) + ".barkpark.cloud";
+}
+// THE CRUEL BRANCH — 84 characters, ONE unbreakable run. Nothing invented: a
+// branch name is whatever a person (or their bot) pushed, and this is the shape
+// a Renovate-style lockfile branch takes on a repo that spells its branch
+// segments with underscores. Underscores matter: `-` and `/` are line-break
+// opportunities in CSS, `_` is not, so a hyphenated branch of the same length
+// wraps on its own and would have made this fixture green by construction.
+export const PREVIEW_CRUEL_BRANCH =
+  "renovate_lockfile_maintenance_all_ecosystems_2026_08_03_retry_after_registry_timeout";
+// 78 chars — the MAXIMUM host the control plane can issue, produced by the
+// mirror above from THIS scenario's own site slug ("acme-web"). It is derived
+// from the site under view on purpose: a foreign 40-char slug would reach the
+// same 78 while modelling a host production could not issue for this site,
+// which is the exact class of error the shape correction above fixes.
+export const PREVIEW_CRUEL_HOST = previewHostFor("acme-web", PREVIEW_CRUEL_BRANCH, "453169");
 const previewLiveRow = deployment({
   id: "5b2c1e00-0000-4000-8000-0000000000f6",
   status: "live",
@@ -994,8 +1735,8 @@ const previewLiveRow = deployment({
   branch: "draft/nav",
   git_ref: "b7e21c94a5f18e2d6c4b0a9f8e7d6c5b4a392817",
   trigger: "manual",
-  preview_host: "draft-nav--acme-web.preview.barkpark.cloud",
-  preview_url: "https://draft-nav--acme-web.preview.barkpark.cloud",
+  preview_host: previewHostFor("acme-web", "draft/nav", "cee407"),
+  preview_url: "https://" + previewHostFor("acme-web", "draft/nav", "cee407"),
   became_live_at: tMinus(18000),
   inserted_at: tMinus(18052),
   updated_at: tMinus(18000),
@@ -1011,7 +1752,26 @@ const previewFailedRow = deployment({
   inserted_at: tMinus(9000),
   updated_at: tMinus(8981),
 });
-const siteStatesPreviews = [previewLiveRow, previewFailedRow];
+// THE CRUEL PREVIEW ROW. It is ADDED, never substituted: `previewLiveRow` and
+// `previewFailedRow` above are the KIND controls — a 9-char branch and a
+// 41-char host — and a remedy that bought the cruel row by shredding ordinary
+// prose has to red somewhere. It is LIVE rather than failed on purpose: a
+// failed preview row paints a `.deploy-fail` panel, and adding a third of those
+// would have changed the population W26-deploy-fail-clip counts.
+const previewCruelRow = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000f9",
+  status: "live",
+  environment: "preview",
+  branch: PREVIEW_CRUEL_BRANCH,
+  git_ref: "a4f0d81c72b6935e0d1c8a47f6b3e2905c7d1a8b",
+  trigger: "manual",
+  preview_host: PREVIEW_CRUEL_HOST,
+  preview_url: "https://" + PREVIEW_CRUEL_HOST,
+  became_live_at: tMinus(3600),
+  inserted_at: tMinus(3661),
+  updated_at: tMinus(3600),
+});
+const siteStatesPreviews = [previewCruelRow, previewLiveRow, previewFailedRow];
 // The site domain-status envelope (DomainStatus.check(%Site{})): a CF-proxied
 // apex (points_here classified `proxied` — informational, GR27) and a www
 // whose TLS is still issuing, with the server-owned remediation verbatim.
@@ -1043,13 +1803,20 @@ const siteStatesDomains = {
 
 // ── G-04 notifications (the crown) ───────────────────────────────────────────
 // Backend-true settings_view: transport + masked SMTP secrets ("********" when
-// set), the 9 per-event email booleans, the chat half (channels report only
+// set), the 6 per-event email booleans, the chat half (channels report only
 // {type, enabled, configured} — credentials are NEVER echoed), event_routes, and
-// the server-owned vocabulary (chat_events = 9 + "test", channel_types = the 5
+// the server-owned vocabulary (chat_events = 6 + "test", channel_types = the 5
 // ChannelConfig types, chat_default_on = the 4 failure events).
+//
+// SIX, NOT NINE (wave 30 S1). `deployment_succeeded`, `member_invited` and
+// `token_expiring` were dropped from `EmailSettings` end to end — no column, no
+// producer, no toggle. A fixture that still seeded them was claiming to be
+// backend-true while describing a backend that no longer exists, which is the
+// exact shape this wave exists to remove; `__app.test.mjs`'s bidirectional
+// census guards app.js but has no reach into this file, so it stayed green.
 const NOTIF_EVENT_KEYS = [
-  "provision_succeeded", "provision_failed", "deployment_succeeded", "deployment_failed",
-  "agent_reachable", "agent_unreachable", "subscription_past_due", "member_invited", "token_expiring",
+  "provision_succeeded", "provision_failed", "deployment_failed",
+  "agent_reachable", "agent_unreachable", "subscription_past_due",
 ];
 const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
 const NOTIF_CHANNEL_TYPES = ["discord", "slack", "telegram", "pushover", "webhook"];
@@ -1088,9 +1855,9 @@ const notifConfigured = notifSettings({
   event_routes: {
     provision_failed: ["discord", "slack"],
     deployment_failed: ["discord"],
-    deployment_succeeded: ["slack"],
+    provision_succeeded: ["slack"],
   },
-  deployment_succeeded: true, // a customized email boolean
+  provision_succeeded: true, // a customized email boolean
 });
 const notifEmpty = notifSettings({});
 // delivery_json rows: recipient/event/channel/kind/status/attempts/last_error/
@@ -1099,7 +1866,7 @@ const notifEmpty = notifSettings({});
 const notifDeliveries = [
   { id: "del_5", recipient: "alerts@acme.com", event: "provision_failed", channel: "email", kind: "alert", status: "failed", attempts: 3, last_error: "smtp 550 mailbox unavailable", http_status: null, inserted_at: tMinus(120) },
   { id: "del_4", recipient: "discord", event: "deployment_failed", channel: "discord", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: 204, inserted_at: tMinus(600) },
-  { id: "del_3", recipient: "alerts@acme.com", event: "deployment_succeeded", channel: "email", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: null, inserted_at: tMinus(4000) },
+  { id: "del_3", recipient: "alerts@acme.com", event: "provision_succeeded", channel: "email", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: null, inserted_at: tMinus(4000) },
   { id: "del_2", recipient: "slack", event: "provision_failed", channel: "slack", kind: "alert", status: "pending", attempts: 0, last_error: null, http_status: null, inserted_at: tMinus(4200) },
   { id: "del_1", recipient: "alerts@acme.com", event: "subscription_past_due", channel: "email", kind: "transactional", status: "sent", attempts: 1, last_error: null, http_status: 200, inserted_at: tMinus(90000) },
 ];
@@ -1221,6 +1988,244 @@ const offloadRoster = (status, task) => [{
   last_seen: tMinus(8), ttl_s: 30, task: task || null,
 }];
 
+// ── cch-w21-s3 — THE CRUEL FIXTURE (server-legal worst-case CONTENT) ─────────
+// Every other fixture in this file is KIND: the longest host it ships is 32
+// characters (`production-5b2c1e.barkpark.cloud`) and the longest name is 10
+// ("Production", "Reporting", "Guerrilla"). The SERVER admits far more, and it
+// is the server's own caps — not an invented absurdity — that set the numbers
+// below:
+//   · `validate_length(:custom_host, max: 253)`   registry/barkpark.ex:727
+//   · `validate_length(:name, min: 1, max: 255)`  registry/barkpark.ex:466
+//   · `@external_host_format` (:109) admits an arbitrary customer-owned FQDN of
+//     TWO OR MORE labels, each `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?` — i.e. up
+//     to 63 characters with NO break opportunity a text renderer can use.
+// `publicUrl()` (`grep -n "function publicUrl" app.js`) PREFERS `custom_host`, so
+// an attached customer domain is the DOMINANT real input on `.fleet-url` and
+// `.instance-card-url`, not an edge case — and until this fixture existed no
+// instrument in this epic had ever driven one.
+//
+// THE LENGTHS ARE DERIVED AND ASSERTED, NEVER HAND-COUNTED. A fixture whose
+// cruelty is a typed-in number stops being cruel the first time somebody edits
+// a word in it and nothing complains. The three throws below are the fixture's
+// own guard: they run at module load, so every consumer of this file (the
+// sweep, the guard, mock.js, the browser) refuses rather than silently
+// measuring a fixture that has gone kind.
+const CUSTOM_HOST_MAX = 253; // registry/barkpark.ex:727
+const BARKPARK_NAME_MAX = 255; // registry/barkpark.ex:466
+const DNS_LABEL_MAX = 63; // @external_host_format's `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?`
+// The server's external-host regex, copied verbatim from registry/barkpark.ex:109
+// so the fixture can PROVE it is admissible rather than assert it in prose.
+const EXTERNAL_HOST_FORMAT = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+
+// Pad a stem to EXACTLY n characters while keeping the RFC-1035 label shape
+// (first and last character alphanumeric). `joiner` decides how cruel the label
+// is, and this is the whole difference between a fixture that bites and one
+// that does not: a HYPHEN IS A LINE-BREAK OPPORTUNITY. Driven on the first cut
+// of this fixture, a hyphen-rich 253-char host wrapped by itself and
+// `.fleet-url` never once exceeded its own box — the fixture had quietly made
+// itself kind. A 63-character label of unbroken alphanumerics is the real
+// worst case the server's own `@external_host_format` admits.
+function dnsLabel(stem, n, joiner = "") {
+  let s = stem;
+  while (s.length < n) s += joiner + stem;
+  s = s.slice(0, n);
+  return s.endsWith("-") ? s.slice(0, -1) + "0" : s;
+}
+
+// 63 + 63 + 63 + 58 + 2, four dots = 253, the cap exactly. THREE maximal DNS
+// labels with NO internal hyphen, because 63 unbroken glyphs is the longest run
+// a URL can carry with nothing — no space, no slash, no hyphen — for the line
+// breaker to use. The fourth label keeps its hyphens: a corpus of pure worst
+// case is its own kind of unrealistic, and the mixed host is what a real
+// customer domain looks like.
+const cruelCustomHost = [
+  dnsLabel("redaksjoneltinnholdogdistribusjonforheleforlagsgruppen", DNS_LABEL_MAX),
+  dnsLabel("gyldendalnorskforlagogdatterselskaperinorden", DNS_LABEL_MAX),
+  dnsLabel("publiseringarkivrettigheterogmetadataplattform", DNS_LABEL_MAX),
+  dnsLabel("kundeeid-domene-for-den-nordiske-plattformen", 58, "-"),
+  "no",
+].join(".");
+// 255 characters, the cap exactly, carrying ONE 62-character unbroken token —
+// a Norwegian compound is the realistic shape of a name with no break
+// opportunity, and it is the token, not the total, that decides min-content.
+const cruelName =
+  "Produksjon redaksjonsinnholdsplattformenforflersprakligpubliseringinorden " +
+  "arkiv og rettighetsstyring for alle avdelinger og datterselskaper i den " +
+  "nordiske forlagsgruppen, inkludert distribusjon og metadata for samtlige " +
+  "utgivelser fra 1892 og fram til 2026";
+
+if (cruelCustomHost.length !== CUSTOM_HOST_MAX) {
+  throw new Error(`cruel fixture: custom_host is ${cruelCustomHost.length} chars, the server's cap is ${CUSTOM_HOST_MAX} — the fixture has gone kind, fix the stems`);
+}
+if (!EXTERNAL_HOST_FORMAT.test(cruelCustomHost) || cruelCustomHost.split(".").filter((l) => l.length === DNS_LABEL_MAX).length < 1) {
+  throw new Error("cruel fixture: custom_host is not admissible by registry/barkpark.ex's @external_host_format, or carries no maximal 63-char label — a fixture the server would REJECT proves nothing");
+}
+if (cruelName.length !== BARKPARK_NAME_MAX) {
+  throw new Error(`cruel fixture: name is ${cruelName.length} chars, the server's cap is ${BARKPARK_NAME_MAX}`);
+}
+
+// The cruel row is a LIVE, healthy, up-to-date box: nothing about its state is
+// unusual, and that is the point — the ONLY variable is the length of two
+// strings a person is allowed to type.
+const cruelInstance = bpBase({
+  id: "5b2c1e00-0000-4000-8000-0000000000c1",
+  name: cruelName,
+  slug: "produksjon",
+  url: "https://produksjon-c1a2b3.barkpark.cloud",
+  host: "produksjon-c1a2b3.barkpark.cloud",
+  custom_host: cruelCustomHost,
+  health_status: "up",
+  agent_status: "online",
+  version: "0.9.2",
+  git_commit: "c1a2b3d4e5f60718293a4b5c6d7e8f9012345678",
+  last_seen_at: tMinus(30),
+  update_state: "current",
+  update_running_release: "0.9.2",
+  update_latest_release: "0.9.2",
+  update_checked_at: tMinus(420),
+  region: "fsn1",
+  server_type: "cx22",
+  channel: "prod",
+  autoupdate_enabled: true,
+  provider: "hetzner",
+  provision_status: "succeeded",
+});
+
+// ── cch-w23-s1 — THE CRUEL PROVISION ERROR (the SHAPE axis, not the length) ──
+// The cruel corpus above bites on two strings a PERSON types. This one bites on
+// a string a MACHINE writes, and it is the axis nothing in this file carried:
+// the status pill's detail is `bp.provision_error` verbatim (`statusOf` in
+// app.js — `kind === "failed"` returns `detail: bp.provision_error`).
+//
+// THE CAP IS DERIVED FROM THE CHAIN, AND THE CHAIN HAS NO CAP. Unlike
+// custom_host (253) and name (255) above, there is NO `validate_length` to cite:
+//   · `provision_jobs.error` is a POSTGRES :text column —
+//     cloud/priv/repo/migrations/20260702130000_provision_job_error_to_text.exs
+//     does `modify :error, :text`, and its own comment says the worker's
+//     compound fallback-ladder error "exceeds varchar(255)", i.e. the widening
+//     happened BECAUSE a real error was longer than the old bound.
+//   · `ProvisionJob.changeset` (registry/provision_job.ex:152) casts `:error`
+//     and validates status/kind/attempts/bundle_ref — and carries ZERO
+//     `validate_length` on any field. Worker socket to pill, no bound.
+// So the effective cap is the RENDER PATH, not a schema number, and the length
+// below is derived as the smallest MEASURED biting value rather than the
+// largest legal one (2000 — registry.ex's only known string cap — merely makes
+// the same defect louder: page 13396 against 320 instead of 3555).
+//
+// AND THE CRUELTY IS SHAPE, NOT LENGTH — this is what makes a length cap the
+// wrong remedy (charter D267). Probed on `mixed-fleet#overview` with all 8
+// `.status-pill-detail` iterated per cell: a 1648-char WORD-BROKEN capture
+// (longest token 8 chars) is COMPLETELY CLEAN (page 320/320, worst detail
+// "none") — it just grows taller, while 512 chars in ONE UNBROKEN TOKEN take
+// the page to 3555/320. Re-driven HERE, on this fixture, in the tree that ships
+// it: unfixed, `#overview` measured documentElement.scrollWidth 3860 against a
+// 320 viewport and the detail 3754/170; `#fleet` 3856/320. It is the TOKEN, not
+// the total, that sets min-content, so the fixture below is a single unbroken
+// run — and 2000 chars (registry.ex's only known string cap) would only make
+// the same defect louder, never a different one.
+const CRUEL_PROVISION_ERROR_LEN = 512;
+// A base64 body echoed back from a provider API is the realistic shape of an
+// error with no break opportunity in it: no space, no hyphen, no slash, no dot.
+const cruelProvisionError = (function () {
+  const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let s = "";
+  while (s.length < CRUEL_PROVISION_ERROR_LEN) s += alphabet;
+  return s.slice(0, CRUEL_PROVISION_ERROR_LEN);
+})();
+
+// THE FIXTURE'S OWN GUARD, in the fixture and not in a charter — the two
+// refusals a cruel CONTENT twin needs (cch-w22 ledger mechanism):
+//   GONE KIND   — the string no longer matches the length it cites.
+//   BREAKABLE   — the string is maximal but still self-wrapping, so the guard
+//                 that consumes it would be green by construction. A single
+//                 space or hyphen anywhere in here is enough to make the whole
+//                 leg vacuous, which is exactly the accident cch-w21's own
+//                 builder shipped on `.fleet-url`.
+if (cruelProvisionError.length !== CRUEL_PROVISION_ERROR_LEN) {
+  throw new Error(`cruel fixture: provision_error is ${cruelProvisionError.length} chars, the derived biting length is ${CRUEL_PROVISION_ERROR_LEN} — the fixture has GONE KIND`);
+}
+if (!/^[A-Za-z0-9]+$/.test(cruelProvisionError)) {
+  throw new Error("cruel fixture: provision_error carries a line-break opportunity (space, hyphen, slash, dot) — a BREAKABLE string wraps by itself and proves nothing about a wrap remedy");
+}
+
+// A FAILED box whose ONLY unusual property is the error string: kind name,
+// kind slug, no host (which is what `classifyBp` requires to read "failed").
+const cruelProvisionErrorInstance = bpBase({
+  id: "5b2c1e00-0000-4000-8000-0000000000c2",
+  name: "Analytics",
+  slug: "analytics",
+  provision_status: "failed",
+  provision_error: cruelProvisionError,
+  region: "fsn1",
+  server_type: "cx22",
+  provider: "hetzner",
+});
+
+// ── cch-w23-s2 — THE CRUEL IDENTITY (the account modal's content axis) ──────
+// The same mechanism as the fleet ledger above (cch-w21-s3): a cap READ OFF the
+// schema file that governs it, a string built to sit exactly at that cap with no
+// break opportunity, and throws at module load so the fixture cannot quietly go
+// kind. This is the ACCOUNT axis, which no fixture in this file had ever driven:
+// every `me()` in here is `ada@acme.com`, whose rendered name is three glyphs.
+//
+// THE CAP IS DERIVED, AND 255 IS INADMISSIBLE. `.am-name` is not a display name:
+// `accountModel()` (re-derive with `grep -n 'function accountModel'
+// cloud/priv/static/app.js`) sets `name: email.split("@")[0]`, the LOCAL PART
+// of the address. `BarkparkCloud.Accounts.User` has no `:name` field and no
+// `validate_length(:name, …)` at all — the ONLY cap on this string is
+//   · `validate_length(:email, max: 160)`  cloud/lib/barkpark_cloud/accounts/user.ex:165
+//   · `@email_format ~r/^[^\s@]+@[^\s@]+$/` (:31) — one "@", at least one
+//     character on each side of it, no spaces.
+// 160 total, minus the "@", minus at least one domain character, gives a
+// DERIVED admissible cap of 158 characters for what `.am-name` paints. The
+// backlog row cchi-w22-bl-am-name-unbounded-every-width asked for a 255-char
+// fixture: the server would reject that address, so it is a string NO PERSON CAN
+// PRODUCE — INADMISSIBLE in this ledger's own vocabulary, and a defect measured
+// only at 255 is a defect nobody has. 158 is measured, and 158 still overflows.
+const ACCOUNT_EMAIL_MAX = 160; // cloud/lib/barkpark_cloud/accounts/user.ex:165
+// The server's own email shape, copied verbatim from user.ex:31 so the fixture
+// can PROVE it is an address the server would accept rather than assert it.
+const ACCOUNT_EMAIL_FORMAT = /^[^\s@]+@[^\s@]+$/;
+// 160 − 1 ("@") − 1 (the shortest domain `@email_format` admits) = 158.
+const AM_NAME_MAX = ACCOUNT_EMAIL_MAX - 2;
+// A single-character domain is not decoration: it is what MAXIMISES the local
+// part under the 160-character cap, and the local part is the whole of what
+// `.am-name` renders — the domain never reaches this element. `dnsLabel` (above)
+// is reused for the padding because its output is exactly what is wanted here
+// too: one unbroken alphanumeric run, no hyphen, no dot, no separator a line
+// breaker can use.
+const cruelAccountLocal = dnsLabel("kristineandreassenbakkevoldhaugen", AM_NAME_MAX);
+const cruelAccountEmail = `${cruelAccountLocal}@x`;
+
+if (cruelAccountLocal.length !== AM_NAME_MAX) {
+  throw new Error(`cruel identity: the local part is ${cruelAccountLocal.length} chars, the derived cap is ${AM_NAME_MAX} (email max ${ACCOUNT_EMAIL_MAX} at user.ex:165, minus "@" and one domain char) — GONE KIND, fix the stem`);
+}
+if (cruelAccountEmail.length !== ACCOUNT_EMAIL_MAX || !ACCOUNT_EMAIL_FORMAT.test(cruelAccountEmail)) {
+  throw new Error(`cruel identity: ${cruelAccountEmail.length} chars against a ${ACCOUNT_EMAIL_MAX} cap, or not admissible by user.ex:31's @email_format — an address the server would REJECT proves nothing`);
+}
+// BREAKABLE (the refusal wave 22 added because wave 21's own builder shipped a
+// maximal-but-self-wrapping string): a run at the cap that a text renderer can
+// break by itself is not cruel — it wraps, nothing overflows, and the leg goes
+// green against a defect that is still shipped. Any of `-`, `.`, `_`, `+`,
+// whitespace is a break opportunity, so the local part must carry none.
+if (/[^a-z0-9]/.test(cruelAccountLocal)) {
+  throw new Error("cruel identity: the local part carries a character a line breaker can use (- . _ + or whitespace) — BREAKABLE, so it would wrap on its own and certify a rule that never bounded it");
+}
+
+// The cruel identity rides an EXISTING account scenario rather than a new key,
+// and this is a fence, not a preference: a new SCENARIOS key is refused by three
+// instruments this slice is fenced out of — smoke.mjs's census guard (every
+// scenario needs an expectation, exit 1), breakpoint-sweep.mjs's committed
+// residue literal (exit 2, "UNLISTED scenario") and its test's census numbers.
+// `account-modal-revoke` is the account scenario with the smallest blast radius:
+// it is the only one of the five that modal-oracle.mjs does NOT drive, and
+// smoke's click oracle asserts sessions and ids, never the identity text.
+// FILED, not implied: cch-w23-bl-cruel-identity-own-scenario.
+const cruelAccountMe = (function () {
+  const m = me("Guerrilla");
+  return Object.assign({}, m, { user: Object.assign({}, m.user, { email: cruelAccountEmail }) });
+})();
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -1244,6 +2249,18 @@ export const SCENARIOS = {
     authed: true,
     deepLink: "#overview",
     data: { me: me("Ada's Lab"), barkparks: [], subscription: trialSub, sites: [], audit: [] },
+  },
+  "overview-member-empty-fleet": {
+    label: "A plain member on a ZERO-instance team — the welcome runway refuses UP-FRONT instead of selling a launch the server 403s",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Ada's Lab", {}, "member", "usr_rex"),
+      barkparks: [],
+      subscription: trialSub,
+      sites: [],
+      audit: [],
+    },
   },
   "mixed-fleet": {
     label: "A real estate — live, provisioning, failed, suspended + sites & activity",
@@ -1306,6 +2323,28 @@ export const SCENARIOS = {
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      capabilities: lifecycleCapabilities,
+      domainStatus: dnsPendingDomain,
+    },
+  },
+  // ── Instance Overview as a plain MEMBER (cch-w38-s1) ──────────────────────
+  // Byte-identical to `panel-overview` except the /v1/me envelope carries
+  // role:"member" — the first plain-member scenario OUTSIDE GR33's settings
+  // scope, and the fixture that makes the instance band's authority answer
+  // observable at all. On origin/main this screen offered a member a live
+  // Decommission (browser-measured: {"port":"4187","meRole":"member",
+  // "decommission":{"disabled":false,"visible":true},"totalDisabled":0}); the
+  // expectation in smoke.mjs pins the disable-and-explain remedy (D428).
+  "panel-overview-member": {
+    label: "Instance Overview as a plain member — the lifecycle rail refuses up-front, with the server's own sentence",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [],
@@ -1393,6 +2432,25 @@ export const SCENARIOS = {
       deployments: rollbackDeployments,
     },
   },
+  // cch-w48-s6: THE SAME SITE SCREEN, entered by a plain MEMBER. Measured before
+  // this key existed: all twelve `#site/` scenarios carried the default owner
+  // actor, so no instrument had ever rendered the site layer for a member —
+  // every member-fence claim about this screen was a claim about a screen the
+  // corpus could not paint. Same fixtures as `rollback` (no new data), one
+  // moved axis: role.
+  "site-member": {
+    label: "Site detail as a plain member — the deploy history and its member-legal controls, on the one screen no member fixture had ever entered",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member", "usr_rex"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteDeploys, blogSite],
+      audit: [],
+      deployments: rollbackDeployments,
+    },
+  },
   // Same screen, but the promote POST answers 409 build_in_progress — the
   // confirm renders the human sentence inline + ONE recovery action (never a
   // dead toast). Click an action, then Confirm, to see the failure state.
@@ -1420,6 +2478,26 @@ export const SCENARIOS = {
     label: "Sites list (v4) — deploy-status pills, host, framework, on <instance>, recency",
     authed: true,
     deepLink: "#sites",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: sitesListRows,
+      audit: [],
+    },
+  },
+
+  // cch-w16-s4: THE SAME six rows, rendered through the OTHER row builder.
+  // `siteRow` (the instance-workspace Sites card) had NO scenario at all, and
+  // every other instance fixture ships `sites: []` or a 100% never-deployed
+  // set — so a guard asserting "no Visit anchor here" would have passed for the
+  // wrong reason, on an empty list. This drives the SAME sitesListRows (no new
+  // fixture data) at the instance route, where the FOUR rows that have served a
+  // build must KEEP their door and the two that never have must not have one.
+  "sites-on-instance": {
+    label: "Instance workspace Sites card — the same six rows through siteRow, doors gated on deployment",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],
@@ -1460,6 +2538,14 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: [],
       audit: activityFeed,
+      // cch-w12-s1: the Who axis is the TEAM ROSTER, read from
+      // GET /v1/teams/:id/members. Without a roster here this scenario answered
+      // `{members: []}` and the axis degraded to "Everyone / Just me" no matter
+      // what the code did — cold boot and warm navigation alike — so the epic's
+      // own default Activity fixture was structurally blind to its own Who axis
+      // (the cold-boot latch bug lived here undetected for eleven waves).
+      // ada is the me() user, so the axis reads Everyone / Just me / lin / rex.
+      members: teamMembers,
     },
   },
 
@@ -1497,6 +2583,52 @@ export const SCENARIOS = {
       members: teamMembers,
       // A member never fetches invitations (the client skips the admin-gated
       // call), so no fixture — the panel renders the roster alone.
+    },
+  },
+  // cch-w45-s1: THE FRAME NO EXISTING CELL PRODUCED — an actor who is not row 0.
+  // lin is the acting ADMIN, by IDENTITY (usr_lin) and not merely by rank, over
+  // the SAME 3-row roster the owner scenario uses. Three different answers in
+  // one panel, each a different arm of the two server predicates:
+  //   ada  (owner, outranks the actor) → NEITHER Change role NOR Remove,
+  //   lin  (SELF)                      → Change role (the rank arm is bypassed
+  //                                      on your own row — self-demotion is a
+  //                                      409 STATE refusal the server owns, not
+  //                                      an authority one) and NOT Remove,
+  //   rex  (member, outranked)         → BOTH.
+  // Before this scenario, every rank-relative predicate was only ever asked
+  // about rows the actor outranked, so an over-offer on a superior's row could
+  // not be seen by any instrument.
+  "members-admin-actor": {
+    label: "Members (admin actor, not the owner) — the owner's row offers NOTHING, the self row only Change role",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "admin", "usr_lin"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembers,
+      invitations: teamInvites,
+    },
+  },
+  // cch-w45-s1: the acting OWNER against a roster that holds a SECOND owner —
+  // the one cell where the server's two member verbs disagree. Remove is
+  // offered on ozz's row (remove_member_as/3's owner escape hatch) and Change
+  // role is NOT (update_member_role_as/4 has no such hatch), so a panel that
+  // paints both is over-offering a control the server 403s `outranked`.
+  "members-peer-owner": {
+    label: "Members (owner) — a PEER OWNER row: Remove is offered, Change role is not (the two verbs disagree)",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembersPeerOwner,
+      invitations: teamInvites,
     },
   },
   // Env-vars (admin): the row grammar end-to-end — team + instance scopes, a
@@ -1655,7 +2787,11 @@ export const SCENARIOS = {
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance + "/timeline",
     data: {
-      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      // cch-w35-s4: the label said "as a non-admin" while me() omitted the role
+      // argument and me() DEFAULTS to "owner" — so this fixture was an owner
+      // being answered 403 by an admin gate, a state the server cannot produce.
+      // The role is now the one the scenario claims.
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [webSite, blogSite],
@@ -1751,6 +2887,35 @@ export const SCENARIOS = {
       sites: [webSiteMigrated, blogSite],
       audit: [],
       deployments: migratedDeployments,
+    },
+  },
+  // cch-w25-s3: THE DEPLOY RAIL, FAILED — the first scenario in this harness to
+  // carry a rail STAGE entry at all. Two sites, two rails, one fixture:
+  //   #site/<acme-web>  BUILD failed with the CRUEL string — a real
+  //                     module-resolution path off `build_failure_reason`, cut
+  //                     by emit(). This is what `.deploy-rail-fail` holds when
+  //                     a Node build dies, and nothing between the worker and
+  //                     the box breaks it.
+  //   #site/<acme-blog> HEALTH failed with the ORDINARY string — the control.
+  // Both deployments are still `building`, which is the honest transient window
+  // this footer lives in (deployIsActive gates the rail to queued/building/
+  // pushing). Driven by overflow-guard's W25-deploy-rail-fail-wrap leg at
+  // 320/390/900 in both themes, page AND box.
+  "site-deploy-rail-failed": {
+    label: "Deploy rail — a stage FAILED mid-flight; the footer carries the builder's raw error",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteInFlight, blogSite],
+      audit: [],
+      deployments: [depRailFailedCruel, depCurrent, depPrior],
+      deploymentsBySite: {
+        [IDS.siteWeb]: [depRailFailedCruel, depCurrent, depPrior],
+        [IDS.siteBlog]: [depRailFailedKind],
+      },
     },
   },
   // ── bp-login-ux W3 (decision 40): the /activate device-login approve page ──
@@ -1993,6 +3158,33 @@ export const SCENARIOS = {
       ],
     },
   },
+  // cch-w11-s3-token-revoke-shrink-oracle. THE LAST LYING DESTROY VERB, given
+  // its own scenario rather than bolted onto `tokens-populated` — that one
+  // asserts `countMatches(html, 'class="token-row') === 4`, so a destroy driven
+  // inside it consumes a row BEFORE the assertion and reds it as a probe
+  // artifact rather than a defect. Modelled on `account-modal-revoke`: real
+  // clicks, a stateful route, and a list that must actually SHRINK.
+  // Deliberately NOT named `account-modal*` (shoot.sh's `?modal=account` case),
+  // and deliberately carrying its OWN token array — a shared fixture that a
+  // destroy mutates would make scenario ORDER decide truth for the readers.
+  "tokens-revoke": {
+    label: "API tokens — the revoke path, driven by real clicks: confirm sheet, one DELETE on the wire, and the list actually shrinks 4 → 3",
+    authed: true,
+    deepLink: "#settings/tokens",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      tokens: [
+        { id: "tok_rv_ci", name: "CI deploy key", abilities: ["deploy"], last_used_at: tMinus(3 * 3600), expires_at: tPlus(60 * 86400), revoked_at: null, inserted_at: tMinus(40 * 86400) },
+        { id: "tok_rv_read", name: "Read-only dashboard", abilities: ["read"], last_used_at: null, expires_at: null, revoked_at: null, inserted_at: tMinus(10 * 86400) },
+        { id: "tok_rv_root", name: "Break-glass root", abilities: ["root"], last_used_at: tMinus(2 * 86400), expires_at: tPlus(365 * 86400), revoked_at: null, inserted_at: tMinus(90 * 86400) },
+        // Already revoked ⇒ renders a row but NO Revoke button, so the row
+        // count (4) and the revokable count (3) differ and a check that
+        // confuses them cannot pass.
+        { id: "tok_rv_old", name: "Legacy writer", abilities: ["read", "write"], last_used_at: tMinus(50 * 86400), expires_at: tPlus(20 * 86400), revoked_at: tMinus(6 * 86400), inserted_at: tMinus(120 * 86400) },
+      ],
+    },
+  },
   "tokens-reveal": {
     label: "API tokens — the plaintext-once reveal: amber only-time banner + mono input-affix + copy",
     authed: true,
@@ -2003,10 +3195,16 @@ export const SCENARIOS = {
       tokens: [],
       // The mint POST answers the plaintext ONCE + pat_json (no plaintext/hash on
       // the row); smoke drives revealToken() directly with this shape.
+      // THE LENGTH IS THE SERVER'S, NOT A ROUND NUMBER (cch-w21-s4): the real
+      // PAT is 51 characters — accounts.ex:857 `plaintext = "bpc_pat_" <>
+      // generate_token()` over `defp generate_token, do:
+      // :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)`
+      // = 8 + 43. This fixture shipped 50 and so understated the reveal's
+      // narrow-viewport clip by one character on every driven cell.
       tokenMint: {
         status: 201,
         body: {
-          token: "bpc_pat_3xampLEon1yShoWnoNCEabcdef0123456789ABCDEF",
+          token: "bpc_pat_3xampLEon1yShoWnoNCEabcdef0123456789ABCDEFg",
           pat: { id: "tok_new", name: "CI deploy key", abilities: ["deploy"], last_used_at: null, expires_at: tPlus(30 * 86400), revoked_at: null, inserted_at: T },
         },
       },
@@ -2084,7 +3282,8 @@ export const SCENARIOS = {
         id: THEATER_IDS.ready,
         name: "Hugin",
         slug: "hugin",
-        url: "hugin-5b2c1e.barkpark.cloud",
+        // W18 REVIEW: schemed with liveInstance — the last bare `url:` fixture.
+        url: "https://hugin-5b2c1e.barkpark.cloud",
         host: "hugin-5b2c1e.barkpark.cloud",
         health_status: "up",
         agent_status: "online",
@@ -2134,12 +3333,64 @@ export const SCENARIOS = {
           id: "bp-ov-degraded",
           name: "Reporting",
           slug: "reporting",
-          url: "reporting-5b2c1e.barkpark.cloud",
+          // W18 REVIEW: schemed with liveInstance. This box sits BESIDE
+          // `liveInstance` on the front screen (`?scen=overview-attention`),
+          // and `.instance-card-url` renders `publicUrl(bp)` — i.e. `bp.url` —
+          // as TEXT. Leaving this one bare printed two adjacent cards in two
+          // different address formats on the most-seen screen in the product.
+          url: "https://reporting-5b2c1e.barkpark.cloud",
           host: "reporting-5b2c1e.barkpark.cloud",
           health_status: "down",
           agent_status: "offline",
           version: "0.9.2",
           last_seen_at: tMinus(1200),
+          provision_status: "succeeded",
+        }),
+        liveInstance,
+      ],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  // ── cch-w34-s6 (REVIEW ADDITION): the NEVER-REPORTED box, on screen ────────
+  // The slice made `unreported` reachable and proved it through the pure hooks
+  // and 26 harness assertions — but shipped no fixture, so the one state a
+  // person most wants to LOOK at was the only console state with no fixture at
+  // all. It is also the state that first reaches the `neutral` role, whose
+  // `.instance-card--neutral` rule did not exist until this review — a gap no
+  // amount of hook-level assertion could have surfaced, and that this fixture
+  // surfaced immediately. HONEST SCOPE: it is registered as breakpoint-sweep
+  // RESIDUE, not as a cell — exactly where its sibling `overview-attention`
+  // sits — so it is RENDERED and asserted by smoke.mjs but not width-walked.
+  //
+  // The row is production's own 3-of-8 shape, not an invented one: host set and
+  // provisioning SUCCEEDED, `health_status: "up"` and `agent_status: "offline"`
+  // still carrying the values written at adoption time (cch-w34-s2 fixed the
+  // WRITERS and shipped no backfill, so legacy rows look exactly like this),
+  // `last_seen_at: null`, `unreachable_count: 3`, created 38 days ago. The
+  // point of the fixture is that the cached green "up" is on the row and the
+  // console must NOT print it. `liveInstance` is the kind control beside it.
+  "overview-never-reported": {
+    label: "Overview never-reported — a box the control plane has never heard from names the absence, not a cached health",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [
+        bpBase({
+          id: "bp-ov-unreported",
+          name: "Archive",
+          slug: "archive",
+          url: "https://archive-5b2c1e.barkpark.cloud",
+          host: "archive-5b2c1e.barkpark.cloud",
+          // The stale cached columns — deliberately the OPTIMISTIC pair.
+          health_status: "up",
+          agent_status: "offline",
+          version: null,
+          last_seen_at: null,
+          unreachable_count: 3,
+          inserted_at: tMinus(38 * 86400),
           provision_status: "succeeded",
         }),
         liveInstance,
@@ -2186,7 +3437,12 @@ export const SCENARIOS = {
       barkparks: [
         bpBase({
           id: "5b2c1e00-0000-4000-8000-0000000000f1", name: "Gyldendal", slug: "gyldendal",
-          url: "gyldendal-506f0.barkpark.cloud", host: "gyldendal-506f0.barkpark.cloud",
+          // W18 REVIEW: the three fleet-v4 rows are schemed for the same reason
+          // as liveInstance — `.fleet-url` renders `publicUrl(bp)` as text, so a
+          // half-schemed fleet list is a formatting inconsistency a person sees.
+          // Driven: overflow-guard's W15 leg stays 90/90 with the 8 extra
+          // characters at every width from 320 up.
+          url: "https://gyldendal-506f0.barkpark.cloud", host: "gyldendal-506f0.barkpark.cloud",
           health_status: "down", agent_status: "online", version: "0.2.25",
           update_state: "current", update_latest_release: "0.2.25",
           region: "fsn1", server_type: "cx22", channel: "prod", autoupdate_enabled: true,
@@ -2194,7 +3450,7 @@ export const SCENARIOS = {
         }),
         bpBase({
           id: "5b2c1e00-0000-4000-8000-0000000000f2", name: "Guerrilla", slug: "guerrilla",
-          url: "guerrilla-77a1c.barkpark.cloud", host: "guerrilla-77a1c.barkpark.cloud",
+          url: "https://guerrilla-77a1c.barkpark.cloud", host: "guerrilla-77a1c.barkpark.cloud",
           health_status: "up", agent_status: "online", version: "0.1.0",
           update_state: "behind", update_running_release: "0.1.0", update_latest_release: "0.2.25",
           region: "fsn1", server_type: "cx32", channel: "prod", autoupdate_enabled: true,
@@ -2202,10 +3458,11 @@ export const SCENARIOS = {
         }),
         bpBase({
           id: "5b2c1e00-0000-4000-8000-0000000000f3", name: "Marketing", slug: "marketing",
-          url: "marketing-2b9c4.barkpark.cloud", host: "marketing-2b9c4.barkpark.cloud",
+          url: "https://marketing-2b9c4.barkpark.cloud", host: "marketing-2b9c4.barkpark.cloud",
           health_status: "up", agent_status: "online", version: "0.2.25",
           region: "hel1", server_type: "cx22", channel: "prod", autoupdate_enabled: false,
-          provider: "azure", suspended: true, suspended_reason: "Payment failed — subscription past due",
+          // cch-w55-s3 — plane-legal slug (see the `suspended_reason` note above).
+          provider: "azure", suspended: true, suspended_reason: "billing_past_due",
           provision_status: "succeeded",
         }),
         bpBase({
@@ -2218,6 +3475,33 @@ export const SCENARIOS = {
       sites: [],
       audit: [],
       archives: { status: 502, body: { ok: false, error: "Archive storage isn't configured for this deployment." } },
+    },
+  },
+  // ── cch-w21-s3: THE CRUEL CONTENT TWIN of the fleet list ──────────────────
+  // Same route, same components, same lifecycle states as `fleet-v4` above —
+  // the ONLY variable is the LENGTH of two strings the server already accepts
+  // (see the cruelCustomHost / cruelName note above the table). It carries a
+  // KIND neighbour (`liveInstance`, 32-char host / 10-char name) in the same
+  // DOM on purpose: a bound that fixes the cruel row by shredding the kind one
+  // has to be visible in the SAME cell, not in a different fixture's run.
+  // Reached on BOTH `#fleet` (the table) and `#overview` (the instance cards),
+  // because the two unbounded hosts live one on each screen.
+  //
+  // cch-w23-s1 adds a THIRD row on the SHAPE axis: `cruelProvisionErrorInstance`
+  // carries a 512-character single-token provision error (see its derivation
+  // above) into `.status-pill-detail`, a host the two typed strings above never
+  // reach. Its name and slug are deliberately KIND so the error is the only
+  // variable, and `liveInstance` stays the kind control for both axes.
+  "fleet-cruel-content": {
+    label: "Cruel content — a 253-char custom domain, a 255-char name and a 512-char single-token provision error, all server-legal",
+    authed: true,
+    deepLink: "#fleet",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
     },
   },
   "fleet-archives-stored": {
@@ -2270,7 +3554,6 @@ export const SCENARIOS = {
           ...Array.from({ length: 10 }, (_, i) =>
             ev(40 - i, "health", { health: "down", disk_used_pct: 91, pg_size_mb: 212 }, tMinus(60 + i * 60))),
           ev(20, "status", { transition: "offline", reason: "agent_silent" }, tMinus(700)),
-          ev(19, "tls", { domain: "production-5b2c1e.barkpark.cloud", status: "issued" }, tMinus(86000)),
         ],
       },
     },
@@ -2352,7 +3635,8 @@ export const SCENARIOS = {
   // ── gr-p3-site-detail (E-02): the v4 site detail, states-complete ─────────
   // The whole ladder in one shot: live current (Redeploy + Now live), a crash
   // failure (red panel + console), a born-failed github push (blocked amber),
-  // a cancelled row (neutral pill), a prior live row (Roll back to this) —
+  // a cancelled row (hollow dashed pill — a terminal, deliberate stop, visibly
+  // NOT the filled grey a queued row wears), a prior live row (Roll back to this) —
   // plus branch previews (live + failed) and the domains rungs (proxied apex,
   // www waiting on TLS with the server's remediation verbatim).
   "site-states": {
@@ -2368,6 +3652,51 @@ export const SCENARIOS = {
       deployments: siteStatesDeployments,
       previews: siteStatesPreviews,
       siteDomainStatus: siteStatesDomains,
+    },
+  },
+
+  // ── ssw8 (charter D82): the content binding on the site surfaces ────────────
+  // One fixture list, three deep links — the same three rows render as siteRow
+  // chips on the instance workspace while each scenario opens ONE of them on the
+  // detail rail. Nothing here is invented: every value is a field site_json/2
+  // serializes, and the UNKNOWN row's honesty comes from a field being ABSENT.
+  "site-binding-bound": {
+    label: "Site binding — bound: the triple agrees with itself and a read token exists",
+    authed: true,
+    deepLink: "#site/" + boundSite.id,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: bindingSites,
+      audit: [],
+      deployments: [],
+    },
+  },
+  "site-binding-unknown": {
+    label: "Site binding — unknown: an older control plane sends no triple and no content_bound; the rail says so",
+    authed: true,
+    deepLink: "#site/" + unknownBindingSite.id,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: bindingSites,
+      audit: [],
+      deployments: [],
+    },
+  },
+  "site-binding-mismatch": {
+    label: "Site binding — mismatch: the payload's two spellings of the dataset disagree; both are shown, neither resolved",
+    authed: true,
+    deepLink: "#site/" + mismatchedBindingSite.id,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: bindingSites,
+      audit: [],
+      deployments: [],
     },
   },
 
@@ -2400,6 +3729,37 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // cch-w39-s1 — THE HEADLINE DEFECT, DRIVEN. A genuine OWNER of a paid team
+  // whose /v1/me 500s: on origin/main billingIsOwner() answered false (a
+  // two-valued read of a three-valued fact) and #billing-manage told the OWNER
+  // "Only the team owner can manage billing." with nothing on the page to
+  // press. It consumes the meFault override cch-w37-s6 already merged (route()
+  // in this file) rather than minting a second one, and deep-links to #billing
+  // — a residue family that already exists, so no 14th family is created.
+  "billing-me-unreadable": {
+    label: "Billing — an OWNER whose /v1/me 500s: the page reports the failed check with a retry instead of accusing them of not being the owner",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 18 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(40 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
+
   // The owner AFTER an in-app cancel: the subscription is now cancel_at_period_end
   // (grace) — the plan card reads "Access until {date}" + the Ending badge, the
   // Cancel section is GONE (a second cancel is a no-op), but Manage billing stays
@@ -2449,7 +3809,7 @@ export const SCENARIOS = {
     },
   },
   "providers-empty": {
-    label: "Providers — nothing connected yet: the empty roster + the connect card armed on the first provider",
+    label: "Providers — nothing connected yet: the empty roster, the connect card armed on the first provider, and the server's REAL 275-character Azure remediation when verify-before-save fails",
     authed: true,
     deepLink: "#settings/providers",
     data: {
@@ -2457,6 +3817,37 @@ export const SCENARIOS = {
       barkparks: [], subscription: activeSub, sites: [], audit: [],
       providers: [],
       capabilities: settingsProviderCapabilities,
+      // ── W23-S6: THE REMEDIATION COPY THE SERVER ACTUALLY SENDS ────────────
+      // `providers-unverified` below carries a 168-character PARAPHRASE, and
+      // that string measures CLEAN at every phone geometry: on it the defect
+      // this fixture exists to expose cannot be produced, so a guard driving
+      // only it is green by construction (wave-23 clause 4). This is
+      // `connect_remediation("azure")` VERBATIM — the LONGEST clause the
+      // server can send — living on the scenario the defect was reproduced on
+      // (`providers-empty#settings/providers`, 390x390).
+      //
+      // The four clauses in cloud/lib/barkpark_cloud/failure_copy.ex:361-375
+      // measure 169 (hetzner) / 275 (azure) / 206 (cloudflare) / 88 (generic).
+      // Re-derive, do not quote:
+      //   node -e 'const s=require("fs").readFileSync("cloud/lib/barkpark_cloud/failure_copy.ex","utf8").split("\n");
+      //            const i=s.findIndex(l=>l.includes(`def connect_remediation("hetzner")`));
+      //            for(let k=i;k<i+16;k++){const m=s[k].match(/^\s*"(.*)"\s*$/); if(m) console.log(m[1].length)}'
+      // (The filed row cch-w21-bl-... cites `registry/failure_copy.ex`, which
+      // does not exist, and 89 for the generic clause, which is 88.)
+      //
+      // IT RIDES AN EXISTING KEY ON PURPOSE. A NEW `SCENARIOS` key is refused
+      // by breakpoint-sweep.mjs's census — "UNLISTED scenario … no cell renders
+      // it and SCENARIO_RESIDUE does not carry it", exit 2 — and that file is
+      // outside this slice's fence. Filed as
+      // cch-w23-bl-real-hetzner-remediation-scenario.
+      providerConnect: {
+        status: 422,
+        body: {
+          error: "provider_unverified",
+          // connect_remediation("azure") — 275 chars, VERBATIM.
+          remediation: "We couldn't authenticate to Azure with those details. In the Azure Portal → App registrations → your app, re-check the Directory (tenant) ID, Application (client) ID and Subscription ID, and that the client secret under Certificates & secrets hasn't expired — then reconnect.",
+        },
+      },
     },
   },
   "providers-unverified": {
@@ -2489,6 +3880,22 @@ export const SCENARIOS = {
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
       providers: connectedProviders,
       capabilities: settingsProviderCapabilities,
+      // cch-w48-s6 — A CONSOLE-SIDE FIXTURE, and it is NOT "the state the
+      // server sends". This is the knowing EXCEPTION to cch-w43-s1's rule that
+      // the corpus mints the envelope the server mints, and it is cited here
+      // rather than left implicit: the live control plane CANNOT mint
+      // connected:true. `record_installation/2` has one caller and that caller
+      // 503s without GitHub App credentials, and the running control plane
+      // carries ZERO ^GITHUB env — so on the deployed system this endpoint
+      // answers the not-configured arm, always. The shape below is read off
+      // app.js's own reader (`renderGithub`: connected / account_login /
+      // configured / install_url — no secret), which is the contract this
+      // fixture is FOR: arm 1 of renderGithub had never been painted by ANY
+      // instrument, so every claim about what a member sees on the GitHub card
+      // was a claim about markup nothing rendered. It rides the EXISTING
+      // providers-member scenario, not a new key, so it moves zero typed
+      // integers — nothing in the census counts fixture keys.
+      github: { connected: true, account_login: "acme-engineering", configured: true },
     },
   },
   // ── G-04 notifications: the crown, states-complete ─────────────────────────
@@ -2674,6 +4081,27 @@ export const SCENARIOS = {
       operatorDenied: true,
     },
   },
+  // cch-w37-s6 — the OTHER unreadable: not the operator routes 403ing, but
+  // /v1/me itself failing. `me` is PRESENT (this really is an operator) and only
+  // the WIRE fails, so meState() lands on "failed" rather than the cold
+  // "loading" the console used to be indistinguishable from. Before the fix the
+  // page sat on "Checking operator access…" for the whole session, because
+  // loadMe's failure arm deliberately does not re-enter loadOperator. This is a
+  // WAIT, not a false grant: the sidebar entry stays hidden and zero
+  // /v1/operator/* routes are read.
+  "operator-me-unreadable": {
+    label: "Operator console — /v1/me itself 500s: the page says it couldn't check, and offers a retry instead of a forever spinner",
+    authed: true,
+    deepLink: "#operator",
+    data: {
+      me: operatorMe("Acme Inc"),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
 
   // ── gr-p5-account-2fa: the account modal (GR54/GR58) ──────────────────────
   // The modal is opened by a CLICK, so it is unreachable by deepLink — smoke
@@ -2715,12 +4143,21 @@ export const SCENARIOS = {
   // Revoke, then Sign-out-everywhere, and reads what the REAL code path paints.
   // Named with the `account-modal` prefix, which (as GR76 notes) auto-enrols it
   // in shoot.sh's screenshot set — intended, so the revoke state gets an eye too.
+  // cch-w23-s2: this scenario is ALSO the CRUEL IDENTITY twin. Its `me` carries
+  // an email whose local part sits at the derived 158-character cap (see the
+  // cruelAccountEmail ledger above `SCENARIOS`), so `.am-name` renders the
+  // longest name a person can actually own. Nothing this scenario already
+  // asserted reads the identity text — smoke's click oracle counts session rows
+  // and ids — and the KIND control is `account-modal` next door, still
+  // `ada@acme.com` (three glyphs), which is what makes a remedy that shreds an
+  // ordinary name red. Driven by overflow-guard's W23-account-modal-identity
+  // -bounded leg.
   "account-modal-revoke": {
-    label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count",
+    label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count; ALSO the cruel-identity twin (a 158-char email local part, the derived cap)",
     authed: true,
     deepLink: "",
     data: {
-      me: me("Guerrilla"),
+      me: cruelAccountMe,
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [],
@@ -2760,7 +4197,7 @@ export const SCENARIOS = {
   },
   // ── MVP-0 Personal Dev Fleet (PDF-D84/D88/D92): the fleet card states ──────
   "fleet-support-provisioning": {
-    label: "Fleet card — a support mid-provision: the SUPPORT theater (5 rungs, no secure) under the main",
+    label: "Fleet card — a support mid-provision: the SUPPORT theater (6 rungs, secure included) under the main",
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -2860,6 +4297,24 @@ export const SCENARIOS = {
       orderTask: offloadOrderTask("blocked", { worker: "muscle-2", epoch: 1, ts_iso: "2026-07-24T12:00:00Z" }),
     },
   },
+  // ── cch-w61-s2: the credential-refused box, and a rollback that CAN refuse ──
+  "instance-update-credential-refused": {
+    label: "Updates panel — a box that answered our stored credential with a 401 (Unknown, 45m), and a Roll back that refuses terminally",
+    authed: true,
+    deepLink: "#instance/" + IDS.refusedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [credentialRefusedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      // The 409 the control plane emits for a box it will not relay to. Before
+      // this route existed the POST fell through to a blanket 200 and the modal
+      // reported success — the fixture could not refuse, so the split could not
+      // be exercised at all.
+      instanceRollback: { status: 409, body: { ok: false, error: { code: "identity_refused" } } },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -2875,13 +4330,48 @@ function sessionsOf(d, state) {
   return state.sessions;
 }
 
+// cch-w10-destroy-shrink-oracle-merged — sessionsOf's SHAPE, generalised to the
+// other lists a destroy verb shrinks (providers, members, invitations, env-vars,
+// barkparks). The three properties that make a shrink OBSERVABLE, all inherited
+// verbatim from sessionsOf and all load-bearing:
+//   1. OPT-IN. No `state` → the old read-only `.slice()`, byte-for-byte. mock.js
+//      is the 3-arg caller and must stay stateless and unchanged.
+//   2. PER-BOOT COPY. Rows are copied, so a destroy can never leak across boots
+//      by mutating the module-level fixture (scenario order would decide truth).
+//   3. THE GET READS THROUGH THE SAME FUNCTION. This is the whole point: a
+//      DELETE that splices a list nobody re-reads proves nothing, because the
+//      refetch would answer the pristine fixture either way.
+// `key` is the SCENARIO field name and doubles as the state-bag slot, so the two
+// can never drift apart.
+function listOf(d, state, key) {
+  if (!state) return (d[key] || []).slice();
+  if (!state[key]) state[key] = (d[key] || []).map((x) => Object.assign({}, x));
+  return state[key];
+}
+
+// The destroy half: 404 on a miss (never a silent success — a wrong id must be
+// distinguishable from a right one), 200 {ok} on a hit, and the splice ONLY when
+// a state bag was supplied, so the stateless caller keeps its old 200.
+function destroyFrom(list, state, pred) {
+  const i = list.findIndex(pred);
+  if (i < 0) return { status: 404, body: { error: "not_found" } };
+  if (state) list.splice(i, 1);
+  return { status: 200, body: { ok: true } };
+}
+
 // route(name, method, path, state) → { status, body } | null.
 //   Returns null for a path this harness does not model, so a caller can decide
 //   whether to 404 or pass through. Query strings are ignored (the SPA never
 //   depends on server-side filtering for these fixtures).
 //   `state` is an OPTIONAL per-boot mutable bag for routes that must actually
-//   change something (see sessionsOf). Omitting it keeps every route stateless,
-//   which is what the browser harness (mock.js) does.
+//   change something (see sessionsOf). Omitting it keeps every route stateless.
+//   CORRECTED (wave 11 review): this used to say stateless "is what the browser
+//   harness (mock.js) does". It has not been true since
+//   cch-bl-mockjs-revoke-stateless — mock.js:124 passes a `fixtureState` on
+//   every call, exactly as smoke.mjs does. NO CALLER OMITS IT TODAY, so the
+//   stateless arm of every `if (state)` is dead code that only a new caller can
+//   revive, and a route added on the assumption that the browser is stateless
+//   will be wrong in the browser first.
 export function route(name, method, path, state) {
   const scen = SCENARIOS[name] || SCENARIOS[DEFAULT_SCENARIO];
   const d = scen.data;
@@ -2997,6 +4487,13 @@ export function route(name, method, path, state) {
       : { status: 404, body: { ok: false, error: "task not found" } };
   }
 
+  // cch-w37-s6 — THE WIRE FAILURE, which no committed fixture could express.
+  // Below, /v1/me answers 200-or-401 only, and a 401 SIGNS THE PERSON OUT
+  // (app.js clearSession + render), so meState()=="failed" — the state
+  // absorbMe writes on a 500/502/offline — was unreachable from every scenario
+  // in this file. `meFault` is a per-scenario override that fails the READ while
+  // leaving `me` present: the account exists, the wire did not answer.
+  if (p === "/v1/me" && d.meFault) return d.meFault;
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
   // gr-p5-account-2fa: the account modal's session list. Defaults to [] rather
   // than 404 so every scenario answers HONESTLY ("No active sessions") instead
@@ -3006,8 +4503,10 @@ export function route(name, method, path, state) {
   // when the caller supplies one, so the two DELETEs below actually change it.
   // With a stateless fixture the list is byte-identical before and after a
   // revoke, so a per-row revoke that never fired is indistinguishable from one
-  // that did: the check passes either way (D39). smoke.mjs passes a store;
-  // mock.js (3 args) does not, and keeps the old read-only behaviour.
+  // that did: the check passes either way (D39). smoke.mjs passes a store, and
+  // since cch-bl-mockjs-revoke-stateless so does mock.js (a per-boot bag), so
+  // both harnesses now answer the destructive routes the same way. A caller
+  // that omits the 4th arg still gets the old read-only behaviour.
   if (p === "/v1/account/sessions" && method === "GET") {
     return { status: 200, body: { sessions: sessionsOf(d, state) } };
   }
@@ -3093,7 +4592,33 @@ export function route(name, method, path, state) {
     if (method === "GET") return { status: 200, body: { onboarding: d.me ? d.me.onboarding : null } };
     return { status: 200, body: { onboarding: d.me ? d.me.onboarding : null } };
   }
-  if (p === "/v1/barkparks") return { status: 200, body: { barkparks: d.barkparks } };
+  if (p === "/v1/barkparks") return { status: 200, body: { barkparks: listOf(d, state, "barkparks") } };
+  // DELETE /v1/barkparks/:id → the teardown BOTH console destroy verbs issue
+  // (the CLI card's typed Decommission and the header's Retry removal). It was
+  // UNMODELLED: it fell through to the terminal `/v1/` 200 {} at the bottom of
+  // route(), so the fleet answered the same list before and after and no oracle
+  // could tell a teardown from a no-op.
+  // METHOD-GUARDED, deliberately: the exact-path arm above carries no method
+  // guard at all, and an unguarded two-segment matcher here would swallow the
+  // instance GET. There is no other two-segment /v1/barkparks matcher (the
+  // domain-status / metrics / app-token arms are all three-segment), so this is
+  // the whole of the surface.
+  const bpOne = p.match(/^\/v1\/barkparks\/([^/]+)$/);
+  if (bpOne && method === "DELETE") {
+    return destroyFrom(listOf(d, state, "barkparks"), state, (b) => b.id === bpOne[1]);
+  }
+  // cch-w61-s2: POST /v1/barkparks/:id/rollback — the instance slot flip. It was
+  // UNMODELLED: it fell through to the terminal `/v1/` 200 {} at the bottom of
+  // route(), so every preview click on "Roll back…" "succeeded" against a
+  // fixture that could never refuse, and the console's whole terminal-vs-retry
+  // split was unreachable from this harness. A scenario overrides via
+  // d.instanceRollback to drive one named refusal; the default stays the 202 the
+  // control plane answers on the happy path.
+  const bpRollback = p.match(/^\/v1\/barkparks\/([^/]+)\/rollback$/);
+  if (bpRollback && method === "POST") {
+    return d.instanceRollback ||
+      { status: 202, body: { status: "rolling_back", target_sha: "9f2c1a7", pinned_release: "v0.9.0" } };
+  }
   if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
   // gr-p4-billing (G-01): the owner-gated billing WRITES, unmodeled before this
   // slice. Default 200; a scenario overrides via d.billingPortal / d.billingCancel
@@ -3113,19 +4638,45 @@ export function route(name, method, path, state) {
   // POST → mint (201 {token: <plaintext ONCE>, pat: pat_json}, overridable via
   // d.tokenMint); DELETE /v1/tokens/:id → revoke (200 {ok}). A member never mints
   // beyond read (the UI offers only read-scope), so no 403 branch is reachable here.
+  // cch-w11-s3: BOTH LEGS GO THROUGH THE STATE BAG, and neither is optional.
+  // The GET was a DIRECT `d.tokens || []` fixture read — nobody had recorded
+  // that half, so even a spliced DELETE would have refetched the pristine list.
   if (p === "/v1/tokens") {
-    if (method === "GET") return { status: 200, body: { tokens: d.tokens || [] } };
+    if (method === "GET") return { status: 200, body: { tokens: listOf(d, state, "tokens") } };
     if (method === "POST") {
       return d.tokenMint || {
         status: 201,
         body: {
-          token: "bpc_pat_previewONLYshownONCEabcdef0123456789ABCDEF",
+          // 51 characters, the server's own length (accounts.ex:857 +
+          // `defp generate_token` = "bpc_pat_" + 43 base64url chars).
+          token: "bpc_pat_previewONLYshownONCEabcdef0123456789ABCDEFg",
           pat: { id: "tok_new", name: "New token", abilities: ["read"], last_used_at: null, expires_at: tPlus(30 * 86400), revoked_at: null, inserted_at: T },
         },
       };
     }
   }
-  if (/^\/v1\/tokens\/[^/]+$/.test(p) && method === "DELETE") return { status: 200, body: { ok: true } };
+  // DELETE /v1/tokens/:id — THE LAST LYING DESTROY VERB. It answered a flat
+  // {ok:true} while the list above answered the pristine fixture, so the console
+  // toasted "Token revoked" over a token list that never moved and no oracle
+  // could tell the revoke from a no-op. destroyFrom 404s on a miss (a wrong id
+  // must stay distinguishable from a right one) and splices only when a state
+  // bag was supplied.
+  //
+  // THIS DOES CHANGE THE BROWSER TWIN, and saying otherwise would be the same
+  // class of lie. mock.js:124 passes a per-boot `fixtureState` on EVERY call
+  // (cch-bl-mockjs-revoke-stateless), so the 4-arg stateful path is the only
+  // one either harness takes and the `if (state)` splice always fires. Two
+  // consequences, both in the honest direction: the browser preview's token
+  // list now SHRINKS on revoke instead of reporting success over a list that
+  // never moved, and a DELETE for an id absent from the bag now 404s where it
+  // used to 200 unconditionally. The only such id is the plaintext-once mint's
+  // `pat_…`, which the POST arm never appends to the bag and which therefore
+  // never reaches a rendered row (the list refetches), so no UI path can reach
+  // the new 404 — but it is a real behavioural change, not a no-op.
+  const tokOne = p.match(/^\/v1\/tokens\/([^/]+)$/);
+  if (tokOne && method === "DELETE") {
+    return destroyFrom(listOf(d, state, "tokens"), state, (t) => t.id === tokOne[1]);
+  }
 
   // /v1/audit is team-admin-only server-side; auditDenied models the member's
   // 403 (the Timeline must degrade to events-only, never error).
@@ -3140,7 +4691,17 @@ export function route(name, method, path, state) {
   // — the widened maybe_audit_target clause this review added, because that is
   // the exact request the Activity chip row has always sent.
   if (p === "/v1/audit") {
-    if (d.auditDenied) return { status: 403, body: { error: "forbidden" } };
+    // cch-w35-s4: the refusal carries the server's EVIDENCE, because the real one
+    // does. Auth.require_primary_team_admin answers this route with
+    // `forbidden(conn, required: "admin", scope: "team")` — "team", NOT
+    // "primary_team": cch-w37-s3 renamed the label because the gate reads
+    // conn.assigns[:current_team] (resolve_team/2 honours the x-barkpark-team
+    // header), so it never consulted the primary team. A fixture that modelled a
+    // refusal shape the server never sends would be its own kind of lie. The
+    // console renders the `required` label and deliberately ignores `scope`.
+    if (d.auditDenied) {
+      return { status: 403, body: { error: "forbidden", required: "admin", scope: "team" } };
+    }
     const q = new URLSearchParams(String(path || "").split("?")[1] || "");
     const ttype = q.get("target_type");
     const tid = q.get("target_id");
@@ -3244,7 +4805,19 @@ export function route(name, method, path, state) {
     const s = d.sites.filter((x) => String(x.id) === siteMatch[1])[0];
     return s ? { status: 200, body: { site: s } } : { status: 404, body: { error: "not_found" } };
   }
-  if (/^\/v1\/sites\/[^/]+\/deployments$/.test(p)) return { status: 200, body: { deployments: d.deployments || [] } };
+  // cch-w25-s3: PER-SITE deployment lists. The default stays the scenario-wide
+  // `d.deployments` (every scenario written before this line is byte-identical
+  // through it); a scenario that needs two DIFFERENT deploy stories on one
+  // fixture — a cruel rail on one site and its kind control on the other —
+  // keys them by site id under `deploymentsBySite`. Without this seam the
+  // cruel string and its control would have to be two scenarios, which pays
+  // the census/residue blast radius twice for one measurement.
+  const depMatch = p.match(/^\/v1\/sites\/([^/]+)\/deployments$/);
+  if (depMatch) {
+    const bySite = d.deploymentsBySite || null;
+    const own = bySite && Object.prototype.hasOwnProperty.call(bySite, depMatch[1]) ? bySite[depMatch[1]] : null;
+    return { status: 200, body: { deployments: own || d.deployments || [] } };
+  }
   // gr-p3: branch previews now come from the scenario (d.previews) so the
   // preview-rows section is observable; absent → the honest empty list.
   if (/^\/v1\/sites\/[^/]+\/previews$/.test(p)) return { status: 200, body: { previews: d.previews || [] } };
@@ -3271,13 +4844,16 @@ export function route(name, method, path, state) {
   // the /:kind/catalog GET (those are two-segment; these are exact or one-segment
   // DELETE, so they never collide with the capabilities/catalog reads above).
   if (p === "/v1/providers" && method === "GET") {
-    return { status: 200, body: { providers: d.providers || [] } };
+    return { status: 200, body: { providers: listOf(d, state, "providers") } };
   }
   if (p === "/v1/providers" && method === "POST") {
     return d.providerConnect || { status: 201, body: { provider: { kind: "hetzner", label: "main" } } };
   }
-  if (method === "DELETE" && /^\/v1\/providers\/[^/]+$/.test(p)) {
-    return { status: 200, body: { ok: true } };
+  // Disconnect is a per-KIND destroy (the server deletes every credential of that
+  // kind), so the roster shrinks by the row whose kind matches — not by id.
+  const provOne = p.match(/^\/v1\/providers\/([^/]+)$/);
+  if (method === "DELETE" && provOne) {
+    return destroyFrom(listOf(d, state, "providers"), state, (x) => (x.kind || "") === provOne[1]);
   }
 
   // S13: the per-host DNS/TLS checklist. A scenario without a `domainStatus`
@@ -3346,13 +4922,20 @@ export function route(name, method, path, state) {
   // A scenario carries `members`/`invitations` fixtures; absent → honest empty
   // lists (the panel never errors on an empty team). Invitations are admin-gated
   // server-side, but the client already skips the call for a plain member, so a
-  // member scenario simply omits the fixture. POST/DELETE are click-driven (inert
-  // in smoke) — modelled here so a live/browser exercise reconciles.
+  // member scenario simply omits the fixture. The DELETEs are click-driven and,
+  // since cch-w10, actually DRIVEN: members-populated clicks Remove and Revoke
+  // for real, so both lists are served from the per-boot store and shrink.
   if (/^\/v1\/teams\/[^/]+\/members$/.test(p) && method === "GET") {
-    return { status: 200, body: { members: d.members || [] } };
+    return { status: 200, body: { members: listOf(d, state, "members") } };
   }
-  if (/^\/v1\/teams\/[^/]+\/members\/[^/]+$/.test(p) && (method === "DELETE" || method === "PATCH")) {
-    return d.memberWrite || { status: 200, body: { ok: true } };
+  const memberOne = p.match(/^\/v1\/teams\/[^/]+\/members\/([^/]+)$/);
+  if (memberOne && (method === "DELETE" || method === "PATCH")) {
+    // A scenario that pins a failure (memberWrite) keeps its exact envelope AND
+    // its roster: a 403 that still shrank the list would be a fixture lying in
+    // the opposite direction. PATCH is a role change, never a removal.
+    if (d.memberWrite) return d.memberWrite;
+    if (method === "PATCH") return { status: 200, body: { ok: true } };
+    return destroyFrom(listOf(d, state, "members"), state, (x) => x.user_id === memberOne[1]);
   }
   if (/^\/v1\/teams\/[^/]+\/invitations$/.test(p)) {
     if (method === "POST") {
@@ -3361,10 +4944,11 @@ export function route(name, method, path, state) {
         body: { invitation: { id: "inv_new", email: "new@acme.com", role: "member", expires_at: tPlus(7 * 86400), inserted_at: T }, accept_url: "http://localhost/#/invitations/accept?token=preview-new" },
       };
     }
-    return { status: 200, body: { invitations: d.invitations || [] } };
+    return { status: 200, body: { invitations: listOf(d, state, "invitations") } };
   }
-  if (/^\/v1\/teams\/[^/]+\/invitations\/[^/]+$/.test(p) && method === "DELETE") {
-    return { status: 200, body: { ok: true } };
+  const inviteOne = p.match(/^\/v1\/teams\/[^/]+\/invitations\/([^/]+)$/);
+  if (inviteOne && method === "DELETE") {
+    return destroyFrom(listOf(d, state, "invitations"), state, (x) => x.id === inviteOne[1]);
   }
 
   // G-06 ENV-VARS: the ROW model (member-read / admin-write). GET is member-
@@ -3379,10 +4963,11 @@ export function route(name, method, path, state) {
       };
     }
     if (d.envVarsDenied) return { status: 403, body: { error: "forbidden" } };
-    return { status: 200, body: { env_vars: d.envVars || [] } };
+    return { status: 200, body: { env_vars: listOf(d, state, "envVars") } };
   }
-  if (/^\/v1\/env-vars\/[^/]+$/.test(p) && method === "DELETE") {
-    return { status: 200, body: { ok: true } };
+  const envOne = p.match(/^\/v1\/env-vars\/([^/]+)$/);
+  if (envOne && method === "DELETE") {
+    return destroyFrom(listOf(d, state, "envVars"), state, (x) => x.id === envOne[1]);
   }
 
   // gr-p5 OPERATOR: the session-gated /v1/operator/* seam. `operatorDenied`
@@ -3404,6 +4989,21 @@ export function route(name, method, path, state) {
       return d.operatorDeliveries ? { status: 200, body: { deliveries: d.operatorDeliveries } } : forbidden;
     }
     return forbidden;
+  }
+
+  // cch-w48-s6 GITHUB — placed ABOVE the catch-all below on purpose: the
+  // catch-all answers `{}`, which renderGithub reads as the not-configured arm,
+  // and that is why arm 1 (connected) had never been painted. GATED ON THE
+  // FIXTURE so no scenario without a `github` fixture changes behaviour by one
+  // byte — the catch-all keeps serving them exactly what it served before.
+  // CONSOLE-SIDE, NOT SERVER TRUTH: see the fixture's own comment on
+  // `providers-member` — the deployed control plane has no GitHub App
+  // credentials and cannot answer connected:true. The DELETE arm exists so the
+  // Disconnect affordance has a wire to reach, not because a member may use it
+  // (cch-w48-s3 owns that fence).
+  if (p === "/v1/github/installation" && d.github) {
+    if (method === "DELETE") return { status: 200, body: { connected: false } };
+    if (method === "GET") return { status: 200, body: d.github };
   }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never

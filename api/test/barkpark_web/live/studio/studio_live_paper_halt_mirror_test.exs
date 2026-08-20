@@ -24,6 +24,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperHaltMirrorTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Phoenix.LiveViewTest
+
   alias Barkpark.Content
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
@@ -66,20 +68,29 @@ defmodule BarkparkWeb.Studio.StudioLivePaperHaltMirrorTest do
   # A paper-pane editor socket the paper handlers accept — mirrors the fixture
   # in StudioLiveSaveStatusTest, but seeds `paper_halt` so the CLEAR path has a
   # banner to dismiss.
-  defp paper_socket(paper, halt) do
-    %Phoenix.LiveView.Socket{
-      assigns: %{
-        __changed__: %{},
-        flash: %{},
-        editor_view: :paper,
-        editor_mode: :classic,
-        editor_doc: nil,
-        paper_doc: paper,
-        dataset: @dataset,
-        save_status: "Save failed",
-        paper_halt: halt
-      }
-    }
+  #
+  # spd-w19 — taken from a REAL `live/2` mount, for the same reason
+  # StudioLiveSaveStatusTest's is: the accepted-write arm of `paper_pane_op/2` now
+  # re-derives the pane through `refetch_paper/1` (`stream/3` → `attach_hook`),
+  # which needs `socket.private[:lifecycle]` and `assigns.streams` — neither of
+  # which a `%Phoenix.LiveView.Socket{}` literal has (`** (KeyError) key
+  # :lifecycle not found in: %{live_temp: %{}}`). The two seeded assigns are then
+  # set on top, because a halt is a state the mount cannot be in.
+  defp paper_socket(conn, paper, halt) do
+    path =
+      case paper do
+        %{doc_id: slug} -> "/d/#{@dataset}/studio/paper/#{slug}"
+        _ -> "/d/#{@dataset}/studio"
+      end
+
+    {:ok, view, _html} = live(conn, scoped_studio(path))
+
+    :sys.get_state(view.pid).socket
+    |> Phoenix.Component.assign(
+      paper_doc: paper,
+      save_status: "Save failed",
+      paper_halt: halt
+    )
   end
 
   # A benign, template-safe op: append a fresh paragraph. Passes the op layer
@@ -96,17 +107,17 @@ defmodule BarkparkWeb.Studio.StudioLivePaperHaltMirrorTest do
   end
 
   describe "SET — put_paper_halt/2 (the shared clause both seams run)" do
-    test "stashes the server reason verbatim, flags Save failed, flashes the copy" do
+    test "stashes the server reason verbatim, flags Save failed, flashes the copy", %{conn: conn} do
       reason = "document is hollow — add a content block beyond the title"
-      socket = Paper.put_paper_halt(paper_socket(nil, nil), reason)
+      socket = Paper.put_paper_halt(paper_socket(conn, nil, nil), reason)
 
       assert socket.assigns.paper_halt == reason
       assert socket.assigns.save_status == "Save failed"
       assert socket.assigns.flash["error"] == reason
     end
 
-    test "a non-binary reason falls back to the API envelope's inspect form" do
-      socket = Paper.put_paper_halt(paper_socket(nil, nil), {:weird, :shape})
+    test "a non-binary reason falls back to the API envelope's inspect form", %{conn: conn} do
+      socket = Paper.put_paper_halt(paper_socket(conn, nil, nil), {:weird, :shape})
 
       assert socket.assigns.paper_halt =~ "mutation vetoed by a plugin lifecycle hook"
       assert socket.assigns.save_status == "Save failed"
@@ -120,8 +131,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperHaltMirrorTest do
       {:ok, paper: paper}
     end
 
-    test "single-op path (paper_pane_op) clears paper_halt on a clean edit", %{paper: paper} do
-      socket = paper_socket(paper, "a stale halt from a prior save")
+    test "single-op path (paper_pane_op) clears paper_halt on a clean edit",
+         %{conn: conn, paper: paper} do
+      socket = paper_socket(conn, paper, "a stale halt from a prior save")
 
       out = Paper.paper_pane_op(socket, append_op("b-single"))
 
@@ -129,8 +141,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperHaltMirrorTest do
       assert out.assigns.save_status == "Auto-saved"
     end
 
-    test "batch path (paper_ops) clears paper_halt on a clean batch", %{paper: paper} do
-      socket = paper_socket(paper, "a stale halt from a prior save")
+    test "batch path (paper_ops) clears paper_halt on a clean batch",
+         %{conn: conn, paper: paper} do
+      socket = paper_socket(conn, paper, "a stale halt from a prior save")
 
       out = Paper.paper_ops(socket, [append_op("b-batch")])
 

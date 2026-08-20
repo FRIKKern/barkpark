@@ -1,0 +1,16 @@
+# Auto-seed acting-gate design facts — re-derivation recipes (verifier autoseed-design, 2026-08-17)
+
+Each row: claim → the one command that re-derives it from scratch.
+
+| # | Claim | Rerun |
+|---|---|---|
+| 1 | The ONLY permission gate on POST /v1/data/mutate/:dataset is RequireWritePermission; deciding function is `Barkpark.Tenancy.Auth.permits?(token, :write)` ← "write"/"admin" | `git show origin/main:api/lib/barkpark_web/router.ex \| sed -n '1884,1888p'` and `git show origin/main:api/lib/barkpark/tenancy/auth.ex \| sed -n '285,294p'` |
+| 2 | publish is an ordinary mutation verb (no higher tier): `apply_one(%{"publish" => ...})` → `Content.publish_document` with zero permission check | `git show origin/main:api/lib/barkpark/content/mutations.ex \| sed -n '203,210p'` |
+| 3 | Flat mutate route pipeline = [:api, :require_token, :require_write, :idempotent]; :api carries OptionalToken + AssignDefaultScope, NO workspace-role plug | `git show origin/main:api/lib/barkpark_web/router.ex \| awk '/pipeline :api do/,/^  end/'` |
+| 4 | seed --check base URL is overridable TODAY via XDG_CONFIG_HOME → barkpark/config.json `server` field (serverURL(), seed/main.go:407-431); hermetic self-test needs NO code seam | `d=$(mktemp -d); mkdir -p $d/barkpark; printf '{"server":"http://127.0.0.1:9"}' > $d/barkpark/config.json; XDG_CONFIG_HOME=$d go run ./scaffy/seed --check; echo $?` (fails UNREACHABLE against port 9 — proves the config is consumed; a real fixture serving `{"result":{"documents":[]}}` at /v1/data/query/production/command yields 0/22 MATCH, 22 MISSING, exit 1) |
+| 5 | BARKPARK_TASK_TOKEN is NOT provisioned and is earmarked for the hotfix lane; provisioning any guerrilla WRITE credential in CI is a recorded lead call | `git show origin/main:docs/ops/merge-gates.md \| sed -n '659,673p'` |
+| 6 | DEPLOY_SSH_KEY + GUERRILLA_HOST are ALREADY-provisioned CI secrets that SSH root into guerrilla (deploy.yml instance job) — the zero-new-secret server-side path exists | `git grep -n 'GUERRILLA_HOST' origin/main -- .github/workflows/deploy.yml` |
+| 7 | ApiToken supports label/name, expires_at, revoked_at, workspace + dataset fields — but NO type scoping, and token.dataset is not enforced on the mutate path (path param wins), so any write token = full content-store write | `git show origin/main:api/lib/barkpark/auth/api_token.ex \| sed -n '15,65p'` and `git grep -n 'token.dataset' origin/main -- api/lib/barkpark_web/` |
+| 8 | The advisory tokenless design was a DELIBERATE recorded decision ("never a CI mutation", "no guerrilla credential is ever provisioned into CI") — the auto-seed overturns standing doctrine, not an accident | `git show origin/main:.github/workflows/scaffy-catalog-drift.yml \| sed -n '1,30p'` and `bp task get scaffy-backlog-seedcheck-ci-advisory -o json` |
+| 9 | Re-seed verbs are `bp doc create-or-replace command --file` + `bp doc publish command <id>` (manifest-driven POST /v1/data/mutate/:dataset); E3 unknown_tag 422 wall is validation, cleared by pre-creating tag docs | `git show origin/main:scaffy/seed/README.md \| sed -n '15,50p'` |
+| 10 | seed --check still RED right now: exactly barkpark--console-helper--js e2874330/5e117c4f + barkpark--console-hook-zones--js c46c32cd/e405a3e1 | `go run ./scaffy/seed --check 2>&1 \| grep -E 'DRIFT\|MATCH,'` |

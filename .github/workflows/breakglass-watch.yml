@@ -1,0 +1,139 @@
+# breakglass-watch — the scream. It reds for as long as main's admin-bypass
+# glass is open, and it is a SEPARATE workflow from required-checks-drift on
+# purpose (honest-gates D61).
+#
+# WHY NOT JUST DROP continue-on-error ON required-checks-drift
+#
+# That job is paths-filtered and reads three GitHub endpoints. Making it a hard
+# failure makes it ELIGIBLE for the required set on flip day — an API-reading
+# check gating every merge, which is exactly the shape this epic refuses. So the
+# scream ships here, and this workflow never renders a check name on a PR head
+# the generator samples: the watch job carries `if: github.event_name !=
+# 'pull_request'`, and the pull_request trigger is paths-filtered besides (S4).
+#
+# WHY THERE IS NO continue-on-error ANYWHERE IN THIS FILE
+#
+# Job-level `continue-on-error: true` still renders a RED check run, but it
+# launders the WORKFLOW RUN to success — and the run conclusion is what
+# notifications, `gh run list` and the rollup read. A scream nobody is paged for
+# is not a scream. This run fails.
+#
+# WHY A SCHEDULE AND NOT `on: branch_protection_rule`
+#
+# `branch_protection_rule` is an EDGE trigger: it fires once when the rule
+# changes, then is silent forever. A glass LEFT open needs a LEVEL trigger. The
+# residual is stated in numbers in docs/ops/break-glass-log.md: a 30-minute
+# observation window, silence during an Actions outage, and GitHub's 60-day
+# auto-disable of scheduled workflows in an inactive repo.
+
+name: breakglass-watch
+
+on:
+  schedule:
+    # Every 30 minutes. GitHub queues cron under load, so treat this as "within
+    # ~30-45 minutes", never "at :00 and :30".
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    # Deliberately narrow: this trigger exists ONLY so the harness below is not
+    # orphaned (D26). Being paths-filtered also keeps every name in this file
+    # out of the required set (generator stage S4), belt and braces with the
+    # watch job's `if:`.
+    paths:
+      - "scripts/breakglass.sh"
+      - "scripts/breakglass-watch.sh"
+      - "scripts/breakglass.test.sh"
+      # --disable delegates into breakglass.sh, so a change here can break the
+      # recorded path without touching a single breakglass* file.
+      - "scripts/required-checks-apply.sh"
+      - ".github/workflows/breakglass-watch.yml"
+      - "docs/ops/break-glass-log.md"
+
+permissions:
+  contents: read
+  # THERE IS DELIBERATELY NO `administration: read` HERE, and the omission is
+  # load-bearing (wave 4 review). `administration` is NOT one of the scopes the
+  # workflow `permissions:` key accepts for GITHUB_TOKEN — GitHub rejects the
+  # whole file as invalid and the workflow NEVER RUNS. A scream that fails to
+  # parse is the exact silence this slice exists to abolish, so it was removed.
+  #
+  # The consequence, stated rather than papered over: GITHUB_TOKEN cannot read
+  # branch protection at all (that read needs repo-admin scope, which a
+  # repo-scoped run token never carries) — it 403s "Resource not accessible by
+  # integration". Until wave 5 that 403 collapsed into UNKNOWN and the run
+  # concluded SUCCESS, so a watch with no live authority reported green. It no
+  # longer does: a 401/403 is a CONFIGURATION fault, exits 3, and FAILS this
+  # run.
+  #
+  # BREAKGLASS_TOKEN WAS PROVISIONED 2026-07-28T22:33:20Z by the flip slice
+  # (hgw2-s7), so the second authority is ARMED and this workflow is not
+  # expected to red. Read the two halves together before concluding anything
+  # from a green tick here: if the secret is ever removed, rotated or revoked,
+  # the `|| github.token` fallback keeps the job RUNNABLE and it then reds every
+  # 30 minutes on the protection read. That red is the honest state of a watch
+  # that cannot read what it watches — it is not a false alarm to silence, and
+  # the fix is to restore the secret, never to soften this classification.
+  #
+  # The token is a broad user PAT (`repo`, `workflow`) in a PUBLIC repository:
+  # far more authority than the `administration: read` this job needs. Fork PRs
+  # cannot read it, but any workflow change merged to main can. The correct
+  # credential is a fine-grained PAT scoped to this repo with Administration:
+  # Read-only, mintable only in the web UI — an OPEN human gate, not a closed
+  # one.
+
+concurrency:
+  group: breakglass-watch-${{ github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the watch dark.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  breakglass-watch:
+    name: Break-glass watch
+    # Never on pull_request: a name that never renders on a PR head can never be
+    # sampled into the required-check spec.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The scream's own tripwire. If the harness stops being able to fail, the
+      # watch below is decoration — and this run says so first.
+      - name: Prove the glass can be shown open (breakglass.test.sh)
+        run: bash scripts/breakglass.test.sh
+
+      - name: Is the break-glass open?
+        env:
+          GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
+        run: |
+          set -uo pipefail
+          rc=0
+          bash scripts/breakglass-watch.sh || rc=$?
+          case "$rc" in
+            0) exit 0 ;;
+            1) echo "::error::BREAK-GLASS OPEN on main. This run fails, and it will keep failing every 30 minutes until it is closed."; exit 1 ;;
+            2) echo "::warning::protection could not be read after retries — UNKNOWN, not green. A 5xx or a timeout clears on its own; see docs/ops/break-glass-log.md for why a transport blip is not a red here."; exit 0 ;;
+            # 401/403 is NOT a blip. The credential cannot read the endpoint and
+            # will not start being able to; a watch with no live authority must
+            # fail the RUN rather than warn into an empty room.
+            3) echo "::error::CONFIGURATION FAULT — this run's credential cannot read branch protection (401/403). Provision or rotate BREAKGLASS_TOKEN. The live authority is dead until then and this run fails every 30 minutes."; exit 1 ;;
+            *) echo "::error::breakglass-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
+          esac
+
+  breakglass-harness:
+    name: Break-glass harness
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Shell syntax
+        run: |
+          bash -n scripts/breakglass.sh
+          bash -n scripts/breakglass-watch.sh
+          # --disable delegates here, so its syntax is this harness's problem too.
+          bash -n scripts/required-checks-apply.sh
+      - name: Mutation proofs (breakglass.test.sh)
+        run: bash scripts/breakglass.test.sh

@@ -8,6 +8,9 @@ defmodule BarkparkWeb.SharedEditTest do
     (3) ...nor a different DATASET of the same workspace (scope is byte-exact);
     (4) the token is REJECTED on the FLAT mutate route (the privilege-escalation
         hole the opaque-permission design closes — MUST stay closed);
+    (4b/4c) the token is REJECTED on the FLAT READ routes too (GET /v1/data/doc
+        + legacy GET /api/documents) — the wave-2 seal for the live-confirmed
+        foreign-scope draft read (foreign-scope-share-token-flat-read);
     (5) an ANONYMOUS write to the shared scope is denied (no unauthenticated
         LAN writes — the owner's hard constraint);
     (6) downgrading the share :edit -> :read makes the token inert LIVE, before
@@ -158,6 +161,70 @@ defmodule BarkparkWeb.SharedEditTest do
              Content.list_documents("post", @dataset, perspective: :drafts),
              &(&1.title == "Edited")
            )
+  end
+
+  # ── (4b/4c) the flat READ escape stays closed (wave-2 seal) ───────────────
+  #
+  # Live-confirmed on guerrilla (tooling/grip/ledger/foreign-share-token-flat-
+  # read-live-confirm-2026-08-17.md): a foreign-scoped share-edit token — kind
+  # "api", so authed — skipped the anonymous drafts clamp AND took
+  # AssignDefaultScope's Default scope on the flat routes, reading a
+  # Default-scoped draft 200/200 on BOTH GET /v1/data/doc/... and
+  # GET /api/documents/... while anon got 404/401. Sealed at token resolution:
+  # `RequireToken.share_token_off_surface?/2` (applied by BOTH RequireToken and
+  # OptionalToken) refuses a `share_scope` token on any flat (non-
+  # /w/:workspace_slug) route with 403. MUTATION PROOF: revert that predicate
+  # (make it return false) → both reads below return 200 carrying the draft
+  # body, redding these tests. Test (1) above is the positive control — the
+  # token still writes its own scoped share routes with the seal in place.
+
+  defp default_scoped_draft! do
+    {ws, project} = ensure_default_scope!()
+    scope = [workspace_id: ws.id, project_id: project.id]
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "type" => "string"}]
+        },
+        @dataset,
+        scope
+      )
+
+    id = "flat-read-#{System.unique_integer([:positive])}"
+
+    # Draft-only: created, never published — its one row is `drafts.<id>`,
+    # exactly the shape the live repro read across the scope boundary.
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => id, "title" => "Default Draft", "content" => %{}},
+        @dataset,
+        scope
+      )
+
+    id
+  end
+
+  test "the token is REJECTED on the flat /v1/data/doc read (no scope binding there)", ctx do
+    id = default_scoped_draft!()
+
+    resp = ctx.conn |> auth(ctx.edit_token) |> get("/v1/data/doc/#{@dataset}/post/drafts.#{id}")
+
+    assert resp.status in [401, 403]
+    refute resp.resp_body =~ "Default Draft"
+  end
+
+  test "the token is REJECTED on the flat legacy /api/documents read", ctx do
+    id = default_scoped_draft!()
+
+    resp = ctx.conn |> auth(ctx.edit_token) |> get("/api/documents/post/drafts.#{id}")
+
+    assert resp.status in [401, 403]
+    refute resp.resp_body =~ "Default Draft"
   end
 
   # ── (5) no unauthenticated LAN writes ─────────────────────────────────────

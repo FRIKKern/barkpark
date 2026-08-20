@@ -9,8 +9,9 @@ name: security
 #
 # Jobs:
 #   1. sobelow    — Phoenix-aware static analysis. Surfaces NEW insecure
-#                   patterns: the 98 pre-existing findings on main are captured
-#                   in api/.sobelow-skips (the reviewed baseline); `--exit Low`
+#                   patterns: the pre-existing findings on main are captured
+#                   in api/.sobelow-skips (the reviewed baseline — 57 rows after
+#                   wave 24 deleted 32 dead waivers); `--exit Low`
 #                   reports any non-baselined finding at Low confidence or above.
 #                   ADVISORY (continue-on-error: true) — Sobelow fingerprints are
 #                   derived from compiled AST and are NOT stable across Elixir
@@ -30,17 +31,45 @@ name: security
 #                   suppression in the audit step. A NEW CVE reds the fleet.
 #
 # Policy of record: docs/ops/merge-gates.md §Security gates.
+#
+# ── THE SKIP SHIM (transplanted from elixir.yml / console-harness.yml) ───────
+#
+# THIS WORKFLOW MUST NEVER REGAIN A WORKFLOW-LEVEL `on: … paths:` KEY.
+#
+# It carried two until wave 10. Measured on live GitHub: a paths-filtered
+# workflow emits NO workflow run and NO check run at all, so a branch-protection
+# rule requiring a name from it leaves the PR BLOCKED forever — reported as
+#     Required status check "X" is expected.   <- never reported: deadlock
+#     Required status check "X" is failing.    <- an actual red
+# That is precisely why this workflow could never be registered as it stood.
+# Path decisions are now made at JOB level, behind the always-running `changes`
+# dispatcher, and this workflow renders a check run on EVERY head.
+#
+# A job skipped by a job-level `if:` DOES publish a check run, with conclusion
+# `skipped`, and GitHub counts `skipped` as PASSING for a required context. That
+# is what makes the shim work — and it is also the trap: a job whose `needs`
+# dependency FAILED reports `skipped` too. `if: always()` buys the RIGHT TO
+# DECIDE; it does not decide. Hence `security-gate` below, which enumerates
+# every upstream result and fails on anything outside an explicit allow-set.
+#
+# NOT REGISTERED YET, deliberately — but NOT for the wave-10 reason, which has
+# expired. `mix-audit` is GREEN on main: `req` is 0.6.3 in api/mix.lock since
+# 95ace3150, and PR #8222 (the bump this block called "open") is CLOSED and was
+# NEVER merged — `gh pr view 8222 --json state,mergeCommit` returns CLOSED with
+# mergeCommit null. Both clauses above were an inherited red quoted long after
+# it went green. What DOES still hold: `mix deps.audit` is green ONLY with
+# `--ignore-advisory-ids GHSA-4g2h-vm7x-747c` (esaml 4.6.0, XXE, "First patched
+# versions:" EMPTY — drop the id the day upstream ships one), and the advisory
+# DB is fetched FRESH at run time, so a disclosure tomorrow reds this gate with
+# no repo change at all. Registering `Security gate` is a policy call about who
+# owns that red, held on its own ledger row; the shape is ratcheted meanwhile by
+# scripts/security-gate-shape.test.sh, which the unfiltered `gate-shape` job
+# below RUNS on every head (a harness nobody runs is not a ratchet — D26).
 
 on:
   pull_request:
-    paths:
-      - "api/**"
-      - ".github/workflows/security.yml"
   push:
     branches: [main]
-    paths:
-      - "api/**"
-      - ".github/workflows/security.yml"
 
 concurrency:
   group: security-${{ github.ref }}
@@ -48,8 +77,151 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    # THE DISPATCHER. No `if:`, no matrix, no path filter — it runs on every
+    # event, always, so the jobs behind it always have a defined answer.
+    #
+    # It never emits `false` when it cannot tell. On an unresolvable base, a base
+    # with no common ancestor, or an uninterpretable verdict it FAILS; on an
+    # empty diff — rare but legal — it dispatches TRUE. That polarity is the
+    # whole point: a dispatcher that "couldn't tell" and emitted false would skip
+    # every security job and publish a green check run over nothing.
+    # Never a silent false: fail, or run everything.
+    #
+    # DEGENERATE ON PURPOSE. All three heavy jobs share ONE path set (`api/**`
+    # plus this workflow file), so there is exactly one output and the match is
+    # inline. Inventing a separate escape-check script for a single-set filter
+    # would be a second place for the same declaration to drift.
+    name: Dispatch (security paths)
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.sets.outputs.api }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
+          # `refs/pull/N/merge` — a commit that already contains main's advance
+          # — while `pull_request.base.sha` LAGS the base branch tip. The
+          # three-dot diff below then sweeps in every commit main gained since
+          # that stale base, and the skip never fires (charter D34).
+          #
+          # This job ONLY. The heavy jobs keep the merge ref: they must analyse
+          # the merged result, not the head in isolation.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history: the PR base sha must be resolvable locally for the
+          # three-dot diff below. A shallow checkout makes `git cat-file -e`
+          # miss it, which this step treats as a hard failure.
+          fetch-depth: 0
+
+      - id: sets
+        name: Compute the changed-path set
+        run: |
+          set -euo pipefail
+
+          event="${{ github.event_name }}"
+          if [ "$event" != "pull_request" ]; then
+            # push-to-main (and anything else): NEVER skip. Main is the branch
+            # every other run is compared against; a partial main is worse than
+            # a slow one, and there is no reviewer left to notice.
+            echo "event '$event' is not a pull_request — the security path set is true."
+            echo "api=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then
+            echo "::error::dispatcher: the PR carries no base sha. Refusing to guess — a guessed base skips the security gates and reports green."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            # The base commit can be absent from this checkout during burst
+            # merges. Try to fetch it once, then give up loudly.
+            git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::error::dispatcher: PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base."
+            exit 1
+          fi
+
+          # A base with NO common ancestor makes the three-dot diff exit 128
+          # with a raw `fatal: … no merge base` and ZERO annotation. Name the
+          # condition instead. There is deliberately NO two-dot fallback —
+          # measured, `base HEAD` sweeps in the base's ENTIRE content and
+          # dispatches true for the wrong reason.
+          if ! git merge-base "$base" HEAD >/dev/null 2>&1; then
+            echo "::error::dispatcher: PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Refusing to emit a path verdict — and refusing a two-dot fallback, which would sweep in the base's entire content. Rebase the branch onto its base branch."
+            exit 1
+          fi
+
+          echo "diff base: ${base} (three-dot against HEAD)"
+          # `-z` + `--no-renames` are BOTH load-bearing; either alone certifies a
+          # hole (measured, wave 10 — and the same fix landed in elixir.yml,
+          # cloud.yml and console-harness.yml in this wave). Plain `--name-only`
+          # QUOTES any path holding `"`, `\`, a newline or a non-ASCII byte even
+          # under core.quotepath=false, so `api/lib/we"ird.ex` misses the case
+          # arm below and the ENTIRE security scan is skipped. Rename detection
+          # prints only the DESTINATION, so `git mv api/lib/a.ex docs/a.ex`
+          # yields api=false while analysed code just left the tree.
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          echo "changed files:"
+          printf '%s\n' "$changed"
+
+          if [ -z "$changed" ]; then
+            # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
+            # PR, nets to nothing against the base. Failing here would red a
+            # legal PR with no self-service fix for its author. Run everything
+            # instead: expensive, never wrong. Never `false`, which is the only
+            # truly unsafe answer.
+            echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching api=true and running the WHOLE security suite rather than skipping it — a skip here would green a gate nothing measured. Cost: the full Sobelow + mix-audit run."
+            echo "api=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # THE PATH SET, declared once. Keep in sync with the roster the three
+          # heavy jobs actually read: everything under api/ (lib, mix.lock,
+          # .sobelow-skips, api/scripts/*.sh) plus this workflow itself.
+          api=false
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            case "$f" in
+              api/* | .github/workflows/security.yml) api=true ;;
+            esac
+          done <<EOF
+          $changed
+          EOF
+
+          case "${api}" in
+            true | false) ;;
+            *)
+              echo "::error::dispatcher: refusing to emit the uninterpretable verdict api=${api}."
+              exit 1
+              ;;
+          esac
+
+          echo "verdict: api=${api}"
+          echo "api=${api}" >> "$GITHUB_OUTPUT"
+
+  gate-shape:
+    # DELIBERATELY UNFILTERED — no `if:`, no dependency on the dispatcher, the
+    # same precedent as elixir.yml's `path-escape` job. This job proves the shim
+    # shape above still holds (no workflow-level paths key, the aggregator
+    # unmatrixed and `always()`, every continue-on-error job OUT of its `needs`
+    # and every blocking job IN, every needs entry actually judged by `decide`).
+    # Gating it on the dispatcher would let it go dark exactly when it matters,
+    # and a harness nobody runs is not a ratchet (charter D26). It costs a few
+    # seconds of python + bash.
+    name: Security gate shape ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Harness (the ratchet must be able to fail)
+        run: bash scripts/security-gate-shape.test.sh
+
   sobelow:
     name: Sobelow static analysis (regression gate, baseline .sobelow-skips)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     # Advisory: fingerprint baselines drift across toolchains. Reconciliation
     # stays pinned to CI and produces a human-reviewed artifact, never a commit.
     continue-on-error: true
@@ -103,6 +275,15 @@ jobs:
         if: always()
         run: bash scripts/sobelow-fresh-finding-guard.sh
 
+      - name: Anchor-token table still matches the Sobelow detector modules
+        # The blocking staleness ratchet carries a GENERATED detector→token
+        # table so it can run with no deps. This is the only job with a real
+        # Sobelow checkout, so it is the only place the table can be proven
+        # against its source. Advisory like the rest of this job: a Sobelow
+        # version bump that adds a detector should be visible, not a hard stop.
+        if: always()
+        run: bash scripts/sobelow-baseline-staleness-check.sh --verify-tokens deps/sobelow
+
       - name: Upload reconciled Sobelow baseline for human review
         if: always()
         uses: actions/upload-artifact@v4
@@ -116,6 +297,103 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+  # spec-authority: advisory-ok — the `(blocking)` token is inside the JOB name,
+  # which IS this job's rendered check-run context and IS a committed exclusion
+  # row (S6 LEAF OF AN EXCLUDED AGGREGATOR) in .github/required-checks.json.
+  # Renaming it would silently invalidate that row. The token means "blocking
+  # WITHIN this workflow, unlike the advisory sobelow job" — see the sentence
+  # below, which is the true and intended reading.
+  sobelow-inline-overlap:
+    name: Sobelow baseline does not swallow its own inline waivers (blocking)
+    # BLOCKING on purpose, unlike the sobelow job above. That job is advisory
+    # because fingerprints drift across toolchains; this check reads only text —
+    # api/.sobelow-skips entries versus `# sobelow_skip` annotations in api/lib —
+    # so it is deterministic and toolchain-independent, and has no honest reason
+    # to be advisory. No BEAM, no deps, ~1s.
+    #
+    # What it protects: an entry present in BOTH places makes the inline waiver
+    # unfalsifiable. Sobelow binds an annotation to its function by AST
+    # adjacency, so a refactor can silently detach it — the moment the gate is
+    # supposed to speak — and a baseline carrying the same finding swallows it.
+    # Honest Gates D29.
+    #
+    # This job carries THREE text-only ratchets (the job id/name is unchanged
+    # because it is referenced by name). They are mutually orthogonal — each
+    # PASSES on the shape the other two catch — so none of them is redundant:
+    #
+    #   1. OVERLAP    a baseline row and an inline annotation waiving the same
+    #                 finding. Span-based and baseline-driven, so it PASSES for
+    #                 a row that drifted out of its annotation span, for a moved
+    #                 file, and for a file with annotations and zero rows.
+    #   2. BINDING    an annotation that waives something other than what its
+    #                 author wrote it for — misspelled past parse.ex:61, bound
+    #                 to no def, left at the old indent, or parked on one clause
+    #                 of a group. Added by wave 24; it rides the SAME script and
+    #                 the SAME two steps below, because both ratchets run on the
+    #                 script's DEFAULT invocation. If those steps ever red with
+    #                 MISSPELL / DETACHED / INDENT / MULTICLAUSE, that is this
+    #                 ratchet, not the overlap one.
+    #   3. STALENESS  a baseline row whose file:line no longer holds a construct
+    #                 of its own detector type. Never looks at annotations at
+    #                 all. Its SELFTEST and its run against the real baseline
+    #                 are BOTH blocking as of wave 24 — the residue reached
+    #                 zero; see the measured numbers on that step.
+    #
+    # All three are ~1s, no BEAM, no deps.
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Selftest (the overlap + binding ratchets must be able to fail)
+        run: bash api/scripts/sobelow-inline-overlap-check.sh --selftest
+
+      - name: No baseline entry duplicates an inline waiver, and every annotation is bound to its def
+        run: bash api/scripts/sobelow-inline-overlap-check.sh
+
+      - name: Selftest (the staleness ratchet must be able to fail)
+        run: bash api/scripts/sobelow-baseline-staleness-check.sh --selftest
+
+      # BLOCKING as of wave 24 — the residue is zero, measured by execution.
+      #
+      # The prior comment here was wrong twice and is corrected rather than
+      # deleted, because a gate that misdescribes itself is the same blind-gate
+      # failure this job exists to remove. (1) It claimed "15 of the 31 are the
+      # blobstore rows"; `grep -c blobstore api/.sobelow-skips` was 0, so that
+      # migration would have moved the residue by exactly zero. (2) It reported
+      # 31 as the whole residue; 31 is only what THIS check can see. Config.*
+      # rows are whole-file findings with no per-line anchor, so they are
+      # SKIPPED — which hid a 32nd dead row, `Config.Headers … router.ex:2550`.
+      #
+      # The split was re-derived by EXECUTION, not by reading the file. Three
+      # runs of `mix sobelow --format json` over api/ at 606fefd15:
+      #   A  no --skip, no baseline           167 findings
+      #   B  baseline EMPTIED, annotations honoured   90 findings
+      #   C  tracked baseline                   32 findings
+      # A baseline row is LIVE iff its exact (type, file, line) appears in run
+      # B — i.e. it is still the only thing suppressing a real finding. 57 of
+      # the 89 rows were live; the other 32 were dead waivers and are deleted.
+      # What killed each, again measured rather than classified by eye:
+      #   25  superseded by a named inline annotation — a finding of that same
+      #       type in that same file is suppressed by annotation alone (it is
+      #       in run A and not in run B; 77 findings are in that set overall)
+      #    6  closed by content: the 5 media.ex rows at 1e0b43e67 (#6283 —
+      #       media.ex retains no traversal-eligible File call at all), and
+      #       archive.ex:36 `File.read!` (no `File.read!` remains in the file)
+      #    1  invisible to this check: `Config.Headers … router.ex:2550`. The
+      #       finding moved to router.ex:2609 and is ALREADY in the residue of
+      #       32, so the row at 2550 was suppressing nothing.
+      #
+      # Measured after the prune: this step exits 0, the overlap ratchet exits
+      # 0, and `mix sobelow --skip` is UNCHANGED at 32 findings — deleting a
+      # dead row suppresses nothing, which is what "dead" means. That last
+      # number is a proof and not a tautology because the mutation was run:
+      # deleting ONE row proven live (DOS.StringToAtom, content/validation.ex:
+      # 109) raises the count to 33, and restoring it returns it to 32.
+      - name: Every baseline entry still points at a construct of its own type
+        run: bash api/scripts/sobelow-baseline-staleness-check.sh
+
   mix-audit:
     name: Dependency CVE audit (mix_audit over mix.lock, blocking)
     # BLOCKING (no continue-on-error). The 8 pre-existing CVEs were remediated by
@@ -127,6 +405,8 @@ jobs:
     # runtime by OTP 27+ (xmerl disables external entities by default), which
     # this job (OTP 27.0) and prod both run. It is the single documented
     # suppression below; revisit if esaml ships a patched release.
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -163,3 +443,171 @@ jobs:
         # other CVE must be fixed by a bump, never ignored — drop the esaml id
         # the moment upstream ships a fix.
         run: mix deps.audit --ignore-advisory-ids GHSA-4g2h-vm7x-747c
+
+  security-gate:
+    # ── THE AGGREGATOR — the one name that should carry branch protection ──
+    #
+    # Deliberate shape, every part of it load-bearing:
+    #
+    #   * NO `strategy.matrix`. The published check-run name is then exactly the
+    #     `name:` string below. A matrixed job's name either gains the full
+    #     matrix tuple (`… (27.0, 1.18.1)`, which is what BOTH heavy jobs here
+    #     publish) or, if it never STARTED, publishes the literal uninterpolated
+    #     `${{ matrix.x }}` — both unusable as a required context (D20).
+    #
+    #   * `if: always()`. Without it this job would itself be `skipped` whenever
+    #     an upstream failed — publishing a PASSING required context out of a
+    #     failed run.
+    #
+    #   * It ASSERTS on every upstream result instead of echoing them.
+    #     `if: always()` buys the right to decide; it does not decide.
+    #
+    # ── WHY `sobelow` IS NOT IN `needs`, AND CANNOT BE ──────────────────────
+    #
+    # `sobelow` is the one `continue-on-error: true` job in this file. MEASURED
+    # on a throwaway probe repo: a continue-on-error job that exits 1 CONCLUDES
+    # FAILURE and renders a RED check run, but `needs.<job>.result` reads
+    # `success` — byte-identical to a genuine pass. `failure` and `skipped` stay
+    # cleanly distinguishable; `success` is NOT decomposable, and no rewrite of
+    # `decide` below can recover the difference, because the information is
+    # destroyed before this job's shell starts.
+    #
+    # So there is no honest "tolerate sobelow" branch to write: aggregating it
+    # would launder a failed Sobelow into a green required context ACCIDENTALLY
+    # and UNFALSIFIABLY. It is EXCLUDED from `needs` entirely — the red it
+    # already renders on its own check run is the only truthful signal it has.
+    # scripts/security-gate-shape.test.sh forces this shape, deriving the
+    # continue-on-error set FROM this file: when felix-w24-s7 flips Sobelow to
+    # blocking, that ratchet will require it to be ADDED here instead.
+    #
+    # Allow-set, exhaustively: `success` always; `skipped` ONLY when the
+    # dispatcher output that gated that job was literally 'false'. Everything
+    # else — `failure`, `cancelled`, an unrecognised value, an empty string —
+    # is a FAILURE, including a failure of the dispatcher itself.
+    name: Security gate
+    if: always()
+    needs: [changes, gate-shape, sobelow-inline-overlap, mix-audit]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide (fail-closed over every upstream result)
+        env:
+          R_CHANGES: ${{ needs.changes.result }}
+          R_SHAPE: ${{ needs.gate-shape.result }}
+          R_OVERLAP: ${{ needs.sobelow-inline-overlap.result }}
+          R_AUDIT: ${{ needs.mix-audit.result }}
+          O_API: ${{ needs.changes.outputs.api }}
+        run: |
+          set -euo pipefail
+
+          echo "dispatcher outputs: api='${O_API}'"
+          echo
+
+          bad=0
+
+          # ── D377 tally: did anything SUBSTANTIVE actually run? ────────────
+          # `bad` answers "is anything wrong"; it cannot answer "was anything
+          # tested", and until wave 33 nothing did. These two answer it.
+          # Only PATH-GATED jobs count: the dispatcher and the ratchet carry the
+          # gate value NEVER and run on every head, so they are present in a
+          # "nothing ran" run exactly as in a full one and can distinguish
+          # nothing.
+          dispatched=0
+          not_dispatched=""
+
+          # ── D770/D771 — `bad` SAYS THAT something is wrong, never WHICH ───
+          # Measured by executing this very step body with one upstream =
+          # failure: the step LOG names the offending job one line above, but
+          # the `::error::` — the ONLY line the check-run API carries, and so
+          # the only line a reader ever sees at the merge button — named
+          # NOTHING. `bad` is a bit; this is the set behind it. It is appended
+          # at EVERY `bad=1` site, so it can never disagree with the verdict: a
+          # job reaches this list through the same line that reds the gate.
+          # DERIVED from `${job}` — never a hardcoded name, and never a
+          # re-print of the step log.
+          # Comma-joined, not space-joined: job names contain spaces
+          # ("changes (dispatcher)"), so a space-joined list cannot be read
+          # back as a set.
+          reds=""
+
+          # decide <job-name> <result> <gate-value>
+          #   gate-value is the dispatcher output that gated the job, or the
+          #   literal string NEVER for jobs that must always run. A skip is
+          #   accepted only against a gate-value of exactly 'false'.
+          decide() {
+            local job="$1" result="$2" gate="$3"
+            case "$result" in
+              success)
+                echo "  ok      ${job}: success"
+                ;;
+              skipped)
+                if [ "$gate" = "false" ]; then
+                  echo "  ok      ${job}: skipped — dispatcher said this path set was not touched (gate='false')"
+                else
+                  echo "  FAIL    ${job}: skipped, but its gate is '${gate}', not 'false'."
+                  echo "          A skip here does NOT mean 'not needed'. It means the job never ran —"
+                  echo "          most often because an upstream FAILED. Refusing to green a required"
+                  echo "          context on it."
+                  bad=1
+                  reds="${reds:+${reds}, }${job}"
+                fi
+                ;;
+              failure | cancelled)
+                echo "  FAIL    ${job}: ${result}"
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              '')
+                echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
+                echo "          or the run object is malformed. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              *)
+                echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+            esac
+            # Tally, for the D377 notice at the bottom of this step. NEVER-gated
+            # jobs are excluded on purpose (see the declaration above).
+            if [ "$gate" != "NEVER" ]; then
+              case "$result" in
+                success) dispatched=$((dispatched + 1)) ;;
+                skipped) not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
+          }
+
+          # The dispatcher itself may never skip: without it there are no gate
+          # values, so nothing downstream can be judged.
+          decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
+          # The shape ratchet is unfiltered, so it may never skip either.
+          decide "gate-shape"              "${R_SHAPE}"   "NEVER"
+          decide "sobelow-inline-overlap"  "${R_OVERLAP}" "${O_API}"
+          decide "mix-audit"               "${R_AUDIT}"   "${O_API}"
+
+          echo
+          if [ "$bad" -ne 0 ]; then
+            # NOT "the required context": branch protection on main requires
+            # exactly four, and `Security gate` is not among them (they are
+            # `Elixir gate`, `Cloud gate`, `Console gate`, `PR references an
+            # active task` — enforce_admins=true). Saying otherwise told every
+            # reader this red blocked a merge it cannot block.
+            echo "::error::Security gate: at least one upstream job is not in the allow-set (see above). This gate is RED on purpose; it is an advisory context, not one of the four required on main. NOT IN THE ALLOW-SET: ${reds}"
+            exit 1
+          fi
+
+          # ── D377/D378 — SAY IT WHERE A PERSON AND AN API CAN READ IT ──────
+          # Same defect as the three REQUIRED aggregators, same fix, and it is
+          # fixed here too so the four gates cannot drift apart: on a docs-only
+          # head this context concludes `success` with every substantive job
+          # skipped and publishes ann=0 / title=null / summary=null — identical
+          # bytes to a run where Sobelow and mix_audit actually ran.
+          # $GITHUB_STEP_SUMMARY does not reach the check-run API; a bare
+          # ::notice:: does (probe/elixir-gate-annotation, run 31055317124).
+          # ONE notice, never one per job — GitHub caps annotations at 10 per
+          # level per step and truncates the rest silently.
+          if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=Security gate: green — nothing ran::NOTHING SECURITY RAN on this head.%0ASecurity gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Security job executed', never as 'the security scans passed'."
+          fi
+          echo "Security gate: every upstream job either succeeded or was legitimately not dispatched."

@@ -70,6 +70,18 @@ defmodule BarkparkWeb.TasksControllerTest do
     doc
   end
 
+  # dr-w34-s4: a task that really lives at its BARE (published) doc_id.
+  # `mk_task!` can never produce one — `Content.Writer.create_document` forces
+  # every new row through `DraftId.draft_id/1` — so a twin pair can only be
+  # built by publishing (`drafts.<id>` → `<id>`, draft deleted) and then
+  # re-creating the draft alongside it. Returns the bare id.
+  defp mk_published_task!(bare_id, scope, content_extra) do
+    content = Barkpark.LabelFixtures.with_registered_labels(content_extra, @dataset)
+    _draft = mk_task!(bare_id, scope, content)
+    {:ok, _} = Content.publish_document(bare_id, "task", @dataset, scope)
+    bare_id
+  end
+
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
   # axi-w2-s2: a card fixture with a caller-chosen TITLE (mk_task! pins
@@ -502,10 +514,15 @@ defmodule BarkparkWeb.TasksControllerTest do
           ]
         })
 
+      # PDS-D289: the criterion is unmet on the doc AS READ and this close flips
+      # it in its own command, so the close needs a recorded reason. The
+      # ATOMICITY under test is unchanged — the override rides the same rev-CAS
+      # write, which is exactly why it is the right place to prove it.
       close_body =
         Jason.encode!(%{
           worker_id: "bd-shim",
           observed_epoch: 1,
+          criteria_override: "criteria-merge atomicity under test, not criteria proof",
           criteria: [
             %{
               index: 0,
@@ -580,7 +597,7 @@ defmodule BarkparkWeb.TasksControllerTest do
 
     # Graduated enforcement (§12): unmet criteria SURFACE as a warning on a
     # close that still succeeds — never a gate, never a non-200.
-    test "close with unmet criteria succeeds AND surfaces a soft warning",
+    test "close with unmet criteria succeeds (on the record) AND still surfaces a soft warning",
          %{conn: conn, scope: scope} do
       task =
         mk_task!(uniq("close-criteria-unmet"), scope, %{
@@ -594,19 +611,92 @@ defmodule BarkparkWeb.TasksControllerTest do
         Jason.encode!(%{
           worker_id: "bd-shim",
           observed_epoch: 1,
+          criteria_override: "criterion 1 is genuinely out of scope; closing on the record",
           criteria: [
             %{index: 0, met: true, evidence: "partial", criterion: "will be met"}
           ]
         })
 
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
-      assert resp.status == 200, "closing with unmet criteria stays LEGAL"
+      assert resp.status == 200, "closing with unmet criteria stays LEGAL — with a reason"
 
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == true
       assert payload["doc"]["lifecycle_status"] == "done"
+      # The lvw-t6 advisory warning SURVIVES beside the D289 gate: the gate makes
+      # the unmet close deliberate, the warning still says how much is unproven.
       assert [warning] = payload["warnings"]
       assert warning =~ "1/2 met"
+
+      assert payload["doc"]["content"]["close_override"]["criteria"]["reason"] =~
+               "genuinely out of scope"
+    end
+
+    test "an unmet-criteria close with NO reason is REFUSED, and the 409 teaches the escape hatch",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("close-criteria-nogate"), scope, %{
+          "acceptance_criteria" => [%{"criterion" => "never proven", "met" => false}]
+        })
+
+      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+
+      assert resp.status == 409
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == false
+      assert payload["reason"] == "criteria_unmet:0"
+      assert payload["message"] =~ "criteria_override"
+
+      reread = conn |> authed() |> get("/v1/tasks/#{task.doc_id}") |> Map.get(:resp_body)
+
+      assert Jason.decode!(reread)["doc"]["lifecycle_status"] == "open",
+             "the refusal wrote nothing"
+    end
+
+    test "a foreign close is REFUSED, and holder_override lands it on the record",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("close-foreign"), scope, %{"acceptance_criteria" => []})
+
+      claim_body = Jason.encode!(%{worker_id: "worker-A"})
+
+      claim_resp =
+        conn |> authed() |> post("/v1/tasks/#{task.doc_id}/claim", claim_body)
+
+      assert claim_resp.status == 200
+      epoch = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]["epoch"]
+      assert is_integer(epoch)
+
+      refused =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{worker_id: "oc-lead", observed_epoch: epoch})
+        )
+
+      assert refused.status == 409
+      refused_payload = Jason.decode!(refused.resp_body)
+      assert refused_payload["reason"] == "not_holder:worker-A"
+      assert refused_payload["message"] =~ "holder_override"
+
+      landed =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/close",
+          Jason.encode!(%{
+            worker_id: "oc-lead",
+            observed_epoch: epoch,
+            holder_override: "lead seal on merge"
+          })
+        )
+
+      assert landed.status == 200
+      override = Jason.decode!(landed.resp_body)["doc"]["content"]["close_override"]["holder"]
+      assert override["actor"] == "oc-lead"
+      assert override["held_by"] == "worker-A"
+      assert override["reason"] == "lead seal on merge"
     end
 
     test "malformed criteria is a 400 (shape), out-of-range index a 409 (state)",
@@ -1082,17 +1172,25 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert child["criteria_progress"] == %{"met" => 1, "total" => 1}
     end
 
-    test "close done with UNMET criteria returns advisory warnings (2xx, ok:true, no gate)",
+    test "close done with UNMET criteria (on the record) still returns advisory warnings",
          %{conn: conn, scope: scope} do
       task =
         mk_task!(uniq("crit-close-warn"), scope, criteria([crit_entry(true), crit_entry(false)]))
 
-      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      # PDS-D289 made the unmet close deliberate rather than free; the lvw-t6
+      # advisory warning is unchanged and still rides the 2xx beside it.
+      close_body =
+        Jason.encode!(%{
+          worker_id: "bd-shim",
+          observed_epoch: 1,
+          criteria_override: "warning-surface under test"
+        })
+
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
       assert resp.status == 200
 
       payload = Jason.decode!(resp.resp_body)
-      # No gate: the close COMMITTED.
+      # The close COMMITTED (the reason is on the record).
       assert payload["ok"] == true
       assert payload["doc"]["lifecycle_status"] == "done"
       assert [warning] = payload["warnings"]
@@ -1173,6 +1271,76 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert length(parent_payload["dependents"]) == 1
       assert hd(parent_payload["dependents"])["doc_id"] == child_doc_id
     end
+
+    # `kind` is a FILTER: a shape we cannot filter on is refused loudly.
+    # `?kind[]=blocks` decodes to a list and used to fall off the case in
+    # edges/2 as a CaseClauseError → 500, raised BEFORE the task lookup.
+    test "list-valued kind returns 400, not a CaseClauseError 500",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("edges-kind-list"), scope)
+
+      resp = conn |> authed() |> get("/v1/tasks/#{task.doc_id}/edges?kind[]=blocks")
+
+      assert resp.status == 400
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == false
+      assert payload["reason"] == "bad_request"
+      assert payload["message"] =~ "kind"
+    end
+
+    test "the 400 fires before the task lookup, so a nonexistent doc_id also 400s",
+         %{conn: conn} do
+      resp = conn |> authed() |> get("/v1/tasks/no-such-task-at-all/edges?kind[]=blocks")
+
+      assert resp.status == 400
+    end
+
+    # The guard must not degrade the real filter.
+    test "happy path: kind=blocks still filters the edge graph",
+         %{conn: conn, scope: scope} do
+      parent = mk_task!(uniq("edges-kind-parent"), scope)
+      child = mk_task!(uniq("edges-kind-child"), scope)
+      {:ok, _} = Tasks.add_dep(child.id, parent.id, :blocks)
+
+      resp = conn |> authed() |> get("/v1/tasks/#{child.doc_id}/edges?kind=blocks")
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert Enum.map(payload["dependencies"], & &1["doc_id"]) == [parent.doc_id]
+    end
+  end
+
+  # `dataset` is a SCOPE SELECTOR with a documented default, so it fails SOFT —
+  # the deliberate opposite of the `kind` FILTER above. A list-valued dataset
+  # used to reach Tasks.Events.replay_since/3 (single is_binary clause, no
+  # fallback) and raise FunctionClauseError → 500 before any Repo call.
+  describe "GET /v1/tasks/events dataset selector" do
+    test "list-valued dataset falls back to production instead of 500ing",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("events-dataset"), scope)
+
+      resp = conn |> authed() |> get("/v1/tasks/events?dataset[]=production&since=0&limit=200")
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      # Scoped to the production default: the just-written production task's
+      # events are in the feed, exactly as with no `dataset` param at all.
+      doc_ids = Enum.map(payload["events"], & &1["doc_id"])
+      assert task.doc_id in doc_ids
+    end
+
+    test "happy path: a binary dataset still scopes the feed", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("events-dataset-binary"), scope)
+
+      prod = conn |> authed() |> get("/v1/tasks/events?dataset=production&since=0&limit=200")
+      assert prod.status == 200
+      assert task.doc_id in Enum.map(Jason.decode!(prod.resp_body)["events"], & &1["doc_id"])
+
+      other = conn |> authed() |> get("/v1/tasks/events?dataset=staging&since=0&limit=200")
+      assert other.status == 200
+      refute task.doc_id in Enum.map(Jason.decode!(other.resp_body)["events"], & &1["doc_id"])
+    end
   end
 
   # ─── w7-08: new endpoints ──────────────────────────────────────────────
@@ -1244,6 +1412,63 @@ defmodule BarkparkWeb.TasksControllerTest do
       payload = Jason.decode!(resp.resp_body)
       assert payload["children"] == []
       assert payload["child_count"] == 0
+    end
+
+    # dr-w34-s4 (twin collapse). `maybe_filter_parent_id/2` strips `drafts.`
+    # from BOTH sides, so a `drafts.<id>` shadow child is GUARANTEED to match
+    # its published parent: before `Tasks.Query.collapse_twins/1` a twinned
+    # child contributed TWO rows and +2 to child_count.
+    test "dr-w34-s4: a twinned child (t1 + drafts.t1) is counted ONCE",
+         %{conn: conn, scope: scope} do
+      root = mk_published_task!(uniq("twin-root"), scope, %{})
+      child = mk_published_task!(uniq("twin-child"), scope, %{"parent_id" => root})
+
+      # The shadow twin: the SAME published id back under `drafts.`, parented
+      # at the DRAFT form of the epic id — exactly the row a /v1/data/mutate
+      # write mints — in the same workspace/project/dataset.
+      shadow = mk_task!(child, scope, %{"parent_id" => "drafts." <> root})
+      assert shadow.doc_id == "drafts." <> child
+
+      payload = conn |> authed() |> get("/v1/tasks/#{root}") |> json_response(200)
+
+      assert Enum.map(payload["children"], & &1["doc_id"]) == [child]
+      assert payload["child_count"] == 1
+
+      # The index's `parent=` slice reads the SAME cardinality — one number,
+      # one meaning, across both surfaces.
+      index = conn |> authed() |> get("/v1/tasks", %{"parent" => root}) |> json_response(200)
+
+      index_ids = Enum.map(index["docs"], & &1["doc_id"])
+      assert index_ids == [child]
+      assert length(index_ids) == payload["child_count"]
+    end
+
+    # dr-w34-s4 NON-VACUITY: the test that lets the ruling LOSE. Tasks created
+    # via /v1/data/mutate live at `drafts.<id>` with NO published twin — a
+    # blanket `not like(doc_id, "drafts.%")` (studio_chat.ex's claim-lookup
+    # form) would silently delete that whole population from every epic's
+    # count, trading a documented over-count for an undocumented under-count.
+    # Twin collapse suppresses only a shadow whose DISTINCT twin exists, so an
+    # unpaired shadow survives. Swap the helper for the blanket exclusion and
+    # this test goes RED.
+    test "dr-w34-s4 non-vacuity: an UNPAIRED drafts.<id> child is still counted",
+         %{conn: conn, scope: scope} do
+      root = mk_published_task!(uniq("orphan-root"), scope, %{})
+      published = mk_published_task!(uniq("orphan-pub"), scope, %{"parent_id" => root})
+
+      orphan = mk_task!(uniq("orphan-shadow"), scope, %{"parent_id" => "drafts." <> root})
+      assert String.starts_with?(orphan.doc_id, "drafts.")
+
+      payload = conn |> authed() |> get("/v1/tasks/#{root}") |> json_response(200)
+
+      child_ids = Enum.map(payload["children"], & &1["doc_id"])
+      assert orphan.doc_id in child_ids
+      assert published in child_ids
+      assert payload["child_count"] == 2
+
+      index = conn |> authed() |> get("/v1/tasks", %{"parent" => root}) |> json_response(200)
+
+      assert index["docs"] |> Enum.map(& &1["doc_id"]) |> Enum.sort() == Enum.sort(child_ids)
     end
   end
 
@@ -2300,6 +2525,52 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert resting["lifecycle_status"] == "considering"
     end
 
+    # pds-w27: the adjudication TERM is an additive key on the brief card —
+    # `bp task ready -o json` auto-selects the brief view, so without this an
+    # adjudicated row reads as un-adjudicated to the reader that most needs it.
+    # Same omission law as engagement above; the exact-key-set test stays
+    # byte-identical. The reason companions (disposition_reason, reopen_trigger)
+    # stay OFF the card on measured bytes and ride `bp task get`.
+    test "disposition rides the brief card when present and is omitted when absent",
+         %{conn: conn, scope: scope} do
+      parked_id = uniq("brief-disp")
+      # Vocabulary-derived (Stage.dispositions/0 = ~w(open parked closed)),
+      # never corpus-sampled.
+      mk_task!(parked_id, scope, %{
+        "lifecycle_status" => "blocked",
+        "disposition" => "parked",
+        "disposition_reason" => "waiting on the terminal round",
+        "reopen_trigger" => "the round closes"
+      })
+
+      plain_id = uniq("brief-disp-none")
+      mk_task!(plain_id, scope, %{"lifecycle_status" => "blocked"})
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks?view=brief")
+        |> json_response(200)
+
+      parked = Enum.find(payload["docs"], &String.contains?(&1["doc_id"], parked_id))
+      assert parked, "parked task missing from brief index"
+      assert parked["disposition"] == "parked"
+      # The reasons are full-view detail — the card names the term only.
+      refute Map.has_key?(parked, "disposition_reason")
+      refute Map.has_key?(parked, "reopen_trigger")
+
+      plain = Enum.find(payload["docs"], &String.contains?(&1["doc_id"], plain_id))
+      assert plain, "undisposed task missing from brief index"
+      refute Map.has_key?(plain, "disposition")
+
+      # …and the full view still carries the whole triple (the escape hatch
+      # `bp task get` reads).
+      full = conn |> authed() |> get("/v1/tasks?view=full") |> json_response(200)
+      full_card = Enum.find(full["docs"], &String.contains?(&1["doc_id"], parked_id))
+      assert full_card["content"]["disposition"] == "parked"
+      assert full_card["content"]["reopen_trigger"] == "the round closes"
+    end
+
     test "full view keeps ONE claim copy: top-level intact, content echo drops it, storage untouched",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-dedup")
@@ -2348,6 +2619,51 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       card = Enum.find(payload["docs"], &(&1["doc_id"] == parent.doc_id))
       assert card, "parent task missing from brief index"
+      assert card["child_count"] == 2
+    end
+
+    # dr-w34-s4 (review). `batch_child_counts/2` is a FIFTH producer of a child
+    # count and the slice's brief did not list it. It groups on the same
+    # drafts-stripped `parent_id` key, so a twinned child landed in its
+    # published parent's bucket twice — and with only the four briefed paths
+    # collapsed, `bp task get <epic>` would answer 1 while
+    # `bp task ls --view=brief` answered 2 for the same epic. Two numbers for
+    # one quantity is the defect this wave removes, not one it may relocate, so
+    # the two surfaces are asserted AGAINST EACH OTHER here rather than against
+    # two independently written literals.
+    test "dr-w34-s4: the brief card's child_count agrees with GET /v1/tasks/:id on a twinned child",
+         %{conn: conn, scope: scope} do
+      root = mk_published_task!(uniq("brief-twin-root"), scope, %{})
+      child = mk_published_task!(uniq("brief-twin-child"), scope, %{"parent_id" => root})
+
+      shadow = mk_task!(child, scope, %{"parent_id" => "drafts." <> root})
+      assert shadow.doc_id == "drafts." <> child
+
+      show = conn |> authed() |> get("/v1/tasks/#{root}") |> json_response(200)
+
+      brief = conn |> authed() |> get("/v1/tasks?view=brief") |> json_response(200)
+      card = Enum.find(brief["docs"], &(&1["doc_id"] == root))
+      assert card, "root task missing from brief index"
+
+      assert show["child_count"] == 1
+
+      assert card["child_count"] == show["child_count"],
+             "the brief card and the show payload must not disagree about one epic's child count"
+    end
+
+    # …and the same non-vacuity guard the show path carries: the collapse must
+    # not become a blanket `drafts.` exclusion here either, or every
+    # mutate-created task disappears from the brief cards' counts.
+    test "dr-w34-s4 non-vacuity: an UNPAIRED drafts.<id> child still counts on the brief card",
+         %{conn: conn, scope: scope} do
+      root = mk_published_task!(uniq("brief-orphan-root"), scope, %{})
+      mk_published_task!(uniq("brief-orphan-pub"), scope, %{"parent_id" => root})
+      orphan = mk_task!(uniq("brief-orphan-shadow"), scope, %{"parent_id" => "drafts." <> root})
+      assert String.starts_with?(orphan.doc_id, "drafts.")
+
+      brief = conn |> authed() |> get("/v1/tasks?view=brief") |> json_response(200)
+      card = Enum.find(brief["docs"], &(&1["doc_id"] == root))
+      assert card, "root task missing from brief index"
       assert card["child_count"] == 2
     end
 
@@ -2516,6 +2832,26 @@ defmodule BarkparkWeb.TasksControllerTest do
           "parent_id" => "phase-hostile",
           "distinct_from" => ids -- [id],
           "acceptance_criteria" => criteria,
+          # pds-w27: the adjudication term rides the hostile page, so this
+          # tripwire MEASURES the field instead of being blind to it (before
+          # this line the probe printed the same 28623B with or without the
+          # renderer key — a green that proved nothing). The value is derived
+          # from the VOCABULARY, not the live board: Stage.dispositions/0 is
+          # ~w(open parked closed), and "parked" is a longest term — the worst
+          # case a valid row can present. The corpus is NOT the source here;
+          # it still holds off-vocabulary prose in this slot (longest 71 B)
+          # that pds-w27-round-terminal-15 is retiring, and a fixture built
+          # on it would red on a value the round makes impossible.
+          "disposition" => "parked",
+          # pds-w28: a park BORN with no reopen trigger is now refused at the
+          # birth door (Writer.ensure_task_born_adjudicated/5) — a hollow park
+          # is a row that claims to be decided and can never say what would
+          # reconsider it. The fixture supplies one so it stays a legal row.
+          # It does NOT move the measured bytes: the reason companions
+          # (disposition_reason, reopen_trigger) are deliberately OFF the brief
+          # card and ride `bp task get` — pinned by "the reasons are full-view
+          # detail — the card names the term only" above.
+          "reopen_trigger" => "never — this row is a byte-ceiling fixture",
           # Worker-less claim residue (a live worker would exclude the row
           # from ready) — now-line + epoch survive as the hostile payload.
           "claim" => %{
@@ -2904,7 +3240,11 @@ defmodule BarkparkWeb.TasksControllerTest do
       mk_task!(id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
 
       content =
-        conn |> nonadmin() |> get("/v1/tasks/#{id}") |> json_response(200) |> get_in(["doc", "content"])
+        conn
+        |> nonadmin()
+        |> get("/v1/tasks/#{id}")
+        |> json_response(200)
+        |> get_in(["doc", "content"])
 
       refute Map.has_key?(content, "secret_field"),
              "private field leaked through the single-task JSON echo"
@@ -2918,7 +3258,11 @@ defmodule BarkparkWeb.TasksControllerTest do
       mk_task!(id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
 
       content =
-        conn |> authed() |> get("/v1/tasks/#{id}") |> json_response(200) |> get_in(["doc", "content"])
+        conn
+        |> authed()
+        |> get("/v1/tasks/#{id}")
+        |> json_response(200)
+        |> get_in(["doc", "content"])
 
       assert content["secret_field"] == "TOP-SECRET"
       assert content["public_field"] == "VISIBLE"
@@ -2938,6 +3282,7 @@ defmodule BarkparkWeb.TasksControllerTest do
         |> Enum.find(&(&1["doc_id"] == task.doc_id))
 
       assert doc, "task not present in the list response"
+
       refute Map.has_key?(doc["content"], "secret_field"),
              "private field leaked through the task LIST JSON echo"
 
@@ -2949,7 +3294,9 @@ defmodule BarkparkWeb.TasksControllerTest do
       from_id = uniq("seal-edge-from")
       dep_id = uniq("seal-edge-dep")
       from = mk_task!(from_id, scope, %{"public_field" => "root"})
-      dep = mk_task!(dep_id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
+
+      dep =
+        mk_task!(dep_id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
 
       {:ok, _} = Tasks.add_dep(from.id, dep.id, "blocks", nil)
 
@@ -2967,6 +3314,106 @@ defmodule BarkparkWeb.TasksControllerTest do
              "private field leaked through the deps/edges JSON echo"
 
       assert dep_doc["content"]["public_field"] == "VISIBLE"
+    end
+  end
+
+  # -- The adjudication triple reaches the verb (PDS wave 24) ----------------
+  #
+  # WHY THIS TEST EXISTS. `Mutations.ensure_disposition_via_verb/4` refuses a
+  # raw `/v1/data/mutate` write of `content.disposition` and its 422 names
+  # `bp task stage ... --disposition ... --reopen-trigger ...` as the remedy.
+  # That message is only TRUE if this route forwards both params: as built, the
+  # slice shipped the refusal and the primitive but not the forwarding, so the
+  # refusal's own retry instruction was unexecutable -- a verb lying about its
+  # remedy, inside the fix for verbs that lie. These assert the forwarding by
+  # POST, not by reading the controller.
+  describe "POST /v1/tasks/:doc_id/stage -- the adjudication triple" do
+    test "a park with a trigger persists all three keys", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("stage-triple"), scope)
+
+      body =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/stage",
+          Jason.encode!(%{
+            state: "considering",
+            disposition: "  PARKED  ",
+            note: "waiting on the ARM runner",
+            "reopen-trigger": "when CI grows an arm64 lane"
+          })
+        )
+        |> json_response(200)
+
+      assert body["ok"] == true
+
+      content = Repo.get_by!(Document, doc_id: task.doc_id).content
+      # Trimmed AND downcased by the one writer -- this is what collapses the
+      # measured OPEN/open split, and it only happens if the param arrived.
+      assert content["disposition"] == "parked"
+      assert content["disposition_reason"] == "waiting on the ARM runner"
+      assert content["reopen_trigger"] == "when CI grows an arm64 lane"
+    end
+
+    test "a park with no trigger is a 422 that names the flag, and writes NOTHING",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("stage-hollow"), scope)
+
+      body =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/stage",
+          Jason.encode!(%{state: "considering", disposition: "parked"})
+        )
+        |> json_response(422)
+
+      assert body["reason"] == "missing_reopen_trigger"
+      assert body["disposition"] == "parked"
+      assert body["message"] =~ "--reopen-trigger"
+
+      # NOTHING was written -- not the term, and not the transition.
+      content = Repo.get_by!(Document, doc_id: task.doc_id).content
+      refute Map.has_key?(content, "disposition")
+      assert content["lifecycle_status"] == "open"
+    end
+
+    test "an off-vocabulary term is a 400 naming the vocabulary", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("stage-vocab"), scope)
+
+      body =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/stage",
+          Jason.encode!(%{state: "considering", disposition: "shelved"})
+        )
+        |> json_response(400)
+
+      assert body["reason"] == "bad_request"
+      assert body["message"] =~ "\"parked\""
+      assert body["message"] =~ "\"shelved\""
+
+      refute Map.has_key?(Repo.get_by!(Document, doc_id: task.doc_id).content, "disposition")
+    end
+
+    test "the underscore spelling of the trigger is accepted too", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("stage-underscore"), scope)
+
+      conn
+      |> authed()
+      |> post(
+        "/v1/tasks/#{task.doc_id}/stage",
+        Jason.encode!(%{
+          state: "considering",
+          disposition: "parked",
+          reopen_trigger: "when the census ratifies a second case"
+        })
+      )
+      |> json_response(200)
+
+      content = Repo.get_by!(Document, doc_id: task.doc_id).content
+      assert content["reopen_trigger"] == "when the census ratifies a second case"
     end
   end
 end

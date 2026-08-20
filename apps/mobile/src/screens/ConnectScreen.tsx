@@ -26,6 +26,7 @@ import {
 } from '../cascade/fleetPick'
 import type { StoredConfig } from '../cascade/knownServers'
 import { useTheme } from '../ui/theme'
+import { scale } from '../ui/typography'
 
 type ConnectState =
   | { phase: 'loading' }
@@ -247,23 +248,23 @@ export function ConnectScreen({
 
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 24, paddingTop: 72 },
-  heading: { fontSize: 26, fontWeight: '700', marginBottom: 20 },
+  heading: { ...scale.display, fontWeight: '700', marginBottom: 20 },
   centerBlock: { alignItems: 'center', gap: 12, marginTop: 32, paddingHorizontal: 8 },
   listContent: { gap: 10 },
   serverRow: { borderWidth: 1, borderRadius: 12, padding: 14, gap: 4 },
-  serverName: { fontSize: 16, fontWeight: '600' },
-  body: { fontSize: 15, textAlign: 'center', lineHeight: 21 },
-  muted: { fontSize: 13, textAlign: 'center', lineHeight: 19 },
-  link: { fontSize: 14, textDecorationLine: 'underline' },
+  serverName: { ...scale.lg, fontWeight: '600' },
+  body: { ...scale.md, textAlign: 'center' },
+  muted: { ...scale.sm, textAlign: 'center' },
+  link: { ...scale.base, textDecorationLine: 'underline' },
   input: {
     alignSelf: 'stretch',
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 11,
-    fontSize: 15,
+    ...scale.md,
   },
   primaryButton: { paddingHorizontal: 22, paddingVertical: 12, borderRadius: 10 },
-  primaryButtonText: { fontSize: 15, fontWeight: '600' },
+  primaryButtonText: { ...scale.md, fontWeight: '600' },
   signOut: { alignItems: 'center', paddingVertical: 16 },
 })

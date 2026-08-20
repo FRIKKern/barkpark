@@ -451,6 +451,8 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
+      {:post, "/tasks/:doc_id/sessions", BarkparkWeb.TasksController, :sessions,
+       auth: :token_root},
       {:post, "/tasks/:doc_id/move", BarkparkWeb.TasksController, :move, auth: :token_root},
       {:post, "/tasks/:doc_id/stage", BarkparkWeb.TasksController, :stage, auth: :token_root},
       # Personal Dev Fleet presence (Wave A) — literal paths mount at
@@ -970,7 +972,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "stage",
         summary:
-          "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,note} on →considering/researching and clears it on →open; emits a task.staged event. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
+          "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open, OR the row's OWN current state. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. THE TERMINAL SAME-STATE ADJUDICATION EDGE (PDS wave 25): a same-state no-op is accepted on EVERY status, not just the stageable ones — done→done, blocked→blocked, in_progress→in_progress — so a FINISHED row can record its disposition/reason/reopen-trigger IN PLACE instead of being resurrected to `open` first (which would leave it saying open while carrying claim.closed_by, and put it back in `bp task ready`). It widens ADJUDICATION, not MOVEMENT: the from-state is read from the locked row, never from your input, so state==current is satisfiable only by a row already in that state, and the write set never includes content.claim — a done→done stage leaves lifecycle_status=done and close attribution byte-identical. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,lapse_ttl_seconds,lapses_at} — an EPHEMERAL lease the TtlSweeper deletes wholesale after ~900s — on →considering/researching and clears it on →open; a `note` does NOT ride that lease, it lands on the DURABLE content.disposition_reason (no sweeper owns it) on EVERY target including →open; emits a task.staged event carrying staged.note_key. PDS wave 24: this verb also owns the ADJUDICATION TRIPLE — --disposition (open|parked|closed, normalised here because one writer means one normaliser), --note/content.disposition_reason and --reopen-trigger are written in that same CAS update or not at all, and a --disposition parked with no trigger on the stage and none on the row is refused BEFORE anything is written. Raw /v1/data/mutate changes of content.disposition on a type:task are refused and name this verb. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. open → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stage"},
         auth_tier: "read",
         args: [
@@ -984,7 +986,8 @@ defmodule Barkpark.Plugins.Tasks do
             name: "state",
             required: true,
             type: "string",
-            summary: "Target lifecycle state: considering | researching | open."
+            summary:
+              "Target lifecycle state: considering | researching | open — or the row's OWN current state (e.g. done on a done row), the same-state no-op that adjudicates a finished row in place without reopening it."
           }
         ],
         flags: [
@@ -998,13 +1001,31 @@ defmodule Barkpark.Plugins.Tasks do
             name: "note",
             type: "string",
             summary:
-              "Free-text note stamped into content.engagement.note on a thought-target stage."
+              "Free-text adjudication reason. Written to the DURABLE content.disposition_reason — NOT to the engagement lease, which the TTL sweeper deletes after ~900s. Recorded on every stageable target; a blank note overwrites nothing."
           },
           %{
             name: "worker",
             type: "string",
             summary:
               "The agent/worker owning the thought, stamped into content.engagement.holder."
+          },
+          %{
+            name: "disposition",
+            type: "string",
+            summary:
+              "The adjudication TERM (PDS wave 24): open | parked | closed, trimmed and downcased by this one writer. Written to the DURABLE content.disposition in the SAME CAS update as the transition and the reason. This verb is the ONLY writer: /v1/data/mutate refuses a raw change of content.disposition on a type:task and names this flag. Omitted → the row's existing term is left exactly as it was. Anything outside the vocabulary is a 400."
+          },
+          %{
+            name: "reopen-trigger",
+            type: "string",
+            summary:
+              "What would make a parked row worth reconsidering. Written to the DURABLE content.reopen_trigger. REQUIRED with --disposition parked unless the row already carries one — a park with no trigger is a 422 (missing_reopen_trigger) and NOTHING is written, because a park that cannot say what would reopen it has decided nothing. Blank counts as absent."
+          },
+          %{
+            name: "rerun",
+            type: "string",
+            summary:
+              "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/D336(a)): a SHARED rerun over distinct rows is the honest shape."
           }
         ],
         writes: true,
@@ -1309,6 +1330,78 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   def hydrate_edges(doc), do: doc
+
+  @doc """
+  Batched `hydrate_edges/1` over a whole corpus — the EdgeProjector rebuild
+  path. Per-doc result identical, but the DB cost is FLAT instead of per-doc:
+  ONE outbound `task_edges` query over every task doc's PK (all kinds) plus
+  ONE `documents` id→doc_id map for the targets — was one `Tasks.edges/2`
+  query per task doc plus one `Repo.get/2` per edge row (the rebuild-path
+  N+1). Non-task docs, and task docs with no resolvable PK, pass through
+  UNCHANGED; input order is preserved.
+  """
+  @spec hydrate_edges_batch([map()]) :: [map()]
+  def hydrate_edges_batch(docs) when is_list(docs) do
+    pks =
+      docs
+      |> Enum.filter(&task_doc?/1)
+      |> Enum.map(&doc_pk/1)
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+
+    if pks == [] do
+      docs
+    else
+      payloads_by_pk = task_edge_payloads_by_pk(pks)
+
+      Enum.map(docs, fn doc ->
+        with true <- is_map(doc) and task_doc?(doc),
+             pk when is_binary(pk) <- doc_pk(doc) do
+          put_task_edges(doc, Map.get(payloads_by_pk, pk, []))
+        else
+          _ -> doc
+        end
+      end)
+    end
+  end
+
+  # ONE outbound task_edges query over all task PKs + ONE Document id→doc_id
+  # map for the targets; rows whose target row no longer exists are dropped
+  # (mirrors edge_row_to_payload/1). Grouped by from_id for the per-doc attach.
+  defp task_edge_payloads_by_pk(pks) do
+    import Ecto.Query, only: [from: 2]
+
+    edge_rows =
+      Barkpark.Repo.all(from(e in Barkpark.Tasks.Edge, where: e.from_id in ^pks))
+
+    doc_id_by_pk =
+      case edge_rows |> Enum.map(& &1.to_id) |> Enum.uniq() do
+        [] ->
+          %{}
+
+        to_pks ->
+          from(d in Barkpark.Content.Document,
+            where: d.id in ^to_pks,
+            select: {d.id, d.doc_id}
+          )
+          |> Barkpark.Repo.all()
+          |> Map.new()
+      end
+
+    edge_rows
+    |> Enum.group_by(& &1.from_id)
+    |> Map.new(fn {from_pk, rows} ->
+      payloads =
+        Enum.flat_map(rows, fn row ->
+          case Map.get(doc_id_by_pk, row.to_id) do
+            to_doc_id when is_binary(to_doc_id) -> [%{to_id: to_doc_id, kind: row.kind}]
+            _ -> []
+          end
+        end)
+
+      {from_pk, payloads}
+    end)
+  end
 
   # Map a `task_edges` row (PK-keyed) to the payload shape the pure callback
   # reads: `%{to_id: <doc_id>, kind: <kind>}`. Resolves the `to_id` PK back to

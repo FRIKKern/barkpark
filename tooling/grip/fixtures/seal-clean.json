@@ -1,0 +1,52 @@
+{
+  "_header": [
+    "SEAL PREDICATE — POSITIVE CONTROL. Feeding this to `node tooling/grip/seal.mjs --ledger` must exit 0.",
+    "",
+    "IT IS COMMITTED ON PURPOSE. The prior art (cloud/priv/static/__preview__/seal-predicate.mjs) was",
+    "credited by D111 as 'mutation-proven in BOTH directions with working --ledger fixture injection',",
+    "and that credential is NOT RE-DERIVABLE FROM MAIN: `git grep -ln defectCommits` returns exactly one",
+    "tracked file, the module itself, and no tracked JSON carries its fixture keys. The fixture was a",
+    "throwaway and the proof evaporated on merge. This one does not.",
+    "",
+    "WHAT A GREEN HERE IS NOT. Under --ledger the command reads NOTHING live: it never walks the task",
+    "corpus, never calls `bp task ready`, and never issues the pinned filter[parent_id] query. Clauses",
+    "(b), (b') and (c) are read straight off the rows below. This is the exact shape of the trap in the",
+    "prior art, where clause (b) under --ledger reads `fixture.landed` and NEVER shells to",
+    "`git merge-base`. So a green here is a MUTATION CONTROL — proof the command is ABLE TO PASS — and",
+    "never evidence about the live ledger, whose only honest reading is a live run.",
+    "",
+    "WHAT IS STILL REAL HERE. Clause (a) is NOT stubbed. The reruns below are executed through the real",
+    "screenedRerun path, so the D50 absence veto is live in this proof. A hand-built result would make it",
+    "silently absent: admitsAbsenceClaim({verdict:'FAILED'}) with no absenceEligible key returns TRUE.",
+    "",
+    "The pool below deliberately contains the ROOT and nothing else from the namespace: that is what a",
+    "held predicate looks like — every child closed, the root still claimable, closing LAST."
+  ],
+  "root_doc": { "_id": "truth-grip-epic", "_type": "task", "lifecycle_status": "open", "_draft": false },
+  "namespace": [
+    { "_id": "truth-grip-epic", "_type": "task", "lifecycle_status": "open", "parent_id": null, "_draft": false },
+    { "_id": "tgw1-workflow-gate-wiring", "_type": "task", "lifecycle_status": "done", "parent_id": "truth-grip-epic", "_draft": false },
+    { "_id": "tgw2-acceptance-suite", "_type": "task", "lifecycle_status": "done", "parent_id": "tgw1-workflow-gate-wiring", "_draft": false },
+    { "_id": "tgw9-s3-criteria-adjudicated", "_type": "task", "lifecycle_status": "done", "parent_id": "truth-grip-epic", "_draft": false },
+    { "_id": "task-a965c4fbfe3710f5", "_type": "task", "lifecycle_status": "done", "parent_id": "truth-grip-epic", "_draft": false },
+    { "_id": "tgw-outside-the-tree", "_type": "task", "lifecycle_status": "done", "parent_id": "some-other-epic", "_draft": false }
+  ],
+  "direct_children": ["tgw1-workflow-gate-wiring", "tgw9-s3-criteria-adjudicated", "task-a965c4fbfe3710f5"],
+  "pool": ["truth-grip-epic", "an-unrelated-open-task"],
+  "criteria": [
+    {
+      "index": 0,
+      "polarity": "pass",
+      "covers": true,
+      "criterion": "a pass-shaped fact, adjudicated through the real screenedRerun path",
+      "rerun": "git show origin/main:tooling/grip/level.mjs | grep -n checkCeiling"
+    },
+    {
+      "index": 1,
+      "polarity": "absence",
+      "covers": true,
+      "criterion": "an absence-shaped fact whose probe genuinely matched nothing",
+      "rerun": "git show origin/main:tooling/grip/record.mjs | grep -c mkdirSync"
+    }
+  ]
+}

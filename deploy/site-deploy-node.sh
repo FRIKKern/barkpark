@@ -25,8 +25,11 @@
 #          poll ITS port to a >=10s deadline (a running process, not a static
 #          file — do not trust Next's "Ready" log line, boot-to-first-200 lags),
 #          assert HTTP 200 AND bp-build-id == BUILD_ID + bp-content-rev / bp-doc-id
-#          non-empty BY VALUE (meta_value, D26). On failure: stop the just-booted
-#          slot, NEVER touch the live slot or Caddy, exit 14 (fail closed).
+#          non-empty BY VALUE (meta_value, D26). An empty bp-doc-id still REFUSES;
+#          the optional bp-corpus-status marker names the upstream condition that
+#          emptied it (403 / 401 / wrong host / genuinely empty corpus) so the
+#          recorded failure_reason is a diagnosis, not a symptom. On failure: stop
+#          the just-booted slot, NEVER touch the live slot or Caddy, exit 14.
 #   SWITCH (D66) marker-anchored per-site reverse_proxy PORT re-flip — replace the
 #          `reverse_proxy localhost:<port>` inside THIS site's Caddy marker block
 #          in place (NOT instance-deploy.sh's whole-file global sed, which was
@@ -66,7 +69,14 @@
 #   14 HEALTH failed          15 gave up waiting for lock
 #   16 SWITCH failed          21 rollback: no_previous
 #   22 rollback: not_supported  23 rollback: lock held (deploy running)
-#   24 rollback failed
+#   24 rollback failed         25 teardown: route still live (disarm rejected)
+#
+# TEARDOWN machine contract (no BPSTAGE — a teardown is not a deploy):
+#   exit 0  prints TORN_DOWN=<slug> on stdout AND appends it to
+#           $BARKPARK_SITE_LOG_FILE — slots stopped, route gone, tree deleted.
+#   exit 25 prints TEARDOWN_FAILED=<slug> detail="…" on the SAME two channels and
+#           NEVER TORN_DOWN=: the Caddy route survived (the disarm was rejected and
+#           reverted), so the release tree + slot env files are LEFT ON DISK.
 #
 # Env inputs (a caller — bp cloud site deploy — injects these):
 #   SITE_SLUG          required. Names releases root, the /sites/<slug>/ route,
@@ -108,7 +118,7 @@ SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
 BP_LOG_TAG="site-deploy-node"
 
 # Shared primitives (charter D61): emit/BPSTAGE, valid_slug/valid_build_id,
-# meta_value, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy.sh
+# meta_value, build_failure_reason, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy.sh
 # sources the SAME file — the two engines cannot drift on the wire protocol, the
 # marker reader, or the one shared Caddyfile lock.
 # shellcheck source=deploy/lib/site-deploy-common.sh
@@ -200,6 +210,37 @@ stop_slot()    { systemctl disable --now "barkpark-site@$(slot_inst "$1")" 2>/de
 slot_running() { systemctl is-active --quiet "barkpark-site@$(slot_inst "$1")" 2>/dev/null; }
 
 # ---------------------------------------------------------------------------
+# THE ROUTE-MARKER PREDICATE (D345) — an IDENTITY, not a substring. Carried
+# VERBATIM from the static engine (deploy/site-deploy.sh); arm, disarm, the
+# active-port read and the port flip must all agree or one of them re-opens the
+# defect.
+#
+# `BARKPARK_SITE_ROUTE:<slug>` read as a bare substring is not an identity: a
+# slug can be a strict PREFIX of another slug, and then `grep -q "$marker"` and
+# awk `index($0, m)` match the SIBLING'S block. Measured live on guerrilla:
+# `search` is a prefix of `search-capstone`, so active_caddy_port read the
+# SIBLING's port 8506, active_slot matched neither PORT_A nor PORT_B and printed
+# nothing, CUR_SLOT came back EMPTY, every run took the phantom first-deploy ARM
+# branch, and the arm's already-armed guard matched the sibling and returned 0
+# WITHOUT WRITING — 208 deploys reporting SWITCH ok at exit 0 over a public 404,
+# with blue/green rollback silently absent (206 `for slot a`, zero slot b).
+#
+# `grep -qw` IS NOT THE FIX: `-w` treats `-` as a NON-word character, so
+# `…ROUTE:search` still word-matches `…ROUTE:search-capstone`. Anchor the
+# DELIMITER instead — and the delimiter is "any character a slug cannot
+# contain", NOT "whitespace". valid_slug() is `^[a-z0-9][a-z0-9-]{0,62}$`, so a
+# sibling can only ever continue the marker with `[a-z0-9-]`; rejecting exactly
+# that class is necessary AND sufficient. Whitespace-only would still be right
+# for markers this engine writes (always `# …:<slug> — …`) but would read a
+# HAND-EDITED marker (`…:<slug>:` / `…:<slug>#`) as not-armed and re-arm a
+# working route into a DUPLICATE handle — the dangerous direction. The slug
+# carries no ERE metacharacter (a `-` LAST in a bracket expression is literal),
+# so it interpolates literally into grep -E AND awk's dynamic regex alike.
+# ---------------------------------------------------------------------------
+site_route_marker_re() { printf 'BARKPARK_SITE_ROUTE:%s([^a-z0-9-]|$)' "$SITE_SLUG"; }
+has_site_route_marker() { grep -qE "$(site_route_marker_re)" "$1"; }
+
+# ---------------------------------------------------------------------------
 # Marker-anchored per-site Caddy read: the ACTIVE upstream port is the one inside
 # THIS site's marker block (BARKPARK_SITE_ROUTE:<slug>), never a global grep — two
 # node sites can legitimately share a port literal elsewhere in the file, and the
@@ -208,8 +249,8 @@ slot_running() { systemctl is-active --quiet "barkpark-site@$(slot_inst "$1")" 2
 # ---------------------------------------------------------------------------
 active_caddy_port() {
   [ -f "$CADDYFILE" ] || return 0
-  awk -v m="BARKPARK_SITE_ROUTE:$SITE_SLUG" '
-    index($0, m) { inb = 1 }
+  awk -v m="$(site_route_marker_re)" '
+    $0 ~ m { inb = 1 }
     inb && match($0, /reverse_proxy[[:space:]]+localhost:[0-9]+/) {
       p = substr($0, RSTART, RLENGTH); sub(/.*localhost:/, "", p); print p; exit
     }
@@ -250,7 +291,12 @@ arm_caddy_node_route() { # <port>
   local port="$1" marker="BARKPARK_SITE_ROUTE:$SITE_SLUG"
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — cannot arm /sites/$SITE_SLUG"; return 1; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — cannot arm /sites/$SITE_SLUG"; return 1; }
-  if grep -q "$marker" "$CADDYFILE"; then return 0; fi
+  # DELIMITER-ANCHORED (D345): a bare-substring guard matched a prefix SIBLING's
+  # marker and returned "already armed" for a site that was never armed at all.
+  if has_site_route_marker "$CADDYFILE"; then
+    ROUTE_DETAIL="already armed: $CADDYFILE already carries this site's own $marker block, so the arm wrote nothing (only the upstream port moves on a re-deploy)"
+    return 0
+  fi
   if ! grep -qE 'reverse_proxy[[:space:]]+localhost:(4000|4001)([[:space:]]|$)' "$CADDYFILE"; then
     log "no slot 'reverse_proxy localhost:...' site in $CADDYFILE — cannot arm /sites/$SITE_SLUG"
     return 1
@@ -304,26 +350,38 @@ SITEROUTE
     !ins && $0 ~ /reverse_proxy[[:blank:]]+localhost:(4000|4001)([[:blank:]]|$)/ { print blk; ins = 1 }
     { print }
   ' "$CADDYFILE" > "$tmp" || { rm -f "$tmp"; return 1; }
-  commit_caddyfile "$tmp"
+  if commit_caddyfile "$tmp"; then
+    ROUTE_DETAIL="armed: this run wrote the $marker block into $CADDYFILE and reloaded Caddy, so https://$HEALTH_HOST/sites/$SITE_SLUG/ now proxies to localhost:$port"
+    return 0
+  fi
+  return 1
 }
 
 # Flip the reverse_proxy port INSIDE this site's marker block, in place. Replaces
 # ONLY the first reverse_proxy localhost:<port> after the marker — never a global
 # sed. 0 flipped, 1 rejected/reverted.
 flip_caddy_node_port() { # <new-port>
-  local port="$1" marker="BARKPARK_SITE_ROUTE:$SITE_SLUG"
+  local port="$1" marker="BARKPARK_SITE_ROUTE:$SITE_SLUG" mre
+  mre="$(site_route_marker_re)"
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — cannot flip /sites/$SITE_SLUG"; return 1; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — cannot flip /sites/$SITE_SLUG"; return 1; }
-  grep -q "$marker" "$CADDYFILE" || { log "no $marker block in $CADDYFILE — cannot flip"; return 1; }
+  # DELIMITER-ANCHORED (D345) on BOTH reads: the guard below and the awk that
+  # finds the block. A bare substring would let this rewrite a prefix SIBLING's
+  # upstream port — the same collision, in its most destructive direction.
+  has_site_route_marker "$CADDYFILE" || { log "no $marker block in $CADDYFILE — cannot flip"; return 1; }
   local tmp; tmp="$(mktemp)"
-  awk -v m="$marker" -v p="$port" '
-    index($0, m) { inb = 1 }
+  awk -v m="$mre" -v p="$port" '
+    $0 ~ m { inb = 1 }
     inb && !done && $0 ~ /reverse_proxy[[:blank:]]+localhost:[0-9]+/ {
       sub(/localhost:[0-9]+/, "localhost:" p); inb = 0; done = 1
     }
     { print }
   ' "$CADDYFILE" > "$tmp" || { rm -f "$tmp"; return 1; }
-  commit_caddyfile "$tmp"
+  if commit_caddyfile "$tmp"; then
+    ROUTE_DETAIL="already armed: this site's $marker block was already in $CADDYFILE, so this run only moved its upstream to localhost:$port (no route was added)"
+    return 0
+  fi
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -333,8 +391,42 @@ flip_caddy_node_port() { # <new-port>
 # asserts the served bytes carry THIS build's markers by value. On any failure it
 # stops the just-booted slot and NEVER touches the live slot or Caddy. Sets
 # HEALTH_DETAIL either way (rides the BPSTAGE line).
+#
+# SLOW IS NOT BROKEN (D27). The probe budget below is TWO-PHASE, because a single
+# per-attempt ceiling made the gate report the same thing for a site that renders
+# in 48s as for a site that never renders at all. Under an 8s ceiling curl aborts
+# mid-render and reports the last COMPLETED hop — a 308 — so a merely-slow site
+# burned all 20 attempts and exited 14 with "returned 308 (want 200)", which is a
+# false diagnosis: the site was serving, just not inside the ceiling.
+#
+# MEASURED, and the CONTROL is what carries the claim (never the seconds alone —
+# the absolute figure was first taken at load average 13.45, so it is a reading of
+# the box under wave load as much as of the site): on ONE box, SECONDS APART, the
+# sibling node slots first-200 in ~1.3s while search-capstone takes ~48s — a ~37x
+# within-host ratio. The LIVE, previously-GREEN capstone release behaves the same
+# (308/8.4s, 308/8.0s, 308/8.0s under the ceiling; 200/48.1s without it), so the
+# latency is site-specific and PRE-EXISTING; the provisioning repair EXPOSES it,
+# it did not cause it.
+#
+# So: FAST attempts at the tight ceiling (a healthy slot passes on the first
+# sub-second one), then ONE PATIENT attempt whose ceiling is ~2x the worst render
+# actually observed. A 200 that only lands on the patient attempt is a DIFFERENT,
+# honest outcome — the gate PASSES it (the bytes are there and the markers are
+# still asserted by value) and says SLOW, with the measured seconds and the
+# multiple of the fast ceiling in the detail, so a slow site is VISIBLE instead of
+# either silently failing or silently passing. Never-200 stays exit 14 and now
+# says never-200 in those words. The TOTAL budget does not grow: worst case
+# 8*(8+0.5) + 90 = 158s, under the 170s the flat 20-attempt loop already spent.
 # ---------------------------------------------------------------------------
+# Dev/self-test knobs ONLY (same contract as BUILD_GATE_*): DeployRunner writes an
+# explicit env allowlist into the transient unit, so nothing ambient can reach the
+# engine on the real path. To change the box's behaviour, change the defaults.
+HEALTH_FAST_ATTEMPTS="${BARKPARK_SITE_HEALTH_ATTEMPTS:-8}"
+HEALTH_FAST_MAX="${BARKPARK_SITE_HEALTH_FAST_MAX:-8}"       # ~6x a healthy 1.3s first render
+HEALTH_PATIENT_MAX="${BARKPARK_SITE_HEALTH_PATIENT_MAX:-90}" # ~2x the worst (48s) observed live
 HEALTH_DETAIL=""
+HEALTH_SLOW=0        # 1 = served 200, but only past the fast ceiling
+HEALTH_SECONDS=""    # curl %{time_total} of the attempt that answered
 health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   HEALTH_DETAIL=""
   local slot="$1" bid="$2" port inst path
@@ -366,38 +458,61 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     log "HEALTH: $HEALTH_DETAIL"; return 1
   fi
 
-  local body code=000 i curl_rc=0 t_total=""
+  local body code=000 i curl_rc=0 t_total="" out fast_code=000
+  HEALTH_SLOW=0; HEALTH_SECONDS=""
   body="$(mktemp "${TMPDIR:-/tmp}/site-node-health.XXXXXX")"
-  # 20 attempts, 8s ceiling each, >=20s wall minimum (D65 raised for SSR): a
-  # force-dynamic SSR page fetches content per request, and a 2s per-attempt
-  # ceiling made EVERY probe abort mid-render — curl then reports the last
-  # COMPLETED hop, so a basePath site read as an eternal 308 (proven live:
-  # search-capstone b-…-stw1d "308 within 12s" while the slot rendered 200 in
-  # ~1s when probed without the ceiling; HEALTH burned 60x2s = 131s, and the
-  # "12s deadline" comment was a lie in node mode). The overall bound stays
-  # finite: worst case 20*(8+0.5)s = 170s, and a healthy slot passes on the
-  # first sub-second attempt.
-  for i in $(seq 1 20); do
+  # PHASE 1 — the fast poll. A force-dynamic SSR page fetches content per request,
+  # so the ceiling is generous by static standards (D65 raised it from 2s, which
+  # made EVERY probe abort mid-render and read as an eternal 308: search-capstone
+  # b-…-stw1d "308 within 12s" while the slot rendered 200 in ~1s unthrottled).
+  # A healthy slot answers on the first sub-second attempt.
+  for i in $(seq 1 "$HEALTH_FAST_ATTEMPTS"); do
     # -L --max-redirs 2: canonicalization is framework-owned. Next with a baked
     # basePath 308s `${basePath}/` -> `${basePath}` (proven live: search-capstone
     # b-…-stw1c HEALTH read 308 at /sites/<slug>/), while a plain static server
     # 301s bare -> slashed. Follow up to 2 loopback hops and gate on the FINAL
     # code — the marker-by-value assertion below still proves the served bytes.
-    out="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time 8 "http://127.0.0.1:$port$path" 2>/dev/null)"; curl_rc=$?
+    out="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_FAST_MAX" "http://127.0.0.1:$port$path" 2>/dev/null)"; curl_rc=$?
     code="${out%% *}"; t_total="${out##* }"; [ -n "$code" ] || code=000
     [ "$code" = 200 ] && break
     sleep 0.5
   done
+  HEALTH_SECONDS="$t_total"
+  # PHASE 2 — the patient attempt. The fast poll never saw a 200; that is the
+  # state where SLOW and BROKEN are indistinguishable, so ASK ONCE MORE without
+  # the tight ceiling instead of guessing. Whatever this returns is a fact about
+  # the site, not about the ceiling.
+  if [ "$code" != 200 ]; then
+    fast_code="$code"
+    log "HEALTH: no 200 in $HEALTH_FAST_ATTEMPTS attempts at the ${HEALTH_FAST_MAX}s ceiling (last: $fast_code) — one patient probe at ${HEALTH_PATIENT_MAX}s to tell a SLOW site from a BROKEN one"
+    out="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_PATIENT_MAX" "http://127.0.0.1:$port$path" 2>/dev/null)"; curl_rc=$?
+    code="${out%% *}"; t_total="${out##* }"; [ -n "$code" ] || code=000
+    HEALTH_SECONDS="$t_total"
+    i=$((i + 1))
+    [ "$code" = 200 ] && HEALTH_SLOW=1
+  fi
   if [ "$code" != 200 ]; then
     rm -f "$body"; stop_slot "$slot"
-    HEALTH_DETAIL="slot $slot on :$port returned $code (want 200) at $path after $i attempts (last: curl exit $curl_rc, ${t_total}s) — boot failed, live slot untouched"
+    HEALTH_DETAIL="slot $slot on :$port returned $code (want 200) at $path — NEVER served 200: $HEALTH_FAST_ATTEMPTS attempts at the ${HEALTH_FAST_MAX}s ceiling (last $fast_code) AND a patient ${HEALTH_PATIENT_MAX}s probe (${HEALTH_SECONDS}s, curl exit $curl_rc) — BROKEN, not slow; live slot untouched"
     log "HEALTH: $HEALTH_DETAIL"; return 1
   fi
+  if [ "$HEALTH_SLOW" = 1 ]; then
+    # It SERVES. It is just slow — and that is a site defect (a cold SSR render
+    # this far past its siblings on the same box), not a boot failure. Say so
+    # loudly on both channels; the markers below are still asserted by value.
+    log "HEALTH: SLOW — slot $slot on :$port served 200 only on the patient probe, after ${HEALTH_SECONDS}s (past the ${HEALTH_FAST_MAX}s per-attempt ceiling; a healthy slot on this box first-200s in ~1.3s). Gating it as healthy: it renders, and refusing it would be a false 'boot failed'."
+  fi
 
-  local got_build got_rev got_doc
+  local got_build got_rev got_doc got_corpus
   got_build="$(meta_value "$body" bp-build-id)"
   got_rev="$(meta_value "$body" bp-content-rev)"
   got_doc="$(meta_value "$body" bp-doc-id)"
+  # bp-corpus-status (cause-truth): the template emits it ONLY when it could not
+  # anchor a content document, carrying the upstream condition that stopped it
+  # ("graph 403: …", "graph 401: …", "graph 200: corpus read OK but carried 0
+  # node(s)…"). Read it BEFORE the body is deleted — it is what turns the empty
+  # bp-doc-id refusal below from a symptom into a diagnosis.
+  got_corpus="$(meta_value "$body" bp-corpus-status)"
   rm -f "$body"
   if [ "$got_build" != "$bid" ]; then
     stop_slot "$slot"
@@ -416,10 +531,26 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   fi
   if [ -z "$got_doc" ]; then
     stop_slot "$slot"
-    HEALTH_DETAIL="bp-doc-id marker is empty — the SSR rendered no content document"
+    # STILL REFUSES — fail-closed on an empty bp-doc-id is correct (D72) and is
+    # NOT relaxed here. What changes is legibility: when the build recorded WHY
+    # it could not read its corpus, that cause rides the failure_reason, so a
+    # 403 (public-read token), a 401 (no token), a wrong host and a genuinely
+    # empty corpus stop collapsing into one illegible row.
+    if [ -n "$got_corpus" ]; then
+      HEALTH_DETAIL="bp-doc-id marker is empty — the SSR could not read a content document: $got_corpus"
+    else
+      HEALTH_DETAIL="bp-doc-id marker is empty — the SSR rendered no content document (no bp-corpus-status marker: this build predates the corpus-status contract, so the upstream cause went unrecorded)"
+    fi
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
-  HEALTH_DETAIL="200 + bp-build-id=$got_build bp-content-rev=$got_rev bp-doc-id=$got_doc (slot $slot :$port)"
+  # The observed latency ALWAYS rides the detail — a stdout-only caller cannot
+  # ask the box afterwards, and "how long did it take to render" is the one
+  # number that separates a site that is degrading from one that is fine.
+  if [ "$HEALTH_SLOW" = 1 ]; then
+    HEALTH_DETAIL="200 in ${HEALTH_SECONDS}s — SLOW: no 200 inside the ${HEALTH_FAST_MAX}s per-attempt ceiling, only on the patient ${HEALTH_PATIENT_MAX}s probe (a healthy slot on this box first-200s in ~1.3s) — serving, not broken + bp-build-id=$got_build bp-content-rev=$got_rev bp-doc-id=$got_doc (slot $slot :$port)"
+  else
+    HEALTH_DETAIL="200 in ${HEALTH_SECONDS}s + bp-build-id=$got_build bp-content-rev=$got_rev bp-doc-id=$got_doc (slot $slot :$port)"
+  fi
   log "HEALTH: $HEALTH_DETAIL"
   return 0
 }
@@ -535,6 +666,8 @@ if [ "$MODE" = selftest ]; then
   free_port() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'; }
   T_PORT_A="$(free_port)"; T_PORT_B="$(free_port)"; T_PORT_C="$(free_port)"; T_PORT_D="$(free_port)"
   T_PORT_E="$(free_port)"; T_PORT_F="$(free_port)"   # basePath site's two slots
+  T_PORT_G="$(free_port)"; T_PORT_H="$(free_port)"   # prefix-collision: the LONGER sibling
+  T_PORT_I="$(free_port)"; T_PORT_J="$(free_port)"   # prefix-collision: the PREFIX slug
 
   FAKEBIN="$TD/bin"; SLOTPIDS="$TD/slotpids"; SENV="$TD/slots"; SRC="$TD/src"
   mkdir -p "$FAKEBIN" "$SLOTPIDS" "$SENV" "$SRC"
@@ -569,7 +702,18 @@ case "\$verb" in
     port="\$(grep -E '^PORT=' "\$envf" | cut -d= -f2)"
     rel="\$(grep -E '^RELEASE_DIR=' "\$envf" | cut -d= -f2-)"
     [ -n "\$port" ] && [ -d "\$rel" ] || exit 1
-    python3 -m http.server "\$port" --bind 127.0.0.1 --directory "\$rel" >/dev/null 2>&1 &
+    # A slot that is SLOW or BROKEN on purpose (the SLOW-vs-BROKEN health cases)
+    # ships a sentinel INSIDE its release: .slow-serve holds a per-request delay
+    # in seconds, .broken-serve an HTTP status it always answers with. Everything
+    # else gets the plain fast file server, byte-identical to before.
+    if [ -f "\$rel/.slow-serve" ] || [ -f "\$rel/.broken-serve" ]; then
+      delay=0; status=200
+      [ -f "\$rel/.slow-serve" ]   && delay="\$(cat "\$rel/.slow-serve")"
+      [ -f "\$rel/.broken-serve" ] && status="\$(cat "\$rel/.broken-serve")"
+      python3 "$TD/probe-server.py" "\$port" "\$rel" "\$delay" "\$status" >/dev/null 2>&1 &
+    else
+      python3 -m http.server "\$port" --bind 127.0.0.1 --directory "\$rel" >/dev/null 2>&1 &
+    fi
     echo \$! > "\$pidf"; exit 0;;
   stop)
     [ -f "\$pidf" ] && { kill "\$(cat "\$pidf")" 2>/dev/null; rm -f "\$pidf"; }; exit 0;;
@@ -578,6 +722,28 @@ case "\$verb" in
 esac
 exit 0
 SYSCTL
+  # The deliberately-slow / deliberately-broken slot server. A real SSR page that
+  # takes 48s to render and a slot that never answers 200 are INDISTINGUISHABLE to
+  # a probe with one ceiling — this is how both are driven offline, in seconds.
+  cat > "$TD/probe-server.py" <<'PROBESRV'
+import http.server, sys, time
+port, root, delay, status = int(sys.argv[1]), sys.argv[2], float(sys.argv[3]), int(sys.argv[4])
+class H(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, directory=root, **kw)
+    def log_message(self, *a):
+        pass
+    def do_GET(self):
+        if delay:
+            time.sleep(delay)
+        if status != 200:
+            self.send_response(status)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        super().do_GET()
+http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+PROBESRV
   # Fake npm: `ci` no-ops; `run build` emits a Next standalone layout carrying the
   # markers the health gate asserts. Lie/fail switches ride in FILES in the source
   # dir (cwd is the one channel the env scrub cannot close).
@@ -604,8 +770,15 @@ if [ -f ./.fail-build ]; then
   echo "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog — the site read token is invalid" >&2
   exit 1
 fi
-bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"
+bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"; corpus=""
 [ -f ./.lie ] && { bid=TOTALLY-WRONG; rev=""; }
+# An SSR that could NOT read its corpus: empty bp-doc-id (the gate must still
+# refuse) PLUS the bp-corpus-status marker naming the upstream condition — the
+# exact bytes templates/search-starter emits via lib/graph.corpusStatusMarker.
+[ -f ./.no-corpus ] && { doc=""; corpus="graph 403: public-read tokens may only read published public documents"; }
+# The legacy shape: empty bp-doc-id and NO status marker (a template built before
+# the corpus-status contract) — the gate must refuse AND say the cause is unknown.
+[ -f ./.no-corpus-legacy ] && { doc=""; corpus=""; }
 mkdir -p .next/standalone .next/static public
 printf '// fake next standalone server\n' > .next/standalone/server.js
 {
@@ -613,10 +786,20 @@ printf '// fake next standalone server\n' > .next/standalone/server.js
   printf '<meta name="bp-build-id" content="%s">\n' "$bid"
   printf '<meta name="bp-content-rev" content="%s">\n' "$rev"
   printf '<meta name="bp-doc-id" content="%s">\n' "$doc"
+  # Emitted ONLY when there is something to record — same conditional the
+  # template uses (a healthy render carries no bp-corpus-status at all).
+  [ -n "$corpus" ] && printf '<meta name="bp-corpus-status" content="%s">\n' "$corpus"
   printf '</head><body><h1>SSR</h1></body></html>\n'
 } > .next/standalone/index.html
 printf 'chunk\n' > .next/static/chunk.js
 printf 'robots\n' > public/robots.txt
+# Carry the slot-behaviour sentinels INTO the release (STAGE's `cp -a src/.`
+# copies dotfiles), so the fake systemctl can boot a slot that is slow, or one
+# that never answers 200, without touching the engine's own code path.
+rm -f .next/standalone/.slow-serve .next/standalone/.broken-serve
+[ -f ./.slow-serve ]   && cp ./.slow-serve   .next/standalone/.slow-serve
+[ -f ./.broken-serve ] && cp ./.broken-serve .next/standalone/.broken-serve
+true
 # basePath mode: an app built with basePath=/sites/<slug> serves its marker page
 # UNDER that prefix even on the raw node port — so also emit the index there, so
 # the real health_gate_node probing /sites/<slug>/ gets 200 + markers.
@@ -667,6 +850,9 @@ FAKENPM
   }
   saw()   { grep -q "^BPSTAGE name=$1 status=$2 build_id=$3" "$TD/out.log"; }
   nosaw() { ! grep -q "^BPSTAGE name=$1 " "$TD/out.log"; }
+  # "this run's log says nothing of the kind" — the negative half of a reason
+  # assertion (a diagnosis must not be invented when nothing was recorded).
+  no_log_match() { ! grep -q "$1" "$TD/out.log"; }
   cf_port() { awk -v m="BARKPARK_SITE_ROUTE:selftest" 'index($0,m){i=1} i&&match($0,/localhost:[0-9]+/){p=substr($0,RSTART+10,RLENGTH-10);print p;exit}' "$CF"; }
 
   echo "[selftest] e2e: first deploy boots slot a, gates it, arms Caddy to :A, walks six stages"
@@ -683,6 +869,75 @@ FAKENPM
   check "STAGE pulled .next/static in"   [ -f "$N_SITE/releases/n1/.next/static/chunk.js" ]
   check "STAGE pulled public/ in"        [ -f "$N_SITE/releases/n1/public/robots.txt" ]
   check "Caddy armed to slot a :A"       [ "$(cf_port)" = "$T_PORT_A" ]
+  # D346 — the arm decision on the DURABLE channel. This engine spoke SWITCH
+  # only, so `arm` vs `flip` (first deploy vs blue/green) was unrecoverable
+  # after the fact: log() writes stdout, which nothing persists.
+  check "ROUTE ok says ARMED on the durable machine channel (D346)" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=n1 detail="armed: ' "$TD/out.log"
+  check "…and the ROUTE detail names the port it armed" \
+    grep -q "proxies to localhost:$T_PORT_A" "$TD/out.log"
+  # ROUTE must stay OUTSIDE DeployRunner's @stage_names, or this report becomes a
+  # verdict: parse_stage_line/2 would fold it into `stages` and stage_exit_code/1
+  # could turn a green deploy red. Report, never verdict (charter D327).
+  RUNNER_EX="$(cd "$(dirname "$SELF")/.." && pwd)/api/lib/barkpark/sites/deploy_runner.ex"
+  if [ ! -f "$RUNNER_EX" ]; then
+    # A silent skip here is the same vacuum as the flock skip below: extracted
+    # without api/, this row disappears and the suite still prints PASS at a
+    # lower total. Skip honestly on a partial checkout; NEVER in CI.
+    if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+      echo "[selftest] FAIL - the DeployRunner @stage_names proof is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but $RUNNER_EX is missing — this engine was extracted without api/, so the only assertion that ROUTE stays OUTSIDE the runner's whitelist did not run; a skipped doctrine proof must not report PASS"
+      exit 1
+    fi
+    echo "[selftest] SKIP DeployRunner @stage_names doctrine (ROUTE stays a report) — needs api/lib/barkpark/sites/deploy_runner.ex in the tree"
+  else
+    check "DeployRunner's @stage_names still has no ROUTE arm (the node report cannot flip a verdict)" \
+      sh -c "! grep -q '^  @stage_names .*ROUTE' '$RUNNER_EX'"
+  fi
+
+  # -------------------------------------------------------------------------
+  # THE MARKER DELIMITER CLASS (D345), asserted DIRECTLY on the predicate.
+  #
+  # #10607's fix landed in BOTH engines, but only the static engine could SEE
+  # it: every marker THIS script writes has a space after the slug, so reverting
+  # site_route_marker_re to a whitespace-only ([[:space:]]|$) predicate left this
+  # suite at 177/177 PASS while the same mutation red the static engine's two
+  # hand-edited-delimiter rows. The hardening in the file that governs every live
+  # Node site's public route was mutation-INVISIBLE — an L4 claim in an L1 suit.
+  #
+  # The dangerous direction is a marker this script did NOT write: a hand-edited
+  # `…:<slug>:` in a live Caddyfile reads as NOT ARMED under a whitespace-only
+  # predicate, and the arm re-writes a working route into a duplicate handle.
+  # So the delimiter is "any character a slug cannot contain" ([^a-z0-9-]),
+  # which is right in BOTH directions — it accepts every real delimiter and
+  # still rejects the only thing a sibling slug can continue with.
+  # -------------------------------------------------------------------------
+  echo "[selftest] the marker delimiter is 'not a slug character', not merely whitespace (D345)"
+  mrk() { # <slug> <line> -> 0 if the predicate says "this line is that slug's marker"
+    # ${SITE_SLUG:-}: the selftest runs with `set -u` and no slug of its own —
+    # the deploy path is what sets this global.
+    local __save="${SITE_SLUG:-}" __rc=0
+    printf '%s\n' "$2" > "$TD/mrk.txt"
+    SITE_SLUG="$1"; has_site_route_marker "$TD/mrk.txt" || __rc=$?
+    SITE_SLUG="$__save"; return "$__rc"
+  }
+  check "delimiter: a space after the slug matches (what this script writes)" \
+    mrk search '# BARKPARK_SITE_ROUTE:search — node site'
+  check "delimiter: end-of-line matches" \
+    mrk search '# BARKPARK_SITE_ROUTE:search'
+  check "delimiter: a hand-edited ':' after the slug STILL reads as armed (no duplicate re-arm)" \
+    mrk search '# BARKPARK_SITE_ROUTE:search: node site'
+  check "delimiter: a hand-edited '#' after the slug STILL reads as armed" \
+    mrk search '# BARKPARK_SITE_ROUTE:search#1'
+  if mrk search '# BARKPARK_SITE_ROUTE:search-capstone — node site'; then
+    check "delimiter: a PREFIX sibling ('-') is REJECTED" false
+  else
+    check "delimiter: a PREFIX sibling ('-') is REJECTED" true
+  fi
+  if mrk search '# BARKPARK_SITE_ROUTE:search2 — node site'; then
+    check "delimiter: an alnum-extended sibling is REJECTED" false
+  else
+    check "delimiter: an alnum-extended sibling is REJECTED" true
+  fi
   check "slot a env RELEASE_DIR=n1"      grep -q "RELEASE_DIR=$N_SITE/releases/n1" "$SENV/selftest__a.env"
   # GNU stat first (-c; on Linux `stat -f` SUCCEEDS with filesystem info, so a
   # BSD-first fallback never fires and the check reads garbage on CI runners),
@@ -705,6 +960,8 @@ FAKENPM
   check "HEALTH ok on the new slot"      saw HEALTH ok n2
   check "SWITCH ok"                      saw SWITCH ok n2
   check "Caddy flipped to slot b :B"     [ "$(cf_port)" = "$T_PORT_B" ]
+  check "ROUTE ok says ALREADY-ARMED on a flip, not armed (D346)" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=n2 detail="already armed: ' "$TD/out.log"
   check "marker block flipped in place, single reverse_proxy inside it" \
     [ "$(awk 'index($0,"BARKPARK_SITE_ROUTE:selftest"){i=1} i&&/reverse_proxy/{c++} i&&/}/{i=0} END{print c+0}' "$CF")" = 1 ]
   check "old port :A fully gone from the marker block" \
@@ -745,6 +1002,36 @@ FAKENPM
   # shellcheck disable=SC2016  # $PATH must expand inside sh -c at run time, not now
   check "the just-booted bad slot is stopped" \
     sh -c '! env PATH="'"$FAKEBIN"':$PATH" systemctl is-active --quiet barkpark-site@selftest__b'
+
+  echo "[selftest] e2e: an UNREADABLE CORPUS fails HEALTH and the reason NAMES the upstream condition (403), not just the empty marker"
+  before_port="$(cf_port)"
+  : > "$SRC/.no-corpus"
+  rc="$(E2E_REV=rev-3b e2e_deploy n3b)"
+  rm -f "$SRC/.no-corpus"
+  check "unreadable-corpus build exit 14"  [ "$rc" = 14 ]
+  check "HEALTH failed"                    saw HEALTH failed n3b
+  check "the reason names the UPSTREAM 403, read out of bp-corpus-status" \
+    grep -q 'bp-doc-id marker is empty .* graph 403: public-read tokens may only read published public documents' "$TD/out.log"
+  # Dual-channel, same contract as the lying build: the cause must ride the plain
+  # human log too, because the run-level reason_tail is the copy the user sees.
+  check "the cause ALSO rides the plain human log (dual-channel)" \
+    grep -q '\[site-deploy-node .*HEALTH: bp-doc-id marker is empty .* graph 403: ' "$TD/out.log"
+  check "no SWITCH stage line at all"      nosaw SWITCH
+  check "Caddy upstream did NOT move (the gate STILL fails closed)" [ "$(cf_port)" = "$before_port" ]
+  check "the corpus-less release is purged" [ ! -d "$N_SITE/releases/n3b" ]
+
+  echo "[selftest] e2e: an empty bp-doc-id with NO status marker still refuses, and SAYS the cause went unrecorded"
+  before_port="$(cf_port)"
+  : > "$SRC/.no-corpus-legacy"
+  rc="$(E2E_REV=rev-3c e2e_deploy n3c)"
+  rm -f "$SRC/.no-corpus-legacy"
+  check "legacy empty-marker build exit 14" [ "$rc" = 14 ]
+  check "HEALTH failed"                     saw HEALTH failed n3c
+  check "the reason admits the cause is UNRECORDED (never invents one)" \
+    grep -q 'no bp-corpus-status marker: this build predates the corpus-status contract' "$TD/out.log"
+  check "it does NOT claim a 403"           no_log_match 'graph 403'
+  check "no SWITCH stage line at all"       nosaw SWITCH
+  check "Caddy upstream did NOT move"       [ "$(cf_port)" = "$before_port" ]
 
   echo "[selftest] e2e: a BUILD failure carries its 401 reason on STDOUT, exit 12, no flip"
   : > "$SRC/.fail-build"
@@ -859,6 +1146,80 @@ FAKENPM
   check "marker-only did NOT arm handle_path" \
     sh -c "! grep -qF 'handle_path /sites/basepath/*' '$CF'"
 
+  # -------------------------------------------------------------------------
+  # SLOW IS NOT BROKEN (D27). Both halves are DRIVEN here, on their own slug and
+  # ports, with the ceilings scaled down (a 2s "slow" render against a 1s fast
+  # ceiling is the same shape as a 48s render against 8s) so the proof costs
+  # seconds, not minutes. What must differ is the OUTCOME, not the wording alone:
+  # one deploys, one refuses.
+  # -------------------------------------------------------------------------
+  sl_deploy() { # <slug> <build_id> <lock> <port-a> <port-b> [patient-max] -> exit code
+    env PATH="$FAKEBIN:$PATH" SITE_SLUG="$1" BUILD_ID="$2" CONTENT_REV=sl-rev \
+      SITE_SRC="$SRC" SITE_PORT_A="$4" SITE_PORT_B="$5" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/$3.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
+      BARKPARK_SITE_HEALTH_PATIENT_MAX="${6:-20}" \
+      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?
+  }
+
+  echo "[selftest] e2e: a SLOW site (serves 200, past the per-attempt ceiling) is gated HEALTHY and SAYS it is slow"
+  printf '2\n' > "$SRC/.slow-serve"
+  rc="$(sl_deploy slowsite sl1 slowsite "$(free_port)" "$(free_port)")"
+  rm -f "$SRC/.slow-serve"
+  check "slow deploy exit 0 (it renders — refusing it would be a false 'boot failed')" [ "$rc" = 0 ]
+  check "HEALTH ok"                            saw HEALTH ok sl1
+  check "SWITCH ok (a slow site still goes live)" saw SWITCH ok sl1
+  check "the stage detail SAYS SLOW"           grep -q '^BPSTAGE name=HEALTH status=ok .*SLOW:' "$TD/out.log"
+  check "the stage detail carries the OBSERVED latency in seconds" \
+    grep -qE '^BPSTAGE name=HEALTH status=ok build_id=sl1 detail="200 in [0-9]+\.[0-9]+s' "$TD/out.log"
+  check "it names the ceiling it exceeded, not just 'slow'" \
+    grep -q 'no 200 inside the 1s per-attempt ceiling' "$TD/out.log"
+  check "the SLOW verdict ALSO rides the plain human log (dual-channel)" \
+    grep -q '\[site-deploy-node .*HEALTH: SLOW —' "$TD/out.log"
+  check "it did NOT report the site as never-serving"  no_log_match 'NEVER served 200'
+
+  echo "[selftest] e2e: a BROKEN site (never 200, even unthrottled) is refused — a DIFFERENT outcome, in different words"
+  printf '503\n' > "$SRC/.broken-serve"
+  rc="$(sl_deploy brokesite br1 brokesite "$(free_port)" "$(free_port)")"
+  rm -f "$SRC/.broken-serve"
+  check "broken deploy exit 14 (HEALTH refused)"  [ "$rc" = 14 ]
+  check "HEALTH failed"                           saw HEALTH failed br1
+  check "the detail says NEVER served 200"        grep -q 'NEVER served 200' "$TD/out.log"
+  check "the detail calls it BROKEN, not slow"    grep -q 'BROKEN, not slow' "$TD/out.log"
+  check "it records the patient probe's own reading too" \
+    grep -q 'AND a patient 20s probe' "$TD/out.log"
+  check "it did NOT claim the site was merely slow" \
+    sh -c "! grep -q 'HEALTH: SLOW —' '$TD/out.log'"
+  check "no SWITCH stage line at all"             nosaw SWITCH
+  check "the broken release is purged"            [ ! -d "$TD/sites/brokesite/releases/br1" ]
+
+  echo "[selftest] e2e: MUTATION PROOF — take the patient headroom away and the SAME slow site is misdiagnosed as broken"
+  # This is the bug, reproduced on demand: with the patient ceiling collapsed to
+  # the fast one (1s — what a single-ceiling gate is), the site that just deployed
+  # green is refused, and refused with the BROKEN wording. The distinction is
+  # therefore load-bearing, not decorative.
+  printf '2\n' > "$SRC/.slow-serve"
+  rc="$(sl_deploy slowsite2 sl2 slowsite2 "$(free_port)" "$(free_port)" 1)"
+  rm -f "$SRC/.slow-serve"
+  check "MUTANT: no headroom -> the identical slow site exits 14"  [ "$rc" = 14 ]
+  check "MUTANT: and it is called BROKEN, which is the false diagnosis being fixed" \
+    grep -q 'BROKEN, not slow' "$TD/out.log"
+
+  echo "[selftest] build_failure_reason resolves from the SHARED lib in THIS engine too"
+  # The lift's whole point: one copy, both engines. If it ever gets re-forked into
+  # an engine, the Console harness reds; if it goes MISSING from the lib, this
+  # does. Pinned against the same RECORDED 30,993-byte Turbopack failure.
+  N_FIXLOG="$(cd "$(dirname "$SELF")" && pwd)/testdata/capstone-turbopack-build-fail.txt"
+  check "the recorded producer is committed"     [ -f "$N_FIXLOG" ]
+  has_fn() { type "$1" >/dev/null 2>&1; }
+  check "the node engine can call the shared extractor" has_fn build_failure_reason
+  if [ -f "$N_FIXLOG" ]; then
+    check "it yields the SAME line the static engine yields (no per-engine drift)" \
+      [ "$(build_failure_reason "$N_FIXLOG")" = "Error: Turbopack build failed with 29 errors:" ]
+  fi
+
   echo "[selftest] rollback preflight is read-only + typed"
   # Fresh site with no previous -> not_supported / no_previous.
   rc="$(env PATH="$FAKEBIN:$PATH" SITE_SLUG=fresh SITE_PORT_A="$T_PORT_A" SITE_PORT_B="$T_PORT_B" \
@@ -908,6 +1269,71 @@ FAKENPM
   check "reattach: the log carries RAW child output, not BPSTAGE lines" \
     sh -c "grep -q 'building the site' '$R_LOG' && ! grep -q '^BPSTAGE' '$R_LOG'"
 
+  # -------------------------------------------------------------------------
+  # THE PREFIX COLLISION (D345) — the whole corrupted-read chain, end to end.
+  #
+  # LIVE SHAPE: `search` is a strict PREFIX of `search-capstone`. With a
+  # bare-substring marker read, active_caddy_port returns the SIBLING'S port,
+  # active_slot compares it to this site's PORT_A/PORT_B, matches NEITHER and
+  # prints nothing, CUR_SLOT comes back EMPTY — so EVERY deploy takes the
+  # phantom first-deploy ARM branch, the arm's already-armed guard matches the
+  # sibling and returns 0 WITHOUT WRITING, and the run emits SWITCH ok at exit 0
+  # over a public 404. Measured: 208 deploys in 36h, 206 of them "for slot a",
+  # ZERO slot b, no .previous file — i.e. blue/green rollback silently absent too.
+  #
+  # BOTH DIRECTIONS, because a too-strict predicate silently un-arms every site
+  # that works today: the prefix slug must arm and then FLIP on its own ports,
+  # and the sibling's upstream must never move when the prefix site deploys.
+  # -------------------------------------------------------------------------
+  echo "[selftest] e2e: a PREFIX slug gets its own route, its own slots and a real blue/green flip (D345)"
+  px_port() { # <slug> — the upstream port inside THAT slug's marker block, anchored
+    awk -v m="BARKPARK_SITE_ROUTE:$1([[:space:]]|\$)" \
+      '$0 ~ m {i=1} i&&match($0,/localhost:[0-9]+/){print substr($0,RSTART+10,RLENGTH-10);exit}' "$CF"
+  }
+  px_deploy() { # <slug> <build_id> <port_a> <port_b>
+    env PATH="$FAKEBIN:$PATH" SITE_SLUG="$1" BUILD_ID="$2" CONTENT_REV="rev-$2" \
+      SITE_SRC="$SRC" SITE_PORT_A="$3" SITE_PORT_B="$4" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/px-$1.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      bash "$SELF" > "$TD/px-$2.out" 2>&1; echo $?
+  }
+  # (1) the LONGER sibling arms, then flips onto its OWN second slot.
+  rc="$(px_deploy pfxn-capstone q1 "$T_PORT_G" "$T_PORT_H")"
+  check "prefix/node: the LONGER sibling's first deploy exits 0"   [ "$rc" = 0 ]
+  rc="$(px_deploy pfxn-capstone q2 "$T_PORT_G" "$T_PORT_H")"
+  check "prefix/node: the sibling flipped onto its second slot"    [ "$(px_port pfxn-capstone)" = "$T_PORT_H" ]
+  # (2) THE CASE — the prefix slug deploys with the sibling's marker already in
+  #     the file. Every assertion below REDS on a bare-substring predicate.
+  rc="$(px_deploy pfxn q3 "$T_PORT_I" "$T_PORT_J")"
+  check "prefix/node: the PREFIX slug's first deploy exits 0"      [ "$rc" = 0 ]
+  check "prefix/node: it ARMED ITS OWN marker block" \
+    grep -qE 'BARKPARK_SITE_ROUTE:pfxn([[:space:]]|$)' "$CF"
+  check "prefix/node: its upstream is ITS OWN slot-a port, not the sibling's" \
+    [ "$(px_port pfxn)" = "$T_PORT_I" ]
+  check "prefix/node: ROUTE reports ARMED on the durable channel" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=q3 detail="armed: ' "$TD/px-q3.out"
+  check "prefix/node: the sibling's upstream did NOT move"         [ "$(px_port pfxn-capstone)" = "$T_PORT_H" ]
+  # (3) THE CHAIN IS BROKEN: active_caddy_port -> active_slot -> CUR_SLOT is no
+  #     longer empty, so the SECOND deploy is a real blue/green FLIP and not
+  #     another phantom first deploy (208 of which happened live).
+  rc="$(px_deploy pfxn q4 "$T_PORT_I" "$T_PORT_J")"
+  check "prefix/node: the prefix slug's SECOND deploy exits 0"     [ "$rc" = 0 ]
+  check "prefix/node: it FLIPPED to slot b (CUR_SLOT was read, not empty)" \
+    [ "$(px_port pfxn)" = "$T_PORT_J" ]
+  check "prefix/node: ROUTE says already-armed, i.e. NOT a phantom first deploy" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=q4 detail="already armed: ' "$TD/px-q4.out"
+  check "prefix/node: .previous now exists (blue/green rollback is possible at all)" \
+    [ -s "$TD/sites/pfxn/.previous" ]
+  check "prefix/node: exactly ONE marker for the prefix slug (never re-armed)" \
+    [ "$(grep -cE 'BARKPARK_SITE_ROUTE:pfxn([[:space:]]|$)' "$CF" | tr -d ' ')" = 1 ]
+  # (4) THE REVERSE DIRECTION — the blast-radius guard. The stricter predicate
+  #     must still match a site's OWN marker, or it un-arms the sites that work.
+  rc="$(px_deploy pfxn-capstone q5 "$T_PORT_G" "$T_PORT_H")"
+  check "prefix/node/reverse: the LONGER slug still finds its own block"  [ "$rc" = 0 ]
+  check "prefix/node/reverse: and flips back onto its own slot a"   [ "$(px_port pfxn-capstone)" = "$T_PORT_G" ]
+  check "prefix/node/reverse: the PREFIX site's upstream was untouched"   [ "$(px_port pfxn)" = "$T_PORT_J" ]
+
   echo "[selftest] e2e: --teardown stops BOTH slots, disarms the Caddy route, deletes the tree"
   # selftest was armed into $CF with two slot units; tear the whole site down. The
   # 'warm' site's route must survive (single-site excision), and its slots too.
@@ -933,6 +1359,176 @@ FAKENPM
     env PATH="$FAKEBIN:$PATH" systemctl is-active --quiet barkpark-site@warm__a
   check "node teardown is idempotent (second run exit 0)" \
     sh -c 'env PATH="'"$FAKEBIN"':$PATH" SITE_SLUG=selftest BARKPARK_SITES_DIR="'"$TD"'/sites" BARKPARK_SLOT_ENV_DIR="'"$SENV"'" BARKPARK_CADDYFILE="'"$CF"'" BARKPARK_SITE_DEPLOY_LOCK="'"$TD"'/deploy.lock" BARKPARK_CADDYFILE_LOCK="'"$TD"'/caddyfile.lock" BARKPARK_SITE_NO_CAP=1 bash "'"$SELF"'" --teardown >/dev/null 2>&1'
+
+  echo "[selftest] --teardown REFUSES to claim TORN_DOWN when caddy validate rejects the disarm (D77)"
+  # The ONE case $FAKEBIN/caddy (validate always exits 0) structurally cannot
+  # reach: a REJECTING validate makes commit_caddyfile revert, so the 'warm' route
+  # keeps serving. The engine must not print TORN_DOWN= (the only marker the CP
+  # reads — its presence alone is exit 0), must exit 25, and must keep the release
+  # tree AND the slot env files. On origin/main every one of these fails.
+  REJBIN="$TD/bin-reject"; mkdir -p "$REJBIN"
+  printf '#!/usr/bin/env bash\ncase "$1" in validate) exit 1;; *) exit 0;; esac\n' > "$REJBIN/caddy"
+  chmod +x "$REJBIN/caddy"   # everything else still resolves from $FAKEBIN
+  env PATH="$REJBIN:$FAKEBIN:$PATH" \
+    SITE_SLUG=warm SITE_PORT_A="$T_PORT_C" SITE_PORT_B="$T_PORT_D" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$CF" BARKPARK_SITE_DEPLOY_LOCK="$TD/warm.lock" \
+    BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" BARKPARK_SITE_LOG_FILE="$TD/td-reject.log" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" --teardown > "$TD/td-reject.out" 2>&1; tdrc3=$?
+  check "node rejected teardown exits 25 (not 0)"   [ "$tdrc3" = 25 ]
+  check "node rejected teardown printed NO TORN_DOWN= on stdout" \
+    sh -c "! grep -q 'TORN_DOWN=' '$TD/td-reject.out'"
+  check "node rejected teardown logged NO TORN_DOWN= durably" \
+    sh -c "! grep -q 'TORN_DOWN=' '$TD/td-reject.log'"
+  check "node rejected teardown printed the typed failure on stdout" \
+    grep -q '^TEARDOWN_FAILED=warm detail="' "$TD/td-reject.out"
+  check "node rejected teardown logged the typed failure durably" \
+    grep -q '^TEARDOWN_FAILED=warm detail="' "$TD/td-reject.log"
+  check "node rejected teardown KEPT the release tree (recoverable)" [ -d "$TD/sites/warm/releases/w3" ]
+  check "node rejected teardown KEPT both slot env files (slots restartable)" \
+    sh -c "[ -f '$SENV/warm__a.env' ] && [ -f '$SENV/warm__b.env' ]"
+  check "node rejected teardown KEPT the live route (reverted, still serving)" \
+    grep -q 'BARKPARK_SITE_ROUTE:warm' "$CF"
+  check "node rejected teardown claims a MEASURED still-live route" \
+    grep -q 'STILL LIVE' "$TD/td-reject.out"
+  check "node rejected teardown does NOT hedge — it made the measurement" \
+    sh -c "! grep -q 'NEVER CHECKED' '$TD/td-reject.out'"
+
+  echo "[selftest] --teardown says UNKNOWN, not 'still live', when the Caddyfile lock was never taken (D77)"
+  # The OTHER non-zero from with_caddy_lock, and a DIFFERENT claim: nothing read
+  # the Caddyfile, so "still live" would be a measurement this run never made. The
+  # fake grants the non-blocking DEPLOY lock (`flock -n 9`) and denies only the
+  # WAITING Caddyfile lock (`flock -w 120 8`).
+  LOCKBIN="$TD/bin-lock"; mkdir -p "$LOCKBIN"
+  printf '#!/usr/bin/env bash\ncase "$1" in -w) exit 1;; *) exit 0;; esac\n' > "$LOCKBIN/flock"
+  chmod +x "$LOCKBIN/flock"
+  cp "$CF" "$TD/cf-before-lockstarve"
+  env PATH="$LOCKBIN:$FAKEBIN:$PATH" \
+    SITE_SLUG=warm SITE_PORT_A="$T_PORT_C" SITE_PORT_B="$T_PORT_D" \
+    BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+    BARKPARK_CADDYFILE="$CF" BARKPARK_SITE_DEPLOY_LOCK="$TD/warm.lock" \
+    BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" BARKPARK_SITE_LOG_FILE="$TD/td-lock.log" \
+    BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+    bash "$SELF" --teardown > "$TD/td-lock.out" 2>&1; tdrc4=$?
+  check "node lock-starved teardown exits 25 (not 0)" [ "$tdrc4" = 25 ]
+  check "node lock-starved teardown printed NO TORN_DOWN=" \
+    sh -c "! grep -q 'TORN_DOWN=' '$TD/td-lock.out'"
+  check "node lock-starved teardown printed the typed failure" \
+    grep -q '^TEARDOWN_FAILED=warm detail="' "$TD/td-lock.out"
+  check "node lock-starved teardown says the route was NEVER CHECKED" \
+    grep -q 'NEVER CHECKED' "$TD/td-lock.out"
+  check "node lock-starved teardown does NOT claim a route it never read" \
+    sh -c "! grep -q 'STILL LIVE' '$TD/td-lock.out'"
+  check "node lock-starved teardown KEPT the release tree" [ -d "$TD/sites/warm/releases/w3" ]
+  check "node lock-starved teardown left the Caddyfile byte-identical" \
+    cmp -s "$TD/cf-before-lockstarve" "$CF"
+
+  # -------------------------------------------------------------------------
+  # THE FLEET BUILD ADMISSION GATE — one box, one build (D95/D104), node side.
+  #
+  # THE HAZARD THIS EXISTS FOR: fd 7 is inherited by children, and THIS engine's
+  # HEALTH stage BOOTS THE SLOT PROCESS, which outlives the run by design (it is
+  # what serves the site). Hold the slot past BUILD ok and that process inherits
+  # the box's only build slot and keeps it for the LIFETIME OF THE SITE — one
+  # deploy permanently denies every other site's build, fleet-wide, and no reaper
+  # exists to notice. The probe is the real semantic, not fd introspection: after
+  # a completed deploy, can anyone else still TAKE the slot?
+  #
+  # Needs a REAL flock(1) — the FAKEBIN above stubs it to `exit 0`, and a gate
+  # proven against that stub proves the stub.
+  # -------------------------------------------------------------------------
+  if ! command -v flock >/dev/null 2>&1; then
+    if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+      echo "[selftest] FAIL - the fleet build admission gate proof is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but flock(1) is missing from PATH — install util-linux on this runner; a gate proven against the fake exit-0 flock proves the stub, and a skipped gate proof must not report PASS"
+      exit 1
+    fi
+    echo "[selftest] SKIP fleet build admission gate — needs a REAL flock(1) (stock macOS ships none; brew install flock)"
+  else
+    NG="$TD/gate"; GBIN="$NG/bin"; GSRC="$NG/src"; GLIB="$NG/lib"
+    mkdir -p "$NG" "$GBIN" "$GSRC" "$GLIB"
+    ENGINE_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+    cp "$ENGINE_DIR/lib/site-deploy-common.sh" "$GLIB/"      # a mutant sources by its OWN dirname
+    # GBIN is FAKEBIN MINUS the flock stub: same fake npm/caddy/systemctl, real flock.
+    for gf in "$FAKEBIN"/*; do
+      case "$(basename "$gf")" in flock) ;; *) ln -sf "$gf" "$GBIN/" ;; esac
+    done
+    printf '{"name":"selftest-gate-site","private":true}\n' > "$GSRC/package.json"
+    g_free() { flock -n "$NG/build.lock" -c true 2>/dev/null; }
+    g_kill_tree() { local p="$1" c; for c in $(pgrep -P "$p" 2>/dev/null); do g_kill_tree "$c"; done
+      kill -9 "$p" 2>/dev/null || true; }
+    # ONE SLUG PER CASE, deliberately. With the flock STUB every other e2e case
+    # above can redeploy a slug freely; with the REAL flock this block needs, the
+    # HARNESS's fake systemctl launches the slot process as a DIRECT CHILD of the
+    # engine, so that process inherits fd 9 — the PER-SLUG deploy lock — and the
+    # next deploy of the SAME slug queues on it for 1200s. That is an artifact of
+    # the fake (on a real box `systemctl restart` hands the spawn to PID 1, which
+    # inherits nothing), but it is a 20-minute hang if you reuse a slug here.
+    ng_deploy() { # <slug> <build_id> [VAR=value…] -> exit code; log at $NG/out.log
+      local slug="$1" bid="$2" pa pb; shift 2
+      pa="$(free_port)"; pb="$(free_port)"
+      env PATH="$GBIN:$PATH" "$@" \
+        SITE_SLUG="$slug" BUILD_ID="$bid" CONTENT_REV=rev-1 \
+        SITE_SRC="$GSRC" SITE_PORT_A="$pa" SITE_PORT_B="$pb" \
+        BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+        BARKPARK_CADDYFILE="$CF" \
+        BARKPARK_SITE_DEPLOY_LOCK="$NG/deploy-$slug.lock" \
+        BARKPARK_CADDYFILE_LOCK="$NG/caddyfile.lock" \
+        BARKPARK_BUILD_GATE_LOCK="$NG/build.lock" \
+        BARKPARK_NODE_LINK="$TD/barkpark-node" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "${GATE_ENGINE:-$SELF}" > "$NG/out.log" 2>&1
+      echo $?
+    }
+    ng_saw() { grep -q "^BPSTAGE name=$1 status=$2 " "$NG/out.log"; }
+
+    echo "[selftest] gate: the booted slot process must NOT inherit the box's build slot"
+    check "the slot is free before the deploy"      g_free
+    rc="$(ng_deploy gatesite ng1)"
+    check "node deploy exit 0"                      [ "$rc" = 0 ]
+    check "the deploy really built"                 grep -q 'npm run build' "$GSRC/.npm-calls"
+    check "the slot process is RUNNING (it outlives the run)" \
+      sh -c "[ -f '$SLOTPIDS/gatesite__a' ] && kill -0 \"\$(cat '$SLOTPIDS/gatesite__a')\" 2>/dev/null"
+    check "THE SLOT IS FREE with that process still alive (fd 7 was released)" g_free
+
+    echo "[selftest] gate: MUTATION PROOF — delete build_gate_release and the slot leaks into that process"
+    NGMUT="$NG/mutant-norelease.sh"
+    awk '{ if ($0 == "  build_gate_release") next; print }' "$SELF" > "$NGMUT"
+    check "the mutant differs by exactly ONE deleted line" \
+      [ "$(diff "$SELF" "$NGMUT" | grep -c '^[<>]')" = 1 ]
+    mrc="$(GATE_ENGINE="$NGMUT" ng_deploy gatesite2 ng2)"
+    check "MUTANT: the deploy itself still succeeds (the leak is SILENT)" [ "$mrc" = 0 ]
+    if g_free; then ng_leak=0; else ng_leak=1; fi
+    check "MUTANT: the slot is STILL HELD after the run — a fleet-wide deny with no reaper" \
+      [ "$ng_leak" = 1 ]
+    echo "  mutation proof: with 'build_gate_release' deleted, 'flock -n $NG/build.lock -c true' is REFUSED after a SUCCESSFUL deploy — the healthy check above (THE SLOT IS FREE with that process still alive) reds, and nothing on the box ever frees it"
+    # Free it again: only the booted slot process holds it now.
+    ng_slotpid="$(cat "$SLOTPIDS/gatesite2__a" 2>/dev/null || true)"
+    [ -n "$ng_slotpid" ] && g_kill_tree "$ng_slotpid"
+    ngn=0; while ! g_free && [ "$ngn" -lt 60 ]; do sleep 0.1; ngn=$((ngn + 1)); done
+    check "killing the leaking slot process is the only way back" g_free
+
+    echo "[selftest] gate: a lapsed budget refuses on the stage protocol (SKIP_BUILD-keyed, set -u safe)"
+    # The foreign holder exits on a sentinel, not a signal: a killed holder prints
+    # job-control noise over the suite's output, and this fixture is not what the
+    # SIGKILL case (static engine) proves. Hard cap ~60s so it cannot wedge CI.
+    : > "$NG/pinned"
+    flock "$NG/build.lock" -c "n=0; while [ -f '$NG/pinned' ] && [ \$n -lt 600 ]; do sleep 0.1; n=\$((n + 1)); done" &
+    ngn=0; while g_free && [ "$ngn" -lt 60 ]; do sleep 0.1; ngn=$((ngn + 1)); done
+    check "a foreign holder pinned the only slot"   sh -c "! flock -n '$NG/build.lock' -c true 2>/dev/null"
+    : > "$GSRC/.npm-calls"
+    rc="$(ng_deploy gatesite3 ng3 BARKPARK_BUILD_GATE_WAIT=1)"
+    check "refused with the typed 15"               [ "$rc" = 15 ]
+    check "emitted BUILD failed BEFORE exiting"     ng_saw BUILD failed
+    check "the detail names the FLEET BUILD SLOT"   grep -q 'FLEET BUILD SLOT' "$NG/out.log"
+    check "ran NO npm"                              [ ! -s "$GSRC/.npm-calls" ]
+    check "no unbound-variable abort (this engine has NO PLAN_MODE)" \
+      sh -c "! grep -q 'unbound variable' '$NG/out.log'"
+    check "the release was never staged"            [ ! -d "$TD/sites/gatesite3/releases/ng3" ]
+    rm -f "$NG/pinned"
+    ngn=0; while ! g_free && [ "$ngn" -lt 60 ]; do sleep 0.1; ngn=$((ngn + 1)); done
+
+  fi
 
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
@@ -1083,15 +1679,23 @@ fi
 # the marker comment through the close brace of the handle[_path], covering the
 # @matcher/redir/reverse_proxy form) and the same commit safety (backup + caddy
 # validate + reload-or-revert): a botched excision REVERTS, never breaking Caddy.
+# RETURNS: 0 the route is gone (or was never armed / no caddy here), 2 the route is
+# STILL LIVE and this run OBSERVED it (commit_caddyfile reverted). Unlike the static
+# engine this signal was always correct — it was the CALLER that discarded it with
+# `|| true` (D77). 2 and not 1 so the caller can tell it apart from
+# `with_caddy_lock`'s own 1 (the lock was never taken, so the route was never
+# looked at) — a distinction the operator's message depends on.
 disarm_caddy_node_route() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG disarm"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — nothing to disarm"; return 0; }
-  local marker="BARKPARK_SITE_ROUTE:$SITE_SLUG"
-  grep -q "$marker" "$CADDYFILE" || { log "caddy /sites/$SITE_SLUG route not armed — nothing to disarm"; return 0; }
+  local marker; marker="$(site_route_marker_re)"
+  # DELIMITER-ANCHORED (D345) — a bare substring would excise a prefix SIBLING's
+  # live route block on this site's teardown.
+  has_site_route_marker "$CADDYFILE" || { log "caddy /sites/$SITE_SLUG route not armed — nothing to disarm"; return 0; }
   local tmp; tmp="$(mktemp)"
   BP_MARK="$marker" awk '
     BEGIN { m = ENVIRON["BP_MARK"] }
-    !inb && index($0, m) { inb = 1; depth = 0; opened = 0; next }
+    !inb && $0 ~ m { inb = 1; depth = 0; opened = 0; next }
     inb {
       o = gsub(/[{]/, "&"); c = gsub(/[}]/, "&"); depth += o - c
       if (o > 0) opened = 1
@@ -1099,13 +1703,42 @@ disarm_caddy_node_route() {
       next
     }
     { print }
-  ' "$CADDYFILE" > "$tmp" || { rm -f "$tmp"; return 1; }
-  commit_caddyfile "$tmp"
+  ' "$CADDYFILE" > "$tmp" || { rm -f "$tmp"; return 2; }
+  commit_caddyfile "$tmp" || return 2
+}
+
+# A teardown that could NOT disarm the route must never print TORN_DOWN= (D77).
+# That marker is the ONLY thing DeployRunner.teardown_outcome/1 reads, and its mere
+# presence IS exit 0 to the control plane — so printing it after a reverted disarm
+# certifies a site that is still routed. Speak a typed failure on the SAME two
+# channels the success marker uses (stdout for the CLI, $BARKPARK_SITE_LOG_FILE for
+# the systemd-mode runner, which sees no exit code), exit non-zero, and leave the
+# release tree AND both slot env files on disk: the route still points at this
+# site, so a re-run of --teardown (after the Caddyfile is fixed) can finish the job
+# and `systemctl start barkpark-site@<slug>__<slot>` can put it back in service.
+teardown_failed_node() { # <detail>
+  local detail="$1" line
+  log "TEARDOWN FAILED — $detail"
+  printf -v line 'TEARDOWN_FAILED=%s detail="%s"' "$SITE_SLUG" "$detail"
+  [ -n "${BARKPARK_SITE_LOG_FILE:-}" ] && printf '%s\n' "$line" >> "$BARKPARK_SITE_LOG_FILE"
+  printf '%s\n' "$line"
+  exit 25
 }
 
 if [ "$MODE" = teardown ]; then
   stop_slot a; stop_slot b
-  with_caddy_lock disarm_caddy_node_route || true
+  # TWO different failures, and they are NOT the same claim (see the static engine's
+  # twin). 2 = the disarm ran and the route demonstrably survived it. 1 =
+  # with_caddy_lock's own guard fired, so nothing ever read the Caddyfile and the
+  # route's state is UNKNOWN to this run. Both keep the tree and both slot env
+  # files; only one of them is a measurement.
+  disarm_rc=0
+  with_caddy_lock disarm_caddy_node_route || disarm_rc=$?
+  if [ "$disarm_rc" = 1 ]; then
+    teardown_failed_node "the caddy /sites/$SITE_SLUG route was NEVER CHECKED — the shared Caddyfile lock could not be taken, so whether this site is still routed is UNKNOWN to this run. Both slots are stopped; the release tree at $ROOT and both slot env files are kept, so a re-run of --teardown (or \`systemctl start barkpark-site@${SITE_SLUG}__a\`) can finish or undo the job"
+  elif [ "$disarm_rc" != 0 ]; then
+    teardown_failed_node "the caddy /sites/$SITE_SLUG route is STILL LIVE — this run tried to remove it, the change was rejected, and the Caddyfile was reverted to the serving config. Both slots are stopped, so that route now answers 502 until you either re-run --teardown (after fixing the Caddyfile) or \`systemctl start barkpark-site@${SITE_SLUG}__a\`; the release tree at $ROOT and both slot env files are kept for exactly that"
+  fi
   rm -f "$(slot_env a)" "$(slot_env b)" 2>/dev/null || true
   if [ -d "$ROOT" ]; then
     rm -rf "$ROOT" && log "TORE DOWN — stopped slots + removed release tree $ROOT"
@@ -1157,14 +1790,9 @@ else
 fi
 
 # ---- BUILD -----------------------------------------------------------------
-build_failure_reason() { # <build-log>
-  local f="$1" r
-  r="$(grep -a 'FATAL' "$f" 2>/dev/null | tail -1)"
-  [ -n "$r" ] || r="$(grep -aE 'npm ERR!|[Ee]rror:' "$f" 2>/dev/null | grep -av 'complete log of this run' | tail -1)"
-  [ -n "$r" ] || r="$(grep -av '^[[:space:]]*$' "$f" 2>/dev/null | tail -1)"
-  [ -n "$r" ] || r="npm ci / npm run build failed with no output"
-  printf '%s' "$r"
-}
+# build_failure_reason() (the `BUILD failed` detail's producer) lives in
+# lib/site-deploy-common.sh, sourced above — ONE copy, shared with the static
+# engine, which is the only way a repair to it reaches BOTH runtime targets.
 
 if [ "$SKIP_BUILD" = 0 ]; then
   emit BUILD started
@@ -1176,6 +1804,25 @@ if [ "$SKIP_BUILD" = 0 ]; then
     DETAIL="$SITE_SRC has no package.json — expected a Node app root; check the payload points at the app dir, not the repo root or a monorepo parent"
     log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 11
   fi
+
+  # ---- FLEET BUILD ADMISSION GATE — one box, one build (D95/D104) ----------
+  # Identical contract to the static engine's (deploy/site-deploy.sh): the lock
+  # taken above is PER-SLUG, so without this second, fleet-wide lock N sites
+  # compile at once on 2 cores — and a `next build` is the heaviest of them.
+  # Keyed on SKIP_BUILD (this engine has NO PLAN_MODE; naming one would be an
+  # unbound expansion under the `set -u` at the top of this file). Taken after
+  # BUILD started and after the two cheap validations; released right after
+  # BUILD ok, BEFORE HEALTH boots the slot process — see below.
+  if ! build_gate_acquire; then
+    DETAIL="waited ${BUILD_GATE_WAIT}s for the FLEET BUILD SLOT ($BUILD_GATE_LOCK) and it never freed — this box runs ONE build at a time (2 cores, MemoryMax=1500M each), so another site's build is still compiling; nothing was built, staged or flipped and the live slot is untouched. Retry once it drains. In flight: $(build_gate_holders)"
+    log "BUILD: $DETAIL"
+    # emit BEFORE the exit, ALWAYS: this refusal fires AFTER `emit PLAN ok`, so a
+    # bare exit would hang a stage-watching orchestrator on a BUILD line that
+    # never comes.
+    emit BUILD failed "$DETAIL"
+    exit 15
+  fi
+
   # BUILD_ID + base path + content rev are EXPORTED (inherited by the child, never
   # on its argv) so the adapter can bake the markers HEALTH asserts on. The rest of
   # the D7 BUILD_ALLOW set already rides the script's (caller-scrubbed) environment
@@ -1229,6 +1876,16 @@ if [ "$SKIP_BUILD" = 0 ]; then
   fi
   [ "$BUILD_LOG_KEEP" = 1 ] || rm -f "$BUILD_LOG"
   emit BUILD ok "npm ci && npm run build (next standalone)"
+  # RELEASE THE SLOT HERE, AND NOWHERE LATER. fd 7 is inherited by children, and
+  # HEALTH (below) BOOTS THE SLOT PROCESS, which OUTLIVES this run by design — it
+  # is the thing that serves the site. Any long-lived process that inherits fd 7
+  # holds the box's only build slot for the LIFETIME OF THE SITE: a fleet-wide
+  # deny with no reaper to notice it. `start_slot` goes through `systemctl
+  # restart` today, so PID 1 (not this script) spawns the slot and inherits
+  # nothing — but that is a property of the LAUNCH MECHANISM, not of the gate, and
+  # this contract must not rest on it. The self-test pins it against a harness
+  # whose fake systemctl DOES spawn the slot as a direct child.
+  build_gate_release
 
   # ---- STAGE (D64) — three-piece standalone copy into an immutable release ----
   emit STAGE started
@@ -1302,6 +1959,19 @@ emit HEALTH ok "$HEALTH_DETAIL"
 # (arm the block on the first deploy). Fail-closed: a rejected flip stops the new
 # slot and leaves the live slot serving.
 emit SWITCH started
+# THE ARM DECISION GETS A DURABLE CHANNEL (D346). This engine spoke SWITCH only,
+# and every route fact reached the operator through log() — i.e. stdout, which
+# nothing persists (the durable .log holds raw npm child output, the durable
+# .status holds BPSTAGE lines). So `arm` vs `flip` — the difference between a
+# first deploy and a blue/green flip — was unmeasurable after the fact, which is
+# exactly why 208 phantom first deploys went unnoticed. ROUTE is the channel: it
+# is a BPSTAGE line, so it lands in the durable .status fold, and it is
+# deliberately OUTSIDE DeployRunner's @stage_names whitelist
+# (PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE), so parse_stage_line/2 skips it and it
+# can NEVER reach stage_exit_code/1 or flip a verdict. Report, not verdict —
+# charter D327 stands and dr-w19-bl-arm-route-incidence-then-fatal owns the
+# fatal question; this is what makes that question answerable.
+ROUTE_DETAIL=""
 CUR_BUILD=""; CUR_PORT=""
 if [ -n "$CUR_SLOT" ]; then CUR_BUILD="$(read_slot_build "$CUR_SLOT")"; CUR_PORT="$(slot_port "$CUR_SLOT")"; fi
 if [ -z "$CUR_SLOT" ]; then
@@ -1322,6 +1992,8 @@ fi
 if [ -n "$CUR_SLOT" ] && [ "$CUR_SLOT" != "$TARGET_SLOT" ]; then
   printf '%s %s %s\n' "$CUR_SLOT" "$CUR_PORT" "$CUR_BUILD" > "$ROOT/.previous"
 fi
+log "ROUTE: $ROUTE_DETAIL"
+emit ROUTE ok "$ROUTE_DETAIL"
 log "SWITCH: '$SITE_SLUG' Caddy upstream -> slot $TARGET_SLOT :$TARGET_PORT (build $BUILD_ID)"
 emit SWITCH ok "Caddy upstream -> slot $TARGET_SLOT :$TARGET_PORT"
 

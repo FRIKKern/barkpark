@@ -58,8 +58,14 @@ defmodule BarkparkWeb.SchemaController do
   def delete(conn, %{"dataset" => dataset, "name" => name} = params) do
     opts = Keyword.put(scope_opts(conn), :force, force_param?(params))
 
-    with {:ok, _} <- Content.delete_schema(name, dataset, opts) do
-      json(conn, %{deleted: name})
+    # RECEIPT LAW (pds w39): the emitted value DESCENDS FROM THE WRITE RETURN.
+    # `delete_schema/3` already hands back the row `Repo.delete/2` removed
+    # (content/schema.ex:181-206) — this used to discard it and echo the `:name`
+    # path param, so the printed sentence could not change if the store said
+    # something else. `id` is the store's own binary_id: it appears nowhere in
+    # the request, so a revert to echoing `name` cannot reproduce this body.
+    with {:ok, %SchemaDefinition{} = deleted} <- Content.delete_schema(name, dataset, opts) do
+      json(conn, %{deleted: deleted.name, id: deleted.id, dataset: deleted.dataset})
     end
   end
 

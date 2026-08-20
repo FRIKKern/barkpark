@@ -405,6 +405,14 @@ EOF
   echo "selftest OK: agree→green, dropped connect member→red, nil mode excluded, tool direction excluded (paste + oauth); tool set: agree→green, @tool_providers channel-neutral, dropped tool entry→red"
 }
 
+# Refuse an argument this gate does not understand. A swallowed flag — a
+# `--selftest` typo, a future rename — would silently run the ordinary check
+# and report green, fabricating the tripwire's own proof.
+if [ -n "${1:-}" ] && [ "$1" != "--selftest" ]; then
+  echo "connectors-catalog-drift-check: unknown argument '$1' (expected nothing or --selftest)" >&2
+  exit 2
+fi
+
 if [ "${1:-}" = "--selftest" ]; then
   selftest
   exit $?

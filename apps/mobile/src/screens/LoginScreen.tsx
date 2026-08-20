@@ -15,6 +15,7 @@ import {
 import { createCloudClient, DEFAULT_CLOUD_URL } from '../cloud/api'
 import { startDeviceFlow, type DeviceFlowHandle } from '../cloud/deviceFlow'
 import { useTheme } from '../ui/theme'
+import { roles, scale } from '../ui/typography'
 
 export interface CloudSession {
   url: string
@@ -153,14 +154,14 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: (session: CloudSession
 
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 },
-  brand: { fontSize: 34, fontWeight: '700', letterSpacing: -0.5 },
-  tagline: { fontSize: 15, textAlign: 'center', maxWidth: 300, lineHeight: 21 },
+  brand: { ...roles.brandWordmark, fontWeight: '700', letterSpacing: -0.5 },
+  tagline: { ...scale.md, textAlign: 'center', maxWidth: 300 },
   centerBlock: { alignItems: 'center', gap: 14, marginTop: 8 },
   primaryButton: { paddingHorizontal: 22, paddingVertical: 13, borderRadius: 10 },
-  primaryButtonText: { fontSize: 16, fontWeight: '600' },
-  codeLabel: { fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 },
+  primaryButtonText: { ...scale.lg, fontWeight: '600' },
+  codeLabel: { ...scale.sm, textTransform: 'uppercase', letterSpacing: 1 },
   code: {
-    fontSize: 30,
+    ...roles.deviceCode,
     fontWeight: '700',
     letterSpacing: 3,
     paddingHorizontal: 18,
@@ -170,7 +171,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   pollRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  statusText: { fontSize: 14 },
-  linkText: { fontSize: 14, textDecorationLine: 'underline' },
-  errorText: { fontSize: 15, textAlign: 'center', maxWidth: 300, lineHeight: 21 },
+  statusText: { ...scale.base },
+  linkText: { ...scale.base, textDecorationLine: 'underline' },
+  errorText: { ...scale.md, textAlign: 'center', maxWidth: 300 },
 })

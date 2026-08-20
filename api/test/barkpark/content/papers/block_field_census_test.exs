@@ -3,15 +3,15 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
   The silent-content-loss write gate, EXTENDED to the census siblings of note/card
   (pt-backlog-block-field-census, the follow-up to #5731).
 
-  Two more block types whose renderer returns an EMPTY STRING (not a visible
-  "no data" placeholder) when their content key is absent are added to the
-  `Slots.field_vocab/1` + `Slots.lossy_shape?/1` narrow rule:
+  Two block families whose renderer historically returned an EMPTY STRING (not
+  a visible "no data" placeholder) when their content key was absent are covered
+  by the `Slots.field_vocab/1` + `Slots.lossy_shape?/1` narrow rule:
 
     * `callout` — its body comes from the legacy `content` inline array (or the
       materialized `body` slot) via `callout_body_inline/1`, plus an optional
-      `title`. Prose authored under `text` (the note vocabulary — a real author
-      confusion) renders an EMPTY callout: `callout_body_inline/1` reads nothing,
-      the title is blank, the `text` is silently dropped behind an HTTP 200.
+      `title`. The production repair established prose under `text` as a
+      deterministic legacy dialect, so readers consume it and write boundaries
+      canonicalize it to `content` instead of rejecting or dropping it.
     * `pipeline` — its flow comes from `nodes: [%{kind,title,detail,files}]`.
       A node list stranded under a mis-keyed container (`steps`/`stages`/…) makes
       `pipeline_html/1` return "" — a totally invisible loss.
@@ -53,10 +53,10 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
     %{"id" => id, "type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
   end
 
-  # A callout in the LOSSY shape: no `content`/`title`, prose stranded under `text`
-  # (the note vocabulary — the exact author confusion the gate closes).
-  defp lossy_callout(id \\ "co1"),
-    do: %{"id" => id, "type" => "callout", "text" => "Stranded callout prose"}
+  # A callout in the proven legacy text dialect. Readers consume it and writers
+  # canonicalize it to `content`.
+  defp text_callout(id \\ "co1"),
+    do: %{"id" => id, "type" => "callout", "text" => "Legacy callout prose"}
 
   # A clean callout — body authored under the consumed `content` inline array.
   defp clean_callout(id \\ "co1") do
@@ -92,8 +92,14 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
   # ── Slots.lossy_shape?/1 — callout ──────────────────────────────────────
 
   describe "Slots.lossy_shape?/1 — callout" do
-    test "a callout with prose under `text` (no content/title/body slot) is lossy" do
-      assert Slots.lossy_shape?(lossy_callout())
+    test "a callout with prose under `text` is consumed by the legacy fallback" do
+      callout = text_callout()
+
+      refute Slots.lossy_shape?(callout)
+
+      assert Slots.callout_body_inline(callout) == [
+               %{"type" => "text", "value" => "Legacy callout prose"}
+             ]
     end
 
     test "NO FALSE ALARM: a callout with a real `content` body is NOT lossy" do
@@ -158,20 +164,21 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
   # ── upsert_paper — NEW lossy write is refused ───────────────────────────
 
   describe "upsert_paper census gate" do
-    test "a NEW lossy callout is rejected with the halt shape, and nothing persists" do
-      slug = fresh_slug("loss-callout")
+    test "a NEW text-dialect callout is canonicalized without losing its prose" do
+      slug = fresh_slug("legacy-callout")
 
-      assert {:error, {:halted, msg}} =
+      assert {:ok, saved} =
                Content.upsert_paper(
                  Barkpark.LabelFixtures.paper_attrs(%{
                    slug: slug,
                    title: "Callouts",
-                   blocks: [locked_title("Callouts"), para("Real body."), lossy_callout()]
+                   blocks: [locked_title("Callouts"), para("Real body."), text_callout()]
                  })
                )
 
-      assert msg =~ "renderer ignores"
-      assert Content.get_paper(slug, @dataset) == nil
+      callout = Enum.find(saved.content["blocks"], &(&1["id"] == "co1"))
+      refute Map.has_key?(callout, "text")
+      assert callout["content"] == [%{"type" => "text", "value" => "Legacy callout prose"}]
     end
 
     test "a NEW lossy pipeline is rejected too" do
@@ -208,7 +215,7 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
 
   # ── the RATCHET — existing losses do not brick ──────────────────────────
 
-  defp seed_stored_lossy_callout! do
+  defp seed_stored_text_callout! do
     slug = fresh_slug("ratchet-callout")
 
     {:ok, doc} =
@@ -220,7 +227,7 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
         })
       )
 
-    blocks = [locked_title("Ratchet"), para("Body block.", "p1"), lossy_callout("co1")]
+    blocks = [locked_title("Ratchet"), para("Body block.", "p1"), text_callout("co1")]
 
     {:ok, _} =
       doc
@@ -231,10 +238,12 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
   end
 
   describe "upsert_paper ratchet" do
-    test "RATCHET: an already-lossy callout row re-saves (does not brick)" do
-      slug = seed_stored_lossy_callout!()
+    test "RATCHET: an already-stored text callout re-saves and canonicalizes" do
+      slug = seed_stored_text_callout!()
       doc = Content.get_paper(slug, @dataset)
-      assert doc.content["blocks"] |> Enum.any?(&Slots.lossy_shape?/1)
+      callout = Enum.find(doc.content["blocks"], &(&1["id"] == "co1"))
+      assert callout["text"] == "Legacy callout prose"
+      refute Map.has_key?(callout, "content")
 
       assert {:ok, saved} =
                Content.upsert_paper(
@@ -246,9 +255,12 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
                )
 
       assert saved.status == "published"
+      callout = Enum.find(saved.content["blocks"], &(&1["id"] == "co1"))
+      refute Map.has_key?(callout, "text")
+      assert callout["content"] == [%{"type" => "text", "value" => "Legacy callout prose"}]
     end
 
-    test "RATCHET: a clean callout cannot be re-upserted into the lossy shape" do
+    test "RATCHET: a clean callout can be replaced by the text dialect without loss" do
       slug = fresh_slug("ratchet-clean-callout")
 
       {:ok, _} =
@@ -260,21 +272,22 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
           })
         )
 
-      assert {:error, {:halted, msg}} =
+      assert {:ok, saved} =
                Content.upsert_paper(
                  Barkpark.LabelFixtures.paper_attrs(%{
                    slug: slug,
                    title: "Clean",
-                   blocks: [locked_title("Clean"), para("Body."), lossy_callout("co1")]
+                   blocks: [locked_title("Clean"), para("Body."), text_callout("co1")]
                  })
                )
 
-      assert msg =~ "renderer ignores"
+      callout = Enum.find(saved.content["blocks"], &(&1["id"] == "co1"))
+      assert callout["content"] == [%{"type" => "text", "value" => "Legacy callout prose"}]
     end
   end
 
   describe "apply_paper_block_op census edge (canvas)" do
-    test "editing a clean callout DOWN into the lossy shape halts, paper unchanged" do
+    test "editing a clean callout into the text dialect canonicalizes the patch" do
       slug = fresh_slug("op-callout")
 
       {:ok, _} =
@@ -286,19 +299,20 @@ defmodule Barkpark.Content.Papers.BlockFieldCensusTest do
           })
         )
 
-      # Blank the consumed `content`, strand the prose under `text`.
+      # Blank the canonical `content` and supply the proven legacy `text` dialect.
       op = %{
         "op" => "patch-block",
         "id" => "co1",
-        "patch" => %{"content" => [], "text" => "Stranded on canvas"}
+        "patch" => %{"content" => [], "text" => "Legacy canvas prose"}
       }
 
-      assert {:error, {:halted, msg}} = Content.apply_paper_block_op(slug, op, @dataset)
-      assert msg =~ "renderer ignores"
+      assert {:ok, _receipt} = Content.apply_paper_block_op(slug, op, @dataset)
 
       doc = Content.get_paper(slug, @dataset)
       callout = Enum.find(doc.content["blocks"], &(&1["id"] == "co1"))
       refute Slots.lossy_shape?(callout)
+      refute Map.has_key?(callout, "text")
+      assert callout["content"] == [%{"type" => "text", "value" => "Legacy canvas prose"}]
     end
   end
 end

@@ -4,14 +4,15 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
 
       Registry.put_env_var/2
       Registry.list_env_vars/1,2
-      Registry.reveal_env_var/1
       Registry.delete_env_var/2
       Registry.resolved_env_for_barkpark/1
 
-  Covers round-trip encryption, per-scope partial-unique integrity (the NULL≠NULL
-  trick), the scope/barkpark_id discriminator, write-once refusal, most-specific-
-  wins resolution, cross-team isolation, the fail-open-on-bad-row resolve, and the
-  FK cascade.
+  Covers round-trip encryption (through `Vault.decrypt/1` directly — there is no
+  per-row reveal function and no route that returns a value), per-scope partial-
+  unique integrity (the NULL≠NULL trick), the scope/barkpark_id discriminator,
+  write-once refusal ON THE WRITE PATH (the only path a caller can reach it from),
+  most-specific-wins resolution, cross-team isolation, the fail-open-on-bad-row
+  resolve, and the FK cascade.
   """
   use BarkparkCloud.DataCase, async: true
   import Ecto.Query, only: [from: 2]
@@ -19,6 +20,7 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.EnvVar
+  alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Repo
 
   defp team_fixture(attrs \\ %{}) do
@@ -74,8 +76,8 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
     end
   end
 
-  describe "put_env_var/2 + reveal_env_var/1" do
-    test "round-trips: ciphertext at rest, plaintext on reveal" do
+  describe "put_env_var/2" do
+    test "round-trips: ciphertext at rest, plaintext under the vault key" do
       team = team_fixture()
 
       assert {:ok, %EnvVar{} = ev} =
@@ -86,7 +88,9 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
       assert is_nil(ev.barkpark_id)
       # Stored value is ciphertext, never the plaintext.
       refute ev.value_encrypted == "s3cr3t"
-      assert {:ok, "s3cr3t"} = Registry.reveal_env_var(ev)
+      # Decrypt through the Vault directly: the context has no per-row reveal
+      # function, and no route hands a value back.
+      assert {:ok, "s3cr3t"} = Vault.decrypt(ev.value_encrypted)
     end
 
     test "upsert: same key+scope twice updates in place (one row)" do
@@ -95,7 +99,7 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
       {:ok, _} = Registry.put_env_var(team, %{key: "FOO", value: "one", scope: "team"})
       {:ok, ev2} = Registry.put_env_var(team, %{key: "FOO", value: "two", scope: "team"})
 
-      assert {:ok, "two"} = Registry.reveal_env_var(ev2)
+      assert {:ok, "two"} = Vault.decrypt(ev2.value_encrypted)
       assert length(Registry.list_env_vars(team)) == 1
     end
 
@@ -119,7 +123,7 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
                })
 
       assert ev.key == "FROM_HTTP"
-      assert {:ok, "v"} = Registry.reveal_env_var(ev)
+      assert {:ok, "v"} = Vault.decrypt(ev.value_encrypted)
     end
   end
 
@@ -195,8 +199,58 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
     end
   end
 
+  # cch-w22-s3 — the comment cap is a COLUMN fact, not a taste. `comment` is
+  # `add :comment, :string` = varchar(255). The changeset validated it at 1000,
+  # so 256 characters passed validation and then raised Postgrex 22001
+  # (string_data_right_truncation) inside `Repo.insert_or_update` — and because
+  # nothing in this app installs a `Plug.ErrorHandler`, the raise reached the
+  # person as a bare 500 behind "Check the values and try again."
+  #
+  # THE TEST HAS TO BE ABLE TO LOSE: it pins BOTH sides of the boundary. 255 must
+  # still WRITE (a cap that merely rejects everything long would also pass a
+  # one-sided test), and 256 must come back as a changeset error and never as a
+  # raise — which is why the 256 case goes through the real `put_env_var/2` write
+  # path rather than stopping at `EnvVar.changeset/2`.
+  describe "comment length is capped at the column (255), not at 1000" do
+    test "255 characters is accepted and stored verbatim" do
+      team = team_fixture()
+      comment = String.duplicate("x", 255)
+
+      assert {:ok, ev} =
+               Registry.put_env_var(team, %{
+                 key: "COMMENT_AT_CAP",
+                 value: "v",
+                 scope: "team",
+                 comment: comment
+               })
+
+      assert String.length(ev.comment) == 255
+      assert Repo.get!(EnvVar, ev.id).comment == comment
+    end
+
+    test "256 characters is a changeset error, not a Postgrex 22001 raise" do
+      team = team_fixture()
+
+      assert {:error, changeset} =
+               Registry.put_env_var(team, %{
+                 key: "COMMENT_OVER_CAP",
+                 value: "v",
+                 scope: "team",
+                 comment: String.duplicate("x", 256)
+               })
+
+      assert Enum.any?(errors_on(changeset).comment, &String.contains?(&1, "255"))
+
+      # and nothing was written — the 422 is honest about the row not existing
+      assert Repo.aggregate(
+               from(e in EnvVar, where: e.team_id == ^team.id and e.key == "COMMENT_OVER_CAP"),
+               :count
+             ) == 0
+    end
+  end
+
   describe "write-once" do
-    test "a write to an is_shown_once var is refused; reveal is refused" do
+    test "a write to an is_shown_once var is refused" do
       team = team_fixture()
 
       {:ok, ev} =
@@ -205,7 +259,10 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
       assert {:error, :write_once} =
                Registry.put_env_var(team, %{key: "ONCE", value: "v2"})
 
-      assert {:error, :write_once} = Registry.reveal_env_var(ev)
+      # The row is untouched: the original ciphertext still decrypts to v1. The
+      # write path is the ONLY path write-once can be exercised from — there is no
+      # reveal function and no route that returns a value.
+      assert {:ok, "v1"} = Vault.decrypt(Repo.get!(EnvVar, ev.id).value_encrypted)
     end
   end
 

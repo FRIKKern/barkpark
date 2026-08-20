@@ -9,26 +9,48 @@
 #
 # Contract (checked hermetically by scripts/pr-task-gate.test.sh):
 #   Inputs  (env):
-#     TASK_ID          required — the task doc id referenced by the PR
-#     LEDGER_BASE      optional — ledger base URL (default guerrilla)
-#     EXPECTED_WORKER  optional — if set, the task's claim.worker must equal it
+#     TASK_ID                    required — the task doc id referenced by the PR
+#     LEDGER_BASE                optional — ledger base URL (default guerrilla)
+#     EXPECTED_WORKER            optional — if set, the actor must equal it
+#     PR_OPENED_AT               required to decide a LAPSED claim — the PR's
+#                                created_at (ISO-8601). Absent/unparseable is a
+#                                refusal on that branch, never a fall-open.
+#     PR_TASK_GATE_RETRIES       optional — ledger attempts (default 3)
+#     PR_TASK_GATE_RETRY_DELAY   optional — seconds between attempts (default 2)
 #   Exit codes:
 #     0  pass   — the change is TASK-BACKED: the task exists and either
 #                   • lifecycle_status == in_progress with a claim.worker, or
-#                   • lifecycle_status == done with a claim.closed_by
+#                   • lifecycle_status == done with a claim.closed_by, or
+#                   • lifecycle_status == open with a claim that was still LIVE
+#                     when this PR was opened (the TTL sweeper reaped it while
+#                     the PR sat in review)
 #                 (and the actor matches EXPECTED_WORKER when that is set)
 #     1  fail   — a DEFINITIVE violation: no task ref, task not found, task
-#                 still open, in_progress with no worker, done without ever
-#                 having been claimed/closed through the engine, cancelled, or
-#                 wrong worker. The PR must not merge.
-#     2  neutral — the ledger could not be reached (network error / 5xx). The
-#                 caller treats this as pass-with-warning: a ledger outage must
-#                 never freeze merges (an infra blip is not a policy violation).
+#                 open and never claimed (or lapsed BEFORE the PR was opened),
+#                 in_progress with no worker, done without ever having been
+#                 claimed/closed through the engine, cancelled, or wrong worker.
+#                 Must not merge.
+#     2  UNCHECKED — the ledger could not be reached after PR_TASK_GATE_RETRIES
+#                 attempts (network error / 5xx / 429 / 000), OR it answered 2xx
+#                 with no task document in the envelope. This is NOT a pass:
+#                 the caller (the workflow) turns it into a FAILURE carrying a
+#                 self-describing "re-run once the ledger is up" message.
 #
 # Why 2 is distinct from 1: a hard fail means "the rule was checked and broken";
-# neutral means "the rule could not be checked". Collapsing them would either
-# turn a guerrilla outage into a merge freeze (if 2→1) or let a genuinely
-# unbacked PR through whenever the ledger hiccups (if 1→2). Keep them separate.
+# 2 means "the rule could not be checked". Both block, but they read differently
+# and only one of them is fixed by pressing re-run. Collapsing them would print
+# a policy accusation at a reader whose PR is fine.
+#
+# Why 2 no longer passes (charter D24). The old contract was "neutral =
+# pass-with-warning", and the handler that would have emitted that warning was
+# unreachable dead code: the workflow step runs under GitHub's `bash -e`, which
+# `set -uo pipefail` does not clear, so exit 2 aborted the step before `rc=$?`.
+# The behaviour shipped for the whole life of the gate was therefore "5xx =
+# red with a misleading label". Making the handler reachable AS WRITTEN would
+# have turned every ledger blip into a SILENT GREEN — a blocking check passing
+# having verified nothing — because GitHub removed the `neutral` conclusion for
+# exit codes in 2019. So: bounded retry (a blip really is transient), then an
+# honest red that says what to do about it.
 #
 # Why `done` can pass. The invariant is "this change is task-backed", NOT
 # "someone is actively typing right now". A task closed on met acceptance
@@ -96,34 +118,165 @@ fi
 
 LEDGER_BASE="${LEDGER_BASE:-https://guerrilla.barkpark.cloud}"
 DATASET="${LEDGER_DATASET:-production}"
+RETRIES="${PR_TASK_GATE_RETRIES:-3}"
+RETRY_DELAY="${PR_TASK_GATE_RETRY_DELAY:-2}"
+# A non-numeric or zero retry count would make `[ "$attempt" -ge "$RETRIES" ]`
+# error out, which reads as false — an INFINITE retry loop, i.e. a gate that
+# hangs instead of deciding. Refuse the input loudly rather than guess.
+case "$RETRIES" in ''|*[!0-9]*|0) echo "pr-task-gate: PR_TASK_GATE_RETRIES must be a positive integer, got '${RETRIES}'" >&2; exit 1 ;; esac
+case "$RETRY_DELAY" in ''|*[!0-9]*) echo "pr-task-gate: PR_TASK_GATE_RETRY_DELAY must be a non-negative integer, got '${RETRY_DELAY}'" >&2; exit 1 ;; esac
 
-fail()    { echo "pr-task-gate: FAIL: $*" >&2; exit 1; }
-neutral() { echo "pr-task-gate: NEUTRAL: $*" >&2; exit 2; }
-pass()    { echo "pr-task-gate: PASS: $*";        exit 0; }
+# The refusal has to survive the trip to the check-run UI. A plain stderr line
+# does not: a red `PR references an active task` exposed output.title=null,
+# output.summary=null and a single annotation reading `Process completed with
+# exit code 1.` — while all 17 fail() sites below already carry the exact
+# remediation command. GitHub's log parser only lifts WORKFLOW COMMANDS out of a
+# step's output, so the fix is the `::error title=…::` envelope, not the stream:
+# proven 2026-07-28 on a live throwaway run, this exact form written to stderr
+# from inside a called script, invoked exactly as .github/workflows/
+# pr-task-gate.yml invokes it, landed as `[failure] title=… | pr-task-gate:
+# FAIL: …`. Only `fail()` wears this title — `unchecked()` is an outage, not a
+# finding about the PR, and the workflow raises its own ::error for it.
+# CONSUMERS: the authored annotation is NOT annotations[0]. The runner's own
+# `Process completed with exit code 1.` and actions/checkout's Node-20 warning
+# both precede it, so select on a non-empty `.title`, never on index.
+fail()      { echo "::error title=PR is not task-backed::pr-task-gate: FAIL: $*" >&2; exit 1; }
+unchecked() { echo "pr-task-gate: UNCHECKED: $*" >&2; exit 2; }
+pass()      { echo "pr-task-gate: PASS: $*";        exit 0; }
 
 [ -n "${TASK_ID:-}" ] || fail "no task reference found on the PR (add a 'Task: <doc_id>' line to the PR description)"
+
+# ── The CURE clause: what a reader must DO, not just what they broke ──────────
+# Wave 24 shipped six PRs that were green on every code gate and then sat red
+# for hours on this one required context. The red was not silent — it named the
+# violation and handed over `bp task claim` — but it stopped one step short of
+# landing anything, twice over:
+#
+#   1. RE-CLAIMING DOES NOT RE-FIRE THE GATE. This check runs on pull_request
+#      events (opened/synchronize/reopened/edited/labeled/unlabeled); a write to
+#      the LEDGER is not one of them. So a reader who does exactly what the red
+#      told them watches the same red sit there, concludes the instruction did
+#      not work, and either pushes an empty commit or gives up. The verdict is
+#      sticky until something re-fires it, and the cheapest something is a
+#      re-run of the failed job.
+#   2. RELEASING AFTERWARDS IS UNRECOVERABLE BY RE-FIRE. `bp task release` does
+#      not clear the claim — apply_release_update/2 in the tasks release path
+#      MERGES released_by/released_at into the SURVIVING claim map and never
+#      touches expired_at. A task that was reaped, re-claimed, then released
+#      therefore carries released_at >= expired_at forever, which is precisely
+#      the ordering clause below. No number of re-runs moves it; only a fresh
+#      claim does. A reader tidying up after themselves ("I am done, let me
+#      release it") converts a fixable red into a permanent one, and nothing in
+#      the old message warned them.
+#
+# HOW TO FIND THE RUN ID BY HAND, and the trap in doing so (recorded here
+# because this is the read site a reader lands on when the interpolated id is
+# absent): `gh api repos/<owner>/<repo>/commits/<sha>/check-runs` PAGINATES at
+# per_page=30. A sha carrying 36 check runs answered with this gate's run
+# NOWHERE in the response — not an error, just a truncated page that reads as
+# "the check never ran". Use `--paginate`, or `--jq` over a `per_page=100` page,
+# and PIN THE RESULT BY (sha, check-run NAME) — never by check-run id: the cure
+# below mints a NEW check-run id for the same (sha, name) pair, so an id
+# captured before the re-fire points at the dead red forever.
+#
+# GITHUB_RUN_ID is a DEFAULT Actions environment variable (present in every
+# step, no `env:` plumbing in .github/workflows/pr-task-gate.yml required), and
+# it is the workflow RUN id — exactly what `gh run rerun` takes. Outside Actions
+# it is unset, and the clause degrades to a readable literal rather than
+# printing `gh run rerun  --failed`, which reads as a broken command.
+if [ -n "${GITHUB_RUN_ID:-}" ]; then
+  RERUN_CMD="gh run rerun ${GITHUB_RUN_ID} --failed"
+else
+  RERUN_CMD="gh run rerun <this run id> --failed"
+fi
+
+# The ordering clause's own line number, quoted in the refusals below so the
+# reader can jump straight to the rule they are one keystroke from tripping. It
+# is a literal because the clause has no other name; scripts/pr-task-gate.test.sh
+# runs the gate, reads this reference back out of the message and asserts that
+# the cited line really is the released_ge_expired comparison — so an edit that
+# shifts the clause reds the harness instead of quietly misdirecting a reader.
+ORDERING_CLAUSE_REF="pr-task-gate.sh:462"
+
+# The whole cure, in the order it must be performed. Every refusal that a
+# re-claim actually fixes carries this, verbatim.
+CURE="Re-claim it: bp task claim ${TASK_ID} <worker>. THEN RE-FIRE THIS CHECK — a ledger write is not a pull_request event, so the red stays sticky until the job re-runs: ${RERUN_CMD}. And do NOT release the claim afterwards: release merges released_at into the SURVIVING claim and never touches expired_at (apply_release_update/2), so released_at >= expired_at trips the ordering clause at ${ORDERING_CLAUSE_REF} — a refusal that NO re-fire can clear, only a fresh claim."
 
 url="${LEDGER_BASE%/}/v1/data/doc/${DATASET}/task/${TASK_ID}"
 
 # -sS: quiet but show errors. -m 20: hard per-request cap. Capture body and the
 # HTTP status separately so a 5xx is distinguishable from a 404 body.
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
-http_code="$(curl -sS -m 20 -o "$tmp" -w '%{http_code}' "$url" 2>"$tmp.err")" || {
-  neutral "could not reach the ledger at ${LEDGER_BASE} ($(cat "$tmp.err" 2>/dev/null | head -1)); not blocking the merge on an infra error"
+trap 'rm -f "$tmp" "$tmp.err"' EXIT
+
+# Bounded retry, then decide (D24). Only INDECISIVE answers are retried: a
+# transport failure or a status that is neither 404 nor 2xx. A 404 and a 2xx are
+# both answers, and retrying an answer would only make the gate slower and its
+# verdict a function of the wall clock — the exact contamination this epic
+# exists to remove. `last_reason` carries the final attempt's reason so the
+# UNCHECKED message names what actually happened, not a generic outage.
+# Authenticated read (wave-3 token plumbing). The ledger serves task documents
+# unauthenticated TODAY, but the day tasks flip to private every unauthenticated
+# read of a REAL task answers 404, and the 404 branch below would then red every
+# PR with "task does not exist" — a private-flip would make main unmergeable with
+# no code change. Sending a Bearer keeps authenticated reads seeing the task.
+# The header is added ONLY when LEDGER_TOKEN is non-empty: an EMPTY `Authorization:
+# Bearer ` is a malformed-but-present credential, worse than sending none. The
+# secret is UNPROVISIONED today and fork PRs never receive secrets, so the
+# empty-token path is the common runtime case, not an error — the 404 branch
+# below treats a token-absent 404 as an outage (exit 2), not a PR accusation.
+# `${auth_args[@]+...}` guards the expansion for empty arrays under `set -u` on
+# bash 3.2 (macOS), where a bare `"${auth_args[@]}"` on an empty array aborts.
+auth_args=()
+if [ -n "${LEDGER_TOKEN:-}" ]; then
+  auth_args=(-H "Authorization: Bearer ${LEDGER_TOKEN}")
+fi
+
+last_reason=""
+fetch_doc() {
+  local attempt=1
+  while : ; do
+    if http_code="$(curl -sS -m 20 ${auth_args[@]+"${auth_args[@]}"} -o "$tmp" -w '%{http_code}' "$url" 2>"$tmp.err")"; then
+      case "$http_code" in
+        404|2??) return 0 ;;
+      esac
+      last_reason="ledger returned HTTP ${http_code} for ${TASK_ID}"
+    else
+      http_code="000"
+      last_reason="could not reach the ledger at ${LEDGER_BASE} ($(head -1 "$tmp.err" 2>/dev/null))"
+    fi
+    [ "$attempt" -ge "$RETRIES" ] && return 1
+    echo "pr-task-gate: attempt ${attempt}/${RETRIES} was indecisive (${last_reason}); retrying in ${RETRY_DELAY}s" >&2
+    sleep "$RETRY_DELAY"
+    attempt=$((attempt + 1))
+  done
 }
 
-# Status handling, decided by code not body:
-#   404              → the task genuinely does not exist → DEFINITIVE fail.
-#   2xx              → parse the body (below).
-#   anything else    → ledger-side / infra problem (5xx, 000 no-response, 429
-#                      rate limit, 401/403 misconfig) → neutral, never block a
-#                      merge on our own infra. A definitive policy violation is
-#                      only ever "no ref / not found / not in_progress".
+fetch_doc || unchecked "${last_reason} after ${RETRIES} attempts — the task backing of this PR could not be checked at all. This is not a finding about your PR: re-run this check once the ledger is up (ledger: ${LEDGER_BASE})"
+
+# Status handling, decided by code not body. A 404 is an ANSWER, never retried
+# (fetch_doc returns it at once), but what it MEANS depends on whether we could
+# read the ledger authenticated:
+#   404 + token PRESENT → we asked as ourselves and the task is not there →
+#                         DEFINITIVE fail (exit 1). The accusation is TRUE.
+#   404 + token ABSENT  → an unauthenticated read cannot tell a missing task from
+#                         a PRIVATE one it is not allowed to see, so this is an
+#                         OUTAGE about the gate's credentials, not a finding about
+#                         the PR → UNCHECKED (exit 2), naming BARKPARK_TASK_TOKEN.
+#                         This is the private-flip safety valve: fork PRs and the
+#                         (currently unprovisioned) secret both land here, and
+#                         neither deserves a false "your task does not exist" red.
+#   2xx                 → parse the body (below).
+# Everything else is already handled by fetch_doc (retry, then UNCHECKED).
 case "$http_code" in
-  404)     fail "task '${TASK_ID}' does not exist on the ledger (${LEDGER_BASE}) — reference a real task (HTTP 404)" ;;
+  404)
+    if [ -n "${LEDGER_TOKEN:-}" ]; then
+      fail "task '${TASK_ID}' does not exist on the ledger (${LEDGER_BASE}) — reference a real task (HTTP 404)"
+    else
+      unchecked "the ledger answered 404 for '${TASK_ID}' and no LEDGER_TOKEN was supplied, so an unauthenticated read cannot tell a missing task from a private one it may not see — the task backing of this PR could not be checked. This is not a finding about your PR: provision BARKPARK_TASK_TOKEN (see .github/workflows/pr-task-gate.yml and docs/ops/merge-gates.md) and re-run, or — on a fork PR, which never receives secrets — merge from a branch in this repo (ledger: ${LEDGER_BASE})"
+    fi
+    ;;
   2??)     : ;;  # parse below
-  *)       neutral "ledger returned HTTP ${http_code} for ${TASK_ID}; not blocking the merge on a ledger error" ;;
 esac
 
 # Parse the flattened doc. doc.get wraps the document under `.result`; a
@@ -138,8 +291,21 @@ esac
 # task that was never worked reads differently from one closed through the
 # engine. Any literal tab inside a value is squashed to a space by the emitter
 # below, so the separator can never be forged from the data side.
-IFS=$'\t' read -r found lifecycle worker closed_by claimed < <(python3 - "$tmp" <<'PY'
-import json, sys
+#
+# The last five fields serve the lapsed-claim branch (D23/D58) and are computed
+# here because the arithmetic is timestamp parsing, which shell cannot do
+# portably: `prev_worker` is stamped by the TTL sweeper's reap, `lapse_age` is
+# the whole seconds since claim.expired_at ("." when it is missing or does not
+# parse — never 0, which would silently read as "just lapsed"),
+# `released_ge_expired` answers the one question that separates a reap from a
+# voluntary release, `pr_open_state` says whether PR_OPENED_AT could be read at
+# all ("ok" / "absent" / "unparseable" — the gate refuses on the last two rather
+# than comparing against a guess), and `open_lead` is claim.expired_at minus the
+# PR's created_at in whole seconds: >= 0 means the claim was still LIVE when the
+# PR was opened, < 0 means it had already lapsed by then (see the `open` branch).
+IFS=$'\t' read -r found lifecycle worker closed_by claimed prev_worker lapse_age released_ge_expired pr_open_state open_lead < <(python3 - "$tmp" <<'PY'
+import json, os, sys
+from datetime import datetime, timezone
 
 
 def emit(*fields):
@@ -148,31 +314,100 @@ def emit(*fields):
     print("\t".join(str(f).replace("\t", " ").replace("\n", " ") for f in fields))
 
 
+def ts(value):
+    """Parse a ledger ISO-8601 stamp to an aware datetime, or None.
+
+    Returns None for anything unparseable rather than a sentinel time: the
+    caller must be able to tell "no timestamp" from "an old one", because those
+    two decide opposite ways.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+# PR_OPENED_AT is read HERE and reported as a state rather than defaulted: an
+# absent or unparseable value must reach the shell as itself, because the only
+# honest answer to "was the claim live when the PR opened?" without it is "the
+# gate cannot tell", and the rule for that is refuse, never pass.
+#
+# NOTE for anyone editing these comments: this block is a heredoc inside a
+# process substitution, so bash scans it for the closing paren while tracking
+# quotes. A lone apostrophe here (a possessive, a contraction) is an unbalanced
+# single quote and breaks the whole script with "bad substitution". Spell around
+# it — every comment below is apostrophe-free on purpose.
+raw_pr_open = os.environ.get("PR_OPENED_AT", "")
+pr_opened_at = None
+if not raw_pr_open.strip():
+    pr_open_state = "absent"
+else:
+    pr_opened_at = ts(raw_pr_open)
+    pr_open_state = "ok" if pr_opened_at is not None else "unparseable"
+
 try:
     with open(sys.argv[1]) as f:
         d = json.load(f)
 except Exception:
-    emit("error", ".", ".", ".", "no")
+    emit("error", ".", ".", ".", "no", ".", ".", "unknown", pr_open_state, ".")
     sys.exit(0)
 doc = d.get("result")
 if isinstance(doc, list):
     doc = doc[0] if doc else None
 if not isinstance(doc, dict) or not doc.get("_id"):
-    emit("missing", ".", ".", ".", "no")
+    emit("missing", ".", ".", ".", "no", ".", ".", "unknown", pr_open_state, ".")
     sys.exit(0)
 raw = doc.get("claim")
 claim = raw if isinstance(raw, dict) else {}
+
+expired_at = ts(claim.get("expired_at"))
+released_at = ts(claim.get("released_at"))
+lapse_age = "."
+if expired_at is not None:
+    lapse_age = int((datetime.now(timezone.utc) - expired_at).total_seconds())
+# Unknown when there is no expired_at to compare against: the shell branch
+# accepts ONLY the explicit "no", so an unknown can never be read as a reap.
+released_ge_expired = "unknown"
+if expired_at is not None:
+    released_ge_expired = "yes" if (released_at is not None and released_at >= expired_at) else "no"
+
+# "." whenever either side is unreadable — the shell branch accepts only an
+# integer, so an unknown can never be read as "the claim was live".
+open_lead = "."
+if expired_at is not None and pr_opened_at is not None:
+    open_lead = int((expired_at - pr_opened_at).total_seconds())
+
 emit("found",
      doc.get("lifecycle_status") or ".",
      claim.get("worker") or ".",
      claim.get("closed_by") or ".",
-     "yes" if claim else "no")
+     "yes" if claim else "no",
+     claim.get("previous_worker") or ".",
+     lapse_age,
+     released_ge_expired,
+     pr_open_state,
+     open_lead)
 PY
 )
 
+# `missing` is UNCHECKED, not a violation (charter D59). It is reachable ONLY
+# via a 200 whose envelope carries no task document: both genuine "no such task"
+# cases (a nonexistent id; a real id of another type) answer HTTP 404 and are
+# decided by the 404 branch above, verified live. So the accusation this branch
+# used to print — "task does not exist" — could only ever be false, while the
+# thing that actually happened is that the ledger answered without answering.
+# The branch is NOT deleted: the emitter still emits `missing`, and removing the
+# arm would drop it through to the lifecycle catch-all, which prints a second,
+# worse false accusation ("task '' is '.'"). Honest limit: exit 2 is still turned
+# into a workflow FAILURE by design (D24) — this removes the false ACCUSATION,
+# not the block.
 case "$found" in
-  error)   neutral "ledger response for ${TASK_ID} was not valid JSON; not blocking on a transport error" ;;
-  missing) fail "task '${TASK_ID}' does not exist on the ledger (${LEDGER_BASE}) — reference a real task" ;;
+  error)   unchecked "ledger response for ${TASK_ID} was not valid JSON — the task backing of this PR could not be checked. Re-run this check once the ledger is serving well-formed documents" ;;
+  missing) unchecked "the ledger answered 2xx for '${TASK_ID}' but the response carried no task document in its 'result' envelope, so the task backing of this PR could not be checked at all. This is not a finding about your PR (a task that genuinely does not exist answers 404, which reds definitively): re-run this check once the ledger is serving documents (ledger: ${LEDGER_BASE})" ;;
 esac
 
 # The task-backed predicate. Exactly two lifecycles can back a change, and each
@@ -187,7 +422,7 @@ case "$lifecycle" in
     # Repo.update_all, ttl_sweeper.ex:256/:269/:284, asserted at
     # ttl_sweeper_test.exs:126-128. schema.ex:147-161 warns about the hand-flip
     # in its own comment.)
-    [ "$worker" != "." ] || fail "task '${TASK_ID}' is in_progress but carries no claim.worker — that state comes from editing lifecycle_status directly (bp doc patch) instead of going through the claim/close engine. Re-claim it: bp task claim ${TASK_ID} <worker>"
+    [ "$worker" != "." ] || fail "task '${TASK_ID}' is in_progress but carries no claim.worker — that state comes from editing lifecycle_status directly (bp doc patch) instead of going through the claim/close engine. ${CURE}"
     actor="$worker"
     verdict="in_progress, claimed by '${worker}'"
     ;;
@@ -201,7 +436,66 @@ case "$lifecycle" in
     verdict="done, closed by '${closed_by}'"
     ;;
   open)
-    fail "task '${TASK_ID}' is still 'open' — claim it before opening the PR (bp task claim ${TASK_ID} <worker>)"
+    # A claim that was LIVE WHEN THIS PR OPENED backs the change (D23, D58).
+    # The claim lease is ~45min and PR dwell routinely exceeds it, so the TTL
+    # sweeper reaps a claim out from under a PR that was green when it opened:
+    # 11 of the gate's last 15 reds were this, not a missing task. The reap
+    # (ttl_sweeper.ex apply_reap) writes worker→nil AND lifecycle→"open" AND
+    # stamps claim.previous_worker + claim.expired_at on the same document this
+    # script already reads unauthenticated — so the gate can tell "reaped while
+    # in review" from "never claimed" without a token, an events walk, or CI
+    # writing to the ledger (a CI-side renewal bumps claim.epoch and would fence
+    # the holder out of their own close).
+    #
+    # Every clause below is load-bearing; each one is a fixture in
+    # scripts/pr-task-gate.test.sh.
+    [ "$claimed" = "yes" ] || fail "task '${TASK_ID}' is still 'open' and carries no claim at all — it was never claimed, so this PR was not opened under a live claim. ${CURE}"
+    [ "$worker" = "." ] || fail "task '${TASK_ID}' is 'open' but its claim still names worker '${worker}' — that mixed state does not come from the claim/close engine (a reap nulls the worker). ${CURE}"
+    [ "$prev_worker" != "." ] || fail "task '${TASK_ID}' is still 'open' — its claim carries no previous_worker, so it was never claimed and reaped. ${CURE}"
+    [ "$lapse_age" != "." ] || fail "task '${TASK_ID}' is 'open' with a previous_worker but no readable claim.expired_at, so how long ago the claim lapsed cannot be established. ${CURE}"
+    # THE ORDERING CLAUSE. Release MERGES into the surviving claim — it stamps
+    # released_by/released_at and never previous_worker — so a task that was
+    # reaped, re-claimed, then voluntarily RELEASED still carries the old
+    # expired_at and would read as "just lapsed" without this. A release is a
+    # worker walking away, which is exactly the state the gate exists to red.
+    # Only an explicit "no" (released_at is absent or predates the reap) passes.
+    [ "$released_ge_expired" = "no" ] || fail "task '${TASK_ID}' is 'open' because its claim was RELEASED (released_at is at or after expired_at), not because a lease lapsed under a live PR — a released task is unowned. ${CURE}"
+    # THE FUTURE-CLOCK FLOOR. A reap can never stamp an expiry ahead of the
+    # clock — the sweeper only reaps a claim whose expiry has already passed —
+    # so a negative age is not "very recently lapsed"; it is a clock or a
+    # document the gate cannot trust, and the epic's rule for that is red, never
+    # pass. Kept under P4 because P4 is PR-relative and would otherwise accept
+    # any expiry stamped far enough forward: a one-field document edit would buy
+    # an indefinite waiver. -300s of slack absorbs honest runner/ledger skew.
+    [ "$lapse_age" -ge -300 ] || fail "task '${TASK_ID}' is 'open' and its claim.expired_at is ${lapse_age#-}s in the FUTURE — a reap cannot stamp a future expiry, so this document (or one of the two clocks) cannot be trusted to say when the claim lapsed. ${CURE}"
+    # THE LEASE PREDICATE, P4 (charter D58): the claim was LIVE when this PR was
+    # OPENED — claim.expired_at >= pull_request.created_at. It replaces the old
+    # wall-clock grace, which made the verdict a function of how long a PR sat in
+    # review: the same PR went green in the morning and red in the afternoon
+    # having changed nothing, and 8 of 15 open PRs were red for that reason
+    # alone. P4 has no tunable number in it, so there is no number to be wrong
+    # about, and its answer for a given PR never changes.
+    #
+    # THE COST, stated rather than smuggled: P4 certifies "this PR was opened
+    # under a live claim", NOT "the task is still being worked". A PR opened
+    # under a live claim therefore passes forever, however long it then sits.
+    # That is a real narrowing of what the gate asserts, accepted with eyes open
+    # — the alternative on offer was a predicate whose verdict decays with the
+    # wall clock, which is the contamination this epic exists to remove.
+    #
+    # Refuse, never fall open, when the PR's open time is unreadable: without it
+    # the only honest answer is "the gate cannot tell", and a gate that cannot
+    # tell must not certify. This is scoped to THIS branch because it is the only
+    # one whose decision needs the comparison — in_progress and done are decided
+    # from the document alone and refusing them would red PRs the gate can read.
+    case "$pr_open_state" in
+      absent)      fail "task '${TASK_ID}' is 'open' with a lapsed claim, but PR_OPENED_AT was not supplied, so the gate cannot tell whether that claim was still live when this PR was opened — it refuses to certify what it cannot read. The workflow passes it as PR_OPENED_AT: \${{ github.event.pull_request.created_at }} (.github/workflows/pr-task-gate.yml)" ;;
+      unparseable) fail "task '${TASK_ID}' is 'open' with a lapsed claim, but PR_OPENED_AT ('${PR_OPENED_AT:-}') is not a readable ISO-8601 timestamp, so the gate cannot tell whether that claim was still live when this PR was opened — it refuses to certify what it cannot read" ;;
+    esac
+    [ "$open_lead" != "." ] || fail "task '${TASK_ID}' is 'open' and the gate could not compare claim.expired_at with this PR's open time, so whether the claim was live when the PR opened cannot be established. ${CURE}"
+    [ "$open_lead" -ge 0 ] || fail "task '${TASK_ID}' is 'open': the claim by '${prev_worker}' had ALREADY lapsed ${open_lead#-}s before this PR was opened, so this PR was not opened under a live claim. ${CURE}"
+    actor="$prev_worker"
+    verdict="open, but the claim by '${prev_worker}' was still live when this PR was opened (it lapsed ${open_lead}s after, and was reaped ${lapse_age}s ago)"
     ;;
   *)
     fail "task '${TASK_ID}' is '${lifecycle}' — only 'in_progress' (claimed) or 'done' (closed through the engine) back a change"

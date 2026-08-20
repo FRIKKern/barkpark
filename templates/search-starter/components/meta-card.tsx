@@ -19,12 +19,32 @@ const SKIP_KEYS = new Set([
   "slug",
   "_updatedAt",
   "_createdAt",
-  // Common body/excerpt fields are rendered as prose, not list rows.
-  "body",
+  // Common excerpt fields are rendered as prose, not list rows.
   "excerpt",
   "description",
   "bio",
+  // Body-shaped fields NEVER surface here in any form: `blocks`/`body` render
+  // through PortableDoc, and `body_html` is the server-rendered HTML twin —
+  // multi-KB markup that once escaped into this list as a raw dump (the single
+  // ugliest surface a stranger could hit). document-detail owns rendering them.
+  "body",
+  "body_html",
+  "body_text",
+  "blocks",
 ]);
+
+/**
+ * Hard ceiling for any single printed value. A summary card shows scalars —
+ * ids, dates, counts, short labels. Anything longer is body-shaped content
+ * that belongs to a real renderer, not a definition list.
+ */
+const MAX_FIELD_CHARS = 500;
+
+/** Markup-shaped text (an HTML/XML tag anywhere in the value). We never print
+ * markup as text — escaped tag soup in a `<dd>` is a dump, not a summary. */
+function looksLikeHtml(value: string): boolean {
+  return /<\/?[a-z][^>]*>/i.test(value);
+}
 
 /** Format an ISO-ish date string to a readable label, or null if unparseable. */
 function formatDate(value: unknown): string | null {
@@ -47,11 +67,16 @@ type FieldValue = string | number | boolean;
 function isShowableField(key: string, value: unknown): value is FieldValue {
   if (SKIP_KEYS.has(key)) return false;
   if (key.startsWith("_")) return false; // other system columns
-  return (
-    (typeof value === "string" && value.length > 0) ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  );
+  if (typeof value === "string") {
+    // Never print a blob or markup: >500 chars or html-shaped strings are
+    // body content wearing a field name, not summary scalars.
+    return (
+      value.length > 0 &&
+      value.length <= MAX_FIELD_CHARS &&
+      !looksLikeHtml(value)
+    );
+  }
+  return typeof value === "number" || typeof value === "boolean";
 }
 
 function fieldDisplay(value: FieldValue): string {
@@ -88,13 +113,21 @@ export function MetaCard({ doc, type }: { doc: GenericDoc; type: string }) {
     .filter(([k, v]) => isShowableField(k, v))
     .map(([k, v]) => [k, v as FieldValue] as const);
 
-  // Prose: prefer an explicit excerpt/description/bio, else a string body.
-  const prose =
+  // Prose: an explicit excerpt/description/bio, plain text only. Body-shaped
+  // keys (`body`, `body_html`) never render here — they belong to the real
+  // readers — and an html-shaped candidate is dropped rather than dumped.
+  // Long plain text is clamped: this is a summary card, not a reader.
+  const proseRaw =
     (typeof doc.excerpt === "string" && doc.excerpt) ||
     (typeof doc.description === "string" && doc.description) ||
     (typeof doc.bio === "string" && doc.bio) ||
-    (typeof doc.body === "string" && doc.body) ||
     null;
+  const prose =
+    proseRaw && !looksLikeHtml(proseRaw)
+      ? proseRaw.length > MAX_FIELD_CHARS
+        ? `${proseRaw.slice(0, MAX_FIELD_CHARS).trimEnd()}…`
+        : proseRaw
+      : null;
 
   return (
     <article className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-10">
@@ -147,7 +180,7 @@ function Row({
 }) {
   return (
     <>
-      <dt className="font-medium text-zinc-500 dark:text-zinc-400">{label}</dt>
+      <dt className="font-medium text-muted-text">{label}</dt>
       <dd className="text-zinc-800 dark:text-zinc-200">{children}</dd>
     </>
   );

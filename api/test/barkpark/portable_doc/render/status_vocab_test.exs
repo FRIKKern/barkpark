@@ -35,7 +35,9 @@ defmodule Barkpark.PortableDoc.Render.StatusVocabTest do
   end
 
   test "roles order + tone tokens are exposed from the manifest" do
-    assert StatusVocab.roles() == ~w(open ready progress blocked done cancel considering researching)
+    assert StatusVocab.roles() ==
+             ~w(open ready progress blocked done cancel considering researching)
+
     assert StatusVocab.tones()["ok"] == %{"light" => "#0d9488", "dark" => "#2dd4bf"}
     assert StatusVocab.tones()["danger"]["dark"] == "#f87171"
   end

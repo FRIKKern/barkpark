@@ -195,7 +195,9 @@ defmodule BarkparkWeb.GithubWebhookController do
 
       {:ambiguous_trailer, ids} ->
         # The PR body references more than one distinct task — refused, not guessed.
-        conn |> put_status(:accepted) |> json(%{ok: true, ignored: "ambiguous_trailer", tasks: ids})
+        conn
+        |> put_status(:accepted)
+        |> json(%{ok: true, ignored: "ambiguous_trailer", tasks: ids})
 
       {:unknown_task, doc_id} ->
         # The trailer names a doc that does not resolve. Accepted no-op (a retry
@@ -215,7 +217,9 @@ defmodule BarkparkWeb.GithubWebhookController do
 
         conn
         |> put_status(:internal_server_error)
-        |> json(%{error: %{code: "merge_reconcile_failed", message: "could not process delivery"}})
+        |> json(%{
+          error: %{code: "merge_reconcile_failed", message: "could not process delivery"}
+        })
     end
   end
 

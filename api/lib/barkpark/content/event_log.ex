@@ -77,8 +77,7 @@ defmodule Barkpark.Content.EventLog do
     # `type != "listener"` — same egress exclusion as the nil-workspace leg
     # above (#5626, PDF-D18): listener presence never resurfaces through replay.
     from(e in MutationEvent,
-      where:
-        e.dataset == ^dataset and e.workspace_id == ^workspace_id and e.type != "listener",
+      where: e.dataset == ^dataset and e.workspace_id == ^workspace_id and e.type != "listener",
       order_by: e.id,
       limit: ^batch
     )
@@ -114,8 +113,6 @@ defmodule Barkpark.Content.EventLog do
   delete (row gone), so it must ask about raw row existence, NOT a scoped read.
   """
   def document_present?(doc_id, dataset) do
-    Repo.exists?(
-      from(d in Document, where: d.doc_id == ^doc_id and d.dataset == ^dataset)
-    )
+    Repo.exists?(from(d in Document, where: d.doc_id == ^doc_id and d.dataset == ^dataset))
   end
 end

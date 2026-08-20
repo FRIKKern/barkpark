@@ -138,11 +138,20 @@ defmodule Barkpark.Plugins.Bulldocs do
   end
 
   @impl Barkpark.Plugin
+  # Reachability: the only path read is `@schemas_dir` joined with one of three
+  # compile-time literal filenames — no runtime input reaches `File.read!/1`.
+  # sobelow_skip ["Traversal.FileModule"]
   def register_schemas(_opts) do
     # paper (public reader artifact) + form_response (PRIVATE — anonymous form
     # submissions land here; visibility "private" keeps every response off the
-    # public read API while bp/Studio token reads see them normally).
-    for file <- ["paper.json", "form_response.json"] do
+    # public read API while bp/Studio token reads see them normally) +
+    # session (session.json — ALSO PRIVATE, same reason as form_response: a
+    # session record carries cwd, hostname, git branch/HEAD and a scrubbed
+    # transcript ref, so it must never be anonymously readable. Sessions are
+    # deliberately NOT in `AuthoringWall`'s `@walled_types`: they are
+    # machine-generated lifecycle records, and being private already removes
+    # the exposure the wall's curation exists to gate).
+    for file <- ["paper.json", "form_response.json", "session.json"] do
       raw =
         @schemas_dir
         |> Path.join(file)
@@ -200,8 +209,47 @@ defmodule Barkpark.Plugins.Bulldocs do
       {:get, "/d/:dataset/papers/:slug/email", BarkparkWeb.BulldocsEmailController, :show,
        auth: :public_root},
       {:post, "/bulldocs/papers", BarkparkWeb.BulldocsIngestController, :ingest, auth: :ingest},
+      # Validate-all dry-run (BPML masterplan W0): same body shapes as ingest,
+      # every violation (BPML parse, wall gates, structure) in one reply,
+      # nothing persisted. Registered BEFORE the :slug routes conceptually but
+      # unambiguous either way — "validate" is a fixed segment, not a slug arg.
+      {:post, "/bulldocs/papers/validate", BarkparkWeb.BulldocsIngestController, :validate,
+       auth: :ingest},
+      # Working-copy push (BPML masterplan W3): edited BPML + baseRev in,
+      # server-derived op batch under if_rev, canonical BPML back.
+      {:post, "/bulldocs/papers/:slug/sync", BarkparkWeb.BulldocsIngestController, :sync,
+       auth: :ingest},
       {:post, "/bulldocs/papers/:slug/ops", BarkparkWeb.BulldocsIngestController, :apply_op,
        auth: :ingest},
+      # Session-handoff (task-3): a `session` is a blocks-doc twin of a paper
+      # (Content.blocks_type?/1 whitelist), same ingest token tier. GET is
+      # `:ingest`-gated, and that gate is the ONLY reader: there is NO public
+      # session reader route (the `/papers/:slug` reader below resolves
+      # `type: "paper"` only), and the query API refuses the type anonymously
+      # because session.json is `visibility: "private"`. Every read of a
+      # session therefore costs a token.
+      #
+      # NOTE on the ops route: `apply_session_op` rides the GENERIC block-op
+      # path, which patches the `drafts.<slug>` twin — NOT the published row
+      # `show_session` reads. The op receipt names the written doc id and says
+      # so; a `POST /bulldocs/sessions` upsert is what makes an edit visible.
+      {:post, "/bulldocs/sessions", BarkparkWeb.BulldocsIngestController, :ingest_session,
+       auth: :ingest},
+      {:get, "/bulldocs/sessions/:slug", BarkparkWeb.BulldocsIngestController, :show_session,
+       auth: :ingest},
+      {:post, "/bulldocs/sessions/:slug/ops", BarkparkWeb.BulldocsIngestController,
+       :apply_session_op, auth: :ingest},
+      # Session-handoff (task-4): append-only server-stamped event trail
+      # (`Barkpark.Content.Sessions.append_event/5`) — kinds whitelist,
+      # advisory-lock + CAS-on-rev, never an update/delete.
+      {:post, "/bulldocs/sessions/:slug/events", BarkparkWeb.BulldocsIngestController,
+       :append_session_event, auth: :ingest},
+      # session-conversations slice: registry of harness conversations that
+      # touched this session (`Barkpark.Content.Sessions.touch_conversation/5`)
+      # — same advisory-lock + CAS-on-rev posture as the events route above,
+      # upsert-by-id rather than append-only.
+      {:post, "/bulldocs/sessions/:slug/conversations", BarkparkWeb.BulldocsIngestController,
+       :touch_session_conversation, auth: :ingest},
       # lvw-t4 — the AI-proposes loop: insert-only draft edits with provenance.
       {:post, "/bulldocs/papers/:slug/proposals", BarkparkWeb.BulldocsIngestController, :propose,
        auth: :ingest},
@@ -249,6 +297,23 @@ defmodule Barkpark.Plugins.Bulldocs do
   No `get`/`ls` paper verb is declared: the paper reader at `/papers/:slug` is a
   LiveView (`:public_root`), not a JSON API route, so there is no honest flat
   `http.path_template` for it — declaring one would invent an endpoint.
+
+  Task 6 (session-handoff) adds the `session` verb group — `bp session
+  {open,log,publish,view,link-task}` — riding the session routes registered
+  ABOVE (tasks 3-4) plus `POST /v1/tasks/:doc_id/sessions` (Tasks plugin,
+  task 5). `session.open`/`publish`/`view` are `ingest`-tier over
+  `/v1/plugins/bulldocs/sessions*`, same as the paper verbs; `session.log`
+  is the ingest-tier event-append; `session.link-task` sits at `read`-tier
+  (it rides the `/v1/tasks` bearer scope, not the ingest token) — so, unlike
+  the paper verbs above, NOT every command in this list is ingest-tier.
+
+  The session-conversations slice adds a sixth session verb, `session.touch`
+  (`bp session touch <slug> --conversation … --harness … --account … --machine
+  … --cwd …`) — ingest-tier, over the sibling
+  `POST /v1/plugins/bulldocs/sessions/:slug/conversations` route registered
+  ABOVE. It upserts-by-id into the session's harness-conversation registry
+  (`Barkpark.Content.Sessions.touch_conversation/5`), server-stamping
+  `first_seen`/`last_active` — never taken from the caller.
   """
   @impl Barkpark.Plugin
   def cli_commands do
@@ -257,7 +322,16 @@ defmodule Barkpark.Plugins.Bulldocs do
         id: "bulldocs.publish",
         noun: "bulldocs",
         verb: "publish",
-        summary: "Publish (upsert) a paper from a portable-doc or HTML payload.",
+        summary:
+          "Publish (upsert) a paper from a portable-doc block payload. blocks[] is the door: " <>
+            "56 renderer block types (chart, diagram, asciicast, diff, filetree, pipeline, …) " <>
+            "with value-keyed inline leaves — items and cells are objects carrying a value key, " <>
+            "never bare strings (a bare string publishes clean and renders blank). " <>
+            "Guide: /papers/paper-authoring-excellence. " <>
+            "body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables " <>
+            "in the terminal reader. " <>
+            "Reader spacing law: empty paragraph blocks are editor scaffolds, not published " <>
+            "layout — remove them from ingest payloads; shared reader tokens own section rhythm.",
         http: %{method: "POST", path_template: "/v1/plugins/bulldocs/papers"},
         auth_tier: "ingest",
         args: [
@@ -267,7 +341,9 @@ defmodule Barkpark.Plugins.Bulldocs do
           %{
             name: "file",
             type: "file",
-            summary: "Payload (blocks or body_html) from a file or - for stdin."
+            summary:
+              "Payload from a file or - for stdin: portable-doc blocks (preferred) " <>
+                "or legacy body_html."
           }
         ],
         writes: true,
@@ -360,6 +436,171 @@ defmodule Barkpark.Plugins.Bulldocs do
           %{name: "id", required: true, type: "string", summary: "Intent (paper_event) id."}
         ],
         flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.open",
+        noun: "session",
+        verb: "open",
+        summary:
+          "Open a living session document at session start (status: open, metadata seeded).",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions"},
+        auth_tier: "ingest",
+        args: [
+          %{
+            name: "slug",
+            required: true,
+            type: "slug",
+            summary: "Session slug (session-YYYY-MM-DD-<topic>)."
+          }
+        ],
+        flags: [
+          %{
+            name: "file",
+            type: "file",
+            summary: "Metadata payload (fields, tags, description; blocks optional)."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.log",
+        noun: "session",
+        verb: "log",
+        summary: "Append one milestone event to an open session (server stamps ts).",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions/:slug/events"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Session slug."}
+        ],
+        flags: [
+          %{
+            name: "kind",
+            type: "string",
+            summary:
+              "Event kind: paper-published | task-closed | epic-wave-complete | push | note."
+          },
+          %{
+            name: "ref",
+            type: "string",
+            summary: "Related doc id (task id, paper slug, commit SHA)."
+          },
+          %{name: "note", type: "string", summary: "Short free-text note."},
+          %{
+            name: "conversation",
+            type: "string",
+            summary: "Conversation that logged this event (provenance)."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.publish",
+        noun: "session",
+        verb: "publish",
+        summary: "Upsert session synthesis blocks + metadata (checkpoint or close).",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/sessions"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Session slug."}
+        ],
+        flags: [
+          %{
+            name: "file",
+            type: "file",
+            summary: "Payload: blocks + fields (status: closed on final close)."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.view",
+        noun: "session",
+        verb: "view",
+        summary: "Read a session back: metadata + event trail + synthesis blocks.",
+        http: %{method: "GET", path_template: "/v1/plugins/bulldocs/sessions/:slug"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Session slug."}
+        ],
+        flags: [],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "json",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.link-task",
+        noun: "session",
+        verb: "link-task",
+        summary:
+          "Stamp a task with the session it was worked in (appends to the task's sessions[]).",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/sessions"},
+        auth_tier: "read",
+        args: [
+          %{name: "doc_id", required: true, type: "string", summary: "Task doc id."}
+        ],
+        flags: [
+          %{name: "add", type: "string", summary: "Session slug to add."}
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "session.touch",
+        noun: "session",
+        verb: "touch",
+        summary:
+          "Register or refresh a harness conversation on a session (server stamps first_seen/last_active).",
+        http: %{
+          method: "POST",
+          path_template: "/v1/plugins/bulldocs/sessions/:slug/conversations"
+        },
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "Session slug."}
+        ],
+        flags: [
+          %{
+            name: "conversation",
+            type: "string",
+            summary: "Harness-native conversation/session uuid."
+          },
+          %{name: "harness", type: "string", summary: "claude-code | codex | other."},
+          %{
+            name: "account",
+            type: "string",
+            summary: "Account holding the conversation (email or best-effort id)."
+          },
+          %{name: "machine", type: "string", summary: "Hostname."},
+          %{name: "cwd", type: "string", summary: "Working directory."}
+        ],
         writes: true,
         batch: false,
         paginated: false,

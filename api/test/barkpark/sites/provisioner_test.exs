@@ -14,10 +14,34 @@ defmodule Barkpark.Sites.ProvisionerTest do
       clobber the site's build cache;
     * it is fail-closed — a missing template returns `{:error,
       {:provision_failed, _}}` and leaves NO half-materialized `src`;
-    * a ROLLBACK never provisions (its source is already there).
+    * a ROLLBACK never provisions (its source is already there);
+    * the DELETE window is closed — no failure leaves a half-deleted `src`, a
+      mutilated `src` self-heals, and two same-slug provisions serialize
+      (the 2026-08-05 search-capstone wedge; see the "delete window" describe).
   """
   # async: false — mutates Application env for the singleton Provisioner config.
   use ExUnit.Case, async: false
+
+  # The wedge tests reproduce "rm_rf raised partway through the tree" with an
+  # unwritable subdirectory. root ignores directory permissions, so on a
+  # privileged filesystem the trigger would not bite and the test would be
+  # vacuously green — probe once, and skip loudly instead.
+  @chmod_bites (fn ->
+                  base =
+                    Path.join(
+                      System.tmp_dir!(),
+                      "bp-perm-probe-#{:erlang.unique_integer([:positive])}"
+                    )
+
+                  locked = Path.join(base, "locked")
+                  File.mkdir_p!(locked)
+                  File.write!(Path.join(locked, "f"), "x")
+                  File.chmod!(locked, 0o500)
+                  bites? = match?({:error, _, _}, File.rm_rf(locked))
+                  File.chmod(locked, 0o700)
+                  File.rm_rf(base)
+                  bites?
+                end).()
 
   alias Barkpark.Sites.DeployRequest
   alias Barkpark.Sites.Provisioner
@@ -209,7 +233,10 @@ defmodule Barkpark.Sites.ProvisionerTest do
     end
 
     test "a TEMPLATE SWITCH on an existing slug swaps the tree" do
-      assert Provisioner.provision(deploy("switcher", template: "next-starter", runtime_target: "node")) == :ok
+      assert Provisioner.provision(
+               deploy("switcher", template: "next-starter", runtime_target: "node")
+             ) == :ok
+
       src = Provisioner.src_dir("switcher")
       assert File.read!(Path.join(src, "package.json")) == ~s({"name":"next-stub"})
 
@@ -342,22 +369,191 @@ defmodule Barkpark.Sites.ProvisionerTest do
 
     test "template=astro-starter selects astro; template=next-starter selects next" do
       assert Provisioner.provision(deploy("t-astro", template: "astro-starter")) == :ok
+
       assert File.read!(Path.join(Provisioner.src_dir("t-astro"), "package.json")) ==
                ~s({"name":"astro-stub"})
 
       assert Provisioner.provision(deploy("t-next", template: "next-starter")) == :ok
+
       assert File.read!(Path.join(Provisioner.src_dir("t-next"), "package.json")) ==
                ~s({"name":"next-stub"})
     end
 
     test "no template falls back to the runtime_target default — unchanged behavior" do
       assert Provisioner.provision(deploy("fb-node", runtime_target: "node")) == :ok
+
       assert File.read!(Path.join(Provisioner.src_dir("fb-node"), "package.json")) ==
                ~s({"name":"next-stub"})
 
       assert Provisioner.provision(deploy("fb-static")) == :ok
+
       assert File.read!(Path.join(Provisioner.src_dir("fb-static"), "package.json")) ==
                ~s({"name":"astro-stub"})
+    end
+  end
+
+  # ── the delete window (2026-08-05 search-capstone wedge) ─────────────────
+  #
+  # The provisioner used to `rm_rf!(src)` and THEN `rename(partial, src)`. On
+  # 2026-08-05 that rm_rf! raised AFTER the recursive delete had begun and
+  # BEFORE the rename, leaving 22 of 66 template files on disk — and the
+  # surviving marker (a fingerprint of the TEMPLATE, never of src) made every
+  # subsequent provision a no-op, so one race became 25 deterministic build
+  # failures with no path back.
+
+  describe "the delete window" do
+    @tag skip: not @chmod_bites && "needs an unprivileged filesystem (chmod must block rm_rf)"
+    test "an undeletable subtree in src NEVER leaves a half-populated src", %{template: template} do
+      # A live, complete src…
+      assert Provisioner.provision(deploy("wedged")) == :ok
+      src = Provisioner.src_dir("wedged")
+
+      # …containing something a recursive delete CANNOT remove: the exact
+      # trigger that raised in production (rm_rf partway through the tree).
+      locked = Path.join(src, "locked")
+      File.mkdir_p!(locked)
+      File.write!(Path.join(locked, "pinned"), "cannot be deleted\n")
+      File.chmod!(locked, 0o500)
+      on_exit(fn -> File.chmod(locked, 0o700) end)
+      # Prove the trigger actually bites before relying on it.
+      assert {:error, _, _} = File.rm_rf(locked)
+
+      # A template update forces a re-materialize over that src.
+      File.write!(Path.join(template, ".basepath"), "marker\n")
+
+      assert Provisioner.provision(deploy("wedged", build_id: "b2")) == :ok
+
+      # The new tree is COMPLETE — not the 22-of-66 mutilation the old
+      # delete-then-rename produced.
+      for rel <- ["package.json", "astro.config.mjs", "src/lib/barkpark.ts", ".gitignore"] do
+        assert File.exists?(Path.join(src, rel)), "#{rel} missing from src"
+      end
+
+      assert File.read!(Path.join(src, ".basepath")) == "marker\n"
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"astro-stub"})
+      assert File.regular?(Path.join(src, ".bp-provisioned"))
+      refute File.exists?(src <> ".partial")
+    end
+
+    @tag skip: not @chmod_bites && "needs an unprivileged filesystem (chmod must block rm_rf)"
+    test "a raise while clearing scratch leaves the PREVIOUS complete tree" do
+      assert Provisioner.provision(deploy("survivor-2")) == :ok
+      src = Provisioner.src_dir("survivor-2")
+
+      # Occupy the scratch path with something rm_rf! cannot clear, so
+      # materialize raises BEFORE it can touch src…
+      stale = src <> ".stale"
+      locked = Path.join(stale, "locked")
+      File.mkdir_p!(locked)
+      File.write!(Path.join(locked, "pinned"), "x")
+      File.chmod!(locked, 0o500)
+      on_exit(fn -> File.chmod(locked, 0o700) end)
+
+      # …and drop the marker so the provision must re-materialize.
+      File.rm!(Path.join(src, ".bp-provisioned"))
+
+      assert {:error, {:provision_failed, _}} = Provisioner.provision(deploy("survivor-2"))
+
+      # Fail-closed: the live source is still the COMPLETE prior tree.
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"astro-stub"})
+      assert File.exists?(Path.join(src, "src/lib/barkpark.ts"))
+      assert File.exists?(Path.join(src, ".gitignore"))
+    end
+
+    test "a MUTILATED src self-heals even though the template digest is unchanged" do
+      assert Provisioner.provision(deploy("mutilated")) == :ok
+      src = Provisioner.src_dir("mutilated")
+
+      # The wedge's disk state: files gone, marker intact and still a valid
+      # fingerprint of an UNCHANGED template. Under provenance-only freshness
+      # this state re-provisions as a no-op forever.
+      File.rm_rf!(Path.join(src, "src"))
+      File.rm!(Path.join(src, "astro.config.mjs"))
+      assert File.regular?(Path.join(src, ".bp-provisioned"))
+      refute File.exists?(Path.join(src, "src/lib/barkpark.ts"))
+
+      assert Provisioner.provision(deploy("mutilated", build_id: "b2")) == :ok
+
+      # Restored from the template — the integrity check, not the marker.
+      assert File.exists?(Path.join(src, "src/lib/barkpark.ts"))
+      assert File.exists?(Path.join(src, "astro.config.mjs"))
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"astro-stub"})
+    end
+
+    test "an INTERRUPTED swap (src gone, .stale/.partial siblings) recovers to a complete src" do
+      assert Provisioner.provision(deploy("interrupted")) == :ok
+      src = Provisioner.src_dir("interrupted")
+
+      # Exactly what a crash between the two renames leaves behind: no live
+      # src, the outgoing tree parked at .stale, a staged tree at .partial.
+      File.rename!(src, src <> ".stale")
+      File.mkdir_p!(src <> ".partial")
+      File.write!(Path.join(src <> ".partial", "junk"), "half-staged")
+      refute File.exists?(src)
+
+      assert Provisioner.provision(deploy("interrupted", build_id: "b2")) == :ok
+
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"astro-stub"})
+      assert File.exists?(Path.join(src, "src/lib/barkpark.ts"))
+      refute File.exists?(Path.join(src, "junk"))
+      # Both scratch siblings are swept.
+      refute File.exists?(src <> ".partial")
+      refute File.exists?(src <> ".stale")
+    end
+  end
+
+  # ── per-slug serialization ───────────────────────────────────────────────
+  #
+  # Two same-slug deploys were in flight when the wedge happened. provision/1
+  # runs in the Elixir runner BEFORE site-deploy.sh takes its per-slug flock, so
+  # nothing else serializes them.
+
+  describe "per-slug serialization" do
+    test "a provision BLOCKS while another holder owns the slug's lock" do
+      parent = self()
+
+      holder =
+        spawn(fn ->
+          :global.trans(Provisioner.lock_id("busy"), fn ->
+            send(parent, :held)
+
+            receive do
+              :release -> :ok
+            end
+          end)
+        end)
+
+      assert_receive :held, 2_000
+
+      task = Task.async(fn -> Provisioner.provision(deploy("busy")) end)
+
+      # It must NOT be inside materialize/4 while the lock is held: no result,
+      # and nothing on disk.
+      refute Task.yield(task, 300)
+      refute File.exists?(Provisioner.src_dir("busy"))
+
+      send(holder, :release)
+
+      assert Task.await(task, 10_000) == :ok
+      assert File.exists?(Path.join(Provisioner.src_dir("busy"), "package.json"))
+    end
+
+    test "concurrent same-slug provisions all succeed and leave ONE complete tree" do
+      results =
+        1..5
+        |> Enum.map(fn i ->
+          Task.async(fn -> Provisioner.provision(deploy("stampede", build_id: "b#{i}")) end)
+        end)
+        |> Enum.map(&Task.await(&1, 30_000))
+
+      assert Enum.all?(results, &(&1 == :ok)), "concurrent provisions: #{inspect(results)}"
+
+      src = Provisioner.src_dir("stampede")
+      assert File.read!(Path.join(src, "package.json")) == ~s({"name":"astro-stub"})
+      assert File.exists?(Path.join(src, "src/lib/barkpark.ts"))
+      assert File.regular?(Path.join(src, ".bp-provisioned"))
+      refute File.exists?(src <> ".partial")
+      refute File.exists?(src <> ".stale")
     end
   end
 

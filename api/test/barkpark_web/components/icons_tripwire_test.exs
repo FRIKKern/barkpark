@@ -51,6 +51,9 @@ defmodule BarkparkWeb.IconsTripwireTest do
        scans above catch.
     3. **It only reads literals in `lib/`.** Names built by interpolation
        (`"chevron-" <> dir`) are invisible, and `test/` is not scanned.
+       `priv/plugins/*/schemas/*.json` USED to be part of this hole and no
+       longer is — three shipped schemas were carrying unmapped emoji at once
+       (spd-w17), so those files now have their own JSON-parsing scan below.
 
   Inside those limits it is exact: it parses balanced `{…}` attribute
   expressions, so a literal hiding inside `name={if x, do: "a", else: "b"}` is
@@ -142,6 +145,48 @@ defmodule BarkparkWeb.IconsTripwireTest do
     end
   end
 
+  describe "every icon declared by a SHIPPED plugin schema (priv/)" do
+    # THE FOURTH HOLE, and it was live in three schemas at once (spd-w17).
+    # A plugin's schema JSON is not source — the two scans above never read
+    # `priv/`, so `session.json`'s 🧵, `form_response.json`'s 🗳️ and scaffy
+    # `command.json`'s 🔧 all shipped names `@emoji_map` does not carry. That
+    # is not cosmetic: `icon/1` RAISES under :test (so any table-driven Studio
+    # test carrying such a row dies before it can assert anything) and warns +
+    # paints the "file" document glyph in dev and prod — a desk row lying
+    # about what it opens. These are developer-authored literals in the tree,
+    # exactly the class the lib/ scans exist for, just spelled as JSON.
+    test "resolves to a real glyph — a schema icon paints a desk row" do
+      sites = schema_icon_sites()
+
+      assert length(sites) > 10,
+             "expected the shipped plugin schemas to declare icons; found " <>
+               "#{length(sites)} — a broken scan is a vacuously green tripwire"
+
+      unknown = Enum.reject(sites, fn {_file, name} -> Icons.known_icon?(name) end)
+
+      assert unknown == [], """
+      #{length(unknown)} icon name(s) declared by a SHIPPED plugin schema have
+      no entry in BarkparkWeb.Icons. `icon/1` raises on them under :test and
+      paints the "file" glyph in dev/prod:
+
+      #{Enum.map_join(unknown, "\n", fn {file, name} -> "  #{name}  <-  #{file}" end)}
+
+      Use a name from BarkparkWeb.Icons.icon_names/0 (or add the path to
+      @icons in lib/barkpark_web/components/icons.ex).
+      """
+    end
+
+    test "the scan reaches the schemas that actually ship a desk row" do
+      files = schema_icon_sites() |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+
+      for expected <- ["bulldocs/schemas/session.json", "bulldocs/schemas/paper.json"] do
+        assert Enum.any?(files, &String.contains?(&1, expected)),
+               "#{expected} declares a desk icon and must be scanned; " <>
+                 "scanned only #{inspect(files)}"
+      end
+    end
+  end
+
   describe "known_icon?/1" do
     test "answers the same question icon/1 asks, including emoji aliases" do
       assert Icons.known_icon?("plus")
@@ -158,13 +203,65 @@ defmodule BarkparkWeb.IconsTripwireTest do
 
     test "every emoji alias points at a glyph that exists" do
       # An alias to a missing name would fall back just as silently.
-      for emoji <- ["📄", "📑", "👤", "🏷", "💼", "⚙", "🧭", "🎨", "📁", "📂", "🖼", "✅", "📰", "📊", "🎫", "🧩", "🗂"] do
+      for emoji <- [
+            "📄",
+            "📑",
+            "👤",
+            "🏷",
+            "💼",
+            "⚙",
+            "🧭",
+            "🎨",
+            "📁",
+            "📂",
+            "🖼",
+            "✅",
+            "📰",
+            "📊",
+            "🎫",
+            "🧩",
+            "🗂"
+          ] do
         assert Icons.known_icon?(emoji), "emoji #{emoji} aliases a glyph that does not exist"
       end
     end
   end
 
   # ── the scanner ────────────────────────────────────────────────────────────
+
+  @priv_plugins_root Path.expand("../../../priv/plugins", __DIR__)
+
+  # Every `"icon"` value declared anywhere in a shipped plugin schema — the
+  # type's own desk glyph AND its field-group tab glyphs, which reach `icon/1`
+  # through the same `drawable_icon/1` seam. Parsed as JSON rather than
+  # grepped, so a nested declaration cannot hide from it.
+  defp schema_icon_sites do
+    @priv_plugins_root
+    |> Path.join("*/schemas/*.json")
+    |> Path.wildcard()
+    |> Enum.flat_map(fn path ->
+      rel = Path.relative_to(path, @priv_plugins_root)
+
+      path
+      |> File.read!()
+      |> Jason.decode!()
+      |> icon_values()
+      |> Enum.map(&{rel, &1})
+    end)
+  end
+
+  defp icon_values(%{} = map) do
+    own =
+      case Map.get(map, "icon") do
+        name when is_binary(name) -> [name]
+        _ -> []
+      end
+
+    own ++ Enum.flat_map(Map.values(map), &icon_values/1)
+  end
+
+  defp icon_values(list) when is_list(list), do: Enum.flat_map(list, &icon_values/1)
+  defp icon_values(_), do: []
 
   defp icon_call_sites do
     @lib_root

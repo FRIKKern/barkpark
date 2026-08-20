@@ -50,8 +50,11 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   # Go provisioner instead of from a local Hetzner token, so the browser journey
   # (create-main → add-support → offload) never needs a laptop credential. It
   # rides the SAME step machine as `provision` (@steps unchanged — a support job
-  # only ever emits create/configure/content/verify/ready, D84) and the SAME
-  # claim/stale-recovery machinery, but is claimed by a kind-filtered query
+  # emits create/secure/configure/content/verify/ready; `secure` joined the
+  # support vocabulary when supports gained a full public identity — the url is
+  # reserved at registration and the worker stands up DNS + Caddy/TLS exactly
+  # like a main, so Open Studio works; only `freshen` stays main-only) and the
+  # SAME claim/stale-recovery machinery, but is claimed by a kind-filtered query
   # (`POST /v1/internal/support-jobs/claim`) so no provision worker grabs it.
   @kinds ~w(provision deprovision attach_domain resurrect provision_support)
 

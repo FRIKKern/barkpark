@@ -7,7 +7,8 @@ defmodule BarkparkWeb.LegacyController do
   import BarkparkWeb.ParamCoercion, only: [bin: 1]
 
   alias Barkpark.Content
-  alias Barkpark.Content.{CallerContext, Envelope}
+  alias Barkpark.Content.{CallerContext, Envelope, Schema}
+  alias BarkparkWeb.AnonPerspective
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -28,11 +29,31 @@ defmodule BarkparkWeb.LegacyController do
       # /v1/data/query enforces, now closed on the legacy surface too.
       case forbidden_filter_field(filter_map, schema, caller_context) do
         nil ->
+          # DRAFTS-LIST CLAMP (api-read-path-security-sweep w3) — the LIST twin
+          # of the show/2 by-id clamp above. `list_documents` defaults to the
+          # `:raw` perspective (content/query.ex:57 — the identity apply at :166),
+          # so `drafts.` rows ARE in the result set. QueryController.index has
+          # always narrowed anon reads via `perspective: AnonPerspective.resolve`
+          # (query_controller.ex:66); this action passed no perspective, so the
+          # LIST arm had the same latent shape the show/2 clamp closed on the
+          # by-id arm. Pin an `anon_pinned?` caller to `:published` here too.
+          #
+          # `anon_pinned?`-SCOPED, never a blanket `:published`: read-tier draft
+          # LISTING is the legacy contract (legacy_crud_test pins an admin token
+          # seeing `drafts.lc-list-2`), so an unconditional clamp would break it —
+          # non-anon callers keep the `:raw` default. Latent today only because
+          # `pipeline :require_token` mounts Plugs.PublicRead, which 403s the one
+          # anon_pinned principal that can reach this route (a public-read token)
+          # two plugs upstream — so a future allowlist change cannot re-open the
+          # list arm alone while the show/2 arm stays clamped.
+          perspective = if AnonPerspective.anon_pinned?(conn), do: :published, else: :raw
+
           documents =
             Content.list_documents(
               type,
               @dataset,
-              [filter_map: filter_map, limit: 10_000] ++ scope_opts(conn)
+              [perspective: perspective, filter_map: filter_map, limit: 10_000] ++
+                scope_opts(conn)
             )
 
           json(conn, %{
@@ -48,8 +69,33 @@ defmodule BarkparkWeb.LegacyController do
   end
 
   def show(conn, %{"type" => type, "id" => doc_id}) do
-    with {:ok, doc} <- Content.get_document(doc_id, type, @dataset, scope_opts(conn)) do
-      json(conn, render_legacy_doc(doc, fetch_schema(conn, type), CallerContext.from_conn(conn)))
+    cond do
+      # DRAFTS-BY-ID CLAMP (api-read-path-security-sweep w2) — the guard
+      # QueryController.show/2 has always carried (query_controller.ex:371),
+      # absent here: this action passed the RAW id straight to get_document, so
+      # a `drafts.` id was fetchable by any published-pinned principal. Latent
+      # today only because `pipeline :require_token` mounts Plugs.PublicRead,
+      # which 403s the one anon_pinned principal that can reach this route (a
+      # public-read token) two plugs upstream — NOT RequireToken, which accepts
+      # any verified token (require_token.ex only 403s a share-token off its
+      # surface). Defense in depth, so a future mount/allowlist change cannot
+      # re-open a drafts read here. Rejected as not-found BEFORE get_document,
+      # the same 404 the action already returns for a missing id.
+      #
+      # `anon_pinned?`-SCOPED, never a blanket prefix block: read-tier draft
+      # access by id IS the legacy contract (legacy_crud_test pins a 200 on
+      # `drafts.lc-show-1` for an admin/read/write token), and a bare
+      # String.starts_with? guard would break it.
+      AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
+        {:error, :not_found}
+
+      true ->
+        with {:ok, doc} <- Content.get_document(doc_id, type, @dataset, scope_opts(conn)) do
+          json(
+            conn,
+            render_legacy_doc(doc, fetch_schema(conn, type), CallerContext.from_conn(conn))
+          )
+        end
     end
   end
 
@@ -92,8 +138,12 @@ defmodule BarkparkWeb.LegacyController do
 
   def delete(conn, %{"type" => type, "id" => doc_id}) do
     case Content.delete_document(doc_id, type, @dataset, [source: :api] ++ scope_opts(conn)) do
-      {:ok, _} ->
-        json(conn, %{deleted: doc_id})
+      # RECEIPT LAW (pds w39): render the row the write returned, never the
+      # request. `delete_document/4` returns `{:ok, target}` — the document it
+      # actually removed (content/lifecycle.ex:694) — and `rev` is the store's
+      # own value, absent from the request, so an echo-of-`doc_id` revert reds.
+      {:ok, deleted} ->
+        json(conn, %{deleted: deleted.doc_id, type: deleted.type, rev: deleted.rev})
 
       # Halts + other errors fall through to action_fallback for the canonical
       # envelope (was a bare %{error: "halted", reason: reason}).
@@ -103,7 +153,22 @@ defmodule BarkparkWeb.LegacyController do
   end
 
   def schemas(conn, _params) do
-    schemas = Content.list_schemas(@dataset, scope_opts(conn))
+    # ANON FIELD DISCLOSURE (api-read-path-security-sweep w2): this route is
+    # deliberately NOT token-gated (see router.ex — public schema discovery),
+    # and it echoed `fields` for EVERY schema, private ones included — the full
+    # field definition of every private type to any anonymous reader (guerrilla:
+    # 39 schemas, 31 of them private-declared). Filter to explicitly-public
+    # schemas through the SAME predicate the query route, the anonymous search
+    # allowlist and the corpus graph use, so a schema flipped to private drops
+    # out of this list on the very next read — never a hardcoded public set.
+    #
+    # The 200 and the array shape are UNCHANGED on purpose: every external
+    # consumer of this route (deploy.sh, the docker-compose healthcheck,
+    # cloud/support.go) probes reachability/parse-ability, not membership.
+    schemas =
+      @dataset
+      |> Content.list_schemas(scope_opts(conn))
+      |> Enum.filter(&Schema.public_schema?/1)
 
     json(
       conn,

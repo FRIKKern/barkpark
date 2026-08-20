@@ -33,7 +33,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   on exactly two things, both stable across the engine's own refactors:
 
     * the **filename prefixes** `bp-ws-bundle-` (the tar, already produced by
-      `WorkspaceBundle.Archive`) and `bp-ws-spill-` (the per-table spill files);
+      `WorkspaceBundle.Archive`), `bp-ws-spill-` (the per-table spill files) and
+      `bp-ws-import-` (the import scratch — the FIRST candidate that is a
+      DIRECTORY, holding the spilled request body plus the extracted members).
+      `remove/1` has always been `File.rm_rf/1`, so a directory was already
+      collectable; what it was NOT is visible — `candidates/1` sweeps by prefix,
+      so an unregistered prefix leaves a multi-GB scratch stranded forever;
     * the **config key** `:bundle_spill_dir`, the directory both sides agree
       the files live in — the SAME key `WorkspaceBundle.Archive.spill_dir/0`
       reads (set in `config/config.exs`, overridable by
@@ -91,6 +96,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
 
   @bundle_prefix "bp-ws-bundle-"
   @spill_prefix "bp-ws-spill-"
+  @scratch_prefix "bp-ws-import-"
   @owner_suffix ".owner"
 
   # See the moduledoc's derivation: ~130 s measured server-side (wave 7) plus
@@ -169,6 +175,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   never be able to fail an export.
   """
   @spec own(Path.t()) :: :ok
+  # Internal export/import callers provide engine-generated spill paths; the
+  # sidecar suffix is fixed and never derived from request text.
+  # sobelow_skip ["Traversal.FileModule"]
   def own(path) do
     File.write(owner_path(path), System.pid())
     :ok
@@ -178,6 +187,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   Drop the ownership sidecar for `path`. Best-effort; see `own/1`.
   """
   @spec disown(Path.t()) :: :ok
+  # Same engine-generated spill-path contract as own/1.
+  # sobelow_skip ["Traversal.FileModule"]
   def disown(path) do
     File.rm(owner_path(path))
     :ok
@@ -251,7 +262,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   # match the same prefixes and are collected with their subject, never on
   # their own).
   defp candidates(dir) do
-    [@bundle_prefix, @spill_prefix]
+    [@bundle_prefix, @spill_prefix, @scratch_prefix]
     |> Enum.flat_map(fn prefix -> Path.wildcard(Path.join(dir, prefix <> "*")) end)
     |> Enum.reject(&String.ends_with?(&1, @owner_suffix))
     |> Enum.uniq()
@@ -265,6 +276,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
     end
   end
 
+  # `path` comes only from candidates/1, whose glob is rooted in the configured
+  # spill directory and restricted to Barkpark's three fixed temp prefixes.
+  # sobelow_skip ["Traversal.FileModule"]
   defp remove(path) do
     File.rm_rf(path)
     File.rm(owner_path(path))
@@ -276,6 +290,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   # True when the sidecar names an OS process that still exists. Everything
   # undeterminable answers TRUE (= leave the file alone): a missed collection
   # costs disk the next boot reclaims, a wrong one costs a live export.
+  # `path` is a candidates/1 result under the configured spill root; the owner
+  # filename adds only the fixed sidecar suffix.
+  # sobelow_skip ["Traversal.FileModule"]
   defp owner_alive?(path) do
     case File.read(owner_path(path)) do
       {:ok, contents} ->
@@ -298,6 +315,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   # user answers EPERM, which is indistinguishable from "gone" by exit status
   # alone and would make us delete a live foreign slot's spill. `ps -p` reports
   # existence regardless of ownership on both Darwin and Linux.
+  # `ps` is resolved by System.find_executable/1 and pid is converted to one argv
+  # element; no shell or command-string interpolation is involved.
+  # sobelow_skip ["CI.System"]
   defp os_process_alive?(pid) do
     case System.find_executable("ps") do
       nil ->

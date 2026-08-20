@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { PopularQuery, SearchEngine } from "@/lib/find";
+import { DEFAULT_ENGINE, type PopularQuery, type SearchEngine } from "@/lib/find";
 import { emptyResponse, runSearch } from "@/lib/find-search";
 import { API_URL, bpFetchJson } from "@/lib/bp-fetch";
 import { DATASET } from "@/lib/config";
@@ -38,8 +38,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (searchParams.get("suggest") === "1") return suggestions();
 
   const q = (searchParams.get("q") ?? "").trim();
+  // Same unbiased reader as the Finder: explicit `engine=indx` opts in, anything
+  // else resolves to the ONE shared default.
   const engine: SearchEngine =
-    searchParams.get("engine") === "indx" ? "indx" : "postgres";
+    searchParams.get("engine") === "indx" ? "indx" : DEFAULT_ENGINE;
   // Browser session id (localStorage `bp-search-client`) — forwarded upstream as
   // X-BP-SEARCH-CLIENT so the recorded query event is attributed to a session.
   const sid = searchParams.get("sid");

@@ -12,9 +12,11 @@ defmodule BarkparkWeb.SheetsReaderLive do
   barkpark-w9dg). A draft-only or unknown slug raises `NotFound`
   (`plug_status: 404`), like the papers contract demands publicly.
 
-  The grid itself is `BarkparkWeb.Studio.SheetGrid` in `read_only` mode —
-  every editing affordance stripped (markup AND the component's
-  server-side `send_ops` guard), tab switching kept.
+  The grid itself is `BarkparkWeb.Studio.SheetGrid` under
+  `{write_capable: false, live_session: false, chrome: :reader}` — the one
+  host that says no on all three axes. Every editing affordance stripped
+  (markup AND the component's server-side `send_ops` guard), no draft byte
+  reachable, no Studio chrome; tab switching kept.
 
   PUBLISHED-PERSPECTIVE, NOT LIVE-DRAFT: this reader does NOT subscribe to
   the sheet session's delta topic. Session deltas (`{:sheets_op, …}`) carry
@@ -155,7 +157,9 @@ defmodule BarkparkWeb.SheetsReaderLive do
         doc={@doc}
         dataset={@dataset}
         is_draft={false}
-        read_only={true}
+        write_capable={false}
+        live_session={false}
+        chrome={:reader}
       />
     </main>
     """

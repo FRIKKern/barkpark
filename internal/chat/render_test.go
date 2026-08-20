@@ -17,13 +17,14 @@ import (
 
 // render_test.go — the projection proofs. The load-bearing one is D10: each
 // settled assistant message renders as its OWN document (one RenderDoc call), so
-// "Figure N." numbering RESETS per message. The golden-parity harness diffs
-// exactly this assistant-body projection; cards/tail/user echoes are out of
+// nothing leaks across replies — and since pdrender now numbers NOTHING (it only
+// emphasises an author-typed "Figure N." lead, like the web reader), a caption
+// says exactly what the author typed in every message. The golden-parity harness
+// diffs exactly this assistant-body projection; cards/tail/user echoes are out of
 // scope and only proven not to crash or scope-creep.
 
-// figureDoc is a one-figure document (an ascii diagram, which carries a
-// "Figure N." caption). Two of these rendered as separate messages must BOTH
-// caption "Figure 1." — the per-message reset.
+// figureBlocks is a one-figure document. Two of these rendered as separate
+// messages must each carry their OWN caption text and no invented number.
 func figureBlocks(caption string) json.RawMessage {
 	doc := map[string]any{
 		"blocks": []any{
@@ -38,10 +39,11 @@ func figureBlocks(caption string) json.RawMessage {
 	return raw
 }
 
-// TestFigureNumberingResetsPerMessage is the D10 proof: two assistant messages
-// each rendered via their own RenderDoc call both start at "Figure 1.", instead
-// of the second continuing to "Figure 2." as it would in one shared document.
-func TestFigureNumberingResetsPerMessage(t *testing.T) {
+// TestFigureCaptionsCarryNoInventedNumber is the D10 proof in its honest form:
+// two assistant messages each rendered via their own RenderDoc call carry their
+// own author caption and NO renderer-generated "Figure N." — nothing accumulates
+// across replies because there is no counter to accumulate.
+func TestFigureCaptionsCarryNoInventedNumber(t *testing.T) {
 	reg := pdrender.DefaultRegistry(pdrender.DarkTheme())
 	m1 := Message{Role: "assistant", Blocks: figureBlocks("first")}
 	m2 := Message{Role: "assistant", Blocks: figureBlocks("second")}
@@ -49,14 +51,13 @@ func TestFigureNumberingResetsPerMessage(t *testing.T) {
 	out1 := strings.Join(renderAssistantDoc(reg, 80, m1), "\n")
 	out2 := strings.Join(renderAssistantDoc(reg, 80, m2), "\n")
 
-	if !strings.Contains(out1, "Figure 1.") {
-		t.Fatalf("first message should caption Figure 1., got:\n%s", out1)
+	if !strings.Contains(out1, "first") || !strings.Contains(out2, "second") {
+		t.Fatalf("each message must carry its own caption, got:\n%s\n---\n%s", out1, out2)
 	}
-	if !strings.Contains(out2, "Figure 1.") {
-		t.Fatalf("second message must RESET to Figure 1. (per-message document, D10), got:\n%s", out2)
-	}
-	if strings.Contains(out2, "Figure 2.") {
-		t.Fatal("figure numbering must NOT continue across messages (D10 per-message reset)")
+	for i, out := range []string{out1, out2} {
+		if strings.Contains(out, "Figure") {
+			t.Fatalf("message %d gained a figure number no author typed:\n%s", i+1, out)
+		}
 	}
 }
 
@@ -682,6 +683,136 @@ func TestHerdRowPillAgeCost(t *testing.T) {
 	// no cost on the wire → no fabricated $0.00
 	if strings.Contains(rows[4], "$") {
 		t.Fatalf("a costless row must not fabricate a cost, got:\n%q", rows[4])
+	}
+}
+
+// TestHerdRowTitleFollowsTheTitleFrame is the READ half of the D69h fold: a
+// live `title` frame renames the picker row IN PLACE, without a roster refetch.
+// The paint must read the HERD's held title, not the cold list's — a fold
+// nobody reads would be a stored value with no reader, and the stale row title
+// this frame exists to fix would survive the fix.
+func TestHerdRowTitleFollowsTheTitleFrame(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	m := Model{width: 100, now: func() time.Time { return now }, sessions: []SessionSummary{
+		{ID: "a", Title: "stale list title", MessageCount: 1, AgentState: "idle",
+			AgentStateAt: now.Add(-time.Minute).Format(time.RFC3339Nano)},
+	}}
+	m.herd = herdSeed(m.herd, m.sessions)
+	if !strings.Contains(m.pickerRows()[1], "stale list title") {
+		t.Fatalf("precondition: the cold list title paints, got:\n%q", m.pickerRows()[1])
+	}
+
+	h, ok := applyFleetFrame(m.herd, "title", []byte(`{"session_id":"a","title":"renamed in Studio"}`))
+	if !ok {
+		t.Fatal("the title frame must apply")
+	}
+	m.herd = h
+	row := m.pickerRows()[1]
+	if !strings.Contains(row, "renamed in Studio") {
+		t.Fatalf("the renamed row must paint the fresh title, got:\n%q", row)
+	}
+	if strings.Contains(row, "stale list title") {
+		t.Fatalf("the stale list title must be gone, got:\n%q", row)
+	}
+
+	// A herd row that holds NO title still falls back to the list's (a roster
+	// row the stream and the seed have not reached).
+	if got := herdRowTitle(HerdRow{SessionID: "a"}, SessionSummary{ID: "a", Title: " listed "}); got != "listed" {
+		t.Fatalf("a titleless herd row must fall back to the list title, got %q", got)
+	}
+}
+
+// ── the archived shelf screen ────────────────────────────────────────────────
+
+// TestShelfScreenPaintsRowsAndTheRestoreKey is the shelf's paint proof: the pane
+// can SHOW the shelf — rows with their title, size, cost and how long they have
+// been shelved — and the footer advertises the ONE verb that gets them back. It
+// also pins the two honest edges: an empty shelf says so, and a load error
+// offers the retry rather than a blank frame.
+func TestShelfScreenPaintsRowsAndTheRestoreKey(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	iso := func(t time.Time) string { return t.Format(time.RFC3339Nano) }
+	m := Model{width: 100, height: 24, screen: screenShelf, now: func() time.Time { return now }}
+	m.shelf = []SessionSummary{
+		{ID: "old", Title: "dismissed epic", MessageCount: 12, TotalCostUSD: 3.25,
+			ArchivedAt: iso(now.Add(-2 * time.Hour))},
+		{ID: "bare", MessageCount: 1},
+	}
+
+	out := m.renderShelf()
+	for _, want := range []string{"shelf", "dismissed epic", "12 msg", "$3.25", "shelved 2h", "enter/u restore"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the shelf paint must carry %q:\n%s", want, out)
+		}
+	}
+	// A titleless row is honest, never blank; and no cost is invented.
+	if !strings.Contains(out, "untitled session") {
+		t.Errorf("a titleless shelf row must read \"untitled session\":\n%s", out)
+	}
+	if strings.Count(out, "$") != 1 {
+		t.Errorf("a costless shelf row must not fabricate a cost:\n%s", out)
+	}
+	// No attention pill on the shelf: the fleet snapshot excludes archived
+	// sessions, so a pill here would be stale-by-construction.
+	for _, never := range []string{"● working", "○ idle", "? unknown", "⚠ stalled"} {
+		if strings.Contains(out, never) {
+			t.Errorf("the shelf must not paint an attention pill (%q):\n%s", never, out)
+		}
+	}
+	// The cursor marks the row it will restore.
+	if !strings.Contains(out, youStyle.Render("▸ ")+titleStyle.Render(m.shelfRows()[0])) {
+		t.Errorf("the shelf cursor must mark its row:\n%s", out)
+	}
+
+	empty := Model{width: 100, height: 24, screen: screenShelf, now: func() time.Time { return now }}
+	if got := empty.renderShelf(); !strings.Contains(got, "Nothing on the shelf") {
+		t.Errorf("an empty shelf must say so:\n%s", got)
+	}
+	// A failed READ is prefixed at the source (model.go), so the paint can print
+	// it verbatim — under stale rows that line is the only context there is.
+	failed := empty
+	failed = mustModel(failed.Update(shelfLoadedMsg{err: errArchiveTest}))
+	if got := failed.renderShelf(); !strings.Contains(got, "could not read the shelf — boom") ||
+		!strings.Contains(got, "press r to retry") {
+		t.Errorf("a failed shelf read must say so and offer the retry:\n%s", got)
+	}
+}
+
+// TestShelfRowFollowsTheHerdTitle: the shelf reads the SAME title projection the
+// herd home does (herdRowTitle), so a session renamed while it sits on the shelf
+// is not a mystery row.
+func TestShelfRowFollowsTheHerdTitle(t *testing.T) {
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	m := Model{width: 100, height: 24, screen: screenShelf, now: func() time.Time { return now }}
+	m.shelf = []SessionSummary{{ID: "old", Title: "stale list title"}}
+	m.herd = seedHerd(HerdRow{SessionID: "old", AgentState: "idle", Title: "renamed while shelved"})
+
+	out := m.renderShelf()
+	if !strings.Contains(out, "renamed while shelved") || strings.Contains(out, "stale list title") {
+		t.Errorf("the shelf row must read the herd's held title:\n%s", out)
+	}
+}
+
+// TestShelfWindowsThroughTheSharedLaw: the shelf uses the picker's cursor-follow
+// windowing (followTop + pickerFitEnd), never a forked copy — a long shelf
+// clips with the same ↑/↓ affordances and the cursor row is always in view.
+func TestShelfWindowsThroughTheSharedLaw(t *testing.T) {
+	m := Model{width: 100, height: 12, screen: screenShelf, now: time.Now}
+	for i := 0; i < 30; i++ {
+		m.shelf = append(m.shelf, SessionSummary{ID: fmt.Sprintf("s%02d", i), Title: fmt.Sprintf("row %02d", i)})
+	}
+	m.shelfCursor = 25
+	m.shelfTop = m.followShelfTop()
+
+	out := m.renderShelf()
+	if !strings.Contains(out, "row 25") {
+		t.Errorf("the cursor row must be inside the window:\n%s", out)
+	}
+	if !strings.Contains(out, "more above") {
+		t.Errorf("a scrolled shelf must show the ↑ affordance:\n%s", out)
+	}
+	if strings.Contains(out, "row 00") {
+		t.Errorf("the window must clip the rows above it:\n%s", out)
 	}
 }
 

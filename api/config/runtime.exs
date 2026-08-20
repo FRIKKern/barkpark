@@ -45,6 +45,39 @@ case System.get_env("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET") do
     end
 end
 
+# SECRET_KEY_BASE, read and validated ONCE for every consumer (the endpoint
+# and the media-signing derive below both use this binding). The predicate is
+# on the RAW env string — at least 64 bytes, never trimmed, never decoded:
+# Plug enforces a 64-byte minimum at first session use, so a shorter value
+# boots clean and then 500s on /login and /studio. Prod refuses at boot with
+# the message below instead; dev/test keep their config-file defaults (nil
+# here). The refusal prints the LENGTH, never the value.
+secret_key_base =
+  case System.get_env("SECRET_KEY_BASE") do
+    skb when is_binary(skb) and byte_size(skb) >= 64 ->
+      skb
+
+    other ->
+      if config_env() == :prod do
+        got =
+          case other do
+            nil -> "it is not set"
+            short -> "got #{byte_size(short)} bytes"
+          end
+
+        raise """
+        SECRET_KEY_BASE must be at least 64 bytes (#{got}).
+
+        Phoenix derives cookie/session signing keys from it; Plug enforces a
+        64-byte minimum at first session use — a shorter value boots clean,
+        then 500s on /login and /studio.
+
+        Generate one: openssl rand -base64 64 — and set SECRET_KEY_BASE in
+        .env (compose) or /opt/barkpark/.env.
+        """
+      end
+  end
+
 # Continuous-canvas editor cutover: ON by default in PRODUCTION (the unified
 # <bp-paper-canvas> Obsidian-style editor). Dev/test stay OFF (the per-block
 # <bp-paper-editor>) so the flag-OFF byte-identical guarantee and its tests hold.
@@ -118,7 +151,7 @@ cloak_key =
         BARKPARK_CLOAK_KEY is not set.
 
         Generate one with:
-            mix phx.gen.secret 32
+            openssl rand -base64 32
         and add to /opt/barkpark/.env as BARKPARK_CLOAK_KEY=<value>.
 
         This MUST be independent of SECRET_KEY_BASE so that key rotation
@@ -182,8 +215,12 @@ end
 
 # Master KEK for envelope encryption (core auth/secrets, Phase 0). The dev/test
 # default lives in config/config.exs; here we OVERRIDE from BARKPARK_KEK and
-# REQUIRE it in prod. Base64 of 32 bytes — generate with `mix phx.gen.secret 32`
-# then base64. MUST be independent of BARKPARK_CLOAK_KEY and SECRET_KEY_BASE.
+# REQUIRE it in prod. Base64 of exactly 32 raw bytes — generate with
+# `openssl rand -base64 32`. MUST be independent of BARKPARK_CLOAK_KEY and
+# SECRET_KEY_BASE. A SET value is validated in EVERY env (an empty or
+# wrong-length key would otherwise pass boot and only be rejected by LocalKek
+# at the FIRST encrypted-field seal, an unbounded time after boot); the
+# nil branch stays prod-gated.
 case System.get_env("BARKPARK_KEK") do
   nil ->
     if config_env() == :prod do
@@ -198,6 +235,21 @@ case System.get_env("BARKPARK_KEK") do
     end
 
   kek ->
+    case Base.decode64(kek) do
+      {:ok, raw} when byte_size(raw) == 32 ->
+        :ok
+
+      _ ->
+        raise """
+        BARKPARK_KEK must be the base64 encoding of exactly 32 raw bytes.
+
+        Generate one: openssl rand -base64 32 — it MUST be independent of
+        BARKPARK_CLOAK_KEY and SECRET_KEY_BASE; LocalKek would otherwise
+        reject this key at the FIRST encrypted-field seal, an unbounded time
+        after boot.
+        """
+    end
+
     # MEDIUM-9: BARKPARK_KEK_PREVIOUS (comma-separated Base64 keys, oldest-last)
     # lets `DataKeys.rewrap_all/0` complete a KEK rotation — it unwraps blobs
     # sealed by a prior KEK and re-wraps them under the current one. Set it to the
@@ -436,6 +488,58 @@ case System.get_env("BARKPARK_MEDIA_DIR") do
     :ok
 end
 
+# Media blob STORAGE BACKEND (see `Barkpark.Media.Blobstore`). Unset ⇒ :local,
+# byte-identical to before — originals under the media blob root above.
+# BARKPARK_MEDIA_STORAGE=s3 moves originals to any S3-compatible bucket
+# (Cloudflare R2, AWS S3, MinIO, Backblaze B2, …); local disk becomes a
+# regenerable write-through cache (renditions + probe/rendition source blobs),
+# so the bucket is the source of truth and the disk can be lost without data
+# loss. The five required keys FAIL LOUDLY at boot when the backend is
+# selected — a half-configured bucket must not silently fall back to local
+# and split the blob set across two stores. Applies in ALL envs (same idiom
+# as BARKPARK_MEDIA_DIR above).
+case System.get_env("BARKPARK_MEDIA_STORAGE") do
+  "s3" ->
+    require_s3 = fn name ->
+      case System.get_env(name) do
+        value when is_binary(value) and value != "" ->
+          value
+
+        _ ->
+          raise """
+          BARKPARK_MEDIA_STORAGE=s3 is set but #{name} is missing.
+
+          The s3 media backend requires:
+              BARKPARK_S3_ENDPOINT           e.g. https://<account>.r2.cloudflarestorage.com
+              BARKPARK_S3_BUCKET             the bucket name
+              BARKPARK_S3_ACCESS_KEY_ID
+              BARKPARK_S3_SECRET_ACCESS_KEY
+          Optional:
+              BARKPARK_S3_REGION             default "auto" (R2); AWS needs a real region
+              BARKPARK_S3_KEY_PREFIX         namespace inside the bucket, default ""
+              BARKPARK_S3_PRESIGN_TTL        presigned-URL lifetime in seconds, default 3600
+              BARKPARK_S3_PUBLIC_BASE_URL    public/CDN origin for unsigned delivery
+          """
+      end
+    end
+
+    config :barkpark, :media_storage,
+      backend: :s3,
+      s3: [
+        endpoint: require_s3.("BARKPARK_S3_ENDPOINT"),
+        bucket: require_s3.("BARKPARK_S3_BUCKET"),
+        region: System.get_env("BARKPARK_S3_REGION") || "auto",
+        access_key_id: require_s3.("BARKPARK_S3_ACCESS_KEY_ID"),
+        secret_access_key: require_s3.("BARKPARK_S3_SECRET_ACCESS_KEY"),
+        key_prefix: System.get_env("BARKPARK_S3_KEY_PREFIX") || "",
+        presign_ttl: String.to_integer(System.get_env("BARKPARK_S3_PRESIGN_TTL") || "3600"),
+        public_base_url: System.get_env("BARKPARK_S3_PUBLIC_BASE_URL")
+      ]
+
+  _ ->
+    :ok
+end
+
 # Workspace-bundle export SPILL root (pds W11). The streamed export writes one
 # per-table spill file plus the assembled tar here; peak transient disk is
 # `tar-so-far + the largest single table`. Relocate it when the default lives
@@ -467,11 +571,12 @@ media_signing_secret =
 
     _ ->
       if config_env() == :prod do
-        skb =
-          System.get_env("SECRET_KEY_BASE") ||
-            raise "SECRET_KEY_BASE required to derive media signing secret"
-
-        Base.encode64(:crypto.hash(:sha256, "barkpark-media:" <> skb), padding: false)
+        # Derives from the hoisted, already-validated SECRET_KEY_BASE binding
+        # at the top of this file (>= 64 raw bytes or the boot refused).
+        Base.encode64(
+          :crypto.hash(:sha256, "barkpark-media:" <> secret_key_base),
+          padding: false
+        )
       end
   end
 
@@ -602,6 +707,45 @@ case System.get_env("SMTP_HOST") do
     :ok
 end
 
+# Trust boundary for x-forwarded-for on every IP-keyed rate bucket
+# (Barkpark.RateLimiter.client_ip/1). NOT prod-gated: which fronts sit in front
+# of this box is a property of the DEPLOYMENT, not of MIX_ENV, and a self-hoster
+# running MIX_ENV=dev behind a relay needs the same knob.
+#
+# Unset keeps the config.exs default (empty — loopback is trusted
+# unconditionally and is never listed here), so a plain self-host needs nothing.
+# Set it to the Barkpark Cloud control plane's egress address to let its relayed
+# caller IP be believed on the revoke DELETE; unlisted, that relay is
+# disbelieved and the whole team shares one bucket keyed on the egress IP.
+#
+# INDIVIDUAL ADDRESSES ONLY (mirrors cloud/config/runtime.exs TRUSTED_PROXY_PEERS
+# and its charter D5 reasoning). A CIDR range re-opens the forgery hole: an
+# attacker inside the range has its real appended hop SKIPPED and its forged
+# left-hand hop believed. A malformed entry raises at boot rather than silently
+# degrading the boundary to a no-op.
+if proxies = System.get_env("BARKPARK_TRUSTED_PROXIES") do
+  config :barkpark,
+         :trusted_proxies,
+         proxies
+         |> String.split(",")
+         |> Enum.map(&String.trim/1)
+         |> Enum.reject(&(&1 == ""))
+         |> Enum.map(fn proxy ->
+           case :inet.parse_address(String.to_charlist(proxy)) do
+             {:ok, address} ->
+               address
+
+             {:error, _} ->
+               raise """
+               BARKPARK_TRUSTED_PROXIES contains #{inspect(proxy)}, which is not a valid IP address.
+               Expected a comma-separated list of individual addresses, e.g. "203.0.113.7".
+               CIDR ranges are NOT supported: trusting a whole range lets any host in it forge
+               every client's rate-limit bucket key via X-Forwarded-For.
+               """
+           end
+         end)
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -639,16 +783,8 @@ if config_env() == :prod do
   config :barkpark, Barkpark.Repo, repo_opts
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
-  # A default value is used in config/dev.exs and config/test.exs but you
-  # want to use a different value for prod and you most likely don't want
-  # to check this value into version control, so we use an environment
-  # variable instead.
-  secret_key_base =
-    System.get_env("SECRET_KEY_BASE") ||
-      raise """
-      environment variable SECRET_KEY_BASE is missing.
-      You can generate one by calling: mix phx.gen.secret
-      """
+  # It is read and validated ONCE at the top of this file (>= 64 raw bytes or
+  # boot refusal); the endpoint config below consumes that hoisted binding.
 
   host =
     case System.get_env("PHX_HOST") do
@@ -757,9 +893,21 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
+  # Non-empty is the only requirement — no byte floor: the JWT HMAC accepts
+  # any key length, and inventing a floor here would refuse working deployments.
   preview_secret =
-    System.get_env("PREVIEW_JWT_SECRET") ||
-      raise "environment variable PREVIEW_JWT_SECRET is missing. Generate with: mix phx.gen.secret"
+    case System.get_env("PREVIEW_JWT_SECRET") do
+      val when is_binary(val) and val != "" ->
+        val
+
+      _ ->
+        raise """
+        PREVIEW_JWT_SECRET must be set to a non-empty value.
+
+        Generate one: openssl rand -base64 48 — and set PREVIEW_JWT_SECRET in
+        .env (compose) or /opt/barkpark/.env.
+        """
+    end
 
   config :barkpark, :preview,
     secret: preview_secret,
@@ -809,6 +957,19 @@ if config_env() == :prod do
     )
 
   config :barkpark, :ticket_rate_limits, ticket_rate_limits
+
+  # Anonymous auth-write rails (BarkparkWeb.Plugs.AuthWriteRateLimit) — per-hour
+  # per-IP register budget, operator-tunable without a rebuild, same pattern as
+  # BARKPARK_TICKET_RATE_* above.
+  base_auth_write_limits = Application.get_env(:barkpark, :auth_write_rate_limits, [])
+
+  auth_write_rate_limits =
+    case System.get_env("BARKPARK_AUTH_RATE_REGISTER") do
+      nil -> base_auth_write_limits
+      raw -> Keyword.put(base_auth_write_limits, :register, String.to_integer(raw))
+    end
+
+  config :barkpark, :auth_write_rate_limits, auth_write_rate_limits
 
   if origins = System.get_env("DEFAULT_CORS_ORIGINS") do
     parsed = origins |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))

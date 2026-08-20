@@ -229,7 +229,9 @@ defmodule Barkpark.Plugins.Github.Web.OpsLiveTest do
       refute html =~ ~s(data-role="github-health-db-down")
     end
 
-    test "captions lag vs pending so a high-lag/zero-pending reading is not misread", %{conn: conn} do
+    test "captions lag vs pending so a high-lag/zero-pending reading is not misread", %{
+      conn: conn
+    } do
       {:ok, _view, html} = live(conn, "/admin/github")
 
       assert html =~ ~s(data-role="github-lag-caption")

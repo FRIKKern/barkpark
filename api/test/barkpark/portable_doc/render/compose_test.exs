@@ -115,14 +115,15 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
                %{"kind" => "PdEmbed", "target" => ""}
     end
 
-    test "list in email mode uses prefix-as-text scaffold" do
+    test "list in email mode preserves semantic PdList/PdListItem structure" do
       b = %{"type" => "list", "ordered" => false, "items" => [["Apple"], ["Banana"]]}
       result = Compose.compose_block(b)
-      assert result["kind"] == "PdBox"
+      assert result["kind"] == "PdList"
+      assert result["ordered"] == false
       [first | _] = result["children"]
-      assert first["kind"] == "PdBox"
-      [prefix_node | _] = first["children"]
-      assert prefix_node["children"] == ["• "]
+      assert first["kind"] == "PdListItem"
+      [text_node] = first["children"]
+      assert text_node["children"] == ["Apple"]
     end
 
     test "list in article mode emits PdList with PdListItem children" do
@@ -408,6 +409,16 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
       # View↔Edit / cross-form parity: the two authoring shapes render identically.
       assert text_html == content_html
     end
+
+    test "render_blocks: an empty scaffold stays authorable but emits no reader HTML" do
+      block = %{"id" => "tpl-body", "type" => "paragraph", "content" => []}
+
+      assert Compose.compose_block(block, :article) ==
+               %{"kind" => "PdParagraph", "children" => []}
+
+      assert Render.render_blocks([block], %{style: :article}) == ""
+      assert Render.render_blocks([block], %{style: :email}) == ""
+    end
   end
 
   # A schemaless paper can carry a block type this engine has no clause for, a
@@ -575,6 +586,53 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
     test "byline integer items still stringify to their decimals" do
       result = Compose.compose_block(%{"type" => "byline", "items" => [1, 2]}, :email)
       assert result["children"] == ["1 · 2"]
+    end
+  end
+
+  # The api-endpoint method badge derives its modifier class from the
+  # user-controlled `method` field. The token MUST be a fail-closed [a-z0-9-]
+  # slug — never the raw/escaped method — or a crafted method breaks out of the
+  # class attribute into live markup (XSS). One HTML producer (compose_block for
+  # :article, :email, and Studio/Edit all route here), so these render-boundary
+  # assertions cover every Elixir surface. Mutation-check: revert the slug fix
+  # in api_endpoint_method_class/1 and the breakout test below REDS.
+  describe "compose_block api-endpoint method-class XSS fail-closed slug" do
+    test "a quote+tag breakout method cannot escape the class attribute" do
+      payload = ~s|"><img src=x onerror=alert(1)>|
+      html = Compose.compose_block(%{"type" => "api-endpoint", "method" => payload, "path" => "/x"}, :article)["html"]
+
+      # No attribute breakout: the sanitized class token carries only inert
+      # [a-z0-9-] chars, so no `"` closes the class= and no live tag appears.
+      refute html =~ "<img"
+      # No live event-handler attribute (the slug may contain the inert letters
+      # "onerror" but never as an `onerror=` attribute — that needs a real break).
+      refute html =~ "onerror="
+      refute html =~ ~s(class="bp-api-endpoint__method bp-api-endpoint__method--"><)
+      # The badge TEXT is still HTML-escaped (visible, inert). `method` is
+      # upcased before escaping, so the escaped text is uppercase.
+      assert html =~ "&quot;&gt;&lt;IMG SRC=X ONERROR=ALERT(1)&gt;"
+      # The class token stripped everything but [a-z0-9-].
+      assert html =~ "bp-api-endpoint__method--imgsrcxonerroralert1"
+    end
+
+    test "legit HTTP methods keep their byte-identical modifier class" do
+      for {m, slug} <- [{"GET", "get"}, {"POST", "post"}, {"PUT", "put"}, {"PATCH", "patch"}, {"DELETE", "delete"}] do
+        html = Compose.compose_block(%{"type" => "api-endpoint", "method" => m, "path" => "/x"}, :article)["html"]
+
+        assert html =~
+                 ~s(<span class="bp-api-endpoint__method bp-api-endpoint__method--#{slug}">#{m}</span>)
+      end
+    end
+
+    test "hyphenated IANA methods survive as lowercase slugs" do
+      html = Compose.compose_block(%{"type" => "api-endpoint", "method" => "VERSION-CONTROL", "path" => "/x"}, :article)["html"]
+      assert html =~ "bp-api-endpoint__method--version-control"
+    end
+
+    test "an all-stripped method omits the modifier class (base only)" do
+      html = Compose.compose_block(%{"type" => "api-endpoint", "method" => "!!!", "path" => "/x"}, :article)["html"]
+      assert html =~ ~s(<span class="bp-api-endpoint__method">)
+      refute html =~ "bp-api-endpoint__method--"
     end
   end
 end

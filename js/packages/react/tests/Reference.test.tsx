@@ -313,7 +313,9 @@ describe('BarkparkReference', () => {
     expect((await findByTestId('author-r1')).textContent).toBe('Ada')
   })
 
-  it('renders notFound when the real-client Response is non-ok', async () => {
+  // 404 ONLY. Other non-ok statuses take the error path — see
+  // Reference.errors.test.tsx; they must never reach `notFound`.
+  it('renders notFound when the real-client Response is a 404', async () => {
     const client: BarkparkReferenceClient = {
       fetchRaw: async <T = Response>(): Promise<T> =>
         new Response('', { status: 404 }) as T,

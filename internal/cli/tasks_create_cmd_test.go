@@ -114,17 +114,51 @@ func TestParseTaskCreateArgs_Errors(t *testing.T) {
 	}
 }
 
-// tlv-s6 (TLV charter D14): the create receipt echoes the lifecycle_status the
-// task was born with — a birth-as-considering must be visible, never silently
-// assumed "open". Runs the real runTaskCreate against a stub mutate endpoint.
-func TestRunTaskCreateReceiptEchoesBornLifecycle(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		if strings.Contains(req.URL.Path, "/v1/data/mutate") {
-			io.WriteString(rw, `{"results":[{"id":"drafts.task-9"}]}`)
+// taskCreateStubMutate is a mutate endpoint that behaves like the real one on
+// the axis these tests exercise: it PERSISTS the create op and echoes the
+// stored record back as results[].document, the way
+// Content.Mutations does with Envelope.render. The receipt reads its claims off
+// that document (PDS wave 48), so a stub that returned a bare id would be
+// testing a receipt with nothing to read.
+func taskCreateStubMutate(t *testing.T, docID string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if !strings.Contains(req.URL.Path, "/v1/data/mutate") {
+			rw.WriteHeader(http.StatusNotFound)
 			return
 		}
-		rw.WriteHeader(http.StatusNotFound)
+		var body struct {
+			Mutations []map[string]map[string]any `json:"mutations"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil || len(body.Mutations) == 0 {
+			rw.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		op := body.Mutations[0]
+		document := map[string]any{"_id": docID, "_draft": true}
+		if create, ok := op["create"]; ok {
+			for k, v := range create {
+				document[k] = v
+			}
+			document["_id"] = docID
+			document["_draft"] = true
+		}
+		if _, ok := op["publish"]; ok {
+			document["_id"] = strings.TrimPrefix(docID, "drafts.")
+			document["_draft"] = false
+		}
+		result := map[string]any{"id": document["_id"], "document": document}
+		json.NewEncoder(rw).Encode(map[string]any{"results": []any{result}})
 	}))
+}
+
+// tlv-s6 (TLV charter D14): the create receipt names the lifecycle_status the
+// task was born with — a birth-as-considering must be visible, never silently
+// assumed "open". PDS wave 48: the value descends from the record the server
+// PERSISTED, not from the request map. Runs the real runTaskCreate against a
+// stub mutate endpoint.
+func TestRunTaskCreateReceiptEchoesBornLifecycle(t *testing.T) {
+	ts := taskCreateStubMutate(t, "drafts.task-9")
 	defer ts.Close()
 
 	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
@@ -165,9 +199,7 @@ func TestRunTaskCreateReceiptEchoesBornLifecycle(t *testing.T) {
 
 // The human (non-machine) receipt line names the born lifecycle too.
 func TestRunTaskCreateHumanReceiptNamesLifecycle(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		io.WriteString(rw, `{"results":[{"id":"drafts.task-3"}]}`)
-	}))
+	ts := taskCreateStubMutate(t, "drafts.task-3")
 	defer ts.Close()
 
 	var so, se bytes.Buffer
@@ -182,9 +214,57 @@ func TestRunTaskCreateHumanReceiptNamesLifecycle(t *testing.T) {
 	}
 }
 
+// PDS wave 48. THE DIVERGENCE THE OLD RECEIPT COULD NOT PRINT: the request asks
+// for lifecycle_status=open and the server stores "blocked". The receipt must
+// name what the server STORED — the old `born := body["lifecycle_status"]` read
+// the request map the CLI had defaulted "open" into, so it printed "open" here
+// and no test could ever have caught it.
+func TestRunTaskCreateReceiptNamesTheStoredLifecycleNotTheRequested(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		io.WriteString(rw, `{"results":[{"id":"drafts.task-11","document":{"_id":"drafts.task-11","_draft":true,"lifecycle_status":"blocked"}}]}`)
+	}))
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+	if code := runTaskCreate(w, globals{yes: true}, ctx, []string{"a task"}); code != exitOK {
+		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+	}
+	if got := so.String(); !strings.Contains(got, "lifecycle blocked") {
+		t.Fatalf("receipt %q does not name the STORED lifecycle — it is still speaking for the request", got)
+	}
+}
+
+// A server that echoes no document cannot back the claim, so the receipt says
+// so instead of filling the gap in from what was sent.
+func TestRunTaskCreateReceiptRefusesWhatTheServerDidNotEcho(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		io.WriteString(rw, `{"results":[{"id":"drafts.task-12"}]}`)
+	}))
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+	if code := runTaskCreate(w, globals{yes: true}, ctx, []string{"a task"}); code != exitOK {
+		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+	}
+	got := so.String()
+	if strings.Contains(got, "lifecycle open") {
+		t.Fatalf("receipt %q claims a lifecycle the server never echoed", got)
+	}
+	if !strings.Contains(got, "unknown") || !strings.Contains(got, "unconfirmed") {
+		t.Fatalf("receipt %q does not say what it could not confirm", got)
+	}
+}
+
 func TestIsProdServer(t *testing.T) {
-	prod := []string{"https://api.barkpark.cloud", "https://prod.example.com"}
-	nonprod := []string{"http://localhost:4000", "https://guerrilla.barkpark.cloud", "http://127.0.0.1:4000"}
+	// Fail-closed (onb-backlog-isprod-custom-host-write-confirm): any non-local
+	// host is prod — including guerrilla.barkpark.cloud, which IS the live fleet
+	// and was previously (wrongly) asserted non-prod here.
+	prod := []string{"https://api.barkpark.cloud", "https://prod.example.com", "https://guerrilla.barkpark.cloud"}
+	nonprod := []string{"http://localhost:4000", "http://127.0.0.1:4000"}
 	for _, s := range prod {
 		if !isProdServer(s) {
 			t.Errorf("isProdServer(%q) = false, want true", s)
@@ -221,15 +301,24 @@ func TestEnsureTaskPortableBrief(t *testing.T) {
 		t.Fatalf("brief = %#v, want PortableDoc v1", body["brief"])
 	}
 	blocks, _ := brief["blocks"].([]any)
-	if len(blocks) != 6 {
-		t.Fatalf("blocks = %d, want purpose/state/definition-of-done pairs", len(blocks))
+	if len(blocks) != 4 {
+		t.Fatalf("blocks = %d, want criteria then purpose pairs", len(blocks))
 	}
-	purpose := blocks[1].(map[string]any)["content"].([]any)[0].(map[string]any)["value"]
+	if blocks[0].(map[string]any)["id"] != "criteria" || blocks[1].(map[string]any)["id"] != "criteria-list" {
+		t.Fatalf("criteria are not the first brief section: %#v", blocks)
+	}
+	if blocks[1].(map[string]any)["type"] != "list" {
+		t.Fatalf("criteria are not a TUI-supported list: %#v", blocks[1])
+	}
+	purpose := blocks[3].(map[string]any)["content"].([]any)[0].(map[string]any)["value"]
 	if strings.Contains(purpose.(string), "**") {
 		t.Fatalf("purpose retained Markdown markers: %q", purpose)
 	}
-	if blocks[5].(map[string]any)["type"] != "list" {
-		t.Fatalf("definition of done is not a TUI-supported list: %#v", blocks[5])
+	for _, block := range blocks {
+		id, _ := block.(map[string]any)["id"].(string)
+		if id == "state" || id == "state-callout" || id == "done" || id == "done-list" || id == "done-copy" {
+			t.Fatalf("brief retained deprecated generated block %q", id)
+		}
 	}
 }
 

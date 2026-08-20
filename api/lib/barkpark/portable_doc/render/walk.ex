@@ -201,10 +201,29 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       inner <> "</div>"
   end
 
+  # Section-frame hook (charter D19): the ONLY classes a PdBox may emit. The
+  # whitelist is MANDATORY, not defensive decoration — walk renders raw
+  # external Pd JSON, so an open `"class"` pass-through would let any document
+  # claim arbitrary paper-surface classes (class injection). Compose stamps
+  # these as FIXED literals (compose_section_stack); anything else stays inert.
+  @box_class_whitelist ~w(bp-section--framed)
+
   defp box(n, width, pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
-    ~s(<div style="#{box_style(Map.get(n, "style"))}">) <> inner <> "</div>"
+
+    ~s(<div#{box_class_attr(n, pal)} style="#{box_style(Map.get(n, "style"))}">) <>
+      inner <> "</div>"
   end
+
+  # Emits the class attr ONLY when the palette is :article (email output stays
+  # byte-identical — Outlook is inline-only) AND the value is in the fixed
+  # whitelist above. Everything else — email palettes, unknown classes,
+  # author-injected values — emits "" (the pre-hook bytes).
+  defp box_class_attr(%{"class" => class}, %{style: :article})
+       when class in @box_class_whitelist,
+       do: ~s( class="#{class}")
+
+  defp box_class_attr(_n, _pal), do: ""
 
   defp box_style(nil), do: ""
 
@@ -262,6 +281,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # Trap: PdText.children mixes raw strings (escaped) and child nodes (recursed).
     inner =
       Map.get(n, "children", [])
+      |> children_of()
       |> Enum.map(fn
         k when is_binary(k) -> escape_html(k)
         k -> walk(k, width, pal)
@@ -300,6 +320,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     "<span#{class_attr}#{style_attr}>#{inner}</span>"
   end
 
+  # Empty PdParagraph is an EDITOR scaffold, not reader content. Compose keeps
+  # the node byte-faithful so a fresh document remains authorable; every reader
+  # that reaches the walker emits zero markup for it. Section rhythm belongs to
+  # the shared reader stylesheet rather than stored `<p></p>` nodes.
+  defp paragraph(%{"children" => []}, _width, _pal), do: ""
+
   # Article-mode paragraph — same role-aware styling as PdText, but emits a
   # semantic `<p>` instead of `<span>`. The editor's
   # `.bp-paper-surface p { margin: 12pt 0 0; hyphens: auto }` rule
@@ -310,9 +336,40 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # body typography (font-size 18px, line-height 1.70, margin rhythm)
   # actually applies. Email/default mode keeps PdText (`<span>`) for
   # byte-stable export.
+  # Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
+  # 2026-07-31): published readers emit only visible semantic groups — an empty
+  # PdParagraph scaffold (Enter, Enter) stays editable in the Pd-tree (compose
+  # keeps it, doctrine invariant 1) but renders NOTHING here (no element at all),
+  # never an empty `<p>` (invariant 2). Suppression is exact and narrow
+  # (invariant 4): only a children list that is nothing but whitespace strings
+  # vanishes — any composed inline node (PdText/PdLink/PdInlineCode/…, i.e. any
+  # marked or non-text run) keeps its `<p>` byte-faithful. Cadence between the
+  # remaining blocks stays reader-owned CSS margins (invariant 3). The JS twin is
+  # blocks/core.ts `paragraph`; legacy cached `<p></p>` HTML is belt-and-braces
+  # suppressed by `.bp-paper-surface p:empty` in paper-surface.css.
   defp paragraph(n, width, pal) do
+    children = Map.get(n, "children", [])
+
+    if blank_paragraph_children?(children) do
+      ""
+    else
+      paragraph_html(n, children, width, pal)
+    end
+  end
+
+  defp blank_paragraph_children?(children) when is_list(children) do
+    Enum.all?(children, fn
+      k when is_binary(k) -> String.trim(k) == ""
+      _ -> false
+    end)
+  end
+
+  defp blank_paragraph_children?(_), do: false
+
+  defp paragraph_html(n, children, width, pal) do
     inner =
-      Map.get(n, "children", [])
+      children
+      |> children_of()
       |> Enum.map(fn
         k when is_binary(k) -> escape_html(k)
         k -> walk(k, width, pal)
@@ -367,6 +424,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp heading_inner(n, width, pal) do
     Map.get(n, "children", [])
+    |> children_of()
     |> Enum.map(fn
       k when is_binary(k) -> escape_html(k)
       k -> walk(k, width, pal)
@@ -487,6 +545,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # Trap: PdLink.children mixes raw strings (escaped) and child nodes (recursed).
     inner =
       Map.get(n, "children", [])
+      |> children_of()
       |> Enum.map(fn
         k when is_binary(k) -> escape_html(k)
         k -> walk(k, width, pal)
@@ -592,6 +651,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       _ ->
         inner =
           Map.get(n, "children", [])
+          |> children_of()
           |> Enum.map(fn
             k when is_binary(k) -> escape_html(k)
             k -> walk(k, width, pal)
@@ -1473,12 +1533,9 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     "<#{tag}>" <> inner <> "</#{tag}>"
   end
 
-  # Non-article fallback (same pattern as heading/3): email COMPOSE never emits
-  # PdList — its list clause builds the flex-row PdBox scaffold with literal
-  # "• " / "1. " prefix spans (byte-stable Outlook target) — but a raw PdList
-  # reaching the walker under a stylesheet-less palette (the email golden corpus
-  # covers every Pd kind; hand-built trees via render_html) must stay self-styled
-  # and byte-frozen, so the pre-Stage-2 inline rule is kept verbatim here.
+  # Email/default keeps the same semantic structure but owns its styling inline:
+  # clients may strip stylesheets, so list indentation, typography, and item
+  # spacing must travel on the `<ul>` / `<ol>` / `<li>` elements themselves.
   defp list(n, width, pal) do
     tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
     inner = render_children(Map.get(n, "children", []), width, pal)
@@ -1544,6 +1601,22 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   # ── shared helpers ──────────────────────────────────────────────────────────
 
+  # Fail-safe coercion for a node's `children`. Papers are schemaless — a raw
+  # API/SDK/CLI mutate can persist a PRESENT `children` key whose JSON value is
+  # `null` (→ `nil` here) or a bare scalar, and `Map.get(n, "children", [])`
+  # only substitutes the default on an ABSENT key. Any non-list would then hit
+  # `Enum.map/2` and RAISE, 500-ing every reader of the raw-tree entry
+  # (render_html/2 → render_body/3, reachable by the TUI, plugins, and tests
+  # ahead of compose coercion). Coercing any non-list to `[]` degrades to empty
+  # instead — it CANNOT alter a list-path render (a list passes through
+  # unchanged), so a passing render never regresses.
+  defp children_of(c) when is_list(c), do: c
+  defp children_of(_), do: []
+
+  # Non-list children degrade to "" here (mirrors the walk/3 non-node catch-all),
+  # covering every render_children caller transitively.
+  defp render_children(children, _width, _pal) when not is_list(children), do: ""
+
   defp render_children(children, width, pal) do
     children
     |> Enum.map(&walk(&1, width, pal))
@@ -1554,6 +1627,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # escaped verbatim, a Pd node (a mark span, link, code) is walked. Shared by
   # PdBlockquote so its inner is byte/shape-equal to a paragraph's — the parity
   # harness compares the article <blockquote> against the JS emitter.
+  defp paragraph_inner(children, _width, _pal) when not is_list(children), do: ""
+
   defp paragraph_inner(children, width, pal) do
     children
     |> Enum.map(fn

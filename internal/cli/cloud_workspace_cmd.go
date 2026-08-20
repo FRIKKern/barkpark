@@ -68,6 +68,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -206,21 +207,69 @@ func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
 		return exitOK
 	}
 
-	f, ferr := os.Create(outPath)
+	// Stream to a TEMP file beside the destination and rename only after the
+	// bytes check out. `os.Create(outPath)` truncated the destination BEFORE the
+	// first byte arrived, so a network drop mid-transfer destroyed the backup the
+	// export was supposed to replace — on the one verb whose entire promise is
+	// that a backup is safe (PDS-D369). Same directory means same filesystem,
+	// which is what makes the rename atomic.
+	destDir := filepath.Dir(outPath)
+	tmp, ferr := os.CreateTemp(destDir, "."+filepath.Base(outPath)+".part-*")
 	if ferr != nil {
-		return useError(out, "failed", "create output file: "+ferr.Error(), exitGeneric)
+		return useError(out, "failed", "create temp export file in "+destDir+": "+ferr.Error(), exitGeneric)
 	}
-	n, cerr := io.Copy(f, resp.Body)
-	if closeErr := f.Close(); closeErr != nil && cerr == nil {
+	tmpName := tmp.Name()
+	n, cerr := io.Copy(tmp, resp.Body)
+	if syncErr := tmp.Sync(); syncErr != nil && cerr == nil {
+		cerr = syncErr
+	}
+	if closeErr := tmp.Close(); closeErr != nil && cerr == nil {
 		cerr = closeErr
 	}
+
+	// What the server DECLARED, against what we actually received. resp.ContentLength
+	// is -1 whenever Go's transport transparently decompressed the body (it adds
+	// `Accept-Encoding: gzip` itself and then strips the length) or the response
+	// was chunked — on THIS route the controller ends in send_file/2 and the stack
+	// refuses to gzip application/x-tar, so a real length arrives today. But
+	// PDS-D204 already moved this route send_resp -> send_file once; a move back
+	// re-arms the -1 case, and a naive `n != resp.ContentLength` would then fail
+	// EVERY successful export. So -1 is unverified-but-fine, PERMANENTLY, and a
+	// real declared length that disagrees is a NAMED failure.
+	declared := resp.ContentLength
+	verified := declared >= 0 && n == declared
+	if declared >= 0 && n != declared {
+		os.Remove(tmpName)
+		why := fmt.Sprintf("export size mismatch: server declared %d bytes, received %d", declared, n)
+		if cerr != nil {
+			why += " (" + cerr.Error() + ")"
+		}
+		why += "; " + exportDest(outPath) + " left unchanged"
+		return useError(out, "failed", why, exitGeneric)
+	}
 	if cerr != nil {
-		return useError(out, "failed", "write export file: "+cerr.Error(), exitGeneric)
+		os.Remove(tmpName)
+		return useError(out, "failed", "write export file: "+cerr.Error()+"; "+exportDest(outPath)+" left unchanged", exitGeneric)
+	}
+	if rerr := os.Rename(tmpName, outPath); rerr != nil {
+		os.Remove(tmpName)
+		return useError(out, "failed", "move export into place: "+rerr.Error(), exitGeneric)
 	}
 
-	payload := map[string]any{"workspace": slug, "file": outPath, "bytes": n}
+	payload := map[string]any{"workspace": slug, "file": outPath, "bytes": n, "verified": verified}
+	if declared >= 0 {
+		payload["declared_bytes"] = declared
+	}
 	if !out.machineOut() {
 		out.outf("Exported workspace %s → %s (%s)", slug, outPath, humanBytes(float64(n)))
+	}
+	if verified {
+		out.progressf("  %s — %d bytes fetched, size-verified against the server's declared length", outPath, n)
+	} else {
+		// NOT a failure and NOT a pass — the same honest third state the blob
+		// sidecar reports for a NULL media_files.size (fetchWorkspaceBlobs). The
+		// transfer stands; the verification does not.
+		out.progressf("  %s — declared size absent; %d bytes fetched, unverified", outPath, n)
 	}
 
 	// Blob sidecar: DB rows are in the tar, the bytes are not. Run it after the
@@ -494,29 +543,40 @@ func printProvenanceReceipt(out *writer, body []byte) {
 	}
 }
 
-// importCounts pulls the {tables,total_rows} pair from the import receipt. A
-// receipt that is not the expected shape (an older/newer server) yields -1 for
-// the missing field so the caller can still print an honest line rather than a
-// fake zero.
+// importCounts pulls the {tables,total_rows} pair from the import receipt.
+//
+// `tables` is a MAP of table name → row count, not a number: the engine
+// typespecs it that way (workspace_bundle.ex:182) and both import arms send
+// `tables: stats.tables` verbatim (workspace_controller.ex:330, :348). The
+// table COUNT is therefore the map's size.
+//
+// Each field is assigned INDEPENDENTLY of the unmarshal error, and that is
+// load-bearing: encoding/json records the first type error and keeps decoding,
+// so a receipt this client cannot fully read still yields the half that decoded
+// (an older server sending a bare integer `tables` prints its real row count
+// with an em dash for tables). Guarding the whole read on `err == nil` threw
+// that half away and printed a double em dash on EVERY human-mode import.
+// A field the client could not read stays -1 so the caller prints an em dash —
+// never a fabricated zero.
 func importCounts(body []byte) (tables, rows int) {
 	var r struct {
-		Tables    *int `json:"tables"`
-		TotalRows *int `json:"total_rows"`
+		Tables    map[string]int `json:"tables"`
+		TotalRows *int           `json:"total_rows"`
 	}
 	tables, rows = -1, -1
-	if err := json.Unmarshal(body, &r); err == nil {
-		if r.Tables != nil {
-			tables = *r.Tables
-		}
-		if r.TotalRows != nil {
-			rows = *r.TotalRows
-		}
+	_ = json.Unmarshal(body, &r)
+	if r.Tables != nil {
+		tables = len(r.Tables)
+	}
+	if r.TotalRows != nil {
+		rows = *r.TotalRows
 	}
 	return tables, rows
 }
 
 // pluralize renders "<n> <noun>[s]" with an honest em dash when the count is
-// unknown (-1 — a receipt that omitted the field), never a fabricated zero.
+// unknown (-1 — a receipt whose field the client could not read, or that omitted
+// it), never a fabricated zero.
 func pluralize(n int, noun string) string {
 	if n < 0 {
 		return "— " + noun + "s"
@@ -539,6 +599,8 @@ type blobReport struct {
 	moved    int
 	failed   int
 	bytes    int64
+	verified int // blobs whose byte count was checked against an independent number
+	unknown  int // blobs that moved with NOTHING to check the byte count against
 	dir      string
 	failures []string
 	exit     int
@@ -547,12 +609,36 @@ type blobReport struct {
 // payload renders the report for -o json/-o yaml.
 func (r blobReport) payload() map[string]any {
 	return map[string]any{
-		r.verb:     r.moved,
-		"failed":   r.failed,
-		"bytes":    r.bytes,
-		"dir":      r.dir,
-		"failures": r.failures,
+		r.verb:           r.moved,
+		"failed":         r.failed,
+		"bytes":          r.bytes,
+		"size_verified":  r.verified,
+		"size_unchecked": r.unknown,
+		"dir":            r.dir,
+		"failures":       r.failures,
 	}
+}
+
+// bytesPhrase names the byte total with the EXACT strength of the claim behind
+// it — the whole point of the sidecar verify is that it must not overstate.
+//
+//   - uploaded: the number is what the target says it RECEIVED
+//     (media_controller.ex:247-251 echoes `byte_size(body)`, measured BEFORE
+//     Blobstore.put_bytes/3, which returns a bare `:ok` with no stat read-back).
+//     "stored" would be a claim nobody measured.
+//   - fetched: the number is what io.Copy wrote to disk, of which `verified` were
+//     checked against the bundle's declared media_files.size. `size` is NULLABLE
+//     (a blob pushed by put_blob/2 creates no media_files row), so blobs with no
+//     declared size are reported as unchecked rather than counted as proof.
+func (r blobReport) bytesPhrase() string {
+	if r.verb == "uploaded" {
+		return fmt.Sprintf("%d bytes received by the target", r.bytes)
+	}
+	s := fmt.Sprintf("%d bytes, %d size-verified", r.bytes, r.verified)
+	if r.unknown > 0 {
+		s += fmt.Sprintf(", %d with no declared size", r.unknown)
+	}
+	return s
 }
 
 // fail records a NAMED per-blob failure and pins the exit to the first one seen.
@@ -568,7 +654,7 @@ func (r *blobReport) fail(out *writer, blobPath, why string, exit int) {
 // render writes the per-run summary line. It is a progress line (stderr under
 // -o json/yaml) so machine stdout stays one parseable document.
 func (r blobReport) render(out *writer) {
-	out.progressf("Blobs: %d %s, %d failed → %s", r.moved, r.verb, r.failed, r.dir)
+	out.progressf("Blobs: %d %s, %d failed, %s → %s", r.moved, r.verb, r.failed, r.bytesPhrase(), r.dir)
 }
 
 // fetchWorkspaceBlobs is the EXPORT half of the sidecar: read the bundle's
@@ -578,7 +664,7 @@ func (r blobReport) render(out *writer) {
 // error — it reports 0 and exits clean.
 func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobReport {
 	rep := blobReport{verb: "fetched", dir: dir, exit: exitOK}
-	paths, err := bundleMediaPaths(bundlePath)
+	refs, err := bundleMediaRefs(bundlePath)
 	if err != nil {
 		out.userErr("read media paths from %s: %v", bundlePath, err)
 		rep.exit = exitGeneric
@@ -586,7 +672,7 @@ func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobR
 		rep.failures = append(rep.failures, bundlePath+": "+err.Error())
 		return rep
 	}
-	if len(paths) == 0 {
+	if len(refs) == 0 {
 		rep.render(out)
 		return rep
 	}
@@ -599,7 +685,8 @@ func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobR
 	}
 
 	client := newTransferClient()
-	for _, p := range paths {
+	for _, ref := range refs {
+		p := ref.path
 		if !safeBlobPath(p) {
 			rep.fail(out, p, "refusing an unsafe media path (traversal/absolute/empty)", exitValidation)
 			continue
@@ -609,13 +696,22 @@ func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobR
 			rep.fail(out, p, "create directory: "+err.Error(), exitGeneric)
 			continue
 		}
-		n, ferr, exit := fetchOneBlob(client, base, token, p, dest)
+		n, verified, ferr, exit := fetchOneBlob(client, base, token, ref, dest)
 		if ferr != nil {
 			rep.fail(out, p, ferr.Error(), exit)
 			continue
 		}
 		rep.moved++
 		rep.bytes += n
+		if verified {
+			rep.verified++
+		} else {
+			// NOT a failure and NOT a pass: media_files.size is nullable, so there
+			// is genuinely nothing to check these bytes against. Saying so is the
+			// whole difference between a verify and a vacuous green.
+			rep.unknown++
+			out.progressf("  %s — declared size absent; %d bytes fetched, unverified", p, n)
+		}
 	}
 	rep.render(out)
 	return rep
@@ -624,36 +720,58 @@ func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobR
 // fetchOneBlob GETs a single blob and STREAMS it to dest — io.Copy, never the
 // whole file in memory. A non-2xx goes through the shared classifyError seam so
 // the server's coded envelope picks the exit, not the HTTP status.
-func fetchOneBlob(client *http.Client, base, token, blobPath, dest string) (int64, error, int) {
-	req, rerr := http.NewRequest(http.MethodGet, base+"/media/files/"+escapeBlobPath(blobPath), nil)
+//
+// The bytes written are compared against the bundle's own declared
+// media_files.size for this row. A disagreement is a NAMED failure — a truncated
+// blob that reported success is exactly the "success while wrong" this leg
+// exists to catch. A row with NO declared size (the column is nullable) returns
+// verified=false: the transfer stands, the verification does not.
+//
+// Any failure after the destination is opened REMOVES it: the sidecar directory
+// is the import half's input, so short bytes left under the final name come
+// back as an upload (PDS-D394).
+func fetchOneBlob(client *http.Client, base, token string, ref mediaBlobRef, dest string) (int64, bool, error, int) {
+	req, rerr := http.NewRequest(http.MethodGet, base+"/media/files/"+escapeBlobPath(ref.path), nil)
 	if rerr != nil {
-		return 0, rerr, exitGeneric
+		return 0, false, rerr, exitGeneric
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, derr := client.Do(req)
 	if derr != nil {
-		return 0, derr, exitGeneric
+		return 0, false, derr, exitGeneric
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := readCapped(resp.Body, maxResponseBytes)
 		ae := classifyError(resp.StatusCode, body)
-		return 0, fmt.Errorf("%s", ae.errorMessage()), ae.exit
+		return 0, false, fmt.Errorf("%s", ae.errorMessage()), ae.exit
 	}
 	f, cerr := os.Create(dest)
 	if cerr != nil {
-		return 0, cerr, exitGeneric
+		return 0, false, cerr, exitGeneric
 	}
 	n, copyErr := io.Copy(f, resp.Body)
 	if closeErr := f.Close(); closeErr != nil && copyErr == nil {
 		copyErr = closeErr
 	}
 	if copyErr != nil {
-		return 0, copyErr, exitGeneric
+		// The bytes on disk are short and they sit under the FINAL name: the
+		// import half walks this same sidecar directory and would PUT the
+		// truncated file straight back. A named failure that leaves the bad
+		// bytes in place is only half honest.
+		_ = os.Remove(dest)
+		return 0, false, copyErr, exitGeneric
 	}
-	return n, nil, exitOK
+	if !ref.sizeKnown {
+		return n, false, nil, exitOK
+	}
+	if n != ref.size {
+		_ = os.Remove(dest)
+		return 0, false, fmt.Errorf("size mismatch: bundle declares %d bytes, fetched %d", ref.size, n), exitGeneric
+	}
+	return n, true, nil, exitOK
 }
 
 // uploadWorkspaceBlobs is the IMPORT half: walk the sidecar dir and PUT every
@@ -690,6 +808,7 @@ func uploadWorkspaceBlobs(out *writer, base, token, slug, dir string) blobReport
 		}
 		rep.moved++
 		rep.bytes += n
+		rep.verified++
 	}
 	rep.render(out)
 	return rep
@@ -697,8 +816,17 @@ func uploadWorkspaceBlobs(out *writer, base, token, slug, dir string) blobReport
 
 // putOneBlob streams ONE sidecar file to the blob-push route. The body is the
 // open file handle (net/http streams it; ContentLength comes from the stat), so
-// a 400MB video never lands in RAM. Non-2xx rides classifyError — which is why
-// `invalid_path` and `empty_body` now carry exitValidation in codeExit.
+// the client never holds a whole asset in RAM — though the SERVER does cap the
+// body at 100 MB (media_controller's read_full_body and endpoint.ex:124 both use
+// 100_000_000), so anything larger comes back as an honest 413. Non-2xx rides
+// classifyError — which is why `invalid_path` and `empty_body` now carry
+// exitValidation in codeExit.
+//
+// The returned count is the TARGET's echoed byte count, never the local stat: a
+// PUT that returned 2xx while the target received a different number of bytes is
+// a NAMED failure. The echo is measured before the write hits the blobstore
+// (Blobstore.put_bytes/3 returns a bare `:ok`), so it proves bytes RECEIVED —
+// the caller's wording must not upgrade that to "stored".
 func putOneBlob(client *http.Client, base, token, slug, localPath, blobPath string) (int64, error, int) {
 	f, oerr := os.Open(localPath)
 	if oerr != nil {
@@ -730,7 +858,17 @@ func putOneBlob(client *http.Client, base, token, slug, localPath, blobPath stri
 		ae := classifyError(resp.StatusCode, body)
 		return 0, fmt.Errorf("%s", ae.errorMessage()), ae.exit
 	}
-	return fi.Size(), nil, exitOK
+	var echo struct {
+		Bytes *int64 `json:"bytes"`
+	}
+	_ = json.Unmarshal(body, &echo)
+	if echo.Bytes == nil {
+		return 0, fmt.Errorf("target accepted the blob but echoed no byte count — the transfer cannot be verified"), exitGeneric
+	}
+	if *echo.Bytes != fi.Size() {
+		return 0, fmt.Errorf("byte mismatch: sent %d bytes, target received %d", fi.Size(), *echo.Bytes), exitGeneric
+	}
+	return *echo.Bytes, nil, exitOK
 }
 
 // sidecarBlobPaths lists every regular file under dir as a SLASH-separated path
@@ -759,14 +897,28 @@ func sidecarBlobPaths(dir string) ([]string, error) {
 	return paths, nil
 }
 
-// bundleMediaPaths reads a bp-export-v1 tar and returns the media_files.path
-// values it carries, de-duplicated and sorted. The COLUMN ORDER is taken from the
-// manifest's own member entry (never assumed positionally), and the dump is the
-// raw Postgres `COPY … TO STDOUT` text format, so fields are tab-separated with
-// backslash escapes and `\N` for NULL. A bundle with no media_files member — a
-// legitimate shape for a workspace that has never uploaded anything — yields an
-// empty list, not an error.
-func bundleMediaPaths(bundlePath string) ([]string, error) {
+// mediaBlobRef is one blob the bundle says exists: the server-generated relative
+// path, and the size the bundle DECLARES for it. sizeKnown is false when the row
+// carries `\N` (media_files.size is nullable — Media.put_blob/2 writes bytes and
+// creates no row at all) or when the bundle predates the size column; in that
+// case there is nothing to verify a fetch against, and the CLI says so instead
+// of pretending.
+type mediaBlobRef struct {
+	path      string
+	size      int64
+	sizeKnown bool
+}
+
+// bundleMediaRefs reads a bp-export-v1 tar and returns the media_files rows'
+// (path, declared size) pairs, de-duplicated by path and sorted. The COLUMN
+// ORDER is taken from the manifest's own member entry (never assumed
+// positionally), and the dump is the raw Postgres `COPY … TO STDOUT` text
+// format, so fields are tab-separated with backslash escapes and `\N` for NULL.
+// A bundle with no media_files member — a legitimate shape for a workspace that
+// has never uploaded anything — yields an empty list, not an error; a bundle
+// whose member declares no `size` column yields refs with sizeKnown=false rather
+// than an error, since the paths are still transferable.
+func bundleMediaRefs(bundlePath string) ([]mediaBlobRef, error) {
 	f, err := os.Open(bundlePath)
 	if err != nil {
 		return nil, err
@@ -810,7 +962,13 @@ func bundleMediaPaths(bundlePath string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return copyColumnValues(dumpBytes, idx), nil
+	// A missing size column is a bundle shape, not an error: -1 means "nothing
+	// declared", and every ref comes back sizeKnown=false.
+	sizeIdx, serr := manifestColumnIndex(manifestBytes, "media_files", "size")
+	if serr != nil {
+		sizeIdx = -1
+	}
+	return copyMediaRefs(dumpBytes, idx, sizeIdx), nil
 }
 
 // manifestColumnIndex finds a column's position in a manifest table member's
@@ -839,13 +997,15 @@ func manifestColumnIndex(manifestBytes []byte, table, column string) (int, error
 	return 0, fmt.Errorf("manifest declares no %s member", table)
 }
 
-// copyColumnValues pulls one column out of a Postgres COPY-text dump: rows are
-// newline-separated (a literal newline inside a value is escaped as \n, so a raw
-// split is safe), fields are tab-separated, and `\N` is NULL (skipped — a media
-// row with no path has no blob to move).
-func copyColumnValues(dump []byte, idx int) []string {
+// copyMediaRefs pulls the (path, size) pair out of a Postgres COPY-text dump:
+// rows are newline-separated (a literal newline inside a value is escaped as \n,
+// so a raw split is safe), fields are tab-separated, and `\N` is NULL — a NULL
+// path is skipped (no blob to move), a NULL or unparseable size yields
+// sizeKnown=false (there is simply nothing to verify against). sizeIdx < 0 means
+// the manifest declared no size column at all.
+func copyMediaRefs(dump []byte, idx, sizeIdx int) []mediaBlobRef {
 	seen := map[string]bool{}
-	var outv []string
+	var refs []mediaBlobRef
 	for _, line := range strings.Split(string(dump), "\n") {
 		if line == "" || line == "\\." {
 			continue
@@ -863,10 +1023,16 @@ func copyColumnValues(dump []byte, idx int) []string {
 			continue
 		}
 		seen[v] = true
-		outv = append(outv, v)
+		ref := mediaBlobRef{path: v}
+		if sizeIdx >= 0 && sizeIdx < len(fields) && fields[sizeIdx] != "\\N" {
+			if n, err := strconv.ParseInt(strings.TrimSpace(fields[sizeIdx]), 10, 64); err == nil && n >= 0 {
+				ref.size, ref.sizeKnown = n, true
+			}
+		}
+		refs = append(refs, ref)
 	}
-	sort.Strings(outv)
-	return outv
+	sort.Slice(refs, func(i, j int) bool { return refs[i].path < refs[j].path })
+	return refs
 }
 
 // unescapeCopyField reverses the Postgres COPY-text backslash escapes.

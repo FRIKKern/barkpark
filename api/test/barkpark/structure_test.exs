@@ -96,12 +96,16 @@ defmodule Barkpark.StructureTest do
       fields: []
     })
 
+    # `singleton: true` — these three are the real host config singletons
+    # (issue #8463); everything `Structure` treats as private+unowned WITHOUT
+    # this flag now falls into the generic "Content" catch-all instead.
     insert_schema!(%{
       name: "siteSettings",
       title: "Site Settings",
       icon: "settings",
       visibility: "private",
       dataset: dataset,
+      singleton: true,
       fields: []
     })
 
@@ -111,6 +115,7 @@ defmodule Barkpark.StructureTest do
       icon: "compass",
       visibility: "private",
       dataset: dataset,
+      singleton: true,
       fields: []
     })
 
@@ -120,12 +125,17 @@ defmodule Barkpark.StructureTest do
       icon: "palette",
       visibility: "private",
       dataset: dataset,
+      singleton: true,
       fields: []
     })
   end
 
   defp settings_node(tree) do
     Enum.find(tree.items, fn n -> n.type == :list and n.id == "settings" end)
+  end
+
+  defp content_types_node(tree) do
+    Enum.find(tree.items, fn n -> n.type == :list and n.id == "content-types" end)
   end
 
   describe "build/1" do
@@ -199,6 +209,130 @@ defmodule Barkpark.StructureTest do
       assert "siteSettings" in ids
       assert "navigation" in ids
       assert "colors" in ids
+    end
+  end
+
+  describe "generic document-type lists for consumer-registered schemas (issue #8463)" do
+    test "a private, non-plugin-owned, non-singleton schema gets a :document_type_list node" do
+      dataset = "structure_test_generic_content"
+      seed_legacy(dataset)
+
+      # An ad-hoc consumer type: private (so it doesn't qualify as public
+      # content), not plugin-owned, and NOT marked singleton — exactly the
+      # shape #8463 reports as a dead Settings entry pre-fix.
+      insert_schema!(%{
+        name: "customerFeedback",
+        title: "Customer Feedback",
+        icon: "message-circle",
+        visibility: "private",
+        dataset: dataset,
+        fields: []
+      })
+
+      tree = Structure.build(dataset)
+
+      content = content_types_node(tree)
+      assert %Node{title: "Content"} = content
+
+      feedback = Enum.find(content.items, &(&1.type_name == "customerFeedback"))
+      assert %Node{} = feedback, "expected the generic type to surface under Content"
+      assert feedback.type == :document_type_list, "must be drillable, not a dead singleton"
+      assert feedback.title == "Customer Feedback"
+
+      # And it must NOT also masquerade as a Settings singleton.
+      settings = settings_node(tree)
+      refute "customerFeedback" in Enum.map(settings.items, & &1.id)
+    end
+
+    test "a generic type surfaces even with zero documents (schema-driven, not census-driven)" do
+      dataset = "structure_test_generic_zero_docs"
+
+      insert_schema!(%{
+        name: "orderNote",
+        title: "Order Notes",
+        icon: "file",
+        visibility: "private",
+        dataset: dataset,
+        fields: []
+      })
+
+      # No documents inserted — unlike …Rest (census-driven), Content must
+      # still surface the type so "create the first document" is reachable.
+      tree = Structure.build(dataset)
+
+      content = content_types_node(tree)
+      assert %Node{} = content
+      assert Enum.any?(content.items, &(&1.type_name == "orderNote"))
+    end
+
+    test "singleton: true preserves the old :document singleton behavior" do
+      dataset = "structure_test_explicit_singleton"
+
+      insert_schema!(%{
+        name: "storeConfig",
+        title: "Store Config",
+        icon: "settings",
+        visibility: "private",
+        dataset: dataset,
+        singleton: true,
+        fields: []
+      })
+
+      tree = Structure.build(dataset)
+
+      settings = settings_node(tree)
+      assert %Node{} = settings
+
+      config = Enum.find(settings.items, &(&1.id == "storeConfig"))
+      assert %Node{type: :document, type_name: "storeConfig"} = config
+
+      # And it must NOT double-list under the generic Content bucket.
+      case content_types_node(tree) do
+        nil -> :ok
+        %Node{items: items} -> refute Enum.any?(items, &(&1.type_name == "storeConfig"))
+      end
+    end
+
+    test "a plugin-owned private schema is excluded from the generic Content group too" do
+      dataset = "structure_test_generic_excludes_owned"
+      seed_legacy(dataset)
+
+      # `sheet` is owned by the (default-enabled, :main-placed) Sheets plugin —
+      # it renders via its own top-level MAIN group, never via the generic
+      # catch-all, mirroring the existing Settings-ownership exclusion.
+      insert_schema!(%{
+        name: "sheet",
+        title: "Sheets",
+        icon: "📊",
+        visibility: "private",
+        dataset: dataset,
+        fields: []
+      })
+
+      tree = Structure.build(dataset)
+
+      case content_types_node(tree) do
+        nil -> :ok
+        %Node{items: items} -> refute Enum.any?(items, &(&1.type_name == "sheet"))
+      end
+    end
+
+    test "an empty private set produces neither a Settings nor a Content group" do
+      dataset = "structure_test_no_private_at_all"
+
+      insert_schema!(%{
+        name: "post",
+        title: "Posts",
+        icon: "file-text",
+        visibility: "public",
+        dataset: dataset,
+        fields: []
+      })
+
+      tree = Structure.build(dataset)
+
+      assert settings_node(tree) == nil
+      assert content_types_node(tree) == nil
     end
   end
 

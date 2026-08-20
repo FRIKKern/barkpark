@@ -47,7 +47,8 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     # scaffy:add-block-type ApiEndpoint MARK:parity-count-test-api-endpoint
     # scaffy:add-block-type CodeTabs MARK:parity-count-test-code-tabs
     # scaffy:add-block-type Tabs MARK:parity-count-test-tabs
-    assert length(GenPdParity.types()) == 60
+    # jdf-bl-historiene-renderer-reconciliation: +duel +lineage
+    assert length(GenPdParity.types()) == 63
   end
 
   test "both members of all 3 alias pairs are present" do
@@ -83,7 +84,9 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
       fx = decode!(@api_dir, @type_slug)
       assert is_binary(fx["expectedHtml"])
       assert is_list(fx["shape"])
-      assert fx["shape"] != [], "#{@type_slug} rendered to an empty shape — check the authored input"
+
+      assert fx["shape"] != [],
+             "#{@type_slug} rendered to an empty shape — check the authored input"
     end
   end
 end

@@ -27,7 +27,7 @@ defmodule Barkpark.Media.Delivery do
   def preview_url(file, opts \\ []), do: Urls.preview_url(file, opts)
   def rendition_urls(file, opts \\ []), do: Urls.rendition_urls(file, opts)
 
-  defdelegate put_file_cache_headers(conn, full_path), to: Urls
+  defdelegate put_file_cache_headers(conn, full_path, visibility), to: Urls
   defdelegate etag_for(full_path), to: Urls
 
   # ── CDN prefixing + invalidation (Cdn) ────────────────────────────────────

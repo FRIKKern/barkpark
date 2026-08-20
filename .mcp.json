@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "barkpark": {
+      "type": "stdio",
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": "https://guerrilla.barkpark.cloud",
+        "BARKPARK_API_TOKEN": "${BARKPARK_API_TOKEN}"
+      }
+    }
+  }
+}

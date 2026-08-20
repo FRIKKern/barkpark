@@ -218,9 +218,7 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         return ledger
 
     def ledger(self, task=None, paper=None):
-        task = task or self.task
         paper = MODULE.EPIC.paper_doc(paper or self.paper)
-        fields = MODULE.EPIC.task_fields(MODULE.EPIC.task_doc(task))
         fleet = MODULE.EPIC.paper_fleet(paper)
         cycle_ledger = next(
             (
@@ -276,7 +274,7 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
             "format": MODULE.EPIC.LEDGER_FORMAT,
             "experiment": {
                 "workspace_id": scope["workspace_id"],
-                "epic_id": fields.get("parent_id"),
+                "epic_id": scope["epic_id"],
                 "wave_id": paper["_id"],
                 "experiment_id": "legendary-fleet-fixture",
                 "phase": "legendary",
@@ -375,6 +373,18 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
 
     def test_valid_five_scale_fixture_passes(self):
         self.assertEqual([], MODULE.validate(self.args()))
+
+    def test_root_campaign_b1_uses_live_cycle_epic_instead_of_parent_goal(self):
+        paper = copy.deepcopy(self.paper)
+        cycle_ledger = next(
+            block["cycle_ledger"]
+            for block in paper["body"]["blocks"]
+            if "cycle_ledger" in block
+        )
+        cycle_ledger["scope"]["epic_id"] = self.task["doc"]["doc_id"]
+        ledger = self.ledger(paper=paper)
+
+        self.assertEqual([], MODULE.validate(self.args(paper=paper, ledger=ledger)))
 
     def test_legendary_build_preflight_accepts_prior_fleet_without_future_completions(self):
         paper = copy.deepcopy(self.paper)

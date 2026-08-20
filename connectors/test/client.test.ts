@@ -172,7 +172,7 @@ describe("auth failures", () => {
 });
 
 describe("retry — keyed off error.code, not the raw status", () => {
-  it("retries a transient chat_unavailable and then succeeds", async () => {
+  it("retries a transient runtime_capacity and then succeeds", async () => {
     let hits = 0;
     server.use(
       http.post(`${TEST_BASE}/v1/chat/sessions/:id/messages`, () => {
@@ -180,8 +180,8 @@ describe("retry — keyed off error.code, not the raw status", () => {
         if (hits < 3) {
           return errorResponse(
             503,
-            "chat_unavailable",
-            "chat runtime is unavailable",
+            "runtime_capacity",
+            "chat runtime is at capacity",
           );
         }
         return HttpResponse.json({ accepted: true }, { status: 202 });
@@ -201,7 +201,7 @@ describe("retry — keyed off error.code, not the raw status", () => {
         hits += 1;
         return errorResponse(
           503,
-          "chat_unavailable",
+          "runtime_unavailable",
           "chat runtime is unavailable",
         );
       }),
@@ -210,8 +210,31 @@ describe("retry — keyed off error.code, not the raw status", () => {
     const err = (await client
       .postMessage(SESSION_ID, "hi")
       .catch((e: unknown) => e)) as ChatClientError;
-    expect(err.code).toBe("chat_unavailable");
+    expect(err.code).toBe("runtime_unavailable");
     expect(hits).toBe(3); // maxRetries default 2
+  });
+
+  it("does NOT retry a 422 chat_unsupported (a permanent refusal is terminal)", async () => {
+    // D26: chat_unsupported means this server/provider will never accept the
+    // request — retrying it forever is the exact failure the reason split
+    // exists to prevent.
+    let hits = 0;
+    server.use(
+      http.post(`${TEST_BASE}/v1/chat/sessions/:id/messages`, () => {
+        hits += 1;
+        return errorResponse(
+          422,
+          "chat_unsupported",
+          "chat is not supported on this instance",
+        );
+      }),
+    );
+
+    const err = (await client
+      .postMessage(SESSION_ID, "hi")
+      .catch((e: unknown) => e)) as ChatClientError;
+    expect(err.code).toBe("chat_unsupported");
+    expect(hits).toBe(1); // no retry
   });
 
   it("does NOT retry a 400 invalid_request (a client bug is terminal)", async () => {
@@ -297,14 +320,15 @@ describe("retry — keyed off error.code, not the raw status", () => {
     expect(hits).toBe(3); // 1 try + 2 retries — a re-read is always safe
   });
 
-  it("still retries a chat_unavailable on a POST (the server proved it refused the work)", async () => {
+  it("still retries a chat_create_failed on a POST (the server proved it refused the work)", async () => {
     // A real 503 response means the request was rejected before any side effect,
     // so replaying it cannot duplicate a turn.
     let hits = 0;
     server.use(
       http.post(`${TEST_BASE}/v1/chat/sessions`, () => {
         hits += 1;
-        if (hits < 2) return errorResponse(503, "chat_unavailable", "runtime down");
+        if (hits < 2)
+          return errorResponse(503, "chat_create_failed", "runtime down");
         return HttpResponse.json(
           { id: SESSION_ID, cwd: "/opt/barkpark" },
           { status: 201 },

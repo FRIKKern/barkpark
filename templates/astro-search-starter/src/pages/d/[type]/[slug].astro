@@ -1,13 +1,28 @@
 ---
 // Document pages, STATICALLY generated at build — every published doc of the
 // featured type becomes real HTML here, rendered by the CANONICAL
-// @barkpark/react PortableDoc (all 42 block types, bp-* classes) through
-// Astro's React SSR. The PortableDoc-on-Astro mastery proof: same renderer,
-// same bytes-shape as Phoenix and Next — zero client JS on this page.
+// @barkpark/react PortableDoc (bp-* classes) through
+// Astro's React SSR.
+//
+// THE SPLIT (parity with the Next edition's `app/(finder)/layout.tsx`): opening
+// a document must NOT drop the visitor on a bare standalone page — the finder
+// stays in the left rail and the document fills the right pane, exactly as on
+// the landing. The rail is the same island at `variant="rail"`; the document
+// beside it is still pure prerendered HTML with zero client JS, so the
+// PortableDoc-on-Astro proof and this page's SEO both survive.
+//
+// Divergence from Next, stated honestly: Next keeps ONE mounted layout and
+// swaps only the `children` segment, so the rail's typed query and scroll
+// survive the navigation. A static site serves each document as its own
+// document, so the rail remounts and re-seeds from `search-seed.json`. The
+// composition a visitor sees is the same; what differs is that the query box
+// starts empty here rather than carrying the text that led to the click.
 import Base from '../../../layouts/Base.astro'
+import FinderIsland from '../../../components/FinderIsland'
 import { PortableDoc } from '@barkpark/react'
 import paperCss from '@barkpark/react/paper-surface.css?url'
 import { allDocs, docBlocks, getDoc } from '../../../lib/bp'
+import '../../../styles/globals.css'
 
 export async function getStaticPaths() {
   const docs = await allDocs()
@@ -28,22 +43,103 @@ const title = (doc.title as string) || doc._id
 // at build; every page below is still pure static HTML.
 const full = await getDoc(doc._type, doc._id)
 const blocks = docBlocks(full ?? doc)
+// Badge label, same shape the Next chrome shows: a readable, capitalised type.
+const rawType = String(doc._type ?? '')
+const typeLabel = rawType ? rawType.charAt(0).toUpperCase() + rawType.slice(1) : 'Document'
 ---
 
 <Base title={title} docId={doc._id}>
   <link rel="stylesheet" href={paperCss} />
-  <main class="bp-paper-surface">
-    <article class="bp-paper-body">
-      <a class="back" href={import.meta.env.BASE_URL}>&lsaquo; Search</a>
-      <h1>{title}</h1>
-      {blocks.length > 0 ? <PortableDoc value={blocks} /> : <p class="empty">This document has no body content.</p>}
-    </article>
-  </main>
+  <div class="flex h-screen w-full overflow-hidden">
+    {/* SAME persist name as the landing's island — that identity is what makes
+        ClientRouter REUSE the finder instead of remounting it, so opening this
+        document keeps the query, the result list and the scroll position. This
+        page renders NO #bp-graph-slot, which is precisely how the graph goes
+        away without the island unmounting. */}
+    <FinderIsland client:only="react" transition:persist="finder-rail" />
+    <section class="min-w-0 flex-1 overflow-y-auto">
+      {/* The detail chrome — the Next edition's components/detail-chrome.tsx,
+          as plain static markup (no island needed): a type badge, the title
+          truncated to one line, and a close button. Close returns to the
+          landing CARRYING THE CURRENT QUERY, because the finder keeps its
+          state in the query string — the inline script below appends
+          location.search so closing lands the finder as you left it, which is
+          exactly what the Next version does with useSearchParams(). */}
+      <header
+        class="sticky top-0 z-10 flex items-center gap-3 border-b border-zinc-200 bg-white/90 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90"
+      >
+        <span
+          class="inline-flex shrink-0 items-center rounded-md bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+          >{typeLabel}</span
+        >
+        <h2 class="min-w-0 flex-1 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          {title}
+        </h2>
+        <a
+          id="bp-detail-close"
+          href={import.meta.env.BASE_URL}
+          aria-label="Close document"
+          class="shrink-0 rounded-md px-2 py-1 text-lg leading-none text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >&times;</a
+        >
+      </header>
+      <main class="bp-paper-surface">
+        <article class="bp-paper-body">
+          <a class="back" href={import.meta.env.BASE_URL}>&lsaquo; Search</a>
+          {/* NO page-level <h1> when there are blocks: under the PortableDoc
+              content-first doctrine the title IS an enforced body block, so the
+              renderer already emits it — printing one here rendered every
+              document's title TWICE. The Next edition renders <PortableDoc>
+              alone for exactly this reason (components/document-detail.tsx
+              renderBody), and falls back to its MetaCard — which carries the
+              title itself — only when a document has no blocks. This mirrors
+              that: heading only on the block-less path. */}
+          {blocks.length > 0 ? (
+            <PortableDoc value={blocks} />
+          ) : (
+            <>
+              <h1>{title}</h1>
+              <p class="empty">This document has no body content.</p>
+            </>
+          )}
+        </article>
+      </main>
+    </section>
+  </div>
 </Base>
+
+<script is:inline>
+  // Carry the finder's live query onto the close link, so closing a document
+  // restores the search exactly as it was (the Next chrome does this with
+  // useSearchParams). Static-safe: if JS never runs, the href already points at
+  // the landing — the link is never broken, only less precise.
+  ;(function () {
+    function wire() {
+      var a = document.getElementById('bp-detail-close')
+      if (!a) return
+      // Re-derive from the ORIGINAL href each time: with client-side navigation
+      // this runs again on every swap, and reading the live href would append
+      // the query repeatedly (?q=x?q=x).
+      var base = a.getAttribute('data-href-base') || a.getAttribute('href') || '/'
+      a.setAttribute('data-href-base', base)
+      a.setAttribute('href', window.location.search ? base + window.location.search : base)
+    }
+    wire()
+    // ClientRouter swaps the DOM without re-running module scripts, so re-wire
+    // after every navigation.
+    document.addEventListener('astro:page-load', wire)
+  })()
+</script>
 
 <style>
   main { max-width: 760px; margin: 0 auto; padding: 48px 20px 96px; }
   .back { display: inline-block; margin-bottom: 24px; opacity: .6; color: inherit; text-decoration: none; }
   .back:hover { opacity: 1; }
   .empty { opacity: .6; }
+  /* The rail is hidden below `md`, so on a phone this link is the only way
+     back and must stay. At `md`+ the rail itself is the way back, which is
+     where the Next edition has no in-pane back affordance either. */
+  @media (min-width: 768px) {
+    .back { display: none; }
+  }
 </style>

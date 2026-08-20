@@ -50,7 +50,17 @@ CSS="api/assets/paper-surface/paper-surface.css"
 GO="internal/pdrender/gridblocks.go"
 REACT_TSX="js/packages/react/src/inline.tsx"
 WEB_TS="web/lib/component-projections.ts"
-MODE="${1:-check}"
+# `MODE="${1:-check}"` used to pass ANY argument straight through to the Python,
+# which treats everything that is not `--write` as check mode — so a typo, or a
+# `--selftest` this gate does not have, ran the ordinary check and exited 0.
+# Refuse what we do not understand instead.
+MODE="check"
+if [ "${1:-}" = "--write" ]; then
+  MODE="--write"
+elif [ -n "${1:-}" ]; then
+  echo "status-manifest-check: unknown argument '$1' (expected --write or none)" >&2
+  exit 2
+fi
 
 python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$REACT_TSX" "$WEB_TS" <<'PY'
 import json, re, sys

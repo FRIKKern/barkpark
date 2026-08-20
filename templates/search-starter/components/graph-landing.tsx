@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GraphView } from "@/components/graph-view";
 import type { GraphNode, GraphEdge } from "@/lib/graph";
@@ -10,6 +10,13 @@ export interface GraphLandingProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
   rootId?: string | null;
+  /** The server cut the node list at its graph budget (`truncated` on the
+   * upstream payload — see `lib/graph.ts`). Drives the honest showing-N line
+   * below; absent/false claims nothing. */
+  truncated?: boolean;
+  /** Upstream `truncation_reason` (e.g. "node_budget") — surfaced for devtools
+   * via a title attribute, never as user copy. */
+  truncationReason?: string | null;
 }
 
 /**
@@ -20,16 +27,35 @@ export interface GraphLandingProps {
  * survives. The live finder query is carried onto the doc href the same way the
  * result rows do it, keeping search + open-doc coexisting in the URL.
  *
- * The renderer owns its own search box + hover hop-cascade; we only translate a
- * node click into a route push and skip phantom (document-less) nodes.
+ * The renderer owns its own legend/zoom chrome + hover hop-cascade; we only
+ * translate a node click into a route push and skip phantom (document-less)
+ * nodes.
+ *
+ * OVERLAY CORNERS (single-owner contract, mirrored in bp-graph.js): the
+ * renderer owns top-left (legend) and bottom-right (zoom strip); top-right is
+ * its search box, suppressed here via `externalSearch` (the finder owns
+ * search). This caption is the host's ONE overlay and lives bottom-left — the
+ * only free corner. Never move it onto a renderer-owned corner.
  */
-export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps) {
+export function GraphLanding({
+  nodes,
+  edges,
+  rootId = null,
+  truncated = false,
+  truncationReason = null,
+}: GraphLandingProps) {
   const router = useRouter();
   const sp = useSearchParams();
   const { hoveredId, setHoveredId } = useHoveredDoc();
   // The finder's visible result set drives which nodes the graph keeps lit, and
   // how strongly (by search rank).
   const { matches } = useGraphMatches();
+
+  // Real documents only — phantoms are referenced-but-absent, not corpus size.
+  const docCount = useMemo(
+    () => nodes.reduce((n, node) => (node.phantom ? n : n + 1), 0),
+    [nodes],
+  );
 
   const onNodeClick = useCallback(
     (node: GraphNode) => {
@@ -53,18 +79,31 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
   );
 
   return (
-    <div className="relative h-full w-full bg-graph-canvas">{/* always-dark Obsidian graph canvas — --color-graph-canvas is the emitted theme-INVARIANT token (design/tokens.json color.graphCanvas): the panel deliberately stays dark in BOTH light + dark modes. */}
-      {/* Caption — quiet top-left overlay in the dark Obsidian aesthetic. It sits
-          above the canvas but lets pointer events through to the graph. */}
-      <div className="pointer-events-none absolute left-5 top-5 z-20 max-w-xs select-none">
-        <p className="text-xs font-medium leading-relaxed text-zinc-400">
-          Barkpark documentation graph
+    <div className="relative h-full w-full bg-background">
+      {/* Theme-AWARE panel (the panel-theme contract lives in graph-view.tsx):
+          the renderer paints the whole canvas bed + chrome for the current
+          data-theme and re-skins live on bp:themechange, so this host bg only
+          shows pre-init and must track the site theme — the old always-dark
+          `bg-graph-canvas` token is retired from this surface. */}
+      {/* Caption — the host's single overlay, bottom-left (see corner contract
+          above). It sits above the canvas but lets pointer events through. */}
+      <div className="pointer-events-none absolute bottom-5 left-5 z-20 max-w-xs select-none">
+        <p className="text-xs font-medium leading-relaxed text-foreground/75">
+          Barkpark document graph
         </p>
-        <p className="mt-1 text-[0.7rem] leading-relaxed text-zinc-500">
+        <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-text">
           {matches
             ? `${matches.length} ${matches.length === 1 ? "match" : "matches"} from your search · brightest = best · click to read`
-            : "Search on the left to filter · click a node to read it"}
+            : `${docCount.toLocaleString()} documents · search on the left to filter · click a node to read`}
         </p>
+        {truncated ? (
+          <p
+            className="mt-1 text-[0.7rem] leading-relaxed text-muted-text"
+            title={truncationReason ?? undefined}
+          >
+            {`Showing the first ${docCount.toLocaleString()} — the full corpus is larger`}
+          </p>
+        ) : null}
       </div>
 
       <GraphView

@@ -2,6 +2,7 @@ package pdrender
 
 import (
 	"math"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -37,6 +38,30 @@ type tableRenderer struct{ ir InlineRenderer }
 func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 	head := attrSlice(b.Attrs, "head")
 	rows := attrSlice(b.Attrs, "rows")
+	columnHead, columnKeys := tableColumns(attrSlice(b.Attrs, "columns"))
+	if len(head) == 0 && len(columnHead) > 0 {
+		head = columnHead
+		if len(columnKeys) > 0 {
+			normalizedRows := make([]any, 0, len(rows))
+			for _, row := range rows {
+				normalizedRows = append(normalizedRows, recordRow(row, columnKeys))
+			}
+			rows = normalizedRows
+		}
+	}
+	if len(head) == 0 && len(rows) > 0 {
+		if row, ok := rows[0].(map[string]any); ok {
+			if header, _ := row["header"].(bool); header {
+				if cells, ok := row["cells"].([]any); ok {
+					head = cells
+					rows = rows[1:]
+				}
+			} else if cells, ok := row["cells"].([]any); ok && allHeaderCells(cells) {
+				head = cells
+				rows = rows[1:]
+			}
+		}
+	}
 	colTypes := parseColTypes(attrSlice(b.Attrs, "cols"))
 
 	t := ltable.New().
@@ -105,6 +130,11 @@ func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 // each cell rendered per its column type (index-aligned to colTypes; text/legacy
 // when colTypes is nil or the index is out of range).
 func (tr tableRenderer) rowCells(row any, colTypes []string, ctx RenderCtx) []string {
+	if wrapped, ok := row.(map[string]any); ok {
+		if cells, ok := wrapped["cells"].([]any); ok {
+			row = cells
+		}
+	}
 	cells, ok := row.([]any)
 	if !ok {
 		// A bare scalar row coerces to a single cell (column 0).
@@ -216,7 +246,15 @@ func colRightAlign(types []string, col int) bool {
 func (tr tableRenderer) cellString(cell any, ctx RenderCtx) string {
 	switch v := cell.(type) {
 	case []any:
-		return tr.ir.Inline(v, ctx)
+		return tr.ir.Inline(flattenCellNodes(v), ctx)
+	case map[string]any:
+		if content, ok := v["content"].([]any); ok {
+			return tr.ir.Inline(flattenCellNodes(content), ctx)
+		}
+		if text, ok := v["text"].(string); ok {
+			return tr.ir.Inline([]any{text}, ctx)
+		}
+		return tr.ir.Inline([]any{v}, ctx)
 	case nil:
 		return ""
 	default:
@@ -224,35 +262,115 @@ func (tr tableRenderer) cellString(cell any, ctx RenderCtx) string {
 	}
 }
 
+func flattenCellNodes(nodes []any) []any {
+	out := make([]any, 0, len(nodes))
+	for _, node := range nodes {
+		if block, ok := node.(map[string]any); ok && attrStr(block, "type") == "paragraph" {
+			if content, ok := block["content"].([]any); ok {
+				out = append(out, content...)
+				continue
+			}
+		}
+		out = append(out, node)
+	}
+	return out
+}
+
+func tableColumns(columns []any) ([]any, []string) {
+	if len(columns) == 0 {
+		return nil, nil
+	}
+	head := make([]any, 0, len(columns))
+	keys := make([]string, 0, len(columns))
+	for _, raw := range columns {
+		column, ok := raw.(map[string]any)
+		if !ok {
+			return nil, nil
+		}
+		key := attrStr(column, "key")
+		if key == "" {
+			text := attrStr(column, "text")
+			if text == "" {
+				return nil, nil
+			}
+			head = append(head, text)
+			continue
+		}
+		label := attrStr(column, "label")
+		if label == "" {
+			label = key
+		}
+		keys = append(keys, key)
+		head = append(head, label)
+	}
+	if len(keys) == 0 && len(head) == len(columns) {
+		return head, nil
+	}
+	if len(keys) != len(columns) {
+		return nil, nil
+	}
+	return head, keys
+}
+
+func recordRow(raw any, keys []string) any {
+	row, ok := raw.(map[string]any)
+	if !ok {
+		return raw
+	}
+	cells := make([]any, 0, len(keys))
+	for _, key := range keys {
+		cells = append(cells, row[key])
+	}
+	return cells
+}
+
+func allHeaderCells(cells []any) bool {
+	if len(cells) == 0 {
+		return false
+	}
+	for _, raw := range cells {
+		cell, ok := raw.(map[string]any)
+		header, _ := cell["header"].(bool)
+		if !ok || !header {
+			return false
+		}
+	}
+	return true
+}
+
 // ── figure ─────────────────────────────────────────────────────────────────
 // Mirrors compose_block(figure): render the single Child block through the
-// registry (full recursion, like section) + a "Figure N." caption below (muted
-// italic). N comes from ctx.figureN — the shared document-global counter — which
-// we increment here. The child + caption sit inside a light card border.
+// registry (full recursion, like section) + the AUTHOR'S caption below (muted
+// italic), with an author-typed "Figure N." lead emphasised exactly as the web
+// reader does. pdrender invents no number of its own — see figureCaption.
+// The child + caption sit inside a light card border.
 type figureRenderer struct{ reg *Registry }
 
 func (fr figureRenderer) Render(b Block, ctx RenderCtx) []string {
-	n := ctx.nextFigure()
-
 	const chrome = 4 // rounded border (2) + padding (2)
 	inner := ctx.Width - chrome
+
+	caption := attrStr(b.Attrs, "caption")
 
 	var childLines []string
 	if b.Child != nil {
 		if inner < MinWidth {
 			// Narrow: render the child flat (no card) at full width + a caption.
 			childLines = fr.reg.Render(*b.Child, ctx.Deeper())
-			caption := attrStr(b.Attrs, "caption")
-			childLines = append(childLines, fr.caption(n, caption, ctx, clampWidth(ctx.Width)))
+			if line := fr.caption(caption, ctx, clampWidth(ctx.Width)); line != "" {
+				childLines = append(childLines, line)
+			}
 			return childLines
 		}
 		childLines = fr.reg.Render(*b.Child, ctx.Deeper().WithWidth(inner))
 	}
 
-	caption := attrStr(b.Attrs, "caption")
-	capLine := fr.caption(n, caption, ctx, clampWidth(inner))
+	cardLines := childLines
+	if capLine := fr.caption(caption, ctx, clampWidth(inner)); capLine != "" {
+		cardLines = append(cardLines, capLine)
+	}
 
-	body := lipgloss.JoinVertical(lipgloss.Left, append(childLines, capLine)...)
+	body := lipgloss.JoinVertical(lipgloss.Left, cardLines...)
 	card := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ruleColor(ctx.Theme)).
@@ -265,18 +383,40 @@ func (fr figureRenderer) Render(b Block, ctx RenderCtx) []string {
 	return strings.Split(card, "\n")
 }
 
-// caption builds the "Figure N. <caption>" line, muted italic, with a bold-ish
-// "Figure N." run-in approximated by the caption style. Wrapped to width.
-func (fr figureRenderer) caption(n int, caption string, ctx RenderCtx, width int) string {
-	caption = sanitizeText(caption)
-	lead := "Figure " + itoa(n) + "."
-	text := lead
-	if caption != "" {
-		text = lead + " " + caption
+// caption builds the caption line beneath a figure: the author's text, muted
+// italic, wrapped to width. Empty caption → empty line (nothing to say).
+func (fr figureRenderer) caption(caption string, ctx RenderCtx, width int) string {
+	styled := figureCaption(sanitizeText(caption), ctx)
+	if styled == "" {
+		return ""
 	}
-	styled := ctx.Theme.Caption.Render(text)
-	lines := wrapLines(styled, width)
-	return strings.Join(lines, "\n")
+	return strings.Join(wrapLines(styled, width), "\n")
+}
+
+// figureCaptionLead matches an AUTHOR-TYPED "Figure N." run-in — the same shape
+// the web reader detects (figures.ex figcaption_inner/1).
+var figureCaptionLead = regexp.MustCompile(`(?s)^(Figure\s+\S+?\.)\s*(.*)$`)
+
+// figureCaption styles a figure/diagram caption the way the web reader does:
+// DETECT an author-typed "Figure N." lead and emphasise it (bold over the
+// muted-italic caption tone — the terminal analogue of figures.ex's <b> run-in),
+// and GENERATE NOTHING. pdrender used to prepend its own document-global
+// "Figure N.", so a paper whose author had typed a number printed two
+// contradictory numbers on one caption line; the terminal must never contradict
+// the author. If auto-numbering is ever wanted it lands on all three surfaces in
+// one wave (charter D11), not here. Empty caption → "" (no line at all).
+func figureCaption(caption string, ctx RenderCtx) string {
+	if caption == "" {
+		return ""
+	}
+	if m := figureCaptionLead.FindStringSubmatch(caption); m != nil {
+		lead := ctx.Theme.Caption.Bold(true).Render(m[1])
+		if m[2] == "" {
+			return lead
+		}
+		return lead + ctx.Theme.Caption.Render(" "+m[2])
+	}
+	return ctx.Theme.Caption.Render(caption)
 }
 
 // ── action (CTA) ───────────────────────────────────────────────────────────
@@ -391,6 +531,9 @@ type eyebrowRenderer struct{}
 func (eyebrowRenderer) Render(b Block, ctx RenderCtx) []string {
 	text := strings.ToUpper(sanitizeText(attrStr(b.Attrs, "text")))
 	spaced := letterSpace(text)
+	if lipgloss.Width(spaced) > ctx.Width {
+		spaced = text
+	}
 	styled := ctx.Theme.Eyebrow.Render(spaced)
 	return wrapLines(styled, ctx.Width)
 }

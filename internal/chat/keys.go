@@ -30,8 +30,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	}
-	if m.screen == screenPicker {
+	switch m.screen {
+	case screenPicker:
 		return m.handlePickerKey(msg)
+	case screenShelf:
+		return m.handleShelfKey(msg)
 	}
 	return m.handleChatKey(msg)
 }
@@ -72,6 +75,13 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openPickerRow()
 	case "n":
 		return m, m.createSessionCmd()
+	case "a":
+		return m.archiveCursorRow()
+	case "s":
+		// Open the ARCHIVED shelf (charter D28) — the door `a` puts rows through,
+		// read from the other side. `s` is the shelf's key on BOTH screens (it
+		// closes again from there), so the toggle is one letter to learn.
+		return m.openShelf()
 	case "r":
 		m.loading = true
 		return m, m.loadSessionsCmd()
@@ -85,6 +95,154 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+// archiveCursorRow shelves the session under the cursor (charter D28).
+//
+// The removal is OPTIMISTIC and immediate: the server emits no fleet frame for
+// an archive flip, so nothing else will ever tell this list the row is gone.
+// The cursor is clamped afterwards so the highlight cannot end up past the
+// shortened roster, and the "+ new session" row (index 0) is not a session —
+// pressing `a` there does nothing rather than archiving whatever happens to
+// sort first.
+//
+// The herd row is deliberately LEFT ALONE. archived_at is dismissal; agent_state
+// is attention. A dismissed session that is still working is still working, and
+// scrubbing its herd state on the way out would be this screen inventing a
+// liveness change the server never made.
+func (m Model) archiveCursorRow() (tea.Model, tea.Cmd) {
+	if m.pickCursor <= 0 {
+		return m, nil
+	}
+	order := m.orderedSessions()
+	idx := m.pickCursor - 1
+	if idx >= len(order) {
+		return m, nil
+	}
+	id := order[idx].ID
+
+	kept := make([]SessionSummary, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s.ID != id {
+			kept = append(kept, s)
+		}
+	}
+	m.sessions = kept
+	if m.pickCursor > len(m.sessions) {
+		m.pickCursor = len(m.sessions)
+	}
+	m = m.syncHerdCursorFromIndex()
+	return m, m.archiveSessionCmd(id)
+}
+
+// ── the archived shelf (charter D28) ─────────────────────────────────────────
+//
+// The archive door used to be one-way inside the pane: `a` shelved a row and
+// nothing here could see the shelf, let alone put a row back (`bp chat ls
+// --archived` + `bp chat unarchive <id>` were the only ways out, and both need
+// you to leave the pane). The shelf screen closes that asymmetry with the
+// smallest possible grammar — a list, a cursor, and ONE verb.
+
+// openShelf foregrounds the shelf and fires its read. The cursor resets to the
+// top on every open: the shelf is re-read each time (a session archived since
+// the last visit belongs at its sorted place), so a remembered index would
+// point at whatever row happens to have moved under it.
+func (m Model) openShelf() (tea.Model, tea.Cmd) {
+	m.screen = screenShelf
+	m.shelfCursor = 0
+	m.shelfTop = 0
+	m.shelfErr = ""
+	m.shelfLoading = true
+	return m, m.loadShelfCmd()
+}
+
+// handleShelfKey is the shelf grammar: up/down + g/G + paging move, enter and
+// `u` BOTH restore the cursor row (enter is the row's verb, `u` is the mnemonic
+// — one path, two doors), esc/`s` close back to the herd, `r` re-reads, `?`
+// opens the key reference, `q` quits. There is deliberately no `a` (a shelved
+// row cannot be shelved again) and no attach: attaching a session you have
+// dismissed is the incoherent state — restore it first, then open it.
+func (m Model) handleShelfKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		return m.clampShelfCursor(m.shelfCursor - 1), nil
+	case "down", "j":
+		return m.clampShelfCursor(m.shelfCursor + 1), nil
+	case "g", "home":
+		return m.clampShelfCursor(0), nil
+	case "G", "end":
+		return m.clampShelfCursor(len(m.shelf) - 1), nil
+	case "pgup":
+		return m.clampShelfCursor(m.shelfCursor - m.shelfPage()), nil
+	case "pgdown":
+		return m.clampShelfCursor(m.shelfCursor + m.shelfPage()), nil
+	case "enter", "u":
+		return m.restoreShelfRow()
+	case "esc", "s":
+		// Back to the herd home. The roster is re-read on the way out so a row
+		// restored during this visit is already on it (the unarchive path also
+		// re-reads; a second read is cheap and keeps "esc always lands on truth"
+		// unconditional).
+		m.screen = screenPicker
+		m.loading = true
+		return m, m.loadSessionsCmd()
+	case "r":
+		m.shelfLoading = true
+		return m, m.loadShelfCmd()
+	case "?":
+		m.helpOpen = true
+		return m, nil
+	case "q":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// restoreShelfRow unarchives the session under the cursor — the shelf's ONE
+// verb and the caller that earns Transport.Unarchive its place back on the
+// interface.
+//
+// The removal is OPTIMISTIC and immediate, for the same reason the archive path
+// is: the server emits no fleet frame for an archived_at flip in either
+// direction, so nothing else will ever tell this list the row left. The cursor
+// clamps into the shortened list afterwards, and an empty shelf is a no-op
+// rather than a restore of whatever happens to sort first.
+//
+// The herd row is deliberately LEFT ALONE (the archiveCursorRow law, mirrored):
+// archived_at is dismissal, agent_state is attention. A restored session's
+// state is whatever the server says it is — the roster re-read carries it.
+func (m Model) restoreShelfRow() (tea.Model, tea.Cmd) {
+	if m.shelfCursor < 0 || m.shelfCursor >= len(m.shelf) {
+		return m, nil
+	}
+	id := m.shelf[m.shelfCursor].ID
+
+	kept := make([]SessionSummary, 0, len(m.shelf))
+	for _, s := range m.shelf {
+		if s.ID != id {
+			kept = append(kept, s)
+		}
+	}
+	m.shelf = kept
+	m.shelfErr = ""
+	m = m.clampShelfCursor(m.shelfCursor)
+	return m, m.unarchiveSessionCmd(id)
+}
+
+// clampShelfCursor is the ONE place the shelf cursor's bounds live: inside the
+// roster, 0 on an empty shelf (never a negative index), and the viewport top
+// re-derived in the same breath so paging accumulates the way the picker's
+// does.
+func (m Model) clampShelfCursor(i int) Model {
+	if i > len(m.shelf)-1 {
+		i = len(m.shelf) - 1
+	}
+	if i < 0 {
+		i = 0
+	}
+	m.shelfCursor = i
+	m.shelfTop = m.followShelfTop()
+	return m
 }
 
 // openPickerRow acts on the cursor row: index 0 is the "+ new session" row, any
@@ -246,7 +404,12 @@ func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			// idempotent reduceTailFetched) so the map the operator just opened is as
 			// fresh as a turn boundary. Edge-gated by !wfExpanded — the drill and
 			// collapse edges never refetch, and no polling/cadence exists (D13 holds).
-			cmd := m.execEffect(FetchTailEffect{SinceSeq: m.st.LastSeq})
+			// Gen -1: this is a HYDRATION refetch, never a settle boundary — the
+			// sentinel can never equal TailGen (>= 0), so its landing never clears
+			// a live tail (charter D77). Carrying st.Gen here would wipe the live
+			// streamed text on a mid-stream expand; the zero value would clear it
+			// in the attach-mid-turn case (no init observed yet, Gen==TailGen==0).
+			cmd := m.execEffect(FetchTailEffect{SinceSeq: m.st.LastSeq, Gen: -1})
 			j := journeyOf(m.st.Workflow)
 			if len(j.Phases) == 0 {
 				// nothing to expand — an honest no-op (the refetch may hydrate the

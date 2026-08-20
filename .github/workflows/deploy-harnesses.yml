@@ -5,6 +5,20 @@ on:
     paths:
       - "deploy/**"
       - ".github/workflows/deploy-harnesses.yml"
+      # Both site engines' self-tests assert on THIS file — the @stage_names
+      # whitelist that decides which BPSTAGE lines become a verdict (ROUTE must
+      # stay out of it, charter D327/D346). Without this entry a PR that adds
+      # ROUTE to @stage_names touches no deploy/** path, so the only shell
+      # assertion protecting that doctrine never fires on the exact change it
+      # exists to catch.
+      #
+      # BELT-AND-BRACES, NOT THE FIX: this workflow is not a required status
+      # check (the required set is "Elixir gate", "PR references an active
+      # task", "Cloud gate", "Console gate"), so it cannot block a merge no
+      # matter what it runs. The blocking guard is
+      # api/test/barkpark/sites/deploy_runner_stage_names_test.exs, which rides
+      # the required Elixir lane. This line just makes the shell half reachable.
+      - "api/lib/barkpark/sites/deploy_runner.ex"
 
 permissions:
   contents: read
@@ -50,7 +64,19 @@ jobs:
       # fixture release dirs in a tmpdir, no npm/caddy/systemd needed). It is
       # worthless unless it actually RUNS — an untested deploy engine is the
       # weakest link in the deploy path, so gate it here alongside its siblings.
+      # BARKPARK_SELFTEST_REQUIRE_E2E=1: the engine-e2e block (stage protocol,
+      # content-truth HEALTH gate, "the box ran no npm" on a prebuilt deploy)
+      # SKIPS itself when python3/curl are absent — and the run then prints PASS
+      # and exits 0 with this engine's central claims untested. In CI that skip
+      # is a green vacuum, so make it a hard failure here. The SAME flag also
+      # hard-fails the fleet build admission gate proof (one box, one build) when
+      # flock(1) is missing: that block drives two concurrent deploys against a
+      # REAL flock, and a gate "proven" against the e2e's exit-0 flock stub proves
+      # the stub. ubuntu-latest ships util-linux, so this only ever fires on a
+      # runner image change — loudly, which is the point.
       - name: Site deploy engine self-test
+        env:
+          BARKPARK_SELFTEST_REQUIRE_E2E: "1"
         run: bash deploy/site-deploy.sh --self-test
       # The Node-engine deploy path ships its own offline proof (--self-test:
       # fixture release dirs in a tmpdir, no npm/caddy/systemd needed) covering
@@ -58,5 +84,12 @@ jobs:
       # reasoning as its static sibling above: an untested deploy engine is the
       # weakest link, so gate it here. The script self-gates and exits non-zero
       # on any failure — no hardcoded total (check counts grow over time).
+      # BARKPARK_SELFTEST_REQUIRE_E2E=1 for the same reason it is set above: this
+      # engine's gate block proves that the slot process HEALTH boots does not
+      # inherit the box's only build slot (a permanent fleet-wide deny), and that
+      # proof needs a REAL flock(1) — without the flag it would skip itself and
+      # still print PASS.
       - name: Site deploy engine (Node) self-test
+        env:
+          BARKPARK_SELFTEST_REQUIRE_E2E: "1"
         run: bash deploy/site-deploy-node.sh --self-test

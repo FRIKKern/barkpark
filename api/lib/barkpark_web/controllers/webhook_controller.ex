@@ -49,8 +49,12 @@ defmodule BarkparkWeb.WebhookController do
   def delete(conn, %{"id" => id}) do
     with :ok <- validate_uuid(id),
          {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)),
-         {:ok, _} <- Webhooks.delete_webhook(wh) do
-      json(conn, %{deleted: id})
+         {:ok, deleted} <- Webhooks.delete_webhook(wh) do
+      # RECEIPT LAW (pds w39): `delete_webhook/1` returns the deleted row
+      # (webhooks.ex:135-142, through `audit_webhook/2` which passes `result`
+      # straight back). The old body echoed the `:id` path param; `name` is the
+      # store's own value, so an echo-revert cannot reproduce this receipt.
+      json(conn, %{deleted: deleted.id, name: deleted.name, dataset: deleted.dataset})
     else
       _ -> webhook_not_found(conn)
     end

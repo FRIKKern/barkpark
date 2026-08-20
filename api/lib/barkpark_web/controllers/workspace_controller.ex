@@ -29,6 +29,7 @@ defmodule BarkparkWeb.WorkspaceController do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
+  alias Barkpark.Tenancy.WorkspaceBundle.Archive
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
 
   action_fallback BarkparkWeb.FallbackController
@@ -253,8 +254,22 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   @doc """
-  POST /api/workspaces/:workspace_slug/import — read the raw tar request body and
-  re-import it via `WorkspaceBundle.import_bundle/2` (admin-gated).
+  POST /api/workspaces/:workspace_slug/import — SPILL the raw tar request body to
+  disk and re-import it via `WorkspaceBundle.import_bundle_file/2` (admin-gated).
+
+  BOUNDED (PDS wave 23). The body is streamed to a scratch file in 8 MB chunks
+  and refused past a derived ceiling with 413 `import_body_too_large`; the
+  engine then extracts to disk and streams each member into COPY. Nothing on
+  this path is ever the whole bundle as a binary. Peak is 1x the largest single
+  member — NOT constant memory. Before this, `length: 100_000_000` read like a
+  limit and was a per-call chunk hint with nothing summing the chunks, so a
+  ~2.6 GB bundle materialised whole and `clean` mode had no gate at all.
+
+  Disk is the risk that trade INTRODUCES, so a free-space precondition runs
+  BEFORE the spill opens and refuses with 507 `insufficient_disk_space`. When
+  the requirement cannot be derived (no Content-Length) or `df` cannot be read,
+  the success receipt carries `disk_precondition: %{checked: false, reason: …}`
+  rather than implying a check that never ran.
 
   The bundle is SELF-DESCRIBING (its manifest carries the workspace identity and
   per-table import strategy). Two modes, selected via the `mode` query param:
@@ -289,13 +304,11 @@ defmodule BarkparkWeb.WorkspaceController do
   def import(conn, %{"workspace_slug" => _slug} = params) do
     case params["mode"] || "clean" do
       "clean" ->
-        {bundle, conn} = read_full_body(conn)
-        clean_import(conn, bundle)
+        with_spilled_body(conn, &clean_import/3)
 
       "merge" ->
         if Application.get_env(:barkpark, :allow_bundle_import, false) do
-          {bundle, conn} = read_full_body(conn)
-          merge_import(conn, bundle)
+          with_spilled_body(conn, &merge_import/3)
         else
           # Fail-closed opt-in (PDS-D10): merge writes into a live workspace, so
           # the server operator must explicitly allow it — refused BEFORE the
@@ -324,14 +337,17 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   end
 
-  defp clean_import(conn, bundle) do
-    case WorkspaceBundle.import_bundle(bundle) do
+  defp clean_import(conn, path, receipt) do
+    case WorkspaceBundle.import_bundle_file(path) do
       {:ok, stats} ->
-        json(conn, %{
-          tables: stats.tables,
-          total_rows: stats.total_rows,
-          provenance: stamp_provenance(stats.manifest)
-        })
+        json(
+          conn,
+          Map.merge(receipt, %{
+            tables: stats.tables,
+            total_rows: stats.total_rows,
+            provenance: stamp_provenance(stats.manifest)
+          })
+        )
 
       {:error, other} ->
         import_failed(conn, :clean, other)
@@ -342,15 +358,18 @@ defmodule BarkparkWeb.WorkspaceController do
     e -> log_import_crash_and_reraise(:clean, e, __STACKTRACE__)
   end
 
-  defp merge_import(conn, bundle) do
-    case WorkspaceBundle.import_bundle(bundle, mode: :merge) do
+  defp merge_import(conn, path, receipt) do
+    case WorkspaceBundle.import_bundle_file(path, mode: :merge) do
       {:ok, stats} ->
-        json(conn, %{
-          tables: stats.tables,
-          total_rows: stats.total_rows,
-          mode: "merge",
-          provenance: stamp_provenance(stats.manifest)
-        })
+        json(
+          conn,
+          Map.merge(receipt, %{
+            tables: stats.tables,
+            total_rows: stats.total_rows,
+            mode: "merge",
+            provenance: stamp_provenance(stats.manifest)
+          })
+        )
 
       {:error, {:workspace_slug_conflict, info}} ->
         conn
@@ -583,15 +602,256 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   end
 
-  # Drain the entire raw request body (the tar bundle) — a POST body can arrive in
-  # multiple chunks, so loop on `:more`. The `application/x-tar` content-type
-  # matches no configured Plug.Parser (parsers pass `*/*` through unread), so the
-  # bytes are still here to read. iolist accumulation avoids O(n^2) concatenation.
-  defp read_full_body(conn, acc \\ []) do
-    case Plug.Conn.read_body(conn, length: 100_000_000) do
-      {:ok, chunk, conn} -> {IO.iodata_to_binary([acc, chunk]), conn}
-      {:more, chunk, conn} -> read_full_body(conn, [acc, chunk])
+  # ── The bounded import body (PDS wave 23) ────────────────────────────────────
+  #
+  # What was here before: `read_full_body/2` looped on `:more` accumulating an
+  # iolist and ended in `IO.iodata_to_binary/1`. Its `length: 100_000_000` reads
+  # as a 100 MB limit and is NOT one — `:length` is a per-CALL chunk hint, and
+  # nothing summed the chunks, so there was no ceiling of any kind. The whole
+  # ~2.6 GB bundle materialised as one binary BEFORE the engine was reached, and
+  # in `clean` mode it was drained with no gate at all.
+  #
+  # THE CEILING, DERIVED — not rounded, and not a comfortable round number:
+  #
+  #   * measured on guerrilla 2026-07-27, the four largest tenant tables carry
+  #     2,605.5 MiB of COPY text (`mutation_events` 1,310,211,957 B +
+  #     `revisions` 1,100,800,292 B + the next two), so today's full-fidelity
+  #     bundle is 2,605.5 MiB = 2_732_101_632 B;
+  #   * headroom is ONE MORE DOUBLING, which is exactly what this epic OBSERVED
+  #     rather than a margin somebody liked: `pg_database_size` went 942 MB
+  #     (PDS-D41's measurement) to 2,012,650,519 B over the epic's life.
+  #
+  # 2 x 2_732_101_632 = 5_464_203_264. The route is admin-gated, so this is a
+  # self-foot-gun ceiling, not a DoS control — and it is NOT the disk control
+  # either: `Archive.check_free_space/2` below is, because a box can be short of
+  # room for a body far under this limit.
+  @max_import_body_bytes 5_464_203_264
+
+  # A ceiling nothing can exercise is a ceiling nobody can trust — and no test
+  # is going to POST 5.46 GB. `:max_import_body_bytes` overrides the derived
+  # default so the refusal is provable at 1 KB (and so an operator on a smaller
+  # box can lower it). The DERIVATION above stays the default; this key never
+  # changes it silently.
+  defp max_import_body_bytes do
+    Application.get_env(:barkpark, :max_import_body_bytes, @max_import_body_bytes)
+  end
+
+  # Per read_body/2 call. Bounded on purpose: this is the largest single binary
+  # the import path ever holds.
+  @body_chunk_bytes 8_000_000
+
+  # Spill + extracted members are held together (the body file cannot be deleted
+  # until extraction completes), so the requirement is 2x the declared body. The
+  # margin covers tar headers and rounding — it does NOT cover the import's
+  # `CREATE TEMP TABLE` + COPY, which holds another ~1x the largest member
+  # inside Postgres, on the SAME filesystem when the DB is local (guerrilla
+  # carries `/`, `/tmp` and `/opt/barkpark` on one). Stated, not hidden.
+  @disk_margin_bytes 268_435_456
+
+  # Spill the raw tar body to a scratch directory, run `fun`, then always remove
+  # the scratch. `fun` is `(conn, bundle_path, receipt_map) -> conn`.
+  #
+  # File.rm_rf removes exactly the directory `Archive.open_scratch_dir!/0` just
+  # created — `spill_dir/0` (operator config) plus System.unique_integer/1. No
+  # request input reaches the path, same basis as archive.ex:229-231.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp with_spilled_body(conn, fun) do
+    scratch = Archive.open_scratch_dir!()
+
+    try do
+      case disk_precondition(scratch, conn) do
+        {:error, {:insufficient_disk_space, info}} ->
+          insufficient_disk_space(conn, info)
+
+        {:ok, verdict} ->
+          case spill_body(conn, Path.join(scratch, "body.tar")) do
+            {:error, :body_too_large, conn, read} ->
+              body_too_large(conn, read)
+
+            {:error, {:body_read_failed, reason}, conn, read} ->
+              body_read_failed(conn, reason, read)
+
+            {:error, {:spill_write_failed, reason}, conn, read} ->
+              spill_write_failed(conn, scratch, reason, read)
+
+            {:ok, path, bytes, conn} ->
+              fun.(conn, path, %{
+                body_bytes: bytes,
+                disk_precondition: describe_disk_verdict(verdict)
+              })
+          end
+      end
+    after
+      File.rm_rf(scratch)
     end
+  end
+
+  # The precondition is derived from Content-Length. When the client sent none
+  # (chunked upload) the requirement is underivable, and the honest answer is to
+  # SAY the check did not run — in the receipt, in the same breath as the
+  # success — never to print a checkmark for a check that never happened.
+  defp disk_precondition(dir, conn) do
+    case content_length(conn) do
+      {:ok, len} ->
+        Archive.check_free_space(dir, 2 * len + @disk_margin_bytes)
+
+      :error ->
+        {:ok, {:unverified, :no_content_length}}
+    end
+  end
+
+  defp content_length(conn) do
+    with [value | _] <- Plug.Conn.get_req_header(conn, "content-length"),
+         {len, ""} <- Integer.parse(String.trim(value)) do
+      {:ok, len}
+    else
+      _ -> :error
+    end
+  end
+
+  defp describe_disk_verdict({:verified, free}),
+    do: %{checked: true, free_bytes: free}
+
+  defp describe_disk_verdict({:unverified, reason}),
+    do: %{checked: false, reason: to_string(reason)}
+
+  # Stream the body to `path`, refusing past the derived ceiling. A POST body
+  # arrives in multiple chunks, so loop on `:more` — but SUM them, which is the
+  # bug this replaces.
+  #
+  # File.open's `path` is Path.join(scratch, "body.tar"), and `scratch` comes
+  # from `Archive.open_scratch_dir!/0` — `spill_dir/0` (operator config) plus
+  # System.unique_integer/1. No request input reaches the path, same basis as
+  # archive.ex:229-231.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp spill_body(conn, path) do
+    case File.open(path, [:write, :raw, :binary]) do
+      {:ok, io} ->
+        try do
+          stream_body(conn, io, path, 0)
+        after
+          File.close(io)
+        end
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "open", path: path
+    end
+  end
+
+  # Three ways this loop can end, and every one of them is NAMED. A multi-GB
+  # upload spends minutes on the wire, so the two failure shapes below are not
+  # theoretical: `read_body` answers `{:error, reason}` on a client disconnect or
+  # a read timeout, and `IO.binwrite/2` answers `{:error, :enospc}` when the
+  # filesystem fills mid-spill — the exact hazard extraction-to-disk introduces.
+  # Neither may reach the caller as a FunctionClauseError/MatchError 500: an
+  # opaque 500 is a failure claim as uninformative as a false success.
+  defp stream_body(conn, io, path, written) do
+    case Plug.Conn.read_body(conn, length: @body_chunk_bytes) do
+      {:ok, chunk, conn} ->
+        case write_chunk(io, chunk, written) do
+          {:ok, written} -> {:ok, path, written, conn}
+          :too_large -> {:error, :body_too_large, conn, written + byte_size(chunk)}
+          {:write_failed, reason} -> {:error, {:spill_write_failed, reason}, conn, written}
+        end
+
+      {:more, chunk, conn} ->
+        case write_chunk(io, chunk, written) do
+          {:ok, written} -> stream_body(conn, io, path, written)
+          :too_large -> {:error, :body_too_large, conn, written + byte_size(chunk)}
+          {:write_failed, reason} -> {:error, {:spill_write_failed, reason}, conn, written}
+        end
+
+      {:error, reason} ->
+        {:error, {:body_read_failed, reason}, conn, written}
+    end
+  end
+
+  defp write_chunk(io, chunk, written) do
+    total = written + byte_size(chunk)
+
+    if total > max_import_body_bytes() do
+      :too_large
+    else
+      case IO.binwrite(io, chunk) do
+        :ok -> {:ok, total}
+        {:error, reason} -> {:write_failed, reason}
+      end
+    end
+  end
+
+  defp body_too_large(conn, read) do
+    conn
+    |> put_status(:request_entity_too_large)
+    |> json(%{
+      error: %{
+        code: "import_body_too_large",
+        message:
+          "import body exceeds the #{max_import_body_bytes()}-byte ceiling " <>
+            "(read #{read} bytes before refusing). The limit is 2x the measured " <>
+            "2,605.5 MiB full-fidelity bundle — one more doubling of the growth this " <>
+            "epic observed (942 MB -> 2,012,650,519 B of database).",
+        details: %{limit_bytes: max_import_body_bytes(), read_bytes: read}
+      }
+    })
+  end
+
+  # The upload died on the wire. 400 and not 500: nothing on this side failed,
+  # and the byte count says exactly how far it got, so an operator can tell a
+  # 3-byte handshake failure from a 2 GB upload that timed out at the last mile.
+  defp body_read_failed(conn, reason, read) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{
+      error: %{
+        code: "import_body_read_failed",
+        message:
+          "the import body could not be read to completion (#{inspect(reason)}) after " <>
+            "#{read} bytes — the upload was interrupted; nothing was imported. Re-run it.",
+        details: %{reason: inspect(reason), read_bytes: read}
+      }
+    })
+  end
+
+  # ENOSPC (or any other write fault) mid-spill. This is the failure mode
+  # extraction-to-disk INTRODUCES, so it is answered by name with the free space
+  # actually measured at the moment of the failure — never as an opaque 500 that
+  # sends an operator looking for a bug in the bundle.
+  defp spill_write_failed(conn, scratch, reason, read) do
+    free =
+      case Archive.free_space(scratch) do
+        {:ok, bytes} -> bytes
+        {:error, why} -> "unmeasured (#{why})"
+      end
+
+    conn
+    |> put_status(507)
+    |> json(%{
+      error: %{
+        code: "import_spill_write_failed",
+        message:
+          "writing the import body to #{scratch} failed (#{inspect(reason)}) after " <>
+            "#{read} bytes; free space now reads #{free}. Nothing was imported, and the " <>
+            "scratch is removed by this request's `after` clause on the way out. Free " <>
+            "space or point BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
+        details: %{reason: inspect(reason), written_bytes: read, free_bytes: free}
+      }
+    })
+  end
+
+  defp insufficient_disk_space(conn, info) do
+    conn
+    |> put_status(507)
+    |> json(%{
+      error: %{
+        code: "insufficient_disk_space",
+        message:
+          "refusing the import before spilling: #{info.dir} has #{info.free_bytes} bytes " <>
+            "free and this import needs #{info.required_bytes} (the body spill and the " <>
+            "extracted members are held together). Free space or point " <>
+            "BARKPARK_BUNDLE_SPILL_DIR at a larger filesystem.",
+        details: info
+      }
+    })
   end
 
   # Build the workspace create-attrs from the request body — only :name and an

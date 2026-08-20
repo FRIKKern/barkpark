@@ -125,25 +125,43 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def create_search_synonym(conn, %{"dataset" => dataset} = params) do
-    case Synonyms.create("media", dataset, params, workspace_id(conn)) do
-      {:ok, row} ->
-        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+    # D58/D71 fail-closed — mirrors update_search_settings. `workspace_id(conn)`
+    # reads `:current_workspace`, which `AssignDefaultScope` has ALREADY masked
+    # from nil to Default, so a genuinely nil-workspace admin token would silently
+    # write the Default/global media synonym row (an operator footgun). Read the
+    # RAW pre-mask token workspace_id and refuse when nil, BEFORE any insert. A
+    # workspace-bound admin token is unaffected — it writes its own row.
+    case token_workspace_id(conn) do
+      nil ->
+        nil_workspace_write_error(conn)
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        validation_error(conn, changeset)
+      _ws_id ->
+        case Synonyms.create("media", dataset, params, workspace_id(conn)) do
+          {:ok, row} ->
+            json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            validation_error(conn, changeset)
+        end
     end
   end
 
   def promote_search_synonym(conn, %{"dataset" => dataset} = params) do
-    case Synonyms.promote("media", dataset, params, workspace_id(conn)) do
-      {:ok, row} ->
-        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+    case token_workspace_id(conn) do
+      nil ->
+        nil_workspace_write_error(conn)
 
-      {:error, reason} when reason in [:invalid, :missing_fields] ->
-        error_json(conn, {:error, promote_fields_changeset()}, "from and to are required")
+      _ws_id ->
+        case Synonyms.promote("media", dataset, params, workspace_id(conn)) do
+          {:ok, row} ->
+            json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        validation_error(conn, changeset)
+          {:error, reason} when reason in [:invalid, :missing_fields] ->
+            error_json(conn, {:error, promote_fields_changeset()}, "from and to are required")
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            validation_error(conn, changeset)
+        end
     end
   end
 
@@ -183,12 +201,18 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def delete_search_synonym(conn, %{"dataset" => dataset, "id" => id}) do
-    case Synonyms.delete(id, "media", dataset, workspace_id(conn)) do
-      :ok ->
-        json(conn, %{ok: true, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+    case token_workspace_id(conn) do
+      nil ->
+        nil_workspace_write_error(conn)
 
-      {:error, :not_found} ->
-        error_json(conn, {:error, {:not_found, "synonym not found"}})
+      _ws_id ->
+        case Synonyms.delete(id, "media", dataset, workspace_id(conn)) do
+          :ok ->
+            json(conn, %{ok: true, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
+
+          {:error, :not_found} ->
+            error_json(conn, {:error, {:not_found, "synonym not found"}})
+        end
     end
   end
 
@@ -220,9 +244,22 @@ defmodule BarkparkWeb.V1.MediaController do
       workspace_id: workspace_id(conn)
     ]
 
+    # `recorded:` is the post-condition the caller actually asked about. A
+    # switched-off recorder is a deliberate no-op and keeps its honest 200; a
+    # lost write says so, with a status to match.
     case MediaIntelligence.record_interaction(dataset, params, record_opts) do
-      {:ok, id} -> json(conn, %{ok: true, interactionEventId: id})
-      _ -> json(conn, %{ok: true})
+      {:ok, id} ->
+        json(conn, %{ok: true, recorded: true, interactionEventId: id})
+
+      {:skipped, :recording_disabled} ->
+        json(conn, %{ok: true, recorded: false, reason: "recording_disabled"})
+
+      {:skipped, reason} ->
+        status = if reason == :error, do: :internal_server_error, else: :unprocessable_entity
+
+        conn
+        |> put_status(status)
+        |> json(%{ok: false, recorded: false, reason: Atom.to_string(reason)})
     end
   end
 
@@ -389,8 +426,18 @@ defmodule BarkparkWeb.V1.MediaController do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
-         {:ok, _} <- Media.delete_file(id, scope_opts(conn)) do
-      json(conn, %{result: %{deleted: id}, syncTags: ["bp:ds:#{dataset}:media"]})
+         {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
+      # RECEIPT LAW (pds w40): `Media.delete_file/2` returns the row
+      # `Repo.delete(file, stale_error_field: :id)` removed (media.ex:413-455).
+      # This used to discard it and echo the `:id` path param. NOTE the trap the
+      # legacy twin (media_controller.ex:362-371) does not have: `file` is bound
+      # at :403 by a PRE-WRITE `Media.get_file/2` read, so `file.filename` would
+      # be store-SHAPED but not descended from the write. Every field below
+      # comes off `deleted` — the delete's own return.
+      json(conn, %{
+        result: %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset},
+        syncTags: ["bp:ds:#{dataset}:media"]
+      })
     else
       error -> error
     end
@@ -427,6 +474,14 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
+  # Force-release privilege for `undo_checkout`. NOTE: write==force-release is
+  # DELIBERATE here — any write token may release ANY actor's checkout lock,
+  # diverging from the pure-admin sibling `Access.admin?/1` (access.ex). The
+  # holder-only fallback in `Checkout.ensure_can_release/3` is therefore dead on
+  # the API path (`require_write` runs first, so admin? is always true). This is
+  # the current, intended posture; whether it SHOULD tighten to true-admin is
+  # tracked separately (felix-w28-bl-checkout-tighten-adjudication) — do not
+  # change behavior here.
   defp admin?(conn) do
     token = conn.assigns[:api_token]
 

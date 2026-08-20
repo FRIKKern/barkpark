@@ -128,7 +128,12 @@ defmodule Barkpark.Seeds.Demo do
           %{name: "slug", title: "Slug", type: "slug", surface: "sidebar"},
           %{name: "bio", title: "Bio", type: "text", rows: 4, surface: "body"},
           %{name: "avatar", title: "Avatar", type: "image", surface: "body"},
-          %{name: "email", title: "Email", type: "string", surface: "sidebar"},
+          # Contact email is PII — `private: true` is the field-visibility
+          # declaration the Envelope chokepoint redacts on (render/3 drops it
+          # for anonymous and non-admin callers; field_readable?/3 refuses it
+          # in filter/order clauses). Sealed by
+          # test/barkpark/content/envelope_author_email_seal_test.exs.
+          %{name: "email", title: "Email", type: "string", surface: "sidebar", private: true},
           %{
             name: "role",
             title: "Role",
@@ -184,6 +189,12 @@ defmodule Barkpark.Seeds.Demo do
         icon: "⚙",
         visibility: "private",
         dataset: dataset,
+        # explicit desk-placement opt-in (issue #8463): siteSettings is a real
+        # host config singleton (one canonical row), not generic content —
+        # `singleton: true` keeps it a `:document` Settings row instead of
+        # falling into the generic `:document_type_list` bucket every other
+        # private schema now gets by default.
+        singleton: true,
         # surface (t7): siteSettings is a config singleton — no article body, so
         # every field is settings → sidebar.
         fields: [
@@ -205,6 +216,8 @@ defmodule Barkpark.Seeds.Demo do
         icon: "🧭",
         visibility: "private",
         dataset: dataset,
+        # explicit desk-placement opt-in (issue #8463) — see siteSettings above.
+        singleton: true,
         # surface (t7): navigation is a config singleton — its menu-title label is
         # settings → sidebar.
         fields: [
@@ -217,6 +230,8 @@ defmodule Barkpark.Seeds.Demo do
         icon: "🎨",
         visibility: "private",
         dataset: dataset,
+        # explicit desk-placement opt-in (issue #8463) — see siteSettings above.
+        singleton: true,
         # surface (t7): colors is a config singleton — every swatch is settings →
         # sidebar.
         fields: [

@@ -9,6 +9,6 @@ INSERT AFTER FIRST
 WITH
 ::: widget registration :::
 	// scaffy:add-widget MARK:registry-{{.widget-name}}
-	registry["{{.widget-name}}"] = {{.WIDGET_NAME}}{}
+	registry["{{.widget-name}}"] = {{.Widget_Name}}{}
 ::: widget registration :::
 MARK "registry-{{.widget-name}}"

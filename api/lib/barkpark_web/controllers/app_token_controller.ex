@@ -88,7 +88,8 @@ defmodule BarkparkWeb.AppTokenController do
   already filters revoked rows in its WHERE clause, so a revoked token fails
   closed on its next use with ZERO read-path changes.
 
-  Body, exactly one of:
+  Body, EXACTLY one of (enforced: both keys → 422; an empty `"token"` → 422
+  naming the field, never a silent logout-everywhere):
 
     * `{"token": raw}` — revoke exactly that token. Unknown raw → the same
       canonical 404 whatever the reason (nonexistent and foreign join one
@@ -137,10 +138,29 @@ defmodule BarkparkWeb.AppTokenController do
 
       true ->
         case Auth.revoke_token(token) do
-          {:ok, _} -> json(conn, %{revoked: true})
-          _ -> unprocessable(conn, "could not revoke token")
+          # RECEIPT LAW (pds w40): `Auth.revoke_token/1` returns the UPDATED row
+          # (auth.ex:200-225) — its own audit block already dereferences
+          # `revoked.id`. The old body was a literal `true` that stayed true even
+          # if the stamp never landed; `revoked` now descends from the persisted
+          # `revoked_at` and stays truthy, so the wire contract is unchanged.
+          {:ok, revoked} ->
+            json(conn, %{
+              revoked: not is_nil(revoked.revoked_at),
+              id: revoked.id,
+              revoked_at: revoked.revoked_at
+            })
+
+          _ ->
+            unprocessable(conn, "could not revoke token")
         end
     end
+  end
+
+  # EXACTLY-ONE-OF, enforced rather than documented: with both keys present the
+  # token clause below used to match first and silently win, so a body naming two
+  # different victims killed one of them without saying which.
+  defp revoke(conn, %{"token" => _, "email" => _}) do
+    unprocessable(conn, ~s(body must carry exactly one of "token" or "email", not both))
   end
 
   defp revoke(conn, %{"token" => raw}) when is_binary(raw) and raw != "" do
@@ -153,11 +173,29 @@ defmodule BarkparkWeb.AppTokenController do
           unprocessable(conn, "admin tokens cannot be revoked through the app-token path")
         else
           case Auth.revoke_token(token) do
-            {:ok, _} -> json(conn, %{revoked: true})
-            _ -> unprocessable(conn, "could not revoke token")
+            # RECEIPT LAW (pds w40): same callee, same repair as
+            # `delete_current/2` above — the admin revoke-by-raw path answered
+            # with a literal `true` that could not distinguish a landed stamp
+            # from an unobserved one (auth.ex:200-225).
+            {:ok, revoked} ->
+              json(conn, %{
+                revoked: not is_nil(revoked.revoked_at),
+                id: revoked.id,
+                revoked_at: revoked.revoked_at
+              })
+
+            _ ->
+              unprocessable(conn, "could not revoke token")
           end
         end
     end
+  end
+
+  # A present-but-empty (or non-string) "token" is a caller bug, not a request to
+  # revoke nothing: name the field instead of falling through to the generic
+  # "token or email" message.
+  defp revoke(conn, %{"token" => raw}) when not (is_binary(raw) and raw != "") do
+    unprocessable(conn, ~s("token" must be a non-empty string))
   end
 
   defp revoke(conn, %{"email" => email}) when is_binary(email) do
@@ -174,19 +212,22 @@ defmodule BarkparkWeb.AppTokenController do
     unprocessable(conn, ~s(body must carry "token" or "email"))
   end
 
+  # The bucket key comes from RateLimiter.client_ip/1 — the ONE trust boundary
+  # for x-forwarded-for (it was the limiter's to draw, not this controller's).
+  # The earlier first-hop read here was inherited from the pulse limiter and was
+  # not a limit at all: Caddy APPENDS, so a caller reaching this endpoint
+  # directly could send its own header and rotate its bucket key per request.
+  # The resolver believes the chain only from a trusted front and takes the
+  # rightmost non-proxy hop. The Cloud control plane's relayed address
+  # (Registry.revoke_app_token/3) still wins — a whole team does not share one
+  # bucket keyed on the single Cloud egress IP — provided that egress address is
+  # listed in BARKPARK_TRUSTED_PROXIES; unlisted, it is correctly disbelieved.
   defp revoke_rate_limited?(conn) do
     RateLimiter.check(
-      {:app_token_revoke, client_ip(conn)},
+      {:app_token_revoke, RateLimiter.client_ip(conn)},
       capacity: @revoke_bucket_capacity,
       refill_per_sec: @revoke_bucket_capacity / 60
     ) == :rate_limited
-  end
-
-  defp client_ip(conn) do
-    case get_req_header(conn, "x-forwarded-for") do
-      [forwarded | _] -> forwarded |> String.split(",") |> hd() |> String.trim()
-      [] -> conn.remote_ip |> :inet.ntoa() |> to_string()
-    end
   end
 
   defp mint(conn, params) do

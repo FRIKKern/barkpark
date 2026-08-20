@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -797,5 +798,276 @@ func TestConfigThemeRoundTrips(t *testing.T) {
 	}
 	if id := ResolveThemeID(got); id != "midnight" {
 		t.Errorf("ResolveThemeID after load = %q, want midnight", id)
+	}
+}
+
+// testCloudPAT is a Cloud PERSONAL ACCESS TOKEN shape: the "bpc_pat_" prefix plus
+// 43 base64url chars (32 random bytes) = 51 chars, exactly what the control plane
+// mints. The Bearer is OPAQUE to the client — require_user_or_pat accepts a
+// session token (43 chars, no prefix) or a PAT on the same Authorization header —
+// so bp neither parses nor validates the shape; a PAT drives the identical path.
+// The value below is fixed, non-secret filler, never a live credential.
+const testCloudPAT = "bpc_pat_AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKK"
+
+// TestConfigCloudTokenEnvReadWhenNoFile is the FAIL-BEFORE pin: with NO config
+// file at all and only BARKPARK_CLOUD_TOKEN set, the persisted field is empty
+// (which is all bp read before this slice — a CI job could not authenticate at
+// all) while resolution now yields the env value and the authed gate opens.
+func TestConfigCloudTokenEnvReadWhenNoFile(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv(CloudTokenEnv, testCloudPAT)
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	// The pre-change read path: the config-file field. Still empty — this is the
+	// exact state in which `bp cloud site deploy --prebuilt` used to refuse.
+	if cfg.CloudToken != "" {
+		t.Fatalf("CloudToken field should stay empty (env is not folded into it), got %q", cfg.CloudToken)
+	}
+	if !cfg.HasCloudToken() {
+		t.Fatal("HasCloudToken should be true from the env alone — CI has no config.json")
+	}
+	tok, src := cfg.ResolveCloudToken()
+	if tok != testCloudPAT {
+		t.Errorf("ResolveCloudToken token = %q, want the env PAT", tok)
+	}
+	if src != CloudTokenSourceEnv {
+		t.Errorf("source = %q, want %q", src, CloudTokenSourceEnv)
+	}
+	// And it reaches the Bearer: CloudClient is the only seam to cloudclient.
+	if got := cfg.CloudClient().Token; got != testCloudPAT {
+		t.Errorf("CloudClient().Token = %q, want the env PAT", got)
+	}
+}
+
+// TestConfigCloudTokenEnvWinsOverFile pins the precedence in the first direction:
+// env beats a persisted cloud_token.
+func TestConfigCloudTokenEnvWinsOverFile(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv(CloudTokenEnv, testCloudPAT)
+
+	if err := SaveConfig(&Config{CloudURL: "https://api.barkpark.cloud", CloudToken: "file-session-token"}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	tok, src := cfg.ResolveCloudToken()
+	if tok != testCloudPAT || src != CloudTokenSourceEnv {
+		t.Fatalf("env must win: got (%q, %q)", tok, src)
+	}
+	if got := cfg.CloudClient().Token; got != testCloudPAT {
+		t.Errorf("CloudClient().Token = %q, want the env PAT", got)
+	}
+	// The persisted value is untouched — an env override never rewrites the file.
+	if cfg.CloudToken != "file-session-token" {
+		t.Errorf("persisted CloudToken mutated: %q", cfg.CloudToken)
+	}
+}
+
+// TestConfigCloudTokenEmptyEnvKeepsFileValue pins the OTHER direction — the
+// no-regression half. Unset, empty and whitespace-only env all leave an
+// interactive user on the token `bp login` wrote.
+func TestConfigCloudTokenEmptyEnvKeepsFileValue(t *testing.T) {
+	for _, tc := range []struct{ name, env string }{
+		{"unset", ""},
+		{"empty", ""},
+		{"whitespace", "   \t\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withTempConfigHome(t)
+			if tc.name == "unset" {
+				t.Setenv(CloudTokenEnv, "sentinel") // restored by t.Setenv on cleanup
+				os.Unsetenv(CloudTokenEnv)
+			} else {
+				t.Setenv(CloudTokenEnv, tc.env)
+			}
+			cfg := &Config{CloudToken: "file-session-token"}
+			tok, src := cfg.ResolveCloudToken()
+			if tok != "file-session-token" || src != CloudTokenSourceConfig {
+				t.Fatalf("config tier must be used: got (%q, %q)", tok, src)
+			}
+			if !cfg.HasCloudToken() {
+				t.Error("HasCloudToken should stay true for a logged-in user")
+			}
+			if got := cfg.CloudClient().Token; got != "file-session-token" {
+				t.Errorf("CloudClient().Token = %q, want the config value", got)
+			}
+			// And with NEITHER tier set, "not logged in" still reads as before.
+			empty := &Config{}
+			if empty.HasCloudToken() || empty.CloudTokenSource() != CloudTokenSourceNone {
+				t.Errorf("empty config should be not-logged-in, source=%q", empty.CloudTokenSource())
+			}
+			if (*Config)(nil).HasCloudToken() {
+				t.Error("nil config must not report a token")
+			}
+		})
+	}
+}
+
+// TestConfigCloudTokenSourceNeverLeaksValue proves the credential is attributable
+// but never exposed: the source label carries no substring of the token, and a
+// load → mutate → SaveConfig cycle (what login/logout/setup do) cannot persist an
+// env credential into config.json.
+func TestConfigCloudTokenSourceNeverLeaksValue(t *testing.T) {
+	root := withTempConfigHome(t)
+	t.Setenv(CloudTokenEnv, testCloudPAT)
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	src := cfg.CloudTokenSource()
+	if src != CloudTokenSourceEnv {
+		t.Fatalf("source = %q, want %q", src, CloudTokenSourceEnv)
+	}
+	if strings.Contains(src, testCloudPAT) || strings.Contains(src, strings.TrimPrefix(testCloudPAT, "bpc_pat_")) {
+		t.Fatalf("source label leaks the credential: %q", src)
+	}
+
+	// A save while the env is set must not write the env token to disk.
+	cfg.Server = "https://api.barkpark.cloud"
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "barkpark", "config.json"))
+	if err != nil {
+		t.Fatalf("read config.json: %v", err)
+	}
+	if bytes.Contains(raw, []byte(testCloudPAT)) {
+		t.Fatalf("config.json embedded the env credential:\n%s", raw)
+	}
+}
+
+// TestConfigCloudTokenPATShapeIsOpaque records the credential shapes and that bp
+// treats the Bearer as opaque: a 51-char bpc_pat_ PAT and a 43-char session token
+// resolve identically, with no prefix parsing or length validation client-side.
+func TestConfigCloudTokenPATShapeIsOpaque(t *testing.T) {
+	withTempConfigHome(t)
+	if len(testCloudPAT) != 51 {
+		t.Fatalf("PAT fixture should be 51 chars (bpc_pat_ + 43), got %d", len(testCloudPAT))
+	}
+	session := strings.TrimPrefix(testCloudPAT, "bpc_pat_") // 43 chars, the session shape
+	if len(session) != 43 {
+		t.Fatalf("session fixture should be 43 chars, got %d", len(session))
+	}
+	for _, tok := range []string{testCloudPAT, session, "anything-the-server-understands"} {
+		t.Setenv(CloudTokenEnv, tok)
+		got, src := (&Config{}).ResolveCloudToken()
+		if got != tok || src != CloudTokenSourceEnv {
+			t.Errorf("opaque Bearer %q resolved as (%q, %q)", tok, got, src)
+		}
+	}
+}
+
+// TestConfigCloudTokenReachesTheDoctorProbe closes the seam the env tier opened
+// in a NEIGHBOURING file. doctorGateOpts arms its cloud-sites probe behind
+// HasCloudToken(), which now answers true for an env-only credential — but the
+// Bearer it attached came from cfg.CloudToken, the PERSISTED tier, which is empty
+// in exactly that case. So CI got a probe pointed at /v1/sites with NO
+// Authorization value and reported the 401 as a failed doctor check: a false red
+// produced by the credential that works for every other Cloud command.
+func TestConfigCloudTokenReachesTheDoctorProbe(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv(CloudTokenEnv, testCloudPAT)
+
+	g := doctorGateOpts("", "")
+	if g.CloudSitesURL == "" {
+		t.Fatalf("an env-only credential must still arm the cloud-sites probe; got %+v", g)
+	}
+	if g.CloudSitesToken != testCloudPAT {
+		t.Fatalf("the probe must carry the RESOLVED token, not the empty persisted field; got %q", g.CloudSitesToken)
+	}
+
+	// And the persisted tier still works on its own, unchanged.
+	t.Setenv(CloudTokenEnv, "")
+	if err := SaveConfig(&Config{CloudToken: "from-the-file"}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	if g := doctorGateOpts("", ""); g.CloudSitesToken != "from-the-file" {
+		t.Fatalf("the persisted tier regressed; got %q", g.CloudSitesToken)
+	}
+}
+
+// TestConfigMarshalRedactsAllFiveTokensButPersistRoundTrips proves BOTH
+// directions of the config-token marshal guard (bp-secgo-config-token-marshal-guard):
+//
+//	(a) SaveConfig -> LoadConfig round-trips all FIVE token-bearing fields,
+//	    including a DISTINCT nested KnownServers[].Token sentinel, so persistence
+//	    is unbroken; and
+//	(b) a PUBLIC json.Marshal(Config) contains NONE of the five sentinels — the
+//	    value-receiver Config.MarshalJSON redacts every credential.
+//
+// The FLAT-TOKEN-SENTINEL (Config.Token) and NESTED-ENTRY-TOKEN-SENTINEL
+// (ServerEntry.Token) are the mutation tripwires: neuter the redaction of
+// either field in config.go and assertion (b) reds on that sentinel.
+func TestConfigMarshalRedactsAllFiveTokensButPersistRoundTrips(t *testing.T) {
+	withTempConfigHome(t)
+
+	const (
+		flatSentinel   = "FLAT-TOKEN-SENTINEL"
+		adminSentinel  = "ADMIN-TOKEN-SENTINEL"
+		ingestSentinel = "INGEST-TOKEN-SENTINEL"
+		cloudSentinel  = "CLOUD-TOKEN-SENTINEL"
+		nestedSentinel = "NESTED-ENTRY-TOKEN-SENTINEL"
+	)
+	sentinels := []string{flatSentinel, adminSentinel, ingestSentinel, cloudSentinel, nestedSentinel}
+
+	want := &Config{
+		Server:      "https://api.barkpark.cloud",
+		Token:       flatSentinel,
+		AdminToken:  adminSentinel,
+		IngestToken: ingestSentinel,
+		CloudToken:  cloudSentinel,
+		KnownServers: []ServerEntry{
+			{Server: "https://api.barkpark.cloud", Token: nestedSentinel},
+		},
+	}
+
+	// (a) Persistence round-trips every token, incl the nested entry token.
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got.Token != flatSentinel || got.AdminToken != adminSentinel ||
+		got.IngestToken != ingestSentinel || got.CloudToken != cloudSentinel {
+		t.Fatalf("flat tokens did not round-trip: got=%+v", *got)
+	}
+	if len(got.KnownServers) != 1 || got.KnownServers[0].Token != nestedSentinel {
+		t.Fatalf("nested ServerEntry.Token did not round-trip: got=%+v", got.KnownServers)
+	}
+
+	// (b) A public marshal of the Config leaks NONE of the five sentinels.
+	pub, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("json.Marshal(Config): %v", err)
+	}
+	for _, s := range sentinels {
+		if bytes.Contains(pub, []byte(s)) {
+			t.Fatalf("public marshal leaked token sentinel %q: %s", s, pub)
+		}
+	}
+	// A *Config nested in another struct redacts identically (value receiver
+	// covers both value and pointer).
+	pubPtr, err := json.Marshal(struct{ C *Config }{want})
+	if err != nil {
+		t.Fatalf("json.Marshal(*Config): %v", err)
+	}
+	for _, s := range sentinels {
+		if bytes.Contains(pubPtr, []byte(s)) {
+			t.Fatalf("public *Config marshal leaked token sentinel %q: %s", s, pubPtr)
+		}
+	}
+
+	// Redaction must not MUTATE the caller's live Config — the nested slice is
+	// deep-copied before blanking, so the in-memory token survives the marshal.
+	if want.Token != flatSentinel || want.KnownServers[0].Token != nestedSentinel {
+		t.Fatalf("public marshal mutated the caller's live tokens: %+v / %+v", *want, want.KnownServers)
 	}
 }

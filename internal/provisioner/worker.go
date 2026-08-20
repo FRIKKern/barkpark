@@ -112,11 +112,14 @@ const supportClaimPath = "/v1/internal/support-jobs/claim"
 // AttachDomainSpec is one claimed attach-domain job as the control plane hands
 // it back — the EXACT JSON the Elixir attach-domain claim endpoint returns on
 // 200 (a 204 means no pending job). ip is the box the instance lives on (the
-// barkpark's host), custom_host the full platform-zone host to attach
-// (gyldendal.barkpark.cloud), dns_label/dns_zone the A record's halves, and
-// app_port the local Phoenix port the new Caddy vhost proxies to. The worker
-// re-validates ALL of it defensively (validateAttachDomainSpec) before any side
-// effect — the claim payload is never trusted blindly.
+// barkpark's host), custom_host the full host to attach — a platform-zone host
+// (gyldendal.barkpark.cloud) or, V2, an arbitrary external customer FQDN
+// (barkpark.jarl.no) — and app_port the local Phoenix port the new Caddy vhost
+// proxies to. dns_label/dns_zone are the platform A record's halves for a
+// platform host and EMPTY (null) for an external host, whose DNS the customer
+// owns. The worker re-validates ALL of it defensively
+// (validateAttachDomainSpec) before any side effect — the claim payload is
+// never trusted blindly.
 type AttachDomainSpec struct {
 	JobID string `json:"job_id"`
 	// ClaimToken (claim-fence bp-c55) is the per-claim token the control plane
@@ -169,8 +172,11 @@ type JobSpec struct {
 	Template string `json:"template,omitempty"`
 	// AgentToken (charter Decision 33) is the per-instance monitoring token the
 	// control plane mints at CLAIM time (scope "report") and threads in plaintext
-	// here — the same sanctioned crossing as env/credentials, over the worker-token
-	// internal channel. The configure step writes it to /etc/barkpark/agent.token
+	// here — the same sanctioned crossing as Credentials above, over the worker-token
+	// internal channel. (It is NOT "the same crossing as env": JobSpec declares no
+	// env field at all, and every claim decode below is a bare json.Unmarshal, so an
+	// `env` key in the claim payload is silently DROPPED and never reaches the box.)
+	// The configure step writes it to /etc/barkpark/agent.token
 	// (0600) and enables barkpark-agent.service so the box reports its health +
 	// vitals home. Present for BOTH providers; only its hash is stored server-side.
 	// Empty when an OLD control plane omits the key → the worker skips the agent
@@ -923,20 +929,28 @@ func (w *Worker) succeed(ctx context.Context, jobID, claimToken, ip, adminToken 
 // later revokes. ADDITIVE contract, tolerant both ways: the key is sent ONLY
 // when non-empty (the ip-only body is byte-identical to before for a mint
 // response that carried no id), and an OLD control plane simply ignores it.
-// The token VALUE never rides here — only its opaque, non-secret id.
-func (w *Worker) succeedSupport(ctx context.Context, jobID, claimToken, ip, tokenID string) error {
+// The ledger-token VALUE never rides here — only its opaque, non-secret id.
+//
+// `admin_token` is the box's own minted per-instance admin bearer — the SAME
+// key mains' succeed sends (the CP's role-agnostic succeed_job encrypts it at
+// rest), so mint_studio_link works against the support's reserved url. Sent
+// ONLY when non-empty; part of the request body and NEVER written to a log.
+func (w *Worker) succeedSupport(ctx context.Context, jobID, claimToken, ip, tokenID, adminToken string) error {
 	body := map[string]any{"ip": ip}
 	if tokenID != "" {
 		body["token_id"] = tokenID
+	}
+	if adminToken != "" {
+		body["admin_token"] = adminToken
 	}
 	return w.postJSON(ctx, fmt.Sprintf(succeedPathFmt, jobID), claimBody(body, claimToken))
 }
 
 // succeedSupportWithRetry is succeedSupport through the shared transient-retry
 // loop (mirrors succeedWithRetry: 5xx/transport retries, 4xx stops).
-func (w *Worker) succeedSupportWithRetry(ctx context.Context, jobID, claimToken, ip, tokenID string) error {
+func (w *Worker) succeedSupportWithRetry(ctx context.Context, jobID, claimToken, ip, tokenID, adminToken string) error {
 	return w.reportWithRetry(ctx, func(ctx context.Context) error {
-		return w.succeedSupport(ctx, jobID, claimToken, ip, tokenID)
+		return w.succeedSupport(ctx, jobID, claimToken, ip, tokenID, adminToken)
 	})
 }
 
@@ -1492,7 +1506,7 @@ func (w *Worker) RunOnceSupport(ctx context.Context) (claimed bool, err error) {
 		pto = DefaultSupportProvisionTimeout
 	}
 	provCtx, cancel := context.WithTimeout(ctx, pto)
-	ip, tokenID, teardown, provErr := w.SupportProvision(provCtx, spec)
+	ip, tokenID, adminToken, teardown, provErr := w.SupportProvision(provCtx, spec)
 	cancel()
 
 	if provErr != nil {
@@ -1511,8 +1525,10 @@ func (w *Worker) RunOnceSupport(ctx context.Context) (claimed bool, err error) {
 	// failures; on a report that never lands, tear the box down so no BILLED
 	// box is orphaned — the RunOnce money-edge, applied to a support. The
 	// minted ledger token's opaque id rides along (task-5866ec745efcd7f7) so
-	// the CP row's fleet_token_id is set and remove can revoke the token.
-	if rerr := w.succeedSupportWithRetry(ctx, spec.Job.ID, spec.Job.ClaimToken, ip, tokenID); rerr != nil {
+	// the CP row's fleet_token_id is set and remove can revoke the token, and
+	// the box's minted admin token rides as `admin_token` (same key as mains)
+	// so the CP stores it encrypted and Open Studio works on the support.
+	if rerr := w.succeedSupportWithRetry(ctx, spec.Job.ID, spec.Job.ClaimToken, ip, tokenID, adminToken); rerr != nil {
 		if teardown != nil {
 			if cerr := teardown(ctx); cerr != nil {
 				return false, fmt.Errorf("report support succeed for job %s failed (%v) AND orphan teardown failed: %w", spec.Job.ID, rerr, cerr)

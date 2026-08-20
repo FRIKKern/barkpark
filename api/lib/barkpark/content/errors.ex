@@ -39,6 +39,10 @@ defmodule Barkpark.Content.Errors do
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
     "label_spine" =>
       "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix. Learn where the authoring standards live in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan.",
+    "invalid_paper_structure" =>
+      "Fix the listed block paths so every list item, table row/cell, and nested block has a reader-supported content shape, then republish.",
+    "invalid_epic_paper_quality" =>
+      "Repair the canonical Epic Paper's opening, outline, empty spacers, and any declared reader checks; details.failures names every hard gate that failed.",
     "rate_limited" =>
       "Back off and retry after the Retry-After header's value; reduce request rate.",
     "idempotency_key_in_use" =>
@@ -99,16 +103,68 @@ defmodule Barkpark.Content.Errors do
                          # this box is not running answers an honest 404, never a
                          # stale slug-keyed ghost.
                          "build_id_mismatch",
+                         # Site-deploy trigger — site_deploy_controller.ex
+                         # `runner_unavailable/1`: a 503 (with `retry-after`)
+                         # for a deploy runner that did not answer in time. It
+                         # is deliberately NOT `feature_not_configured`: the box
+                         # is busy or wedged, and an operator sent to "set the
+                         # apply flag" is sent to a flag that is already set.
+                         # PUBLIC, so it is declared here rather than excluded —
+                         # a spec-generated SDK must expect this variant on a
+                         # deploy trigger.
+                         "deploy_runner_unavailable",
                          # Papers ingest / block-ops / proposals — bulldocs_ingest_controller.ex
                          "invalid_paper",
                          "invalid_text",
                          "malformed_op",
                          "invalid_op",
+                         # BPML (masterplan W0–W2) — bulldocs_ingest_controller.ex +
+                         # bulldocs_source_controller.ex. `bpml` wraps the parser's
+                         # teaching errors (parse failure on publish or an op
+                         # fragment); the others are the format=bpml read path and
+                         # the validate-all dry-run's violation codes.
+                         "bpml",
+                         "bpml_unavailable",
+                         "bpml_unprintable",
+                         "unknown_format",
+                         "hollow_paper",
+                         "structure",
                          "malformed_proposal",
                          "invalid_proposal",
                          "missing_source",
                          "source_not_found",
                          "constraint",
+                         # BPML create-on-push (masterplan W3, charter D41) —
+                         # bulldocs_ingest_controller.ex sync_create/6. A push to
+                         # an ABSENT slug births the paper through the full publish
+                         # wall; `slug_mismatch` (422) refuses when the document's
+                         # own <paper slug> disagrees with the pushed path, and
+                         # `create_wall` (422) carries EVERY wall violation under
+                         # `errors` when the birth is refused — both write NOTHING.
+                         # PUBLIC on /v1/plugins/bulldocs, so a spec-generated SDK
+                         # must expect these variants on the sync route. Each
+                         # envelope carries its own controller-owned `hint`, so
+                         # (like every code in this set) they take no @hints entry.
+                         "slug_mismatch",
+                         "create_wall",
+                         # Session-handoff (tasks 3-4) — the session legs of the
+                         # SAME controller. `missing_slug` (422, an upsert body
+                         # with no slug), `invalid_kind` (422, an event kind
+                         # outside `Content.Sessions.event_kinds/0` — the
+                         # envelope carries the allowed list) and
+                         # `conflict_retry` (409, the append-only trail's
+                         # CAS-on-rev lost a race; the caller retries the
+                         # append, nothing was written). Registered rather than
+                         # folded into the canonical `malformed`/`conflict`
+                         # because each names a distinct, actionable condition
+                         # the neighbours above already set the precedent for.
+                         "missing_slug",
+                         "invalid_kind",
+                         "conflict_retry",
+                         # Session-conversations slice: a touch_session_conversation
+                         # call with a nil/non-binary/empty conversation id
+                         # (`Barkpark.Content.Sessions.touch_conversation/5`).
+                         "invalid_conversation",
                          # Sheets ops API — plugins/sheets/web/ops_controller.ex
                          "malformed_ops",
                          "batch_too_large",
@@ -141,9 +197,36 @@ defmodule Barkpark.Content.Errors do
                          # carries the term, replacing the silent internal_error
                          # the round-3 live fire died on (task-96d8ab2b582818a4).
                          "import_failed",
+                         # Bounded import (PDS W23) — v1/workspace_controller.ex
+                         # spills the request body to disk and extracts member by
+                         # member instead of materialising the bundle in memory.
+                         # Each names a distinct operational failure the caller can
+                         # act on, and each replaces what would otherwise be a
+                         # blind 500: the socket read failed mid-body (400), the
+                         # body exceeded the configured ceiling (413), the spill
+                         # file could not be written (500), and the spill target
+                         # had no room for it (507).
+                         "import_body_read_failed",
+                         "import_body_too_large",
+                         "import_spill_write_failed",
+                         "insufficient_disk_space",
                          # Workspace bundle EXPORT (PDS W3) — v1/workspace_controller.ex:
                          # the export stream failed or timed out before the tar completed.
-                         "export_failed"
+                         "export_failed",
+                         # Chat transport send/create failures (chat_controller.ex,
+                         # charter D26 reason split — mobile/TUI clients branch on
+                         # these: 5xx → transient retry, 4xx → refused/permanent).
+                         # 503 + Retry-After: the managed runtime pool is full.
+                         "runtime_capacity",
+                         # 503: the runtime is not there right now (dead process,
+                         # closed port, runtime-gone) — retryable.
+                         "runtime_unavailable",
+                         # 422: the provider/operation combination can never
+                         # succeed as asked — permanent, do not retry.
+                         "chat_unsupported",
+                         # 503: creating the session row/spawn failed — a store
+                         # defect distinct from runtime availability.
+                         "chat_create_failed"
                        ])
 
   def to_envelope(reason), do: to_envelope(reason, nil)
@@ -373,6 +456,29 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, {:halted, reason}}),
     do: %{code: "halted", message: halt_message(reason), status: 409}
 
+  # The task dedup gate could not RUN (PDS wave 24). It carries its OWN internal
+  # tag rather than reusing `:halted`, and that distinction is load-bearing
+  # rather than cosmetic: `halted` means a policy DELIBERATELY vetoed the write,
+  # so consumers treat it as deterministic and stop retrying —
+  # `Plugins.Github.Intake` answers a clean 2xx on `{:halted, _}` on the explicit
+  # reasoning that "GitHub redelivery would only hit the same veto forever". A
+  # dedup outage is the opposite: TRANSIENT. Sharing the tag made a DB hiccup
+  # into a permanently dropped GitHub issue, logged as a policy refusal that
+  # never happened. The tag split is what lets Intake route the two apart.
+  #
+  # ON THE WIRE it deliberately keeps `halted` / 409, unchanged from before this
+  # wave. A new public code must be registered in `@hints`, which puts it in
+  # `known_codes/0`, which `errors_doc_coverage_test` requires in
+  # `docs/api-v1.md` §9 — a file sitting on 3 bytes of headroom against a
+  # CI-enforced cap that PDS wave 24 spent its last cheap dedup to clear. So the
+  # honest 503 `dedup_unavailable` is deferred to a slice that can pay those
+  # bytes, and is NOT claimed here. What ships is the part that fixes the
+  # unattended data loss; the residual imperfection is that an external client
+  # still reads a transient outage as a 409 whose registered hint talks about
+  # plugin vetoes. The MESSAGE is exact either way.
+  defp build({:error, {:dedup_unavailable, reason}}),
+    do: %{code: "halted", message: halt_message(reason), status: 409}
+
   # The publish wall's label spine (authoring-excellence D5): the document
   # failed `Barkpark.Content.LabelSpine.validate` at publish and is not in the
   # legacy exemption ledger. 422 with the validator's documentation-grade
@@ -384,6 +490,22 @@ defmodule Barkpark.Content.Errors do
     do: %{
       code: "label_spine",
       message: "document failed the publish wall's label spine",
+      status: 422,
+      details: details
+    }
+
+  defp build({:error, {:invalid_paper_structure, details}}),
+    do: %{
+      code: "invalid_paper_structure",
+      message: "paper contains block content that readers cannot render",
+      status: 422,
+      details: details
+    }
+
+  defp build({:error, {:invalid_epic_paper_quality, details}}),
+    do: %{
+      code: "invalid_epic_paper_quality",
+      message: "canonical Epic Paper failed the publish-quality floor",
       status: 422,
       details: details
     }
@@ -431,6 +553,21 @@ defmodule Barkpark.Content.Errors do
       details: Map.take(payload, [:unknown, :suggestions])
     }
   end
+
+  # A write's `dataset` STRING was REFUSED by dataset-row resolution
+  # (WriteScope fail-closed contract, felix-w26-bl-write-scope-swallow-nil):
+  # the Tenancy.Dataset changeset rejected the slug (format/length). 422 under
+  # the canonical `validation_failed` code — already an @hints member, so
+  # known_codes/OpenAPI are untouched — with the changeset messages re-keyed
+  # under "dataset" (the key the caller actually sent; the row's :slug is an
+  # internal name). Replaces the old silent degrade to a dataset_id=NULL stamp.
+  defp build({:error, {:invalid_dataset, details}}) when is_map(details),
+    do: %{
+      code: "validation_failed",
+      message: "dataset failed validation",
+      status: 422,
+      details: details
+    }
 
   defp build({:error, %Ecto.Changeset{} = cs}) do
     details =

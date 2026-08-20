@@ -1251,6 +1251,7 @@
       display: flex; align-items: center; justify-content: center;
     }
     .pane-add-btn:hover { background: var(--primary-hover); }
+    .pane-add-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     .pane-body { flex: 1; overflow-y: auto; }
 
     /* ── Responsive desk (space-priority) — spd-s1 ─────────────────────────
@@ -1540,13 +1541,29 @@
       border-color: var(--primary);
     }
 
+    /* A desk row is a real <button> (panes.ex pane_item/1) so it is
+       Tab-reachable. ORDER IS LOAD-BEARING: the UA reset's `border: 0` must
+       come BEFORE `border-left`, or it wipes the selected row's rail. The
+       bare class is targeted (not button.pane-item) so the
+       a.pane-item.nav-plugin-entry link variant keeps the same rhythm.
+       `width: 100%` is not optional — .pane-body is a plain block container,
+       so a button inside it would otherwise shrink-to-fit its label.
+       `line-height: inherit` and `margin: 0` are part of the reset for the
+       same reason: the UA `button { font: 400 13.33px … }` shorthand resets
+       line-height to `normal` (~1.2), and these rows inherited body's 1.6 as
+       divs — without it every desk row silently tightens on conversion.
+       Reset idiom copied from .pane-section-header below. */
     .pane-item {
+      background: none; border: 0; margin: 0; width: 100%; text-align: left;
+      font-family: inherit; line-height: inherit;
+      appearance: none; -webkit-appearance: none;
       display: flex; align-items: center; gap: 10px;
       padding: 8px 16px; cursor: pointer;
       border-left: 3px solid transparent; color: var(--fg-muted);
       transition: all 0.1s; font-size: var(--text-sm);
     }
     .pane-item:hover { background: var(--bg-muted); color: var(--fg); }
+    .pane-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     .pane-item.selected { background: var(--bg-accent); color: var(--fg); border-left-color: var(--primary); }
     .pane-item-icon { width: 18px; text-align: center; font-size: 15px; }
     .pane-item-label { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1632,7 +1649,13 @@
     /* Real subtitle line under the title — a declared/manifest summary or a
        humanized "updated" time (never a bare mono id). fg-muted keeps it a
        legible secondary tier (AA), truncating on overflow. */
+    /* `display: block` is REQUIRED, not cosmetic: this element is a <span>
+       (button content is phrasing content), and on an inline box vertical
+       margins do not apply and text-overflow: ellipsis silently does
+       nothing. .pane-doc-title needs no such line — it already declares
+       display: flex. */
     .pane-doc-sub {
+      display: block;
       font-size: var(--text-xs); color: var(--fg-muted); margin-top: 2px; margin-left: 15px;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
@@ -3436,10 +3459,19 @@
        assign is non-empty), so the CSS only needs to style the visible
        states. ─────────────────────────────────────────────────────────── */
     .pane-doc-item { display: flex; align-items: flex-start; }
+    /* The row BODY is the activatable control and is a real <button>; the
+       outer .pane-doc-item stays a div because it hosts the bulk-publish
+       checkbox as a sibling. UA reset first, same order rule as .pane-item. */
     .bp-doc-row-body {
+      background: none; border: 0; margin: 0; text-align: left; color: inherit;
+      font-family: inherit; font-size: inherit; line-height: inherit;
+      appearance: none; -webkit-appearance: none;
       flex: 1; min-width: 0; cursor: pointer; padding: 10px 16px;
       display: flex; align-items: center; gap: 8px;
     }
+    .bp-doc-row-body:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+    /* Blockified as a flex item of .bp-doc-row-body, so it survives the
+       <div> → <span> conversion the button's phrasing-content rule forced. */
     .pane-doc-main { flex: 1; min-width: 0; }
     /* Drill chevron, revealed on row hover (structure rows already show one). */
     .pane-doc-chevron {
@@ -3751,6 +3783,29 @@
        link. No JS — the classes come from the LV client. */
     .phx-click-loading, .phx-submit-loading { pointer-events: none; opacity: 0.6; }
 
+    /* The WORDS half of that guard (spd-w19 / charter D263). The tint above is
+       wordless, silent to assistive tech, and UNBOUNDED (PUSH_TIMEOUT is
+       30000ms and it was measured ON for 11+ seconds on a lost press) — which
+       is what the owner read as a dead control. `#bp-press-answer` is the named
+       answer, filled by the delegated click listener in WidthBucket below.
+
+       It renders in <body>, OUTSIDE the LiveView root, on purpose: inside the
+       root morphdom may patch the region mid-announce and the announcement is
+       lost. Empty means ABSENT (`:empty { display: none }`) — the hook clears
+       textContent when a press settles, so a quiet desk carries no residue and
+       no stale "Done." pill. Bottom-LEFT, clear of the bottom-centre
+       `.bp-ae-toast` lane. `pointer-events: none` — it never eats a press. */
+    .bp-press-answer {
+      position: fixed; bottom: 16px; left: 16px; z-index: 200;
+      max-width: min(360px, calc(100vw - 32px));
+      padding: 8px 14px; border-radius: var(--radius-lg);
+      background: var(--bg-card); border: 1px solid var(--border);
+      box-shadow: 0 8px 32px hsl(var(--bp-shadow-hsl) / 0.24);
+      font-size: var(--text-sm); color: var(--fg);
+      pointer-events: none;
+    }
+    .bp-press-answer:empty { display: none; }
+
     /* Selected state transition (only the highlight animates, not the layout) */
     .pane-item, .pane-doc-item { transition: background 0.1s, border-color 0.1s; }
 
@@ -3785,24 +3840,34 @@
 
     /* The page — a single centered serif column on warm paper. The
        `.bp-paper-shell` already wraps the Beta editor content (View +
-       Edit). We add `.bp-paper-surface` to it for the tokens + the page. */
+       Edit). We add `.bp-paper-surface` to it for the tokens + the page.
+
+       The TYPE half of this rule (font-size / line-height / letter-spacing /
+       font-feature-settings / text-rendering / font-smoothing) MOVED to the
+       shared source in pe-w1-reader-editorial-typography — `paper_stylesheet()`
+       above inlines it, so Studio still resolves the same six declarations from
+       one rule earlier in this same <style>. It was never Studio-only chrome:
+       while it lived here, Studio was the ONLY surface consuming
+       `--bp-body-size`, and the public reader — which carries
+       `.bp-paper-surface` on its <main> — inherited the browser's 16px beside a
+       token that said 18. What stays here is what really is page chrome: the
+       Studio ground, ink and serif stack. */
     .bp-paper-surface.bp-paper-shell,
     .bp-paper-surface {
       background: var(--paper-bg);
       color: var(--paper-ink);
       font-family: var(--paper-font-serif);
-      font-size: var(--bp-body-size);
-      /* A2: airier rhythm (~30.6px at 18px) to match the original editor. */
-      line-height: var(--bp-body-lh);
-      letter-spacing: var(--bp-body-tracking);
-      font-feature-settings: "kern", "liga", "onum";
-      text-rendering: optimizeLegibility;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
     }
-    /* Measure parity: the reader article column is 720px / 40px side padding
-       (640px measure). The edit surface matches it exactly so a line wraps at
+    /* Measure parity: the reader article column is 660px / 40px side padding
+       (580px measure). The edit surface matches it exactly so a line wraps at
        the same word on both.
+
+       660, not 720, since pe-w1-reader-editorial-typography. The column was
+       sized for 16px prose; at the 18px the token always specified, a 640px
+       measure runs ~75 characters per line, past the top of the 60-75 editorial
+       band and well past the 66-72 this wave targets. Measured on the rig's
+       5-paper panel at 1440: 86.7 CPL at 16px/640px before, 69 at 18px/580px
+       after. The MEASURE is what moved; the gutter token did not.
 
        --paper-gutter IS THE SIDE PADDING, and it is a token so that the
        Studio's protected floor can consume the SAME number instead of
@@ -3819,7 +3884,7 @@
        that no longer has one. measure_parity_test.exs guards both halves. */
     .bp-paper-surface {
       --paper-gutter: 40px;
-      max-width: 720px;
+      max-width: 660px;
       margin: 0 auto;
       padding: 56px var(--paper-gutter);
       min-height: 100%;
@@ -3902,7 +3967,40 @@
        the move/delete controls + drag grip are de-emphasised, hover-revealed
        (a floating toolbar replaces them in B2). */
     .bp-paper-editor { display: flex; flex-direction: column; gap: 0; padding: 0; }
-    .bp-paper-editor-empty { color: var(--paper-ink-faint); font-style: italic; }
+    /* spd-w18 — the empty-body sentence is a real message, not chrome. It was
+       `--paper-ink-faint` + italic, which is the same faint-grey family the
+       owner read as a dead control; raised to `--paper-ink-soft` upright so it
+       reads as text the product means. */
+    .bp-paper-editor-empty { color: var(--paper-ink-soft); }
+    .bp-paper-editor-empty code {
+      font-family: var(--font-mono); font-size: 0.9em; color: var(--paper-ink);
+    }
+
+    /* spd-w18 — the never-blank state for a document Studio resolved but cannot
+       render (no block list, no body_html). It replaces an EMPTY <article>: the
+       whole point is that it is impossible to mistake for absence, so it carries
+       weight, a border and full-ink copy rather than faint chrome. */
+    .bp-paper-unrenderable {
+      display: flex; flex-direction: column; gap: 10px;
+      margin: 8px 0 4px; padding: 16px 18px;
+      border: 1px solid var(--paper-ink-faint);
+      border-left: 3px solid var(--paper-accent);
+      border-radius: 6px;
+      background: var(--paper-bg-deep);
+      color: var(--paper-ink);
+    }
+    .bp-paper-unrenderable-title {
+      margin: 0; font-family: var(--font); font-weight: 600; font-size: 15px;
+      color: var(--paper-ink);
+    }
+    .bp-paper-unrenderable-reason {
+      margin: 0; font-family: var(--font); font-size: 13px; line-height: 1.55;
+      color: var(--paper-ink-soft);
+    }
+    .bp-paper-unrenderable-reason code {
+      font-family: var(--font-mono); font-size: 12px; color: var(--paper-ink);
+    }
+    .bp-paper-unrenderable-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     /* No uniform inter-block gap — prose rhythm rides on the element margins
        inside `.bp-paper-editor-body` (type-aware) so we don't double-space.
        Bound-FIELD blocks have no such element rhythm, so they get a wrapper
@@ -4496,9 +4594,21 @@
        Top-only so the flat ProseMirror (collapse) and div-wrapped reader (additive)
        land identical. */
     .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
-    .bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh);  margin: 1.9em 0 0; }
+    .bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
     .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
-    .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
+    /* THE SECTION HEAD — the Studio canvas's copy of the device the reader draws
+       with `.bp-paper-surface > #paper-body > h2` (paper-surface.css carries the
+       full reasoning) and the embedder bundle repeats. A TOP-LEVEL level-2
+       heading is a section boundary: `--bp-section-beat` of air above the rule,
+       the rule, `--bp-section-gap` between rule and words. DIRECT child, so a
+       component node-view's own h2 is untouched. Byte-mirrored across all three
+       editor copies AND the reader — view_edit_parity_test.exs §9 pins the set. */
+    .bp-paper-editor-body > h2 {
+      margin-top: var(--bp-section-beat);
+      border-top: var(--bp-section-rule) solid var(--paper-ink);
+      padding-top: var(--bp-section-gap);
+    }
+    .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: manual; }
     .bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
     .bp-paper-editor-body ul,
     .bp-paper-editor-body ol { padding-left: var(--bp-list-indent); }
@@ -4511,10 +4621,10 @@
        italic is an author mark the node emits INLINE (font-style:italic), NOT in the
        class, so it stays out of these rules on both surfaces. Keep byte-aligned with
        paper-surface.css + assets/paper-editor/src/styles.css. */
-    .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem; }
-    .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem; }
-    .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem; }
-    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2rem; }
+    .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; }
+    .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
+    .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; }
+    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
     /* editable-table: the three reader table class rules, mirrored byte-for-byte from
        paper-surface.css `.bp-paper-surface .bp-table*` (view_edit_parity_test.exs §2
        guards drift). Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the
@@ -4522,9 +4632,16 @@
        split into ONE <tbody>; the header row's cells carry `.bp-table__th` regardless,
        and NO CSS targets thead/tbody, so the delta is visually byte-identical. Keep
        byte-aligned with assets/paper-editor/src/styles.css. */
-    .bp-paper-editor-body .bp-table { border-collapse: collapse; width: 100%; }
-    .bp-paper-editor-body .bp-table__th { border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
+    .bp-paper-editor-body .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; }
+    .bp-paper-editor-body .bp-table__th { border-bottom: var(--bp-rule-hairline) solid var(--paper-rule); padding: 8px 12px; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); }
     .bp-paper-editor-body .bp-table__td { border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top; }
+    /* evidence-band breakout mirrors: .bp-stats / .bp-chart step out of the prose
+       column exactly like .bp-table (the reader's three breakout classes). Values
+       byte-copied from paper-surface.css `.bp-paper-surface .bp-stats` / `.bp-chart`
+       (view_edit_parity_test.exs §2 guards drift — pe-w2-parity-widening). Keep
+       byte-aligned with assets/paper-editor/src/styles.css. */
+    .bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--paper-rule); margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+    .bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
     /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF
        the .bp-table* selectors so it never leaks into the parity comparison). The
        control rails reveal on hover so an idle table reads byte-identically to /papers. */
@@ -4653,6 +4770,13 @@
     @media (max-width: 720px) { .bp-canvas-section > .bp-section__grid { grid-template-columns: 1fr; } }
     .bp-canvas-section .bp-section__cell { min-width: 0; }
     .bp-canvas-section .bp-section__cell > :first-child { margin-top: 0; }
+    <%!-- FRAMED-FINALE (charter D34, variant="framed"): the canvas node-view toggles
+         `bp-section--framed` on its wrapper when attrs.variant === "framed". Editor
+         mirror of the reader frame — hairline border in rule color, and the frame
+         REPLACES the section's own direct-child `bp-hr` band. Editor-only (NOT in the
+         parity gate's @parity_elements). Keep byte-aligned with styles.css:599-600. --%>
+    .bp-paper-editor-body .bp-section--framed { border: var(--bp-rule-hairline) solid var(--paper-rule); padding: 1.1rem 1.5rem; }
+    .bp-paper-editor-body .bp-section--framed > .bp-hr { display: none; }
     <%!-- S2 layout-engine: the hover-revealed layout controls (mode toggle + tracks
          stepper) — EDIT-ONLY chrome, hidden at rest, NO reader counterpart. Keep
          BYTE-IDENTICAL with styles.css. --%>
@@ -4884,7 +5008,7 @@
       background: var(--paper-bg-deep, #f4f4ef);
     }
     .bp-canvas-action .bp-button {
-      display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent);
+      display: inline-block; padding: 10px 20px; border: var(--bp-rule-hairline) solid var(--paper-accent);
       color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
     }
     .bp-canvas-action .bp-button--primary {
@@ -5852,6 +5976,23 @@
 </head>
 <body>
   {@inner_content}
+  <%!-- The press answer region (spd-w19 / charter D263). A SIBLING of
+        `{@inner_content}`, i.e. OUTSIDE the LiveView root and conn-rendered:
+        inside the root morphdom can patch the node while a screen reader is
+        reading it and the announcement is dropped. `role="status"` +
+        `aria-live="polite"` + `aria-atomic` so a press is announced without
+        interrupting, and `data-test-id` so an instrument can read the words
+        rather than a human reading a tint. It ships EMPTY and hides while
+        empty — every word in it is written by WidthBucket's delegated click
+        listener below and cleared by that same hook when the press settles. --%>
+  <div
+    id="bp-press-answer"
+    class="bp-press-answer"
+    role="status"
+    aria-live="polite"
+    aria-atomic="true"
+    data-test-id="press-answer"
+  ></div>
   <script src="/assets/bp-rich-text-editor.js" defer></script>
   <script src="/assets/bp-search-intel.js" defer></script>
   <script src="/assets/bp-asset-explorer.js" defer></script>
@@ -6149,6 +6290,195 @@
         this._bucket = next;
         this.pushEvent("width-bucket", { bucket: next });
       },
+      // ── THE PRESS ANSWER (spd-w19 / charter D263) ────────────────────────
+      //
+      // WHY IT LIVES IN THIS HOOK. The only press acknowledgement in the Studio
+      // was `.phx-click-loading{opacity:.6}` above — wordless, AT-silent and
+      // unbounded. The SERVER route to a pending state is closed: a push_patch
+      // from handle_event replies with the event's OWN ref
+      // (channel.ex:911-918 → sync_handle_params_with_live_redirect), so
+      // handle_params + render collapse into the single reply frame (D242), and
+      // finish_handle_params does not blanket-reset assigns, so a pending
+      // assign would STICK. D225 additionally bans phx-disable-with. So the
+      // answer is a CLIENT one, and it goes HERE because LiveView reads exactly
+      // ONE hook name per element (view.js:995-999) and #studio-panes already
+      // carries this one — a second phx-hook on that container is impossible.
+      // WidthBucket's other half is a resize listener, so nothing collides.
+      //
+      // WHY A DELEGATED LISTENER ON THIS CONTAINER WORKS. LiveView's own click
+      // binding is on `window` (live_socket.js:830-833); ours is on a
+      // descendant, so ours runs FIRST. That is what makes
+      // `data-phx-ref-src` READ AT CLICK TIME an exact discriminator for "this
+      // press is about to be DISCARDED" — it is the same condition as
+      // bindClick's early return (live_socket.js:857-859), which is the drop
+      // mechanism that alone reproduces the owner's "the buttons do nothing".
+      //
+      // COVERAGE: anything with a `phx-click` inside #studio-panes — Structure
+      // rows, document rows, row checkboxes, pane header actions, the collapsed
+      // strip. The studio-tab strip and the top bar sit OUTSIDE this container
+      // and are NOT covered by this slice.
+      _PA_PROBE: 16,     // ms — is the ref stamped yet? (measured at dt≈1ms)
+      _PA_POLL: 100,     // ms — has the ref dropped / the row detached?
+      _PA_CEILING: 8000, // ms — the named ceiling, in place of an unbounded tint
+      _PA_FADE: 6000,    // ms — how long a settled answer stays readable
+
+      _paRegion() { return document.getElementById("bp-press-answer"); },
+
+      _paSay(text) {
+        var el = this._paRegion();
+        if (!el) return;
+        // Re-writing the same string is not re-announced by most AT anyway, and
+        // a press with nothing new to say must not restart the announcement.
+        if (el.textContent === text) return;
+        el.textContent = text;
+      },
+
+      // The accessible name of the pressed control, or null. NOTHING is
+      // invented: an unnamed control gets "Working…", never a guess at what it
+      // does.
+      _paName(el) {
+        var n = el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent || "";
+        n = n.replace(/\s+/g, " ").trim();
+        if (!n) return null;
+        return n.length > 60 ? n.slice(0, 59) + "…" : n;
+      },
+
+      // The desk's selection signature: every `aria-current` in this container.
+      // A move here is a REAL screen change, and it is one of only two things
+      // that license a success word (D263: #item-rest ANSWERS in 1944ms and
+      // changes nothing — a ref-drop clear that said "Opened." would announce a
+      // success for a dead row, i.e. trade the old silence for a new lie).
+      _paCurrentSig() {
+        var nodes = this.el.querySelectorAll("[aria-current]"), out = [], i, n;
+        for (i = 0; i < nodes.length; i++) {
+          n = nodes[i];
+          out.push(String(n.id || n.getAttribute("aria-label") || (n.textContent || "").trim()).slice(0, 40));
+        }
+        return out.join("|");
+      },
+
+      // Drop the pending press and every timer it owns, then say `text` (empty
+      // = the region disappears). This is the ONLY place a pending is released,
+      // so ref-drop, detach, ceiling and unload all clear through one path and
+      // none of them can strand.
+      _paRelease(text) {
+        if (this._paPoll) { window.clearInterval(this._paPoll); this._paPoll = 0; }
+        if (this._paProbe) { window.clearTimeout(this._paProbe); this._paProbe = 0; }
+        if (this._paCeil) { window.clearTimeout(this._paCeil); this._paCeil = 0; }
+        if (this._paFadeT) { window.clearTimeout(this._paFadeT); this._paFadeT = 0; }
+        this._paPending = null;
+        this._paSay(text || "");
+        if (text) {
+          this._paFadeT = window.setTimeout(() => {
+            this._paFadeT = 0;
+            if (!this._paPending) this._paSay("");
+          }, this._PA_FADE);
+        }
+      },
+
+      // What actually changed on screen since the press — the evidence, and the
+      // words are bound to it: a URL patch is a navigation ("Opened"), an
+      // aria-current move is a selection ("Selected"), and NEITHER is a
+      // success this hook is allowed to name.
+      _paSettleWord(p) {
+        if (location.href !== p.url) return p.name ? "Opened “" + p.name + "”." : "Opened.";
+        if (this._paCurrentSig() !== p.sig) return p.name ? "Selected “" + p.name + "”." : "Selected.";
+        return null;
+      },
+
+      _paSettle(p) {
+        var word = this._paSettleWord(p);
+        // NEUTRAL BY LAW when nothing observable moved (D263). The server
+        // answered — the ref appeared and dropped — but this desk looks the
+        // same, and the hook does not know why. "Done." reports the round trip
+        // and claims no outcome.
+        this._paRelease(word || "Done.");
+      },
+
+      _paTick(p) {
+        if (this._paPending !== p) return;
+        // A detached node keeps its attributes, so the detach test comes FIRST:
+        // a re-render that replaced the pressed row would otherwise hold a ref
+        // forever on an orphan and only the ceiling would ever release it.
+        if (document.contains(p.el) && p.el.hasAttribute("data-phx-ref-src")) { p.sawRef = true; return; }
+        this._paSettle(p);
+      },
+
+      _paOnPress(ev) {
+        var t = ev.target;
+        if (!t || !t.closest) return;
+        var el = t.closest("[phx-click]");
+        if (!el || !this.el.contains(el)) return;
+        var spec = el.getAttribute("phx-click") || "";
+        // A pure client-side JS command list never reaches the server and never
+        // gets a ref, so there is nothing to wait for and saying "working"
+        // about it would be noise. A command list that pushes is kept.
+        if (spec.charAt(0) === "[" && spec.indexOf("\"push\"") === -1) return;
+
+        if (el.hasAttribute("data-phx-ref-src")) {
+          // THE DISCARD BRANCH. bindClick's early return drops this press with
+          // no frame, no exception and no trace (a discarded press puts ZERO
+          // "type":"click" frames on the socket). Say so, and do NOT stamp a
+          // second pending or restart the ceiling — the FIRST press is still
+          // the one in flight, and its settle owns the region.
+          this._paSay("Still working on your last press — that one was not sent.");
+          return;
+        }
+
+        var p = {
+          el: el,
+          name: this._paName(el),
+          url: location.href,
+          sig: this._paCurrentSig(),
+        };
+        // Newest press owns the region; the previous one's timers die with it.
+        this._paRelease("");
+        this._paPending = p;
+        // Within this same task, so the words are on screen at the next paint —
+        // this is TIME-TO-FEEDBACK, not speed. Nothing here makes the server
+        // faster (the root-cause slice is filed separately).
+        this._paSay(p.name ? "Working on “" + p.name + "”…" : "Working…");
+
+        this._paProbe = window.setTimeout(() => {
+          this._paProbe = 0;
+          if (this._paPending !== p) return;
+          if (p.el.hasAttribute("data-phx-ref-src")) { p.sawRef = true; return; }
+          // NO REF 16ms AFTER THE CLICK — and that is not ambiguous. LiveView
+          // generates the ref SYNCHRONOUSLY inside the click dispatch, and only
+          // AFTER the connection check — `pushWithReply` returns
+          // `Promise.reject(new Error("no connection"))` when `isConnected()` is
+          // false, BEFORE any ref exists — so a press that was pushed always has
+          // its ref by now, and a press with no ref
+          // was never put on the wire (independently confirmed: a discarded
+          // press puts ZERO "type":"click" frames on /live/websocket, D265).
+          // This is the owner's actual complaint, so it gets WORDS rather than
+          // the silence it has today.
+          var word = this._paSettleWord(p);
+          if (word) { this._paRelease(word); return; }
+          // ONE exception, and it is the only shape that can delay a ref: a
+          // debounced or throttled binding pushes LATER. There the hook has no
+          // ground for either verdict and says nothing rather than inventing one.
+          if (p.el.hasAttribute("phx-debounce") || p.el.hasAttribute("phx-throttle")) {
+            this._paRelease("");
+            return;
+          }
+          this._paRelease("That press did not reach the server — press it again.");
+        }, this._PA_PROBE);
+
+        this._paPoll = window.setInterval(() => this._paTick(p), this._PA_POLL);
+
+        this._paCeil = window.setTimeout(() => {
+          this._paCeil = 0;
+          if (this._paPending !== p) return;
+          // The named ceiling, replacing an unbounded tint. Non-accusatory on
+          // purpose: it fires on a slow-but-alive server too, and this hook
+          // cannot tell that from a press that never arrived.
+          this._paRelease(
+            "No answer from the server after 8 seconds. It may be slow, or the press may not have arrived."
+          );
+        }, this._PA_CEILING);
+      },
+
       mounted() {
         this._bucket = null;
         this._raf = 0;
@@ -6161,10 +6491,26 @@
         };
         this._sync();
         window.addEventListener("resize", this._onResize);
+
+        this._paPending = null;
+        this._paPoll = 0;
+        this._paProbe = 0;
+        this._paCeil = 0;
+        this._paFadeT = 0;
+        // Bubble phase on this container — never capture, and never on window:
+        // running before LiveView's window listener is the whole mechanism.
+        this._paOnClick = (ev) => this._paOnPress(ev);
+        this.el.addEventListener("click", this._paOnClick);
+        // A navigation away must not leave a pending announcement behind.
+        this._paOnPageHide = () => this._paRelease("");
+        window.addEventListener("pagehide", this._paOnPageHide);
       },
       destroyed() {
         window.removeEventListener("resize", this._onResize);
         if (this._raf) window.cancelAnimationFrame(this._raf);
+        this.el.removeEventListener("click", this._paOnClick);
+        window.removeEventListener("pagehide", this._paOnPageHide);
+        this._paRelease("");
       }
     };
 

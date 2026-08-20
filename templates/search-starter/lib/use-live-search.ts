@@ -25,7 +25,7 @@ import { DATASET, WS_SCOPE } from "@/lib/config";
  * head-start for the first 1-2 chars — the WS query refines as the user types.
  *
  * Ships DARK, exactly like `LiveBridge`: inert unless BOTH
- *   - `NEXT_PUBLIC_BARKPARK_WS_URL`   (e.g. wss://api.barkpark.cloud/socket), and
+ *   - `NEXT_PUBLIC_BARKPARK_WS_URL`   (e.g. https://api.barkpark.cloud/socket), and
  *   - `NEXT_PUBLIC_BARKPARK_WS_TOKEN` (a READ-ONLY token scoped to the public
  *      workspace/dataset — it reaches the browser, so it must grant nothing
  *      beyond the already-public published reads the demo serves anyway)
@@ -34,12 +34,24 @@ import { DATASET, WS_SCOPE } from "@/lib/config";
  * any keystroke typed during the connect handshake still falls back to HTTP and
  * no query is dropped on the floor.
  *
+ * NOBODY SETS THOSE TWO BY HAND (charter D52). The managed deploy path's env
+ * allowlist is closed over `BARKPARK_*`, so `next.config.mjs` DERIVES both at
+ * build time — the URL as `origin(BARKPARK_API_URL) + "/socket"`, the token
+ * straight from `BARKPARK_TOKEN` — and Next inlines them here as string
+ * literals. An https:// endpoint is correct: `phoenix`'s Socket passes an
+ * absolute URL through untouched and the WebSocket constructor normalizes
+ * http(s) → ws(s). The THIRD derived var is the dataset (see `lib/config`): the
+ * topic below is `search:<ws>:<proj>:<dataset>`, and a browser without the real
+ * dataset joins the default topic GREEN and gets count=0 on every keystroke.
+ *
  * Stale-reply safety: every `search()` stamps a monotonic `seq`. A reply whose
  * `seq` isn't the latest is rejected as an `AbortError` — which the finder's
  * fetch path already ignores — so a slow earlier keystroke can never overwrite a
  * newer result.
  */
 
+// Build-time literals (next.config.mjs `env`) — an unset var inlines as "",
+// which is falsy, so the pair below is the single dark/live switch.
 const WS_URL = process.env.NEXT_PUBLIC_BARKPARK_WS_URL;
 const WS_TOKEN = process.env.NEXT_PUBLIC_BARKPARK_WS_TOKEN;
 const LIVE_ENABLED = Boolean(WS_URL && WS_TOKEN);
@@ -142,8 +154,8 @@ export function useLiveSearch(): UseLiveSearch {
             resolve(
               shapeFindResponse(reply, {
                 engine,
-                // The socket always carries the scoped read token, so indx is
-                // live — what the caller asked for is what's served.
+                // Fallback only — the reply's server-reported `engineUsed`
+                // (which retriever ACTUALLY answered) wins in the shaper.
                 engineUsed: engine,
                 browse,
                 cache: false,

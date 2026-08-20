@@ -4000,7 +4000,7 @@ defmodule Barkpark.CycleFleet do
     completed =
       Enum.flat_map(rows, fn
         {_assignment, %Result{status: "completed", payload: payload}} ->
-          round = value(payload, :round)
+          round = canonical_experiment_round(payload, rounds)
           if round in rounds, do: [round], else: []
 
         _ ->
@@ -4016,6 +4016,22 @@ defmodule Barkpark.CycleFleet do
       round_counts: Map.new(rounds, &{&1, Map.get(counts, &1, 0)}),
       missing_rounds: missing
     }
+  end
+
+  defp canonical_experiment_round(payload, rounds) do
+    round = value(payload, :round)
+
+    cond do
+      round in rounds ->
+        round
+
+      is_integer(round) and round >= 1 and round <= length(rounds) ->
+        round_name = value(payload, :round_name) || value(payload, :round_key)
+        if Enum.at(rounds, round - 1) == round_name, do: round_name
+
+      true ->
+        nil
+    end
   end
 
   defp outcome_ownership_violations(rows) do

@@ -53,11 +53,27 @@ type Seams struct {
 	Runner  cloud.StepRunner
 	Secrets cloud.SecretGen // nil → the real secret-gen
 
+	// LookupHost resolves a hostname to its A/AAAA addresses via the SYSTEM
+	// resolver — the attach-domain V2 ownership re-check for EXTERNAL customer
+	// domains (the worker re-verifies the host already points at the box before
+	// touching it; it cannot trust the control plane's own pre-check). nil →
+	// net.DefaultResolver.LookupHost. Tests inject a fake.
+	LookupHost func(ctx context.Context, host string) ([]string, error)
+
 	// Mail is the SHARED transactional-mail relay every provisioned instance is
 	// pointed at (magic-link / password-reset / verify-email). Zero value → the
 	// instance is provisioned without SMTP (Local adapter, no delivery). Sourced
 	// from the worker's SMTP_RELAY_* env in cmd/barkpark-provisioner/main.go.
 	Mail cloud.MailRelay
+
+	// CloudEgressIPs is the control plane's own EGRESS address — written into every
+	// provisioned instance's BARKPARK_TRUSTED_PROXIES so the box believes the caller
+	// address the control plane relays (the per-phone rate-limit bucket on a proxied
+	// revoke). Empty → the instance keeps loopback-only trust and every proxied
+	// request keys on ONE bucket per team. Sourced from the worker's
+	// BARKPARK_CLOUD_EGRESS_IPS env in cmd/barkpark-provisioner/main.go — the SAME
+	// address as the CP_HOST deploy secret, authored once (see deploy/README.md).
+	CloudEgressIPs string
 
 	// HealthPollInterval / HealthPollDeadline tune the bounded health-gate poll the
 	// chain runs after configuring a box (cloud F2). Production leaves both ZERO so
@@ -377,6 +393,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		Runner:             seams.Runner,
 		Secrets:            seams.Secrets,
 		Mail:               seams.Mail,
+		TrustedProxies:     seams.CloudEgressIPs,
 		HealthPollInterval: seams.HealthPollInterval,
 		HealthPollDeadline: seams.HealthPollDeadline,
 		// The chain fires create/secure/configure at its real phase boundaries;

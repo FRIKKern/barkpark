@@ -1,0 +1,45 @@
+{
+  "grip_id": "v-vendor-rebuild-2026-07-26",
+  "verifier": "v-vendor-rebuild",
+  "wave": "search-template-wave-9-2026-07-26",
+  "assignment": "Prove the vendored-asset refresh is mechanically cheap and correct: (a) rebuild @barkpark/react from source and confirm the fresh tarball carries PortableDoc/renderPortableDocument AND the #6114 (af4fe3a35) list-item {content:[…]} fix; (b) diff templates/search-starter/public/bp-graph.js vs api/priv/static/assets/bp-graph.js and confirm the delta is exactly the setTheme hunk (D12 snapshot policy); (c) locate the bp-table CSS and settle whether the mobile table fix is SDK-side or template-side.",
+  "verdict": "PROVEN CHEAP — with TWO traps the MUST-RUN recipe itself walks into. (a) Rebuild+pack is seconds and the fresh tarball carries renderPortableDocument, PortableDoc and the #6114 marker `itemInlines` (2 hits in dist/chunk-WHJFKOPS.mjs); the vendored 07-16 tarball has 0 — yet BOTH package.json read version 1.0.0-preview.1, so the version string is provably NOT a freshness signal (content-hash or `grep itemInlines` is). TRAP 1: `npm pack` (the assigned command) emits `dependencies:{\"@barkpark/core\":\"workspace:^\"}` — a spec npm cannot resolve (EUNSUPPORTEDPROTOCOL on a lockfile-less install); `pnpm pack` rewrites it to `^1.0.0-preview.3`, byte-matching what the committed vendored tarball declares. The re-vendor slice MUST use `pnpm pack`. TRAP 2: package-lock.json pins each tarball's sha512 and the deploy runs `npm ci` (DEPLOYING.md:90) — swapping the tarball alone gives EINTEGRITY on a cold cache and, worse, SILENTLY INSTALLS THE OLD BYTES on a warm cache (reproduced: stale paper-surface.css line 223 after a green `npm ci --offline`). `npm install --package-lock-only --offline` does NOT rewrite it either; the working recipe is `rm package-lock.json && npm install` (online), after which a cold-cache `npm ci` installs the fresh bytes. (b) The bp-graph delta is EXACTLY the setTheme hunk: one insertion `3061a3062,3080`, 19 added lines, 0 deleted — and `templates/search-starter/public/bp-graph.js` is byte-identical (md5 b9a3b71…) to `templates/astro-search-starter/public/bp-graph.js`, while `api/priv/static/assets/bp-graph.js` is byte-identical (md5 3d95f57…) to `web/public/bp-graph.js`. Re-vendoring is `cp` into both templates; it serves the Next AND the Astro demo in one move. No CI tripwire compares them (D12 left it as backlog; doc-gates.yml's `templates/**` trigger only makes template PRs RUN doc-gates, it compares nothing). (c) The mobile table fix is SDK-SIDE AND ALREADY FIXED AT SOURCE. There is no overflow-x WRAPPER anywhere — the Phoenix reader puts `display:block; max-width:100%; overflow-x:auto` on the `.bp-table` element itself (api/assets/paper-surface/paper-surface.css:241, landed bbf110e19/#5651, present on origin/main), and tsup copyFile ships that exact file as `dist/paper-surface.css`, which the template already imports (document-detail.tsx:13). The vendored tarball's copy is the pre-fix line 223. Blast radius of the mobile table fix = the re-vendor, ZERO code. Also note: the fresh tarball's export surface is identical to the vendored one (PortableDoc, PortableText, renderPortableDocument, toPlainText, BarkparkImage, imageUrl, BarkparkReference — only the chunk grouping moved) and the template imports only `PortableDoc`, so re-vendoring is non-breaking. Charter D4 (\"pinned exact @1.0.0-preview.2\" from npm) does not describe reality — both templates use `file:./vendor/*.tgz`.",
+  "recipes": [
+    {
+      "claim": "The freshly built @barkpark/react tarball carries the #6114 list-item fix (marker `itemInlines`, af4fe3a35) and renderPortableDocument; the committed vendored tarball does NOT — while both declare version 1.0.0-preview.1",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/js && pnpm --filter @barkpark/react build && cd packages/react && pnpm pack --pack-destination /tmp/vp/ && tar -xzOf /tmp/vp/barkpark-react-*.tgz package/dist/chunk-*.mjs | grep -c itemInlines; tar -xzOf /Volumes/SATECHI/github/barkpark/templates/search-starter/vendor/barkpark-react.tgz package/dist/chunk-ZGIEJQLV.mjs | grep -c itemInlines; for t in /tmp/vp/barkpark-react-*.tgz /Volumes/SATECHI/github/barkpark/templates/search-starter/vendor/barkpark-react.tgz; do tar -xzOf $t package/package.json | grep '\"version\"'; done"
+    },
+    {
+      "claim": "`npm pack` from the pnpm workspace emits an UNINSTALLABLE tarball (dependencies:{\"@barkpark/core\":\"workspace:^\"}); `pnpm pack` rewrites it to ^1.0.0-preview.3, matching the committed vendored tarball",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/js/packages/react && npm pack --pack-destination /tmp/vp-npm/ && pnpm pack --pack-destination /tmp/vp-pnpm/ && for t in /tmp/vp-npm/*.tgz /tmp/vp-pnpm/*.tgz /Volumes/SATECHI/github/barkpark/templates/search-starter/vendor/barkpark-react.tgz; do echo -n \"$t \"; tar -xzOf $t package/package.json | python3 -c 'import sys,json;print(json.load(sys.stdin)[\"dependencies\"])'; done"
+    },
+    {
+      "claim": "package-lock.json pins the vendored tarballs by sha512 and the deploy runs `npm ci`, so swapping a tarball without regenerating the lock fails EINTEGRITY on a cold cache",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'resolved\\\": \\\"file:vendor' -A1 templates/search-starter/package-lock.json; grep -n 'npm ci' templates/search-starter/DEPLOYING.md; shasum -a 512 templates/search-starter/vendor/barkpark-react.tgz | awk '{print $1}' | xxd -r -p | base64"
+    },
+    {
+      "claim": "The correct end-to-end re-vendor recipe (pnpm pack -> copy -> rm package-lock.json -> npm install) yields a lock whose cold-cache `npm ci` installs the FRESH bytes (paper-surface.css line 241 with overflow-x)",
+      "rerun": "rm -rf /tmp/vp-tpl && mkdir -p /tmp/vp-tpl && cd /Volumes/SATECHI/github/barkpark/templates/search-starter && tar -cf - package.json package-lock.json vendor | (cd /tmp/vp-tpl && tar -xf -) && cd /Volumes/SATECHI/github/barkpark/js/packages/react && pnpm pack --pack-destination /tmp/vp-pnpm/ && cd ../core && pnpm pack --pack-destination /tmp/vp-pnpm/ && cd /tmp/vp-tpl && cp /tmp/vp-pnpm/barkpark-react-*.tgz vendor/barkpark-react.tgz && cp /tmp/vp-pnpm/barkpark-core-*.tgz vendor/barkpark-core.tgz && rm -f package-lock.json && npm install --no-audit --no-fund && rm -rf node_modules && npm ci --no-audit --no-fund --cache /tmp/vp-cache && grep -n 'bp-table {' node_modules/@barkpark/react/dist/paper-surface.css"
+    },
+    {
+      "claim": "The templates' bp-graph.js differs from api/web's copy by EXACTLY the setTheme hunk — one insertion, 19 added lines, 0 deleted; both templates carry the identical stale snapshot and api == web is a byte-identical mirror pair",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && diff templates/search-starter/public/bp-graph.js api/priv/static/assets/bp-graph.js; diff templates/search-starter/public/bp-graph.js api/priv/static/assets/bp-graph.js | grep -c '^>'; md5 -q web/public/bp-graph.js api/priv/static/assets/bp-graph.js templates/search-starter/public/bp-graph.js templates/astro-search-starter/public/bp-graph.js"
+    },
+    {
+      "claim": "The mobile table overflow fix is a CSS rule on .bp-table itself (no wrapper element) in api/assets/paper-surface/paper-surface.css:241 on origin/main, shipped into the SDK by tsup copyFile and imported by the template — so it is SDK-side and already fixed at source",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:api/assets/paper-surface/paper-surface.css | grep -n 'bp-table {'; git log --oneline -1 -S'display: block; max-width: 100%; overflow-x: auto' -- api/assets/paper-surface/paper-surface.css; grep -n 'PAPER_SURFACE_SRC\\|copyFile' js/packages/react/tsup.config.ts; grep -n 'paper-surface.css' templates/search-starter/components/document-detail.tsx; tar -xzOf templates/search-starter/vendor/barkpark-react.tgz package/dist/paper-surface.css | grep -n 'bp-table {'"
+    },
+    {
+      "claim": "The fresh tarball's export surface equals the vendored one (only chunk grouping moved) and the template imports only PortableDoc -> re-vendoring is non-breaking",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && for t in /tmp/vp-pnpm/barkpark-react-*.tgz templates/search-starter/vendor/barkpark-react.tgz; do echo \"== $t\"; tar -xzOf $t package/dist/index.mjs | grep -o 'export {[^}]*}'; done; grep -rn 'from \"@barkpark/react\"' templates/search-starter --include='*.tsx'"
+    },
+    {
+      "claim": "The paper-surface.css drift guard (D12) is a real test and is GREEN against origin/main sources",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark/js/packages/react && npx vitest run tests/paper-surface-asset.test.ts"
+    },
+    {
+      "claim": "js/packages/react/src and api/assets/paper-surface are byte-identical to origin/main, so every tarball fact above is a fact about origin/main and not about a dirty worktree",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git diff --stat origin/main -- js/packages/react/src api/assets/paper-surface && echo CLEAN-MATCH"
+    }
+  ]
+}

@@ -95,6 +95,28 @@ func runPaper(out *writer, g globals, args []string) int {
 			return exitOK
 		}
 		return runPaperCapture(out, g, args[1:])
+	// The BPML working copy (masterplan W3, paper_wc_cmd.go): read verbs above
+	// render papers; these edit them as files under .barkpark/papers/. They
+	// resolve the target context exactly like every other built-in.
+	//
+	// `new` (paper_new_cmd.go, charter D41) is the LOCAL scaffold half of the
+	// one authoring door — no server call, so it takes globals only; the server
+	// is met at push, whose sync endpoint creates an absent slug through the
+	// full publish wall.
+	case "new":
+		if g.help && len(args) == 1 {
+			usagePaperNew(out, true)
+			return exitOK
+		}
+		return runPaperNew(out, g, args[1:])
+	case "pull":
+		return runPaperPull(out, g, resolveContext(g), args[1:])
+	case "status":
+		return runPaperStatus(out, g, resolveContext(g), args[1:])
+	case "diff":
+		return runPaperWCDiff(out, g, args[1:])
+	case "push":
+		return runPaperPush(out, g, resolveContext(g), args[1:])
 	case "help":
 		usagePaper(out, true)
 		return exitOK
@@ -313,7 +335,7 @@ func runPaperView(out *writer, g globals, args []string) int {
 	// empty result yields "" and the section simply does not appear — the paper
 	// render above must never break on this new read. Skipped for the -o json /
 	// share / release-pinned paths above (they return before here).
-	if section := paperRenderRelated(client, ctx.Dataset, opt.slug, paperRelatedTopN); section != "" {
+	if section := paperRenderRelated(client, ctx.Dataset, opt.slug, paperRelatedTopN, width); section != "" {
 		out.outf("%s", section)
 	}
 	return exitOK
@@ -368,7 +390,7 @@ func (e paperRelatedEntry) backlinkOnly() bool {
 // transport error, a non-2xx status (incl. the anon 404 existence-hiding), a
 // decode failure, or an empty related list all yield "" so the caller prints
 // nothing and the paper render is never broken by this read.
-func paperRenderRelated(client *apiclient.Client, dataset, id string, limit int) string {
+func paperRenderRelated(client *apiclient.Client, dataset, id string, limit, width int) string {
 	id = strings.TrimSpace(id)
 	if client == nil || dataset == "" || id == "" {
 		return ""
@@ -393,7 +415,7 @@ func paperRenderRelated(client *apiclient.Client, dataset, id string, limit int)
 	if json.Unmarshal(body, &env) != nil || len(env.Result.Related) == 0 {
 		return ""
 	}
-	return formatRelatedSection(env.Result.Related)
+	return formatRelatedSection(env.Result.Related, width)
 }
 
 // formatRelatedSection renders up to paperRelatedTopN entries as a plain-text
@@ -402,7 +424,7 @@ func paperRenderRelated(client *apiclient.Client, dataset, id string, limit int)
 // with an indented shared-tags detail line. No SGR — plain text keeps piped and
 // golden captures clean and honours a NoColor profile. Returns "" for no
 // entries; the returned string carries NO trailing newline (outf adds it).
-func formatRelatedSection(entries []paperRelatedEntry) string {
+func formatRelatedSection(entries []paperRelatedEntry, width int) string {
 	if len(entries) == 0 {
 		return ""
 	}
@@ -423,16 +445,42 @@ func formatRelatedSection(entries []paperRelatedEntry) string {
 		if e.backlinkOnly() {
 			marker = "  · backlink"
 		}
-		lines = append(lines, fmt.Sprintf("  %.2f  %s%s%s", e.Score, label, typeSuffix, marker))
+		prefix := fmt.Sprintf("  %.2f  ", e.Score)
+		lines = append(lines, wrapRelatedLine(prefix, label+typeSuffix+marker, width)...)
 		if len(e.SharedTags) > 0 {
 			parts := make([]string, 0, len(e.SharedTags))
 			for _, t := range e.SharedTags {
 				parts = append(parts, fmt.Sprintf("%s (%d·%d)", t.Tag, t.SrcStrength, t.CandStrength))
 			}
-			lines = append(lines, "        tags: "+strings.Join(parts, ", "))
+			lines = append(lines, wrapRelatedLine("        tags: ", strings.Join(parts, ", "), width)...)
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// wrapRelatedLine keeps the Related appendix under the same width contract as
+// the PortableDoc body. Continuations align under the content, so a long title
+// or tag list remains readable instead of becoming the only overflowing line
+// in an otherwise valid 80-column render.
+func wrapRelatedLine(prefix, content string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	prefixWidth := ansi.StringWidth(prefix)
+	if prefixWidth >= width {
+		return strings.Split(wrapPaperPlainText(prefix+content, width), "\n")
+	}
+	wrapped := strings.Split(wrapPaperPlainText(content, width-prefixWidth), "\n")
+	continuation := strings.Repeat(" ", prefixWidth)
+	lines := make([]string, len(wrapped))
+	for i, line := range wrapped {
+		if i == 0 {
+			lines[i] = prefix + line
+			continue
+		}
+		lines[i] = continuation + line
+	}
+	return lines
 }
 
 // normalizePaperRef accepts the three forms users naturally paste into a
@@ -1520,6 +1568,23 @@ func usagePaper(out *writer, toStdout bool) {
 	p("  view <slug>      render a paper to the terminal (the CLI counterpart")
 	p("                   to opening it in the browser)")
 	p("  capture <url>    capture immutable CLI, task-board, and TUI readers")
+	p("")
+	p("working copy (BPML — papers as files under .barkpark/papers/):")
+	p("  new <slug>       scaffold a wall-passing BPML starter + rev-0 anchor")
+	p("                   (LOCAL — no server call); push creates the paper")
+	p("  pull <slug>      fetch the paper as BPML + a pristine snapshot + rev anchor")
+	p("  status [<slug>]  edited? (vs pristine) and behind? (anchor vs server)")
+	p("  diff <slug>      line diff of your edits")
+	p("  push <slug>      send the edited file; the SERVER derives and applies the")
+	p("                   op batch under your anchor, then the file converges on")
+	p("                   the returned canonical BPML. An ABSENT slug is CREATED")
+	p("                   through the full publish wall. --check dry-runs the")
+	p("                   wall (every violation, nothing written)")
+	p("")
+	p("to author a NEW paper: bp paper new <slug> → edit → bp paper push <slug>")
+	p("  (--check first to see violations). Guide: /papers/paper-authoring-excellence")
+	p("  JSON producers: bp bulldocs publish <slug> --file payload.json (blocks")
+	p("  payload — never hand-rolled HTML; the slug also goes INSIDE the JSON)")
 }
 
 // usagePaperView prints the `bp paper view` command signature. An explicit

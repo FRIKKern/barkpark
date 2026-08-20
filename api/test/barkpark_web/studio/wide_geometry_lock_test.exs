@@ -416,10 +416,18 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
     test "the reading column is its own `content` query base" do
       block = block!(".editor-with-preview .editor-panel-main.bp-paper-body")
 
-      assert value!(block, ".editor-with-preview .editor-panel-main.bp-paper-body", "container-type") ==
+      assert value!(
+               block,
+               ".editor-with-preview .editor-panel-main.bp-paper-body",
+               "container-type"
+             ) ==
                "inline-size"
 
-      assert value!(block, ".editor-with-preview .editor-panel-main.bp-paper-body", "container-name") ==
+      assert value!(
+               block,
+               ".editor-with-preview .editor-panel-main.bp-paper-body",
+               "container-name"
+             ) ==
                "content",
              """
              The reading column no longer names the `content` container.
@@ -539,15 +547,15 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
       for {key, _props} <- geometry_census(),
           selector <- String.split(key, ", "),
           selector not in base do
+        # NEGATIVE scoping, and the strongest form available: the wide
+        # bucket is subtracted by name. #4923's summoned-destination rules
+        # move real geometry (`flex`, `width`) and are allowed to precisely
+        # because `html:not([data-width-bucket="wide"])` cannot match in
+        # epic criterion 2's own band (charter D92).
         scoped? =
           String.starts_with?(selector, ~S|html[data-width-bucket="phone"] |) or
             String.starts_with?(selector, ~S|html[data-width-bucket="narrow"] |) or
             String.starts_with?(selector, ~S|html[data-editor-focus="beta"] |) or
-            # NEGATIVE scoping, and the strongest form available: the wide
-            # bucket is subtracted by name. #4923's summoned-destination rules
-            # move real geometry (`flex`, `width`) and are allowed to precisely
-            # because `html:not([data-width-bucket="wide"])` cannot match in
-            # epic criterion 2's own band (charter D92).
             String.starts_with?(selector, ~S|html:not([data-width-bucket="wide"]) |) or
             selector in [
               # Inspector variants and children. `.is-collapsed` is a state the

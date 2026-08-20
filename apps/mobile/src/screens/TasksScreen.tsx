@@ -1,13 +1,20 @@
 // Tasks tab — live GET /v1/tasks/prime?view=brief through @barkpark/core
 // (charter D14: the SDK's RN maiden voyage, expoFetch injected via
-// config.fetch). Read-only; fence-free triage lands later in wave 2. Honest
-// states: loading, error-with-retry, empty, and the two prime sections
-// (in progress / ready) with pull-to-refresh.
+// config.fetch). Honest states: loading, error-with-retry, empty, and the two
+// prime sections (in progress / ready) with pull-to-refresh.
+//
+// Tapping a row opens TaskDetailScreen — the full dossier plus FENCE-FREE
+// triage (claim · pulse · criterion stamp · release, all via /v1/tasks, all
+// refusing anything the claim-epoch law says is not ours to take). This
+// screen owns that one-level stack itself, the same way ChatScreen owns the
+// session stack; the app shell stays a three-tab switch.
 //
 // Live refresh rides the SDK's listen() SSE stream (/v1/data/listen/:dataset,
 // types=task) — the D14 expoFetch streaming seam doing its load-bearing job
 // on device: the welcome frame is logged as the connect proof, and every task
-// mutation event triggers a silent re-prime.
+// mutation event triggers a silent re-prime. That includes OUR OWN triage
+// writes: a stamp or pulse emits task.criterion / task.pulse, so the list
+// behind the detail screen is already fresh when you navigate back.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -20,17 +27,33 @@ import {
 } from 'react-native'
 
 import { fetchPrimeBrief, makeInstanceClient, type BriefTaskCard, type InstanceConnection, type PrimeBrief } from '../api/instance'
+import { TaskDetailScreen } from './TaskDetailScreen'
 import { useTheme, type Theme } from '../ui/theme'
+import { scale } from '../ui/typography'
 
 type TasksState =
   | { phase: 'loading' }
   | { phase: 'error'; message: string }
   | { phase: 'ready'; prime: PrimeBrief; refreshing: boolean }
 
+/** The stale-board affordance's one truth, pure so it is jest-provable: the
+ * banner shows ONLY when a painted board (ready) has lost its live stream —
+ * loading/error screens carry their own honesty already. */
+export function staleBoardNotice(
+  phase: TasksState['phase'],
+  streamDown: boolean,
+): string | undefined {
+  return phase === 'ready' && streamDown
+    ? 'Live updates paused — the board may be stale. Tap to refresh.'
+    : undefined
+}
+
 export function TasksScreen({ connection }: { connection: InstanceConnection }) {
   const theme = useTheme()
   const [state, setState] = useState<TasksState>({ phase: 'loading' })
+  const [streamDown, setStreamDown] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const [openTask, setOpenTask] = useState<{ docId: string; title?: string } | undefined>(undefined)
   const client = useMemo(() => makeInstanceClient(connection), [connection])
 
   // The fetch lives in the effect; every setState happens AFTER an await so
@@ -59,14 +82,22 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
   // one re-fetch.
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
-    const handle = client.listen('task')
+    // maxReconnects: 'unbounded' (charter D23): a board that sits open all day
+    // must survive sleep/wake cycles and server restarts — the SDK retries
+    // transient failures forever (jittered, 16s-capped) instead of dying after
+    // five. Only a terminal failure (signed out, revoked token, repeated
+    // refusals) ends the stream, and that flips the stale-board banner below.
+    const handle = client.listen('task', undefined, { maxReconnects: 'unbounded' })
     let alive = true
+    // No eager reset here: after a connection change the board genuinely IS
+    // possibly stale until the new stream's welcome frame proves it live —
+    // the reset below is the honest one.
     ;(async () => {
       try {
         for await (const ev of handle) {
           if (!alive) break
           if (ev.type === 'welcome') {
-            console.log('[barkpark-mobile] listen welcome frame:', JSON.stringify(ev))
+            setStreamDown(false) // the connect proof — the board is live again
           } else if (ev.type === 'mutation') {
             if (refetchTimer.current !== undefined) clearTimeout(refetchTimer.current)
             refetchTimer.current = setTimeout(() => {
@@ -74,9 +105,12 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
             }, 400)
           }
         }
-      } catch (err) {
-        // Honest degrade: the board still works on pull-to-refresh.
-        if (alive) console.log('[barkpark-mobile] listen stream ended:', String(err))
+        // The iterator ending without an unmount means the stream is gone.
+        if (alive) setStreamDown(true)
+      } catch {
+        // Honest degrade: live updates are dead — SAY so (the stale-board
+        // banner) instead of a console.log nobody sees; pull-to-refresh works.
+        if (alive) setStreamDown(true)
       }
     })()
     return () => {
@@ -95,6 +129,23 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
     setState((prev) => (prev.phase === 'ready' ? { ...prev, refreshing: true } : { phase: 'loading' }))
     setAttempt((a) => a + 1)
   }, [])
+
+  // Detail is a one-level stack over the list: back always returns here, and
+  // opening a parent/child REPLACES the open task rather than growing a stack
+  // this screen would then have to unwind honestly.
+  if (openTask !== undefined) {
+    return (
+      <TaskDetailScreen
+        connection={connection}
+        docId={openTask.docId}
+        {...(openTask.title !== undefined ? { fallbackTitle: openTask.title } : {})}
+        onBack={() => setOpenTask(undefined)}
+        onOpenTask={(docId, title) =>
+          setOpenTask(title !== undefined ? { docId, title } : { docId })
+        }
+      />
+    )
+  }
 
   if (state.phase === 'loading') {
     return (
@@ -134,33 +185,64 @@ export function TasksScreen({ connection }: { connection: InstanceConnection }) 
     )
   }
 
+  const notice = staleBoardNotice(state.phase, streamDown)
+
   return (
-    <SectionList
-      style={{ backgroundColor: theme.bg }}
-      contentContainerStyle={styles.listContent}
-      sections={sections}
-      keyExtractor={(card) => card.doc_id}
-      refreshControl={
-        <RefreshControl
-          refreshing={state.refreshing}
-          onRefresh={refresh}
-          tintColor={theme.accent}
-        />
-      }
-      renderSectionHeader={({ section }) => (
-        <Text style={[styles.sectionHeader, { color: theme.textMuted }]}>{section.title}</Text>
+    <View style={[styles.listRoot, { backgroundColor: theme.bg }]}>
+      {notice !== undefined && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={refresh}
+          style={[styles.staleBanner, { borderColor: theme.border, backgroundColor: theme.surface }]}
+        >
+          <Text style={[styles.staleText, { color: theme.textMuted }]}>{notice}</Text>
+        </Pressable>
       )}
-      renderItem={({ item }) => <TaskRow card={item} theme={theme} />}
-    />
+      <SectionList
+        style={{ backgroundColor: theme.bg }}
+        contentContainerStyle={styles.listContent}
+        sections={sections}
+        keyExtractor={(card) => card.doc_id}
+        refreshControl={
+          <RefreshControl
+            refreshing={state.refreshing}
+            onRefresh={refresh}
+            tintColor={theme.accent}
+          />
+        }
+        renderSectionHeader={({ section }) => (
+          <Text style={[styles.sectionHeader, { color: theme.textMuted }]}>{section.title}</Text>
+        )}
+        renderItem={({ item }) => (
+          <TaskRow
+            card={item}
+            theme={theme}
+            onOpen={() => setOpenTask({ docId: item.doc_id, title: item.title })}
+          />
+        )}
+      />
+    </View>
   )
 }
 
-function TaskRow({ card, theme }: { card: BriefTaskCard; theme: Theme }) {
+function TaskRow({
+  card,
+  theme,
+  onOpen,
+}: {
+  card: BriefTaskCard
+  theme: Theme
+  onOpen: () => void
+}) {
   const nowText = card.claim?.now?.text
   const criteria =
     card.criteria_total !== undefined ? `${card.criteria_met ?? 0}/${card.criteria_total}` : undefined
   return (
-    <View style={[styles.row, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onOpen}
+      style={[styles.row, { backgroundColor: theme.surface, borderColor: theme.border }]}
+    >
       <View style={styles.rowTop}>
         {card.priority !== undefined && (
           <Text style={[styles.priority, { color: theme.accent, borderColor: theme.accent }]}>P{card.priority}</Text>
@@ -184,15 +266,25 @@ function TaskRow({ card, theme }: { card: BriefTaskCard; theme: Theme }) {
           {nowText}
         </Text>
       )}
-    </View>
+    </Pressable>
   )
 }
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
+  listRoot: { flex: 1 },
+  staleBanner: {
+    borderWidth: 1,
+    borderRadius: 10,
+    marginHorizontal: 16,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  staleText: { ...scale.xs, textAlign: 'center' },
   listContent: { padding: 16, gap: 10 },
   sectionHeader: {
-    fontSize: 12,
+    ...scale.xs,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 1,
@@ -202,7 +294,7 @@ const styles = StyleSheet.create({
   row: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 6, marginBottom: 8 },
   rowTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   priority: {
-    fontSize: 11,
+    ...scale.micro,
     fontWeight: '700',
     borderWidth: 1,
     borderRadius: 5,
@@ -210,11 +302,11 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     overflow: 'hidden',
   },
-  title: { flex: 1, fontSize: 15, fontWeight: '600', lineHeight: 20 },
+  title: { flex: 1, ...scale.md, fontWeight: '600' },
   rowMeta: { flexDirection: 'row', gap: 12 },
-  metaText: { fontSize: 12 },
-  nowLine: { fontSize: 13, fontStyle: 'italic', lineHeight: 18 },
-  body: { fontSize: 15, textAlign: 'center' },
-  muted: { fontSize: 13, textAlign: 'center' },
-  link: { fontSize: 14, textDecorationLine: 'underline' },
+  metaText: { ...scale.xs },
+  nowLine: { ...scale.sm, fontStyle: 'italic' },
+  body: { ...scale.md, textAlign: 'center' },
+  muted: { ...scale.sm, textAlign: 'center' },
+  link: { ...scale.base, textDecorationLine: 'underline' },
 })

@@ -100,7 +100,7 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
     assert {:blocks, ^labeled} = Content.Papers.reader_source(paper, "test", [])
   end
 
-  test "HTML-only source is sanitized without changing safe bytes and conflicting mixed provenance fails" do
+  test "HTML-only source is sanitized without changing safe bytes and unstamped mixed provenance serves blocks" do
     html = "<h1>Exact &amp; authored</h1>\n<p>two spaces  stay</p>"
 
     legacy = %Document{
@@ -150,7 +150,12 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
       content: %{"blocks" => blocks, "body_html" => "<p>Different richer HTML</p>"}
     }
 
-    assert {:error, :ambiguous_source} = Content.Papers.reader_source(mixed, "test", [])
+    # An unstamped mixed row claims nothing about the current renderer, so since
+    # pe-w2-reader-stamp-guard it is LAGGING, not divergent: blocks are
+    # canonical, the derived HTML cache is rewritten. Only a row stamped with the
+    # current digest can still fail closed — pinned in
+    # test/barkpark/content/papers/reader_lagging_stamp_test.exs.
+    assert {:blocks, ^blocks} = Content.Papers.reader_source(mixed, "test", [])
   end
 
   test "reader source rejects punctuation-only block and HTML bodies" do
@@ -221,5 +226,69 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
 
     assert {:error, {:halted, _}} = Content.apply_paper_block_ops(slug, [op], "test")
     assert Content.get_paper(slug, "test") == before
+
+    assert {:error, {:halted, _}} =
+             Content.apply_paper_block_ops(slug, [op], "test", if_rev: 1)
+
+    assert Content.get_paper(slug, "test") == before
+  end
+
+  test "revision-fenced batch promotes legacy body.blocks without treating it as HTML-only" do
+    slug = "legacy-body-blocks-fence-#{System.unique_integer([:positive])}"
+    html = "<p>Legacy authored body</p>"
+
+    {:ok, seeded} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{slug: slug, dataset: "test", body_html: html})
+      )
+
+    legacy_blocks = [
+      %{
+        "id" => "legacy-body",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Legacy authored body"}]
+      }
+    ]
+
+    legacy_content =
+      seeded.content
+      |> Map.delete("blocks")
+      |> Map.put("body", %{"blocks" => legacy_blocks})
+      |> Map.put("body_html", html)
+      |> Map.put("rev", 7)
+
+    {:ok, legacy} =
+      seeded
+      |> Document.changeset(%{"content" => legacy_content})
+      |> Barkpark.Repo.update()
+
+    op = %{
+      "op" => "append-block",
+      "block" => %{
+        "id" => "new-body",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Safely promoted"}]
+      }
+    }
+
+    assert {:error, {:halted, message}} =
+             Content.apply_paper_block_ops(slug, [op], "test")
+
+    assert message =~ "require an explicit revision-fenced batch conversion"
+    assert Content.get_paper(slug, "test") == legacy
+
+    assert {:error, :precondition_failed} =
+             Content.apply_paper_block_ops(slug, [op], "test", if_rev: 6)
+
+    assert Content.get_paper(slug, "test") == legacy
+
+    assert {:ok, %{op_count: 1, rev: 8}} =
+             Content.apply_paper_block_ops(slug, [op], "test", if_rev: 7)
+
+    promoted = Content.get_paper(slug, "test")
+    assert Enum.map(promoted.content["blocks"], & &1["id"]) == ["legacy-body", "new-body"]
+    assert get_in(promoted.content, ["body", "blocks"]) == promoted.content["blocks"]
+    assert promoted.content["body_html"] =~ "Legacy authored body"
+    assert promoted.content["body_html"] =~ "Safely promoted"
   end
 end

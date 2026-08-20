@@ -19,6 +19,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   import BarkparkWeb.Studio.StudioLive.Components.PaperEditor
 
   alias Barkpark.Content
+  # `Icons.drawable_name/2` guards the DYNAMIC `name={…}` sites below — a pane
+  # item's icon is Structure/schema/plugin data, so it can be nil or an
+  # unmapped string, and both used to reach `icon/1` bare (spd-w18-nil-icon-500:
+  # HTTP 500 on /studio/rest and /studio/plugins). The literal `name="…"` sites
+  # in this file stay literal — the icons tripwire owns those.
+  alias BarkparkWeb.Icons
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
   alias Phoenix.LiveView.JS
@@ -70,6 +77,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # UNASSIGNED on a fresh paper open (the outer call site Map.get-guards it).
   attr(:save_status, :string, default: "")
   attr(:paper_halt, :string, default: nil)
+  # spd-w19 / D257 — the `/w/:ws/p/:proj` scope prefix, threaded from the shell.
+  # It was MISSING (a third instance of the b39 missing-thread class): every URL
+  # this component emits fell to `assigns[:scope_prefix] || ""`, which on a
+  # scoped Studio mount — the ONLY Studio mount since the P3 cutover — produced
+  # an UNROUTABLE flat `/d/:dataset/studio/...` href. The default keeps a
+  # hypothetical unthreaded call site rendering the flat grammar, which
+  # `doc_list_href/3` at the bottom of this module now spells routably too.
+  attr(:scope_prefix, :string, default: "")
 
   def studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
@@ -112,10 +127,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       assigns.paper_doc != nil and
         inspector_destination?(assigns.width_bucket, assigns.sidebar_user_opened)
 
+    # spd-w18 — the pane's REAL document type. The paper pane is opened by every
+    # blocks-doc type (`PaneBuilder` keys on `Content.blocks_type?/1`), so a
+    # session lands on this exact component; the header badge used to print the
+    # literal "paper" over it and the empty-body sentence used to call it a
+    # paper. Fall back to the paper type ONLY when there is no document at all,
+    # so the no-document paint stays byte-identical.
+    doc_type = (assigns.paper_doc && Map.get(assigns.paper_doc, :type)) || Content.paper_type()
+
+    # spd-w18 review — mirror the OP layer's own refusal so the never-blank
+    # notice never offers a repair the write path rejects.
+    # `Papers.BlockOps.reject_implicit_html_conversion/1` halts any block op on a
+    # document whose content carries a `body_html` STRING while `blocks` is not a
+    # list — precisely the shape `blank_body?/1` routes here when that HTML
+    # paints nothing (`"<p></p>"`, `"&nbsp;"`, `""`).
+    html_backed_body =
+      is_binary(get_in((assigns.paper_doc && assigns.paper_doc.content) || %{}, ["body_html"]))
+
     assigns =
       assign(assigns,
         slug: slug,
         title: title,
+        doc_type: doc_type,
+        html_backed_body: html_backed_body,
         edit_blocks: edit_blocks,
         canvas_on: canvas_on,
         show_editor: show_editor,
@@ -126,7 +160,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     <div class="editor-panel" data-role="content" data-test-id="studio-paper-editor">
       <.document_header dataset={@dataset} title={@title}>
         <:status_pill>
-          <span class="badge badge-published">paper</span>
+          <span class="badge badge-published">{@doc_type}</span>
         </:status_pill>
         <:actions>
           <%!-- View ⇄ Edit toggle — the flag-OFF OPT-OUT path ONLY. With the
@@ -147,7 +181,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </button>
           <a
             :if={@slug}
-            href={Paths.paper_path(assigns[:scope_prefix] || "", @slug)}
+            href={Paths.paper_path(@scope_prefix, @slug)}
             class="btn btn-ghost btn-sm"
             target="_blank"
             rel="noopener"
@@ -221,6 +255,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       opt-out path it renders once the user toggles into Edit. --%>
                 <.paper_block_editor
                   slug={@slug}
+                  doc_type={@doc_type}
                   blocks={@edit_blocks}
                   paper_rev={@paper_rev}
                   dataset={@dataset}
@@ -256,6 +291,54 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     {raw(block.html)}
                   </div>
                 </article>
+              <% blank_body?(@paper_html) -> %>
+                <%!-- spd-w18 — THE NEVER-BLANK ARM. A document RESOLVED into the
+                      pane but with no renderable body used to fall through to
+                      the legacy HTML arm below and paint an EMPTY <article>:
+                      the paper shell plus the metadata sidebar and nothing
+                      between — no editor, no message, no way out. That is the
+                      owner's bug in its general form (an unrenderable document
+                      answering "I cannot render this" with absence), and it is
+                      still reachable for any document whose content carries no
+                      block LIST at all (`Projection.read_blocks/1` returns nil
+                      ⇒ `paper_block_mode` false ⇒ `show_editor` false) and no
+                      body_html either — the two production draft-only fossils.
+
+                      The <article> wrapper and its data-rev are kept verbatim so
+                      the DOM contract of this branch is unchanged; only the
+                      emptiness inside it is replaced by a named, announced
+                      state.
+
+                      spd-w19 — its id is the ONE thing that had to change, and
+                      it is a correctness fix, not cosmetics. This arm shipped
+                      with the SAME `paper-body-<slug>` id the streamed block arm
+                      uses, and the repair below crosses precisely that
+                      boundary: with `BARKPARK_PAPER_CANVAS=0` the repaired
+                      document renders the streamed arm, so LiveView saw one node
+                      keep its id while GAINING `phx-update="stream"` — and a
+                      stream container never removes children it did not insert
+                      (`dom_patch.js` deletes only `[data-phx-stream-ref]` rows
+                      on reset). The notice would have SURVIVED its own repair,
+                      sitting above the new paragraph. `LiveViewTest` refuses the
+                      same transition outright ("phx-update stream requires
+                      setting an ID on each child"), which is how it was caught.
+                      A distinct id makes the swap a node REPLACEMENT, which is
+                      what a swap is. --%>
+                <article id={"paper-body-unrenderable-#{@slug}"} data-rev={@paper_rev}>
+                  <%!-- The id the human owns is the PUBLISHED id: `drafts.` is a
+                        storage prefix, and a never-published fossil arrives here
+                        as `drafts.paper-…` (the same normalisation the sidebar's
+                        slug field does — showing the raw prefix is the product
+                        quoting its own plumbing back at the author). The
+                        <article> id above keeps the raw slug, unchanged. --%>
+                  <.unrenderable_document_notice
+                    doc_id={Content.published_id(@slug)}
+                    doc_type={@doc_type}
+                    html_backed={@html_backed_body}
+                    repairable={@doc_type == Content.paper_type() and not @html_backed_body}
+                    list_href={doc_list_href(@scope_prefix, @doc_type, @dataset)}
+                  />
+                </article>
               <% true -> %>
                 <%!-- HTML-only (legacy): whole opaque body, re-assigned on
                       update. Keyed on the slug too so a jump swaps the node. --%>
@@ -285,6 +368,80 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           backlinks_linked={@backlinks_linked}
           backlinks_unlinked={@backlinks_unlinked}
         />
+      </div>
+    </div>
+    """
+  end
+
+  # ── spd-w18: the never-blank state for a resolved-but-unrenderable doc ───────
+  #
+  # A document the pane RESOLVED but cannot render must say so BY NAME. Modelled
+  # on `StudioComponents.Editor.doc_conflict_banner/1` (role="alert" +
+  # aria-live="assertive" + a stable data-test-id + a recovery control carrying
+  # its own test-id) and deliberately NOT on `empty_editor/1`, which has no
+  # action slot — an actionless empty state is exactly where the owner's bug
+  # landed.
+  #
+  # It carries four things, because a state that omits any of them is still a
+  # shrug: the document's OWN id, its REAL type (not the literal "paper"), a
+  # plain-language reason, and at least one keyboard-focusable way out. The way
+  # out is a REAL repair on the paper path — `paper-add-block` appends through
+  # `Content.apply_paper_block_op/4`, whose `get_in(content, ["blocks"]) || []`
+  # mints the missing list — and a plain link back to the type's list for the
+  # types whose pane is read-only (a session refuses writes by design, so
+  # offering it a repair button would be a second lie).
+  #
+  # spd-w18 review — `repairable` is NOT "is a paper". The op layer's
+  # `reject_implicit_html_conversion/1` HALTS an append on a document that has a
+  # `body_html` STRING but no block list, and `blank_body?/1` deliberately calls
+  # a visually-empty `"<p></p>"` / `"&nbsp;"` body blank — so an HTML-backed
+  # blank paper reaches this notice and the write layer would refuse its repair.
+  # A button that cannot do what it says is the owner's complaint in a new
+  # costume, so that case gets the honest reason and the link only.
+  attr(:doc_id, :string, required: true)
+  attr(:doc_type, :string, required: true)
+  attr(:repairable, :boolean, default: false)
+  attr(:html_backed, :boolean, default: false)
+  attr(:list_href, :string, required: true)
+
+  def unrenderable_document_notice(assigns) do
+    ~H"""
+    <div
+      class="bp-paper-unrenderable"
+      role="alert"
+      aria-live="assertive"
+      data-test-id="paper-unrenderable-notice"
+      data-doc-id={@doc_id}
+      data-doc-type={@doc_type}
+    >
+      <p class="bp-paper-unrenderable-title">
+        Studio cannot render the body of this {@doc_type}.
+      </p>
+      <p :if={not @html_backed} class="bp-paper-unrenderable-reason">
+        <code>{@doc_id}</code> ({@doc_type}) was stored without a body block list and without
+        saved HTML, so there is nothing here to show or edit yet. The document itself is intact —
+        its metadata is in the panel beside this message.
+      </p>
+      <p :if={@html_backed} class="bp-paper-unrenderable-reason">
+        <code>{@doc_id}</code> ({@doc_type}) was stored as saved HTML that renders nothing a reader
+        can see, and it has no body block list. Studio will not silently convert stored HTML into
+        blocks, so the body cannot be started from here — the document itself is intact, and its
+        metadata is in the panel beside this message.
+      </p>
+      <div class="bp-paper-unrenderable-actions">
+        <button
+          :if={@repairable}
+          type="button"
+          class="btn btn-primary btn-sm"
+          phx-click="paper-add-block"
+          phx-value-block-type="paragraph"
+          data-test-id="paper-unrenderable-start-body"
+        >
+          Start the body with a paragraph
+        </button>
+        <a href={@list_href} class="btn btn-ghost btn-sm" data-test-id="paper-unrenderable-back">
+          Back to the {@doc_type} list
+        </a>
       </div>
     </div>
     """
@@ -827,7 +984,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         :inspector_leaf,
         has_editor and inspector_destination?(assigns.width_bucket, assigns.sidebar_user_opened)
       )
-      |> assign(:trail_visible, crumb_trail_bucket?(assigns.width_bucket, has_editor, assigns.sidebar_user_opened))
+      |> assign(
+        :trail_visible,
+        crumb_trail_bucket?(assigns.width_bucket, has_editor, assigns.sidebar_user_opened)
+      )
 
     ~H"""
     <nav
@@ -987,10 +1147,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 title="Review scoped access grants"
                 data-test-id="access-open-type"
               ><.icon name="clock" size={14} /></button>
+              <%!-- Icon-only: without an explicit label its accessible name
+                    is the empty string, so AT announces a nameless button. --%>
               <button
                 class="pane-add-btn"
                 phx-click="new-document"
                 phx-value-type={pane.type_name}
+                title={"New #{pane.type_name}"}
+                aria-label={"New #{pane.type_name}"}
               ><.icon name="plus" size={14} /></button>
             <% end %>
           </:header_actions>
@@ -1050,7 +1214,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
                 <% :header -> %>
                   <.pane_section_header>
-                    <.icon name={item.icon} size={12} /> <%= item.title %>
+                    <.icon name={Icons.drawable_name(item[:icon], "folder")} size={12} /> <%= item.title %>
                   </.pane_section_header>
 
                 <% :plugin_link -> %>
@@ -1099,7 +1263,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     phx_value_pane={"#{idx}"}
                     selected={item.id == pane[:selected]}
                   >
-                    <:icon><.icon name={item.icon} size={16} /></:icon>
+                    <:icon><.icon name={Icons.drawable_name(item.icon)} size={16} /></:icon>
                     <%= item.title %>
                     <:trailing :if={item[:drillable]}>
                       <.icon name="chevron-right" size={14} />
@@ -1128,6 +1292,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             therefore pinned to the wide branch, and the Tier-3 destination
             predicate could never fire at all. One attribute closes it, and the
             default keeps the pre-connect first paint byte-identical. --%>
+      <%!-- spd-w19 — and `scope_prefix` below closes the SAME class of missing
+            thread one attribute further down. Without it every href the paper
+            pane emits (the never-blank notice's way back, "Open standalone")
+            was built against an empty prefix — i.e. against a grammar this
+            router does not serve. `rebuild_panes/1` already carries it. --%>
       <%= cond do %>
         <% @editor_view == :paper -> %>
         <.studio_paper_view
@@ -1141,6 +1310,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}
           dataset={@dataset}
+          scope_prefix={@scope_prefix}
           streams={@streams}
           backlinks_used_by={@backlinks_used_by}
           backlinks_linked={@backlinks_linked}
@@ -1161,13 +1331,44 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         />
         <% @editor_view == :sheet and @sheet_doc != nil -> %>
         <%!-- Sheet grid editor (Sheets M2). One LiveComponent owns the whole
-              surface; `{:sheets_op,…}` deltas reach it via send_update. --%>
+              surface; `{:sheets_op,…}` deltas reach it via send_update.
+
+              THREE PROPS, THREE AXES (SheetGrid's moduledoc is the contract):
+
+              `write_capable` is the CAPABILITY, not a display flag: a
+              `phx-target`ed event carries a component cid and LiveView runs the
+              COMPONENT socket's lifecycle for it, so the parent socket's
+              `:handle_event` hooks — the `Caps` deny-gate among them — are never
+              consulted. A fourth `attach_hook` on the parent therefore cannot
+              gate this surface at all; the capability has to travel INTO the
+              component, where `SheetGrid`'s write-head guards and the last wall
+              in `SheetGrid.Ops.send_ops/2` already read it
+              (`grep -n 'write_capable' lib/barkpark_web/live/studio/sheet_grid.ex`).
+              Until this prop existed those guards were dead code on the Studio
+              path — the component defaults `write_capable: false`.
+
+              `live_session={true}` is a SEPARATE decision and stays a literal
+              here rather than a derivation of the capability: a Studio member
+              entitled to READ this desk sees the same live draft session their
+              write-capable colleagues are editing. Wave 41 wired the single
+              overloaded flag and a denied member silently dropped to the
+              PUBLISHED row — two people, one sheet, different numbers. It is
+              also NOT derived from `chrome`, which is what keeps this line the
+              place to reconsider if a principal-LESS public-demo socket ever
+              needs the draft withheld.
+
+              `chrome={:studio}` is presentation only, and carries no authority:
+              document header, editor identity, selection highlight, keyboard
+              navigation. A denied member is still in Studio. --%>
         <.live_component
           module={BarkparkWeb.Studio.SheetGrid}
           id={"sheet-grid-#{Content.published_id(@sheet_doc.doc_id)}"}
           doc={@sheet_doc}
           dataset={@dataset}
           is_draft={@editor_is_draft}
+          write_capable={sheet_write_capable?(assigns)}
+          live_session={true}
+          chrome={:studio}
           user_id={@user_id}
           presence_topic={@sheet_presence_topic}
           presences={@sheet_presences}
@@ -1304,6 +1505,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             <:extra_actions>
               <.editor_mode_toggle :if={beta_ok} mode={@editor_mode} beta_ok={beta_ok} />
             </:extra_actions>
+            <%!-- spd-w19 — the third seam. The slot has been DECLARED and never
+                  filled since D222; unfilled it fell to
+                  `<.empty_editor message="Select a document to edit">`, which
+                  answers a named-but-unresolvable document with absence. The
+                  reason is derived ONCE in `Shared.rebuild_panes` (assign
+                  `:editor_empty`, from `(panes, nav_path)`) because every
+                  nil-editor producer in PaneBuilder returns a bare nil. Filling
+                  the slot makes the default string unreachable on this path. --%>
+            <:empty_state>
+              <% empty = Map.get(assigns, :editor_empty) || %{reason: :nothing_selected, doc_id: nil, doc_type: nil} %>
+              <%!-- Only `:not_found` gets a type-list link: for `:no_schema` that
+                    list IS the pane that could not open the document, so
+                    offering it would be a second shrug. --%>
+              <BarkparkWeb.StudioComponents.Editor.unresolved_document_notice
+                reason={empty.reason}
+                doc_id={empty.doc_id}
+                doc_type={empty.doc_type}
+                list_href={
+                  if empty.reason == :not_found and empty.doc_type,
+                    do:
+                      Paths.studio_path(
+                        Map.get(assigns, :scope_prefix) || "",
+                        [empty.doc_type],
+                        @dataset
+                      )
+                }
+                desk_href={
+                  Paths.studio_path(Map.get(assigns, :scope_prefix) || "", [], @dataset)
+                }
+              />
+            </:empty_state>
           </.studio_editor_shell>
         <% end %>
       <% end %>
@@ -1539,6 +1771,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     """
   end
 
+  # ── the SheetGrid capability prop ───────────────────────────────────────────
+  #
+  # May the socket's principal WRITE the mounted desk? This does NOT re-state
+  # the rule — it CALLS the one owner, `Caps.write_capable?/2`, which the
+  # socket-level deny-gate also calls. The component-targeted path never reaches
+  # that hook (a `phx-target`ed event runs the COMPONENT socket's lifecycle), so
+  # a fork here would be a security rule maintained in two places; the review of
+  # pds-w41-caps-component-gate collapsed it into one.
+  #
+  # `@caps` is the freshly-derived map StudioLive re-assigns on every grant
+  # change and expiry tick (`grep -n 'defp refresh_caps' lib/barkpark_web/live/studio/studio_live.ex`),
+  # so an expired grant drops the write prop on the next render.
+  defp sheet_write_capable?(assigns),
+    do: Caps.write_capable?(assigns, Map.get(assigns, :caps) || %{})
+
   # The expected fields STILL recommendable for the current Beta block list,
   # rendered into `data-expected-fields` for the slash menu's EXPECTED group.
   # Returns [] when there is no schema/Expectation (no group shown).
@@ -1586,6 +1833,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     width_bucket in ["narrow", "phone"] and user_opened == true
   end
 
+  # spd-w19 / D257 — the never-blank notice's way BACK, spelled as a ROUTE.
+  #
+  # Both grammars this router actually serves, and neither of them is the one the
+  # notice shipped with. `Paths.studio_path("", ["paper"], ds)` yields
+  # `/d/:dataset/studio/paper` — a path that exists ONLY under the
+  # `/w/:ws/p/:proj` scope, so with an empty prefix `Router.route_info/4` returns
+  # `:error` and a real request 404s. The scoped form is that same suffix WITH
+  # the prefix; the flat form the router serves is `/studio/:dataset/*path`
+  # (`Paths.flat_root/1`), which 302s into the scoped canonical.
+  #
+  # Composed from the two existing `Paths` owners rather than interpolated here —
+  # `Paths` stays the single owner of both grammars.
+  defp doc_list_href(scope_prefix, doc_type, dataset) do
+    if is_binary(scope_prefix) and scope_prefix != "" do
+      Paths.studio_path(scope_prefix, [doc_type], dataset)
+    else
+      Paths.flat_root(dataset) <> "/" <> doc_type
+    end
+  end
+
   # Where the desk crumb trail renders (D168 + D180). Two clauses of the same
   # enumeration, never a negation: the buckets that have no rail at all, plus
   # the ladder tier at the moment the ladder has taken the rail away.
@@ -1605,4 +1872,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     do: JS.push("sidebar-toggle-panel") |> JS.focus(to: return_to)
 
   defp dismiss_or_toggle(_not_destination, _return_to), do: "sidebar-toggle-panel"
+
+  # spd-w18 — "this body renders NOTHING a reader can see", the gate on the
+  # never-blank arm. It is deliberately NOT `html == ""`:
+  #
+  #   * `== ""` is too narrow. A stored `"<p></p>"` / `"<div>\n</div>"` /
+  #     `"&nbsp;"` body_html is a non-empty STRING that paints an empty screen,
+  #     which is the very blank being fixed — the string is not the surface.
+  #   * a bare tag-strip is too WIDE, and that is the byte-identity risk: an
+  #     image-only, table-only or embed-only legacy body carries no text yet is
+  #     perfectly visible, and swallowing it behind a "cannot render" notice
+  #     would be a NEW blank of our own making. So any visible-by-itself element
+  #     answers "not blank" before the text test runs.
+  #
+  # Net effect on a legitimate legacy HTML-only paper: `false`, so it falls
+  # through to the unchanged `raw(@paper_html)` arm byte for byte.
+  @self_visible_tags ~w(img svg picture video audio iframe embed object canvas
+                        table hr input button select textarea math)
+
+  defp blank_body?(html) when is_binary(html) do
+    cond do
+      Regex.match?(~r/<\s*(#{Enum.join(@self_visible_tags, "|")})\b/i, html) ->
+        false
+
+      true ->
+        html
+        |> String.replace(~r/<[^>]*>/, "")
+        |> String.replace(~r/&nbsp;|&#160;|&#xa0;/i, " ")
+        |> String.trim()
+        |> Kernel.==("")
+    end
+  end
+
+  defp blank_body?(_not_a_string), do: true
 end

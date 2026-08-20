@@ -4,46 +4,330 @@ name: console-harness
 # is the surface that renders the deploy stage rail, the freshness badge, and
 # the one-click rollback control — all pure helpers with rich edge cases
 # (min-dwell pacing, stale-vs-fresh classification, deploy-eligibility). Its
-# node:vm harness (__app.test.mjs, 415 tests) pins that logic against the
+# node:vm harness (__app.test.mjs) pins that logic against the
 # SHIPPED file but until now gated NOTHING: cloud.yml runs Elixir only, and
 # ci.yml's node:test is scoped to web/**. A regression to the rail/freshness/
 # rollback helpers shipped blind. This zero-dependency job closes that gap.
 #
-# NOTE: this workflow only *gates* a PR once it is registered as a required
-# check in the repo's branch-protection settings (a human GitHub step). Until
-# then it still runs and reds the PR page on failure.
+# Jobs:
+#   0. changes       — the DISPATCHER. Always runs. Computes the changed-path
+#                      set against the PR base and emits the one boolean the
+#                      expensive jobs are gated on.
+#   1. console-unit  — the node:vm harness, the preview smoke run, the seal
+#                      predicate's own tests, the CSS/token drift gate.
+#   2. cssom-parity  — the only check here that PARSES the artifact (see below).
+#   3. tier-floor-render — the only check here that RENDERS one, in a browser:
+#                      the geometric half of the billing tier-floor guard.
+#   4. path-escape   — the path ratchet + its harness. Unfiltered, blocking.
+#   5. console-gate  — the AGGREGATOR. The one name that should be REQUIRED.
 #
-# PATH FILTERS COVER THE GOLDENS TOO. The harness compares the fixtures embedded
-# in cloud/priv/static/__preview__/coherence.html against the committed Go
-# goldens under internal/**/testdata/. Scoping the triggers to cloud/priv/static
-# alone let a foreign PR regenerate a golden without ever running this job:
-# #4393 added the considering/researching lifecycle rows and main went red on
-# the NEXT cloud PR instead of its own (repaired by gr-p5-coherence-fixture).
-# Any path this harness reads belongs in both filters below.
+# ── THE SKIP SHIM (transplanted from elixir.yml — honest-gates D18/D19/D31) ──
+#
+# THIS WORKFLOW MUST NEVER REGAIN A WORKFLOW-LEVEL `on: … paths:` KEY.
+#
+# It carried two until wave 9. Measured on live GitHub: a paths-filtered
+# workflow emits NO workflow run and NO check run at all, so a branch-protection
+# rule requiring a name from it leaves the PR BLOCKED forever — reported as
+#     Required status check "X" is expected.   <- never reported: deadlock
+#     Required status check "X" is failing.    <- an actual red
+# and PR #7805's docs-only head f1c33790 rendered 13 check runs with not one
+# console-harness name among them. So path decisions are made at JOB level,
+# behind the always-running `changes` dispatcher, and this workflow now renders
+# a check run on EVERY head.
+#
+# A job skipped by a job-level `if:` DOES publish a check run, with conclusion
+# `skipped`, and GitHub counts `skipped` as PASSING for a required context.
+# That is what makes the shim work — and it is also the trap: a job whose
+# `needs` dependency FAILED reports `skipped` too. `if: always()` buys the RIGHT
+# TO DECIDE; it does not decide. Hence `console-gate` below, which enumerates
+# every upstream result and fails on anything outside an explicit allow-set.
+#
+# REGISTRATION IS NOT A HUMAN CLICKING IN SETTINGS. The required-context roster
+# is committed in .github/required-checks.json and applied by
+# `scripts/required-checks-apply.sh --confirm`. The name to register from this
+# workflow is `Console gate` — the aggregator, NEVER a leaf job: a leaf can be
+# legitimately `skipped`, and a matrixed or never-started leaf publishes a name
+# that does not match what was registered.
+#
+# THE PATH SET COVERS THE GOLDENS — AND THE READS NOBODY DECLARED. The harness
+# compares fixtures embedded in cloud/priv/static/__preview__/coherence.html
+# against committed Go goldens under internal/**/testdata/, and the seal
+# predicate's tests reach .github/workflows/cloud.yml, design/emit-fence.test.mjs
+# and five cloud/test/barkpark_cloud/web/*_test.exs files. Scoping the old
+# triggers to cloud/priv/static alone let a foreign PR regenerate a golden
+# without ever running this job (#4393). The set itself now lives in
+# scripts/console-path-escape-check.sh, not here, for one reason: that script is
+# also the RATCHET that re-derives the harness's real cross-tree reads from the
+# working tree and fails when one is not dispatched on. One declaration, so the
+# filter and its proof cannot drift.
 
 on:
+  pull_request:
   push:
     branches: [main]
-    paths:
-      - "cloud/priv/static/**"
-      - "internal/taskboard/testdata/**"
-      - "internal/pdrender/testdata/**"
-      - ".github/workflows/console-harness.yml"
-  pull_request:
-    paths:
-      - "cloud/priv/static/**"
-      - "internal/taskboard/testdata/**"
-      - "internal/pdrender/testdata/**"
-      - ".github/workflows/console-harness.yml"
 
 concurrency:
   group: console-harness-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    # THE DISPATCHER. No `if:`, no matrix, no path filter — it runs on every
+    # event, always, so the jobs behind it always have a defined answer.
+    #
+    # It never emits `false` when it cannot tell. On an unresolvable base, a
+    # base with no common ancestor, or an uninterpretable verdict it FAILS; on
+    # an empty diff — rare but legal — it dispatches TRUE. That polarity is the
+    # whole point: a dispatcher that "couldn't tell" and emitted all-false would
+    # skip the entire console harness and publish a green required context.
+    # Never a silent false: fail, or run everything.
+    name: Dispatch (console paths)
+    runs-on: ubuntu-latest
+    outputs:
+      console: ${{ steps.sets.outputs.console }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
+          # `refs/pull/N/merge` — a commit that already contains main's advance
+          # — while `pull_request.base.sha` LAGS the base branch tip. The
+          # three-dot diff below then sweeps in every commit main gained since
+          # that stale base, and the skip never fires (charter D34).
+          #
+          # This job ONLY. The other jobs here deliberately keep the merge ref:
+          # they must test the merged result, not the head in isolation.
+          # `github.sha` is the fallback for `push` events, which have no PR.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history: the PR base sha must be resolvable locally for the
+          # three-dot diff below. A shallow checkout makes `git cat-file -e`
+          # miss it, which this step treats as a hard failure.
+          fetch-depth: 0
+
+      - id: sets
+        name: Compute the changed-path set
+        run: |
+          set -euo pipefail
+
+          event="${{ github.event_name }}"
+          if [ "$event" != "pull_request" ]; then
+            # push-to-main (and anything else): NEVER skip. Main is the branch
+            # every other run is compared against; a partial main is worse than
+            # a slow one, and there is no reviewer left to notice.
+            echo "event '$event' is not a pull_request — the console path set is true."
+            echo "console=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then
+            echo "::error::dispatcher: the PR carries no base sha. Refusing to guess — a guessed base skips the harness and reports green."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            # The base commit can be absent from this checkout during burst
+            # merges. Try to fetch it once, then give up loudly.
+            git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::error::dispatcher: PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base."
+            exit 1
+          fi
+
+          # A base with NO common ancestor makes the three-dot diff below exit
+          # 128 with a raw `fatal: … no merge base` and ZERO annotation: under
+          # `set -euo pipefail` the assignment dies and the author sees a red
+          # dispatcher with no guidance. Name the condition instead. There is
+          # deliberately NO two-dot fallback — measured, `base HEAD` sweeps in
+          # the base's ENTIRE content and dispatches true for the wrong reason,
+          # which is exactly the "verdict from an unknown base" this job refuses.
+          if ! git merge-base "$base" HEAD >/dev/null 2>&1; then
+            echo "::error::dispatcher: PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Refusing to emit a path verdict — and refusing a two-dot fallback, which would sweep in the base's entire content. Rebase the branch onto its base branch."
+            exit 1
+          fi
+
+          echo "diff base: ${base} (three-dot against HEAD)"
+          # `-z` + `--no-renames` are BOTH load-bearing; either alone certifies
+          # a hole (measured, wave 10):
+          #   * plain `--name-only` QUOTES and octal-escapes any path holding a
+          #     non-ASCII byte, and keeps quoting `"`, `\` and newline even under
+          #     core.quotepath=false — `cloud/priv/static/we"ird.js` prints as
+          #     `"cloud/priv/static/we\"ird.js"`, the anchored ERE below misses
+          #     it, and this job reports a GREEN required context over a harness
+          #     that never looked. `-z` emits the raw bytes, which cannot be
+          #     quoted; `tr` restores the line format the matcher reads.
+          #   * rename detection (default-on since git 2.9) prints only the
+          #     DESTINATION, so `git mv cloud/priv/static/app.js docs/app.js`
+          #     yields console=false while the file under test moved out from
+          #     under the harness. `--no-renames` prints both sides.
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          echo "changed files:"
+          printf '%s\n' "$changed"
+
+          if [ -z "$changed" ]; then
+            # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
+            # PR, nets to nothing against the base. The old polarity failed here
+            # — a permanently red required context on a legal PR, with no
+            # self-service fix for the author. Run everything instead: expensive,
+            # never wrong. Never `false`, which is the only truly unsafe answer.
+            echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching console=true and running the WHOLE harness rather than skipping it — a skip here would green a required context nothing measured. Cost: the full console harness, a few minutes."
+            echo "console=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The path set is declared ONCE, in the ratchet that proves it.
+          console="$(printf '%s\n' "$changed" | bash scripts/console-path-escape-check.sh --match console)"
+
+          case "${console}" in
+            true | false) ;;
+            *)
+              echo "::error::dispatcher: refusing to emit the uninterpretable verdict console=${console}."
+              exit 1
+              ;;
+          esac
+
+          echo "verdict: console=${console}"
+          echo "console=${console}" >> "$GITHUB_OUTPUT"
+
+  path-escape:
+    # DELIBERATELY UNFILTERED — no `if:`, no dependency on the dispatcher. This
+    # job proves the dispatcher's path set still covers everything the harness
+    # reads, so gating it on that same set would let it go dark exactly when it
+    # is needed (charter D26). It costs a few seconds of bash.
+    name: Console path-escape ratchet
+    runs-on: ubuntu-latest
+    # ── THE VERDICT CHANNEL, EXTENDED TO THE LAST EXIT-2-CAPABLE JOB (D776) ──
+    # Same contract as console-unit's and cssom-parity's channels below: read
+    # ONLY to choose the sentence a human reads, never consulted by anything
+    # that computes pass/fail. Wave 63 gave console-unit this channel and left
+    # this job one over, so a path-escape REFUSAL still reached the merge
+    # button as a bare `FAIL path-escape ratchet: failure`.
+    #
+    # THE REFUSAL IS REACHABLE, not theoretical: scripts/console-path-escape-
+    # check.sh exits 2 from three sites — an unknown path-set name, an
+    # unrecognised argument, and a path set that resolves to an EMPTY pattern
+    # (an empty ERE matches every line, so the script refuses rather than
+    # answer). The last one is reached by the BARE `--check` invocation this
+    # job runs, with no argument at all: emptying CONSOLE_PATHS and running
+    # `bash scripts/console-path-escape-check.sh` exits 2 at that site. A
+    # refusal there means the ratchet made NO claim about path coverage — it is
+    # not "the repo is clean" and not "a read escaped", and the two must not
+    # read alike at the merge button.
+    #
+    # A step that PASSES publishes nothing, so this chain reduces to the one
+    # failing step's verdict, and to the empty string when the job dies
+    # somewhere with no exit-2 vocabulary (e.g. checkout). Empty is read by the
+    # aggregator as "no verdict published", exactly as before this channel
+    # existed.
+    outputs:
+      verdict: >-
+        ${{ steps.selftest.outputs.verdict
+        || steps.ratchet.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Harness (the ratchet must be able to fail)
+        id: selftest
+        run: |
+          # THE VERDICT WRAPPER (see this job's `outputs:` note). `set -uo
+          # pipefail` WITHOUT `-e`, for the reason cssom-parity gives: `-e`
+          # would kill the shell before the case could read `rc`.
+          # `${GITHUB_OUTPUT:-}` is guarded so publishing a verdict can never
+          # break the classification it describes. Both exits stay non-zero — a
+          # refusal is not a pass.
+          set -uo pipefail
+          rc=0
+          bash scripts/console-path-escape-check.sh --selftest || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=path-escape ratchet ${v} — console-path-escape-check.sh --selftest::console-path-escape-check.sh --selftest exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      - name: Every repo-root read is dispatched on
+        id: ratchet
+        run: |
+          # Same wrapper, same vocabulary. THIS is the invocation that can
+          # reach the empty-pattern refusal: no argument, so the script takes
+          # its `--check` default and resolves the console path set.
+          set -uo pipefail
+          rc=0
+          bash scripts/console-path-escape-check.sh || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=path-escape ratchet ${v} — console-path-escape-check.sh::console-path-escape-check.sh exited ${rc}. exit 2 is a REFUSAL to measure (an unknown path-set name, an unrecognised argument, or a path set that resolved to an empty pattern) and makes NO claim about path coverage in either direction; exit 1 is a coverage defect the ratchet really measured. The cause is printed by name in this step's own output above."
+          exit 1
+
+      # ── TDZ ORDER + THE RUNTIME PIN (cch-w61) ──────────────────────────────
+      # Both guards live HERE, in the unfiltered job, and not in console-unit,
+      # for the same reason the ratchet above does: console-unit carries
+      # `if: needs.changes.outputs.console == 'true'`, so a PR that edits only
+      # this workflow's `node-version:` lines — the precise edit the pin exists
+      # to catch — would skip its own guard. An instrument that goes dark on the
+      # change it measures is not an instrument (charter D26).
+      #
+      # No `setup-node` step in this job, deliberately: both scripts are
+      # zero-dependency (node builtins / POSIX sh) and run on the runner's
+      # default Node, and a setup-node here would itself be a FOURTH
+      # `node-version:` entry — the pin below would red on its own workflow.
+      #
+      # The self-test runs FIRST and in the SAME STEP as the measurement. The
+      # TDZ guard is a heuristic lexer, not a parser: v1 of it mis-lexed regex
+      # literals and reported `crossings: 0, exit 0` on a file with five live
+      # crossings. A guard that fails silently toward green must be made to red
+      # on a known fixture before its green means anything.
+      - name: TDZ order — the guard must lose on its fixture, then the harness must be clean
+        run: |
+          node scripts/console-tdz-order-check.mjs --selftest
+          node scripts/console-tdz-order-check.mjs cloud/priv/static/__app.test.mjs
+
+      - name: Console runtime pin — the declaration and this workflow agree
+        run: |
+          sh scripts/console-runtime-pin-check.sh --selftest
+          sh scripts/console-runtime-pin-check.sh
+
   console-unit:
     name: Console client unit harness
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
     runs-on: ubuntu-latest
+    # ── THE VERDICT CHANNEL, EXTENDED TO THE BROWSERLESS JOB (D209 shape) ────
+    # Same contract as cssom-parity's channel below — read only to choose the
+    # sentence a human reads, never consulted by anything that computes
+    # pass/fail — and wired here because the aggregate was naming ONE of TWO
+    # refusals. On run 31322709682 this job exited 2 with the same refusal
+    # tier-floor-render did and reached the merge button as a bare
+    # `FAIL console-unit: failure` with no verdict at all, because it had
+    # `outputs:` None and its `decide` line took no verdict argument.
+    #
+    # SEVEN of this job's steps can exit 2 (ten exit(2) sites: breakpoint-sweep
+    # 4, member-authority-sweep 1, and one each in the five censuses). Each of
+    # those steps classifies its own exit code and publishes the verdict BEFORE
+    # exiting — the shape proven to survive `exit 1` on run 31136979488. A step
+    # that PASSES publishes nothing, so the chain below reduces to the one
+    # failing step's verdict, and to the empty string when the job dies in one
+    # of the un-wrapped steps (`node --check`, the two `node --test` runs, the
+    # smoke harness, the css/token gate, the seal-predicate network probe) —
+    # none of which has an exit-2 vocabulary. Empty is read by the aggregator as
+    # "no verdict published", exactly as before this channel existed.
+    outputs:
+      verdict: >-
+        ${{ steps.sweep.outputs.verdict
+        || steps.member-authority.outputs.verdict
+        || steps.binding-census.outputs.verdict
+        || steps.unknown-census.outputs.verdict
+        || steps.reason-arm-census.outputs.verdict
+        || steps.me-envelope-census.outputs.verdict
+        || steps.agent-event-census.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +342,223 @@ jobs:
       - name: Run console harness
         run: node --test cloud/priv/static/__app.test.mjs
 
+      # The preview SMOKE harness — the instrument that renders every console
+      # scenario against the SHIPPED app.js and asserts what each one draws. It
+      # carried gate authority nobody had wired: it sat RED on main for two days
+      # (a stale `data-step="secure"` exclusion authored in f021b4cd4 on
+      # 2026-07-24, two days before the product legitimately gained the rung in
+      # 1b71a4d09 on 2026-07-26) and no job
+      # anywhere would have said so. Zero-dependency and node-20 clean: it imports
+      # only node builtins plus ./scenarios.mjs and reads only ../app.js — no
+      # Chrome, no network, no goldens.
+      - name: Run preview smoke harness
+        run: node cloud/priv/static/__preview__/smoke.mjs
+
+      # ── THE MEMBER-ACTOR RENDERED-STATE AUTHORITY SWEEP (cch-w46-s7) ────────
+      #
+      # The smoke harness above asserts that each scenario DREW what it should.
+      # This one asks the orthogonal question the epic had no instrument for:
+      # across every scenario whose own GET /v1/me answers role="member", what
+      # is the console actually OFFERING? It boots them through smoke.mjs's shim
+      # (which is why smoke.mjs is now importable and silent on import — the
+      # sweep's first guard measures exactly that, in a child process) and reads
+      # the RENDERED BYTES, accounting for every control against a hook table
+      # and failing closed on anything unaccounted for.
+      #
+      # WHY IT CAN LOSE, measured, not asserted: revert cch-w48-s2's site-screen
+      # fence (`var githubControl = authority === "grant"` → `= true`) and this
+      # step reds naming #site-github — while the smoke harness above stays at
+      # "all 110 scenarios rendered", because the rendered corpus has no
+      # expectation on that control. It is the first corpus-level instrument in
+      # this epic that can lose on that fence.
+      #
+      # Same shape as the standalone censuses below: node builtins only, no
+      # Chrome, no network.
+      - name: Member-actor rendered-state authority sweep
+        id: member-authority
+        run: |
+          # THE VERDICT WRAPPER (see this job's `outputs:` note). It preserves the
+          # instrument's exit VOCABULARY — 2 = refused to measure, 1 = a defect
+          # it really measured — instead of collapsing both into "the job
+          # failed", which is what sent a reader of run 31322709682 hunting for
+          # an environment fault that was not there.
+          #
+          # `set -uo pipefail` WITHOUT `-e`, for the reason cssom-parity gives:
+          # `-e` would kill the shell at the `node` line before the case could
+          # read `rc`. `${GITHUB_OUTPUT:-}` is guarded so publishing a verdict
+          # can never break the classification it describes. Both exits stay
+          # non-zero — a refusal is not a pass.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/member-authority-sweep.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — member-authority-sweep.mjs::member-authority-sweep.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      # The seal predicate's OWN TESTS — never a live seal run. `seal-predicate.mjs`
+      # decides clause (b) with `git merge-base --is-ancestor`, and under
+      # actions/checkout@v4's depth-1 default (what both jobs here use) that exits
+      # 128 `Not a valid object name`; the predicate catches ANY non-zero as "not an
+      # ancestor", so running the instrument itself in CI would manufacture a false
+      # NO SEAL out of a shallow clone. What runs here instead is the predicate's
+      # test file, which drives it against COMMITTED FIXTURES through `--ledger`:
+      # a fixture's own `landed`/`diffs` entries stand in for those git reads
+      # (seal-predicate.mjs:441-450), so the fixture-driven tests never ask a
+      # shallow clone a question it cannot answer.
+      #
+      # TWO THINGS THE OLD TEXT HERE ASSERTED AND THE BYTES REFUSE, both re-measured
+      # at 3a32373b8 rather than inherited:
+      #
+      #   * NOT every spawn is `--guard-cmd true`. Most are — that stub is how the
+      #     fixture tests isolate clause (b) from the guard arm — but the clause-(b)
+      #     ladder section runs WITHOUT it on purpose (its own words, at
+      #     seal-predicate.test.mjs:546: "Run WITHOUT --guard-cmd, so the two
+      #     committed guards actually execute"), so the two registered rung-1
+      #     guards — cloud/priv/static/__app.test.mjs and design/emit-fence.test.mjs
+      #     — really spawn and their stdout is really matched against `guardExpect`.
+      #
+      #   * HERMETIC W.R.T. THE NETWORK — as of wave 30, and only w.r.t. the network.
+      #     Until then the wave-11 control spawned the predicate with no `--ledger`,
+      #     which `curl`s ${BP_SERVER:-https://guerrilla.barkpark.cloud} for the live
+      #     roster — ANONYMOUSLY, since BP_TOKEN is unset here. This step, and so the
+      #     REQUIRED `Console gate` that aggregates this job, was therefore only as
+      #     available as a host this repo does not own, and its outage surfaced as a
+      #     bare exit-code mismatch (`2 !== 1`) naming neither the network nor the
+      #     ledger. That control now stubs the roster IN SOURCE on the live branch,
+      #     and the suite makes NO network call at all: run it with a `curl` shim
+      #     first on PATH and the shim never fires, or with
+      #     `BP_SERVER=http://127.0.0.1:1` and it stays green.
+      #
+      #     THE OUTAGE RED HAS ITS OWN NAMED HOME NOW: `wave 30: a ledger this program
+      #     could not REACH is an INFRA FAULT that says so by name` drives a refusing
+      #     `curl` shim and asserts `code=LEDGER-UNREACHABLE` at exit 2, next to the
+      #     wave-29 test that pins `code=LEDGER-UNREADABLE` for an HTTP error body. So
+      #     ANY red in this step is now a real defect — none of them mean "the ledger
+      #     was unreachable". Counts and line numbers are deliberately not restated
+      #     here (the old text drifted to `59 tests` and line `1080` against a suite
+      #     that had moved on): run the file, read its own tally.
+      #
+      #     STILL NOT HERMETIC W.R.T. GIT. The suite passes `--repo <repo root>` and
+      #     the predicate reads real history through it — see the depth-1 note above.
+      #
+      # It passes `--repo <the real repo root>`, which is why the console path
+      # set reaches .github/workflows/cloud.yml, design/emit-fence.test.mjs and
+      # cloud/test/barkpark_cloud/web/** — see scripts/console-path-escape-check.sh.
+      # RUN UNDER A RECORDING `curl`, SO THE HERMETIC CLAIM ABOVE IS AN EXIT CODE.
+      #
+      # The paragraph above asserts this suite makes no network call. Wave 30 made
+      # that true; nothing made it STAY true, and a comment that outlives the
+      # property it describes is the exact defect this epic is named for — the
+      # old text drifted to `59 tests` and line `1080` while sitting right here.
+      # So the claim is measured rather than written: a pass-through `curl` first
+      # on PATH records every invocation, and the step fails if the log is not
+      # empty. Pass-through, not refusing, so a red reports WHAT was called
+      # instead of collapsing into a confusing downstream failure.
+      #
+      # This does not disturb the outage test, which installs its own refusing
+      # `curl` ahead of this one for its own spawn: that shim is a hermetic
+      # fixture, not a network call, and it is invisible here by construction.
+      #
+      # Proven able to lose: run with origin/main's copy of the test file and the
+      # log carries 2 calls to guerrilla.barkpark.cloud; on this tree it is 0.
+      - name: Seal predicate tests (no network — recorded, not asserted in prose)
+        run: |
+          set -euo pipefail
+          shim="$(mktemp -d)"
+          log="$shim/curl-calls.log"
+          : > "$log"
+          printf '#!/bin/sh\necho "$*" >> %s\nexec /usr/bin/curl "$@"\n' "$log" > "$shim/curl"
+          chmod +x "$shim/curl"
+          PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs
+          if [ -s "$log" ]; then
+            echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
+            cat "$log"
+            exit 1
+          fi
+          echo "no curl invocations — the suite is hermetic w.r.t. the network"
+
+      # THE RESPONSIVE SWEEP'S COVERAGE REFUSAL — the CHEAP leg only.
+      #
+      # breakpoint-sweep.mjs derives its width axis from app.css's own @media
+      # set and its screen axis from index.html's own section.view set, and
+      # compares both against the tables its render leg actually drives. Run
+      # browserless it is ~50ms of parsing and answers ONE question: has the
+      # artifact grown a breakpoint or a screen that no sweep covers? That is
+      # the hole wave 13 measured — 621-768 swept by nothing, seven screens
+      # never rendered at tablet width at all — and the only shape that keeps it
+      # closed is a check that fails the moment the axis moves.
+      #
+      # ONLY THIS LEG IS WIRED. `--render` drives 338 headless cells at roughly
+      # a second each: MINUTES, not seconds. It is a developer instrument and
+      # the wave's evidence engine, deliberately not a CI step.
+      #
+      # It belongs HERE, in the node-20 job, precisely because it needs no
+      # Chrome and no port — so it cannot join the class of instruments nothing
+      # runs. (That class had exactly one member, overflow-guard.mjs, and it is
+      # empty as of the `overflow-guard` job below. Note the old proof offered
+      # here — "`grep -rn overflow-guard .github/` still exits 1" — was
+      # self-refuting the moment this comment named the file: the honest
+      # predicate is always "no `run:` step invokes it", never a grep over
+      # prose.)
+      #
+      # Its unit tests run alongside it: the refusal's parser is where a blind
+      # spot would hide (a width token the parser eats but cannot resolve
+      # DISAPPEARS, and the sweep exits 0 over a breakpoint nobody covers —
+      # measured, and pinned in breakpoint-sweep.test.mjs).
+      #
+      # HONEST SCOPE: `Console gate`, the aggregator this step reaches branch
+      # protection through, is a REQUIRED context on `main` — a red here BLOCKS
+      # the merge, and has done since 2026-08-03. This comment used to say the
+      # opposite, and kept saying it for the two waves after it stopped being
+      # true, because it re-enumerated the required set in prose. So it does not
+      # anymore: `.github/required-checks.json` is the single committed source
+      # of truth for what protection enforces, and
+      # scripts/required-checks-verify.sh reds when a workflow's prose
+      # contradicts that file. Nothing is registered here.
+      - name: Responsive sweep — breakpoint/screen coverage refusal
+        id: sweep
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/breakpoint-sweep.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — breakpoint-sweep.mjs::breakpoint-sweep.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      - name: Responsive sweep unit tests
+        run: node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs
+
+      # THE BRING-UP RETRY'S OWN TESTS (deploy-reliability wave 8).
+      #
+      # Wired HERE, in the browserless job, for the reason the comment above
+      # gives about the sweep: bringup-retry.mjs is the code that decides
+      # whether a Chrome that did not start becomes a retry or a refusal, and
+      # it is shared by all four browser instruments — so it must not join the
+      # class of code nothing runs. Its whole subject is the failure path, which
+      # a green browser job by definition never exercises: on a healthy runner
+      # every instrument comes up first try and this module's retry, its
+      # stderr capture and its refusal are all UNVISITED. This step is the only
+      # thing in CI that visits them.
+      #
+      # The load-bearing assertion in it is the fail-closed one: N consecutive
+      # refusals still REFUSE. If that ever regressed, a required Console gate
+      # could go green over a run that measured nothing.
+      - name: Bring-up retry unit tests (the refusal path a green run never visits)
+        run: node --test cloud/priv/static/__preview__/bringup-retry.test.mjs
+
       # The SPA's design contract, machine-checked (charter GR5): dead classes,
       # undefined tokens, WCAG contrast across every theme identity, offline-purity,
       # and the living styleguide's class/token drift. Exits non-zero on any E1-E8
@@ -65,6 +566,335 @@ jobs:
       # the token ramps, and the cloudChrome bridge have landed and it exits 0.
       - name: CSS/token drift gate
         run: node cloud/priv/static/__css_check.mjs
+
+      # THE ELEVATED-WRITE BINDING CENSUS (cch-w37-s4, charter D383/D409/D421).
+      #
+      # The console draws write affordances. Forty of the seventy-nine are above
+      # plain team membership, and eighteen of THOSE have no client predicate in
+      # front of them — a member sees the button, clicks it, gets a 403. This
+      # step does not fix those eighteen; it makes the NINETEENTH impossible to
+      # add quietly. Two arms, both proven able to lose by mutation before this
+      # step was wired: ADD (a write call site no PIN row predicts) and REMOVE
+      # (a pinned site whose function/route pair has vanished).
+      #
+      # A SEPARATE STEP, NOT A CASE IN __app.test.mjs, and deliberately so: this
+      # wave has three other slices editing that file, and a census that has to
+      # merge with them is a census that gets weakened to land. It also reads
+      # cloud/lib/barkpark_cloud/web/router.ex and accounts.ex — outside the
+      # node:vm harness's world — to check that the six inline-`cond` non-admin
+      # refusals are still six and that every `context_fn` it names still exists.
+      # Both of those paths are already in the console dispatch set (see
+      # scripts/console-path-escape-check.sh), so a router edit reaches it.
+      #
+      # WHY IT CAN LOSE, in one line each: delete the `providerCanWrite` fence
+      # and add a POST — ADD reds and names the line; delete a pinned call site
+      # — REMOVE reds and names the row. Neither arm is a count (D383): a commit
+      # that predicates one affordance and ships another unpredicated keeps the
+      # population identical and a `count <= N` gate green.
+      - name: Elevated-write binding census (ADD + REMOVE)
+        id: binding-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__binding_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __binding_census.mjs::__binding_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      # ── THE REASON-ARM CENSUS (charter D448/D449, wave 40) ──────────────────
+      #
+      # Sibling to the binding census above, and the same shape of instrument:
+      # it reads a fact out of the ELIXIR tree that the console's own harness is
+      # structurally incapable of seeing.
+      #
+      # Auth.forbidden/2 can merge a `reason:` CAUSE around a 403 — for refusals
+      # where no static authority label would be true (a rank-relative member
+      # refusal: the SAME admin refused on a peer admin succeeds on a plain
+      # member). The console maps those through FORBIDDEN_REASON_COPY. A cause
+      # with no arm there does NOT degrade to silence: forbiddenEvidenceCopy
+      # returns null, friendly() falls through, and the person reads the curated
+      # `forbidden` entry — a sentence written for a different refusal entirely.
+      # That is exactly how a plain team admin clicking Remove on a peer admin
+      # came to read "Only the team owner can manage billing." (charter D448).
+      #
+      # WHY IT CANNOT BE A CASE IN __app.test.mjs, and this is not a merge-window
+      # convenience: the bug is a key that was NEVER WRITTEN, so there is nothing
+      # in app.js to diff and no drift to detect — the map is complete with
+      # respect to itself. The only oracle for "which causes exist" is the
+      # EMITTER, in another language in another tree. Measured (D449): adding the
+      # two missing arms to app.js alone ships 919/919 green and smoke 104/104.
+      #
+      # PROVEN ABLE TO LOSE, IN BOTH DIRECTIONS, BEFORE THIS STEP WAS WIRED:
+      #   rc=1 — against origin/main's app.js it names all three emission sites
+      #          (router.ex:4958 twice, via the dynamic binding it resolves one
+      #          hop back, and :4997 literal), and clears the moment the arms land
+      #   rc=2 — it REFUSES to measure rather than pass on an input it cannot
+      #          read: an unresolvable `reason:` binding, a renamed/removed
+      #          FORBIDDEN_REASON_COPY, an unrecognised evidence key, or a
+      #          zero-emission census (a broken extractor is not a clean tree)
+      #
+      # It reads cloud/lib/barkpark_cloud/web/router.ex, which is already in the
+      # console dispatch set (scripts/console-path-escape-check.sh), so a router
+      # edit that grows a new cause reaches this step.
+      - name: Refusal reason-arm census (router causes ⊆ console arms)
+        id: reason-arm-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__reason_arm_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __reason_arm_census.mjs::__reason_arm_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      # ── THE /v1/me ENVELOPE CENSUS (charter D478/D480/D481, wave 43) ────────
+      #
+      # The third sibling in this family, and the one that audits the HARNESS
+      # ITSELF rather than app.js. Everything the two steps above certify, and
+      # everything __app.test.mjs and smoke.mjs certify, is certified against
+      # ONE fixture producer: `me()` in __preview__/scenarios.mjs, the single
+      # builder behind every logged-in scenario's GET /v1/me. If that producer
+      # mints a different account than the route mints, this whole job is a
+      # required context telling every merge the console renders correctly for
+      # an account nobody can ever hold.
+      #
+      # It was: before wave 43 me() emitted FOUR of /v1/me's SIX top-level keys
+      # — no `teams`, no `team_authority` — so all 93 logged-in scenarios took
+      # app.js's pre-wave-42 compatibility floors and the `grant` authority band
+      # had never been painted by any instrument in the repo.
+      #
+      # RUNTIME, NOT A SOURCE SCAN, and that is the load-bearing choice (D480):
+      # it calls the exported route(name, "GET", "/v1/me") over every scenario
+      # and reads the body that comes back, which covers mock.js and smoke.mjs
+      # in one pass (both delegate to that same route()). A scan of me()'s
+      # literal would report `user.platform_operator` as a hole; it is not one —
+      # operatorMe() raises it and the census prints it as served by 5 of 93.
+      #
+      # NOT A COUNT, EITHER SIDE (D383's rule, applied here): both sides are
+      # derived sets — the server's from a brace-balanced walk of the
+      # `get "/v1/me"` response map in router.ex, the corpus's from the served
+      # bodies — and the gate is their symmetric difference, reported by KEY
+      # PATH including nesting. There is no expected total in the file, so a
+      # commit that drops one key and adds another cannot hold the gate green.
+      #
+      # PROVEN ABLE TO LOSE, BOTH DIRECTIONS, BEFORE THIS STEP WAS WIRED:
+      #   rc=1 — against origin/main's corpus it names all TEN missing key paths
+      #          over two subjects (teams + 4 nested, team_authority + 4 nested)
+      #          with INVENTED empty, and clears the moment me() is widened
+      #   rc=1 — a NESTED server key a top-level diff would miss (user.locale
+      #          added inside the `user:` sub-map) reds by name
+      #   rc=2 — it REFUSES to measure rather than pass: an unreadable or
+      #          renamed /v1/me clause, a response map it cannot brace-balance,
+      #          a segment that is not `key: value`, a zero-key parse, or a
+      #          corpus where not one scenario answers 200
+      #
+      # It reads cloud/lib/barkpark_cloud/web/router.ex, already in the console
+      # dispatch set (scripts/console-path-escape-check.sh), so a route edit
+      # that grows or drops an envelope key reaches this step. No new leaf name
+      # in .github/required-checks.json: this job is already in console-gate's
+      # `needs:`, so a failure here fails the one required context.
+      - name: /v1/me envelope census (route keys ≡ preview corpus keys)
+        id: me-envelope-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__me_envelope_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __me_envelope_census.mjs::__me_envelope_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      # ── agent-event vocabulary census — A TITLE IS A PROMISE ────────────────
+      # Fourth sibling of the three censuses above, and the same law: the
+      # instance Timeline must not name an event type nothing in the control
+      # plane can write, and must not leave a type that IS written rendering as
+      # a raw lowercase slug. Before wave 51, TLV_EVENT_TITLES gave human
+      # titles to `backup`, `tls` and `content` — ZERO producers in cloud/lib
+      # and none in the history of main — tlvVerdictOf answered "completed" for
+      # a backup that cannot exist, and the empty state told a brand-new owner
+      # in the console's own voice that "backups" would appear here. Meanwhile
+      # `space`, which the agent beat DOES write, had no title at all.
+      #
+      # SIDE A IS READ BY RUNNING, NOT BY PARSING (charter D341, and this is
+      # the load-bearing choice): app.js is evaluated in a node:vm sandbox and
+      # the vocabulary comes off `__bpTestHook.tlvEventTitles`, which app.js
+      # derives with Object.keys(TLV_EVENT_TITLES). A literal parse was built
+      # and MEASURED first — against a value-preserving `forEach` refactor of
+      # the map it emitted EIGHTY false orphans with a confident verdict while
+      # the vm run reported the one real defect. A false red in a merge-blocking
+      # gate is worse than the miss it replaces.
+      #
+      # SIDE B IS cloud/lib/** ONLY, AND THAT IS ALSO LOAD-BEARING: a variant
+      # globbing cloud/** runs GREEN on the very tree this census exists to
+      # red, because registry_test.exs and accounts_test.exs supply backup/tls/
+      # content as false producers. Tests are not producers.
+      #
+      # NOT A COUNT, ANY ARM (D383): all three arms are derived SETS and the
+      # gate is their difference in three named directions, so a commit that
+      # drops one title and adds another cannot hold it green.
+      #
+      # PROVEN ABLE TO LOSE, ALL THREE ARMS, EACH MUTATION ONE FILE, BEFORE
+      # THIS STEP WAS WIRED:
+      #   rc=1 — `snapshot: "Snapshot"` added to TLV_EVENT_TITLES in app.js
+      #          alone → "rendered-with-no-producer: snapshot"
+      #   rc=1 — Registry.record_event(_, "quota", …) added to
+      #          health/staleness_worker.ex alone → "produced-with-no-renderer:
+      #          quota", naming the call site by file:line
+      #   rc=1 — the deleted ev(7,"backup",…) row re-added to scenarios.mjs
+      #          alone → "fixture-manufactures-unproducible: backup", naming
+      #          the fixture line
+      #   rc=2 — it REFUSES to measure rather than pass: the tlvEventTitles
+      #          export removed, a non-array export, an app.js that throws, an
+      #          unreadable cloud/lib, or ANY arm under its floor (produced ≥ 4,
+      #          rendered ≥ 4, fixtured ≥ 3). An unreadable render side reads as
+      #          an EMPTY set, which would satisfy every arm trivially — that is
+      #          the exit that matters most.
+      #
+      # NEGATIVE CONTROL, run on the identical tree: the cheap variant whose
+      # side A is AgentEvent's @types allowlist is GREEN where this one reds —
+      # it never opens app.js, so it is blind to every console-side regression
+      # this step exists to catch. DECLARED is not PRODUCED, and @types keeps
+      # backup/tls/content on purpose (charter D576).
+      #
+      # CONSOLE_PATHS already carries both cloud/priv/static/** and cloud/lib/**
+      # (scripts/console-path-escape-check.sh), so a new producer AND a new
+      # title each re-fire this job — the guard is non-vacuous in both
+      # directions. No new leaf in .github/required-checks.json: console-unit is
+      # already in console-gate's `needs:`, so a failure here fails the one
+      # required context.
+      - name: Agent-event vocabulary census (titles ≡ producers ≡ fixtures)
+        id: agent-event-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__agent_event_vocabulary_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __agent_event_vocabulary_census.mjs::__agent_event_vocabulary_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      # ── THE ABSENCE-AS-ANSWER CENSUS, AS A DIRECT RUN (cch-w67-s4, D821) ────
+      #
+      # Fifth of the census family, and the oldest instrument in it:
+      # __unknown_census.mjs used to reach CI only through its __app.test.mjs
+      # spawn test. Wave 68 widened it from a 4-row fold allowlist into a
+      # per-GET-call-site census (every api("GET") site in app.js pinned with a
+      # guarded|sanctioned|degrades verdict plus a proof regex), and a widened
+      # instrument earns the same first-class step its four census siblings
+      # have: its rc is read bare — never piped, a pipe eats the rc — and its
+      # exit-2 REFUSED band (broken walker / zero call sites / breached
+      # positive control) stays distinguishable from a measured defect.
+      #
+      # WHY IT CAN LOSE, one line per arm (all five mutation-proven in a temp
+      # copy, cch-w67-s4): ADD — an unpinned api("GET") arrival reds and names
+      # the function; REMOVE — a deleted or MOVED call site reds (moving between
+      # functions is an ADD+REMOVE pair, which is the attribution proof);
+      # DECAY — stripping a pinned `guarded` row's !ok arm reds because the
+      # row's proof regex stops matching; REFUSE — overlapping walker extents
+      # exit 2 rather than misattribute.
+      - name: Absence-as-answer census (per-GET-call-site ADD + REMOVE + verdict decay)
+        id: unknown-census
+        run: |
+          # Verdict wrapper — same contract as the first one in this job.
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__unknown_census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$v" >> "$GITHUB_OUTPUT"; fi
+          echo "::error title=console-unit ${v} — __unknown_census.mjs::__unknown_census.mjs exited ${rc}. It printed the cause by name in this step's own output above; the Console gate names only the KIND of failure, never the cause."
+          exit 1
+
+      # THE CENSUS'S FIXTURE CONTROL (cch-w40-s3, charter D452).
+      #
+      # The step above is the gate. Until this one landed, nothing showed that
+      # gate LOSING. Its only committed control was (2d), which proves the census
+      # can SEE the decisive POST /v1/providers pair — not that the ADD/REMOVE
+      # set diff, the arm that actually reds a merge, can fire at all. A gate
+      # never observed losing is a gate being trusted.
+      #
+      # AND (2d) is SPLIT in the same commit, because ONE of its two directional
+      # verdict sub-clauses froze a live defect: `bp.predicate !== null` required
+      # submitProviderCred to stay UNPREDICATED forever, so the fix the census
+      # exists to motivate red its own instrument (measured: predicating that PIN
+      # row and correctly moving EXPECT in the same commit still exited 2). That
+      # term is retired and replaced by (2d-ii), the non-directional rule that the
+      # pair may not go BOTH unpredicated — and the add fixture's
+      # VERDICT-COLLAPSE must-flag row is what proves THAT arm can lose.
+      #
+      # THE OTHER directional term is KEPT, as (2d-iii). `gp.predicate === null`
+      # requires submitInlineProviderCred to stay predicated, and that direction
+      # freezes nothing: the fix touches the BARE row. Retiring it too — the
+      # first draft of this slice — measurably dropped a guard main was running:
+      # predicating the bare row AND nulling the gated row's pin predicate in one
+      # commit exited 0 under (2d-i)+(2d-ii) alone where main exits 2. Both
+      # directions are re-measured at rescue time; neither the unfreezing nor the
+      # retained guard is asserted from reading.
+      #
+      # SEPARATE STEPS, NOT CASES IN __app.test.mjs — the same reason the census
+      # step above states in its own comment, and it is true again this wave:
+      # other slices are editing that file, and a census that has to merge with
+      # them is a census that gets weakened to land.
+      #
+      # THE FULL 2x2, NOT JUST THE TWO FIRING CELLS. Each fixture is also run
+      # through the OTHER flag and must exit 0. Without those two cells the pair
+      # would only show the control shouting; with them it shows the control
+      # telling the two arms apart. `set -e` is on by default, so each `test`
+      # below is itself the assertion — an exit code that drifts fails the step
+      # by name rather than being swallowed by a pipeline.
+      - name: Binding census fixture control — ADD arm fires (exit 1)
+        run: |
+          node cloud/priv/static/__binding_census.mjs --add-check \
+            cloud/priv/static/__binding_census.add.fixture.js && rc=0 || rc=$?
+          echo "rc=$rc (expect 1)"
+          test "$rc" -eq 1
+
+      - name: Binding census fixture control — REMOVE arm fires (exit 1)
+        run: |
+          node cloud/priv/static/__binding_census.mjs --remove-check \
+            cloud/priv/static/__binding_census.remove.fixture.js && rc=0 || rc=$?
+          echo "rc=$rc (expect 1)"
+          test "$rc" -eq 1
+
+      - name: Binding census fixture control — the cross cells stay silent (exit 0)
+        run: |
+          node cloud/priv/static/__binding_census.mjs --remove-check \
+            cloud/priv/static/__binding_census.add.fixture.js && rc=0 || rc=$?
+          echo "add fixture under --remove-check: rc=$rc (expect 0)"
+          test "$rc" -eq 0
+          node cloud/priv/static/__binding_census.mjs --add-check \
+            cloud/priv/static/__binding_census.remove.fixture.js && rc=0 || rc=$?
+          echo "remove fixture under --add-check: rc=$rc (expect 0)"
+          test "$rc" -eq 0
 
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
@@ -80,16 +910,39 @@ jobs:
   # node-version: 20; this instrument speaks CDP over a bare global WebSocket,
   # stable-by-default only from Node 22, so a fourth step would inherit 20 and
   # fail. Bumping console-unit to 22 instead would silently change the runtime
-  # under the 415-test __app.test.mjs harness AND __css_check.mjs — a risk-bearing
-  # edit to two working gates to buy nothing. A separate job also earns its own
-  # name in branch protection and runs its ~26s in parallel.
+  # under the __app.test.mjs harness AND __css_check.mjs — a risk-bearing
+  # edit to two working gates to buy nothing. A separate job also runs its ~26s
+  # in parallel.
   #
-  # It inherits the `on:` path filters above verbatim — they are workflow-level,
-  # and the header note about keeping every read path in both filters applies to
-  # this job too (it reads cloud/priv/static/app.css).
+  # It takes the SAME job-level `if:` as console-unit (it reads
+  # cloud/priv/static/app.css), and it reaches branch protection through
+  # `Console gate`, never under its own name.
   cssom-parity:
     name: CSSOM parity (authored CSS vs browser)
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
     runs-on: ubuntu-latest
+    # ── THE VERDICT CHANNEL (deploy-reliability wave 8) ────────────────────
+    # The instrument already distinguishes 2 (REFUSED TO MEASURE) from 1 (a
+    # measured defect), and the wrapper below already prints an honest banner
+    # for each. But `needs.<job>.result` carries ONE word — `failure` — for
+    # both, so the AGGREGATOR, which is the required context a reviewer reads
+    # at the merge button, could only ever say "a job failed". A refusal
+    # therefore arrived looking exactly like a CSS defect.
+    #
+    # PROVEN ON LIVE GITHUB (run 31136979488): a job's `outputs:` DO survive
+    # `exit 1` and reach `needs.<job>.outputs`, both when the output is written
+    # by the same step that exits 1 and when a later step fails. So the verdict
+    # rides this channel while the EXIT CODE stays untouched.
+    #
+    # THIS CHANNEL CAN NEVER GREEN AN UNMEASURED GATE. It is not consulted by
+    # anything that computes pass/fail: the job still exits non-zero, its
+    # `result` is still `failure`, and console-gate's `bad=1` is set from
+    # `result` ALONE. `continue-on-error` is banned (D19) precisely because it
+    # would launder `result`; this output changes only the SENTENCE A HUMAN
+    # READS.
+    outputs:
+      verdict: ${{ steps.cssom.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -106,7 +959,598 @@ jobs:
       # the missing path, instead of silently falling through to a different
       # browser. Both sides go through one normalise(), so a floating Chrome
       # version can only cost sensitivity, never manufacture a false miss.
+      #
+      # THE WRAPPER PRESERVES THE INSTRUMENT'S EXIT VOCABULARY. cssom-parity.mjs
+      # distinguishes 2 (GUARD: it REFUSED to measure — no Chrome, no baseline
+      # sidecar, wrong Node) from 1 (a real parity DEFECT). Bare `run:` collapses
+      # both into "the job failed", and the first thing a reader does with a red
+      # CSS gate is go hunting for a CSS bug that does not exist. Both still exit
+      # 1: a refusal is not a pass. `set -uo pipefail` WITHOUT `-e` — `-e` would
+      # kill the shell at the `node` line before the case could read `rc`. And
+      # NEVER `continue-on-error`: for such a job `needs.<job>.result` reads
+      # `success` even when it failed, which would launder the lie straight into
+      # `Console gate`.
       - name: CSSOM parity gate
+        id: cssom
         env:
           CHROME: /usr/bin/google-chrome
-        run: node cloud/priv/static/__preview__/cssom-parity.mjs
+        run: |
+          set -uo pipefail
+          # The verdict is published BEFORE the exit, in the same step that
+          # exits — the shape proven to survive on run 31136979488.
+          #
+          # `${GITHUB_OUTPUT:-}` and the guard are NOT belt-and-braces:
+          # scripts/console-path-escape-check.test.sh extracts this exact step
+          # body and executes it under `env -i`, so an unguarded write would
+          # kill the step under `set -u` before the case block could classify
+          # the exit code — turning a REFUSED banner into a crash. Publishing
+          # the verdict may never be able to break the classification it
+          # describes.
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
+          rc=0
+          node cloud/priv/static/__preview__/cssom-parity.mjs || rc=$?
+          case "$rc" in
+            0)
+              verdict OK
+              echo "CSSOM parity: authored CSS and the browser agree."
+              ;;
+            2)
+              verdict REFUSED
+              # THE SAME CORRECTION AS THE AGGREGATE'S REFUSED ARM, APPLIED TO
+              # THE ONE PER-INSTRUMENT BANNER THAT STILL DISAGREED WITH IT.
+              # This sentence used to read "an ENVIRONMENT fault, not a
+              # stylesheet defect. app.css was never parsed … fix the
+              # environment". Counted in cssom-parity.mjs rather than
+              # remembered, exit 2 has SIX shapes: no global WebSocket (Node
+              # < 22), no stylesheet at $CSS, no Chrome/CHROME not executable,
+              # a MISSING cssom-heads.baseline sidecar, an UNPARSEABLE one, and
+              # a CDP/bring-up failure raised through die() after a bounded
+              # retry. Three of those six are committed files under
+              # cloud/priv/static/__preview__ — repo faults wearing an
+              # "environment" label — and the last one fires AFTER app.css has
+              # been read, so "never parsed" was false there too. The sibling
+              # tier-floor-render and overflow-guard banners already said
+              # "ENVIRONMENT or COVERAGE"; this one now agrees with them and
+              # with the aggregate. scripts/console-path-escape-check.test.sh
+              # drives this exact step body at rc=2 and both asserts the new
+              # cause set and DENIES the two removed claims.
+              echo "::error title=CSSOM parity REFUSED::The instrument refused to measure (exit 2). It made NO parity claim about cloud/priv/static/app.css in either direction — a refusal is the absence of a measurement, not a clean bill and not an accusation. WHY it refused is in this job's own log, above: cssom-parity.mjs prints the cause by name. exit 2 covers SIX causes and only one of them is the runner — no global WebSocket (Node 20 instead of 22); no stylesheet at \$CSS; no Chrome binary, or CHROME pointing at a non-executable; a MISSING cloud/priv/static/__preview__/cssom-heads.baseline sidecar; a sidecar carrying no parseable count; or a CDP bring-up that failed after a bounded retry in a fresh profile (every attempt's Chrome stderr is in the log). THREE of those six are committed files in this repo, so do NOT assume the environment before reading the line the instrument printed."
+              exit 1
+              ;;
+            1)
+              verdict MEASURED_DEFECT
+              echo "::error title=CSSOM parity DEFECT::The browser's CSSOM disagrees with the authored stylesheet (exit 1). This is a REAL CSS defect in cloud/priv/static/app.css — rules the browser dropped or rewrote. See the diff above."
+              exit 1
+              ;;
+            *)
+              verdict UNINTERPRETABLE
+              echo "::error title=CSSOM parity UNINTERPRETABLE::cssom-parity.mjs exited ${rc}, which is outside its vocabulary (0 pass / 1 defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+  # ── tier-floor-render — the GEOMETRIC half of the billing-tier floor guard ──
+  # #8741 repaired the billing tier grid with a single declaration
+  # (`repeat(auto-fit, minmax(230px, 1fr))`) and shipped with NO guard: every
+  # command this workflow invoked exited 0 on a 180px mutant, so a tidy-down
+  # would have un-fixed a person-facing defect with every check green.
+  #
+  # The guard is a PAIR, and each half refuses a DIFFERENT mutation. The
+  # byte-pin in __app.test.mjs (already run by console-unit, ~55ms, zero
+  # workflow cost) refuses the TEXTUAL tidy-down at any value below 230 — but
+  # it pins a declaration, so it is blind to a re-cut arriving from anywhere
+  # else. THIS job renders the real screen in a real browser and refuses the
+  # GEOMETRIC regression. Measured on this corpus: floors 190…230 are
+  # byte-identical at 901 (three tracks, 283.5px, zero clips) and a 200px floor
+  # passes even the FULL 13-width leg exit 0 — so this half alone is a "<=185"
+  # guard, not a floor guard, and the byte-pin alone is a text guard, not a
+  # layout guard. Neither subsumes the other; both are needed.
+  #
+  # ONE CELL, ONE WIDTH — 2.6s clean / 2.9s red including Chrome bring-up. The
+  # full render leg is 26 cells x 13 widths and takes MINUTES; that stays a
+  # developer instrument (see the comment on the cheap coverage leg above).
+  # `--cell` is exact-match SINGLE-NAME on main: a comma list exits 2.
+  #
+  # SEPARATE JOB, NOT A FOURTH STEP IN console-unit — the same reason as
+  # cssom-parity (D17/D183(e)): console-unit pins node 20, which has no global
+  # `WebSocket`, and this sweep exits 2 there with
+  # `CDP bring-up failed: WebSocket is not defined`. Modelled on cssom-parity
+  # exactly: same `needs`/`if`, node 22, an explicit CHROME, and the same 0/1/2
+  # wrapper — a REFUSAL (2) is not a layout defect and must not send a reader
+  # hunting for a CSS bug that does not exist. Both still exit 1: a refusal is
+  # not a pass. Never `continue-on-error` — `needs.<job>.result` reads `success`
+  # for such a job even when it failed, laundering the lie into `Console gate`.
+  #
+  # HONEST SCOPE: `Console gate`, which this job reaches branch protection
+  # through, is a REQUIRED context on `main` — a red here BLOCKS the merge, and
+  # has done since 2026-08-03. This comment used to say the opposite, having
+  # re-enumerated the required set in prose that then rotted, so it does not
+  # anymore: `.github/required-checks.json` is the single committed source of
+  # truth for what protection enforces, and scripts/required-checks-verify.sh
+  # reds when a workflow's prose contradicts that file. Nothing is registered
+  # here.
+  tier-floor-render:
+    name: Billing tier floor (rendered)
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
+    runs-on: ubuntu-latest
+    # See the verdict-channel note on `cssom-parity` — same contract, same
+    # fail-closed guarantee: this output NAMES the fault, it never grades it.
+    outputs:
+      verdict: ${{ steps.tier.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tier floor — render the billing screen at 901px
+        id: tier
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          # Guarded exactly as in `cssom-parity` above, for the same reason.
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
+          rc=0
+          node cloud/priv/static/__preview__/breakpoint-sweep.mjs --render --widths 901 --cell billing-trial || rc=$?
+          case "$rc" in
+            0)
+              verdict OK
+              echo "Tier floor: the billing tier grid renders at 901px with no clipped control."
+              ;;
+            2)
+              verdict REFUSED
+              echo "::error title=Tier floor render REFUSED::The sweep refused to measure (exit 2) — an ENVIRONMENT or COVERAGE fault, not a layout defect. NO claim is being made about the tier grid. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the sweep's port, or a cell/breakpoint the sweep has no coverage for. A bring-up refusal is retried a bounded number of times in a fresh profile before this fires — every attempt's Chrome stderr is in the log."
+              exit 1
+              ;;
+            1)
+              verdict MEASURED_DEFECT
+              echo "::error title=Tier floor render DEFECT::A measured defect on the billing tier screen at 901px (exit 1) — most likely the .tier-grid track floor was lowered below ~185px, which re-admits five auto-fit tracks and CLIPS the Free tier's CTA label. See the Q1/Q2/Q3 lines above for the element, its scrollWidth/clientWidth and its text."
+              exit 1
+              ;;
+            *)
+              verdict UNINTERPRETABLE
+              echo "::error title=Tier floor render UNINTERPRETABLE::breakpoint-sweep.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+  # overflow-guard (D208/D209): the browser-geometry guard that FIVE waves of
+  # person-facing fixes have shipped their assertions into — and that, until
+  # this job existed, no `run:` step in this repository ever invoked. Its
+  # 108/108 was a hand-run baseline nothing protected: a regression of the
+  # wave-15 fleet lead-column fix would have merged green while the epic's own
+  # browser guard certified it.
+  #
+  # Modelled on `tier-floor-render` above, deliberately byte-for-byte: node 22
+  # (node 20 has no global `WebSocket` and CDP bring-up exits 2 there with
+  # `WebSocket is not defined`), an explicit CHROME, `actions/checkout@v4` with
+  # no `ref:`, and the same 0/1/2/* ladder — a REFUSAL (2) is not a layout
+  # defect and must not send a reader hunting for a CSS bug that does not
+  # exist. Both still exit 1: a refusal is not a pass. Never
+  # `continue-on-error` — `needs.<job>.result` reads `success` for such a job
+  # even when it failed, laundering the lie straight into `Console gate`.
+  #
+  # ONE INVOCATION, NO `--defect` (D208). Chained per-leg invocations were
+  # measured on a quiet host at 28.5s against 12.6s for the single run, and
+  # produced 3/6 FALSE exit-2 refusals against SERVER_CAP = 8000 with a leaked
+  # serve.mjs child. One run pays Chrome + server bring-up once and dodges that
+  # class entirely. It also means the guard's `--defect` single-flag bug
+  # (`argv.indexOf` reads only the first occurrence) is NOT a precondition for
+  # this wiring — it stays an independent filed row.
+  #
+  # HONEST SCOPE: `Console gate`, the aggregator this job reaches branch
+  # protection through, is a REQUIRED context on `main` — a red here BLOCKS the
+  # merge, and has done since 2026-08-03. This comment used to say the opposite,
+  # having re-enumerated the required set in prose that then rotted, so it does
+  # not anymore: `.github/required-checks.json` is the single committed source
+  # of truth for what protection enforces, and
+  # scripts/required-checks-verify.sh reds when a workflow's prose contradicts
+  # that file. Nothing is registered here.
+  overflow-guard:
+    name: Overflow guard (rendered)
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
+    runs-on: ubuntu-latest
+    # See the verdict-channel note on `cssom-parity` — same contract, same
+    # fail-closed guarantee: this output NAMES the fault, it never grades it.
+    outputs:
+      verdict: ${{ steps.overflow.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # W18 REVIEW: the leg COUNT is deliberately not in this copy. Slice S1 of
+      # this same wave adds a seventh (`W18-overview-card-pill`), and a number
+      # baked into a step name is a sentence nothing re-derives — the disease
+      # this epic keeps curing. The guard prints its own leg roster on every
+      # run; read that, not this line.
+      - name: Overflow guard — every defect leg in one browser run
+        id: overflow
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          # Guarded exactly as in `cssom-parity` above, for the same reason.
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
+          rc=0
+          node cloud/priv/static/__preview__/overflow-guard.mjs || rc=$?
+          case "$rc" in
+            0)
+              verdict OK
+              echo "Overflow guard: every leg it declared measured clean in a real browser (the roster is printed above)."
+              ;;
+            2)
+              verdict REFUSED
+              echo "::error title=Overflow guard REFUSED::The guard refused to measure (exit 2) — an ENVIRONMENT or COVERAGE fault, not a layout defect. NO claim is being made about any screen: nothing here says the console is clean and nothing here says it is broken. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the guard's port, a bring-up that outran SERVER_CAP, or a defect id the guard has no coverage for. A bring-up refusal is retried a bounded number of times in a fresh profile before this fires — every attempt's Chrome stderr is in the log."
+              exit 1
+              ;;
+            1)
+              verdict MEASURED_DEFECT
+              echo "::error title=Overflow guard DEFECT::A measured geometry defect in a real browser (exit 1) — an element whose scrollWidth exceeds its clientWidth, a truncated money message, a page scrolling sideways, or a dead rule that lost the cascade. See the ✗ lines above for the leg, the scenario/theme/width cell, the selector and its measured numbers."
+              exit 1
+              ;;
+            *)
+              verdict UNINTERPRETABLE
+              echo "::error title=Overflow guard UNINTERPRETABLE::overflow-guard.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+  console-gate:
+    # ── THE AGGREGATOR — the one name that should carry branch protection ──
+    #
+    # Deliberate shape, every part of it load-bearing:
+    #
+    #   * NO `strategy.matrix`. The published check-run name is then exactly the
+    #     `name:` string below. A matrixed job's name either gains the full
+    #     matrix tuple or, if it never STARTED, publishes the literal
+    #     uninterpolated `${{ matrix.x }}` — both unusable as a required context
+    #     (charter D20). This name is a constant.
+    #
+    #   * `if: always()`. Without it this job would itself be `skipped` whenever
+    #     an upstream failed — publishing a PASSING required context out of a
+    #     failed run.
+    #
+    #   * It ASSERTS on every upstream result instead of echoing them.
+    #     `if: always()` buys the right to decide; it does not decide. A probe
+    #     aggregator that merely printed `needs.will-fail.result` reported
+    #     `success`, and a PR merged through it (charter D19).
+    #
+    #   * NO job here carries `continue-on-error`. For such a job
+    #     `needs.<job>.result` reads `success` EVEN WHEN IT FAILED; including
+    #     one would launder the run-level lie straight into the required
+    #     context. If a job is worth aggregating it is worth blocking.
+    #
+    # Allow-set, exhaustively: `success` always; `skipped` ONLY when the
+    # dispatcher output that gated that job was literally 'false'. Everything
+    # else — `failure`, `cancelled`, an unrecognised value, an empty string —
+    # is a FAILURE, including a failure of the dispatcher itself.
+    name: Console gate
+    if: always()
+    needs: [changes, console-unit, cssom-parity, tier-floor-render, overflow-guard, path-escape]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide (fail-closed over every upstream result)
+        env:
+          R_CHANGES: ${{ needs.changes.result }}
+          R_UNIT: ${{ needs.console-unit.result }}
+          R_CSSOM: ${{ needs.cssom-parity.result }}
+          R_TIER: ${{ needs.tier-floor-render.result }}
+          R_OVERFLOW: ${{ needs.overflow-guard.result }}
+          R_ESCAPE: ${{ needs.path-escape.result }}
+          O_CONSOLE: ${{ needs.changes.outputs.console }}
+          # ── THE VERDICT CHANNEL (deploy-reliability wave 8) ──────────────
+          # Second, INDEPENDENT axis: `result` answers "did it fail", these
+          # answer "what KIND of failure". Read ONLY to choose the sentence a
+          # human reads; `bad` is computed from `result` alone, so no value or
+          # absence of a value here can ever green this context. A job that was
+          # skipped or never ran interpolates to the empty string, which the
+          # decide() below reports as "no verdict published" — never as OK.
+          V_UNIT: ${{ needs.console-unit.outputs.verdict }}
+          V_CSSOM: ${{ needs.cssom-parity.outputs.verdict }}
+          V_TIER: ${{ needs.tier-floor-render.outputs.verdict }}
+          V_OVERFLOW: ${{ needs.overflow-guard.outputs.verdict }}
+          # D776: the ratchet is the LAST exit-2-capable job to get a channel.
+          V_ESCAPE: ${{ needs.path-escape.outputs.verdict }}
+        run: |
+          set -euo pipefail
+
+          echo "dispatcher outputs: console='${O_CONSOLE}'"
+          echo
+
+          bad=0
+
+          # ── D377 tally: did anything SUBSTANTIVE actually run? ────────────
+          # `bad` answers "is anything wrong"; it cannot answer "was anything
+          # tested", and until wave 33 nothing did. These two answer it.
+          # Only PATH-GATED jobs count: the dispatcher and the ratchet carry the
+          # gate value NEVER and run on every head, so they are present in a
+          # "nothing ran" run exactly as in a full one and can distinguish
+          # nothing.
+          dispatched=0
+          not_dispatched=""
+
+          # ── D101 wave 8: WHAT KIND of failure, alongside WHETHER ──────────
+          # A browser instrument that could not START Chrome and a browser
+          # instrument that MEASURED a broken layout both land here as
+          # `failure`, and until now this step could only say "a job failed" —
+          # so a runner whose Chrome never came up read, at the merge button,
+          # exactly like a CSS bug. These two collect the distinction for the
+          # closing sentence. They never touch `bad`.
+          refusals=""
+          measured=""
+
+          # ── D770/D771 — `bad` SAYS THAT something is wrong, never WHICH ───
+          # `refusals` and `measured` above name the two verdict-bearing kinds
+          # of red. NEITHER is populated on the ordinary paths — a skip whose
+          # gate is not 'false', an EMPTY result, an unrecognised one, a
+          # failure with no verdict published — and on those the `::error::`
+          # (the ONLY line the check-run API carries) named NOTHING at all.
+          # This is the set behind `bad`, appended at EVERY `bad=1` site so it
+          # can never disagree with the verdict. DERIVED from `${job}` — never
+          # a hardcoded name, never a re-print of the step log.
+          # Comma-joined, not space-joined: job names contain spaces
+          # ("changes (dispatcher)", "path-escape ratchet"), so a space-joined
+          # list cannot be read back as a set.
+          reds=""
+
+          # decide <job-name> <result> <gate-value> [verdict]
+          #   gate-value is the dispatcher output that gated the job, or the
+          #   literal string NEVER for jobs that must always run. A skip is
+          #   accepted only against a gate-value of exactly 'false'.
+          #   verdict is OPTIONAL and ADVISORY: jobs that publish one (the three
+          #   browser instruments, and console-unit for its seven exit-2-capable
+          #   steps) get their failure NAMED; jobs that do not
+          #   pass nothing and are judged exactly as before. It is read on the
+          #   failure path ONLY, and cannot reach `bad` from there either.
+          decide() {
+            local job="$1" result="$2" gate="$3" verdict="${4:-}"
+            case "$result" in
+              success)
+                echo "  ok      ${job}: success"
+                ;;
+              skipped)
+                if [ "$gate" = "false" ]; then
+                  echo "  ok      ${job}: skipped — dispatcher said this path set was not touched (gate='false')"
+                else
+                  echo "  FAIL    ${job}: skipped, but its gate is '${gate}', not 'false'."
+                  echo "          A skip here does NOT mean 'not needed'. It means the job never ran —"
+                  echo "          most often because an upstream FAILED. Refusing to green a required"
+                  echo "          context on it."
+                  bad=1
+                  reds="${reds:+${reds}, }${job}"
+                fi
+                ;;
+              failure | cancelled)
+                echo "  FAIL    ${job}: ${result}"
+                # `bad=1` FIRST and unconditionally, so no reading of the
+                # verdict below can be mistaken for a place where red is
+                # decided. Everything after this line only chooses words.
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                case "$verdict" in
+                  '')
+                    : # this job publishes no verdict (or never ran to publish one) — judged on result alone, as before
+                    ;;
+                  OK)
+                    echo "          verdict='OK' but the job FAILED — the instrument said clean and the job"
+                    echo "          still died (a later step, a cancellation, a runner fault). Cannot tell,"
+                    echo "          therefore red. Read the job log."
+                    ;;
+                  REFUSED)
+                    # WHY THIS NAMES A CAUSE *SET* AND NOT A CAUSE (charter D237,
+                    # and D760 for the incident): this arm used to say "the
+                    # browser never came up, so NOT ONE rule or element was
+                    # measured". That was true of the last refusal its author
+                    # saw and false of the next one: on run 31322709682
+                    # tier-floor-render parsed 25 preludes, 6 breakpoints and 13
+                    # registered views and then refused over a COVERAGE fault in
+                    # cloud/priv/static/__preview__ — the console defect this
+                    # very sentence denied, while sending the reader to the
+                    # runner, the one place the fix was not. exit 2 is ONE code
+                    # over MANY causes (cssom-parity.mjs alone has eight message
+                    # shapes over ten, and only one of them is bring-up), and
+                    # this aggregate measured NONE of them. So it names the kind
+                    # of failure — which is all `result` + verdict can support —
+                    # and hands the cause back to the instrument that measured it.
+                    echo "          verdict=REFUSED — this instrument REFUSED TO MEASURE (exit 2). It made NO"
+                    echo "          claim, in either direction, about cloud/priv/static: a refusal is the"
+                    echo "          absence of a measurement, NOT a clean bill and NOT an accusation."
+                    echo "          WHY it refused is NOT knowable from here. exit 2 is ONE code over MANY"
+                    echo "          causes — headless Chrome that never came up after a bounded retry in a"
+                    echo "          fresh profile; a missing or unreadable input (e.g. the"
+                    echo "          cssom-heads.baseline sidecar, a renamed export, an unparseable route);"
+                    echo "          a COVERAGE fault in cloud/priv/static/__preview__ (a breakpoint, screen"
+                    echo "          or vocabulary no sweep accounts for); an unrecognised argument or defect"
+                    echo "          name; a census under its own floor."
+                    echo "          READ THAT JOB'S OWN SUMMARY LINE — the instrument printed the cause by"
+                    echo "          name. Do NOT assume the environment: several of those causes are fixed"
+                    echo "          in cloud/priv/static and nowhere else."
+                    echo "          This context is still RED: a refusal is not a pass."
+                    refusals="${refusals} ${job}"
+                    ;;
+                  MEASURED_DEFECT)
+                    echo "          verdict=MEASURED_DEFECT — the browser came up and the instrument measured"
+                    echo "          a REAL defect (exit 1). This one IS about the console's own bytes."
+                    measured="${measured} ${job}"
+                    ;;
+                  *)
+                    echo "          verdict='${verdict}' — outside the published vocabulary"
+                    echo "          (OK / REFUSED / MEASURED_DEFECT). Cannot tell, therefore red."
+                    ;;
+                esac
+                ;;
+              '')
+                echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
+                echo "          or the run object is malformed. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              *)
+                echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+            esac
+            # Tally, for the D377 notice at the bottom of this step. NEVER-gated
+            # jobs are excluded on purpose (see the declaration above).
+            if [ "$gate" != "NEVER" ]; then
+              case "$result" in
+                success) dispatched=$((dispatched + 1)) ;;
+                skipped) not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
+          }
+
+          # WIRING A JOB IN IS THREE EDITS AND ALL THREE SHIP IN ONE COMMIT
+          # (D209): the `needs:` array above, an `R_*` entry in `env:` above,
+          # and a `decide` line below. `decide` is invoked BY HAND, once per
+          # upstream — there is deliberately NO loop over the needs set, because
+          # a loop cannot know each job's gate value. Omitting `needs:` fires
+          # the empty-result branch (LOUD); omitting the `env:` entry dies on
+          # `set -u` (LOUD); OMITTING THE `decide` LINE IS SILENTLY IGNORED —
+          # this gate then greens over a job it never read. So the review
+          # instruction is a COUNT, independently re-derived, not a reading:
+          # `decide` calls must equal the length of `needs:`. Today: 6 and 6.
+          # (The D36 emitter in scripts/console-path-escape-check.test.sh walks
+          # that whole chain per job and is mutation-proven in four directions.)
+          #
+          # The dispatcher itself may never skip: without it there are no gate
+          # values, so nothing downstream can be judged. Same for the ratchet,
+          # which is deliberately unfiltered.
+          decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
+          # `:-` on the VERDICT arguments ONLY, never on an `R_*`: an unbound
+          # R_* must keep dying under `set -u` (that LOUD death is how D209's
+          # missing-`env:` wiring mistake is caught). A verdict is advisory, and
+          # scripts/console-path-escape-check.test.sh extracts and executes this
+          # very step body supplying only the R_*/O_* environment GitHub had
+          # before this channel existed — so an unset verdict must mean "none
+          # published", not a crash.
+          decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"          "${V_ESCAPE:-}"
+          decide "console-unit"            "${R_UNIT}"    "${O_CONSOLE}"   "${V_UNIT:-}"
+          decide "cssom-parity"            "${R_CSSOM}"   "${O_CONSOLE}"   "${V_CSSOM:-}"
+          decide "tier-floor-render"       "${R_TIER}"    "${O_CONSOLE}"   "${V_TIER:-}"
+          decide "overflow-guard"          "${R_OVERFLOW}"  "${O_CONSOLE}" "${V_OVERFLOW:-}"
+
+          echo
+          if [ "$bad" -ne 0 ]; then
+            # ONE `exit 1`, reached from every red path — the sentence differs,
+            # the verdict never does. `refusals` and `measured` are read AFTER
+            # `bad` has already decided; there is deliberately no arm here in
+            # which a REFUSED verdict can reach `exit 0`.
+            if [ -n "${refusals}" ]; then
+              # SAME RULE AS THE REFUSED ARM ABOVE, AND FOR THE SAME MEASURED
+              # REASON (D760): this sentence used to promise the reader an
+              # ENVIRONMENT fault and a Chrome that never started. It is a
+              # promise this step cannot keep — it reads one word, `REFUSED`,
+              # and never opens the refusing job's log. Naming the cause SET is
+              # the strongest honest claim available here; the cause itself
+              # belongs to the instrument that measured it.
+              echo "::error title=Console gate RED — an instrument REFUSED TO MEASURE::RED because at least one upstream job is not in the allow-set.%0AREFUSED TO MEASURE (exit 2):${refusals}%0AA refusal is the ABSENCE of a measurement: those instruments made no claim about cloud/priv/static in either direction. It does NOT follow that the environment is at fault. exit 2 is ONE code over MANY causes — headless Chrome that never came up after a bounded retry in a fresh profile; a missing or unreadable input (e.g. the cssom-heads.baseline sidecar); a COVERAGE fault in cloud/priv/static/__preview__ (a breakpoint, screen or vocabulary no sweep accounts for); an unrecognised argument or defect name; a census under its own floor. This aggregate measured none of them and will not guess.%0AREAD THE REFUSING JOB'S OWN SUMMARY LINE — it printed the cause by name, and that cause may well live in the console's own bytes rather than on the runner.%0AMeasured defects (exit 1) in this run:${measured:- none}%0AThis context is RED on purpose: a refusal is not a pass, and only a fix or a re-run can turn it green.%0ANOT IN THE ALLOW-SET: ${reds}"
+            else
+              # THE ARM #11377 LEFT NAMING NOTHING (D770). This `else` is not a
+              # rare corner: it fires on EVERY red where no upstream published
+              # a REFUSED verdict — a plain MEASURED_DEFECT run, a skip whose
+              # gate is not 'false', an EMPTY result, a failure from a job with
+              # no verdict channel at all. `measured` was already collected
+              # above and then thrown away on this exact path, so a reader of a
+              # real CSS defect got the same contentless sentence as a reader
+              # of a malformed `needs:` set. Both facts are named here now.
+              echo "::error::Console gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose.%0ANOT IN THE ALLOW-SET: ${reds}%0AMeasured defects (exit 1) in this run:${measured:- none}"
+            fi
+            exit 1
+          fi
+
+          # ── D377/D378 — SAY IT WHERE A PERSON AND AN API CAN READ IT ──────
+          # Measured on api-only PR #9529 (head 48d960092): this context read
+          # `Console gate | success | ann=0 | summary=null` with ALL FOUR of its
+          # substantive jobs skipped — byte-identical to a run where the console
+          # harness passed. $GITHUB_STEP_SUMMARY does not reach the check-run
+          # API (0 of 32 check-runs returned a non-null summary), and renaming
+          # this frozen required context would deadlock main; a bare ::notice::
+          # does reach it (probe/elixir-gate-annotation, run 31055317124).
+          # ONE notice, never one per job — GitHub caps annotations at 10 per
+          # level per step and truncates the rest silently.
+          if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=Console gate: green — nothing ran::NOTHING CONSOLE RAN on this head.%0AConsole gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Console job executed', never as 'the Console harness passed'."
+          fi
+          echo "Console gate: every upstream job either succeeded or was legitimately not dispatched."
+
+  report-main-failure:
+    # ── THE RED THAT REACHES A HUMAN ─────────────────────────────────────────
+    #
+    # `Console gate` went RED on NINE main pushes in the 2026-08-05T19:52Z ..
+    # 2026-08-07T05:26Z window — six of them consecutively, on `CSSOM parity`
+    # and `Overflow guard` — and told nobody. A post-merge red X is only visible
+    # to whoever thinks to open the Actions tab; main was broken for ~46 minutes,
+    # self-healed, and no record of it exists anywhere. `gh issue list --state
+    # all --search 'CI failure in:title'` returns exactly two issues in the
+    # entire repository's history, and neither is one of the nine.
+    #
+    # This job is the record. Everything about its shape is load-bearing:
+    #
+    #   * `needs: [console-gate]` — it reports on the AGGREGATOR'S verdict, the
+    #     same name branch protection reads, not on any single leaf.
+    #
+    #   * `if: failure() && …` — `failure()` is true when an ancestor FAILED and
+    #     is FALSE for `cancelled`. That is the wanted behaviour, not an
+    #     accident: a cancelled main-push run (queue-depth-1 displacement, the
+    #     CADENCE class of charter D115) executes zero substantive jobs and has
+    #     nothing to report; filing an issue for it would be noise that trains
+    #     people to ignore the real ones.
+    #
+    #   * `github.ref == 'refs/heads/main'` — a failing PR already has a human
+    #     attached to it. Only main's post-merge red is ownerless.
+    #
+    #   * `permissions:` is JOB-LEVEL, and must stay that way. The repository's
+    #     `default_workflow_permissions` is "read", so the issue POST 403s
+    #     without an explicit `issues: write` — but a WORKFLOW-level block would
+    #     silently re-scope the token of every other job in this file. The grant
+    #     lives here, on the one job that needs it, and nowhere else.
+    #
+    # It cannot warn-and-pass: scripts/file-ci-failure-issue.sh exits 1 whenever
+    # the alert was not delivered (empty token, non-2xx API, unparseable body).
+    # A red here means "main is broken AND nobody was told" — worse than
+    # the failure it was trying to report, so it is worth its own red. It never
+    # affects `Console gate`, which has already published its verdict by then.
+    name: Report main-push failure to a human
+    needs: [console-gate]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: console-harness-main
+          CI_FAILURE_DETAIL: |
+            The `Console gate` required context is RED on a push to `main`.
+            This is POST-MERGE: the breakage is already on the default branch,
+            and every PR branched from this tip inherits it.
+
+            Read the aggregator's "Decide (fail-closed over every upstream
+            result)" step first — it names which job failed AND, for the browser
+            instruments, which KIND of failure it was:
+
+              * a MEASURED defect (exit 1) accuses `cloud/priv/static` — fix the
+                CSS/markup, or revert the merge that introduced it;
+              * an environment REFUSAL (exit 2) means headless Chrome never
+                started after a bounded retry — nothing was measured, so nothing
+                is accused; re-run the job.
+
+            This issue is idempotent per key: an ongoing failure appends a
+            comment rather than opening a new issue. CLOSE IT once main is green
+            again — the next main-push failure opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh

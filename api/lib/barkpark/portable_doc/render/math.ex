@@ -75,7 +75,8 @@ defmodule Barkpark.PortableDoc.Render.Math do
     end
   end
 
-  def equation_html(_), do: ~s|<div class="bp-equation bp-equation--empty">equation — no tex source</div>|
+  def equation_html(_),
+    do: ~s|<div class="bp-equation bp-equation--empty">equation — no tex source</div>|
 
   @doc "Email-safe equation: a degrade badge showing the raw TeX source."
   def equation_email_html(block) when is_map(block) do

@@ -28,10 +28,14 @@ package cli
 //     (the ssh one-liner is printed instead)
 //   - honest terminal states: roster-row write failure, bind mint failure,
 //     online-poll timeout (never faking online)
-//   - remove (PDF-D68): the ordered four-surface teardown, the identity fence,
-//     the verify-gone census (planted survivors caught + named, non-zero),
-//     double-remove idempotence, partial-state convergence, and the 403→401
-//     token probe (alive = named survivor)
+//   - remove (PDF-D68, five surfaces since PDF-D101): the ordered teardown,
+//     the identity fence, the verify-gone census (planted survivors caught +
+//     named, non-zero), double-remove idempotence, partial-state convergence,
+//     the 403→401 token probe (alive = named survivor), and the A-record
+//     sweep BY VALUE (both same-IP records deleted, the by-name trap; the
+//     credential precedence --dns-token > BARKPARK_DNS_HCLOUD_TOKEN > compute;
+//     warn-and-continue on a failing delete; honest SKIP when the CP row
+//     carries no url)
 
 import (
 	"bytes"
@@ -54,7 +58,7 @@ import (
 func supportEnvIsolate(t *testing.T) {
 	t.Helper()
 	withTempConfigHome(t)
-	for _, k := range []string{"BARKPARK_API_URL", "BARKPARK_SERVER", "BARKPARK_API_TOKEN"} {
+	for _, k := range []string{"BARKPARK_API_URL", "BARKPARK_SERVER", "BARKPARK_API_TOKEN", "BARKPARK_DNS_HCLOUD_TOKEN"} {
 		t.Setenv(k, "")
 	}
 }
@@ -70,6 +74,7 @@ func supportSaveSeams(t *testing.T) {
 	origInterval := supportRosterPollInterval
 	origBudget := supportRosterPollBudget
 	origClock := supportClock
+	origDNS := supportDNSFor
 	t.Cleanup(func() {
 		supportCreateServer = origCreate
 		supportProviderFor = origProvider
@@ -78,6 +83,7 @@ func supportSaveSeams(t *testing.T) {
 		supportRosterPollInterval = origInterval
 		supportRosterPollBudget = origBudget
 		supportClock = origClock
+		supportDNSFor = origDNS
 	})
 }
 
@@ -482,6 +488,54 @@ func supportSeedBox(t *testing.T, log *supportCallLog, name, worker string) *sup
 	return p
 }
 
+// supportFakeDNS wraps the in-memory FakeDNS with order logging and a
+// planted-lie knob for the census tests: a delete that errors leaves the
+// record standing, so the fifth census leg has something real to catch.
+type supportFakeDNS struct {
+	*cloud.FakeDNS
+	log        *supportCallLog
+	failDelete bool
+}
+
+func (d *supportFakeDNS) DeleteRecord(ctx context.Context, zone, name, typ string) error {
+	if d.log != nil {
+		d.log.add("dns DeleteRecord " + name)
+	}
+	if d.failDelete {
+		return fmt.Errorf("injected dns delete failure for %s", name)
+	}
+	return d.FakeDNS.DeleteRecord(ctx, zone, name, typ)
+}
+
+// supportSeedDNS plants the TWO A records every provisioner-born support
+// leaks — the support chain's own label (TTL 60) AND the go-live sibling
+// <name>-<teamid> (no TTL) — BOTH at the box IP (the by-name trap: deleting
+// only the first passes a by-name census while the leak survives), plus an
+// unrelated record at a different IP that must SURVIVE the sweep. Wires
+// supportDNSFor to the fake and captures the resolved credential so tests can
+// assert the --dns-token > BARKPARK_DNS_HCLOUD_TOKEN > compute precedence.
+// Callers must have run supportSaveSeams.
+func supportSeedDNS(t *testing.T, log *supportCallLog, name, ip string) (*supportFakeDNS, *string) {
+	t.Helper()
+	fake := &supportFakeDNS{FakeDNS: cloud.NewFakeDNS(), log: log}
+	seed := func(label, value string, ttl int) {
+		if err := fake.FakeDNS.UpsertRecord(context.Background(), cloud.Record{
+			Zone: "barkpark.cloud", Name: label, Type: "A", Value: value, TTL: ttl,
+		}); err != nil {
+			t.Fatalf("seed dns %s: %v", label, err)
+		}
+	}
+	seed(name, ip, 60)                   // the support chain's record (TTL 60)
+	seed(name+"-506f035e", ip, 0)        // the go-live sibling — the by-name trap
+	seed("bystander", "203.0.113.77", 0) // unrelated value — must survive
+	gotToken := new(string)
+	supportDNSFor = func(tok string) cloud.DNSProvider {
+		*gotToken = tok
+		return fake
+	}
+	return fake, gotToken
+}
+
 // supportHappyWiring installs the standard happy-path fakes: create succeeds,
 // SSH ready, configure returns minted secrets, capacity measures standard.
 func supportHappyWiring(t *testing.T, runner *fakeSupportRunner) {
@@ -657,10 +711,27 @@ func TestCloudSupportAddHappyPath(t *testing.T) {
 		}
 	}
 
-	// Ordering: the workspace-ensure step runs BEFORE the merge-import.
-	ensureIdx, importIdx := -1, -1
+	// Ordering: this run's workspace IS "default" (no --workspace, no context),
+	// so the seeded-workspace reset bracket must fire — the warm image's baked
+	// Postgres carries seed docs, so without the reset the box's own "default"
+	// flunks the merge engine's empty-shell proof and the import 409s
+	// workspace_slug_conflict. Strict order:
+	// reset < re-mint#1 < ensure < import < re-mint#2 (both default-workspace
+	// deletes — the reset's and the import's PDS-D9 adopt-delete — cascade the
+	// box admin token, api_tokens.workspace_id :delete_all).
+	resetIdx, ensureIdx, importIdx := -1, -1, -1
+	var mintIdxs []int
 	for i, s := range runner.steps {
 		joined := strings.Join(s.Argv, " ")
+		if strings.Contains(joined, "Barkpark.Tenancy.delete_workspace") {
+			resetIdx = i
+		}
+		if strings.Contains(joined, "Barkpark.Auth.create_token") {
+			mintIdxs = append(mintIdxs, i)
+			if !strings.Contains(joined, "box-admin-tok-xyz") {
+				t.Fatal("the re-mint must restore the chain's own admin token value verbatim")
+			}
+		}
 		if strings.Contains(joined, "POST http://localhost:4000/api/workspaces") {
 			ensureIdx = i
 		}
@@ -668,8 +739,16 @@ func TestCloudSupportAddHappyPath(t *testing.T) {
 			importIdx = i
 		}
 	}
-	if ensureIdx == -1 || importIdx == -1 || ensureIdx > importIdx {
-		t.Fatalf("workspace-ensure must run before the merge-import (ensure=%d import=%d)", ensureIdx, importIdx)
+	if resetIdx == -1 {
+		t.Fatal("the default-workspace reset step never ran on a ws=default add")
+	}
+	if len(mintIdxs) != 2 {
+		t.Fatalf("want exactly 2 admin-token re-mints (post-reset + post-import), got %d", len(mintIdxs))
+	}
+	if ensureIdx == -1 || importIdx == -1 ||
+		!(resetIdx < mintIdxs[0] && mintIdxs[0] < ensureIdx && ensureIdx < importIdx && importIdx < mintIdxs[1]) {
+		t.Fatalf("default-workspace bracket out of order: reset=%d mint1=%d ensure=%d import=%d mint2=%d",
+			resetIdx, mintIdxs[0], ensureIdx, importIdx, mintIdxs[1])
 	}
 
 	// The minted ledger token rides ONLY inside the redacted env step — it is
@@ -1026,6 +1105,14 @@ func TestCloudSupportAddBindWhichHost(t *testing.T) {
 // TestCloudSupportAddCPRefusalNarrations: the CP's credential-aware refusals
 // each get a NAMED narration — 401 → bp login, 422 no_team → bp team use,
 // 403 → team-admin / deploy-ability (the PAT ruling made explicit).
+//
+// The `403 no_team (post-#9956)` row is the STATUS-FLIP guard (cch-w40-s4): the
+// control plane's team gate is being converted from 422 {"error":"no_team"} to
+// 403 {"error":"forbidden","reason":"no_team","scope":"team"}. Reading the STATUS
+// alone hands a caller who HAS NO TEAM a sentence about a ROLE they cannot be
+// granted without one — so the two no_team rows must stay identical in hint and
+// exit across that flip, while the plain `403 forbidden` row proves a real
+// authority refusal is still narrated as one.
 func TestCloudSupportAddCPRefusalNarrations(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -1036,7 +1123,13 @@ func TestCloudSupportAddCPRefusalNarrations(t *testing.T) {
 	}{
 		{"401 dead session", http.StatusUnauthorized, `{"error":"unauthorized"}`, "bp login", exitAuth},
 		{"422 no_team", http.StatusUnprocessableEntity, `{"error":"no_team"}`, "bp team use", exitGeneric},
+		{"403 no_team (post-#9956)", http.StatusForbidden, `{"error":"forbidden","reason":"no_team","scope":"team"}`, "bp team use", exitGeneric},
+		// Added at review: the cause AS the code at the new status. The predicate
+		// read `reason` only, so this body fell into the role arm and told a
+		// teamless caller they needed team-admin.
+		{"403 no_team, cause as code", http.StatusForbidden, `{"error":"no_team"}`, "bp team use", exitGeneric},
 		{"403 forbidden", http.StatusForbidden, `{"error":"forbidden"}`, "a session needs team-admin, a PAT needs the deploy ability", exitAuth},
+		{"403 role", http.StatusForbidden, `{"error":"forbidden","reason":"role","required":"team_admin"}`, "a session needs team-admin, a PAT needs the deploy ability", exitAuth},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1055,6 +1148,11 @@ func TestCloudSupportAddCPRefusalNarrations(t *testing.T) {
 			}
 			if !strings.Contains(stderr, tc.wantHint) {
 				t.Fatalf("want the named narration %q\nstderr:\n%s", tc.wantHint, stderr)
+			}
+			// A teamless caller must never ALSO be handed the role sentence — the
+			// role is not the problem and cannot be granted without a team.
+			if tc.wantHint == "bp team use" && strings.Contains(stderr, "a session needs team-admin") {
+				t.Fatalf("a no_team refusal was narrated as a role problem\nstderr:\n%s", stderr)
 			}
 			// The honest written-state line still names the minted-but-unbound token.
 			if !strings.Contains(stderr, "NOT registered") {
@@ -1190,10 +1288,12 @@ func TestCloudSupportAddParentAutoResolve(t *testing.T) {
 // ── the mirror verb: remove (PDF-D68/D72) ────────────────────────────────────
 
 // supportRemoveWiring seeds the standard remove fixture: a main that answers
-// revoke + roster honestly, a CP carrying the main row AND the support row, a
-// provider holding the labeled box, and a runner that yields the probe secret.
+// revoke + roster honestly, a CP carrying the main row AND the support row
+// (with the url the DNS zone derives from), a provider holding the labeled box
+// (FakeProvider's first create ⇒ IP 10.0.0.1), a fake DNS zone carrying BOTH
+// leaked A records at that IP, and a runner that yields the probe secret.
 // Everything shares one order log.
-func supportRemoveWiring(t *testing.T) (*supportMainRecorder, *httptest.Server, *supportCPRecorder, *supportFleetProvider, *supportCallLog) {
+func supportRemoveWiring(t *testing.T) (*supportMainRecorder, *httptest.Server, *supportCPRecorder, *supportFleetProvider, *supportFakeDNS, *supportCallLog) {
 	t.Helper()
 	supportEnvIsolate(t)
 	runner := newFakeSupportRunner()
@@ -1212,21 +1312,24 @@ func supportRemoveWiring(t *testing.T) (*supportMainRecorder, *httptest.Server, 
 	cp.honestDelete = true
 	cp.rows = append(cp.rows, map[string]any{
 		"id": "support-row-1", "name": "hex", "fleet_role": "support",
+		"url":             "https://hex.barkpark.cloud",
 		"fleet_parent_id": "cp-main-1", "fleet_token_id": "tid-42",
 	})
 
 	provider := supportSeedBox(t, log, "warm-cafe01", "hex")
+	dns, _ := supportSeedDNS(t, log, "hex", "10.0.0.1") // FakeProvider's first create ⇒ 10.0.0.1
 	runner.outputs[supportProbeSecretScript] = "sup-ledger-tok-abc123\n"
 	supportRunnerFor = func(string) cloud.SupportRunner { return runner }
-	return main, srv, cp, provider, log
+	return main, srv, cp, provider, dns, log
 }
 
 // TestCloudSupportRemoveHappyTeardown: the full PDF-D68 order — CP read FIRST,
-// token revoke on the main, identity-fenced box delete, roster-row delete via
-// the dataset-in-path mutate, CP row DELETE LAST — then the four-surface census
-// re-reads everything and reports delta zero, with the REAL 403→401 token probe.
+// token revoke on the main, identity-fenced box delete, the by-VALUE A-record
+// sweep (PDF-D101), roster-row delete via the dataset-in-path mutate, CP row
+// DELETE LAST — then the five-surface census re-reads everything and reports
+// delta zero, with the REAL 403→401 token probe.
 func TestCloudSupportRemoveHappyTeardown(t *testing.T) {
-	main, srv, cp, _, log := supportRemoveWiring(t)
+	main, srv, cp, _, _, log := supportRemoveWiring(t)
 
 	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
 	if code != exitOK {
@@ -1238,6 +1341,8 @@ func TestCloudSupportRemoveHappyTeardown(t *testing.T) {
 		"cp GET /v1/barkparks",                        // read FIRST — the sole durable token-id holder
 		"main DELETE /v1/fleet/support-tokens/tid-42", // then revoke on the main
 		"provider Delete warm-cafe01",                 // then the fenced box delete
+		"dns DeleteRecord hex",                        // then the by-VALUE A sweep: the support record…
+		"dns DeleteRecord hex-506f035e",               // …AND the same-IP go-live sibling (the by-name trap)
 		"main POST /v1/data/mutate/production",        // then the roster row
 		"cp DELETE /v1/fleet/supports/support-row-1",  // CP row LAST
 	)
@@ -1289,7 +1394,7 @@ func TestCloudSupportRemoveHappyTeardown(t *testing.T) {
 // names a DIFFERENT support is REFUSED loudly — nothing is deleted anywhere
 // (the DeprovisionByIP fence, ported).
 func TestCloudSupportRemoveForeignIdentityRefusal(t *testing.T) {
-	main, srv, cp, provider, log := supportRemoveWiring(t)
+	main, srv, cp, provider, _, log := supportRemoveWiring(t)
 	provider.foreign = []cloud.Server{{
 		Name:   "warm-other",
 		IP:     "203.0.113.99",
@@ -1319,7 +1424,7 @@ func TestCloudSupportRemoveForeignIdentityRefusal(t *testing.T) {
 // TestCloudSupportRemoveTwoBoxAnomaly: >1 label match is a named anomaly —
 // never pick-one.
 func TestCloudSupportRemoveTwoBoxAnomaly(t *testing.T) {
-	_, srv, _, provider, log := supportRemoveWiring(t)
+	_, srv, _, provider, _, log := supportRemoveWiring(t)
 	provider.foreign = []cloud.Server{
 		{Name: "warm-a", IP: "203.0.113.1", Labels: map[string]string{cloud.FleetSupportLabelKey: "hex"}},
 		{Name: "warm-b", IP: "203.0.113.2", Labels: map[string]string{cloud.FleetSupportLabelKey: "hex"}},
@@ -1340,15 +1445,16 @@ func TestCloudSupportRemoveTwoBoxAnomaly(t *testing.T) {
 }
 
 // TestCloudSupportRemovePlantedSurvivors: every surface LIES about deleting —
-// the census catches and NAMES all four survivors and exits non-zero. This is
+// the census catches and NAMES all five survivors and exits non-zero. This is
 // the proof the verify-gone check can fail (a census that cannot fail proves
 // nothing).
 func TestCloudSupportRemovePlantedSurvivors(t *testing.T) {
-	main, srv, cp, provider, _ := supportRemoveWiring(t)
+	main, srv, cp, provider, dns, _ := supportRemoveWiring(t)
 	provider.lieOnDelete = true     // box survives its "successful" delete
 	main.rosterDeleteHonest = false // roster row survives the mutate
 	cp.honestDelete = false         // CP row survives the DELETE
 	main.probeStuckValid = true     // token still answers 403 after revoke
+	dns.failDelete = true           // the A records survive their deletes
 
 	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
 	if code == exitOK {
@@ -1360,6 +1466,8 @@ func TestCloudSupportRemovePlantedSurvivors(t *testing.T) {
 		"roster row listener-hex still",   // survivor 2: the roster row
 		"control-plane row support-row-1", // survivor 3: the CP row
 		"STILL VALID",                     // survivor 4: the token (403, not 401)
+		"A record hex.barkpark.cloud still resolves to box IP 10.0.0.1",          // survivor 5a: the support A record
+		"A record hex-506f035e.barkpark.cloud still resolves to box IP 10.0.0.1", // survivor 5b: the go-live sibling
 	} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("survivor %q not named\noutput:\n%s", want, all)
@@ -1461,7 +1569,7 @@ func TestCloudSupportRemoveDryRun(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("dry run exit %d\nstdout:\n%s", code, stdout)
 	}
-	for _, want := range []string{"DRY RUN", "cp-read", "locate", "token", "server", "roster", "cp-row", "census"} {
+	for _, want := range []string{"DRY RUN", "cp-read", "locate", "token", "server", "dns", "roster", "cp-row", "census"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("dry-run narration missing %q\nstdout:\n%s", want, stdout)
 		}
@@ -1478,7 +1586,7 @@ func TestCloudSupportRemoveDryRun(t *testing.T) {
 // credential refusal — PDF-D69/D71 vocabulary), continues, and the census still
 // names the surviving row with a non-zero exit.
 func TestCloudSupportRemoveCPRowForbiddenNarration(t *testing.T) {
-	main, srv, cp, _, _ := supportRemoveWiring(t)
+	main, srv, cp, _, _, _ := supportRemoveWiring(t)
 	cp.deleteStatus = http.StatusForbidden
 	cp.honestDelete = false
 
@@ -1496,5 +1604,209 @@ func TestCloudSupportRemoveCPRowForbiddenNarration(t *testing.T) {
 	// Everything BEFORE the CP row still tore down (warn-and-continue, not stop).
 	if main.count("DELETE /v1/fleet/support-tokens/tid-42") != 1 {
 		t.Fatalf("the token revoke must still have run: %v", main.requests)
+	}
+}
+
+// TestCloudSupportRemoveDNSSweepByValue: the A-record teardown is BY VALUE
+// (PDF-D101) — the zone holds the support's own record AND the go-live sibling
+// <name>-<teamid>, BOTH at the box IP, and BOTH are deleted (a by-name delete
+// removes one, leaves the other, and a by-name census still reads clean). The
+// sweep runs between the box delete and the roster leg, and --dns-token is the
+// credential that actually reaches the DNS provider (never the fleet compute
+// token, which sees zero zones).
+func TestCloudSupportRemoveDNSSweepByValue(t *testing.T) {
+	_, srv, _, _, _, log := supportRemoveWiring(t)
+	_, gotToken := supportSeedDNS(t, log, "hex", "10.0.0.1") // rewire to capture the token
+
+	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex", "--dns-token", "dns-proj-tok")
+	if code != exitOK {
+		t.Fatalf("want exit 0, got %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if *gotToken != "dns-proj-tok" {
+		t.Fatalf("--dns-token must reach the DNS provider, got %q", *gotToken)
+	}
+	supportAssertOrder(t, log.list(),
+		"provider Delete warm-cafe01",          // the box goes first…
+		"dns DeleteRecord hex",                 // …then the by-VALUE sweep: the support record…
+		"dns DeleteRecord hex-506f035e",        // …AND the same-IP go-live sibling (the by-name trap)
+		"main POST /v1/data/mutate/production", // …then the roster leg
+	)
+	if !strings.Contains(stdout, "hex.barkpark.cloud") || !strings.Contains(stdout, "hex-506f035e.barkpark.cloud") {
+		t.Fatalf("the deleted records must be named\nstdout:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "dns verified by value") {
+		t.Fatalf("the census must report the dns leg verified by value\nstdout:\n%s", stdout)
+	}
+}
+
+// TestCloudSupportRemoveDNSBothRecordsGoneBystanderSurvives: after the sweep,
+// BOTH same-IP records are gone from the zone and the unrelated record at a
+// different IP is untouched — asserted against the fake zone itself, not the
+// command's own narration.
+func TestCloudSupportRemoveDNSBothRecordsGoneBystanderSurvives(t *testing.T) {
+	_, srv, _, _, dns, _ := supportRemoveWiring(t)
+
+	_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex", "--dns-token", "dns-proj-tok")
+	if code != exitOK {
+		t.Fatalf("want exit 0, got %d\nstderr:\n%s", code, stderr)
+	}
+	for _, fqdn := range []string{"hex.barkpark.cloud", "hex-506f035e.barkpark.cloud"} {
+		vals, err := dns.FakeDNS.Resolve(context.Background(), fqdn)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", fqdn, err)
+		}
+		if len(vals) != 0 {
+			t.Fatalf("A record %s must be gone after the by-value sweep, still resolves to %v", fqdn, vals)
+		}
+	}
+	vals, err := dns.FakeDNS.Resolve(context.Background(), "bystander.barkpark.cloud")
+	if err != nil {
+		t.Fatalf("resolve bystander: %v", err)
+	}
+	if len(vals) != 1 || vals[0] != "203.0.113.77" {
+		t.Fatalf("the unrelated record must SURVIVE the sweep, got %v", vals)
+	}
+}
+
+// TestCloudSupportRemoveDNSTokenPrecedence: the sweep credential follows
+// instDNSClient's law — --dns-token > BARKPARK_DNS_HCLOUD_TOKEN > compute —
+// and the compute fallback is never silent (the fleet compute token sees ZERO
+// zones, so a quiet fallback would fail the leg silently on every real
+// teardown).
+func TestCloudSupportRemoveDNSTokenPrecedence(t *testing.T) {
+	t.Run("env token wins over compute", func(t *testing.T) {
+		_, srv, _, _, _, log := supportRemoveWiring(t)
+		_, gotToken := supportSeedDNS(t, log, "hex", "10.0.0.1")
+		t.Setenv("BARKPARK_DNS_HCLOUD_TOKEN", "env-dns-tok")
+
+		_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+		if code != exitOK {
+			t.Fatalf("exit %d\nstderr:\n%s", code, stderr)
+		}
+		if *gotToken != "env-dns-tok" {
+			t.Fatalf("BARKPARK_DNS_HCLOUD_TOKEN must reach the DNS provider, got %q", *gotToken)
+		}
+		if strings.Contains(stderr, "riding the compute token") {
+			t.Fatalf("an env-resolved credential must not warn about the compute fallback\nstderr:\n%s", stderr)
+		}
+	})
+
+	t.Run("--dns-token beats the env", func(t *testing.T) {
+		_, srv, _, _, _, log := supportRemoveWiring(t)
+		_, gotToken := supportSeedDNS(t, log, "hex", "10.0.0.1")
+		t.Setenv("BARKPARK_DNS_HCLOUD_TOKEN", "env-dns-tok")
+
+		_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex", "--dns-token", "flag-dns-tok")
+		if code != exitOK {
+			t.Fatalf("exit %d\nstderr:\n%s", code, stderr)
+		}
+		if *gotToken != "flag-dns-tok" {
+			t.Fatalf("--dns-token must beat the env, got %q", *gotToken)
+		}
+	})
+
+	t.Run("compute fallback warns loudly", func(t *testing.T) {
+		_, srv, _, _, _, log := supportRemoveWiring(t)
+		_, gotToken := supportSeedDNS(t, log, "hex", "10.0.0.1")
+
+		_, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+		if code != exitOK {
+			t.Fatalf("exit %d\nstderr:\n%s", code, stderr)
+		}
+		if *gotToken != "" {
+			t.Fatalf("the compute fallback passes an empty token (CloudDNS inherits the process credential), got %q", *gotToken)
+		}
+		if !strings.Contains(stderr, "riding the compute token") || !strings.Contains(stderr, "ZERO zones") {
+			t.Fatalf("the compute fallback must warn loudly\nstderr:\n%s", stderr)
+		}
+	})
+}
+
+// TestCloudSupportRemoveDNSDeleteFailureWarnsAndContinues: a failing DNS
+// delete is WARN-AND-CONTINUE — the roster and CP legs still tear down — and
+// the census's fifth leg then names every surviving A record BY VALUE with a
+// non-zero exit. The census, not the step, is what fails the command.
+func TestCloudSupportRemoveDNSDeleteFailureWarnsAndContinues(t *testing.T) {
+	main, srv, cp, _, dns, _ := supportRemoveWiring(t)
+	dns.failDelete = true
+
+	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+	if code == exitOK {
+		t.Fatalf("surviving A records must exit non-zero\nstdout:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "⚠ dns: sweep failed") || !strings.Contains(stderr, "continuing; the census below is the truth") {
+		t.Fatalf("the DNS failure must warn-and-continue, never stop\nstderr:\n%s", stderr)
+	}
+	// The steps AFTER dns still ran (warn-and-continue, not r.fail).
+	if main.count("POST /v1/data/mutate/production") != 1 {
+		t.Fatalf("the roster leg must still run after a DNS failure: %v", main.requests)
+	}
+	if cp.count("DELETE /v1/fleet/supports/support-row-1") != 1 {
+		t.Fatalf("the CP-row leg must still run after a DNS failure: %v", cp.requests)
+	}
+	all := stdout + stderr
+	for _, want := range []string{
+		"A record hex.barkpark.cloud still resolves to box IP 10.0.0.1",
+		"A record hex-506f035e.barkpark.cloud still resolves to box IP 10.0.0.1",
+	} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("the census must name the surviving A record %q\noutput:\n%s", want, all)
+		}
+	}
+}
+
+// TestCloudSupportRemoveDNSSkipNoURL: a CP row without a url means the DNS
+// zone cannot be derived — the leg is SKIPPED and SAYS SO (an honest absence,
+// PDS-D287), it is never reported clean, no DNS provider is ever built, and
+// the rest of the teardown still converges to exit 0.
+func TestCloudSupportRemoveDNSSkipNoURL(t *testing.T) {
+	_, srv, cp, _, _, _ := supportRemoveWiring(t)
+	cp.mu.Lock()
+	for _, row := range cp.rows {
+		if fmt.Sprintf("%v", row["id"]) == "support-row-1" {
+			delete(row, "url")
+		}
+	}
+	cp.mu.Unlock()
+	supportDNSFor = func(string) cloud.DNSProvider {
+		t.Fatal("the skip path must never build a DNS provider")
+		return nil
+	}
+
+	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex")
+	if code != exitOK {
+		t.Fatalf("a skipped DNS leg is not residue — want exit 0, got %d\nstderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "dns: SKIPPED — the control-plane row carries no url") {
+		t.Fatalf("the skip must be said explicitly\nstdout:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "NOT verified clean") {
+		t.Fatalf("a skipped leg must never read as clean\nstdout:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "dns SKIPPED") || strings.Contains(stdout, "dns verified by value") {
+		t.Fatalf("the success line must carry the skip, not a clean verdict\nstdout:\n%s", stdout)
+	}
+}
+
+// TestSupportDNSForSatisfiesRecordLister observes the CALL SITE, not a rebuild
+// of it. supportDNSFor is declared to return cloud.DNSProvider — an INTERFACE —
+// so it is the one production wiring whose RecordLister satisfaction no
+// compile-time `var _ RecordLister` in package cloud can see: swap the body for
+// any other DNSProvider, or wrap it in a decorator that forwards only
+// DNSProvider, and the build stays green while deprovisionDNS (warmpool.go)
+// silently degrades from the by-VALUE A-record sweep to the by-NAME delete,
+// leaving custom-domain records pointing at an IP Hetzner hands to someone else.
+// cch-w57-s5's in-package table test cannot reach this seam (internal/cli/cloud
+// cannot import internal/cli); this arm closes it from the other side.
+func TestSupportDNSForSatisfiesRecordLister(t *testing.T) {
+	for _, tok := range []string{"", "token-from---dns-token"} {
+		p := supportDNSFor(tok)
+		if p == nil {
+			t.Fatalf("supportDNSFor(%q) returned nil — the remove-side sweep has no provider", tok)
+		}
+		if _, ok := p.(cloud.RecordLister); !ok {
+			t.Fatalf("supportDNSFor(%q) builds %T, which does NOT satisfy cloud.RecordLister: "+
+				"deprovisionDNS would take the by-name degrade arm for the whole fleet", tok, p)
+		}
 	}
 }

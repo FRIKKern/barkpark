@@ -199,19 +199,22 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # row-click would. rebuild_panes then dispatches on editor[:view].
   def walk_path(["open", type, id | _], _depth, _current, panes, _editor, dataset, opts) do
     editor =
-      if type == "paper" do
-        case Content.get_paper(id, dataset, scope(opts)) do
-          nil ->
+      if Content.blocks_type?(type) do
+        # Same draft-first fix as `build_editor`'s blocks branch (spd-w17 D220).
+        # A backlink to a never-published paper is the SAME silent blank screen,
+        # reached by a different door — fixing only one leaves the other.
+        case Content.fetch_doc_with_draft(type, id, dataset, scope(opts)) do
+          {nil, _is_draft, _has_pub} ->
             nil
 
-          paper_doc ->
+          {paper_doc, is_draft, has_pub} ->
             %{
               view: :paper,
               doc: paper_doc,
               schema: nil,
               type: type,
-              is_draft: false,
-              has_published: false,
+              is_draft: is_draft,
+              has_published: has_pub,
               form: %{}
             }
         end
@@ -411,23 +414,34 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           kind_filter: desk_kind_filter(active_group)
         }
 
-      # `Content.paper_type/0` is the canonical accessor for the paper type
-      # name; "sheet"/"graph" are fixed plugin schema names with no accessor.
-      type_name == Content.paper_type() ->
+      # Blocks-doc whitelist (`Content.blocks_type?/1` — `["paper", "session"]`,
+      # session-handoff Task 3): a session opens in the SAME paper pane by
+      # design (`view: :paper`), fetched by its actual type rather than the
+      # hardcoded "paper" equality this replaced. "sheet"/"graph" are fixed
+      # plugin schema names with no accessor.
+      Content.blocks_type?(type_name) ->
         case rest do
           [slug | _] ->
-            case Content.get_paper(slug, dataset, scope_kw) do
-              nil ->
+            # DRAFT-FIRST, like every other editor branch. `create_document`
+            # ALWAYS writes `drafts.<id>` (writer.ex) and the desk navigates to
+            # the PUBLISHED id, so a published-only lookup here resolved to
+            # nothing for every never-published paper — a brand-new one most of
+            # all. That is the owner's blank screen (spd-w17): a doc was
+            # created, the URL moved, and the pane still read "Select a document
+            # to edit". The flags were hardcoded `false`, so a draft paper that
+            # did open claimed to be published; thread the real ones.
+            case Content.fetch_doc_with_draft(type_name, slug, dataset, scope_kw) do
+              {nil, _is_draft, _has_pub} ->
                 nil
 
-              paper_doc ->
+              {paper_doc, is_draft, has_pub} ->
                 %{
                   view: :paper,
                   doc: paper_doc,
                   schema: schema,
                   type: type_name,
-                  is_draft: false,
-                  has_published: false,
+                  is_draft: is_draft,
+                  has_published: has_pub,
                   form: %{}
                 }
             end
@@ -964,7 +978,17 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
               type: :item,
               id: child.id,
               title: child.title,
-              icon: child.icon,
+              # `|| "file"` closes the asymmetry that WAS the bug
+              # (spd-w18-nil-icon-500): the placed-node paths above already
+              # fall back (`node.icon || (schema && schema.icon)`), this
+              # forwarding did not, and its render site draws the icon
+              # UNCONDITIONALLY — so a nil here 500'd the whole desk column.
+              # No schema is in hand at this depth, hence the neutral glyph
+              # rather than a schema icon. (`:plugin_link` above stays
+              # nil-tolerant on purpose: its render site is wrapped in
+              # `if item.icon`, so nil means "draw no glyph" there, a real
+              # design state rather than a crash.)
+              icon: child.icon || "file",
               drillable: drillable
             }
           ]

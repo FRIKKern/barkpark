@@ -329,6 +329,75 @@ if ! grep -q '^BARKPARK_CLOUD_URL=' .env 2>/dev/null; then
   log "added BARKPARK_CLOUD_URL to .env"
 fi
 
+# ---- The x-forwarded-for trust boundary (BARKPARK_TRUSTED_PROXIES) ----------
+# Barkpark.RateLimiter.client_ip believes x-forwarded-for ONLY from loopback or a
+# peer LISTED here, and walks the chain right-to-left skipping listed hops. On a
+# cloud-managed box the chain on a proxied revoke is "<phone>, <control plane
+# egress>" — so until the control plane's egress address is listed, the rightmost
+# non-listed hop IS that egress address and every proxied revoke keys on ONE
+# bucket (the whole team shares 10/minute). Not a forgery and not a 5xx: a SILENT
+# loss of the per-phone bucketing.
+#
+# The address is CONFIGURATION, never a literal in this script: it comes from
+# $BARKPARK_CLOUD_EGRESS_IPS, which the CD workflow fills from the SAME `CP_HOST`
+# secret it SSHes the control plane with (deploy/README.md), and which the
+# provisioner reads from its own worker env for freshly-provisioned boxes. One
+# authored value, two readers.
+#
+# NEVER overwrites an existing line: provisioning already wrote the right value on
+# a managed box, and a self-hosted operator may legitimately trust a different
+# front. Absent value + absent line ⇒ a commented placeholder + a LOUD log, so the
+# gap is visible on the box instead of silently costing per-caller buckets.
+#
+# The shape is VALIDATED before writing, because runtime.exs RAISES on a malformed
+# entry — writing an unvalidated value here would not degrade a bucket key, it
+# would refuse to boot the app at the slot restart later in this very run.
+egress_ips_ok() { # $1=comma-separated candidate; true only if EVERY entry is a bare IP literal
+  printf '%s' "$1" | awk -F, '
+    function ipv4(s,   p, i) {
+      if (s !~ /^[0-9]+(\.[0-9]+){3}$/) return 0
+      split(s, p, ".")
+      for (i = 1; i <= 4; i++) if (p[i] + 0 > 255) return 0
+      return 1
+    }
+    function ipv6(s) { return (s ~ /^[0-9a-fA-F:]+$/ && s ~ /:/ && s !~ /:::/) }
+    {
+      for (i = 1; i <= NF; i++) {
+        gsub(/^[ \t]+|[ \t]+$/, "", $i)
+        if ($i == "") continue
+        if (!ipv4($i) && !ipv6($i)) exit 1
+        n++
+      }
+    }
+    END { if (n == 0) exit 1 }
+  '
+}
+if grep -q '^BARKPARK_TRUSTED_PROXIES=' .env 2>/dev/null; then
+  log "BARKPARK_TRUSTED_PROXIES already set in .env — left untouched"
+elif [ -n "${BARKPARK_CLOUD_EGRESS_IPS:-}" ]; then
+  if egress_ips_ok "${BARKPARK_CLOUD_EGRESS_IPS}"; then
+    echo "BARKPARK_TRUSTED_PROXIES=${BARKPARK_CLOUD_EGRESS_IPS}" >> .env
+    log "added BARKPARK_TRUSTED_PROXIES=${BARKPARK_CLOUD_EGRESS_IPS} to .env (the control plane's relayed caller address is now believed)"
+  else
+    log "WARN: BARKPARK_CLOUD_EGRESS_IPS='${BARKPARK_CLOUD_EGRESS_IPS}' is not a comma-separated list of bare IP addresses (CIDR ranges are REFUSED — trusting a range lets any host in it forge every client's bucket key) — NOT written; runtime.exs would raise at boot on it"
+  fi
+else
+  # The placeholder is written ONCE (guarded on its own commented marker) — an
+  # unguarded append would grow .env by five lines on every single deploy. The WARN
+  # fires either way: the gap must stay visible in every deploy log, not only the
+  # first one.
+  if ! grep -q '^# BARKPARK_TRUSTED_PROXIES=' .env 2>/dev/null; then
+    {
+      echo '# BARKPARK_TRUSTED_PROXIES: individual IPs of every front whose x-forwarded-for'
+      echo '# this box should believe (comma-separated, NO CIDR ranges). On a barkpark.cloud-'
+      echo '# managed instance this is the control plane EGRESS address; unset, proxied'
+      echo '# requests all share ONE rate-limit bucket per team instead of one per caller.'
+      echo '# BARKPARK_TRUSTED_PROXIES=203.0.113.7'
+    } >> .env
+  fi
+  log "WARN: no BARKPARK_CLOUD_EGRESS_IPS in the deploy env and no BARKPARK_TRUSTED_PROXIES in .env — see the commented placeholder in .env; proxied requests will key on ONE bucket per team until an operator fills it in (deploy/README.md)"
+fi
+
 # The Connectors bridge ciphers each install's per-workspace credentials with
 # this key (the KEK — every row is sealed under an HKDF-derived per-workspace
 # subkey, never the KEK directly). It is backfilled ONCE into .env and only
@@ -612,7 +681,20 @@ write_slot_env green "$GREEN_PORT" "$APP/api/_build_green"
 # slot, so --rollback knows what the idle slot holds after the next flip. STATE
 # is one global sha and the env files carry only port+build-root — without the
 # stamp a box has slot amnesia and rollback would flip to an unknown build.
-echo "$NEW" > "$APP/.slots/$TARGET.sha"
+#
+# ORDERING (D291): the stamp is DEFINED here but WRITTEN only after the health
+# gate. It used to be written right here — before deps.get/deps.compile/compile/
+# ecto.migrate — and no exit-12/13 path reverted it, so a deploy that never
+# built left `.slots/<slot>.sha` claiming a build the slot does not hold, and
+# `--rollback` reads exactly that file (see the preflight above) to pick its
+# target. Same discipline as $STATE, which is written only after health + flip.
+SLOT_SHA_FILE="$APP/.slots/$TARGET.sha"
+PREV_SLOT_SHA="$(cat "$SLOT_SHA_FILE" 2>/dev/null || true)"
+stamp_slot_sha() { echo "$NEW" > "$SLOT_SHA_FILE"; }
+restore_slot_sha() { # any post-stamp failure path: the slot is being retired
+  if [ -n "$PREV_SLOT_SHA" ]; then printf '%s\n' "$PREV_SLOT_SHA" > "$SLOT_SHA_FILE"
+  else rm -f "$SLOT_SHA_FILE"; fi
+}
 systemctl daemon-reload
 
 # ---- Clean-build the idle slot's root while the active slot keeps serving
@@ -666,6 +748,10 @@ if [ "$ok" != "1" ]; then
   git reset --hard "$OLD"   # keep sources in step with the still-serving old build
   exit 14
 fi
+# The slot booted and answered — only NOW may it claim this sha as a rollback
+# target (D291). Every earlier failure (exit 12/13) leaves the previous stamp,
+# and the flip failures below restore it.
+stamp_slot_sha
 
 # ---- Hot swap: point Caddy at the new slot (graceful reload, no drops).
 # UNDER THE SHARED CADDYFILE LOCK (fd 8, D27): site-deploy.sh rewrites this same
@@ -678,6 +764,7 @@ exec 8>"$CADDY_LOCK"
 if ! flock -w 120 8; then
   log "gave up waiting for the Caddyfile lock ($CADDY_LOCK) — no swap; slot $TARGET stopped, :$ACTIVE_PORT still serving (no downtime)"
   systemctl disable --now "barkpark-slot@$TARGET" 2>/dev/null || true
+  restore_slot_sha
   git reset --hard "$OLD"; exit 14
 fi
 # Re-read the live upstream INSIDE the lock. ACTIVE_PORT was read BEFORE a
@@ -691,12 +778,14 @@ if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
   log "Caddyfile invalid after port flip — restoring, no swap"
   cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"
   systemctl disable --now "barkpark-slot@$TARGET" 2>/dev/null || true
+  restore_slot_sha
   git reset --hard "$OLD"; exit 14
 fi
 if ! systemctl reload caddy; then
   log "caddy reload failed — restoring, no swap"
   cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"; systemctl reload caddy || true
   systemctl disable --now "barkpark-slot@$TARGET" 2>/dev/null || true
+  restore_slot_sha
   git reset --hard "$OLD"; exit 14
 fi
 exec 8>&-   # leaf lock: released the moment the flip is written + reloaded, so
@@ -719,8 +808,9 @@ systemctl disable --now barkpark >/dev/null 2>&1 || true
 # ---- Refresh the on-box monitoring agent (charter Decision 33), best-effort.
 # Only touch boxes the provisioner ARMED with the agent (its token file exists);
 # a plain/legacy box is left untouched. Rebuild barkpark-agent from the just-
-# deployed code, re-install the COMMITTED unit, and (re)enable it so a self-update
-# never drops the beat. The control/health URLs persist in /etc/barkpark/agent.env
+# deployed code, re-install the COMMITTED unit, and enable + RESTART it so a
+# self-update never drops the beat and never strands the old binary. The
+# control/health URLs persist in /etc/barkpark/agent.env
 # (written at provision time), so this step needs no knowledge of them. NON-FATAL:
 # a monitoring hiccup must never fail a zero-downtime deploy — the app is already
 # live on the new slot at this point.
@@ -729,7 +819,15 @@ if [ -f /etc/barkpark/agent.token ]; then
   if command -v go >/dev/null 2>&1 && go build -o /usr/local/bin/barkpark-agent ./cmd/barkpark-agent; then
     install -m 0644 "$APP/deploy/systemd/barkpark-agent.service" /etc/systemd/system/barkpark-agent.service
     systemctl daemon-reload
-    if systemctl enable --now barkpark-agent >/dev/null 2>&1; then log "barkpark-agent enabled"; else log "WARN: barkpark-agent enable failed — beat down until next deploy"; fi
+    # restart (not just enable --now): `--now` is `start`, a NO-OP on an
+    # already-active unit, so systemd never re-execs it and the running agent
+    # keeps serving the deleted inode of the previous binary (measured: 29h
+    # stale on guerrilla). Same shape as barkpark-mcp below.
+    if systemctl enable barkpark-agent >/dev/null 2>&1 && systemctl restart barkpark-agent; then
+      log "barkpark-agent enabled + restarted"
+    else
+      log "WARN: barkpark-agent enable/restart failed — beat down until next deploy"
+    fi
   else
     log "WARN: barkpark-agent rebuild skipped/failed — keeping the running agent"
   fi

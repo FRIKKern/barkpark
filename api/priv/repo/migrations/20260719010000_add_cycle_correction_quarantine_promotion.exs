@@ -154,7 +154,8 @@ defmodule Barkpark.Repo.Migrations.AddCycleCorrectionQuarantinePromotion do
         null: false
 
       add :correction_wave_id,
-          references(:cycle_correction_targets, column: :wave_id, type: :uuid), null: false
+          references(:cycle_correction_targets, column: :wave_id, type: :uuid),
+          null: false
 
       add :workspace_id, references(:workspaces, type: :uuid), null: false
       add :project_id, references(:projects, type: :uuid), null: false

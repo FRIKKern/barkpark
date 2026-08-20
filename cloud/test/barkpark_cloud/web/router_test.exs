@@ -20,6 +20,18 @@ defmodule BarkparkCloud.Web.RouterTest do
 
   @opts Router.init([])
 
+  # The register handler spends the node-global "register:" ETS bucket on EVERY
+  # call (arpss w3 — the check precedes validation by design), and Plug.Test
+  # conns all arrive as 127.0.0.1, so this module's register calls accumulate
+  # against ONE 30/60s budget across the whole run. Today's call count keeps the
+  # margin, but a mystery 429 in an unrelated register test is the worst kind of
+  # flake — start every test with a clean limiter. async: false (above), so no
+  # concurrent spender races the reset.
+  setup do
+    BarkparkCloud.DeviceAuth.RateLimiter.reset()
+    :ok
+  end
+
   @password "correct-horse-battery"
   @worker_token "worker-token-test-fixed"
 
@@ -403,6 +415,32 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert row["slug"] == "prod"
       assert row["health_status"] == "unknown"
       assert row["team_id"] == team.id
+    end
+
+    test "the fleet row carries the reachability counters (cch-w34-s2)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team, %{name: "Prod", slug: "prod"})
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # A fresh row: BOTH keys present, carrying their honest zero/false — a
+      # client can state "0 missed heartbeat windows", not infer it.
+      conn = call(:get, "/v1/barkparks", nil, token)
+      [row] = json_body(conn)["barkparks"]
+      assert Map.has_key?(row, "unreachable_count")
+      assert Map.has_key?(row, "unreachable_notification_sent")
+      assert row["unreachable_count"] == 0
+      assert row["unreachable_notification_sent"] == false
+
+      # After the staleness sweep has bumped and latched, the counters are the
+      # evidence behind the health axis.
+      {:ok, bumped} = Registry.bump_unreachable(bp)
+      {:ok, _} = Registry.mark_offline(bumped)
+
+      conn2 = call(:get, "/v1/barkparks", nil, token)
+      [row2] = json_body(conn2)["barkparks"]
+      assert row2["unreachable_count"] == 1
+      assert row2["unreachable_notification_sent"] == true
+      assert row2["health_status"] == "unknown"
     end
 
     test "the fleet row carries the BP-ONB-09 verify verdict fields" do
@@ -1290,6 +1328,30 @@ defmodule BarkparkCloud.Web.RouterTest do
       refute conn.resp_body =~ "tok"
     end
 
+    test "the row carries updated_at, so a rotation is not a byte-identical payload" do
+      {user, team} = user_with_team()
+      {:ok, _p} = Registry.connect_provider(team, "hetzner", "tok", label: "main")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      [fresh] = json_body(call(:get, "/v1/providers", nil, token))["providers"]
+      assert is_binary(fresh["updated_at"])
+      # A first connect fills both stamps from one autogenerate entry — the
+      # console reads that as "never rotated" and shows no update line.
+      assert fresh["updated_at"] == fresh["inserted_at"]
+
+      {:ok, _} = Registry.connect_provider(team, "hetzner", "rotated-tok")
+
+      [after_rotation] = json_body(call(:get, "/v1/providers", nil, token))["providers"]
+      assert after_rotation["id"] == fresh["id"]
+      assert after_rotation["inserted_at"] == fresh["inserted_at"]
+
+      assert after_rotation["updated_at"] > fresh["updated_at"],
+             "without updated_at the payload is byte-identical across a rotation and the console cannot show it"
+
+      refute after_rotation["updated_at"] == after_rotation["inserted_at"]
+      refute call(:get, "/v1/providers", nil, token).resp_body =~ "rotated-tok"
+    end
+
     test "empty team → 200 {providers: []}" do
       {user, _team} = user_with_team()
       {:ok, token} = Accounts.create_user_session_token(user)
@@ -2070,6 +2132,52 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert conn.status == 403
     end
 
+    # cch-w36-s1 — THE CROWN CHAIN, WALKED BY ONE PRINCIPAL. Every leg of this
+    # already had a single-hop test; none of them walked the chain, which is the
+    # only way the contradiction is visible: the 402 hands the admin a
+    # `checkout_path` the SAME admin is then refused at. Two authorities disagree
+    # by design (launch is team-admin, paying is owner) — this pins that they
+    # both SAY which one they wanted.
+    test "cch-w36-s1: an admin with a spent trial walks launch(402) → its own checkout_path(403 owner)" do
+      {_a, team, a_token} = user_with_role("admin")
+      exhaust_trial(team)
+
+      launch = call(:post, "/v1/launch", %{provider: "hetzner", name: "Crown"}, a_token)
+      assert launch.status == 402
+      launch_body = json_body(launch)
+      assert launch_body["error"] == "no_active_subscription"
+      checkout_path = launch_body["checkout_path"]
+      assert checkout_path == "/v1/billing/checkout"
+
+      # The SAME principal knocks on the door the 402 just handed them.
+      checkout = call(:post, checkout_path, %{plan: "supporter"}, a_token)
+      assert checkout.status == 403
+
+      assert json_body(checkout) == %{
+               "error" => "forbidden",
+               "required" => "owner",
+               "scope" => "team"
+             }
+    end
+
+    test "cch-w36-s1: a plain member is refused BEFORE the 402, and the refusal names 'admin'" do
+      # Full-map equality, not a slug check: the whole point is the evidence
+      # BESIDE the slug — without it this body is byte-identical to the
+      # owner-only billing refusal above, and the console guessed "plan limit".
+      {_m, team, m_token} = user_with_role("member")
+      exhaust_trial(team)
+
+      conn = call(:post, "/v1/launch", %{provider: "hetzner", name: "Crown"}, m_token)
+
+      assert conn.status == 403
+
+      assert json_body(conn) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+    end
+
     test "member → DELETE /v1/barkparks/:id ⇒ 403; admin ⇒ 200 removed" do
       {_m, team_m, m_token} = user_with_role("member")
       bp_m = barkpark_fixture(team_m)
@@ -2123,6 +2231,165 @@ defmodule BarkparkCloud.Web.RouterTest do
       conn = call(:post, "/v1/providers", %{kind: "hetzner", token: "x"}, token)
       assert conn.status == 403
       assert json_body(conn)["error"] == "forbidden"
+    end
+  end
+
+  ## Keyset pagination — the compound cursor
+
+  # An admin of a fresh team, plus a live session token.
+  defp tied_feed_admin do
+    {user, team} = user_with_team()
+    {:ok, token} = Accounts.create_user_session_token(user)
+    {team, token}
+  end
+
+  # `count` audit rows sharing ONE inserted_at. insert_all (not record_audit)
+  # because the stamp must be identical to the microsecond, and the table
+  # carries a BEFORE UPDATE trigger, so the value cannot be corrected after
+  # the fact.
+  defp seed_tied_audit(team, ts, count) do
+    rows =
+      for _ <- 1..count do
+        %{
+          id: Ecto.UUID.generate(),
+          team_id: team.id,
+          action: "site.created",
+          metadata: %{},
+          inserted_at: ts
+        }
+      end
+
+    {^count, _} = Repo.insert_all(BarkparkCloud.Accounts.AuditEvent, rows)
+    Enum.map(rows, & &1.id)
+  end
+
+  defp seed_tied_deliveries(team, ts, count) do
+    rows =
+      for i <- 1..count do
+        %{
+          id: Ecto.UUID.generate(),
+          team_id: team.id,
+          recipient: "ops#{i}@example.com",
+          event: "provision_failed",
+          channel: "email",
+          kind: "alert",
+          status: "sent",
+          attempts: 1,
+          inserted_at: ts,
+          updated_at: ts
+        }
+      end
+
+    {^count, _} = Repo.insert_all(BarkparkCloud.Notifications.Delivery, rows)
+    Enum.map(rows, & &1.id)
+  end
+
+  defp get_page(token, path, key) do
+    conn = call(:get, path, nil, token)
+    assert conn.status == 200
+    json_body(conn)[key]
+  end
+
+  # Walk `path_fn` with the full `(inserted_at, id)` cursor until a short page,
+  # and return every id seen IN ORDER (duplicates included — the caller asserts
+  # they are absent).
+  defp walk_all(token, key, path_fn, limit) do
+    Enum.reduce_while(1..10, {nil, nil, []}, fn _, {before, before_id, acc} ->
+      cursor =
+        if before,
+          do: "&before=" <> URI.encode_www_form(before) <> "&before_id=" <> before_id,
+          else: ""
+
+      page = get_page(token, path_fn.(limit) <> cursor, key)
+      acc = acc ++ Enum.map(page, & &1["id"])
+
+      if length(page) < limit do
+        {:halt, acc}
+      else
+        last = List.last(page)
+        {:cont, {last["inserted_at"], last["id"], acc}}
+      end
+    end)
+  end
+
+  # gr-bl-delivery-keyset-tiebreak: both paginated feeds ORDER BY the compound
+  # key `(inserted_at DESC, id DESC)` but historically PAGED on half of it
+  # (`inserted_at < ^before`). A page boundary landing between two rows that
+  # share a stamp therefore dropped every tied row on the far side — permanently,
+  # silently, and exactly in the workloads that make ties routine (a fan-out
+  # writes one delivery per recipient in one instant; a burst of audited writes
+  # lands in one microsecond). These tests seed an ALL-TIED page so the boundary
+  # is guaranteed to fall mid-tie, then assert the union of the pages is the
+  # whole set with nothing seen twice and nothing missing.
+  describe "keyset pagination across an inserted_at tie" do
+    test "GET /v1/audit: every tied row is enumerated exactly once across pages" do
+      {team, token} = tied_feed_admin()
+      ts = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      ids = seed_tied_audit(team, ts, 5)
+
+      seen = walk_all(token, "events", fn n -> "/v1/audit?limit=#{n}" end, 2)
+
+      assert length(seen) == length(Enum.uniq(seen)), "a page boundary duplicated a tied row"
+      assert Enum.sort(seen) == Enum.sort(ids), "a page boundary dropped a tied row"
+    end
+
+    test "GET /v1/notifications/deliveries: every tied row is enumerated exactly once" do
+      {team, token} = tied_feed_admin()
+      ts = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      ids = seed_tied_deliveries(team, ts, 5)
+
+      seen =
+        walk_all(token, "deliveries", fn n -> "/v1/notifications/deliveries?limit=#{n}" end, 2)
+
+      assert length(seen) == length(Enum.uniq(seen)), "a page boundary duplicated a tied row"
+      assert Enum.sort(seen) == Enum.sort(ids), "a page boundary dropped a tied row"
+    end
+
+    test "BACKWARD COMPATIBLE: `before` with no `before_id` is still the stamp-only cutoff" do
+      {team, token} = tied_feed_admin()
+      ts = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      _ids = seed_tied_audit(team, ts, 5)
+      _dids = seed_tied_deliveries(team, ts, 5)
+
+      audit_p1 = get_page(token, "/v1/audit?limit=2", "events")
+      assert length(audit_p1) == 2
+      stamp = List.last(audit_p1)["inserted_at"]
+
+      # Unchanged legacy semantics: a stamp-only cutoff is STRICTLY older, so an
+      # all-tied trail yields nothing after page one. That is the historical
+      # behaviour, kept byte-for-byte for bookmarked URLs — the tiebreak arm
+      # engages only when the id half arrives (the tests above).
+      assert get_page(token, "/v1/audit?limit=2&before=" <> URI.encode_www_form(stamp), "events") ==
+               []
+
+      del_p1 = get_page(token, "/v1/notifications/deliveries?limit=2", "deliveries")
+      assert length(del_p1) == 2
+      dstamp = List.last(del_p1)["inserted_at"]
+
+      assert get_page(
+               token,
+               "/v1/notifications/deliveries?limit=2&before=" <> URI.encode_www_form(dstamp),
+               "deliveries"
+             ) == []
+    end
+
+    test "a garbage before_id degrades to the stamp-only cutoff, never a 500" do
+      {team, token} = tied_feed_admin()
+      ts = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      _ids = seed_tied_audit(team, ts, 3)
+      _dids = seed_tied_deliveries(team, ts, 3)
+      stamp = URI.encode_www_form(DateTime.to_iso8601(ts))
+
+      # `id` is a :binary_id — a raw non-UUID in that comparison would raise
+      # Ecto.Query.CastError (a 500 on a typo'd cursor).
+      assert get_page(token, "/v1/audit?limit=2&before=#{stamp}&before_id=not-a-uuid", "events") ==
+               []
+
+      assert get_page(
+               token,
+               "/v1/notifications/deliveries?limit=2&before=#{stamp}&before_id=not-a-uuid",
+               "deliveries"
+             ) == []
     end
   end
 
@@ -2282,6 +2549,97 @@ defmodule BarkparkCloud.Web.RouterTest do
         |> Router.call(@opts)
 
       assert untrusted.remote_ip == {172, 18, 0, 1}
+    end
+  end
+
+  # wave 13 S2. `Sites.Deploy.fail/2` writes the SAME string to `failure_reason`
+  # and to `detail`, and the build console is raw remote output — so scrubbing
+  # only `failure_reason` would ship a redacted field sitting beside its
+  # unredacted twin in ONE response. Driven as a plain authenticated NON-admin
+  # team member through GET /v1/sites/:id/deployments/:dep_id.
+  describe "deployment_json — the failure capture is scrubbed on every field, not just one" do
+    @deploy_secret "sk-live-9aB3xQ7zLmNpR4tV6wY2"
+    @deploy_capture "ssh: remote said Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2"
+    @deploy_scrubbed "ssh: remote said Authorization: Bearer [redacted]"
+
+    test "failure_reason, detail AND console all refuse the secret; the DB row stays raw" do
+      {user, team} = user_with_team()
+      n = System.unique_integer([:positive])
+      {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+      {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+
+      {:ok, d} =
+        Registry.create_deployment(site, %{git_ref: "v1-sha", artifact_url: "file:///tmp/v1.tgz"})
+
+      # What Sites.Deploy.fail/2 writes: the same string in both fields, plus the
+      # console line the stage fold appended.
+      {:ok, d} =
+        Registry.transition_deployment(d, %{
+          status: "failed",
+          failure_reason: @deploy_capture,
+          detail: @deploy_capture,
+          # "BUILD" — a stage name Sites.Deploy.stages/1 actually RECOGNIZES, so
+          # the stage fold below is exercised rather than filtered away. A
+          # lowercase name here made the whole-payload assertion vacuously green.
+          console: [
+            %{
+              "line" => @deploy_capture,
+              "detail" => @deploy_capture,
+              "stage" => "BUILD",
+              "status" => "failed"
+            }
+          ]
+        })
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/sites/#{site.id}/deployments/#{d.id}", nil, token)
+      assert conn.status == 200
+
+      dep = json_body(conn)["deployment"]
+
+      # No field in the payload carries it, and none is redacted while a twin is not.
+      refute Jason.encode!(dep) =~ @deploy_secret
+      assert dep["failure_reason"] == @deploy_scrubbed
+      assert dep["detail"] == @deploy_scrubbed
+      assert [%{"line" => @deploy_scrubbed, "detail" => @deploy_scrubbed}] = dep["console"]
+
+      # The stage fold recomputes from the RAW row (Sites.Deploy.stages/1 reads
+      # d.console, not this serializer's output), so it is its own boundary.
+      assert %{"detail" => @deploy_scrubbed} =
+               Enum.find(dep["stages"], &(&1["name"] == "BUILD"))
+
+      # The store is untouched — ops recovery reads the raw bytes.
+      raw = Repo.get(Registry.Deployment, d.id)
+      assert raw.failure_reason == @deploy_capture
+      assert raw.detail == @deploy_capture
+      assert [%{"line" => @deploy_capture}] = raw.console
+    end
+
+    test "the commit a person deployed survives — a git SHA is not redacted" do
+      {user, team} = user_with_team()
+      n = System.unique_integer([:positive])
+      {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+      {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+
+      {:ok, d} =
+        Registry.create_deployment(site, %{git_ref: "v1-sha", artifact_url: "file:///tmp/v1.tgz"})
+
+      sha_line = "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed"
+
+      {:ok, d} =
+        Registry.transition_deployment(d, %{
+          status: "failed",
+          failure_reason: sha_line,
+          detail: sha_line
+        })
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/sites/#{site.id}/deployments/#{d.id}", nil, token)
+      assert conn.status == 200
+
+      dep = json_body(conn)["deployment"]
+      assert dep["failure_reason"] == sha_line
+      assert dep["detail"] == sha_line
     end
   end
 end

@@ -22,7 +22,7 @@ concrete mechanisms that deliver it — each specced further down:
 2. **Progress at every scale** — criteria `2/3` → phase rollup `5/11` → an overall % header. The needle
    is visible wherever you look.
 3. **Movement surfaced** — flash-on-change per row + a one-line activity ticker of what just moved
-   (`✓ tokens.json completed · ◐ inject snapshot 1→2`). Nothing changes silently.
+   (`✓ tokens.json completed · ⠋ inject snapshot 1→2`). Nothing changes silently.
 4. **Completion is felt** — the done blink-×3 + a "done today" tally that climbs. Every finish lands.
 5. **Always a next step** — ready-to-claim pinned; you can always make progress in one keypress
    (claim-forward, from the TUI charter).
@@ -30,7 +30,7 @@ concrete mechanisms that deliver it — each specced further down:
    on width / animated count); in the TUI, the heartbeat repaints the changed cells. Change you can
    *watch happen*.
 
-A **momentum header** (aggregate: `◐ N in flight · ▶ N ready · ✓ N done today · NN%` + an animated
+A **momentum header** (aggregate: `⠋ N in flight · ○ N ready · ✓ N done today · NN%` + an animated
 overall bar) sits atop the board on both surfaces — the always-on progress read. Motion is never
 decoration here: it is the signal that the system, and your work, is moving.
 

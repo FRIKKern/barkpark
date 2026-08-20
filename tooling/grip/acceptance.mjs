@@ -69,6 +69,29 @@
 // Pure and hermetic: `execute: false` throughout. Nothing here touches the
 // network, the box, or the clock. A specimen's rerun is never run — several of
 // them ssh to production.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// THE SPECIMEN'S OWN `rerun` IS SCREENED, NEVER RUN (charter D116)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The paragraphs above explain why the specimen's `rerun` is not the command we
+// ADJUDICATE. It is still an artefact worth pinning, and there is exactly one
+// safe way to pin it: put it through `screenCommand` and freeze the `{ok,
+// reason}` it comes back with.
+//
+// The tempting alternative — "put every specimen's rerun through `runRerun`" —
+// wears the vocabulary of safety while removing the refusal. `runRerun` does
+// NOT gate on `screenCommand`; its step 1 is `classifySafety` (rerun.mjs:676),
+// which returns `{safe: true, reason: "no write shape detected"}` for ALL SIX
+// ratified specimens — including specimen 1's `ssh … root@157.180.90.121` and
+// specimen 6's arbitrary-JS `node`. adjudicate.mjs:90-96 calls that path, left
+// to itself, "a default-on RCE". Implementing it literally would ssh to
+// production from the acceptance suite.
+//
+// `screenCommand` refuses three of the six, and THE REFUSALS ARE THE ASSERTION.
+// screen.mjs has zero imports and executes nothing, so `execute: false`
+// hermeticity (stated at :69-71) survives intact, and the fixture becomes a
+// screen-DRIFT tripwire nothing else in the repo asserts.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -76,6 +99,9 @@ import { fileURLToPath } from "node:url";
 
 import { adjudicate, VERDICTS } from "./adjudicate.mjs";
 import { deriveLevel } from "./level.mjs";
+// PURE — screen.mjs has zero imports and runs nothing. Screening a command is a
+// string judgement, not an execution.
+import { screenCommand } from "./screen.mjs";
 // Used ONLY inside the isMain block below, and only against stderr (D78).
 import { emitProvenance } from "./provenance.mjs";
 
@@ -120,6 +146,35 @@ const EXPECTED = Object.freeze({
   4: { verdict: VERDICTS.ADMITTED, reasons: [] },
   5: { verdict: VERDICTS.REJECTED, reasons: ["LEVEL-SKIP"] },
   6: { verdict: VERDICTS.REJECTED, reasons: ["LEVEL-SKIP"] },
+});
+
+// ── the frozen SCREEN of each specimen's own rerun ───────────────────────────
+//
+// One row per ratified specimen: exactly what `screenCommand(specimen.rerun)`
+// answers, `{ok, reason}`, VERBATIM. The reason strings are the tripwire — an
+// `ok: false` frozen without its reason would stay green through a screen that
+// started refusing the same command for an entirely different rule.
+//
+// THE THREE REFUSALS ARE NOT ONE CLASS, and collapsing them under a single
+// "refused" label would throw away the distinction this table exists to hold:
+//
+//   * specimens 1 and 4 are HOST-BOUND refusals — the command leaves this box
+//     (`ssh`, `barkpark.cloud`). The bound is about WHERE it would run.
+//   * specimen 6 is a HEAD-ALLOWLIST refusal — `node` is not an allowlisted
+//     head at all (screen.mjs:1096, "node executes arbitrary JavaScript
+//     (including fs writes)"). The bound is about WHAT it would run, and it
+//     holds even for a command that never leaves the loopback.
+//
+// That second rule is also this slice's own evidence ceiling: every command in
+// this file's gate starts with `node`, so grip refuses to screen its own
+// execution and the facts here are L3 with no L2 route (D96).
+const SCREEN_EXPECTED = Object.freeze({
+  1: { ok: false, reason: "host bound: names ssh (remote execution)" },
+  2: { ok: true, reason: "admitted: within the host bound, allowlisted head and sub-verb, no write shape" },
+  3: { ok: true, reason: "admitted: within the host bound, allowlisted head and sub-verb, no write shape" },
+  4: { ok: false, reason: "host bound: names barkpark.cloud" },
+  5: { ok: true, reason: "admitted: within the host bound, allowlisted head and sub-verb, no write shape" },
+  6: { ok: false, reason: "not allowlisted: node executes arbitrary JavaScript (including fs writes)" },
 });
 
 // ── declared divergences between the fixture's label and measured reality ────
@@ -286,6 +341,11 @@ export function runAcceptance(fixturePath = FIXTURE) {
     const caught = ruling.verdict === VERDICTS.REJECTED;
     const labelledCaught = specimen.caught_by !== "UNCAUGHT";
 
+    // The specimen's OWN rerun, screened and never run (D116). Pure string
+    // judgement — screen.mjs imports nothing and executes nothing.
+    const screened = screenCommand(specimen.rerun ?? "");
+    const screen = { ok: screened.ok === true, reason: String(screened.reason ?? "") };
+
     const row = {
       id: specimen.id,
       title: specimen.title,
@@ -295,8 +355,30 @@ export function runAcceptance(fixturePath = FIXTURE) {
       reasons,
       caught,
       labelled_caught: labelledCaught,
+      screen,
       failures: [],
     };
+
+    // (0) THE SCREEN IS FROZEN, refusals included. A rerun that starts being
+    // admitted — or starts being refused for a different rule — is drift in the
+    // one instrument that stands between this fixture and a production ssh, and
+    // it must be discovered here rather than by a command that runs.
+    const wantScreen = SCREEN_EXPECTED[specimen.id];
+    if (!wantScreen) {
+      row.failures.push({
+        kind: "NO-SCREEN-EXPECTATION",
+        detail: `specimen ${specimen.id} has no entry in SCREEN_EXPECTED — its rerun was screened but nothing pins the answer`,
+      });
+    } else if (screen.ok !== wantScreen.ok || screen.reason !== wantScreen.reason) {
+      row.failures.push({
+        kind: "SCREEN-DRIFT",
+        detail:
+          `screenCommand now answers {ok: ${screen.ok}, reason: ${JSON.stringify(screen.reason)}}, ` +
+          `frozen as {ok: ${wantScreen.ok}, reason: ${JSON.stringify(wantScreen.reason)}}. ` +
+          "Either the screen moved or the specimen's rerun did — never relax this row to match; " +
+          "re-derive the screen and say which rule changed.",
+      });
+    }
 
     // (a) The adjudicator's behaviour against this specimen, exactly.
     if (!expected) {
@@ -385,6 +467,7 @@ function report(outcome) {
     lines.push(`${mark} [${r.id}] ${r.title}`);
     lines.push(`    ${model}`);
     lines.push(`    labelled ${r.caught_by} · verdict ${r.verdict}${r.reasons.length ? ` (${r.reasons.join("+")})` : ""}`);
+    lines.push(`    screen ${r.screen.ok ? "ADMITTED" : "REFUSED "} · ${r.screen.reason}`);
     for (const f of r.failures) lines.push(`    FAIL ${f.kind}: ${f.detail}`);
     if (r.modelled.remap) lines.push(`    note: ${r.modelled.remap.why}`);
   }
@@ -405,7 +488,9 @@ function report(outcome) {
 
   lines.push("");
   const passing = outcome.results.filter((r) => r.failures.length === 0).length;
+  const refused = outcome.results.filter((r) => !r.screen.ok).length;
   lines.push(`${passing}/${outcome.results.length} ratified specimens adjudicate as expected · ${declared.length} declared divergence(s)`);
+  lines.push(`${refused}/${outcome.results.length} specimen reruns are REFUSED by the screen, frozen verbatim — none was executed`);
   lines.push(outcome.ok ? "ACCEPTANCE: PASS" : "ACCEPTANCE: FAIL");
   return lines.join("\n");
 }
@@ -426,4 +511,4 @@ if (isMain) {
   process.exit(outcome.ok ? 0 : 1);
 }
 
-export { READ_LEVEL_PROBES, EXPECTED, DECLARED_DIVERGENCES, FIXTURE, report };
+export { READ_LEVEL_PROBES, EXPECTED, SCREEN_EXPECTED, DECLARED_DIVERGENCES, FIXTURE, report };

@@ -29,6 +29,13 @@ defmodule BarkparkWeb.Plugs.AcceptBarkparkVendor do
   makes JSON negotiable — identical to the SSE branch — so the export route is
   reachable with its spec-compliant Accept.
 
+  The SAME append happens for `application/x-ndjson`: `ExportController.export`
+  RESPONDS with `application/x-ndjson` (the backup verb streams NDJSON), and
+  `bp export` sends the matching Accept, but `GET /v1/data/export/:dataset`
+  rides `:scoped_api` (`plug(:accepts, ["json"])`), which would 406 that header
+  before the request reached `OptionalToken` — a backup refused on content
+  negotiation, before auth, for asking for the exact type the route emits.
+
   This runs before `:accepts` in both the `:api` and `:scoped_api`
   pipelines, so no router change is needed; only requests that would
   otherwise 406 are affected.
@@ -72,6 +79,14 @@ defmodule BarkparkWeb.Plugs.AcceptBarkparkVendor do
           x_tar?(header) ->
             put_req_header(conn, "accept", header <> ", application/json")
 
+          # `application/x-ndjson` clients (the document export / backup verb)
+          # hit the same seam: `:accepts ["json"]` would 406 that header before
+          # the request reaches `ExportController.export`, which SETS
+          # `application/x-ndjson` as its own response type. Append (do NOT
+          # replace) so JSON is negotiable — identical to the x-tar branch.
+          x_ndjson?(header) ->
+            put_req_header(conn, "accept", header <> ", application/json")
+
           true ->
             conn
         end
@@ -86,4 +101,6 @@ defmodule BarkparkWeb.Plugs.AcceptBarkparkVendor do
   defp sse?(header), do: String.contains?(header, "text/event-stream")
 
   defp x_tar?(header), do: String.contains?(header, "application/x-tar")
+
+  defp x_ndjson?(header), do: String.contains?(header, "application/x-ndjson")
 end

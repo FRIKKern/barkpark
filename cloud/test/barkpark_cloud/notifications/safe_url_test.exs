@@ -43,15 +43,55 @@ defmodule BarkparkCloud.Notifications.SafeUrlTest do
     end
   end
 
-  describe "check/1 allows legitimate public provider URLs" do
-    test "public hostnames resolve to public IPs and pass" do
-      # These resolve to real public addresses; the resolve-then-check passes.
-      assert SafeUrl.check("https://discord.com/api/webhooks/1/x") == :ok
-      assert SafeUrl.check("https://hooks.slack.com/services/T/B/X") == :ok
+  # Named for what it covers now: the resolve-then-check path in BOTH directions
+  # (a public hostname passes, a rebinding hostname does not) plus the IP-literal
+  # short-circuit. The old name said "allows legitimate public provider URLs",
+  # which stopped being true the moment the seam let this file assert a refusal.
+  describe "the resolve-then-check path" do
+    # These drive the HOSTNAME path (resolve-then-check) through the `:resolver`
+    # seam instead of real DNS. Asking discord.com and hooks.slack.com for their
+    # A records made a merge-blocking CI context depend on a third party's
+    # nameservers: one resolver outage and every PR in the repo froze. The
+    # assertion is unchanged — a public hostname whose addresses are public
+    # passes — only the nameserver is now ours. Mirror of
+    # api/test/barkpark/net/safe_outbound_test.exs, which is IP-literals-only.
+    test "a public hostname resolving to public addresses passes" do
+      resolver =
+        stub_resolver(%{
+          {~c"discord.com", :inet} => [{162, 159, 128, 233}],
+          {~c"discord.com", :inet6} => [{0x2606, 0x4700, 0x90, 0, 0, 0, 0, 0x1}],
+          {~c"hooks.slack.com", :inet} => [{3, 5, 20, 100}]
+        })
+
+      assert SafeUrl.check("https://discord.com/api/webhooks/1/x", resolver: resolver) == :ok
+      assert SafeUrl.check("https://hooks.slack.com/services/T/B/X", resolver: resolver) == :ok
+    end
+
+    test "a hostname resolving to a private address is blocked (DNS rebinding)" do
+      resolver = stub_resolver(%{{~c"evil.example.com", :inet} => [{169, 254, 169, 254}]})
+
+      assert SafeUrl.check("https://evil.example.com/hook", resolver: resolver) ==
+               {:error, :ssrf_blocked}
+    end
+
+    test "a hostname that resolves to nothing is unresolvable, not allowed" do
+      assert SafeUrl.check("https://nowhere.example.com/hook", resolver: stub_resolver(%{})) ==
+               {:error, :unresolvable}
     end
 
     test "a public IPv4 literal passes" do
       assert SafeUrl.check("https://1.1.1.1/hook") == :ok
+    end
+  end
+
+  # An :inet.getaddrs/2-shaped function backed by a fixture map. Anything not in
+  # the map answers :nxdomain, exactly as a real resolver would.
+  defp stub_resolver(fixtures) do
+    fn charlist, family ->
+      case Map.fetch(fixtures, {charlist, family}) do
+        {:ok, addrs} -> {:ok, addrs}
+        :error -> {:error, :nxdomain}
+      end
     end
   end
 

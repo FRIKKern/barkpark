@@ -88,7 +88,9 @@ defmodule BarkparkWeb.StudioComponents.PresenceNavTest do
 
     dots =
       item_presences
-      |> Enum.map(fn p -> ~s(<span class="presence-dot-sm" style="background: #{p.color}"></span>) end)
+      |> Enum.map(fn p ->
+        ~s(<span class="presence-dot-sm" style="background: #{p.color}"></span>)
+      end)
       |> Enum.join()
 
     render_component(&StudioComponents.pane_doc_item/1, %{

@@ -1,0 +1,7 @@
+{
+    "error": {
+        "code": "not_found",
+        "message": "Zone not found",
+        "details": null
+    }
+}

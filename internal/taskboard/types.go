@@ -63,6 +63,11 @@ type Criteria struct{ Met, Total int }
 type CriterionItem struct {
 	Criterion string
 	Met       bool
+	// Evidence is the proof text the met-flip carries (content.acceptance_
+	// criteria[N].evidence). A met with empty evidence is not a sealed row —
+	// the server refuses that flip — so a read-back that finds one has found a
+	// write that did NOT land the way it was asked for. Empty on an unmet row.
+	Evidence string
 	// Attempts is the honest-miss trail (charter D8): `bp task stamp --miss`
 	// appends {note,ts,worker} WITHOUT flipping met, bounded server-side to the
 	// 5 most recent. A recorded attempt on an unmet criterion is what turns its
@@ -282,8 +287,12 @@ type UIState struct {
 	Cursor         int             // index into the flattened visible-row list
 	CollapsedEpics map[string]bool // root doc_id -> user-collapsed
 	Conn           ConnState
-	LastSync       time.Time
-	Strip          ActionStrip // the one-line action status above the footer
+	// ConnProblem is a short, truthful reason the snapshot path is degraded.
+	// Empty means the ordinary Conn label applies. It distinguishes a rejected
+	// or invalid snapshot from a genuinely unreachable server.
+	ConnProblem string
+	LastSync    time.Time
+	Strip       ActionStrip // the one-line action status above the footer
 	// SpineScroll is the board viewport's remembered top line (Amendment 8:
 	// minimal scrolling — the cursor walks a stable window, and the window
 	// slides only when the cursor would leave it, 1:1 with the cursor's line
@@ -304,9 +313,9 @@ type UIState struct {
 	// HoverTarget is the Ref (task doc_id / fold key) of the selectable spine
 	// row currently under the mouse pointer, "" for none (charter D94/D95). It
 	// is resolved by the ttm-s1 compose-level hit map from a Motion MouseMsg and
-	// set through setHoverTarget (the hover-changed guard IS the debounce — a
-	// Motion onto the same row is a no-op, so an all-motion stream never
-	// re-renders). Render restyles exactly this row in the accent foreground
+	// committed through a bounded trailing debounce, so an all-motion stream
+	// coalesces crossed rows and never renders every intermediate preview.
+	// Render restyles exactly this row in the accent foreground
 	// (hoverStyle — the chat Phases-pane selection grammar); every other row is
 	// untouched, at full brightness. A "" target paints nothing, so a board
 	// with no mouse is byte-identical. Cleared on any key input, so the
@@ -341,8 +350,8 @@ type UIState struct {
 	HoverFooterVerb rune
 	// OpenTasks marks the ONE task currently entered — the deepest FrameTask on
 	// the navigation stack (single-open: at most one entry, never a pile of
-	// checks). The board renders that row's status glyph as the checked radio ●
-	// (ASCII '*'): enter checks the row, esc unchecks it — the picker
+	// checks). The board renders that row's status glyph as the reader-open ◆
+	// (ASCII '@'): enter marks the row, esc clears it — the reader
 	// vocabulary, visible in the wide two-pane where the board stays pinned
 	// beside the reading frame. It is DERIVED from Model.stack at compose time
 	// (openTaskRefs, compose.go), never stored shell state, so it cannot desync

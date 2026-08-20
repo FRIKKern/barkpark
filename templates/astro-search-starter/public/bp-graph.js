@@ -1,11 +1,15 @@
 // ─────────────────────────────────────────────────────────────────────────
-// MIRROR PAIR — canonical lives at api/priv/static/assets/bp-graph.js
-// This file is kept BYTE-IDENTICAL across two surfaces:
-//   • api/priv/static/assets/bp-graph.js  (canonical — Studio blast-radius pane)
-//   • web/public/bp-graph.js              (mirror — Next.js web demo landing)
-// Edit the canonical copy, then copy it verbatim to the mirror. Never hand-edit
-// one side alone — the two drifted to 0.79 similarity once and had to be
-// reconciled (Cody duplication finding, task-e94f519629c2dc52).
+// MIRROR SET — canonical lives at api/priv/static/assets/bp-graph.js
+// This file is kept BYTE-IDENTICAL across four surfaces:
+//   • api/priv/static/assets/bp-graph.js           (canonical — Studio blast-radius pane)
+//   • web/public/bp-graph.js                       (mirror — Next.js web demo landing)
+//   • templates/search-starter/public/bp-graph.js  (mirror — Next search template)
+//   • templates/astro-search-starter/public/bp-graph.js (mirror — Astro search template)
+// Edit the canonical copy, then copy it verbatim to every mirror. Never
+// hand-edit one side alone — the first two drifted to 0.79 similarity once and
+// had to be reconciled (Cody duplication finding, task-e94f519629c2dc52), and
+// the template snapshots later went 19 lines stale (missing setTheme), which
+// shipped a dead theme toggle. Verify: md5 -q <all four> | sort -u | wc -l → 1.
 // ─────────────────────────────────────────────────────────────────────────
 // bp-graph.js — Obsidian-style graph renderer for the Studio blast-radius
 // pane. Self-contained vanilla Canvas2D + a hand-rolled velocity-Verlet force
@@ -119,6 +123,13 @@
     sheet: "#22D3EE",
     project: "#A3E635",
     "game-data": "#E879F9",
+    // Live dogfood-corpus types (search-starter flagship). Same Tailwind-400
+    // family as the rest of the palette; each hue is distinct from every type
+    // it actually co-occurs with (task=rose, paper=sky dominate that corpus).
+    tag: "#2DD4BF",
+    command: "#C084FC",
+    metric: "#FACC15",
+    session: "#F472B6",
     _unknown: SLATE
   };
 
@@ -781,6 +792,21 @@
       R_RING = 0.22 * Math.min(W, H);
       var GOLDEN = Math.PI * (3 - Math.sqrt(5));
       var seedIdx = 0;
+      // UNREACHED nodes (no path from the root — depthMap holds the maxD+1
+      // sentinel) have no true ring. Seeding them ALL at that one sentinel
+      // radius built a dense distant annulus that center-gravity collapsed
+      // into the frozen "hairball" at corpus scale (n≈1800, most nodes outside
+      // the root's component). Scatter them instead across an area-uniform
+      // phyllotaxis disc sized near the sim's gravity/repulsion equilibrium
+      // (r³ ≈ repel·n/gravity), which is already close to its settled spread —
+      // the short synchronous settle then RELAXES it instead of failing to
+      // untangle it. Reached nodes keep the proven radial-by-depth seed.
+      var unreachedCount = 0;
+      nodes.forEach(function (node) {
+        if (!(oldPos[node.id] && hadData) && depthMap[node.id] > maxD) unreachedCount++;
+      });
+      var discR = Math.cbrt((800 * Math.max(nodes.length, 8)) / 0.009);
+      var discIdx = 0;
       nodes.forEach(function (node) {
         var op = oldPos[node.id];
         if (op && hadData) {
@@ -790,10 +816,17 @@
           node.alpha = 1;
           node.scaleK = 1;
         } else {
-          var depth = Math.max(1, depthMap[node.id] || 1);
-          var ang = seedIdx * GOLDEN;
-          seedIdx++;
-          var rad = depth * R_RING + (Math.random() - 0.5) * 20;
+          var ang, rad;
+          if (depthMap[node.id] > maxD && unreachedCount > 0) {
+            ang = discIdx * GOLDEN;
+            rad = discR * Math.sqrt((discIdx + 0.5) / unreachedCount) + (Math.random() - 0.5) * 16;
+            discIdx++;
+          } else {
+            var depth = Math.max(1, depthMap[node.id] || 1);
+            ang = seedIdx * GOLDEN;
+            seedIdx++;
+            rad = depth * R_RING + (Math.random() - 0.5) * 20;
+          }
           node.x = cx + rad * Math.cos(ang);
           node.y = cy + rad * Math.sin(ang);
           node.alpha = 0;
@@ -920,19 +953,33 @@
       });
     }
 
-    // ── synchronous settle (reduced-motion) ──
+    // ── synchronous settle (first load + reduced-motion) ──
+    // ADAPTIVE budget. The old fixed 40ms wall exited after ~1 tick of the
+    // O(n^2) repulsion at n≈1800 and then hard-zeroed alpha — the "hairball"
+    // was a FROZEN, unrelaxed layout wearing a settled graph's stillness. The
+    // budget now scales with node count (capped so mount never janks), alpha
+    // genuinely cools toward rest (so small graphs exit early on REAL
+    // convergence, not just the clock), and the banding pass is time-guarded
+    // (40 unguarded ticks at corpus scale was itself a multi-hundred-ms stall).
     function settleSync() {
       var start = perfNow();
       var iters = 0;
+      var n = nodes.length || 1;
+      var budget = clamp(60 + n * 0.13, 60, 250); // ms — ~250 at corpus scale
       alpha = 1.0;
+      alphaTarget = 0;
       R_RING = 0.22 * Math.min(W, H);
-      while (alpha > alphaMin && perfNow() - start < 40 && iters < 500) {
+      while (alpha > alphaMin && perfNow() - start < budget && iters < 600) {
         tick(16.67, true);
         iters++;
       }
       applyAngularFan();
-      // apply blast-ring banding firmly
-      for (var b = 0; b < 40; b++) tick(16.67, true);
+      // apply blast-ring banding firmly (time-guarded)
+      var bandStart = perfNow();
+      for (var b = 0; b < 40 && perfNow() - bandStart < 90; b++) {
+        tick(16.67, true);
+        iters++;
+      }
       nodes.forEach(function (nd) {
         nd.alpha = nd.phantom ? 1 : 1;
         nd.scaleK = 1;
@@ -941,6 +988,15 @@
       edges.forEach(function (e) {
         e.alpha = 1;
       });
+      // Instrumented settle line (debug level — silent in default consoles).
+      // This is the convergence truth a harness can assert on: iterations
+      // actually run + the alpha the sim reached before the freeze.
+      try {
+        console.debug(
+          "[bp-graph] settleSync n=" + n + " iters=" + iters +
+            " alpha=" + alpha.toFixed(4) + " ms=" + Math.round(perfNow() - start)
+        );
+      } catch (e) {}
       alpha = 0;
       alphaTarget = 0;
     }
@@ -1947,24 +2003,26 @@
       var html = "";
       var title = node.phantom ? node.broken_id || node.title : node.title;
       // Hairline the title underline with the node's resolved hue for a bespoke
-      // feel (vs. a generic popover). Title text stays high-contrast white.
+      // feel (vs. a generic popover). Title text stays high-contrast per theme
+      // (white was invisible on the light tooltip's white glass).
       var hue = node.phantom ? SLATE : TYPE_HEX[node.type] || SLATE;
+      var light = theme === "light";
       html +=
-        "<div style='font-weight:600;color:#fff;margin-bottom:4px;padding-bottom:3px;" +
+        "<div style='font-weight:600;color:" + (light ? "#16161a" : "#fff") + ";margin-bottom:4px;padding-bottom:3px;" +
         "border-bottom:1.5px solid " + rgba(hue, 0.55) + "'>" + esc(title) + "</div>";
       if (node.phantom) {
         var line = node.via
           ? esc(node.broken_id) + " · via " + esc(node.via)
           : esc(node.broken_id) + " · broken reference";
-        html += "<div style='color:" + SLATE + "'>" + line + "</div>";
+        html += "<div style='color:" + (light ? MONO_LIGHT : SLATE) + "'>" + line + "</div>";
       } else {
-        html += "<div style='color:" + rgba(ACCENT, 0.9) + "'>" + esc(node.type) + "</div>";
+        html += "<div style='color:" + (light ? shiftL(ACCENT, -0.22) : rgba(ACCENT, 0.9)) + "'>" + esc(node.type) + "</div>";
         var cc = Object.keys(adj[node.id] || {}).length;
-        html += "<div style='color:rgba(226,232,240,0.7);margin-top:2px'>" + cc + " connection" + (cc === 1 ? "" : "s") + "</div>";
+        html += "<div style='color:" + (light ? "rgba(15,17,23,0.6)" : "rgba(226,232,240,0.7)") + ";margin-top:2px'>" + cc + " connection" + (cc === 1 ? "" : "s") + "</div>";
       }
       tooltip.innerHTML = html;
-      tooltip.style.background = theme === "light" ? "rgba(255,255,255,0.92)" : "rgba(19,20,27,0.92)";
-      tooltip.style.border = "1px solid rgba(255,255,255,0.08)";
+      tooltip.style.background = light ? "rgba(255,255,255,0.92)" : "rgba(19,20,27,0.92)";
+      tooltip.style.border = "1px solid " + (light ? "rgba(15,17,23,0.10)" : "rgba(255,255,255,0.08)");
       tooltip.style.backdropFilter = "blur(14px)";
       tooltip.style.opacity = "1";
 
@@ -1983,8 +2041,8 @@
     }
 
     function esc(s) {
-      return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
-        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
       });
     }
 
@@ -2705,6 +2763,61 @@
     // ════════════════════════════════════════════════════════════ CHROME ══
     var chromeEls = [];
     var _chromeRevealed = false;
+    // Chrome palette for the CURRENT theme. The overlay chrome (legend, zoom
+    // strip, toggles, search) was hard-coded dark glass, which read as a stuck
+    // dark island once hosts went theme-aware (setTheme re-skins the canvas
+    // live). Dark keeps the exact original values; light mirrors them on a
+    // white glass. setTheme() rebuilds the chrome so both flip together.
+    function chromeC() {
+      if (theme === "light") {
+        return {
+          panelBg: "rgba(255,255,255,0.72)",
+          panelBorder: "rgba(15,17,23,0.10)",
+          title: "rgba(15,17,23,0.45)",
+          row: "rgba(15,17,23,0.68)",
+          rowDim: "rgba(15,17,23,0.52)",
+          btnBg: "rgba(255,255,255,0.72)",
+          btnBgHover: "rgba(255,255,255,0.95)",
+          btnBorder: "rgba(15,17,23,0.10)",
+          btnBorderHover: "rgba(15,17,23,0.20)",
+          btnText: "rgba(15,17,23,0.72)",
+          btnTextHover: "rgba(15,17,23,0.95)",
+          togBgOn: "rgba(226,229,238,0.8)",
+          togBgOff: "rgba(226,229,238,0.45)",
+          togBorderOn: "rgba(15,17,23,0.14)",
+          togBorderOff: "rgba(15,17,23,0.07)",
+          togTextOn: "rgba(15,17,23,0.85)",
+          togTextOff: "rgba(15,17,23,0.55)",
+          dotOff: "rgba(15,17,23,0.25)",
+          inputText: "#16161a",
+          mono: MONO_LIGHT,
+          phantomRing: "rgba(90,95,110,0.55)"
+        };
+      }
+      return {
+        panelBg: "rgba(15,17,23,0.55)",
+        panelBorder: "rgba(255,255,255,0.07)",
+        title: "rgba(255,255,255,0.45)",
+        row: "rgba(255,255,255,0.65)",
+        rowDim: "rgba(255,255,255,0.5)",
+        btnBg: "rgba(15,17,23,0.55)",
+        btnBgHover: "rgba(24,27,36,0.72)",
+        btnBorder: "rgba(255,255,255,0.07)",
+        btnBorderHover: "rgba(255,255,255,0.14)",
+        btnText: "rgba(255,255,255,0.75)",
+        btnTextHover: "rgba(255,255,255,0.95)",
+        togBgOn: "rgba(40,44,58,0.7)",
+        togBgOff: "rgba(40,44,58,0.4)",
+        togBorderOn: "rgba(255,255,255,0.12)",
+        togBorderOff: "rgba(255,255,255,0.06)",
+        togTextOn: "rgba(255,255,255,0.85)",
+        togTextOff: "rgba(255,255,255,0.6)",
+        dotOff: "rgba(255,255,255,0.25)",
+        inputText: "#fff",
+        mono: MONO_DARK,
+        phantomRing: "rgba(148,163,184,0.5)"
+      };
+    }
     function buildChrome() {
       // On first build, fade the whole chrome layer in AFTER the constellation
       // has kindled (delay matches the ~600ms guide-circle fade) so the controls
@@ -2725,6 +2838,7 @@
       });
       chromeEls = [];
       var n = nodes.length;
+      var cc = chromeC();
 
       // zoom strip (always)
       var strip = mkPanel("position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;gap:6px;");
@@ -2742,21 +2856,21 @@
         b.title = pair[2];
         b.style.cssText =
           "width:32px;height:32px;border-radius:8px;cursor:pointer;pointer-events:auto;" +
-          "background:rgba(15,17,23,0.55);border:1px solid rgba(255,255,255,0.07);" +
-          "color:rgba(255,255,255,0.75);font-size:16px;line-height:1;backdrop-filter:blur(14px);outline:none;" +
+          "background:" + cc.btnBg + ";border:1px solid " + cc.btnBorder + ";" +
+          "color:" + cc.btnText + ";font-size:16px;line-height:1;backdrop-filter:blur(14px);outline:none;" +
           "transition:background .14s ease, border-color .14s ease, transform .08s ease, box-shadow .14s ease;";
         b.addEventListener("click", pair[1]);
         // live pointer states — the difference between "functional" and
         // "crafted" chrome (no new paint cost).
         b.addEventListener("pointerenter", function () {
-          b.style.background = "rgba(24,27,36,0.72)";
-          b.style.borderColor = "rgba(255,255,255,0.14)";
-          b.style.color = "rgba(255,255,255,0.95)";
+          b.style.background = cc.btnBgHover;
+          b.style.borderColor = cc.btnBorderHover;
+          b.style.color = cc.btnTextHover;
         });
         b.addEventListener("pointerleave", function () {
-          b.style.background = "rgba(15,17,23,0.55)";
-          b.style.borderColor = "rgba(255,255,255,0.07)";
-          b.style.color = "rgba(255,255,255,0.75)";
+          b.style.background = cc.btnBg;
+          b.style.borderColor = cc.btnBorder;
+          b.style.color = cc.btnText;
         });
         b.addEventListener("pointerdown", function () { b.style.transform = "scale(0.92)"; });
         b.addEventListener("pointerup", function () { b.style.transform = "scale(1)"; });
@@ -2771,39 +2885,51 @@
       // legend (always). In the DEFAULT monochrome look there is nothing to key
       // by color, so we show a single muted dot. When "Full color" is on, the
       // per-type color key appears — small round swatches, no glyph letters.
+      // OVERLAY OWNERSHIP CONTRACT: the renderer owns TOP-LEFT (this legend)
+      // and BOTTOM-RIGHT (the zoom strip); TOP-RIGHT is the in-canvas search,
+      // suppressed under opts.externalSearch. A hosting app may overlay its own
+      // chrome ONLY in a corner the renderer leaves free (the search-starter
+      // caption sits bottom-left) — exactly one owner per corner, never two.
       var presentTypes = {};
       nodes.forEach(function (nd) {
-        if (!nd.phantom) presentTypes[nd.type] = true;
+        if (!nd.phantom) presentTypes[nd.type] = (presentTypes[nd.type] || 0) + 1;
       });
-      var typeList = Object.keys(presentTypes);
+      // Most-present types first, so the slice(0,8) cap always keeps the types
+      // the eye actually meets (count desc, then name for determinism).
+      var typeList = Object.keys(presentTypes).sort(function (a, b) {
+        return presentTypes[b] - presentTypes[a] || (a < b ? -1 : a > b ? 1 : 0);
+      });
       var legend = mkPanel("position:absolute;left:12px;top:12px;padding:9px 11px;max-width:200px;");
       var title = document.createElement("div");
-      title.style.cssText = "font-size:10px;letter-spacing:0.04em;text-transform:uppercase;color:rgba(255,255,255,0.45);margin-bottom:6px;";
+      title.style.cssText = "font-size:10px;letter-spacing:0.04em;text-transform:uppercase;color:" + cc.title + ";margin-bottom:6px;";
       title.textContent = fullColor ? "Types" : "Legend";
       legend.appendChild(title);
       if (fullColor) {
         typeList.slice(0, 8).forEach(function (ty) {
           var row = document.createElement("div");
-          row.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:rgba(255,255,255,0.65);letter-spacing:0.03em;";
-          var swStyle = "width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" +
-            (TYPE_HEX[ty] || SLATE) + ";";
-          row.innerHTML = "<span style='" + swStyle + "'></span>" + ty;
+          row.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:" + cc.row + ";letter-spacing:0.03em;";
+          // Swatch matches the DRAWN fill exactly — nodeFill darkens hues on
+          // light (shiftL -0.22), so the key must too or the legend lies.
+          var swHex = TYPE_HEX[ty] || SLATE;
+          if (theme === "light") swHex = shiftL(swHex, -0.22);
+          var swStyle = "width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + swHex + ";";
+          row.innerHTML = "<span style='" + swStyle + "'></span>" + esc(ty);
           legend.appendChild(row);
         });
       } else {
         var mrow = document.createElement("div");
-        mrow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:rgba(255,255,255,0.65);";
-        mrow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + MONO_DARK + "'></span> document";
+        mrow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:" + cc.row + ";";
+        mrow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + cc.mono + "'></span> document";
         legend.appendChild(mrow);
         var arow = document.createElement("div");
-        arow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:rgba(255,255,255,0.65);";
+        arow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:" + cc.row + ";";
         arow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + ACCENT + "'></span> active";
         legend.appendChild(arow);
       }
       // phantom ghost entry
       var prow = document.createElement("div");
-      prow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:rgba(255,255,255,0.5);font-style:italic;";
-      prow.innerHTML = "<span style='width:9px;height:9px;border-radius:50%;border:1px solid rgba(148,163,184,0.5)'></span> broken ref";
+      prow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:" + cc.rowDim + ";font-style:italic;";
+      prow.innerHTML = "<span style='width:9px;height:9px;border-radius:50%;border:1px solid " + cc.phantomRing + "'></span> broken ref";
       legend.appendChild(prow);
 
       // full-color toggle (pill with state dot)
@@ -2833,8 +2959,8 @@
         sw.placeholder = "Search…";
         sw.style.cssText =
           "position:absolute;right:16px;top:12px;width:160px;pointer-events:auto;" +
-          "padding:6px 10px;border-radius:8px;background:rgba(15,17,23,0.55);" +
-          "border:1px solid rgba(255,255,255,0.07);color:#fff;font-size:12px;backdrop-filter:blur(14px);font-family:" + FONT_STACK + ";";
+          "padding:6px 10px;border-radius:8px;background:" + cc.panelBg + ";" +
+          "border:1px solid " + cc.panelBorder + ";color:" + cc.inputText + ";font-size:12px;backdrop-filter:blur(14px);font-family:" + FONT_STACK + ";";
         var deb = null;
         sw.addEventListener("input", function () {
           if (deb) clearTimeout(deb);
@@ -2846,24 +2972,26 @@
     }
 
     function mkPanel(extra) {
+      var cc = chromeC();
       var d = document.createElement("div");
       d.style.cssText =
-        "background:rgba(15,17,23,0.55);backdrop-filter:blur(14px) saturate(180%);" +
-        "border:1px solid rgba(255,255,255,0.07);border-radius:10px;pointer-events:auto;" + extra;
+        "background:" + cc.panelBg + ";backdrop-filter:blur(14px) saturate(180%);" +
+        "border:1px solid " + cc.panelBorder + ";border-radius:10px;pointer-events:auto;" + extra;
       return d;
     }
     // Pill toggle with a state dot (on = accent-lit, off = dim) — reads as
     // premium chrome rather than a debug control with a checkmark-in-label.
     function mkToggle(label, on, fn) {
+      var cc = chromeC();
       var b = document.createElement("button");
       b.setAttribute("role", "switch");
       b.setAttribute("aria-checked", on ? "true" : "false");
       b.style.cssText =
         "margin-top:8px;display:flex;align-items:center;gap:7px;width:100%;padding:5px 9px;" +
         "border-radius:7px;cursor:pointer;text-align:left;" +
-        "background:rgba(40,44,58," + (on ? "0.7" : "0.4") + ");" +
-        "border:1px solid rgba(255,255,255," + (on ? "0.12" : "0.06") + ");" +
-        "color:rgba(255,255,255," + (on ? "0.85" : "0.6") + ");" +
+        "background:" + (on ? cc.togBgOn : cc.togBgOff) + ";" +
+        "border:1px solid " + (on ? cc.togBorderOn : cc.togBorderOff) + ";" +
+        "color:" + (on ? cc.togTextOn : cc.togTextOff) + ";" +
         "font-size:11px;pointer-events:auto;font-family:" + FONT_STACK + ";" +
         "transition:background .14s ease, border-color .14s ease, transform .08s ease, box-shadow .14s ease;";
       var dot = document.createElement("span");
@@ -2871,7 +2999,7 @@
         "width:7px;height:7px;border-radius:50%;flex:0 0 auto;" +
         (on
           ? "background:" + ACCENT + ";box-shadow:0 0 6px " + rgba(ACCENT, 0.8) + ";"
-          : "background:rgba(255,255,255,0.25);");
+          : "background:" + cc.dotOff + ";");
       var txt = document.createElement("span");
       txt.textContent = label;
       b.appendChild(dot);
@@ -3057,6 +3185,27 @@
         hoverId = nextId;
         // Match the canvas-hover path: wake for the crossfade, never reheat the
         // sim — a list hover should focus the node, not stir the layout.
+        wake();
+      },
+      // Re-skin to a new theme in place. The host reads the site's real theme
+      // from document.documentElement.dataset.theme — which our "auto" never
+      // sees, since it resolves via matchMedia ONLY — and pushes it here on
+      // every toggle. Reassigns the closure `theme` the paint helpers read (same
+      // resolution as construction), rebuilds the DOM chrome (legend/zoom/
+      // search flip with the theme), then repaints; no destroy/recreate, so the
+      // layout, camera, hover and filter state are all untouched.
+      setTheme: function (next) {
+        var choice = next || "auto";
+        if (choice === "auto") {
+          var pd = true;
+          try {
+            pd = !window.matchMedia("(prefers-color-scheme: light)").matches;
+          } catch (e) {}
+          theme = pd ? "dark" : "light";
+        } else {
+          theme = choice;
+        }
+        buildChrome();
         wake();
       },
       destroy: function () {

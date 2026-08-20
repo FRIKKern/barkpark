@@ -1,0 +1,333 @@
+# cp-ops — operator commands on the control plane, from a workflow_dispatch.
+#
+# The control plane's operator surface (mix barkpark_cloud.grant_forever, IEx
+# rpc) lives on the CP box, but operator SSH is deliberately narrow: CI is the
+# one place that already holds DEPLOY_SSH_KEY + CP_HOST (deploy.yml). This
+# workflow reuses exactly those secrets to run a NAMED operator command — never
+# a free-form remote shell. Each operation is an explicit case arm with its own
+# validation; adding one is a reviewed diff, not an input string.
+name: cp-ops
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Operator command to run"
+        type: choice
+        required: true
+        options:
+          - grant-forever
+          - guerrilla-logs-grep
+          - site-runtime-install
+          - site-artifact-fetch
+          - box-logs
+          - builder-token-fix
+          - box-file-tail
+          - caddy-repair
+          - box-probe
+          - box-prune
+          - box-unit-repair
+      team:
+        description: "grant-forever: team UUID (as shown by bp whoami / bp teams)"
+        required: false
+      needle:
+        description: "guerrilla-logs-grep: request id or token to grep (90-min journal window)"
+        required: false
+      box_ip:
+        description: "site-runtime-install / site-artifact-fetch: managed-box IPv4"
+        required: false
+      artifact_repo:
+        description: "site-artifact-fetch: GitHub owner/repo whose tarball to stage"
+        required: false
+      artifact_ref:
+        description: "site-artifact-fetch: git ref (branch or 40-hex sha) to stage"
+        required: false
+      unit:
+        description: "box-logs: systemd unit (barkpark-builder | barkpark-runtime | barkpark-agent)"
+        required: false
+      file_path:
+        description: "box-file-tail: file under /var/log/barkpark-builder/ to tail (200 lines)"
+        required: false
+
+jobs:
+  run:
+    # STATIC on purpose. A job `name:` that is nothing but an input
+    # interpolation renders as a different check-run name on every dispatch, and
+    # scripts/required-checks-generate.sh reads job names as TEMPLATES: an
+    # all-interpolation template regexes to `^.+$` and claims EVERY rendered
+    # name in the repo, erasing the continue-on-error/paths-filter/needs
+    # provenance the selection stage excludes on. The operation still shows in
+    # the UI — on the step below, where it cannot enter the workflow index.
+    name: cp-ops operator command
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ${{ inputs.operation }} on the control plane
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          CP_HOST: ${{ secrets.CP_HOST }}
+          GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
+          TEAM: ${{ inputs.team }}
+          NEEDLE: ${{ inputs.needle }}
+          BOX_IP: ${{ inputs.box_ip }}
+          ARTIFACT_REPO: ${{ inputs.artifact_repo }}
+          ARTIFACT_REF: ${{ inputs.artifact_ref }}
+          UNIT: ${{ inputs.unit }}
+          FILE_PATH: ${{ inputs.file_path }}
+          OP: ${{ inputs.operation }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
+          case "$OP" in
+            box-probe)
+              # Fixed read-only diagnostics: disk, memory, docker state, units.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              $SSH "root@${CP_HOST}" "
+                KEY=/root/.ssh/barkpark_indx
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+                  echo == df ==; df -h / /var 2>/dev/null | tail -3
+                  echo == mem ==; free -m | head -2
+                  echo == docker ps ==; docker ps -a --format \"{{.Names}} {{.Status}} {{.Image}}\" | head -10
+                  echo == docker disk ==; docker system df 2>/dev/null | head -6
+                  echo == units ==; systemctl is-active barkpark-agent barkpark-builder barkpark-runtime caddy
+                  echo == last docker events ==; journalctl -u docker -n 12 --no-pager | tail -12
+                '
+              "
+              ;;
+            box-prune)
+              # Reclaim disk on a site box: every deploy builds a fresh image
+              # and (until jpf-runtime-image-pruning lands in the runtime)
+              # nothing removes the superseded ones — the jarl box hit 100%
+              # of 38G this way and took the instance down. Removes exited
+              # site containers, then dangling/unreferenced images and build
+              # cache. The RUNNING deployment and its image are never touched
+              # (prune only removes what nothing references). df before/after.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              $SSH "root@${CP_HOST}" "
+                KEY=/root/.ssh/barkpark_indx
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+                  set -euo pipefail
+                  echo == df before ==; df -h / | tail -1
+                  echo == removing exited site containers ==
+                  docker ps -a --filter status=exited --filter \"name=site-\" -q | xargs -r docker rm
+                  echo == pruning images ==
+                  docker image prune -af 2>/dev/null | tail -1
+                  echo == pruning build cache ==
+                  docker builder prune -af 2>/dev/null | tail -1
+                  echo == vacuuming journal ==
+                  journalctl --vacuum-size=200M 2>&1 | tail -1
+                  echo == df after ==; df -h / | tail -1
+                '
+              "
+              ;;
+            box-unit-repair)
+              # The disk-full incident left the jarl instance dead AFTER the
+              # space came back: nothing on the operator belt could even LOOK
+              # at the instance units on a box, let alone restart one. With no
+              # unit given: list the barkpark/postgres/caddy units, who owns
+              # port 4000, and the recent slot journal. With a unit: journal
+              # tail, restart, verify. The allowlist is the security boundary.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              if [ -n "$UNIT" ]; then
+                [[ "$UNIT" =~ ^(barkpark-slot@[a-z]|barkpark-agent|barkpark-runtime|barkpark-builder|barkpark|postgresql(@[0-9a-z-]+)?|caddy)$ ]] \
+                  || { echo "unit not in allowlist"; exit 1; }
+              fi
+              $SSH "root@${CP_HOST}" "
+                KEY=/root/.ssh/barkpark_indx
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+                  set -uo pipefail
+                  if [ -z \"${UNIT}\" ]; then
+                    echo == units ==
+                    systemctl list-units --all --no-pager --plain \"barkpark*\" \"postgresql*\" caddy.service 2>/dev/null | head -14
+                    echo == port 4000 ==
+                    ss -ltnp 2>/dev/null | grep :4000 || echo nothing-listens-on-4000
+                    echo == recent slot journal ==
+                    journalctl -u \"barkpark*\" -n 40 --no-pager 2>/dev/null | tail -40
+                  else
+                    echo == journal before ==
+                    journalctl -u \"${UNIT}\" -n 30 --no-pager 2>/dev/null | tail -30
+                    echo == restarting ${UNIT} ==
+                    systemctl restart \"${UNIT}\" && sleep 4
+                    systemctl is-active \"${UNIT}\"
+                    echo == journal after ==
+                    journalctl -u \"${UNIT}\" -n 10 --no-pager 2>/dev/null | tail -10
+                  fi
+                '
+              "
+              ;;
+            caddy-repair)
+              # Restore the instance vhosts the site runtime's Caddyfile switch
+              # clobbered (gap: the runtime rebuilds the file from its own state
+              # and drops blocks it does not own). Appends the two known-shape
+              # blocks when missing, validates, reloads. Prints the file head.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              $SSH "root@${CP_HOST}" "
+                set -euo pipefail
+                KEY=/root/.ssh/barkpark_indx
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+                  set -euo pipefail
+                  CF=/etc/caddy/Caddyfile
+                  cp -a \"\$CF\" \"\$CF.pre-repair.\$(date +%s)\"
+                  add() {
+                    local host=\"\$1\" ondemand=\"\$2\"
+                    grep -q \"^\$host {\" \"\$CF\" && { echo \"vhost \$host present\"; return; }
+                    {
+                      echo \"\"
+                      echo \"# Restored by cp-ops caddy-repair — instance vhost \$host.\"
+                      echo \"\$host {\"
+                      [ \"\$ondemand\" = yes ] && printf \"\\ttls {\\n\\t\\ton_demand\\n\\t}\\n\"
+                      printf \"\\treverse_proxy 127.0.0.1:4000\\n\"
+                      echo \"}\"
+                    } >> \"\$CF\"
+                    echo \"vhost \$host appended\"
+                  }
+                  add jarl.barkpark.cloud no
+                  add barkpark.jarl.no yes
+                  caddy validate --config \"\$CF\" >/dev/null
+                  systemctl reload caddy
+                  echo == caddy repaired ==
+                  head -40 \"\$CF\"
+                '
+              "
+              ;;
+            box-file-tail)
+              # Tail a file on a managed box, restricted to the builder log dir.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              [[ "$FILE_PATH" =~ ^/var/log/barkpark-builder/[A-Za-z0-9._-]+$ ]] \
+                || { echo "file_path must be a plain file under /var/log/barkpark-builder/"; exit 1; }
+              $SSH "root@${CP_HOST}" "
+                set -euo pipefail
+                KEY=/root/.ssh/barkpark_indx
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} \
+                  'ls /var/log/barkpark-builder/ && tail -n 200 ${FILE_PATH} 2>/dev/null || echo FILE-MISSING'
+              "
+              ;;
+            builder-token-fix)
+              # The /v1/builder/claim route authenticates with the CP's shared
+              # WORKER_TOKEN (require_worker), not an agent token. Extract it
+              # from the running control_plane container on the CP and install
+              # it on the box as /etc/barkpark/worker.token, repointing the
+              # builder unit. The token value never touches this runner's log.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              $SSH "root@${CP_HOST}" "
+                set -euo pipefail
+                c=\$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)
+                [ -n \"\$c\" ] || { echo 'no control_plane container'; exit 1; }
+                WT=\$(docker exec \"\$c\" printenv WORKER_TOKEN)
+                [ -n \"\$WT\" ] || { echo 'WORKER_TOKEN unset in container'; exit 1; }
+                KEY=/root/.ssh/barkpark_indx
+                printf '%s' \"\$WT\" | ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+                  set -euo pipefail
+                  umask 077
+                  cat > /etc/barkpark/worker.token
+                  sed -i \"s#--token-file /etc/barkpark/agent.token#--token-file /etc/barkpark/worker.token#\" /etc/systemd/system/barkpark-builder.service
+                  systemctl daemon-reload
+                  systemctl restart barkpark-builder
+                  sleep 2
+                  systemctl is-active barkpark-builder
+                  echo builder-token-fix complete
+                '
+              "
+              ;;
+            box-logs)
+              # Last 100 journal lines for an ALLOWLISTED unit on a managed box.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              case "$UNIT" in
+                barkpark-builder|barkpark-runtime|barkpark-agent) ;;
+                *) echo "unit not in allowlist"; exit 1 ;;
+              esac
+              $SSH "root@${CP_HOST}" "
+                set -euo pipefail
+                KEY=/root/.ssh/barkpark_indx
+                [ -f \"\$KEY\" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} \
+                  'journalctl -u ${UNIT} -n 100 --no-pager'
+              "
+              ;;
+            site-artifact-fetch)
+              # Stage a GitHub tarball as a file:// artifact directory on a
+              # managed box — the builder's resolveArtifact is file://-only
+              # (https blob storage is a future addition), so this is how a
+              # public repo's ref becomes buildable on the box. Prints the
+              # exact file:// URL to pass to `bp deploy --artifact-url`.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              [[ "$ARTIFACT_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] \
+                || { echo "artifact_repo must be owner/repo"; exit 1; }
+              [[ "$ARTIFACT_REF" =~ ^[A-Za-z0-9_./-]{1,120}$ ]] \
+                || { echo "artifact_ref must be a plain ref"; exit 1; }
+              $SSH "root@${CP_HOST}" "
+                set -euo pipefail
+                KEY=/root/.ssh/barkpark_indx
+                [ -f \"\$KEY\" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+                  set -euo pipefail
+                  DEST=/var/lib/barkpark-builder/uploads/${ARTIFACT_REPO##*/}
+                  rm -rf \"\$DEST\" \"\$DEST.tmp\" && mkdir -p \"\$DEST.tmp\"
+                  curl -fsSL https://github.com/${ARTIFACT_REPO}/archive/${ARTIFACT_REF}.tar.gz \
+                    | tar -xz -C \"\$DEST.tmp\" --strip-components=1
+                  mv \"\$DEST.tmp\" \"\$DEST\"
+                  echo \"artifact staged: file://\$DEST\"
+                '
+              "
+              ;;
+            site-runtime-install)
+              # Install the site-hosting stack (docker, nixpacks, barkpark-builder,
+              # barkpark-runtime) on a managed box that `bp launch` provisioned
+              # WITHOUT it — the gap that leaves site deployments queued forever.
+              # Hops: runner → CP (DEPLOY_SSH_KEY) → box (the CP's warm-pool key
+              # ~/.ssh/barkpark_indx — the same key the provisioner's attach-domain
+              # worker uses). Idempotent: every step checks before it installs.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              # Stream the repo's installer to the CP, which relays it to the box
+              # with the warm-pool key and runs it there.
+              $SSH "root@${CP_HOST}" "
+                set -euo pipefail
+                cat > /tmp/site-runtime-install.sh
+                KEY=/root/.ssh/barkpark_indx
+                [ -f \"\$KEY\" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+                scp -i \"\$KEY\" -o StrictHostKeyChecking=accept-new /tmp/site-runtime-install.sh root@${BOX_IP}:/tmp/
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} 'bash /tmp/site-runtime-install.sh'
+              " < deploy/site-runtime-install.sh
+              ;;
+            guerrilla-logs-grep)
+              # Request ids / tokens only — the needle is interpolated into a
+              # remote grep, so the charset is the whole security boundary.
+              [[ "$NEEDLE" =~ ^[A-Za-z0-9_-]{4,64}$ ]] \
+                || { echo "needle must be 4-64 chars of [A-Za-z0-9_-]"; exit 1; }
+              $SSH "root@${GUERRILLA_HOST}" "
+                journalctl -u 'barkpark-slot@*' --since '-3 hours' --no-pager 2>/dev/null \
+                  | grep -F '$NEEDLE' -A 30 | head -200 \
+                  || echo 'no journal match for $NEEDLE in the last 3 hours'
+              "
+              ;;
+            grant-forever)
+              # UUID only — the rpc string below is built from validated parts.
+              [[ "$TEAM" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+                || { echo "team must be a UUID"; exit 1; }
+              # rpc into the LIVE release node (mix tasks don't exist in a prod
+              # release). grant_forever is idempotent; the caveat about a
+              # surviving Stripe-side subscription is the operator's to handle.
+              $SSH "root@${CP_HOST}" "
+                set -euo pipefail
+                c=\$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)
+                [ -n \"\$c\" ] || { echo 'no running control_plane container'; exit 1; }
+                docker exec \"\$c\" bin/barkpark_cloud rpc \
+                  'BarkparkCloud.Billing.grant_forever(\"$TEAM\") |> IO.inspect(label: \"grant_forever\")'
+              "
+              ;;
+            *)
+              echo "unknown operation: $OP"; exit 1
+              ;;
+          esac

@@ -173,7 +173,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   def seed_new_doc_content("task"), do: %{"kind" => "task", "lifecycle_status" => "open"}
-  def seed_new_doc_content(_type), do: %{}
+
+  # A blocks-doc is born with an EXPLICIT EMPTY block list — not `%{}`, and not a
+  # hand-rolled paragraph. The empty list is the signal
+  # `Papers.Template.maybe_seed/3` reads as "a new blank document" (via
+  # `Writer.maybe_apply_paper_template/2`), which is what produces the locked
+  # `tpl-title` heading, the empty `tpl-body` paragraph to type into, and
+  # `style: "article"`. `%{}` leaves `blocks` nil — the HTML-ingest path — so the
+  # human got a document with nothing to click and nowhere to type (spd-w17).
+  # Hand-rolling a paragraph here would bypass the template and lose all of it.
+  def seed_new_doc_content(type) do
+    if Content.blocks_type?(type), do: %{"blocks" => []}, else: %{}
+  end
 
   @doc false
   defdelegate paper_op(socket, op), to: Paper
@@ -794,6 +805,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
     same_doc? = same_editor_doc?(socket.assigns[:editor_doc], editor_doc)
 
+    # spd-w19 — the third seam. When the walk produced NO editor, the shell used
+    # to shrug ("Select a document to edit") no matter which of the nine
+    # nil-editor producers fired. They are indistinguishable at the shell's
+    # attrs (all return a bare nil), but they ARE distinguishable from
+    # (panes, nav_path) — so the reason is derived HERE, once, and carried as a
+    # single new assign the shell's `<:empty_state>` renders.
+    editor_empty =
+      if editor_doc,
+        do: nil,
+        else: empty_editor_state(panes, socket.assigns.nav_path)
+
     editor_mode =
       if same_doc?,
         do: socket.assigns[:editor_mode] || :classic,
@@ -811,6 +833,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_mode: editor_mode,
         editor_blocks: editor_blocks,
         editor_blocks_synth?: editor_blocks_synth?,
+        editor_empty: editor_empty,
         save_status:
           if(same_doc?,
             do: socket.assigns[:save_status] || "",
@@ -869,6 +892,83 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         |> clear_sheet_view()
         |> clear_graph_view()
         |> assign(editor_view: :form, media_kind_filter: "all")
+    end
+  end
+
+  @doc """
+  Name WHY the editor is empty, from the two things that survive a nil editor:
+  the pane stack and the nav path. Returns
+  `%{reason: atom, doc_id: String.t() | nil, doc_type: String.t() | nil}`.
+
+  `PaneBuilder` has nine distinct nil-editor producers and every one of them
+  returns a bare `nil`, so `not_found == unknown_node == no_schema ==
+  nothing_selected` by the time the shell renders (charter D260). The shapes,
+  however, are distinct — this is the derivation charter D222 asked for:
+
+    * `:nothing_selected` — no document was NAMED: either `nav_path == []`, or the
+                            path drilled to a list pane and selected nothing in
+                            it. Nothing went wrong, so this state does not shout.
+    * `:unknown_node`     — the walk never advanced past the root pane while the
+                            root pane had a selection: the first segment names
+                            no node in this desk (stale link, disabled plugin).
+    * `:not_found`        — the walk reached a document-list pane (it carries a
+                            `type_name`), so the type is real and installed; the
+                            id is simply not there.
+    * `:no_schema`        — the walk reached a plain `:list` pane (no
+                            `type_name`) — the …Rest column — and stopped: the
+                            segment named a type that degraded to a
+                            non-drillable `:document` node because it has no
+                            installed schema.
+
+  Deliberately NOT a reason: `unrenderable_content`. A document that RESOLVES
+  and cannot render is the OTHER arm, owned by
+  `StudioLive.Components.unrenderable_document_notice/1` (#7897). Also deliberately absent:
+  `draft_only` — D220's draft-first fetch resolves a never-published document,
+  so that reason can never fire (charter D259).
+  """
+  @spec empty_editor_state([map()], [String.t()]) :: %{
+          reason: atom(),
+          doc_id: String.t() | nil,
+          doc_type: String.t() | nil
+        }
+  def empty_editor_state(panes, nav_path) do
+    last = List.last(panes || [])
+    nav_path = nav_path || []
+
+    cond do
+      nav_path == [] ->
+        %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
+
+      match?(%{role: :nav}, last) and Map.get(last, :selected) != nil ->
+        %{
+          reason: :unknown_node,
+          doc_id: List.last(nav_path),
+          doc_type: List.first(nav_path)
+        }
+
+      # A list pane with NO selection means the human drilled to the list and
+      # picked nothing — no document was named, so there is nothing to report as
+      # missing. Reporting `:not_found` here would invent an id out of the type
+      # segment and accuse the desk of losing a document nobody asked for.
+      match?(%{role: :list}, last) and Map.get(last, :selected) == nil ->
+        %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
+
+      match?(%{role: :list}, last) and Map.get(last, :type_name) != nil ->
+        %{
+          reason: :not_found,
+          doc_id: Map.get(last, :selected),
+          doc_type: Map.get(last, :type_name)
+        }
+
+      match?(%{role: :list}, last) ->
+        %{
+          reason: :no_schema,
+          doc_id: List.last(nav_path),
+          doc_type: Map.get(last, :selected)
+        }
+
+      true ->
+        %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
     end
   end
 

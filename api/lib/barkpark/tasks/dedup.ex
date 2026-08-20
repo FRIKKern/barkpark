@@ -23,12 +23,35 @@ defmodule Barkpark.Tasks.Dedup do
   blocks. That is the D1 "must name a real candidate" property, enforced by
   construction rather than by a separate check.
 
-  ## Fail-open
+  ## When the gate cannot run: it SAYS SO (it does not silently pass)
 
-  Any error fetching candidates yields an EMPTY candidate set, so the create
-  proceeds. A dedup query hiccup must never block legitimate work — the gate is
-  a guard rail, not a single point of failure. Only a definitively-computed
-  refusal blocks.
+  This used to fail OPEN and silently: any candidate-fetch error yielded an empty
+  candidate set, so the create returned `200 OK` having never actually checked
+  for a duplicate. That is the exact lie this epic exists to kill — a verb
+  reporting success on a claim ("this task is not a duplicate") it never
+  computed, on the ledger the epic is audited on.
+
+  It now fails LOUD. A candidate fetch that errors or times out returns
+  `{:error, {:dedup_unavailable, msg}}` (503) whose message names precisely what
+  could not be done and how to proceed. The owner's escape hatch is
+  **`content.dedup_bypass: true`** — file it unchecked, deliberately, and the
+  flag persists on the document as the trail (same shape as `distinct_from`).
+
+  Two honest caveats, both live:
+
+    * The code is `dedup_unavailable` (503), NOT the plugin-veto `{:halted, …}`.
+      That distinction is load-bearing, not cosmetic: `halted` means a policy
+      DELIBERATELY refused, so consumers treat it as deterministic and stop —
+      `Plugins.Github.Intake` answers a clean 2xx on it precisely because
+      "GitHub redelivery would only hit the same veto forever". A dedup outage
+      is TRANSIENT and must be retried, so borrowing `halted` for it would turn
+      a DB hiccup into a permanently dropped GitHub issue.
+    * The dedup query is bounded (`@query_timeout_ms`) so it fails fast and named
+      instead of eating the request's 15 s DB-checkout budget and poisoning the
+      INSERT that follows. That closes dedup's share of the window in which the
+      `bp` CLI abandons a request at 30 s while the server keeps executing it
+      (measured up to 61 s); the rest of the write path is still unbounded, which
+      is tracked as `pds-bl-cli-budget-window`.
   """
   import Ecto.Query, only: [from: 2]
 
@@ -38,61 +61,108 @@ defmodule Barkpark.Tasks.Dedup do
   alias Barkpark.Repo
   alias Barkpark.Tasks.{Judge, Similarity}
 
-  # Bound the worst-case scan. The backlog is small (hundreds); this caps a
-  # pathological corpus without an FTS pre-filter, which tier-2 can add later.
+  # Bound the worst-case scan. MEASURED 2026-07-30 (`bp doc ls task --all -o json`
+  # against guerrilla, `production`): 3,793 published `type:task` rows, ~4.1k
+  # counting draft twins — NOT the "hundreds" this cap was calibrated against in
+  # #1210. The limit is therefore live, not theoretical: the corpus is inside one
+  # order of magnitude of it. An FTS/trigram pre-filter is still the real answer
+  # (tier-2); until then the cost is held down by projecting the candidate row
+  # (below) instead of hauling full content JSONB, and by tokenizing the new task
+  # once (Similarity.probe/1).
   @candidate_limit 5000
 
+  # The dedup scan gets its OWN budget, well inside the request's 15 s DB
+  # checkout. Without it the scan raced that budget and the FOLLOW-UP insert was
+  # the statement that blew up — so the owner saw `internal_error / unknown
+  # error` from a write that had actually been starved by the read.
+  @query_timeout_ms 5_000
+
   @doc """
-  `:ok`, or `{:error, {:duplicate_task, payload}}` when a new task duplicates an
-  existing one. Only fires for `type == "task"` with **no `prev_doc`** (a genuine
-  birth — updates/autosaves/publishes are never gated). All other shapes → `:ok`.
+  `:ok`, `{:error, {:duplicate_task, payload}}` when a new task duplicates an
+  existing one, or `{:error, {:dedup_unavailable, message}}` when the gate could not run at
+  all (the message names what could not be done — it never passes silently).
+  Only fires for `type == "task"` with **no `prev_doc`** (a genuine birth —
+  updates/autosaves/publishes are never gated). All other shapes → `:ok`.
   """
   @spec check_new_task(String.t(), map(), String.t(), Document.t() | nil, keyword()) ::
-          :ok | {:error, {:duplicate_task, map()}}
+          :ok | {:error, {:duplicate_task, map()}} | {:error, {:dedup_unavailable, String.t()}}
   def check_new_task("task", attrs, dataset, nil, opts) do
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
     new_task = to_task(attrs, content)
 
-    # A task with no textual signal (no title/description) can't be judged —
-    # let it through rather than compare empty strings.
-    if String.trim("#{new_task.title} #{new_task.description}") == "" do
-      :ok
-    else
-      distinct =
-        string_list(Map.get(content, "distinct_from") || Map.get(content, :distinct_from))
+    cond do
+      # A task with no textual signal (no title/description) can't be judged —
+      # let it through rather than compare empty strings.
+      String.trim("#{new_task.title} #{new_task.description}") == "" ->
+        :ok
 
-      candidates = fetch_candidates(dataset, opts)
+      # The author has consciously chosen to file without the gate. Unlike the
+      # old silent fail-open this is the OWNER's claim, not the server's, and it
+      # persists on the document as the trail.
+      bypass?(content) ->
+        :ok
 
-      assessment =
-        Similarity.assess(new_task, candidates, distinct_from: distinct)
-
-      # Tier-2 (task-obsession layer 2): the gray-zone `advise` matches are the
-      # ones tier-1 is unsure about. When a judge is configured, ask it; a
-      # confident duplicate/already_landed verdict escalates the match to a hard
-      # refuse. Everything fails open — no judge, or a judge error, leaves the
-      # tier-1 verdict untouched.
-      {escalated, remaining_advise} = judge_escalate(new_task, candidates, assessment.advise)
-      refuse = assessment.refuse ++ escalated
-
-      case refuse do
-        [] ->
-          :ok
-
-        _ ->
-          {:error,
-           {:duplicate_task,
-            %{
-              message:
-                "this task looks like an existing one — claim/extend it, or pass " <>
-                  "distinct_from: [\"<id>\"] to confirm it is different",
-              similar: Enum.map(refuse, &present/1),
-              advise: Enum.map(remaining_advise, &present/1)
-            }}}
-      end
+      true ->
+        gate(new_task, content, dataset, opts)
     end
   end
 
   def check_new_task(_type, _attrs, _dataset, _prev_doc, _opts), do: :ok
+
+  defp gate(new_task, content, dataset, opts) do
+    distinct =
+      string_list(Map.get(content, "distinct_from") || Map.get(content, :distinct_from))
+
+    case fetch_candidates(dataset, opts) do
+      {:degraded, reason} ->
+        {:error, {:dedup_unavailable, degraded_message(reason)}}
+
+      {:ok, candidates} ->
+        assessment =
+          Similarity.assess(new_task, candidates, distinct_from: distinct)
+
+        # Tier-2 (task-obsession layer 2): the gray-zone `advise` matches are the
+        # ones tier-1 is unsure about. When a judge is configured, ask it; a
+        # confident duplicate/already_landed verdict escalates the match to a hard
+        # refuse. Everything fails open — no judge, or a judge error, leaves the
+        # tier-1 verdict untouched.
+        {escalated, remaining_advise} = judge_escalate(new_task, candidates, assessment.advise)
+        refuse = assessment.refuse ++ escalated
+
+        case refuse do
+          [] ->
+            :ok
+
+          _ ->
+            {:error,
+             {:duplicate_task,
+              %{
+                message:
+                  "this task looks like an existing one — claim/extend it, or pass " <>
+                    "distinct_from: [\"<id>\"] to confirm it is different",
+                similar: Enum.map(refuse, &present/1),
+                advise: Enum.map(remaining_advise, &present/1)
+              }}}
+        end
+    end
+  end
+
+  # The refusal SAYS WHAT IT COULD NOT DO, in the response body, and names the
+  # one action that gets the owner unstuck. Never `unknown error`.
+  defp degraded_message(reason) do
+    "task dedup gate could not complete: #{reason}. The create was REFUSED rather " <>
+      "than filed unchecked — no duplicate check ran, so nothing here claims this " <>
+      "task is new. Retry, or resend with content.dedup_bypass: true to file it " <>
+      "deliberately without the duplicate check."
+  end
+
+  defp bypass?(content) do
+    case Map.get(content, "dedup_bypass") || Map.get(content, :dedup_bypass) do
+      true -> true
+      "true" -> true
+      _ -> false
+    end
+  end
 
   # ── tier-2 judge escalation (fail-open) ────────────────────────────────────
 
@@ -131,11 +201,30 @@ defmodule Barkpark.Tasks.Dedup do
     end
   end
 
-  # ── candidate fetch (fail-open) ────────────────────────────────────────────
+  # ── candidate fetch ────────────────────────────────────────────────────────
 
+  # `{:ok, candidates}` or `{:degraded, reason}` — NEVER a silently-empty list.
+  #
+  # WHAT THIS QUERY CHANGED, said out loud (no silent narrowing):
+  #
+  #   * It projects the five scored fields instead of the whole `content` JSONB.
+  #     A task row's content carries `brief`, `acceptance_criteria`,
+  #     `disposition_reason` … none of which is scored; hauling them for 4.1k
+  #     rows was most of the cost. Detection is UNCHANGED — Similarity only ever
+  #     read title/description/labels/parent_id/lifecycle_status.
+  #   * `DISTINCT ON` the canonical (drafts-stripped) id collapses a
+  #     draft/published TWIN pair to one row, preferring the published one.
+  #     Detection is UNCHANGED here too: both rows normalize to the same id and
+  #     scored identically, so the twin only ever bought a duplicate entry in
+  #     `similar` and a second scoring pass. A task that exists ONLY as a draft
+  #     still has exactly one row and is still detected.
+  #
+  # So: no duplicate that was caught before goes uncaught now. Only the cost and
+  # the double-reporting are gone.
   defp fetch_candidates(dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
+    timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
 
     query =
       from(d in Document,
@@ -146,20 +235,41 @@ defmodule Barkpark.Tasks.Dedup do
         # (acceptance criterion 4). Done tasks stay in — a match against a done
         # task is a real "already landed" signal.
         where: fragment("COALESCE(?->>'lifecycle_status', '')", d.content) != "cancelled",
-        select: %{doc_id: d.doc_id, title: d.title, content: d.content},
+        distinct: [asc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)],
+        # Second key: `false` sorts before `true`, so the PUBLISHED row of a twin
+        # pair wins the DISTINCT ON.
+        order_by: [asc: fragment("? LIKE 'drafts.%'", d.doc_id)],
+        select: %{
+          doc_id: d.doc_id,
+          title: d.title,
+          description: fragment("?->>'description'", d.content),
+          labels: fragment("?->'labels'", d.content),
+          parent: fragment("?->>'parent_id'", d.content),
+          lifecycle: fragment("?->>'lifecycle_status'", d.content)
+        },
         limit: @candidate_limit
       )
       |> maybe_filter_dataset(dataset)
       |> Scope.scope_to_workspace(workspace_id, project_id)
 
-    query
-    |> Repo.all()
-    |> Enum.map(&row_to_task/1)
+    {:ok, query |> Repo.all(timeout: timeout) |> Enum.map(&row_to_task/1)}
   rescue
     e ->
-      Logger.warning("Tasks.Dedup fail-open: candidate fetch failed: #{inspect(e)}")
-      []
+      Logger.warning("Tasks.Dedup degraded: candidate fetch failed: #{inspect(e)}")
+      {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
+  catch
+    :exit, reason ->
+      Logger.warning("Tasks.Dedup degraded: candidate fetch exited: #{inspect(reason)}")
+      {:degraded, "the backlog scan was cut off by the database"}
   end
+
+  defp reason_phrase(%DBConnection.ConnectionError{}, timeout),
+    do: "the backlog scan did not finish inside its #{timeout}ms budget"
+
+  defp reason_phrase(%{__struct__: mod}, _timeout),
+    do: "the backlog scan failed (#{inspect(mod)})"
+
+  defp reason_phrase(_, _timeout), do: "the backlog scan failed"
 
   defp maybe_filter_dataset(query, nil), do: query
 
@@ -180,16 +290,16 @@ defmodule Barkpark.Tasks.Dedup do
     }
   end
 
-  defp row_to_task(%{doc_id: id, title: title, content: content}) do
-    content = content || %{}
-
+  # The projected row IS the scored shape — no JSONB decoding left to do beyond
+  # the `labels` array.
+  defp row_to_task(row) do
     %{
-      id: id,
-      title: title || "",
-      description: get(content, "description"),
-      labels: string_list(get(content, "labels")),
-      parent: get(content, "parent_id"),
-      lifecycle: get(content, "lifecycle_status")
+      id: row.doc_id,
+      title: row.title || "",
+      description: row.description,
+      labels: string_list(row.labels),
+      parent: row.parent,
+      lifecycle: row.lifecycle
     }
   end
 

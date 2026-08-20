@@ -9,4 +9,575 @@
 #
 # Measured 2026-07-21 on app.css @ sha256 176f441387bc… (Chrome 150.0.7871.129,
 # node v22.22.0): 1203 authored heads == 1203 CSSOM rules, MISSES 0.
-1233
+#
+# Re-measured 2026-07-28 by running cssom-parity.mjs on this branch merged with
+# origin/main: 1235 authored heads, MISSES 0 — the +2 are the Overview's own
+# not-current chip rules. MISSES 0 is what makes this an unrecorded ADD rather
+# than a parity defect, which is the distinction the ratchet's own failure text
+# tells you to confirm before bumping.
+#
+# Re-measured 2026-07-31 (W12 narrow-viewport slice, cch-w12-s2): UNCHANGED at
+# 1235, MISSES 0 — deliberately NOT bumped. That slice edits app.css in two
+# regions but adds no rule HEAD: `.instances-grid`, `.set-matrix`,
+# `.set-matrix-corner` and `.set-matrix-event` all already existed and only
+# gained declarations, and the two at-rules it introduces (`@property
+# --set-matrix-fade`, `@keyframes set-matrix-edge-fade`) are OPAQUE at-rules —
+# cssom-parity skips them on BOTH sides (authoredHeads' GROUPING_AT branch and
+# the symmetric CSSOM walk), so they contribute zero to this count by design.
+# Recorded here rather than left silent: a ratchet whose number does not move
+# on a real CSS change should say WHY in the same commit, or the next reader
+# cannot tell a considered no-op from a forgotten bump.
+# Re-measured 2026-07-31 (cch-w12-s3-sites-card-focus-perimeter): 1236 authored heads,
+# MISSES 0. The +1 is ONE rule — `.inst-sites-card .site-row[data-id]:focus-visible` —
+# giving a keyboard-focused row in the instance-detail Sites card a four-sided inset
+# outline. Before it, that card's flush list treatment (`border: none` + `border-top`)
+# zeroed the border the shared focus rule only re-COLOURS, so three of the four sides
+# painted nothing. MISSES 0 confirms this is an unrecorded ADD, not a parity defect.
+#
+# Re-measured 2026-07-31 (cch-w13-s3-cancelled-deploy-not-queued): 1237 authored heads,
+# MISSES 0 — MEASURED by running cssom-parity.mjs on this branch (app.css @ sha256
+# e11bdbea41cf…, Chrome 150.0.7871.187, node v22.22.0), not hand-incremented. The +1 is
+# ONE rule — `.dep-cancelled` — the sixth Deployment status finally getting a paint of
+# its own; until it existed the class fell through to the .dep-pill base, which is
+# byte-identical to .dep-queued, so a terminal abort painted as one still waiting.
+# MISSES 0 confirms this is an unrecorded ADD, not a parity defect. NOTE for whoever
+# rebases onto sibling slice S4, which also adds heads: two identical bumps merge CLEAN
+# and WRONG — re-run cssom-parity.mjs and write what it MEASURES (D158), never resolve
+# this number by hand.
+# Re-measured 2026-07-31 (W13 detail-route band, cch-w13-s4-tablet-band-detail-routes):
+# UNCHANGED at 1236 authored heads == 1236 CSSOM rules, MISSES 0 — MEASURED by a real
+# cssom-parity.mjs run on this branch (app.css 207795 B, sha256 bf36a9936ef5…, Chrome
+# 150.0.7871.187, node v22.22.0), not reasoned about. That slice adds a new
+# `@media (max-width: 899px)` block with FOUR rule heads — `.detail-grid`,
+# `.detail-head`, `.detail-head .fleet-badges`, `.detail-actions` — and removes exactly
+# those four from the 768 and 720 blocks they were split out of, so the net is zero: a
+# MOVE, not an add. Recorded rather than left silent, for the same reason as the W12
+# entry above: a ratchet whose number does not move across a real CSS change has to say
+# why in the same commit, or the next reader cannot tell a considered no-op from a
+# forgotten bump. If you rebase this onto a sibling that DOES add a head, re-measure
+# (charter D158 REGENERATE-ON-REBASE) — two slices bumping to the same number merge
+# clean and wrong.
+# Re-measured 2026-07-31 by the LEAD while rebasing the tablet-width slice onto
+# a main that had moved: HEAD carried 1237, the branch carried 1236, and neither
+# was a considered claim about the merged tree — the branch measured before its
+# siblings landed. Both prose records above are kept because each explains a real
+# earlier measurement; the COUNT is re-derived rather than picked. A real Chrome
+# on the merged tree reports authored rule heads 1237, CSSOM style rules 1237,
+# MISSES 0, PARITY PASS — so this slice adds no rule HEAD on top of main, and the
+# number moves for its siblings reasons, not for this one.
+# Re-measured 2026-07-31 (cch-bl-provider-rotation-identity-echo, at REVIEW): 1242
+# authored heads, MISSES 0 — MEASURED by running cssom-parity.mjs on this branch, not
+# hand-incremented. The +6 are the SIX `.prov-identity*` rules the slice's rendered
+# markup already emitted with no rule at all: __css_check E2 red with 12 errors on the
+# builder's state, because this slice's gate is the only one in the wave that does not
+# run that checker. MISSES 0 confirms an unrecorded ADD, not a parity defect.
+# NOTE for the lead: sibling S3 (.dep-cancelled) also adds ONE head and records 1237.
+# These two merge CLEAN and WRONG — 1242 and 1237 are both right alone and both wrong
+# together. RE-MEASURE after merging (charter D158 REGENERATE-ON-REBASE).
+# Re-measured 2026-07-31 by the LEAD rebasing onto a moved main, and the number
+# is 1243 — NOT the 1242 this branch carried. The branch measured against a main
+# that read 1236 before its siblings landed, and 1242 also contradicts this
+# slices OWN commit message, which says the identity line gets the SIX CSS rules
+# it was rendering without: 1237 + 6 = 1243. A real Chrome on the merged tree
+# reports authored rule heads 1243, CSSOM style rules 1243, MISSES 0 — so this is
+# an unrecorded ADD of exactly six heads, not a parity defect, and the count is
+# re-derived rather than carried forward.
+# together. RE-MEASURE after merging (charter D158 REGENERATE-ON-REBASE). Review DID
+# measure the combined state — S3 + S4 + S5 merged locally, cssom-parity run on the
+# result: 1243 authored heads, MISSES 0. That is the number the lead should write once
+# all three are on main; it was MEASURED on the merge, not derived by adding.
+# Re-measured 2026-07-31 (cch-w14-s2-folded-shell-nav-wall): 1241 authored heads == 1241
+# CSSOM style rules, MISSES 0 — MEASURED by running cssom-parity.mjs on this branch
+# (app.css sha256 asserted against the served bytes, Chrome 150.0.7871.187, node
+# v22.22.0), not hand-derived. The count goes DOWN, which no earlier entry here has
+# done, so it needs saying explicitly: this is cause 2 of the two the failure text
+# names (a deliberate deletion), not cause 1 (a stray `/*` swallowing a live region).
+# NET MINUS TWO. MINUS EIGHT: the pre-v4 `.nav-menu` topbar-dropdown block is retired — `.nav-menu`,
+# `.nav-menu-trigger`, `.nav-menu-trigger::-webkit-details-marker`, `.nav-caret`,
+# `.nav-menu[open] .nav-caret`, `.nav-menu-list`, `.nav-menu-item`,
+# `.nav-menu-item:hover`. `nav-menu` occurred ZERO times in index.html; the v4 shell
+# moved Settings into the sidebar years of waves ago and left the styling behind.
+# PLUS SIX: the live disclosure that replaces it — `.nav-group-summary`,
+# `.nav-group-summary::-webkit-details-marker`, `.nav-group-summary:hover`,
+# `.nav-group-caret`, `.nav-group[open] > .nav-group-summary .nav-group-caret` — plus
+# `.sidebar.is-nav-clipped`, the folded strip's continuation-cue state.
+# NOT COUNTED, by design: `@property --nav-fade` is an OPAQUE at-rule, skipped on
+# BOTH sides (the W12 entry above records the same for --set-matrix-fade); and the
+# folded-shell `.sidebar` / `.app-shell` /
+# `.nav-spacer` heads only gained declarations. Two selectors also left the shared
+# focus-ring comma group and one joined it — that is a group's CONTENTS, not a head,
+# so it moves this number by zero.
+# FOR THE LEAD: sibling slices in W14 also touch app.css. Re-measure on the merge
+# (charter D158 REGENERATE-ON-REBASE) — a down-bump and an up-bump merge clean and
+# wrong, and this one is the only entry here that can be mistaken for a swallow.
+# Re-measured 2026-07-31 (cch-w14-s3-fleet-row-band-899-split, at BUILD): 1243
+# authored heads, CSSOM style rules 1243, MISSES 0, PARITY PASS — MEASURED by running
+# cssom-parity.mjs on this branch's bytes (app.css 213560 B, sha256 4923f236f8bd…),
+# not carried forward. THE COUNT DID NOT MOVE AND THAT IS THE POINT: this slice is a
+# MOVE, not an add — `.fleet-row` and `.fleet-badges` left the `@media (max-width:
+# 768px)` block and landed in the existing `@media (max-width: 899px)` block, so two
+# rule heads changed WHICH block they live in and none was created or destroyed. The
+# W13-S4 entries above are the precedent for saying an unchanged number out loud
+# rather than staying silent and letting the next reader wonder whether it was
+# measured at all.
+# LEAD RESOLUTION 2026-07-31 (merge of cch-w14-s2 and cch-w14-s3): the two records
+# above collided in this file and BOTH ARE KEPT — s2's deliberate MINUS TWO and s3's
+# net-zero MOVE are separate facts about separate commits, and picking a side would
+# erase one of them. The number below was NOT derived by adding them. It was
+# RE-MEASURED on the merged tree by running cssom-parity.mjs here: Chrome
+# 150.0.7871.187, node v22.22.0, app.css 221362 B sha256 31d8444f729b…, authored rule
+# heads 1241 == CSSOM style rules 1241, flattened selectors 1209/1209, MISSES 0.
+# s2's own warning is why this was measured rather than reasoned: "a down-bump and an
+# up-bump merge clean and wrong". They did merge clean, and the answer is s2's number,
+# because s3 moved two heads between @media blocks without creating or destroying one.
+# Re-measured 2026-07-31 (cch-w14-s5-planned-rail-and-ticker, at BUILD): 1245 authored
+# heads, MISSES 0 — MEASURED by running cssom-parity.mjs on this branch off origin/main
+# (which read 1243), not hand-incremented. The +2 are the indeterminate active dot:
+# `.new-step.active .new-step-dot[data-ring-unpaced]` plus its prefers-reduced-motion
+# twin, both new heads with no prior rule. MISSES 0 confirms an unrecorded ADD, not a
+# parity defect. Siblings in wave 14 that also touch app.css will collide on this
+# number exactly as S3/S4/S5 did last wave — RE-MEASURE on the merged tree (D158
+# REGENERATE-ON-REBASE); do not add 2 to whatever lands first.
+# LEAD RESOLUTION 2026-08-01 (merge of cch-w14-s5 onto the s2+s3 result): the third
+# collision in this file this wave, resolved the same way — BOTH prose records kept,
+# the number RE-MEASURED rather than reconciled. NEITHER SIDE'S NUMBER WAS RIGHT: the
+# merged-main record above said 1241 and this slice's own build record said 1245, and
+# the merged tree measures 1243. That is exactly the failure s2 warned about in
+# writing ("a down-bump and an up-bump merge clean and wrong"), reproduced a second
+# time, and it is why this file is never allowed to carry an arithmetic answer.
+# MEASURED here by running cssom-parity.mjs on the rebased tree: Chrome
+# 150.0.7871.187, node v22.22.0, app.css 222460 B sha256 480fe6ad1e7a…, authored rule
+# heads 1243 == CSSOM style rules 1243, flattened selectors 1210/1210, MISSES 0,
+# PARITY PASS. s5 is a net PLUS TWO over the 1241 that s2 and s3 left on main.
+# Re-measured 2026-08-01 (cch-w15-s2-archives-resurrect-scroller, at BUILD): 1245
+# authored heads == 1245 CSSOM style rules, flattened selectors 1212/1212, MISSES 0 —
+# MEASURED by running cssom-parity.mjs on this branch off origin/main (which reads
+# 1243, and which this branch's first run reported as "+2 ABOVE"), not hand-derived.
+# The +2 are the TWO scoped chip rules the archives resurrect fix adds:
+# `.archive-resurrect .cli-chip` and `.archive-resurrect .cli-chip-code`. They are
+# SCOPED on purpose — `.cli-chip` is shared with the webhook chips, so an unscoped
+# edit would have moved this number by zero and changed four other surfaces instead.
+# NOT COUNTED, by design and consistent with the W12/W14 entries above: `@property
+# --archive-cli-fade` and `@keyframes archive-cli-edge-fade` are OPAQUE at-rules,
+# skipped on BOTH sides, so the two-state scroll cue costs zero heads; and
+# `.archive-resurrect` itself only gained declarations (flex-basis, flex-wrap,
+# min-width), which is a declaration change, not a head. MISSES 0 is what makes this
+# an unrecorded ADD rather than a parity defect.
+# FOR THE LEAD: three wave-15 slices touch app.css. This number and theirs merge
+# CLEAN and WRONG — re-measure on the merged tree (charter D158 REGENERATE-ON-REBASE);
+# do not add 2 to whatever lands first.
+# Re-measured 2026-08-01 (cch-w15-s4-fleet-lead-column-bounded, at BUILD): 1245
+# authored rule heads == 1245 CSSOM style rules, flattened selectors 1210/1210,
+# MISSES 0 — MEASURED by running cssom-parity.mjs on this branch off origin/main
+# (which reads 1243), Chrome 150.0.7871.187, node v22.22.0, app.css 226942 B sha256
+# 2cef44395396…. Not hand-incremented and not arithmetic: the run's own output line
+# is "authored rule heads 1245 (baseline 1243 ← ABOVE)". The +2 are the two heads of
+# the new `@media (min-width: 900px)` block that stops the fleet row painting the
+# hostname through the badge chips — `.fleet-row` (flex-wrap) and `.fleet-main`
+# (flex: 1 1 auto; min-width: 200px). Both selectors already exist at :952 and inside
+# the `@media (max-width: 899px)` complement, but a head is per BLOCK, so a scoped
+# re-declaration is two new heads, not zero. MISSES 0 confirms an unrecorded ADD, not
+# a parity defect. FOR THE LEAD: three of the last four entries in this file are
+# collision resolutions, and wave 15 has siblings touching app.css too — RE-MEASURE
+# on the merged tree (D158 REGENERATE-ON-REBASE). Do not add 2 to whatever lands
+# first; that is the exact mistake recorded twice above.
+# LEAD RESOLUTION 2026-08-01 (merge of cch-w15-s4 onto main already carrying s5): the
+# fourth collision in this file, and the slice's own warning above was exactly right -
+# 1245 was measured off a main reading 1243, main now reads 1245 after #8740, and the
+# merged tree measures 1247. Adding 2 to whatever landed first would have produced 1247
+# by luck this time and been wrong the next; the number below was MEASURED, not derived.
+# Chrome 150.0.7871.187, node v22.22.0, app.css 232062 B sha256 b5b8ac065608...,
+# authored rule heads 1247 == CSSOM style rules 1247, flattened selectors 1212/1212,
+# MISSES 0, PARITY PASS. Both prose records above are kept: s5's +2 and s4's +2 are
+# separate facts about separate blocks and neither may be collapsed into the other.
+# Re-measured 2026-08-01 (cch-w15-s5-site-link-phone-band, at BUILD): 1244 authored
+# heads == 1244 CSSOM style rules, flattened selectors 1211/1211, MISSES 0, on a branch
+# off origin/main which read 1243 — MEASURED by running cssom-parity.mjs on this
+# branch's bytes (Chrome 150.0.7871.187, node v22.22.0, app.css 224079 B, sha256
+# 9371f25335e1…), not hand-incremented. The +1 is ONE new rule head,
+# `.fleet-url .site-open`, which lifts `white-space: nowrap` off the live-URL text link
+# in the site detail head so it wraps instead of pushing documentElement.scrollWidth
+# past the viewport on every iPhone width in portrait. MISSES 0 is what makes this an
+# unrecorded ADD rather than a parity defect.
+# FOR THE LEAD: wave 15's other slices also touch app.css. This number is +1 over
+# origin/main's 1243 and is NOT to be reconciled by arithmetic against another slice's
+# bump — RE-MEASURE on the merged tree (charter D158 REGENERATE-ON-REBASE). Three
+# collisions in this file across the last two waves all resolved that way.
+# LEAD RESOLUTION 2026-08-01 (merge of cch-w15-s5 onto main carrying s2+s4): the FIFTH
+# collision in this file this session, and the most instructive one. The branch measured
+# 1244 — a DOWN-bump, against a main that then read 1245; main now reads 1247 after its
+# two siblings; and the merged tree measures 1248. So this slice is a net PLUS ONE here
+# and was a net MINUS ONE there, purely because of what it was measured against. No
+# arithmetic over the three recorded deltas reaches 1248; only running the tool does.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 233681 B sha256 1cf9bac24cf0...,
+# authored rule heads 1248 == CSSOM style rules 1248, flattened selectors 1213/1213,
+# MISSES 0, PARITY PASS. Both prose records above are kept.
+# W16-S3 2026-08-01 (cch-w16-s3-pill-text-bounded-rail-and-fleet): 1248 -> 1253, +5
+# authored rule heads, ALL ADDS under wrapper selectors — `.detail-rail .status-pill`,
+# `.detail-rail .status-pill-label`, `.fleet-status .status-pill`,
+# `.fleet-status .status-pill-dot`, `.fleet-status .status-pill-detail`. The pill's own
+# four families at app.css:2913-2957 are byte-identical (GR11/GR25 carve-out, D157
+# ADD-not-restyle). MISSES 0, so this is an unrecorded ADD, never a parity defect.
+# HOW 1253 WAS OBTAINED, since a sixth collision in this file is likely: the sentinel
+# `1` was written here deliberately and cssom-parity.mjs run — it printed
+# "BASELINE MISMATCH: 1253 authored rule heads, sidecar baseline is 1 (+1252)", i.e.
+# the TOOL named the value. 1248 + 5 also happens to equal 1253; that arithmetic is a
+# coincidence of a quiet tree and is NOT how this line may be produced. D158 stands:
+# on any rebase or merge conflict here, re-run the tool on the MERGED tree and take
+# what it prints. Never merge-resolve this number, never add deltas.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 237836 B sha256 1ed8286de6c3...,
+# authored rule heads 1253 == CSSOM style rules 1253, flattened selectors 1218/1218,
+# MISSES 0, PARITY PASS.
+# W16-S8 2026-08-01 (cch-w16-s8-drop-900-tier-rule-axis-and-baseline): 1253 -> 1252, a
+# DOWN-bump — only the SECOND this file has ever carried (cch-w14-s2's minus-two is the
+# first). It is cause 2 of the two the failure text names — a DELIBERATE DELETION — not
+# cause 1, a stray `/*` swallowing a live region. The MINUS ONE is one whole @media
+# wrapper holding exactly one rule: `@media (max-width: 900px) { .tier-grid {
+# grid-template-columns: 1fr 1fr; } }` at app.css:1051, which forced two tier tracks
+# onto every phone and pushed documentElement.scrollWidth to 413 in a 320 viewport.
+# THE SIGNATURE THAT SEPARATES A DELETION FROM A SWALLOW: flattened selectors are
+# 1218/1218 BEFORE and 1218/1218 AFTER, and MISSES stays 0. A `/*` swallow drops
+# flattened selectors with the heads; this drops one head and no selector, because the
+# deleted block's single selector `.tier-grid` still exists at app.css:1046.
+# NOT TOUCHED, and it matters: `@media (min-width: 900px)` at :2273 stays. That block is
+# what keeps 899 in the derived breakpoint axis after this deletion.
+# HOW 1252 WAS OBTAINED (D158, and the sixth-collision warning above was written for
+# exactly this): the sentinel `1` was written here deliberately and cssom-parity.mjs
+# run — it printed "BASELINE MISMATCH: 1252 authored rule heads, sidecar baseline is 1
+# (+1251)", i.e. the TOOL named the value. 1253 - 1 also equals 1252; that arithmetic is
+# a coincidence of a quiet tree and is NOT how this line may be produced. This slice is
+# the wave's SOLE holder of this file in round 1 (D202), so no sibling collides here —
+# but a LATER app.css slice will, and D158 stands: re-run the tool on the MERGED tree
+# and take what it prints. Never merge-resolve this number, never add deltas.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 237759 B sha256 24505040b13e...,
+# authored rule heads 1252 == CSSOM style rules 1252, flattened selectors 1218/1218,
+# MISSES 0.
+# LEAD RE-MEASUREMENT 2026-08-01 (rebase of the w17 billing stack onto main 1253):
+# the branch recorded 1252 against an older base and the merged tree ALSO measures
+# 1252 — the first collision this session where the branch's number survived the
+# rebase. That is not luck and it is worth saying why: this stack's net is a DELETION
+# (the 900 tier rule) plus additions that land inside blocks that already have heads,
+# so main's 1253 minus the dropped rule is 1252 whichever order the hunks arrive in.
+# MEASURED anyway, per D158 — never inferred from that argument: Chrome
+# 150.0.7871.187, node v22.22.0, authored rule heads 1252 == CSSOM style rules 1252,
+# flattened selectors 1218/1218, MISSES 0, PARITY PASS.
+# W18-S1 2026-08-01 (cch-w16-bl-attention-pill-detail-truncated-front-screen): 1252 ->
+# 1256, +4 authored rule heads, ALL ADDS under a WRAPPER selector —
+# `.instance-card-head` (a second, tail-authored head carrying only `flex-wrap: wrap`),
+# `.instance-card-head .status-pill`, `… .status-pill-dot`, `… .status-pill-detail`.
+# The pill's own four quarantined families at app.css:2913-2957 are byte-identical
+# (GR11/GR25 carve-out, D157 ADD-not-restyle, D198 wrapper ruling).
+# WHY FOUR AND NOT THREE, since a +3 variant exists and is cheaper: folding
+# `flex-wrap: wrap` into the EXISTING `.instance-card-head` at app.css:3064 edits an
+# existing declaration line and forfeits the old-length-zero `git diff -U0`
+# construction that proves :2913-2957 untouched WITHOUT anyone inspecting it. D198
+# refused the +3 on exactly that ground: the fourth head IS the carve-out proof's
+# price, not an oversight.
+# HOW 1256 WAS OBTAINED (D158, and no arithmetic — 1252 + 4 also equals 1256 and that
+# coincidence is NOT how this line may be produced): the sentinel `1` was written here
+# deliberately and cssom-parity.mjs run. It printed "BASELINE MISMATCH: 1256 authored
+# rule heads, sidecar baseline is 1 (+1255)" with MISSES 0 — the TOOL named the value,
+# and MISSES 0 is what makes this an unrecorded ADD rather than a parity defect.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 246573 B sha256 fc609a38467c…,
+# authored rule heads 1256 == CSSOM style rules 1256, MISSES 0, PARITY PASS.
+# FOR THE LEAD: this slice is the wave's SOLE holder of this file in round 1, so nothing
+# collides here today — but a round-2 or round-3 app.css slice will, and D158 stands:
+# re-run the tool on the MERGED tree and take what it prints. Never merge-resolve this
+# number, never add deltas.
+# W19-S2 2026-08-01 (cch-w19-s2-topbar-phone-band-620 — the phone topbar wraps at 620):
+# 1256 -> 1259, +3 authored rule heads, ALL ADDS, all inside ONE new
+# `@media (max-width: 620px)` block authored immediately after the 830 block at
+# app.css:3963-3967 — `.topbar`, `.topbar-right`, `.billing-chip`. Nothing existing was
+# edited: the block is a pure append, so every prior head is byte-identical.
+# HOW 1259 WAS OBTAINED (D158 sentinel, and NO ARITHMETIC — 1256 + 3 also equals 1259
+# and that coincidence is NOT how this line may be produced): the sentinel `1` was
+# written into the payload line deliberately (re-anchored with `grep -nE '^[0-9]+$'`,
+# which named line 287, not by trusting 287), then cssom-parity.mjs was run. It printed
+# "BASELINE MISMATCH: 1259 authored rule heads, sidecar baseline is 1 (+1258)." with
+# MISSES 0 — the TOOL named 1259, and MISSES 0 is what makes this an unrecorded ADD
+# rather than a parity defect. That number was written back verbatim.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 250262 B sha256 f8bf39c843eb…,
+# authored rule heads 1259 == CSSOM style rules 1259, FLATTENED SELECTORS 1221 authored
+# / 1221 CSSOM (the pair no prose entry has recorded since 1218/1218 — a holder quoting
+# only heads is quoting half the instrument), MISSES 0, PARITY PASS.
+# THE THREE NEW SELECTORS ARE THE THREE NEW FLATTENED ONES: 1218 -> 1221, one selector
+# per head, because none of the three rule heads is a selector list.
+# FOR THE LEAD: this slice is the wave's SOLE holder of this file in round 1 (D202).
+# A round-2 or round-3 app.css slice WILL collide here, and D158 stands: re-run the tool
+# on the MERGED tree and take what it prints. Never merge-resolve this number, never add
+# deltas.
+# W20-S8 2026-08-01 (cch-w20-s8-band-a-shell-fold-cliff — the past-due money message
+# stops being cut at 721-740): 1259 -> 1260, +1 authored rule head, ONE add, inside ONE
+# new `@media (min-width: 621px) and (max-width: 740px)` block authored between the 830
+# block's close and the W19-S2 620 banner (keeping the region descending 830 > 740 >
+# 620) — `.topbar`. Nothing existing was edited: `git diff -U0` shows the block as a
+# hunk of OLD LENGTH ZERO (`@@ -3916,0 +3917,47 @@`), so every prior head is
+# byte-identical.
+# HOW 1260 WAS OBTAINED (D158 sentinel, and NO ARITHMETIC — 1259 + 1 also equals 1260
+# and that coincidence is NOT how this line may be produced): the payload line was
+# RE-ANCHORED with `grep -nE '^[0-9]+$'`, which named line 309, and the sentinel `1`
+# REPLACED it (never prepended — a prepend hand-authors the one silent failure mode,
+# two bare integers where the tool reads the first). cssom-parity.mjs was then run and
+# printed "BASELINE MISMATCH: 1260 authored rule heads, sidecar baseline is 1 (+1259).
+# … Bump the sidecar to 1260 IN THE SAME COMMIT as the CSS change" with MISSES 0 — the
+# TOOL named 1260, and MISSES 0 is what makes this an unrecorded ADD rather than a
+# parity defect. That number was written back verbatim and `grep -cE '^[0-9]+$'`
+# confirmed EXACTLY 1 payload line survives.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 253419 B sha256 15473f0a7935…,
+# authored rule heads 1260 == CSSOM style rules 1260, FLATTENED SELECTORS 1221 authored
+# / 1221 CSSOM, MISSES 0, PARITY PASS.
+# THE FLATTENED PAIR DOES NOT MOVE, AND THAT IS NOT AN OMISSION (D222 — record the pair,
+# not half the instrument). `authored` is a Map keyed by NORMALISED SELECTOR, first
+# occurrence only (cssom-parity.mjs:532-537), so it is a DISTINCT-selector census:
+# `.topbar` is already authored at :794 and again in the 830 block, so a third head
+# carrying the same single selector adds a HEAD and no distinct SELECTOR. Heads +1,
+# flattened +0 is the signature of a scoped re-declaration, and it is the opposite of a
+# `/*` swallow, which drops flattened selectors ALONGSIDE heads.
+# FOR THE LEAD: this slice is the wave's SOLE holder of this file this round (D230) —
+# the other screen slices abstain by hard criterion, so the INTEGRATED tree will still
+# be short and needs one corrective bump. D158 stands: re-run the tool on the MERGED
+# tree and take what it prints. Never merge-resolve this number, never add deltas.
+# LEAD CORRECTIVE BUMP 2026-08-02 (wave 20's parallel round, integrated tree). Wave 20
+# deliberately killed the baseline SEQUENCER: four screen slices built concurrently, ONE
+# named holder (cch-w19-s3, #8984) bumping this file and the other three FORBIDDEN from
+# touching it by a hard criterion. That is D202 kept — one hand still holds — with the
+# other three abstaining by machine rather than by politeness. #8984 landed 1259 -> 1260
+# measured on its own branch; the integrated tree with #8985, #8986 and #8988 on top
+# measures 1264. This is that single corrective bump, taken the D158 way: wrong sentinel
+# written, cssom-parity.mjs run, the value read out of the tool's OWN failure text, and
+# `grep -cE '^[0-9]+$'` confirmed to return exactly 1 afterwards. Chrome 150.0.7871.187,
+# authored rule heads 1264 == CSSOM style rules 1264, flattened selectors 1225/1225,
+# MISSES 0. NOT arithmetic over the four slices' deltas — the ninth collision this session
+# and the ninth time the tool was the only thing that knew the answer.
+# W21-S1 2026-08-02 (cch-w21-s1-members-roster-identity-and-remove — the members
+# roster stops hiding WHO you are removing, and Remove stops leaving the screen):
+# 1264 -> 1266, +2 authored rule heads, ONE new `@media (max-width: 620px)` block
+# authored immediately after `.set-chip` at the foot of the GR33 roster grammar (620 is
+# an EXISTING breakpoint in this file — five other blocks already declare it — so the
+# derived breakpoint axis breakpoint-sweep.mjs walks is unchanged at [620,720,740,768,
+# 830,899]). The two heads are `.set-row` (flex-wrap + row-gap) and `.set-row-side`
+# (flex-basis: 100% + justify-content: flex-end). Nothing existing was deleted.
+# THE THIRD CSS CHANGE COSTS ZERO HEADS, and that is the point of recording it: the
+# base `.set-row-name` at :2111 gained ONE declaration, `overflow-wrap: anywhere`. A
+# declaration added to an existing rule is not a head, so this slice's remedy is three
+# changes and two heads. Whoever re-measures on the merged tree should expect that
+# asymmetry rather than read it as a missing bump.
+# THE FLATTENED PAIR DOES NOT MOVE: 1225 authored / 1225 CSSOM, unchanged from the
+# lead's corrective bump above. `authored` is a Map keyed by NORMALISED SELECTOR, first
+# occurrence only, so it is a DISTINCT-selector census — `.set-row` is already authored
+# at :2092 and `.set-row-side` at :2116, so two new heads carrying two already-authored
+# selectors add HEADS and no distinct SELECTOR. Heads +2 / flattened +0 is the
+# scoped-re-declaration signature (D222), and it is the OPPOSITE of a `/*` swallow,
+# which drops flattened selectors alongside heads. MISSES 0 confirms an unrecorded ADD.
+# HOW 1266 WAS OBTAINED (D158 sentinel, and NO ARITHMETIC — 1264 + 2 also equals 1266
+# and that coincidence is NOT how this line may be produced): the payload line was
+# RE-ANCHORED with `grep -nE '^[0-9]+$'`, which named line 352, the sentinel `1`
+# REPLACED it (never prepended — a prepend hand-authors the one silent failure mode,
+# two bare integers where the tool reads the first), and cssom-parity.mjs was run. It
+# printed "authored rule heads 1266 (baseline 1 ← ABOVE)" and "!! BASELINE MISMATCH:
+# 1266 authored rule heads, sidecar baseline is 1 (+1265)." — the TOOL named 1266. That
+# number was written back verbatim and `grep -cE '^[0-9]+$'` confirmed EXACTLY 1 payload
+# line survives.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 262241 B sha256 c513ba2b87b3…,
+# authored rule heads 1266 == CSSOM style rules 1266, flattened selectors 1225/1225,
+# MISSES 0, PARITY PASS.
+# FOR THE LEAD: this slice is the wave's NAMED HOLDER of this file this round (D246) —
+# every other app.css candidate folds into an existing rule at Δ0 and abstains by hard
+# criterion, so the INTEGRATED tree still needs ONE corrective bump. D158 stands: re-run
+# the tool on the MERGED tree and take what it prints. Never merge-resolve this number,
+# never add deltas — wave 20's own record above is the ninth time that was the only way
+# to get it right.
+# LEAD RE-MEASUREMENT 2026-08-02 (rebase of cch-w21 members-roster onto main 1264).
+# The branch's own 1266 SURVIVED the rebase — main gained #9058's instance-head leg,
+# which adds no rule head, so this slice's +2 lands unchanged. MEASURED, not reasoned:
+# wrong sentinel written, cssom-parity.mjs run, value read out of its own failure text,
+# `grep -cE '^[0-9]+$'` confirmed to return exactly 1. authored rule heads 1266 ==
+# CSSOM style rules 1266, MISSES 0. Tenth collision this session; the second time the
+# branch's number survived, and both times only the tool knew that in advance.
+# LEAD RESOLUTION 2026-08-02 (#8987 rebased onto main 1266 after wave 21's four slices).
+# This PR had been stuck across three waves. The lead's earlier diagnosis of it was WRONG
+# in two ways, both now corrected in the record: it is NOT cch-w19-s8 (that is #8986,
+# merged), and it never conflicted on THIS file at all — its conflicts were app.css and
+# overflow-guard.mjs, and what it was MISSING was a bump it never had. Resolved by the
+# technique that beat the same conflict class four times tonight: overflow-guard.mjs by
+# LEG TRANSPLANT (checkout --ours, brace-walk the missing leg out of stage :3:, anchor it
+# after the last sibling, add the registry entry, then RUN the module — never node --check,
+# which passes files the ESM loader rejects); app.css by keep-both, which is right for CSS
+# and wrong for JS. Guard PASSES across 13 legs in a real browser. Baseline MEASURED here:
+# wrong sentinel, cssom-parity.mjs run, value read from its own failure text, exactly one
+# bare integer confirmed. authored rule heads 1269 == CSSOM style rules 1269, MISSES 0.
+# W22-S2 (cch-w22-s2-site-row-name-and-host-bounded) 2026-08-02: 1269 -> 1271, MEASURED
+# by the sidecar's own recipe — the file still held 1269 (this branch's tree already
+# carried the change), cssom-parity.mjs was RUN, and the number was read out of its own
+# failure text: "authored rule heads 1271 (baseline 1269 <- ABOVE) ... CSSOM style rules
+# 1271 ... MISSES 0". MISSES 0 is what makes this a recorded ADD and not a parity defect.
+# The +2 are the two NEW heads this slice authors, both scoped away from the global row:
+#   .site-row:not(.site-row--global)             { flex-wrap: wrap; }
+#   .site-row:not(.site-row--global) .site-main  { flex: 1 1 200px; }
+# The wrap declarations themselves add ZERO heads — .site-name, .site-host and
+# .site-meta .mono already existed and only gained a declaration each.
+# THE LEAD RE-MEASURES ON THE INTEGRATED TREE: three round-1 slices of wave 22 touch
+# this single integer, so 1271 is this branch's honest number and NOT a prediction for
+# main. Re-run the sidecar after integration; do not arithmetic the deltas together.
+#
+# W22-S3 MEASURED 2026-08-02 (env-comment 500 + .set-row-note wrap): UNCHANGED at
+# 1269, MISSES 0 — deliberately NOT bumped, and recorded rather than left silent.
+# This slice edits app.css in exactly one place: `.set-row-note` gains an
+# `overflow-wrap` DECLARATION and a block comment above it. Neither adds a rule
+# HEAD — the selector already existed — so the count cannot move, and a bump here
+# would be a lie the ratchet has no way to catch. MEASURED, not reasoned: 999999
+# written into this file, cssom-parity.mjs run, and the number read out of its own
+# failure text ("authored rule heads 1269 (baseline 999999 ← BELOW)"), then
+# restored. Clean re-run: authored rule heads 1269 (baseline 1269), CSSOM style
+# rules 1269, flattened selectors 1225/1225, MISSES 0, PARITY PASS.
+# LEAD RESOLUTION 2026-08-02 (#9103 rebased onto main 1271 after #9102 landed).
+# Both prose records kept; the number RE-MEASURED on the merged tree and it did NOT
+# move — 1271 before and after, because this slice's declarations land inside blocks
+# that already carry heads. An unchanged number is worth writing down as loudly as a
+# changed one: a silent no-op here is indistinguishable from a forgotten bump, and the
+# W13-S4 entries above are the precedent for saying so. MEASURED, not assumed: wrong
+# sentinel written, cssom-parity.mjs run, value read from its own failure text, exactly
+# one bare integer confirmed. authored rule heads 1271 == CSSOM style rules 1271,
+# MISSES 0, PARITY PASS. Eleventh collision this session.
+# W22-S4 2026-08-02 (cch-w22-s4-2fa-enroll-modal-phone-band — the account modal's 2FA
+# enrollment stops resting off-screen on a phone): 1269 -> 1282, +13 authored rule heads,
+# ONE new `@media (max-width: 620px)` block authored at the foot of the ACCOUNT MODAL + 2FA
+# section, immediately after `.a2f-saved`. The thirteen heads are
+# `.modal-root:has(.am-modal)`, `.modal-root:has(.am-modal) .modal-card`, `.am-identity`,
+# `.am-who`, `.am-identity > .am-link`, `.am-head`, `.session-row`, `.a2f-enroll`,
+# `.a2f-manual`, `.a2f-qr`, `.a2f-confirm-row`, `.a2f-otp` and `.a2f-codes`. Nothing
+# existing was deleted and no existing rule gained a declaration.
+# 620 IS DELIBERATELY NOT A NEW BREAKPOINT: the measured overflow ends at 508.45px, so a
+# 520-keyed block would fit tighter — but a new breakpoint owes breakpoint-sweep.mjs's
+# BREAKPOINTS list an entry and this slice is fenced out of all three instruments, so the
+# derived axis stays [620, 720, 740, 768, 830, 899] and the boundary walk is unchanged
+# (verified: `node --test breakpoint-sweep.test.mjs` and Leg A both pass with the list
+# untouched — no UNCOVERED/PHANTOM breakpoint refusal).
+# THE FLATTENED PAIR MOVES BY EXACTLY TWO, and that asymmetry is the record worth keeping
+# (D222): 1225 -> 1227 authored / 1227 CSSOM. `authored` is a Map keyed by NORMALISED
+# SELECTOR, first occurrence only, so it is a DISTINCT-selector census — eleven of the
+# thirteen selectors are already authored elsewhere in this file (`.a2f-qr` at :5553,
+# `.modal-root:has(.am-modal) .modal-card` at :5508, and so on), so they add HEADS and no
+# distinct SELECTOR. The two exceptions are `.am-identity > .am-link` and
+# `.modal-root:has(.am-modal)` on its own, compounds that have never appeared before.
+# Heads +13 / flattened +2 is the scoped-re-declaration signature with two genuine new
+# selectors, and it is the OPPOSITE of a `/*` swallow, which drops flattened selectors
+# ALONGSIDE heads. MISSES 0 confirms an unrecorded ADD, not a parity defect.
+# MEASURED, not hand-incremented: cssom-parity.mjs run on this branch against the stale
+# 1269 printed "!! BASELINE MISMATCH: 1282 authored rule heads, sidecar baseline is 1269
+# (+13)" with "authored rule heads 1282 == CSSOM style rules 1282, MISSES 0" — the TOOL
+# named 1282 and that number was written back verbatim, then re-run to PARITY PASS.
+# Chrome 150.0.7871.187, node v22.22.0, app.css 279933 B sha256 76223772d7b9…. (The head
+# COUNT survived a late scoping change unmoved — two of the thirteen heads were narrowed
+# from `.modal-root` / `.modal-card` to `:has(.am-modal)` variants after review, which is
+# heads +0 / flattened +1. Both numbers were re-measured after that edit rather than
+# assumed to have stayed put.)
+# FOR THE LEAD: siblings s2, s3, s5 and bl also hold app.css this round. D158 REGENERATE-
+# ON-REBASE stands — re-run the tool on the MERGED tree and write what it prints. Never
+# resolve this number by hand and never add the slices' deltas: 1269 + 13 also equals
+# 1282, and that coincidence is not a measurement.
+# LEAD RESOLUTION 2026-08-02 (#9104 rebased onto main 1271 after #9102 and #9103).
+# Both prose records kept, number RE-MEASURED on the merged tree: 1284, a jump of THIRTEEN
+# — by far the largest single move this file has seen, and the 2FA enrollment modal is why:
+# a phone-band modal is a new block of scoped heads, not declarations added to existing
+# ones. That is the shape most likely to be mis-predicted by arithmetic, and it is exactly
+# why this file is never allowed to carry a reasoned number. MEASURED: wrong sentinel,
+# cssom-parity.mjs run, value taken from the tool's own failure text, exactly one bare
+# integer confirmed afterwards. authored rule heads 1284 == CSSOM style rules 1284,
+# MISSES 0, PARITY PASS. Twelfth collision this session; twelfth time only the tool knew.
+# LEAD RESOLUTION 2026-08-02 (#9104 rebased a SECOND time, onto main 1271 after #9103).
+# Both prose records kept; RE-MEASURED and the answer is 1284 again — the same value the
+# first rebase produced against a different base, because #9103 moved the count by zero.
+# Worth recording BECAUSE it repeated: a number that survives a rebase is not evidence
+# the doctrine is unnecessary, it is evidence about THIS pair of diffs. The 2FA modal is
+# a new block of scoped heads (+13, the largest single move this file has seen); #9103's
+# declarations landed inside blocks that already had heads (+0). Same session, adjacent
+# slices, and no arithmetic over deltas would have predicted either. MEASURED both times:
+# sentinel, run, read the tool's own failure text, confirm exactly one bare integer.
+# authored rule heads 1284 == CSSOM style rules 1284, MISSES 0, PARITY PASS.
+# cch-w25-s2 (SOLE BASELINE HOLDER this round, charter D302 under D202/D230). The <=720
+# theater block gains TWO new rule heads — `.new-step { flex-wrap: wrap; }` and
+# `.new-step-time { margin-left: 0; flex: 1 0 100%; padding-left: 34px; }` — paying the
+# theater grid's min-content escape without putting the hostname tear back. 1284 -> 1286.
+# MEASURED, NOT REASONED, even though this is the one shape arithmetic would have got
+# right: two new heads inside an EXISTING block, no scoped fork, no comma members moved.
+# Recorded precisely because it was predictable — a doctrine that is only obeyed when the
+# answer is surprising is not a doctrine. Wrong sentinel (a throwaway file containing `7`,
+# HEADS_BASELINE pointed at that PATH — it is a path, never an integer; an integer there
+# is an exit-2 ENVIRONMENT refusal that reads like a pass), cssom-parity.mjs run, number
+# taken from the tool's own failure text: "BASELINE MISMATCH: 1286 authored rule heads,
+# sidecar baseline is 7 (+1279)". Exactly one bare integer confirmed afterwards.
+# authored rule heads 1286 == CSSOM style rules 1286, MISSES 0, PARITY PASS.
+# cch-w29 (task-1daff7bc1bf46ceb, the unmeasurable-domain-rung slice). THREE new rule
+# heads, all in the .dom-* domain-checklist block: `.dom-rung--unknown` (a rung the
+# control plane could not MEASURE had NO paint rule at all — it was pixel-identical to a
+# rung we are still waiting on), plus `.dom-recheck` / `.dom-recheck-note` (the re-check
+# footer a terminal unmeasurable rail now carries, because the 4s poll deliberately stops
+# there and left the person no way back short of a navigation). 1286 -> 1289.
+# MEASURED, NOT REASONED: cssom-parity.mjs run against the edited tree, number taken from
+# the tool's own failure text — "BASELINE MISMATCH: 1289 authored rule heads, sidecar
+# baseline is 1286 (+3)" — with `authored rule heads 1289 == CSSOM style rules 1289,
+# MISSES 0` on the same run, which is what makes this an unrecorded ADD rather than a
+# parity defect. Chrome/150.0.7871.187, node v22.22.0, app.css sha256 cae689418a3f…
+# HONEST CAVEAT: this bump was taken against origin/main + THIS slice alone. If another
+# wave-29 slice also adds a rule head, the merged total is NOT 1289 and must be
+# re-measured — never added up from two deltas (this file's own D302 lesson).
+# authored rule heads 1289 == CSSOM style rules 1289, MISSES 0, PARITY PASS.
+#
+# Re-measured 2026-08-06: 1304 authored heads, MISSES 0 — the +15 are the team
+# picker's own rules (.ws-switch-wrap/.team-menu/.team-item/…), added when the
+# sidebar workspace switcher stopped opening the account modal and grew its own
+# menu. MISSES 0 is what makes this an unrecorded ADD rather than a parity
+# defect — the distinction this ratchet's own failure text tells you to confirm
+# before bumping, and it was confirmed by run, not assumed.
+#
+# Re-measured 2026-08-06 after merging origin/main: 1305 authored heads,
+# MISSES 0 — the +1 is this slice's own never-reported rule. The baseline was
+# 1289 when this branch was cut and reached 1304 on main via the sidebar team
+# picker (#9775/#9777), so this is the ONE-HOLDER-PER-ROUND collision resolved
+# the prescribed way: merge main first, RE-RUN parity, and record the number the
+# run printed — never arithmetic over two deltas. MISSES 0 confirmed FIRST,
+# which is what makes it an unrecorded ADD rather than a parity defect.
+#
+# Re-measured 2026-08-07: 1307 authored heads, MISSES 0 — the +2 are the
+# account modal's sessions fold (.session-fold and its :hover), added when the
+# sessions list learned to collapse past five rows. Number recorded from the
+# parity run itself, MISSES 0 confirmed first.
+#
+# cch-w63-s5 MEASURED 2026-08-09 (the resting state stops asserting a check that
+# never happened): 1307 -> 1310, +3 authored rule heads, MISSES 0. WHY: the fleet
+# card's refused update chip. A box that answered our stored credential with a 401
+# rendered BYTE-IDENTICALLY to a box nobody had ever probed (measured over the
+# shipped bundle: fleetRow equal, both len 576 on a minimal fixture), so the chip
+# had to exist — and a chip whose class has no rule is an __css_check E2 red, while
+# one falling through to `--ready` would paint a credential refusal in the same
+# GREEN that elsewhere means "a newer release is waiting for you". The three heads
+# are the WARN role, stated explicitly: `.fleet-update-chip--refused`,
+# `.fleet-update-chip--refused .fleet-update-dot`, and
+# `[data-theme="dark"] .fleet-update-chip--refused` — each mirroring the `--ready`
+# and `--busy` trio directly above it, so the block stays symmetric.
+# MEASURED, NOT REASONED (D158), even though 1307 + 3 also equals 1310 and that
+# coincidence is not a measurement: cssom-parity.mjs was RUN against the stale 1307
+# and named the value in its own failure text — "!! BASELINE MISMATCH: 1310 authored
+# rule heads, sidecar baseline is 1307 (+3)" with "MISSES 0" on the same run, which
+# is what makes this an unrecorded ADD rather than a parity defect. That number was
+# written back verbatim and re-run to PARITY PASS.
+# FOR THE LEAD: this slice is the ROUND-1 SOLE HOLDER of app.css and this sidecar
+# (charter D774); three round-2 slices are sequenced behind it. D158 stands — re-run
+# the tool on the MERGED tree and write what it prints; never add deltas.
+# cch-w64-s6 MEASURED 2026-08-09 (the deferred pill stops reading calm): 1310 ->
+# 1311, +1 authored rule head, MISSES 0, flattened selectors 1256 -> 1257. WHY: ONE
+# rule, `.dep-deferred`. The deploy ladder emitted `dep-deferred` from the raw
+# server status with NO rule behind it, so it fell through to the `.dep-pill` base
+# — which app.css's own comment records as byte-identical to `.dep-queued` on
+# colour, background and border in both themes. A build the box REFUSED therefore
+# impersonated a build still waiting its turn. The rule keeps the warn hue but
+# gives up the filled chip (the `.dep-cancelled` precedent: a row no longer holding
+# a build slot), so it cannot be confused with `.dep-building` either.
+# MEASURED, NOT REASONED (D158): cssom-parity.mjs was RUN against the stale 1310 and
+# printed "!! BASELINE MISMATCH: 1311 authored rule heads, sidecar baseline is 1310
+# (+1)" with "MISSES 0" and "flattened selectors 1257 authored / 1257 CSSOM" on the
+# same run. Both numbers are copied from that printout, never from arithmetic.
+# ARM A OF THIS SLICE COST THIS FILE NOTHING, deliberately: the site-list pill
+# consumes `.fresh-badge--rebuild` and `.status-pill--warn`, which already exist.
+1311

@@ -1,5 +1,5 @@
-COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc block type across all three required code surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all) — plus the cross-surface golden-parity harness leg (@inputs fixture, both count pins, regenerated golden mirrors: the exact gate CI runs on any compose.ex diff, closing the local-green/CI-red gap), plus the three downstream count-sync sites the generated golden set feeds — the create-barkpark-app showcase seed, the cloud vendored template copy, and the type-keyed toPlainText partition — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper)." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "portabledoc", "block", "render" CONCEPT "block-type" VARIANT "starter" DIRECTION "add" VARIABLES
-  VARIABLE 1 "BlockName" TITLE "Name your block type" DESCRIPTION "PascalCase concept name. Drives every surface through the four spellings-as-transforms: {{.BlockName}} (Go test name, comments), {{.block-name}} (the PortableDoc `type` string, the `bp-` CSS class, MARK suffixes), {{.blockName}} (Go renderer type, JS emitter fn), {{.block_name}} (Go file paths — Go and Elixir paths derive via snake)." EXAMPLES "Timeline", "FactBox", "Milestone"
+COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc block type across all FOUR required renderer surfaces — Go pdrender (renderer + named test + DefaultRegistry entry), JS react SDK (emitter + coreEmitters entry + fail-closed test parity), Elixir compose (one compose_block clause before the unknown-type catch-all), apps/mobile RN (core-prose renderer + coreProseRenderers entry + authored case; required since the crown tripwire began asserting mobile ≡ react with an EMPTY exclusions ledger) — plus the cross-surface golden-parity harness leg (@inputs fixture, both count pins, regenerated golden mirrors: the exact gate CI runs on any compose.ex diff, closing the local-green/CI-red gap), plus the three downstream count-sync sites the generated golden set feeds — the create-barkpark-app showcase seed, the cloud vendored template copy, and the type-keyed toPlainText partition — idempotently, with parity at birth: every surface emits the same starter form (the block's `text` in a `bp-<type>` wrapper)." LAST_UPDATED "27-07-2026-00-00-00" DOMAIN "barkpark" TAGS "portabledoc", "block", "render" CONCEPT "block-type" VARIANT "starter" DIRECTION "add" VARIABLES
+  VARIABLE 1 "BlockName" TITLE "Name your block type" DESCRIPTION "PascalCase concept name. Drives every surface through the five spellings-as-transforms: {{.BlockName}} (Go test name, comments), {{.block-name}} (the PortableDoc `type` string, the `bp-` CSS class, MARK suffixes), {{.blockName}} (Go renderer type, JS emitter fn), {{.block_name}} (Go file paths — Go and Elixir paths derive via snake)." EXAMPLES "Timeline", "FactBox", "Milestone"
   VARIABLE 2 "CountBefore" OPAQUE TITLE "Registry count before this run" DESCRIPTION "The JS registry's current in-scope type count — the number inside expect(registered).toHaveLength(N) in js/packages/react/tests/PortableDoc.test.tsx (46 at authoring time). OPAQUE numeric literal, never re-cased. Scaffy has no arithmetic, so the count crosses as a declared pair; SUCCESSOR on CountAfter is what the validator lints." EXAMPLES "46"
   VARIABLE 3 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "Registry count after this run" DESCRIPTION "CountBefore plus one — what the toHaveLength assertion must say once this block type is registered. OPAQUE numeric literal; SUCCESSOR declares the +1 relation the validator checks across the EXAMPLES pair." EXAMPLES "47"
   VARIABLE 4 "ParityCountBefore" OPAQUE TITLE "Golden-parity census before this run" DESCRIPTION "The compose-dispatch census the parity harness currently pins — the number in EXPECTED_COUNT= in scripts/pd-parity-completeness.sh AND inside `== N` in pd_golden_parity_test.exs (46 at authoring time). This SAME golden-dir-derived census also pins three downstream sites the gen_pd_parity golden set feeds: the three showcase-seed count assertions in create-barkpark-app's showcase-content.test.ts and the pd-golden corpus pin (`cases.length`) in react's toPlainText.typekeyed.test.ts — every count that tracks the golden-dir size moves as one. A DIFFERENT number line from the JS registry's CountBefore — the two pins move independently (compose.ex dispatches 60 types with 14 excluded; the react SDK scopes its own registry) and only coincidentally both read 46 today. OPAQUE numeric literal, never re-cased." EXAMPLES "46"
@@ -10,10 +10,13 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 # ─────────────────────────────────────────────────────────────────────────────
 # WHAT THIS COMMAND HONESTLY DOES
 #
-# 3 required code surfaces + fail-closed JS test parity + the required
-# golden-parity harness leg + the 3 downstream count-sync sites the generated
-# golden set feeds (Surface 5) + optional CSS and classification. Never
-# "4 surfaces auto-injected":
+# 4 required renderer surfaces + fail-closed JS AND mobile test parity + the
+# required golden-parity harness leg + the 3 downstream count-sync sites the
+# generated golden set feeds (Surface 5) + optional CSS and classification.
+# The count moved from 3 to 4 on 2026-07-27: apps/mobile stopped being allowed
+# to lag when its registry tripwire began asserting parity with react against an
+# EMPTY exclusions ledger (Surface 6 below carries the full reasoning). Every
+# file is listed; nothing is claimed that is not injected:
 #
 #   ● internal/pdrender/{{.block_name}}.go          created — Go renderer
 #   ● internal/pdrender/{{.block_name}}_test.go     created — named Go test
@@ -27,6 +30,8 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #   ○ js/packages/create-barkpark-app/tests/showcase-content.test.ts injected ×3 — showcase census pins
 #   ○ js/packages/react/tests/toPlainText.typekeyed.test.ts injected ×2 — corpus + textless-partition pins
 #   ○ js/packages/react/tests/fixtures/pd-plaintext-golden.ts injected — TEXTLESS_SKIP allow-list entry
+#   ○ apps/mobile/src/papers/portabledoc/blocks/core-prose.tsx injected ×2 — RN renderer + registry map entry
+#   ○ apps/mobile/__tests__/cases/core-prose.cases.tsx injected — authored registry case
 #
 # The gen_pd_parity ASSERT CMD below additionally GENERATES (never injects) the
 # frozen golden pair api/test/support/fixtures/pd-parity/{{.block-name}}.golden.json
@@ -43,10 +48,13 @@ COMMAND "Add PortableDoc Block Type" DESCRIPTION "Scaffold a new PortableDoc blo
 #
 # The JS surface is FAIL-CLOSED at four edits: the react test suite asserts
 # CASES ≡ REGISTERED_TYPES and pins the exact count, so an emitter + map entry
-# alone reds exactly one assertion (expect(registered).toHaveLength(N)). The Go
-# registry is OPEN (no count test) and the Elixir clause set is OPEN (unknown
-# types degrade through the catch-all) — for those two surfaces the MARK-planted
-# injection is the whole story.
+# alone reds exactly one assertion (expect(registered).toHaveLength(N)). The
+# MOBILE surface is fail-closed at three, and from FOUR independent directions:
+# registry ≡ authored cases, registry ≡ react's registry, the pd-parity corpus
+# floor, and the register fingerprint — so a partial mobile landing cannot be
+# green. The Go registry is OPEN (no count test) and the Elixir clause set is
+# OPEN (unknown types degrade through the catch-all) — for those two surfaces the
+# MARK-planted injection is the whole story.
 #
 # The starter render is identical on every surface: the block's `text` attr in
 # a `bp-{{.block-name}}` wrapper (terminal: sanitized + width-wrapped text).
@@ -243,14 +251,21 @@ MARK "go-registry-{{.block-name}}"
 
 # ── Surface 2: JS (js/packages/react) — FAIL-CLOSED, all four edits ─────────
 
-# Edit 1/4: the emitter function. Anchor is the eyebrow emitter (core.ts:46,
-# unique) — the canonical one-line exemplar this starter mirrors. escapeHtml
-# and str are already in scope in core.ts. Guard derives from the MARK line.
+# Edit 1/4: the emitter function. Anchor is the eyebrow emitter (unique) — the
+# canonical one-line exemplar this starter mirrors. escapeHtml and str are
+# already in scope in core.ts. Guard derives from the MARK line.
+#
+# NOTE (mob-bl-react-list-emitter): eyebrow itself now composes the D12
+# content||text law (`renderInlines(paragraphInline(b))`) — it was blanking the
+# live `{content:[…]}` shape. The GENERATED starter below deliberately stays on
+# the simpler `escapeHtml(str(b.text))` form: a brand-new block type has no
+# authored `content[]` shape in the wild yet, and the author adds the fallback
+# when it does. Only the ANCHOR was re-synced to the current bytes.
 IN "js/packages/react/src/blocks/core.ts"
 ### Add the {{.block-name}} emitter beside the eyebrow exemplar
 INSERT AFTER FIRST
 ::: eyebrow emitter anchor :::
-const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
+const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${renderInlines(paragraphInline(b))}</p>`
 ::: eyebrow emitter anchor :::
 WITH
 ::: {{.block-name}} emitter :::
@@ -550,6 +565,94 @@ WITH
 ::: {{.block-name}} textless-skip entry :::
 MARK "plaintext-skip-{{.block-name}}"
 
+# ── Surface 6: apps/mobile — the fourth renderer surface ─────────────────────
+#
+# WHY THIS SURFACE EXISTS HERE NOW. Until the zero-unknown-blocks wave, mobile
+# was allowed to lag: an unregistered type degraded to a labeled fallback box,
+# and this command's three "required" surfaces did not include RN. That changed
+# when `apps/mobile/__tests__/registryParity.test.ts` began live-importing
+# react's `REGISTERED_TYPES` and asserting mobile ≡ react ∖ EXCLUSIONS with an
+# EMPTY exclusions ledger. A run of this command that touched only Go, react and
+# Elixir now leaves mobile one type behind — and the mobile gate REDS on the very
+# next mobile PR, misattributed to whoever pushed it. The three edits below are
+# what keep that tripwire true by construction rather than by remembering.
+#
+# WHY core-prose AND WHY bodyText(ctx). The starter form is `text` in a wrapper,
+# which is prose, so it belongs in the prose family — and every import it needs
+# (Text, str, bodyText, Render) is ALREADY in that file, so there is no import
+# injection and no ensure-import dependency. Routing the text through
+# `bodyText(ctx)` is not cosmetic: it makes the block register-SENSITIVE, which
+# is what keeps `registerFidelity.test.tsx` green without an allowlist row. A
+# fixed `scale.*` rung here would be register-BLIND, and that is a RULING — it
+# would owe a REGISTER_BLIND entry with a reason class plus a header note in the
+# family file (charter D50). The cheap default is the correct one.
+
+# Edit 1/3: the renderer. Anchor is the `paragraph` renderer — the family's most
+# stable member and the exemplar the starter copies (same bodyText + marginVertical
+# shape). Unique in the file. Guard derives from the payload's MARK line.
+IN "apps/mobile/src/papers/portabledoc/blocks/core-prose.tsx"
+### Add the {{.block-name}} RN renderer beside the paragraph exemplar
+INSERT AFTER FIRST
+::: paragraph renderer anchor :::
+const paragraph: Render = (b, ctx, key) => (
+  <Text key={key} style={[bodyText(ctx), { marginVertical: 6 }]}>
+    {renderInlineNodes(paragraphInline(b), ctx)}
+  </Text>
+)
+::: paragraph renderer anchor :::
+WITH
+::: {{.block-name}} RN renderer :::
+
+// scaffy:add-block-type {{.BlockName}} MARK:mobile-renderer-{{.block-name}}
+// The RN twin of the {{.block-name}} emitter: the same `text`, at the register's
+// body measure. PURE (no hooks) so the jest suites can walk the element tree
+// without a native host, and register-aware via bodyText(ctx) — see the surface
+// note above for why that choice is load-bearing rather than stylistic.
+const {{.blockName}}: Render = (b, ctx, key) => (
+  <Text key={key} style={[bodyText(ctx), { marginVertical: 6 }]}>
+    {str(b.text)}
+  </Text>
+)
+::: {{.block-name}} RN renderer :::
+MARK "mobile-renderer-{{.block-name}}"
+
+# Edit 2/3: the coreProseRenderers map entry. registry.tsx spreads this map into
+# BLOCK_RENDERERS, so this single entry is what makes the type exist for the app.
+# Anchor is the map's last entry `  footnote,` (unique at this indent) which KEEPS
+# its trailing comma, so a plain INSERT after it is safe. Key is QUOTED because
+# kebab-case types require it ('bulleted-list' sets the precedent two lines up).
+IN "apps/mobile/src/papers/portabledoc/blocks/core-prose.tsx"
+### Register the {{.block-name}} renderer in the coreProseRenderers map
+INSERT AFTER FIRST
+::: coreProseRenderers tail anchor :::
+  footnote,
+::: coreProseRenderers tail anchor :::
+WITH
+::: {{.block-name}} RN map entry :::
+  // scaffy:add-block-type {{.BlockName}} MARK:mobile-map-{{.block-name}}
+  '{{.block-name}}': {{.blockName}},
+::: {{.block-name}} RN map entry :::
+MARK "mobile-map-{{.block-name}}"
+
+# Edit 3/3: the authored case. THREE mobile suites read the per-family case files
+# — chatRenderers.test.tsx pins registry ≡ cases (so a renderer without a case
+# reds), and registerFidelity.test.tsx derives its whole corpus from them (so a
+# missing case would leave the new type unmeasured by the register tripwire).
+# Anchor is the paragraph case, the file's most stable row. Guard derives from
+# the MARK line.
+IN "apps/mobile/__tests__/cases/core-prose.cases.tsx"
+### Add the {{.block-name}} case to the core-prose case file
+INSERT AFTER FIRST
+::: core-prose cases paragraph anchor :::
+  { type: 'paragraph', block: { type: 'paragraph', text: 'body copy' } },
+::: core-prose cases paragraph anchor :::
+WITH
+::: {{.block-name}} RN case :::
+  // scaffy:add-block-type {{.BlockName}} MARK:mobile-case-{{.block-name}}
+  { type: '{{.block-name}}', block: { type: '{{.block-name}}', text: 'Starter' } },
+::: {{.block-name}} RN case :::
+MARK "mobile-case-{{.block-name}}"
+
 # ── Post-conditions ──────────────────────────────────────────────────────────
 
 # Per-surface file asserts — each string is a verbatim substring of what an op
@@ -570,6 +673,10 @@ ASSERT FILE "js/packages/create-barkpark-app/tests/showcase-content.test.ts" CON
 ASSERT FILE "js/packages/react/tests/toPlainText.typekeyed.test.ts" CONTAINS "cases.length).toBe({{.ParityCountAfter}})"
 ASSERT FILE "js/packages/react/tests/toPlainText.typekeyed.test.ts" CONTAINS "TEXTLESS_SKIP).length).toBe({{.TextlessSkipAfter}})"
 ASSERT FILE "js/packages/react/tests/fixtures/pd-plaintext-golden.ts" CONTAINS "MARK:plaintext-skip-{{.block-name}}"
+# Surface 6 postconditions — the three RN edits (renderer, registry map, case).
+ASSERT FILE "apps/mobile/src/papers/portabledoc/blocks/core-prose.tsx" CONTAINS "MARK:mobile-renderer-{{.block-name}}"
+ASSERT FILE "apps/mobile/src/papers/portabledoc/blocks/core-prose.tsx" CONTAINS "MARK:mobile-map-{{.block-name}}"
+ASSERT FILE "apps/mobile/__tests__/cases/core-prose.cases.tsx" CONTAINS "MARK:mobile-case-{{.block-name}}"
 
 # DRY-RUN HONESTY (benchmark note — read before you chase a phantom var bug).
 # `bp scaffy run add-block-type … --dry-run` on THIS command ALWAYS reports
@@ -653,3 +760,30 @@ ASSERT CMD "cd js/packages/create-barkpark-app && npx vitest run"
 # runs BarkparkCloud.Templates.AppFilesDriftTest, the same both-directions gate.
 ASSERT CMD "make cloud-templates-sync"
 ASSERT CMD "cd cloud && mix test test/barkpark_cloud/templates/app_files_drift_test.exs" TIER ci
+
+# ── Surface 6 gates: apps/mobile, LAST because they read everything above ─────
+#
+# THE WORKSPACE TRAP, recorded so nobody debugs it twice. This repo has TWO
+# independent pnpm workspaces with two lockfiles: the ROOT one (web, js/packages/
+# core, js/packages/react, apps/mobile) and js/'s own (packages/*, docs). The
+# `cd js && pnpm install` above hydrates the SECOND one, so it does nothing for
+# apps/mobile — hence the root install below, which is why this gate is
+# self-priming rather than relying on the earlier one.
+#
+# The build is required for TYPECHECK only: the SDK packages publish just dist/,
+# and mobile's app code imports their package entries, so tsc needs the built
+# .d.ts. (mobile's jest does not — registryParity.test.ts imports react's
+# SOURCE by deep relative path, deliberately, so a stale dist cannot green it.)
+# `...` is MANDATORY for the same reason the react gate above needs it: a bare
+# --filter omits @barkpark/core, whose dist react's DTS imports.
+#
+# `pnpm test` runs the WHOLE mobile suite, not a named test, and that is the
+# point — it is the fail-closed proof that all three RN edits landed AND that
+# they are mutually consistent: registryParity reds if the type reached react but
+# not mobile, chatRenderers reds if the renderer landed without a case,
+# crownFloor reds unless gen_pd_parity (above) minted the type's fixture, and
+# registerFidelity reds if the renderer ignores the register. Four independent
+# tripwires, one command.
+ASSERT CMD "pnpm install && pnpm --filter @barkpark/react... build"
+ASSERT CMD "cd apps/mobile && pnpm typecheck"
+ASSERT CMD "cd apps/mobile && pnpm test"

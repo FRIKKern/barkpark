@@ -251,10 +251,17 @@ defmodule Barkpark.Content.EnvelopeTest do
     refute Envelope.field_readable?(schema, "content.meta.seo", ctx)
   end
 
-  test "field_readable? treats nil/:internal callers as unrestricted" do
+  test "field_readable? fails closed for a nil or unexpected caller; :internal stays unrestricted" do
     schema = schema_with([%{"name" => "salary", "private" => true}])
-    assert Envelope.field_readable?(schema, "salary", nil)
+    # nil caller ⇒ FAIL CLOSED (the most restrictive anonymous principal). The
+    # WS-B-class fail-open (nil ⇒ true) is gone: a caller-less call can no longer
+    # slip a private field into a WHERE/ORDER clause.
+    refute Envelope.field_readable?(schema, "salary", nil)
+    # Explicit internal/full-content sentinel ⇒ unrestricted.
     assert Envelope.field_readable?(schema, "salary", :internal)
+    # Catch-all: ANY unexpected caller shape fails closed too (first-ever pin —
+    # this clause had zero coverage before the ctx-s3 flip).
+    refute Envelope.field_readable?(schema, "salary", :unexpected_atom)
   end
 
   # ── render_many_by_type: multi-type search surfaces (Phase 3 leak fix) ───────

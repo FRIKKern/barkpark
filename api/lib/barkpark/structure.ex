@@ -12,10 +12,19 @@ defmodule Barkpark.Structure do
   switch; nested `:list` recurses fine):
 
     * **MAIN** — flat, TOP-LEVEL (no wrapper, preserving deep-links): the host
-      content/papers/sheets/taxonomy/settings groups, plus the desk items of any
-      plugin whose effective placement is `:main` (tasks by default, or any
-      promoted plugin). Books follow OnixEdit's enablement/placement; Media
-      follows the media plugin's (`:top_menu` default = out of the tree).
+      content/papers/sheets/taxonomy/content-types/settings groups, plus the
+      desk items of any plugin whose effective placement is `:main` (tasks by
+      default, or any promoted plugin). Books follow OnixEdit's
+      enablement/placement; Media follows the media plugin's (`:top_menu`
+      default = out of the tree). "content-types" (title "Content", issue
+      #8463) is the GENERIC fallback: every private, non-plugin-owned,
+      non-singleton schema — i.e. any consumer-registered type nobody curated
+      a home for — gets a drillable `:document_type_list` row there, so
+      Studio can browse and edit it. "settings" keeps ONLY the schemas that
+      opt into `singleton: true` (the real siteSettings-style config
+      objects) — see `build_settings_group/2` and
+      `build_generic_types_group/2`, which partition the exact same
+      private+unowned set.
     * **Plugins** — ONE nested `:list` node (`id: "plugins"`) holding the desk
       items of ENABLED plugins with placement `:plugins`, grouped per plugin.
       Emitted only when non-empty.
@@ -128,11 +137,16 @@ defmodule Barkpark.Structure do
       end
 
     # ── MAIN host groups: always top-level, in charter order ──
+    # `build_generic_types_group/2` sits right before Settings: it and
+    # `build_settings_group/2` read the SAME private+unowned schema set and
+    # partition it by the `singleton` flag, so they are kept adjacent here on
+    # purpose (one catch-all immediately followed by the other).
     host_main = [
       build_content_group(schemas),
       build_papers_group(schemas),
       build_sheets_group(schemas),
       build_taxonomy_group(schemas),
+      build_generic_types_group(schemas, owned_map),
       build_settings_group(schemas, owned_map)
     ]
 
@@ -250,8 +264,21 @@ defmodule Barkpark.Structure do
 
   # One per-plugin group node under the Plugins tier — "grouped per plugin"
   # (charter Decision 1). A nested :list, so it recurses on every consumer.
+  #
+  # `:icon` is "puzzle" — the same glyph the Plugins tier itself carries ("🧩"
+  # aliases to it), because a per-plugin group IS a Plugins-tier row. It used to
+  # be omitted entirely, which left EVERY `plugin-grp-*` child with `icon: nil`
+  # and 500'd `/studio/plugins` on a clean database (spd-w18-nil-icon-500) —
+  # structural, not data-dependent. The renderer is fail-safe now too; this
+  # emitter still names a real glyph so the rows say "plugin", not "file".
   defp plugin_group_node(name, nodes) do
-    %Node{id: "plugin-grp-#{name}", title: plugin_display_name(name), type: :list, items: nodes}
+    %Node{
+      id: "plugin-grp-#{name}",
+      title: plugin_display_name(name),
+      icon: "puzzle",
+      type: :list,
+      items: nodes
+    }
   end
 
   # Human labels for the Plugins-tier group headers. Falls back to a
@@ -298,6 +325,12 @@ defmodule Barkpark.Structure do
   # only forward the workspace id (dropping :project_id).
   defp census_opts(opts), do: Keyword.take(opts, [:workspace_id])
 
+  # Both branches name a REAL glyph. They used to leave `:icon` nil — the orphan
+  # branch by omission, the schema branch whenever the schema declared no icon —
+  # which 500'd `/studio/rest` for an authenticated admin (spd-w18-nil-icon-500).
+  # "file" is the neutral document glyph the desk already falls back to for a
+  # pane with no icon (`studio_live/components.ex`), so a …Rest row now reads as
+  # "documents of a type with no home" rather than as absence.
   defp rest_child_node(type, total, schemas) do
     title = "#{type} (#{total})"
 
@@ -306,13 +339,13 @@ defmodule Barkpark.Structure do
         # Orphaned type — no schema in scope. A plain, non-drillable :document
         # leaf (Go keeps it; pane_builder renders nothing to drill). Truth over
         # silence: these rows exist and the tree says so.
-        %Node{id: "rest-#{type}", title: title, type: :document, type_name: type}
+        %Node{id: "rest-#{type}", title: title, icon: "file", type: :document, type_name: type}
 
       schema ->
         %Node{
           id: "rest-#{type}",
           title: title,
-          icon: Map.get(schema, :icon),
+          icon: Map.get(schema, :icon) || "file",
           type: :document_type_list,
           type_name: type
         }
@@ -689,21 +722,35 @@ defmodule Barkpark.Structure do
     items
   end
 
-  # Settings — HOST private singletons (siteSettings/navigation/colors, …)
-  # grouped under a sub-list. The catch-all rejects by plugin OWNERSHIP, not
-  # enablement (charter Decision 12): any private schema whose name is in the
-  # harvested `owned_map` is a plugin's type, not a host singleton — enabled or
-  # not — so it must NOT masquerade here. An enabled plugin renders its type via
-  # its own desk group (no double-list); a disabled plugin's private type falls
-  # to …Rest with an honest count (no Settings-singleton leak). Host singletons
-  # are unowned and stay.
+  # Settings — HOST config singletons (siteSettings/navigation/colors, …)
+  # grouped under a sub-list, each rendered as a `:document` node whose pane
+  # resolves the ONE canonical row (id == type name — `PaneBuilder`'s
+  # `fetch_doc_with_draft(type_name, type_name, …)`). The catch-all rejects by
+  # plugin OWNERSHIP, not enablement (charter Decision 12): any private schema
+  # whose name is in the harvested `owned_map` is a plugin's type, not a host
+  # singleton — enabled or not — so it must NOT masquerade here. An enabled
+  # plugin renders its type via its own desk group (no double-list); a
+  # disabled plugin's private type falls to …Rest with an honest count (no
+  # Settings-singleton leak).
+  #
+  # Singleton semantics (issue #8463) are now an explicit, EXPLICIT opt-in:
+  # only schemas with `singleton: true` land here. This function and
+  # `build_generic_types_group/2` partition the exact same private+unowned
+  # set by that one flag — a schema is drillable list (Content) XOR singleton
+  # (Settings), never both, never neither. Pre-existing private schemas that
+  # never set the flag default to `false` (the Ecto column default) and fall
+  # to Content instead of masquerading as a broken singleton — which is the
+  # bug this issue reports. The three real host singletons opt back in from
+  # their seed definitions (`Barkpark.Seeds.Demo`); an already-deployed
+  # instance's existing rows are flipped by the companion backfill migration
+  # (`20260726130000_backfill_singleton_for_host_settings_types`).
   defp build_settings_group(schemas, owned_map) do
     owned = owned_type_set(owned_map)
 
     private =
       schemas
       |> Map.values()
-      |> Enum.filter(&(&1.visibility == "private"))
+      |> Enum.filter(&(&1.visibility == "private" and &1.singleton))
       |> Enum.reject(&MapSet.member?(owned, &1.name))
 
     if private == [] do
@@ -727,6 +774,55 @@ defmodule Barkpark.Structure do
                 visibility: :private
               }
             end)
+        }
+      ]
+    end
+  end
+
+  # Content (generic fallback, issue #8463) — every PRIVATE, non-plugin-owned
+  # schema that does NOT opt into `singleton: true`. This is the fix for
+  # "Studio cannot browse consumer-registered document types": before this
+  # group existed, EVERY such schema fell into `build_settings_group/2` and
+  # rendered as a `:document` singleton node, whose pane looks up a document
+  # whose id equals the type name — dead for a normal N-document type. Here
+  # each schema gets the same `:document_type_list` node the curated host
+  # groups use (`doc_type_list_item/1`), so its documents are actually
+  # browsable and editable.
+  #
+  # Deliberately SCHEMA-driven, not census-driven like …Rest
+  # (`build_rest_children/4`, which only surfaces a type once a document of
+  # it exists): a type registered via `POST /v1/schemas` with zero documents
+  # still needs a home the instant it exists, so "create the first document
+  # of my new type" is reachable from Studio without seeding data out of
+  # band first.
+  #
+  # Grouped under one titled sub-list (like Settings/Media) rather than
+  # flattened into `build_content_group/1`'s un-headered top-level items —
+  # the real-world case that filed #8463 registers 25 custom types, and a
+  # flat dump of that many rows into the MAIN tier would bury the curated
+  # post/page/project items. "Settings" stays reserved for the small, stable
+  # set of true singletons; "Content" collapses everything else into one
+  # discoverable, growing bucket. See the PR description for the full naming
+  # rationale considered.
+  defp build_generic_types_group(schemas, owned_map) do
+    owned = owned_type_set(owned_map)
+
+    generic =
+      schemas
+      |> Map.values()
+      |> Enum.filter(&(&1.visibility == "private" and not &1.singleton))
+      |> Enum.reject(&MapSet.member?(owned, &1.name))
+
+    if generic == [] do
+      []
+    else
+      [
+        %Node{
+          id: "content-types",
+          title: "Content",
+          icon: "🗂",
+          type: :list,
+          items: Enum.map(generic, &doc_type_list_item/1)
         }
       ]
     end

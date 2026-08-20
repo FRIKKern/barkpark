@@ -7,27 +7,22 @@
  * Barkpark document into a uniform hit the UI can render regardless of `_type`.
  */
 
-/** Search engines Barkpark exposes. Postgres = exact/operator-aware (and the
- * anonymous-safe flat route); Indx = fuzzy/typo-tolerant lexical recall, only
- * reachable on a token-scoped route. */
+/** Search engines Barkpark exposes. Postgres = exact/operator-aware; Indx =
+ * fuzzy/typo-tolerant lexical recall. Both ride the same route (scoped when a
+ * token is configured, flat-anonymous otherwise). */
 export type SearchEngine = "postgres" | "indx";
 
-export const ENGINES: ReadonlyArray<{
-  id: SearchEngine;
-  label: string;
-  tagline: string;
-}> = [
-  {
-    id: "postgres",
-    label: "Postgres",
-    tagline: "Exact & operator-aware — phrases, exclusions, prefixes.",
-  },
-  {
-    id: "indx",
-    label: "Indx",
-    tagline: "Fuzzy & typo-tolerant — finds it even when you misspell.",
-  },
-];
+/**
+ * The ONE default engine — consumed by the SSR seed (layout), the Finder's
+ * `initialEngine` prop default, the `?engine=` URL readers (Finder + the
+ * `/api/find` route), so every surface agrees on what "no engine param" means.
+ * Postgres: always provisioned wherever Barkpark runs, exact + operator-aware.
+ * The engine PILL is retired (Indx is unprovisionable headlessly, so the UI no
+ * longer advertises it); an explicit `?engine=indx` URL still opts in, and the
+ * server-reported `engineUsed` drives an honest `indxUnavailable` note when
+ * the request was silently served by Postgres instead.
+ */
+export const DEFAULT_ENGINE: SearchEngine = "postgres";
 
 /** Document types the finder knows how to surface. Every type now has a reader
  * via the unified `/d/[type]/[slug]` detail route — there are no dead-end types
@@ -159,9 +154,12 @@ export interface FindResponse {
   total: number;
   /** Engine the caller asked for. */
   engine: SearchEngine;
-  /** Engine actually used (falls back to postgres when Indx is unavailable). */
+  /** Engine that ACTUALLY served — the server-reported `engineUsed` (the
+   * query pipeline is the only place that knows; a silent zero-hit-recovery
+   * substitution reports postgres here even on an indx request). */
   engineUsed: SearchEngine;
-  /** True when Indx was requested but no token was configured to reach it. */
+  /** True when indx was requested but the answer was served by Postgres —
+   * derived from the server truth, shown as a calm inline note. */
   indxUnavailable: boolean;
   parsedQuery: ParsedQuery | null;
   /** "drop_tokens" | "typo_widen" when a fallback widened the search, else null. */
@@ -195,6 +193,53 @@ export interface PopularQuery {
   query: string;
   count: number;
   resultCount?: number;
+}
+
+/* ── popular-chip curation ─────────────────────────────────────────────── */
+
+/** Most words a popular query may have to earn a chip. */
+export const POPULAR_CHIP_MAX_WORDS = 2;
+/** Longest a popular query may be (characters) to earn a chip. */
+export const POPULAR_CHIP_MAX_CHARS = 24;
+/** How many chips the idle status row shows at most. */
+export const POPULAR_CHIP_CAP = 6;
+
+/**
+ * Curate the raw popular-query pool down to the chips worth offering.
+ *
+ * `/api/find?suggest` returns the query LOG verbatim, and a Barkpark instance's
+ * log is mostly machine exhaust: agents probing with whole sentences ("research
+ * coverage ledger"), operator syntax, one-off spelunking. A chip row is a
+ * promise — "these are the searches worth trying" — so an uncurated row ships
+ * that promise over telemetry and reads as noise at the ten-second bar.
+ *
+ * The filter keeps only human-shaped queries: at most
+ * {@link POPULAR_CHIP_MAX_WORDS} words AND at most
+ * {@link POPULAR_CHIP_MAX_CHARS} characters, deduped case-insensitively (the
+ * log records "Deploy" and "deploy" separately), capped at
+ * {@link POPULAR_CHIP_CAP}. Input rank order is preserved — the pool already
+ * arrives sorted by popularity.
+ *
+ * DEGRADES TO NOTHING BY DESIGN: a fresh dataset has an empty log, and a
+ * dev-heavy one can have a log with nothing short in it. Both yield `[]`, and
+ * the caller renders no row at all rather than a row of leftovers.
+ */
+export function curatePopularQueries(
+  pool: PopularQuery[] | null | undefined,
+): PopularQuery[] {
+  const seen = new Set<string>();
+  const chips: PopularQuery[] = [];
+  for (const entry of pool ?? []) {
+    const query = typeof entry?.query === "string" ? entry.query.trim() : "";
+    if (!query || query.length > POPULAR_CHIP_MAX_CHARS) continue;
+    if (query.split(/\s+/).length > POPULAR_CHIP_MAX_WORDS) continue;
+    const key = query.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    chips.push({ ...entry, query });
+    if (chips.length >= POPULAR_CHIP_CAP) break;
+  }
+  return chips;
 }
 
 /* ── normalisation ─────────────────────────────────────────────────────── */

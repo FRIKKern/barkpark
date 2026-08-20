@@ -3,6 +3,9 @@ name: elixir
 # Phase 2 / WI4 — Elixir CI gate.
 #
 # Jobs:
+#   0. changes          — the DISPATCHER. Always runs. Computes the changed-path
+#                         set against the PR base and emits the two booleans the
+#                         expensive jobs are gated on. (Honest Gates D18/D31.)
 #   1. format           — `mix format --check-formatted`. ADVISORY (see the
 #                         continue-on-error note on the job). Runs first so
 #                         drift is visible in <60s without spinning up
@@ -11,6 +14,38 @@ name: elixir
 #   2. mix-test         — dev-mode compile + test suite. Blocking gate.
 #   3. mix-prod-compile — repeats compile with MIX_ENV=prod and a clean
 #                         _build/prod, --warnings-as-errors enforced.
+#   4. validation-perf  — the cross-field validation perf bench. Blocking.
+#   5. path-escape      — the path ratchet + its harness. Unfiltered, blocking.
+#   6. elixir-gate      — the AGGREGATOR. The one name that should be REQUIRED.
+#
+# ── THE SKIP SHIM (Honest Gates wave 2, charter D18/D19/D31) ────────────────
+#
+# THIS WORKFLOW MUST NEVER GAIN A WORKFLOW-LEVEL `on: … paths:` KEY.
+#
+# Measured on live GitHub: a paths-filtered workflow emits NO workflow run and
+# NO check run at all. A branch-protection rule requiring a name from such a
+# workflow leaves the PR `BLOCKED` forever — and even `gh pr merge --admin` is
+# refused, with a message that differs from a real red:
+#     Required status check "X" is expected.   <- never reported: deadlock
+#     Required status check "X" is failing.    <- an actual red
+# A docs-only PR would deadlock the repo permanently. So path decisions are
+# made at JOB level, behind the always-running `changes` dispatcher.
+#
+# A job skipped by a job-level `if:` DOES publish a check run, with conclusion
+# `skipped`, and GitHub counts `skipped` as PASSING for a required context.
+# That is what makes the shim work — and it is also the trap: a job whose
+# `needs` dependency FAILED reports `skipped` too, so a naive needs-chain
+# converts an upstream FAILURE into a green required context. `if: always()`
+# alone does not save you either; a probe aggregator ran with a failed
+# dependency and reported `success` because it merely echoed the result instead
+# of asserting on it. `if: always()` buys the RIGHT TO DECIDE; it does not
+# decide. Hence `elixir-gate` below, which enumerates every upstream result and
+# fails on anything outside an explicit allow-set.
+#
+# The path sets themselves live in scripts/elixir-path-escape-check.sh, not
+# here, for one reason: that script is also the RATCHET that re-derives the
+# suite's real cross-tree reads from the working tree and fails when one is not
+# dispatched on. One declaration, so the filter and its proof cannot drift.
 #
 # Why a dedicated `format` job? The format check used to live inside
 # `mix-test`, which was `continue-on-error: true` while the test suite was
@@ -40,6 +75,195 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    # THE DISPATCHER. No `if:`, no matrix, no path filter — it runs on every
+    # event, always, so the jobs behind it always have a defined answer.
+    #
+    # It never emits `false` when it cannot tell. On an unresolvable base, a
+    # base with no common ancestor, or an uninterpretable verdict it FAILS; on
+    # an empty diff — rare but legal — it dispatches TRUE. That polarity is the
+    # whole point: a dispatcher that "couldn't tell" and emitted all-false would
+    # skip the entire Elixir suite and publish a green required context.
+    # Never a silent false: fail, or run everything.
+    name: Dispatch (changed-path sets)
+    runs-on: ubuntu-latest
+    outputs:
+      compile: ${{ steps.sets.outputs.compile }}
+      test: ${{ steps.sets.outputs.test }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
+          # `refs/pull/N/merge` — a commit that already contains main's advance
+          # — while `pull_request.base.sha` LAGS the base branch tip. The
+          # three-dot diff below then sweeps in every commit main gained since
+          # that stale base: PR #6427 changed ONE docs file and this dispatcher
+          # printed TEN, so the docs-only skip had never once fired (charter
+          # D34). Pinning the head sha makes the diff describe THIS PR.
+          #
+          # This job ONLY. Every other job here deliberately keeps the merge
+          # ref: they must test the merged result, not the head in isolation.
+          # `github.sha` is the fallback for `push` events, which have no PR.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history: the PR base sha must be resolvable locally for the
+          # three-dot diff below. A shallow checkout makes `git cat-file -e`
+          # miss it, which this step treats as a hard failure. Measured cost of
+          # depth 0 over depth 1 in this repo: ~3 seconds.
+          fetch-depth: 0
+
+      - id: sets
+        name: Compute the changed-path sets
+        run: |
+          set -euo pipefail
+
+          event="${{ github.event_name }}"
+          if [ "$event" != "pull_request" ]; then
+            # push-to-main (and anything else): NEVER skip. Main is the branch
+            # every other run is compared against; a partial main is worse than
+            # a slow one, and there is no reviewer left to notice.
+            echo "event '$event' is not a pull_request — every path set is true."
+            {
+              echo "compile=true"
+              echo "test=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then
+            echo "::error::dispatcher: the PR carries no base sha. Refusing to guess — a guessed base skips the suite and reports green."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            # Same hazard deploy.yml:53-64 documents for burst merges: the base
+            # commit can be absent from this checkout. Try to fetch it once,
+            # then give up loudly.
+            git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::error::dispatcher: PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base."
+            exit 1
+          fi
+
+          # A base with NO common ancestor makes the three-dot diff below exit
+          # 128 with a raw `fatal: … no merge base` and ZERO annotation: under
+          # `set -euo pipefail` the assignment dies and the author sees a red
+          # dispatcher with no guidance. Name the condition instead. There is
+          # deliberately NO two-dot fallback — measured, `base HEAD` sweeps in
+          # the base's ENTIRE content and dispatches true for the wrong reason,
+          # which is exactly the "verdict from an unknown base" this job refuses.
+          if ! git merge-base "$base" HEAD >/dev/null 2>&1; then
+            echo "::error::dispatcher: PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Refusing to emit a path verdict — and refusing a two-dot fallback, which would sweep in the base's entire content. Rebase the branch onto its base branch."
+            exit 1
+          fi
+
+          echo "diff base: ${base} (three-dot against HEAD)"
+          # `-z` + `--no-renames` are BOTH load-bearing; either alone certifies
+          # a hole (measured, wave 10). `Elixir gate` is a REGISTERED required
+          # context, so this line is the one that decides whether the suite runs
+          # at all:
+          #   * plain `--name-only` QUOTES and octal-escapes any path holding a
+          #     non-ASCII byte, and keeps quoting `"`, `\` and newline even under
+          #     core.quotepath=false — `api/lib/we"ird.ex` prints as
+          #     `"api/lib/we\"ird.ex"`, the anchored ERE below misses it, and the
+          #     ENTIRE suite is skipped under a green required context. `-z`
+          #     emits the raw bytes, which cannot be quoted; `tr` restores the
+          #     line format the matcher reads.
+          #   * rename detection (default-on since git 2.9) prints only the
+          #     DESTINATION, so `git mv api/lib/a.ex docs/a.ex` yields
+          #     compile=false test=false while compiled code just left the tree.
+          #     `--no-renames` prints both sides.
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          echo "changed files:"
+          printf '%s\n' "$changed"
+
+          if [ -z "$changed" ]; then
+            # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
+            # PR, nets to nothing against the base. The old polarity failed here
+            # — a permanently red required context on a legal PR, with no
+            # self-service fix for the author. Run everything instead: expensive,
+            # never wrong. Never `false`, which is the only truly unsafe answer.
+            echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching compile=true test=true and running the WHOLE suite rather than skipping it — a skip here would green a required context nothing measured. Cost, and it is real: the full Elixir suite, measured 9m31s-16m29s."
+            {
+              echo "compile=true"
+              echo "test=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The path sets are declared ONCE, in the ratchet that proves them.
+          compile="$(printf '%s\n' "$changed" | bash scripts/elixir-path-escape-check.sh --match compile)"
+          test="$(printf '%s\n' "$changed" | bash scripts/elixir-path-escape-check.sh --match test)"
+
+          # Containment invariant: compile ⊆ test, by construction of the two
+          # path sets — every path that recompiles the app is also a path the
+          # test suite reads. compile=true with test=false therefore does not
+          # describe a real change; it means the two matchers in
+          # scripts/elixir-path-escape-check.sh have drifted apart, and the
+          # consequence is that a change to compiled code sails through with the
+          # ENTIRE test suite skipped — legitimately, as far as the aggregator
+          # can see, because it accepts a skip whose gate is literally 'false'.
+          # The case statement below refuses that verdict too; this assertion
+          # exists to name the cause. (It once cited `mix-prod-compile needs:
+          # mix-test` — that edge was cut, the invariant was never about it.)
+          if [ "$compile" = "true" ] && [ "$test" != "true" ]; then
+            echo "::error::dispatcher: compile=true but test=${test}. The compile path set is not a subset of the test set — fix scripts/elixir-path-escape-check.sh."
+            exit 1
+          fi
+
+          case "${compile}/${test}" in
+            true/true | false/true | false/false) ;;
+            *)
+              echo "::error::dispatcher: refusing to emit the uninterpretable verdict compile=${compile} test=${test}."
+              exit 1
+              ;;
+          esac
+
+          echo "verdict: compile=${compile} test=${test}"
+          {
+            echo "compile=${compile}"
+            echo "test=${test}"
+          } >> "$GITHUB_OUTPUT"
+
+  path-escape:
+    # DELIBERATELY UNFILTERED — no `if:`, no dependency on the dispatcher. This
+    # job proves the dispatcher's path sets still cover everything the suite
+    # reads, so gating it on those same sets would let it go dark exactly when
+    # it is needed (charter D26: scripts/pr-task-gate.test.sh was 30 green
+    # fixtures executed by nothing). It costs a few seconds of bash.
+    name: Elixir path-escape ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Harness (the ratchet must be able to fail)
+        run: bash scripts/elixir-path-escape-check.sh --selftest
+
+      - name: Every repo-root read is dispatched on
+        run: bash scripts/elixir-path-escape-check.sh
+
+      # ── the wave-33 skip-disclosure ratchet, riding this job ─────────────
+      # Same wiring intent as security.yml's `Security gate shape ratchet`
+      # (unfiltered, blocking, a few seconds of python + bash) but as a STEP of
+      # this already-unfiltered job rather than a job of its own, for two
+      # measured reasons:
+      #   * A NEW job in any of the four workflows breaks a sibling ratchet this
+      #     slice may not touch: each of security-gate-shape.test.sh,
+      #     elixir/cloud/console-path-escape-check.test.sh derives
+      #     `blocking_not_in_needs` FROM the YAML and demands the new job be
+      #     added to the aggregator's `needs` — and adding it there leaves their
+      #     `env -i` gate exercises without the new `R_*` var, which dies on
+      #     `set -u`. Correct ratchets, both directions; the answer is not to
+      #     add a job.
+      #   * A step adds no rendered check name, so required-checks-verify.sh's
+      #     roster is unchanged.
+      # This job is in the aggregator's needs with gate value NEVER, so the
+      # ratchet blocks the merge — strictly stronger placement than its sibling,
+      # which hangs off a context branch protection does not require.
+      - name: The four gates announce their skips (the ratchet must be able to fail)
+        run: bash scripts/gate-announces-skips.test.sh
+
   format:
     # ADVISORY format signal — NOT a merge gate. The project pins formatting
     # to the PROD Elixir version (server runs 1.18.x; local dev runs 1.19.x,
@@ -51,6 +275,8 @@ jobs:
     # job stays visible as a drift signal, not a blocker.
     name: Format (mix format --check-formatted, advisory)
     continue-on-error: true
+    needs: changes
+    if: needs.changes.outputs.compile == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -85,6 +311,13 @@ jobs:
 
   mix-test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    needs: changes
+    # The TEST path set: compile-affecting paths PLUS the fixture/mirror trees
+    # the suite reads across the repo (internal/taskboard/**,
+    # internal/chat/testdata/**, .codex/skills/epic-cycle/scripts/**, …). Two
+    # sets, not one — charter D31. Declared in, and proven by,
+    # scripts/elixir-path-escape-check.sh.
+    if: needs.changes.outputs.test == 'true'
     runs-on: ubuntu-latest
     # BLOCKING since 2026-06-10: the remediation this job waited on is done —
     # suite de-flaked at the root (CompactorTest serialization, DateTime
@@ -274,7 +507,22 @@ jobs:
   mix-prod-compile:
     # The merge gate. See docs/ops/merge-gates.md.
     name: Prod compile gate (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
-    needs: mix-test
+    needs: [changes]
+    # The COMPILE path set — api/** plus design/** (design/status-manifest.json
+    # is an @external_resource of portable_doc/render/status_vocab.ex:20, so
+    # editing it recompiles). Strictly narrower than the test set.
+    #
+    # NO `needs: mix-test`. There was never a correctness edge — own checkout,
+    # own `rm -rf _build/prod`, a disjoint cache namespace, no artifact hand-off
+    # (`validation-perf` is the live precedent) — it only serialised 177s onto
+    # the critical path (16m36s → 13m39s) and MANUFACTURED hazard (3) of charter
+    # D19: a skip meaning "upstream died" rather than "not needed". With the
+    # edge gone this job can no longer be skipped-by-upstream-death, so the
+    # aggregator's rule for it — accept a skip ONLY when the dispatcher's
+    # compile output was literally 'false' — degrades from load-bearing to
+    # belt-and-braces. It stays: the aggregator must not depend on the shape of
+    # the `needs` graph to stay fail-closed.
+    if: needs.changes.outputs.compile == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -333,6 +581,11 @@ jobs:
     # drift. Runs the synthetic 200-field / 100-rule bench, takes the median
     # of 5 timed runs, fails the job if median > 100ms.
     name: Validation perf bench (median-of-5, alarm >100ms)
+    needs: changes
+    # Pure api/** compute (bench/validation_perf.exs against the rule
+    # evaluator), so it rides the COMPILE set. NOTE for the aggregator: this job
+    # does NOT carry continue-on-error, so it is a genuine blocking gate.
+    if: needs.changes.outputs.compile == 'true'
     # ubuntu-latest-4-core is a PAID larger-runner label — on this personal
     # account it never gets a runner, so every run containing this job sat
     # queued forever (no completed elixir run since 2026-04-26, masked by
@@ -378,3 +631,170 @@ jobs:
         # --no-start skips OTP app boot. The bench is pure-compute; we don't
         # need Postgres just to time the rule evaluator.
         run: mix run --no-start bench/validation_perf.exs
+
+  elixir-gate:
+    # ── THE AGGREGATOR — the one name that should carry branch protection ──
+    #
+    # Deliberate shape, every part of it load-bearing:
+    #
+    #   * NO `strategy.matrix`. The published check-run name is then exactly the
+    #     `name:` string below. A matrixed job's name either gains the full
+    #     matrix tuple (`… (27.0, 1.18.1)`) or, if it never STARTED, publishes
+    #     the literal uninterpolated `${{ matrix.x }}` — both unusable as a
+    #     required context (charter D20). This name is a constant.
+    #
+    #   * `if: always()`. Without it this job would itself be `skipped` whenever
+    #     an upstream failed — publishing a PASSING required context out of a
+    #     failed run. This is the repo's first job-level `if: always()`.
+    #
+    #   * It ASSERTS on every upstream result instead of echoing them.
+    #     `if: always()` buys the right to decide; it does not decide. A probe
+    #     aggregator that merely printed `needs.will-fail.result` reported
+    #     `success`, and a PR merged through it (charter D19).
+    #
+    #   * `format` is NOT in `needs`. It carries `continue-on-error: true`, and
+    #     for such a job `needs.<job>.result` reads `success` EVEN WHEN IT
+    #     FAILED. Including it would launder the run-level lie straight into the
+    #     required context. Do not add it here; make it blocking first (that is
+    #     a separate slice), then add it.
+    #
+    # Allow-set, exhaustively: `success` always; `skipped` ONLY when the
+    # dispatcher output that gated that job was literally 'false'. Everything
+    # else — `failure`, `cancelled`, an unrecognised value, an empty string —
+    # is a FAILURE, including a failure of the dispatcher itself.
+    name: Elixir gate
+    if: always()
+    needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide (fail-closed over every upstream result)
+        env:
+          R_CHANGES: ${{ needs.changes.result }}
+          R_TEST: ${{ needs.mix-test.result }}
+          R_PROD: ${{ needs.mix-prod-compile.result }}
+          R_PERF: ${{ needs.validation-perf.result }}
+          R_ESCAPE: ${{ needs.path-escape.result }}
+          O_COMPILE: ${{ needs.changes.outputs.compile }}
+          O_TEST: ${{ needs.changes.outputs.test }}
+        run: |
+          set -euo pipefail
+
+          echo "dispatcher outputs: compile='${O_COMPILE}' test='${O_TEST}'"
+          echo
+
+          bad=0
+
+          # ── D377 tally: did anything SUBSTANTIVE actually run? ────────────
+          # `bad` answers "is anything wrong"; it cannot answer "was anything
+          # tested", and until wave 33 nothing did. These two answer it.
+          # Only PATH-GATED jobs count: the dispatcher and the ratchet carry the
+          # gate value NEVER and run on every head, so they are present in a
+          # "nothing ran" run exactly as in a full one and can distinguish
+          # nothing.
+          dispatched=0
+          not_dispatched=""
+
+          # ── D770/D771 — `bad` SAYS THAT something is wrong, never WHICH ───
+          # Measured by executing this very step body with one upstream =
+          # failure: the step LOG names the offending job one line above, but
+          # the `::error::` — the ONLY line the check-run API carries, and so
+          # the only line a human at the merge button or the merge queue ever
+          # reads — named NOTHING. `bad` is a bit; this is the set behind it.
+          # It is appended at EVERY `bad=1` site, so it can never disagree with
+          # the verdict: a job reaches this list through the same line that
+          # reds the gate. DERIVED from `${job}` — never a hardcoded name, and
+          # never a re-print of the step log.
+          # Comma-joined, not space-joined: job names contain spaces
+          # ("changes (dispatcher)", "path-escape ratchet"), so a space-joined
+          # list cannot be read back as a set.
+          reds=""
+
+          # decide <job-name> <result> <gate-value>
+          #   gate-value is the dispatcher output that gated the job, or the
+          #   literal string NEVER for jobs that must always run. A skip is
+          #   accepted only against a gate-value of exactly 'false'.
+          decide() {
+            local job="$1" result="$2" gate="$3"
+            case "$result" in
+              success)
+                echo "  ok      ${job}: success"
+                ;;
+              skipped)
+                if [ "$gate" = "false" ]; then
+                  echo "  ok      ${job}: skipped — dispatcher said this path set was not touched (gate='false')"
+                else
+                  echo "  FAIL    ${job}: skipped, but its gate is '${gate}', not 'false'."
+                  echo "          A skip here does NOT mean 'not needed'. It means the job never ran —"
+                  echo "          most often because an upstream FAILED. Refusing to green a required"
+                  echo "          context on it."
+                  bad=1
+                  reds="${reds:+${reds}, }${job}"
+                fi
+                ;;
+              failure | cancelled)
+                echo "  FAIL    ${job}: ${result}"
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              '')
+                echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
+                echo "          or the run object is malformed. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              *)
+                echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+            esac
+            # Tally, for the D377 notice at the bottom of this step. NEVER-gated
+            # jobs are excluded on purpose (see the declaration above).
+            if [ "$gate" != "NEVER" ]; then
+              case "$result" in
+                success) dispatched=$((dispatched + 1)) ;;
+                skipped) not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
+          }
+
+          # The dispatcher itself may never skip: without it there are no gate
+          # values, so nothing downstream can be judged.
+          decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
+          decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
+          decide "mix-test"                "${R_TEST}"    "${O_TEST}"
+          decide "mix-prod-compile"        "${R_PROD}"    "${O_COMPILE}"
+          decide "validation-perf"         "${R_PERF}"    "${O_COMPILE}"
+
+          echo
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::Elixir gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose. NOT IN THE ALLOW-SET: ${reds}"
+            exit 1
+          fi
+
+          # ── D377/D378 — SAY IT WHERE A PERSON AND AN API CAN READ IT ──────
+          # A green here means one of two very different things and, until wave
+          # 33, published byte-identical evidence for both: conclusion=success,
+          # annotations=0, output.title=null, output.summary=null. Measured on
+          # real heads — cloud-only PR #9656 and docs-only #9637 both greened
+          # this context with every substantive job skipped, and the honest
+          # sentence printed just below goes only to stdout, six clicks deep.
+          #
+          # Two mechanisms are RULED OUT BY MEASUREMENT, do not substitute one:
+          #   * $GITHUB_STEP_SUMMARY does NOT populate the check-run API — eight
+          #     workflows write it and 0 of 32 check-runs on that sha returned a
+          #     non-null summary, pr-task-gate (which writes one) included.
+          #   * Renaming this check is forbidden: `Elixir gate` is a frozen
+          #     required context under enforce_admins=true, and a rename
+          #     deadlocks main.
+          # A bare ::notice:: DOES reach the annotations endpoint from a
+          # succeeding, checkout-less, unmatrixed job — measured on probe branch
+          # probe/elixir-gate-annotation, commit e9be79a8d, run 31055317124.
+          #
+          # ONE notice, never one per skipped job: GitHub caps annotations at 10
+          # per level per step, so an N-per-job emitter truncates silently — the
+          # same class of quiet lie this line exists to remove.
+          if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=Elixir gate: green — nothing ran::NOTHING ELIXIR RAN on this head.%0AElixir gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Elixir job executed', never as 'the Elixir suite passed'."
+          fi
+          echo "Elixir gate: every upstream job either succeeded or was legitimately not dispatched."

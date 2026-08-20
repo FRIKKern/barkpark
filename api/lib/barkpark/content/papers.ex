@@ -55,6 +55,35 @@ defmodule Barkpark.Content.Papers do
   @doc "The document type discriminator for papers."
   def paper_type, do: @paper_type
 
+  # The closed blocks-type whitelist (session-handoff Task 2): every document
+  # type whose write path rides the generalized `upsert_blocks_doc/3` /
+  # `BlockOps.upsert_blocks_doc/3` machinery (blocks body + metadata fields).
+  # Deliberately closed and hand-maintained, mirroring `AuthoringWall`'s
+  # `@walled_types` pattern — widening it is a reviewed one-line decision.
+  #
+  # SOLE SOURCE OF TRUTH lives in `BlockOps` (a compile-time module attribute
+  # there, required so its `upsert_blocks_doc/3` guard clause can pattern
+  # against it) — both delegates below defer to it rather than keeping an
+  # independent literal, so there is exactly one list to widen.
+  @doc "The closed whitelist of document types that ride the blocks-doc write path."
+  defdelegate blocks_types(), to: BlockOps
+
+  @doc "Whether `type` is in the blocks-doc whitelist (`blocks_types/0`)."
+  defdelegate blocks_type?(type), to: BlockOps
+
+  @doc """
+  Fetch a blocks-doc (a document whose type rides `upsert_blocks_doc/3`) by
+  `{slug, type, dataset}`. Generalizes `get_paper/3` off the hardcoded
+  `"paper"` type — same shape, `%Document{} | nil`.
+  """
+  def get_blocks_doc(slug, type, dataset \\ @paper_default_dataset, opts \\ [])
+      when is_binary(slug) and is_binary(type) do
+    case Content.get_document(slug, type, dataset, opts) do
+      {:ok, doc} -> doc
+      {:error, :not_found} -> nil
+    end
+  end
+
   @doc "Return one visibility-safe canonical source for any historical Paper shape."
   def reader_source(paper, dataset, scope_opts \\ [])
 
@@ -141,15 +170,18 @@ defmodule Barkpark.Content.Papers do
   #                      that is no longer ours (or its resolved externals have
   #                      since moved). Blocks are canonical, so serve them and
   #                      rewrite the derived cache. No 422.
-  #   :divergent       — the current renderer, fed these blocks, cannot produce
-  #                      the stored bytes, and nothing external can explain the
-  #                      gap. The cache carries content the blocks do not. This
-  #                      is the population the 422 was built for; it keeps it.
+  #   :divergent       — the stamp IS the current renderer's digest, so the row
+  #                      claims this renderer emitted these bytes from these
+  #                      blocks; the byte compare says otherwise and nothing
+  #                      external can explain the gap. The cache carries content
+  #                      the blocks do not. This is the population the 422 was
+  #                      built for; it keeps it, and ONLY it.
   #
   # Provenance comes from `content["body_html_sv"]` — a sha256 digest of the
   # renderer's own source, stamped at every fresh block→HTML render. Compare it
   # with `==` ONLY: a content hash has no total order, so "older/newer" is not a
-  # question it can answer.
+  # question it can answer. Anything that is not that digest — an old digest,
+  # the honest pre-digest integer, or nothing — is a LAGGING stamp, i.e. stale.
   defp cache_provenance(_paper, _blocks, html, _dataset)
        when not is_binary(html) or html == "",
        do: :coherent
@@ -183,15 +215,40 @@ defmodule Barkpark.Content.Papers do
         {:stale, rendered}
 
       true ->
-        case Map.get(content, "body_html_sv") do
-          sv when is_binary(sv) and sv != "" ->
-            if sv == Render.body_html_render_version(), do: :divergent, else: {:stale, rendered}
-
-          # No stamp: the legacy class. Drift and divergence are genuinely
-          # indistinguishable here, so hold today's behaviour and fail closed.
-          _ ->
-            :divergent
-        end
+        # DIVERGENCE IS THE NARROW CASE: only a stamp that IS the current
+        # renderer's digest can carry the claim "this renderer, fed these
+        # blocks, emitted these bytes" — and only that claim, contradicted by
+        # the byte compare, is divergence. Every other stamp state is a LAGGING
+        # stamp: an old hex digest, the renderer's own honest pre-digest integer
+        # (`@body_html_render_version 1..3`, before it became a sha256 hex), or
+        # no stamp at all. None of them claims this renderer, so none of them
+        # can contradict it, and blocks stay canonical: re-render, serve,
+        # restamp.
+        #
+        # Measured (guerrilla, 2026-08-17 — recipe in
+        # tooling/grip/ledger/pe-w2-guerrilla-live-writes-2026-08-17.md): the
+        # old `_ -> :divergent` catch-all sent 119 papers stamped with the
+        # integer 3 into this branch, and 59 of them answered 422 to every
+        # reader for ~4 weeks. The remaining 60 served only via the
+        # `rendered == html` short-circuit above, so any renderer change would
+        # have gone dark too; 42 null-stamped papers carried the same hazard.
+        # Fail-closed on an unverifiable stamp is not a safety property — it is
+        # a reader outage with no upper bound.
+        #
+        # PROD REPAIR (ops, after this merges — the reader self-heals each row on
+        # first read via `refresh_html_cache/3`, this just does it in bulk):
+        #
+        #     mix barkpark.rehydrate_body_html --type paper --published-only
+        #     mix barkpark.rehydrate_body_html --type paper --published-only --write
+        #
+        # The first line is the DRY-RUN TALLY (dry run is that task's default —
+        # it reports and writes nothing). An integer stamp reads as "stamp
+        # foreign" there, so it lands on the rewrite arm; only `is_nil(sv)` rows
+        # with drifted bytes are report-only, and those are exactly the ones the
+        # reader now heals itself.
+        if Map.get(content, "body_html_sv") == Render.body_html_render_version(),
+          do: :divergent,
+          else: {:stale, rendered}
     end
   end
 
@@ -1071,7 +1128,7 @@ defmodule Barkpark.Content.Papers do
       fn query ->
         query
         |> task_query_dataset(dataset)
-        |> Barkpark.Tasks.Query.rows_for_query(scope)
+        |> Barkpark.Tasks.Query.rows_for_query(scope, dataset: dataset)
       end,
       fn query ->
         query
@@ -1240,16 +1297,53 @@ defmodule Barkpark.Content.Papers do
   """
   def get_public_document(type, slug, dataset \\ @paper_default_dataset)
       when is_binary(type) and is_binary(slug) do
+    case get_public_document_with_workspace(type, slug, dataset) do
+      {doc, _workspace} -> doc
+      nil -> nil
+    end
+  end
+
+  @doc """
+  `get_public_document/3` that ALSO returns the resolved Default `%Workspace{}`
+  — `{doc, workspace}` or `nil`. The am-w1-s3 reader dedupe seam: the public
+  reader needs the workspace row again after the read (theme identity), and
+  re-fetching what this resolve already loaded was a measured per-mount
+  statement. Same pinned-Default scoping, same fail-closed posture.
+  """
+  def get_public_document_with_workspace(type, slug, dataset \\ @paper_default_dataset)
+      when is_binary(type) and is_binary(slug) do
     case Barkpark.Tenancy.get_default_workspace() do
-      %{id: ws_id} when is_binary(ws_id) ->
-        case Content.get_document(slug, type, dataset, workspace_id: ws_id) do
-          {:ok, doc} -> doc
-          {:error, :not_found} -> nil
-        end
+      %{id: ws_id} = workspace when is_binary(ws_id) ->
+        # Typeless batched read + type pick, NOT `get_document/4`: the typed
+        # read pays an `owner_scoped?` schema round-trip on every call, pure
+        # overhead on this public pinned-tenant resolve (am-w1-s3). The scoping
+        # stack is the documented typeless-read precedent
+        # (`Query.resolve_docs_by_ids/3` — dataset + workspace_or_global +
+        # unconditional `scope_to_owner(nil)`, byte-identical for
+        # non-owner_scoped types whose rows carry a NULL `owner_id`, and the
+        # same unowned-rows-only posture `get_document/4` reaches for an
+        # anonymous caller when the type IS owner-scoped). The list return
+        # makes the type pick exact — a same-slug document of another type can
+        # never shadow the requested one.
+        doc =
+          [slug]
+          |> Content.resolve_docs_by_ids(dataset, workspace_id: ws_id)
+          |> Enum.find(&(&1.type == type))
+
+        doc && {doc, workspace}
 
       _ ->
         nil
     end
+  end
+
+  @doc """
+  `get_public_paper/2` that also returns the resolved Default `%Workspace{}` —
+  see `get_public_document_with_workspace/3`.
+  """
+  def get_public_paper_with_workspace(slug, dataset \\ @paper_default_dataset)
+      when is_binary(slug) do
+    get_public_document_with_workspace(@paper_type, slug, dataset)
   end
 
   @doc """
@@ -1507,6 +1601,14 @@ defmodule Barkpark.Content.Papers do
   true` escape. See `Barkpark.Content.Papers.BlockOps.upsert_paper/2`.
   """
   defdelegate upsert_paper(attrs, opts \\ []), to: BlockOps
+
+  @doc """
+  Upsert a blocks-doc keyed by `{dataset, slug}` for any type in the
+  `blocks_types/0` whitelist (`upsert_paper/2` generalized off the hardcoded
+  `"paper"` type — session-handoff Task 2). See
+  `Barkpark.Content.Papers.BlockOps.upsert_blocks_doc/3`.
+  """
+  defdelegate upsert_blocks_doc(type, attrs, opts \\ []), to: BlockOps
 
   @doc """
   Apply a single portable-doc `op` (a DocPatchOp map) to a paper's block list,

@@ -34,7 +34,7 @@
 //	E-002  unfenced multi-line target/payload (every block is fenced, D3(a))
 //	E-003  undeclared token: no VARIABLE's word-list matches (D3(d))
 //	E-004  malformed token spelling: matches a VARIABLE but is not one of
-//	       the four joiner outputs Pascal/kebab/camel/snake (A1/D22)
+//	       the five joiner outputs Pascal/kebab/camel/snake/SCREAMING (A1/D22)
 //	E-005  self-consuming REPLACE (target survives as a substring of its
 //	       own payload) without BOTH a payload-derived ASLONG and a
 //	       REANCHOR (A4/D21)

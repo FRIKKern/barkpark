@@ -105,12 +105,20 @@
               "code": {
                 "enum": [
                   "batch_too_large",
+                  "bpml",
+                  "bpml_unavailable",
+                  "bpml_unprintable",
                   "build_id_mismatch",
                   "bundle_import_disabled",
+                  "chat_create_failed",
+                  "chat_unsupported",
                   "conflict",
+                  "conflict_retry",
                   "constraint",
                   "cors_forbidden",
+                  "create_wall",
                   "csrf_required",
+                  "deploy_runner_unavailable",
                   "duplicate_of",
                   "duplicate_task",
                   "event_not_found",
@@ -118,16 +126,25 @@
                   "forbidden",
                   "forbidden_field",
                   "halted",
+                  "hollow_paper",
                   "idempotency_key_in_use",
+                  "import_body_read_failed",
+                  "import_body_too_large",
                   "import_constraint_violation",
                   "import_failed",
+                  "import_spill_write_failed",
+                  "insufficient_disk_space",
                   "internal_error",
+                  "invalid_conversation",
                   "invalid_enrollment",
+                  "invalid_epic_paper_quality",
                   "invalid_filter",
                   "invalid_grant",
+                  "invalid_kind",
                   "invalid_mode",
                   "invalid_op",
                   "invalid_paper",
+                  "invalid_paper_structure",
                   "invalid_proposal",
                   "invalid_request_id",
                   "invalid_state_report",
@@ -139,6 +156,7 @@
                   "malformed_proposal",
                   "mfa_enrolment_required",
                   "mfa_required",
+                  "missing_slug",
                   "missing_source",
                   "not_found",
                   "payload_too_large",
@@ -146,13 +164,18 @@
                   "quota_exceeded",
                   "rate_limited",
                   "rev_mismatch",
+                  "runtime_capacity",
+                  "runtime_unavailable",
                   "schema_has_documents",
                   "schema_unknown",
                   "session_unavailable",
                   "share_expired",
+                  "slug_mismatch",
                   "source_not_found",
                   "storage_unavailable",
+                  "structure",
                   "unauthorized",
+                  "unknown_format",
                   "unknown_tag",
                   "unprocessable",
                   "unsupported_if_match_for_batch",
@@ -767,7 +790,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -1298,7 +1321,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -2002,6 +2025,75 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/v1/plugins/bulldocs/sessions/{slug}/events": {
+      "post": {
+        "operationId": "session.log",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Append one milestone event to an open session (server stamps ts).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
+      }
+    },
     "/v1/auth/mfa/enroll": {
       "post": {
         "operationId": "auth.mfa-enroll",
@@ -2026,7 +2118,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -2445,6 +2537,75 @@
           "graph"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/plugins/bulldocs/sessions/{slug}/conversations": {
+      "post": {
+        "operationId": "session.touch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Register or refresh a harness conversation on a session (server stamps first_seen/last_active).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
       }
     },
     "/v1/media/{dataset}/{id}": {
@@ -3035,7 +3196,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3095,7 +3256,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3968,6 +4129,64 @@
           "media"
         ],
         "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/plugins/bulldocs/sessions": {
+      "post": {
+        "operationId": "session.publish",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "Request body fields: slug.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Upsert session synthesis blocks + metadata (checkpoint or close).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/doc/{dataset}/{type}/{doc_id}": {
@@ -5948,7 +6167,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -6733,7 +6952,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -7122,7 +7341,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -7229,7 +7448,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -8093,6 +8312,75 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/chat/sessions/{id}/archive": {
+      "post": {
+        "operationId": "chat.archive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Archive a chat session — it leaves the active sidebar for the archived shelf (idempotent; liveness untouched).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/webhooks/{dataset}": {
       "get": {
         "operationId": "webhook.ls",
@@ -8708,7 +8996,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8879,7 +9167,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8977,7 +9265,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,note} on →considering/researching and clears it on →open; emits a task.staged event. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
+        "summary": "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open, OR the row's OWN current state. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. THE TERMINAL SAME-STATE ADJUDICATION EDGE (PDS wave 25): a same-state no-op is accepted on EVERY status, not just the stageable ones — done→done, blocked→blocked, in_progress→in_progress — so a FINISHED row can record its disposition/reason/reopen-trigger IN PLACE instead of being resurrected to `open` first (which would leave it saying open while carrying claim.closed_by, and put it back in `bp task ready`). It widens ADJUDICATION, not MOVEMENT: the from-state is read from the locked row, never from your input, so state==current is satisfiable only by a row already in that state, and the write set never includes content.claim — a done→done stage leaves lifecycle_status=done and close attribution byte-identical. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,lapse_ttl_seconds,lapses_at} — an EPHEMERAL lease the TtlSweeper deletes wholesale after ~900s — on →considering/researching and clears it on →open; a `note` does NOT ride that lease, it lands on the DURABLE content.disposition_reason (no sweeper owns it) on EVERY target including →open; emits a task.staged event carrying staged.note_key. PDS wave 24: this verb also owns the ADJUDICATION TRIPLE — --disposition (open|parked|closed, normalised here because one writer means one normaliser), --note/content.disposition_reason and --reopen-trigger are written in that same CAS update or not at all, and a --disposition parked with no trigger on the stage and none on the row is refused BEFORE anything is written. Raw /v1/data/mutate changes of content.disposition on a type:task are refused and name this verb. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. open → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
         "tags": [
           "task"
         ],
@@ -9099,6 +9387,55 @@
           "schema"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/plugins/bulldocs/sessions/{slug}": {
+      "get": {
+        "operationId": "session.view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a session back: metadata + event trail + synthesis blocks.",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "ingest"
       }
     },
     "/v1/data/search/{dataset}": {
@@ -9305,6 +9642,75 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/v1/tasks/{doc_id}/sessions": {
+      "post": {
+        "operationId": "session.link-task",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stamp a task with the session it was worked in (appends to the task's sessions[]).",
+        "tags": [
+          "session"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/auth/mfa/disable": {
       "post": {
         "operationId": "auth.mfa-disable",
@@ -9329,7 +9735,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -9413,7 +9819,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Publish (upsert) a paper from a portable-doc or HTML payload.",
+        "summary": "Publish (upsert) a paper from a portable-doc block payload. blocks[] is the door: 56 renderer block types (chart, diagram, asciicast, diff, filetree, pipeline, …) with value-keyed inline leaves — items and cells are objects carrying a value key, never bare strings (a bare string publishes clean and renders blank). Guide: /papers/paper-authoring-excellence. body_html is a legacy last resort — hand-rolled HTML renders flat and loses tables in the terminal reader. Reader spacing law: empty paragraph blocks are editor scaffolds, not published layout — remove them from ingest payloads; shared reader tokens own section rhythm.",
         "tags": [
           "bulldocs"
         ],
@@ -10961,7 +11367,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -11459,7 +11865,7 @@
                 }
               }
             },
-            "description": "Success."
+            "description": "Mutation applied."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -11804,6 +12210,75 @@
         ],
         "x-barkpark-scope": "read"
       }
+    },
+    "/v1/chat/sessions/{id}/unarchive": {
+      "post": {
+        "operationId": "chat.unarchive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unarchive a chat session — it returns from the archived shelf to the active sidebar (idempotent).",
+        "tags": [
+          "chat"
+        ],
+        "x-barkpark-scope": "admin"
+      }
     }
   },
   "servers": [
@@ -11877,7 +12352,7 @@
       "name": "cycle"
     },
     {
-      "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve. Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",
+      "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve, archive/unarchive. Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",
       "name": "chat"
     },
     {
@@ -11895,6 +12370,10 @@
     {
       "description": "ONIX 3.0 book metadata editor — Norwegian-publisher flavoured. Phase 4 skeleton (WI1) — book schema surface only; contributor / Thema / localizedText shapes are filled in by WI2 and codelist seeding lands in WI3.",
       "name": "onixedit"
+    },
+    {
+      "description": "session — plugin-contributed commands.",
+      "name": "session"
     },
     {
       "description": "Tasks — the W7 task-document substrate as a first-party plugin. Declares the `task` schema (goals/phases/events are all just tasks) and owns the TTL-sweep + compaction Oban cron jobs. Built on the core Barkpark.Tasks machinery, which stays in core as reusable utilities.",

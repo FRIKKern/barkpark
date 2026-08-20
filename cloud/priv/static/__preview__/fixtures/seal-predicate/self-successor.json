@@ -1,0 +1,51 @@
+{
+  "_comment": "R4. The successor IS the epic, and `forwarded` carries every live row — exactly what fetchRoster(SUCCESSOR) returns when the successor is the epic's own id. Run against an R4-LESS copy of the predicate this fixture SEALS at a=PASS; run against the shipped predicate it is REFUSED before any clause. That pair is the mutation proof that R4 is load-bearing, and it is the fixture form of the live measurement (83 live rows -> forwarded 79, orphans 0, a=PASS).",
+  "successor": "cloud-console-hardening-epic",
+  "tasks": {
+    "cloud-console-hardening-epic": {
+      "_id": "cloud-console-hardening-epic",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "in_progress",
+      "parent_id": null
+    }
+  },
+  "children": [
+    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
+    { "_id": "gr-fixture-live-1", "lifecycle_status": "open" },
+    { "_id": "gr-fixture-live-2", "lifecycle_status": "in_progress" }
+  ],
+  "forwarded": ["gr-fixture-live-1", "gr-fixture-live-2"],
+  "gates": {
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "cch-hg-compose-network-recreation": {
+      "_id": "cch-hg-compose-network-recreation",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    }
+  },
+  "landed": [
+    "481d6f231",
+    "8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4",
+    "d157d098c78bc6604d00d84e22d038bdb176ef58",
+    "26acc7a91be0f0352efdb3e89b2017accb786367",
+    "58862f621"
+  ],
+  "unmeasuredWaivers": ["CCH-D5-rate-limiter-sees-every-user-as-one"],
+  "defectCommits": {}
+}

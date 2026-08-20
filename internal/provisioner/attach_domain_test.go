@@ -541,3 +541,270 @@ func TestRunOnceAttachDomainNilFuncIsNoOp(t *testing.T) {
 		t.Error("claimed=true with a nil AttachDomain, want false")
 	}
 }
+
+// ── attach-domain V2: arbitrary EXTERNAL customer domains ──
+
+// validExternalAttachSpec is the V2 external-domain claim payload: a
+// customer-owned FQDN outside the platform zone. dns_label/dns_zone are EMPTY
+// by contract — the customer owns DNS, so there is no platform record to
+// upsert.
+func validExternalAttachSpec() AttachDomainSpec {
+	return AttachDomainSpec{
+		JobID:      "adjob-ext-1",
+		IP:         "203.0.113.9",
+		CustomHost: "barkpark.jarl.no",
+		AppPort:    4000,
+	}
+}
+
+// recordingLookup is the system-resolver fake for the V2 ownership re-check:
+// it records each lookup (and logs it into the shared event log, so ordering
+// against the SSH steps is assertable) and returns a fixed address set/error.
+type recordingLookup struct {
+	log   *attachEventLog
+	mu    sync.Mutex
+	calls []string
+	addrs []string
+	err   error
+}
+
+func (l *recordingLookup) lookup(_ context.Context, host string) ([]string, error) {
+	l.mu.Lock()
+	l.calls = append(l.calls, host)
+	l.mu.Unlock()
+	if l.log != nil {
+		l.log.add("resolve:" + host)
+	}
+	return l.addrs, l.err
+}
+
+// attachFakeSeamsWithLookup extends attachFakeSeams with the injectable
+// system-resolver seam the external path re-verifies through.
+func attachFakeSeamsWithLookup(addrs []string, lookupErr error) (Seams, *recordingAttachDNS, *recordingAttachRunner, *recordingLookup, *attachEventLog) {
+	seams, dns, runner, log := attachFakeSeams()
+	lk := &recordingLookup{log: log, addrs: addrs, err: lookupErr}
+	seams.LookupHost = lk.lookup
+	return seams, dns, runner, lk, log
+}
+
+// TestRunOnceAttachDomainExternalHappyPath is the V2 happy path: an external
+// customer FQDN that already resolves to the box → the worker SKIPS the
+// platform-DNS upsert entirely (customer owns DNS), re-verifies resolution →
+// box IP FIRST, then runs the same four SSH steps as the platform path, and
+// reports succeed.
+func TestRunOnceAttachDomainExternalHappyPath(t *testing.T) {
+	spec := validExternalAttachSpec()
+	cp := &fakeAttachDomainControlPlane{spec: &spec}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	seams, dns, runner, lk, log := attachFakeSeamsWithLookup([]string{"2001:db8::7", "203.0.113.9"}, nil)
+	w := &Worker{
+		ControlURL:   srv.URL,
+		Token:        testToken,
+		HTTPClient:   srv.Client(),
+		AttachDomain: DefaultAttachDomain(seams),
+	}
+
+	claimed, err := w.RunOnceAttachDomain(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnceAttachDomain: %v", err)
+	}
+	if !claimed {
+		t.Fatal("RunOnceAttachDomain claimed=false, want true (an external attach-domain job was queued)")
+	}
+
+	// ── the platform DNS zone is NEVER touched for an external host ──
+	if len(dns.upserts) != 0 {
+		t.Errorf("DNS upserts = %v, want NONE (the customer owns external DNS)", dns.upserts)
+	}
+
+	// ── ordering: the ownership re-check strictly precedes every SSH step ──
+	events := log.all()
+	if len(events) != 5 {
+		t.Fatalf("events = %v, want 1 resolve + 4 ssh", events)
+	}
+	if events[0] != "resolve:barkpark.jarl.no" {
+		t.Errorf("first event = %q, want the resolution re-check before any SSH step", events[0])
+	}
+	if got := lk.calls; len(got) != 1 || got[0] != "barkpark.jarl.no" {
+		t.Errorf("lookup calls = %v, want exactly one for barkpark.jarl.no", got)
+	}
+	for i, want := range []string{"BARKPARK_EXTRA_ORIGINS", "Caddy vhost", "validate + reload", "restart Barkpark"} {
+		if !strings.Contains(events[i+1], want) {
+			t.Errorf("event[%d] = %q, want an ssh step containing %q", i+1, events[i+1], want)
+		}
+	}
+
+	// ── the rendered steps carry the external host verbatim ──
+	envScript := runner.steps[0].Argv[2]
+	if !strings.Contains(envScript, "https://barkpark.jarl.no") {
+		t.Errorf("env-merge script missing the external origin: %q", envScript)
+	}
+	vhostScript := runner.steps[1].Argv[2]
+	for _, want := range []string{"barkpark.jarl.no {", "on_demand", "reverse_proxy 127.0.0.1:4000", "handle_errors"} {
+		if !strings.Contains(vhostScript, want) {
+			t.Errorf("vhost script missing %q:\n%s", want, vhostScript)
+		}
+	}
+
+	if cp.succeededID != "adjob-ext-1" {
+		t.Errorf("succeed job id = %q, want adjob-ext-1", cp.succeededID)
+	}
+	if cp.failedID != "" {
+		t.Errorf("fail was called (id=%q) on the external happy path, want none", cp.failedID)
+	}
+}
+
+// TestAttachDomainExternalHostileSpecAborts is the V2 fail-closed regex gate:
+// an external host is interpolated into a Caddyfile and a shell script, so the
+// well-formed-FQDN regex must exclude EVERY shell/Caddy metacharacter (dots,
+// hyphens, alphanumerics only) plus the RFC length caps. Any miss aborts with
+// no lookup, no DNS write, and no remote command.
+func TestAttachDomainExternalHostileSpecAborts(t *testing.T) {
+	overlong := strings.TrimSuffix(strings.Repeat(strings.Repeat("a", 63)+".", 4), ".") + ".no" // 259 chars
+
+	cases := []struct {
+		name   string
+		mutate func(*AttachDomainSpec)
+	}{
+		{"shell metachars", func(s *AttachDomainSpec) { s.CustomHost = "foo.bar;rm -rf" }},
+		{"command substitution", func(s *AttachDomainSpec) { s.CustomHost = "$(x).evil.com" }},
+		{"backticks", func(s *AttachDomainSpec) { s.CustomHost = "`x`.evil.com" }},
+		{"unicode label", func(s *AttachDomainSpec) { s.CustomHost = "bärkpark.jarl.no" }},
+		{"uppercase", func(s *AttachDomainSpec) { s.CustomHost = "Barkpark.Jarl.No" }},
+		{"254+ chars", func(s *AttachDomainSpec) { s.CustomHost = overlong }},
+		{"single label", func(s *AttachDomainSpec) { s.CustomHost = "intranet" }},
+		{"trailing dot", func(s *AttachDomainSpec) { s.CustomHost = "barkpark.jarl.no." }},
+		{"empty label", func(s *AttachDomainSpec) { s.CustomHost = "a..no" }},
+		{"leading hyphen", func(s *AttachDomainSpec) { s.CustomHost = "-bad.jarl.no" }},
+		{"underscore", func(s *AttachDomainSpec) { s.CustomHost = "foo_bar.jarl.no" }},
+		{"space", func(s *AttachDomainSpec) { s.CustomHost = "foo bar.jarl.no" }},
+		{"newline", func(s *AttachDomainSpec) { s.CustomHost = "foo\n.jarl.no" }},
+		{"bare IP shape (numeric TLD)", func(s *AttachDomainSpec) { s.CustomHost = "203.0.113.9" }},
+		{"the platform apex itself", func(s *AttachDomainSpec) { s.CustomHost = "barkpark.cloud" }},
+		{"over-63-char label", func(s *AttachDomainSpec) { s.CustomHost = strings.Repeat("a", 64) + ".jarl.no" }},
+		{"external claim smuggling platform DNS halves", func(s *AttachDomainSpec) {
+			s.DNSLabel = "barkpark"
+			s.DNSZone = "jarl.no"
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			seams, dns, runner, lk, _ := attachFakeSeamsWithLookup([]string{"203.0.113.9"}, nil)
+			spec := validExternalAttachSpec()
+			tc.mutate(&spec)
+
+			err := DefaultAttachDomain(seams)(context.Background(), spec)
+			if err == nil {
+				t.Fatalf("DefaultAttachDomain accepted a hostile external spec %+v, want an error", spec)
+			}
+			if len(lk.calls) != 0 {
+				t.Errorf("the resolver was consulted (%v) for a hostile spec, want validation to abort first", lk.calls)
+			}
+			if len(dns.upserts) != 0 {
+				t.Errorf("DNS was touched (%v) for a hostile spec, want NO side effects", dns.upserts)
+			}
+			if len(runner.steps) != 0 {
+				t.Errorf("the runner ran %d step(s) for a hostile spec, want NO side effects", len(runner.steps))
+			}
+		})
+	}
+}
+
+// TestAttachDomainExternalResolutionGate is the worker-side half of the V2
+// ownership moat (defense in depth — the worker cannot trust the control
+// plane): an external host that does NOT currently resolve to the box aborts
+// with NO remote command and NO DNS write.
+func TestAttachDomainExternalResolutionGate(t *testing.T) {
+	cases := []struct {
+		name  string
+		addrs []string
+		err   error
+	}{
+		{"resolves elsewhere", []string{"198.51.100.7"}, nil},
+		{"resolves nowhere", nil, nil},
+		{"resolver error (fail closed)", nil, errBoom},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			seams, dns, runner, lk, _ := attachFakeSeamsWithLookup(tc.addrs, tc.err)
+			spec := validExternalAttachSpec()
+
+			err := DefaultAttachDomain(seams)(context.Background(), spec)
+			if err == nil {
+				t.Fatal("DefaultAttachDomain succeeded for an un-pointed external host, want an error")
+			}
+			if got := lk.calls; len(got) != 1 || got[0] != spec.CustomHost {
+				t.Errorf("lookup calls = %v, want exactly one for %s", got, spec.CustomHost)
+			}
+			if len(dns.upserts) != 0 {
+				t.Errorf("DNS was touched (%v), want NO side effects", dns.upserts)
+			}
+			if len(runner.steps) != 0 {
+				t.Errorf("the runner ran %d step(s), want NO side effects before the resolution gate passes", len(runner.steps))
+			}
+		})
+	}
+}
+
+// TestRunOnceAttachDomainExternalMismatchReportsFail proves the worker loop
+// reports a resolution-gate abort to /fail (the job fails visibly, never
+// silently) and never POSTs succeed.
+func TestRunOnceAttachDomainExternalMismatchReportsFail(t *testing.T) {
+	spec := validExternalAttachSpec()
+	spec.JobID = "adjob-ext-2"
+	cp := &fakeAttachDomainControlPlane{spec: &spec}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	seams, _, runner, _, _ := attachFakeSeamsWithLookup([]string{"198.51.100.7"}, nil)
+	w := &Worker{
+		ControlURL:   srv.URL,
+		Token:        testToken,
+		HTTPClient:   srv.Client(),
+		AttachDomain: DefaultAttachDomain(seams),
+	}
+
+	claimed, err := w.RunOnceAttachDomain(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnceAttachDomain returned an error for a resolution abort, want nil (reported to /fail): %v", err)
+	}
+	if !claimed {
+		t.Error("RunOnceAttachDomain claimed=false, want true (the job was drained even though it failed)")
+	}
+	if cp.failedID != "adjob-ext-2" {
+		t.Errorf("fail job id = %q, want adjob-ext-2", cp.failedID)
+	}
+	if !strings.Contains(cp.failedError, "resolve") {
+		t.Errorf("fail error = %q, want the resolution-gate message", cp.failedError)
+	}
+	if cp.succeededID != "" {
+		t.Errorf("succeed was called (id=%q) for an un-pointed host, want none", cp.succeededID)
+	}
+	if len(runner.steps) != 0 {
+		t.Errorf("the runner ran %d step(s) for an un-pointed host, want NO side effects", len(runner.steps))
+	}
+}
+
+// TestAttachDomainPlatformPathSkipsResolutionGate pins the V1 platform path
+// UNTOUCHED by V2: a platform-zone host still upserts platform DNS (we own the
+// zone — pointing it IS the attach) and never consults the system resolver.
+func TestAttachDomainPlatformPathSkipsResolutionGate(t *testing.T) {
+	seams, dns, runner, lk, _ := attachFakeSeamsWithLookup(nil, errBoom)
+
+	if err := DefaultAttachDomain(seams)(context.Background(), validAttachSpec()); err != nil {
+		t.Fatalf("DefaultAttachDomain (platform host): %v", err)
+	}
+	if len(lk.calls) != 0 {
+		t.Errorf("the system resolver was consulted (%v) for a platform host, want never", lk.calls)
+	}
+	if len(dns.upserts) != 1 {
+		t.Errorf("DNS upserts = %d, want 1 (the platform A-record upsert is the attach)", len(dns.upserts))
+	}
+	if got := len(runner.steps); got != 4 {
+		t.Errorf("runner ran %d steps, want 4", got)
+	}
+}

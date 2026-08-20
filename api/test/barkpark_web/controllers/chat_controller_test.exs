@@ -171,7 +171,7 @@ defmodule BarkparkWeb.ChatControllerTest do
     })
   end
 
-  # ── A. eight-route auth matrix (16 negative-auth assertions) ────────────────
+  # ── A. ten-route auth matrix (20 negative-auth assertions) ──────────────────
 
   describe "auth matrix — auth runs BEFORE any UUID/store/runtime work (obligation A)" do
     setup %{sid: sid} do
@@ -184,6 +184,8 @@ defmodule BarkparkWeb.ChatControllerTest do
           {:post, "/v1/chat/sessions/#{sid}/messages"},
           {:post, "/v1/chat/sessions/#{sid}/interrupt"},
           {:post, "/v1/chat/sessions/#{sid}/approval"},
+          {:post, "/v1/chat/sessions/#{sid}/archive"},
+          {:post, "/v1/chat/sessions/#{sid}/unarchive"},
           {:get, "/v1/chat/sessions/#{sid}/events"}
         ]
       }
@@ -284,6 +286,8 @@ defmodule BarkparkWeb.ChatControllerTest do
           |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "x"}))
         end,
         fn -> json_conn(conn_b) |> post("/v1/chat/sessions/#{sid}/interrupt", "") end,
+        fn -> json_conn(conn_b) |> post("/v1/chat/sessions/#{sid}/archive", "") end,
+        fn -> json_conn(conn_b) |> post("/v1/chat/sessions/#{sid}/unarchive", "") end,
         fn ->
           json_conn(conn_b)
           |> post(
@@ -935,6 +939,170 @@ defmodule BarkparkWeb.ChatControllerTest do
              |> patch("/v1/chat/sessions/#{Ecto.UUID.generate()}", Jason.encode!(%{draft: "x"}))
              |> json_response(404)
     end
+
+    test "PIN: unknown session + BAD body is 404, not 400 (fetch-before-validate precedence)",
+         %{admin: a1} do
+      # The provider-aware validators need the session row first, so the
+      # not-found oracle now outranks body shape. A tenant probing with garbage
+      # bodies learns nothing it wouldn't learn from a valid one.
+      for body <- [%{mode: "not-a-mode"}, %{bogus: 1}, %{draft: 123}] do
+        conn =
+          json_conn(a1)
+          |> patch("/v1/chat/sessions/#{Ecto.UUID.generate()}", Jason.encode!(body))
+
+        assert json_response(conn, 404)["error"]["code"] == "not_found", inspect(body)
+      end
+    end
+
+    test "mode/model/effort validators consult the SESSION's provider, not hardcoded claude",
+         %{admin: a1} do
+      # A codex session (FakeCodexAdapter caps: modes default/read-only, models
+      # gpt-5.6, efforts high) accepts its own vocabulary and rejects claude's.
+      body =
+        json_conn(a1)
+        |> post("/v1/chat/sessions", Jason.encode!(%{provider: "codex"}))
+        |> json_response(201)
+
+      codex_sid = body["id"]
+
+      # codex's own vocabulary validates (model_choice "gpt-5.6" was a 400
+      # under the old hardcoded-claude validator) and persists. The mode axis
+      # uses "default" — the value both FakeCodex advertises and the store
+      # persists (Session.persistable_modes/0 gates persistence separately).
+      ok =
+        json_conn(a1)
+        |> patch(
+          "/v1/chat/sessions/#{codex_sid}",
+          Jason.encode!(%{mode: "default", model_choice: "gpt-5.6", effort_choice: "high"})
+        )
+        |> json_response(200)
+
+      assert ok["mode"] == "default"
+      assert ok["model_choice"] == "gpt-5.6"
+      assert ok["effort_choice"] == "high"
+
+      # claude vocabulary is INVALID on a codex session…
+      for body <- [%{mode: "acceptEdits"}, %{model_choice: "sonnet"}, %{effort_choice: "max"}] do
+        conn = json_conn(a1) |> patch("/v1/chat/sessions/#{codex_sid}", Jason.encode!(body))
+        assert json_response(conn, 400)["error"]["code"] == "invalid_request", inspect(body)
+      end
+    end
+
+    test "codex vocabulary stays invalid on a claude session", %{admin: a1, sid: sid} do
+      for body <- [%{mode: "read-only"}, %{model_choice: "gpt-5.6"}] do
+        conn = json_conn(a1) |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(body))
+        assert json_response(conn, 400)["error"]["code"] == "invalid_request", inspect(body)
+      end
+    end
+
+    test "a model_choice PATCH with a LIVE runtime steers set_model on CHANGE only (steer parity)",
+         %{admin: a1, sid: sid} do
+      {:ok, recorder} =
+        Barkpark.StudioChat.Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      # The cat fake echoes our outbound set_model control_request straight
+      # back; ClaudeChat answers the echo with an error control_response whose
+      # request_id matches the one we minted, so the ack surfaces on the topic
+      # as a typed {:claude_chat_control, :set_model, …} — observable proof the
+      # steer actually went out over the wire.
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      assert json_conn(a1)
+             |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{model_choice: "sonnet"}))
+             |> json_response(200)
+
+      assert_receive {:claude_chat_control, :set_model, _rid, _resp}, 2_000
+
+      # The echo PATCH (same value — the TUI leave-PATCH shape): change-guard
+      # suppresses the steer entirely.
+      assert json_conn(a1)
+             |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{model_choice: "sonnet"}))
+             |> json_response(200)
+
+      refute_receive {:claude_chat_control, :set_model, _rid, _resp}, 300
+
+      assert Process.alive?(recorder)
+      DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, recorder)
+    end
+
+    test "an effort_choice PATCH with a LIVE runtime persists and the runtime survives the steer",
+         %{admin: a1, sid: sid} do
+      # claude's adapter has no effort steer axis ({:error, {:unsupported_steer,
+      # _}} — swallowed); the honest bar here is the mode-steer test's: persisted
+      # choice + a runtime that survives the attempt.
+      {:ok, recorder} =
+        Barkpark.StudioChat.Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      body =
+        json_conn(a1)
+        |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{effort_choice: "high"}))
+        |> json_response(200)
+
+      assert body["effort_choice"] == "high"
+      assert Process.alive?(recorder)
+      DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, recorder)
+    end
+
+    test "model_choice/effort_choice PATCH with NO live Recorder is fail-soft — persist only",
+         %{admin: a1, sid: sid} do
+      assert Barkpark.StudioChat.Recorder.whereis(sid) == nil
+
+      body =
+        json_conn(a1)
+        |> patch(
+          "/v1/chat/sessions/#{sid}",
+          Jason.encode!(%{model_choice: "opus", effort_choice: "low"})
+        )
+        |> json_response(200)
+
+      assert body["model_choice"] == "opus"
+      assert body["effort_choice"] == "low"
+    end
+  end
+
+  # ── archive/unarchive: the shelf flips (charter D28) ────────────────────────
+
+  describe "POST /sessions/:id/{archive,unarchive} — archive shelf flips (D28)" do
+    test "archive → 200 {session} with archived_at; unarchive clears it; both idempotent",
+         %{admin: a1, sid: sid} do
+      body = json_conn(a1) |> post("/v1/chat/sessions/#{sid}/archive", "") |> json_response(200)
+      assert body["id"] == sid
+      assert body["archived_at"] != nil
+
+      # Idempotent: re-archiving is a 200 (the stamp refreshes), never an error.
+      again = json_conn(a1) |> post("/v1/chat/sessions/#{sid}/archive", "") |> json_response(200)
+      assert again["archived_at"] != nil
+
+      back = json_conn(a1) |> post("/v1/chat/sessions/#{sid}/unarchive", "") |> json_response(200)
+      assert back["id"] == sid
+      assert back["archived_at"] == nil
+
+      # Idempotent the other way too.
+      still =
+        json_conn(a1) |> post("/v1/chat/sessions/#{sid}/unarchive", "") |> json_response(200)
+
+      assert still["archived_at"] == nil
+    end
+
+    test "archiving moves the session between the two list sides", %{admin: a1, sid: sid} do
+      json_conn(a1) |> post("/v1/chat/sessions/#{sid}/archive", "") |> json_response(200)
+
+      active = json_conn(a1) |> get("/v1/chat/sessions") |> json_response(200)
+      refute sid in Enum.map(active["sessions"], & &1["id"])
+
+      shelf = json_conn(a1) |> get("/v1/chat/sessions?archived=true") |> json_response(200)
+      assert sid in Enum.map(shelf["sessions"], & &1["id"])
+    end
+
+    test "a missing/non-UUID id joins the not-found oracle on both verbs", %{admin: a1} do
+      for verb <- ["archive", "unarchive"] do
+        conn = json_conn(a1) |> post("/v1/chat/sessions/#{Ecto.UUID.generate()}/#{verb}", "")
+        assert json_response(conn, 404)["error"]["code"] == "not_found", verb
+
+        conn2 = json_conn(a1) |> post("/v1/chat/sessions/not-a-uuid/#{verb}", "")
+        assert json_response(conn2, 404)["error"]["code"] == "not_found", verb
+      end
+    end
   end
 
   # ── send: strict adapter, validation before any runtime call (D + wire) ─────
@@ -1023,6 +1191,213 @@ defmodule BarkparkWeb.ChatControllerTest do
       # once, without pre-empting turn-1's zero-valued derivation.
       assert StudioChat.get_session(sid).message_count == 1
       assert [%{role: "user", source_markdown: "turn one"}] = StudioChat.list_messages(sid)
+    end
+  end
+
+  # ── D26: the send-failure reason split ──────────────────────────────────────
+
+  defmodule NilSessionRecorderStub do
+    @moduledoc false
+    # Claims a session's Recorder registry name and answers :session_pid with
+    # {:ok, nil} — the exact reply a Recorder whose provider runtime is gone
+    # gives (session_pid/1 has NO failure branch). ensure/1 resolves to this
+    # stub via its {:already_started, pid} branch, so the controller walks the
+    # REAL path into the nil-session guard.
+    use GenServer
+
+    def start_link(sid) do
+      GenServer.start_link(__MODULE__, nil,
+        name: {:via, Registry, {Barkpark.StudioChat.RecorderRegistry, sid}}
+      )
+    end
+
+    @impl true
+    def init(_), do: {:ok, nil}
+
+    @impl true
+    def handle_call(:session_pid, _from, state), do: {:reply, {:ok, nil}, state}
+  end
+
+  # The classification seam (ChatController.send_failure_response/2 — public
+  # per the exit-reason-mapping convention): one assertion per allowlist leg.
+  defp split(reason) do
+    conn = ChatController.send_failure_response(build_conn(), reason)
+
+    {conn.status, Jason.decode!(conn.resp_body)["error"],
+     Plug.Conn.get_resp_header(conn, "retry-after")}
+  end
+
+  describe "send failures split by reason (charter D26)" do
+    test "capacity leg: 503 runtime_capacity + Retry-After" do
+      for reason <- [{:managed_runtime_capacity, 3}, :admission_registration_conflict] do
+        {status, error, retry_after} = split(reason)
+        assert status == 503, inspect(reason)
+        assert error["code"] == "runtime_capacity", inspect(reason)
+        assert [seconds] = retry_after
+        assert String.to_integer(seconds) > 0
+      end
+    end
+
+    test "unavailable leg: 503 runtime_unavailable, no Retry-After" do
+      for reason <- [
+            {:not_running, :noproc},
+            :port_closed,
+            :no_port,
+            {:app_server_exit, 1},
+            :runtime_session_missing
+          ] do
+        {status, error, retry_after} = split(reason)
+        assert status == 503, inspect(reason)
+        assert error["code"] == "runtime_unavailable", inspect(reason)
+        assert retry_after == [], inspect(reason)
+      end
+    end
+
+    test "unsupported leg: 422 chat_unsupported (permanent — a 503 would retry forever)" do
+      for reason <- [
+            {:provider_not_ready, "codex"},
+            {:provider_protocol_incompatible, "codex"},
+            {:unsupported_runtime_operation, :steer},
+            {:missing_runtime_contract, :port}
+          ] do
+        {status, error, _} = split(reason)
+        assert status == 422, inspect(reason)
+        assert error["code"] == "chat_unsupported", inspect(reason)
+      end
+    end
+
+    test "opaque fallback: an unknown reason (raw exception struct) is 503 with NO interpolation" do
+      # safe_command's rescue leg can surface raw exception structs — the wire
+      # message must never echo them (information leak).
+      leaky = %RuntimeError{message: "SECRET-/opt/barkpark/private-path"}
+      {status, error, _} = split({:unexpected, leaky})
+
+      assert status == 503
+      assert error["code"] == "runtime_unavailable"
+      refute error["message"] =~ "SECRET"
+      refute inspect(error) =~ "SECRET"
+    end
+
+    test "E2E capacity: a full admission pool answers 503 runtime_capacity + Retry-After",
+         %{admin: a1, sid: sid} do
+      prev = Application.get_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission)
+
+      Application.put_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission,
+        max_managed_runtimes: 1
+      )
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission, prev),
+          else: Application.delete_env(:barkpark, Barkpark.StudioChat.RuntimeAdmission)
+      end)
+
+      # Fill the single slot with a live cat runtime on another session…
+      {:ok, other} =
+        StudioChat.create_session(%{
+          id: Ecto.UUID.generate(),
+          cwd: ClaudeChat.cwd(),
+          mode: "plan"
+        })
+
+      {:ok, recorder} =
+        Barkpark.StudioChat.Recorder.ensure(%{session_id: other.id, mode: "plan", resume: false})
+
+      # …then a send on OUR session has no slot: deterministic backpressure.
+      conn =
+        json_conn(a1)
+        |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "hello"}))
+
+      body = json_response(conn, 503)
+      assert body["error"]["code"] == "runtime_capacity"
+      assert [_seconds] = Plug.Conn.get_resp_header(conn, "retry-after")
+
+      DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, recorder)
+    end
+
+    test "E2E unavailable: a spawn failure is an OPAQUE 503 runtime_unavailable",
+         %{admin: a1, sid: sid} do
+      prev = Application.get_env(:barkpark, :claude_chat)
+
+      Application.put_env(:barkpark, :claude_chat,
+        enabled: true,
+        command: {"/nonexistent-bp-e2e", []}
+      )
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :claude_chat, prev),
+          else: Application.delete_env(:barkpark, :claude_chat)
+      end)
+
+      conn =
+        json_conn(a1)
+        |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "hello"}))
+
+      body = json_response(conn, 503)
+      assert body["error"]["code"] == "runtime_unavailable"
+      # Opacity: the internal reason term never reaches the wire.
+      refute inspect(body) =~ "nonexistent-bp-e2e"
+      refute inspect(body) =~ "binary_not_found"
+    end
+
+    test "E2E nil-session guard: a Recorder with NO live runtime session is 503, never 500",
+         %{admin: a1, sid: sid} do
+      # Claim sid's Recorder name with the stub; ensure/1 adopts it via
+      # {:already_started, pid} and session_pid/1 answers {:ok, nil} — the
+      # runtime-gone shape that used to FunctionClauseError → 500 in the
+      # is_pid-guarded adapter send.
+      {:ok, stub} = NilSessionRecorderStub.start_link(sid)
+
+      conn =
+        json_conn(a1)
+        |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "hello"}))
+
+      body = json_response(conn, 503)
+      assert body["error"]["code"] == "runtime_unavailable"
+
+      GenServer.stop(stub)
+    end
+
+    test "PATCH steer nil-session guard: a runtime-gone Recorder is fail-soft persist-only, never 500",
+         %{admin: a1, sid: sid} do
+      # Same runtime-gone shape as above, but on the PATCH steer path: the
+      # three steer blocks (mode/model_choice/effort_choice) must treat
+      # {:ok, nil} from session_pid/1 like an absent Recorder — persist the
+      # choice, skip the steer. Unguarded, nil flowed into the is_pid-guarded
+      # adapter (ClaudeChat.set_model/set_permission_mode) → FunctionClauseError
+      # → 500 while the persisted value had ALREADY landed.
+      {:ok, stub} = NilSessionRecorderStub.start_link(sid)
+
+      body =
+        json_conn(a1)
+        |> patch(
+          "/v1/chat/sessions/#{sid}",
+          Jason.encode!(%{mode: "acceptEdits", model_choice: "opus", effort_choice: "low"})
+        )
+        |> json_response(200)
+
+      assert body["mode"] == "acceptEdits"
+      assert body["model_choice"] == "opus"
+      assert body["effort_choice"] == "low"
+
+      GenServer.stop(stub)
+    end
+
+    test "create-failure code is distinct: chat_unavailable is fully retired from the wire" do
+      # The two legacy chat_unavailable emitters are gone (grep-proven in the
+      # slice evidence): the create branch now answers chat_create_failed and
+      # the send branch answers the D26 split codes. Pin the send seam never
+      # re-grows the legacy code for any allowlisted reason.
+      for reason <- [
+            {:managed_runtime_capacity, 3},
+            :port_closed,
+            {:provider_not_ready, "codex"},
+            :some_unknown_reason
+          ] do
+        {_status, error, _} = split(reason)
+        refute error["code"] == "chat_unavailable", inspect(reason)
+      end
     end
   end
 

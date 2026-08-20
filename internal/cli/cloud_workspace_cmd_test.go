@@ -11,6 +11,7 @@ package cli
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
@@ -60,6 +61,14 @@ func runWorkspace(t *testing.T, g globals, output string, args ...string) (strin
 	code := runCloud(w, g, append([]string{"workspace"}, args...))
 	return sout.String(), serr.String(), code
 }
+
+// realImportReceipt is the import response shape the SERVER actually sends:
+// `tables` is a MAP of table name → row count (Barkpark.Tenancy.WorkspaceBundle
+// typespecs it at workspace_bundle.ex:182; both import arms pass `stats.tables`
+// through verbatim at workspace_controller.ex:330 and :348). Six members, 42
+// rows — the numbers the older `{"tables":6,…}` mocks claimed while hiding that
+// the client could not read the real shape at all.
+const realImportReceipt = `{"tables":{"workspaces":1,"projects":1,"datasets":1,"documents":30,"media_files":6,"roles":3},"total_rows":42}`
 
 // TestCloudWorkspaceExportWritesFile: export GETs the bundle route with the admin
 // bearer and streams the tar body verbatim to --file.
@@ -118,7 +127,7 @@ func TestCloudWorkspaceImportRefusesWithoutYes(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hit = true
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"tables":1,"total_rows":1}`))
+		_, _ = w.Write([]byte(`{"tables":{"documents":1},"total_rows":1}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -153,7 +162,10 @@ func TestCloudWorkspaceImportPostsBytesWithYes(t *testing.T) {
 		gotBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"tables":6,"total_rows":42}`))
+		// The REAL receipt shape: `tables` is a map of table → row count
+		// (workspace_bundle.ex:182), never a bare integer. The old int mock is
+		// what let the double-em-dash bug ship green.
+		_, _ = w.Write([]byte(realImportReceipt))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -180,6 +192,9 @@ func TestCloudWorkspaceImportPostsBytesWithYes(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "42 rows") || !strings.Contains(stdout, "6 tables") {
 		t.Fatalf("stdout missing {tables,total_rows} receipt:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "— rows") || strings.Contains(stdout, "— tables") {
+		t.Fatalf("a receipt the client CAN read must print no unknown-count em dash:\n%s", stdout)
 	}
 }
 
@@ -355,7 +370,7 @@ func TestCloudWorkspaceImportMergeMode(t *testing.T) {
 		gotQuery = r.URL.RawQuery
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"tables":1,"total_rows":1,"mode":"merge"}`))
+		_, _ = w.Write([]byte(`{"tables":{"documents":1},"total_rows":1,"mode":"merge"}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -390,11 +405,11 @@ func TestCloudWorkspaceExportWithBlobsStreamsSidecar(t *testing.T) {
 		"2026/06/cover-a1b2c3d4.jpg":             "JPEG-BYTES",
 	}
 	bundle := makeBundleTar(t,
-		[]string{"id", "path", "workspace_id"},
+		[]string{"id", "path", "size", "workspace_id"},
 		[][]string{
-			{"id-1", "2026/07/5-styleguide-dark-338df37b.png", "ws-1"},
-			{"id-2", "2026/06/cover-a1b2c3d4.jpg", "ws-1"},
-			{"id-3", "\\N", "ws-1"}, // NULL path — no blob to move, must not fail
+			{"id-1", "2026/07/5-styleguide-dark-338df37b.png", fmt.Sprint(len(blobs["2026/07/5-styleguide-dark-338df37b.png"])), "ws-1"},
+			{"id-2", "2026/06/cover-a1b2c3d4.jpg", fmt.Sprint(len(blobs["2026/06/cover-a1b2c3d4.jpg"])), "ws-1"},
+			{"id-3", "\\N", "0", "ws-1"}, // NULL path — no blob to move, must not fail
 		})
 
 	var served []string
@@ -437,6 +452,13 @@ func TestCloudWorkspaceExportWithBlobsStreamsSidecar(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "Blobs: 2 fetched, 0 failed") {
 		t.Fatalf("missing honest blob report:\n%s", stdout)
+	}
+	// Both rows declare a size, and both fetches matched it byte for byte.
+	if !strings.Contains(stdout, "2 size-verified") {
+		t.Fatalf("report must own how many blobs were size-verified:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "no declared size") {
+		t.Fatalf("no row here lacks a declared size:\n%s", stdout)
 	}
 }
 
@@ -495,7 +517,7 @@ func TestCloudWorkspaceImportWithBlobsPutsPathVerbatim(t *testing.T) {
 		}
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"tables":6,"total_rows":42}`))
+		_, _ = w.Write([]byte(`{"tables":{"a":1,"b":2,"c":3,"d":4,"e":5,"f":6},"total_rows":42}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -548,7 +570,7 @@ func TestCloudWorkspaceImportBlobInvalidPathExitsValidation(t *testing.T) {
 				}
 				_, _ = io.Copy(io.Discard, r.Body)
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"tables":1,"total_rows":1}`))
+				_, _ = w.Write([]byte(`{"tables":{"documents":1},"total_rows":1}`))
 			}))
 			t.Cleanup(srv.Close)
 
@@ -591,8 +613,8 @@ func TestBlobErrorCodesMapToValidation(t *testing.T) {
 // carries a `provenance` key and stays SILENT when it does not — mocked, so this
 // slice never waited on the provenance-guard slice.
 func TestCloudWorkspaceImportProvenanceReceipt(t *testing.T) {
-	const withProv = `{"tables":6,"total_rows":42,"provenance":{"source_server":"https://guerrilla.barkpark.cloud","dataset":"production","profile":"dev","pulled_at":"2026-07-19T19:00:00Z"}}`
-	const withoutProv = `{"tables":6,"total_rows":42}`
+	const withProv = `{"tables":{"a":1,"b":2,"c":3,"d":4,"e":5,"f":6},"total_rows":42,"provenance":{"source_server":"https://guerrilla.barkpark.cloud","dataset":"production","profile":"dev","pulled_at":"2026-07-19T19:00:00Z"}}`
+	const withoutProv = `{"tables":{"a":1,"b":2,"c":3,"d":4,"e":5,"f":6},"total_rows":42}`
 
 	for _, tc := range []struct {
 		name string
@@ -660,7 +682,7 @@ func TestCloudWorkspaceImportLocalTargetDoesNotWarn(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"tables":1,"total_rows":1}`))
+		_, _ = w.Write([]byte(`{"tables":{"documents":1},"total_rows":1}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -698,10 +720,10 @@ func TestCloudWorkspaceExportWithBlobsRefusesStdout(t *testing.T) {
 	}
 }
 
-// TestBundleMediaPathsHonoursManifestColumnOrder: the path column is located via
+// TestBundleMediaRefsHonoursManifestColumnOrder: the path column is located via
 // the MANIFEST's declared column list, never a positional assumption, and COPY
 // escapes round-trip. A bundle with no media_files member is 0 blobs, not an error.
-func TestBundleMediaPathsHonoursManifestColumnOrder(t *testing.T) {
+func TestBundleMediaRefsHonoursManifestColumnOrder(t *testing.T) {
 	dir := t.TempDir()
 	// `path` is the THIRD column here — a positional guess would read the wrong field.
 	bundle := makeBundleTar(t,
@@ -715,12 +737,46 @@ func TestBundleMediaPathsHonoursManifestColumnOrder(t *testing.T) {
 	if err := os.WriteFile(f, bundle, 0o644); err != nil {
 		t.Fatalf("write bundle: %v", err)
 	}
-	got, err := bundleMediaPaths(f)
+	got, err := bundleMediaRefs(f)
 	if err != nil {
-		t.Fatalf("bundleMediaPaths: %v", err)
+		t.Fatalf("bundleMediaRefs: %v", err)
 	}
-	if len(got) != 1 || got[0] != "2026/07/a-11112222.png" {
-		t.Fatalf("paths = %#v, want the single de-duplicated path", got)
+	if len(got) != 1 || got[0].path != "2026/07/a-11112222.png" {
+		t.Fatalf("refs = %#v, want the single de-duplicated path", got)
+	}
+	// This manifest declares NO size column: the refs still carry the paths, and
+	// they honestly report that there is nothing to verify a fetch against.
+	if got[0].sizeKnown {
+		t.Fatalf("ref = %#v, want sizeKnown=false when the manifest declares no size column", got[0])
+	}
+}
+
+// TestBundleMediaRefsReadsDeclaredSize: when the manifest declares the (real,
+// non-generated) media_files.size column, each ref carries the declared byte
+// count — and a `\N` size is NOT a zero, it is "nothing declared".
+func TestBundleMediaRefsReadsDeclaredSize(t *testing.T) {
+	bundle := makeBundleTar(t,
+		[]string{"id", "path", "size", "workspace_id"},
+		[][]string{
+			{"id-1", "2026/07/a-11112222.png", "1234", "ws"},
+			{"id-2", "2026/07/b-33334444.jpg", "\\N", "ws"},
+		})
+	f := filepath.Join(t.TempDir(), "b.tar")
+	if err := os.WriteFile(f, bundle, 0o644); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	got, err := bundleMediaRefs(f)
+	if err != nil {
+		t.Fatalf("bundleMediaRefs: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("refs = %#v, want 2", got)
+	}
+	if !got[0].sizeKnown || got[0].size != 1234 {
+		t.Fatalf("ref[0] = %#v, want the declared 1234 bytes", got[0])
+	}
+	if got[1].sizeKnown || got[1].size != 0 {
+		t.Fatalf("ref[1] = %#v, want sizeKnown=false for a NULL size (never a fabricated 0)", got[1])
 	}
 }
 
@@ -899,5 +955,460 @@ func TestCloudWorkspaceExportDryRunRendersScope(t *testing.T) {
 		if !strings.Contains(line, want) {
 			t.Fatalf("dry-run line missing %q:\nstdout:%s\nstderr:%s", want, stdout, stderr)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PDS wave 22 — receipt + sidecar honesty (PDS-D294 / PDS-D295)
+// ---------------------------------------------------------------------------
+
+// TestImportCountsReadsTheServersTableMap: the receipt the SERVER sends carries
+// `tables` as a MAP, and the count is its size. Before this fix the whole decode
+// was guarded on `err == nil`, so the type error on `tables` threw away the
+// total_rows that HAD decoded and every human-mode import printed
+// "Imported workspace acme — — rows across — tables" with exit 0.
+func TestImportCountsReadsTheServersTableMap(t *testing.T) {
+	const body = `{"tables":{"documents":10,"media_files":3,"datasets":1},"total_rows":13}`
+	tables, rows := importCounts([]byte(body))
+	if tables != 3 || rows != 13 {
+		t.Fatalf("importCounts = tables:%d rows:%d, want tables:3 rows:13", tables, rows)
+	}
+	line := fmt.Sprintf("%s across %s", pluralize(rows, "row"), pluralize(tables, "table"))
+	if line != "13 rows across 3 tables" {
+		t.Fatalf("receipt line = %q, want %q", line, "13 rows across 3 tables")
+	}
+}
+
+// TestImportCountsNeverFabricatesZero: every shape the client cannot fully read
+// must degrade to an em dash for the UNREADABLE half only — never a fabricated
+// 0, and never at the cost of the half that decoded. The bare-int case is the
+// trap the naive fix walks into: encoding/json allocates the destination before
+// it fails, so dropping the guard without retyping prints "0 tables".
+func TestImportCountsNeverFabricatesZero(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       string
+		wantTables int
+		wantRows   int
+		wantLine   string
+	}{
+		{"tables absent", `{"total_rows":13}`, -1, 13, "13 rows across — tables"},
+		{"rows absent", `{"tables":{"documents":10}}`, 1, -1, "— rows across 1 table"},
+		{"older int shape", `{"tables":6,"total_rows":42}`, -1, 42, "42 rows across — tables"},
+		{"not json at all", `<html>502</html>`, -1, -1, "— rows across — tables"},
+		{"empty body", ``, -1, -1, "— rows across — tables"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tables, rows := importCounts([]byte(tc.body))
+			if tables != tc.wantTables || rows != tc.wantRows {
+				t.Fatalf("importCounts = tables:%d rows:%d, want tables:%d rows:%d", tables, rows, tc.wantTables, tc.wantRows)
+			}
+			line := fmt.Sprintf("%s across %s", pluralize(rows, "row"), pluralize(tables, "table"))
+			if line != tc.wantLine {
+				t.Fatalf("receipt line = %q, want %q", line, tc.wantLine)
+			}
+		})
+	}
+}
+
+// TestCloudWorkspaceImportPartialReceiptPrintsWhatItKnows: end to end through the
+// real command — a receipt carrying only total_rows prints the rows it moved and
+// an honest em dash for the tables, never "0 tables".
+func TestCloudWorkspaceImportPartialReceiptPrintsWhatItKnows(t *testing.T) {
+	workspaceEnvIsolate(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total_rows":13}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	tarFile := filepath.Join(t.TempDir(), "acme.tar")
+	if err := os.WriteFile(tarFile, []byte("BUNDLE"), 0o644); err != nil {
+		t.Fatalf("seed tar: %v", err)
+	}
+	g := globals{server: srv.URL, token: "admin-tok", yes: true}
+	stdout, stderr, code := runWorkspace(t, g, "table", "import", "acme", "--file", tarFile)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "13 rows across — tables") {
+		t.Fatalf("stdout must print the rows it knows and an em dash for the rest:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "0 tables") {
+		t.Fatalf("an unreadable field must NEVER print as a fabricated zero:\n%s", stdout)
+	}
+}
+
+// TestBlobUploadReportsBytesTheTargetReceived: the upload leg returns the
+// TARGET's echoed byte count (media_controller.ex:247-251), not the local stat,
+// and says "received" — put_bytes/3 returns a bare :ok, so nothing here has
+// measured what was STORED.
+func TestBlobUploadReportsBytesTheTargetReceived(t *testing.T) {
+	workspaceEnvIsolate(t)
+	const blob = "PNG\x00\xff-bytes"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			body, _ := io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"written":"2026/07/pic-abcd1234.png","bytes":` + fmt.Sprint(len(body)) + `}`))
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(realImportReceipt))
+	}))
+	t.Cleanup(srv.Close)
+
+	tarFile := seedBlobSidecar(t, map[string]string{"2026/07/pic-abcd1234.png": blob})
+	g := globals{server: srv.URL, token: "admin-tok", yes: true}
+	stdout, stderr, code := runWorkspace(t, g, "table", "import", "acme", "--file", tarFile, "--with-blobs")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	want := fmt.Sprintf("Blobs: 1 uploaded, 0 failed, %d bytes received by the target", len(blob))
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("report = %q, want it to contain %q", stdout, want)
+	}
+	if strings.Contains(stdout, "stored") {
+		t.Fatalf("the echo measures bytes RECEIVED — the receipt must not claim stored:\n%s", stdout)
+	}
+}
+
+// TestBlobUploadByteMismatchIsANamedFailure: a 2xx whose echoed byte count
+// disagrees with what the client sent is exactly "success while being wrong" —
+// it must be NAMED and must not count as an upload.
+func TestBlobUploadByteMismatchIsANamedFailure(t *testing.T) {
+	for _, tc := range []struct{ name, echo, wantFrag string }{
+		{"short write", `{"written":"ok","bytes":3}`, "byte mismatch"},
+		{"no echo", `{"written":"ok"}`, "echoed no byte count"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspaceEnvIsolate(t)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPut {
+					_, _ = io.Copy(io.Discard, r.Body)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(tc.echo))
+					return
+				}
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(realImportReceipt))
+			}))
+			t.Cleanup(srv.Close)
+
+			tarFile := seedBlobSidecar(t, map[string]string{"2026/07/pic-abcd1234.png": "PNG-BYTES-LONGER-THAN-3"})
+			g := globals{server: srv.URL, token: "admin-tok", yes: true}
+			stdout, stderr, code := runWorkspace(t, g, "table", "import", "acme", "--file", tarFile, "--with-blobs")
+			if code == exitOK {
+				t.Fatalf("an unverifiable transfer MUST NOT exit 0\nstdout:%s\nstderr:%s", stdout, stderr)
+			}
+			if !strings.Contains(stderr, "2026/07/pic-abcd1234.png") || !strings.Contains(stderr, tc.wantFrag) {
+				t.Fatalf("failure must NAME the blob and the reason (%q):\n%s", tc.wantFrag, stderr)
+			}
+			if !strings.Contains(stdout, "0 uploaded, 1 failed") {
+				t.Fatalf("report must own the failure:\n%s", stdout)
+			}
+		})
+	}
+}
+
+// TestBlobFetchSizeMismatchIsANamedFailure: a truncated blob that arrives with a
+// 200 is caught by comparing io.Copy's count against the bundle's declared
+// media_files.size.
+func TestBlobFetchSizeMismatchIsANamedFailure(t *testing.T) {
+	workspaceEnvIsolate(t)
+	bundle := makeBundleTar(t,
+		[]string{"id", "path", "size"},
+		[][]string{{"id-1", "2026/07/short-11112222.png", "9999"}})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/media/files/") {
+			_, _ = w.Write([]byte("TRUNCATED"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-tar")
+		_, _ = w.Write(bundle)
+	}))
+	t.Cleanup(srv.Close)
+
+	outFile := filepath.Join(t.TempDir(), "acme.tar")
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "table", "export", "acme", "--file", outFile, "--with-blobs")
+	if code == exitOK {
+		t.Fatalf("a blob that does not match its declared size MUST NOT exit 0\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "2026/07/short-11112222.png") || !strings.Contains(stderr, "size mismatch") {
+		t.Fatalf("failure must NAME the blob and the mismatch:\n%s", stderr)
+	}
+	if !strings.Contains(stdout, "0 fetched, 1 failed") {
+		t.Fatalf("report must own the failure:\n%s", stdout)
+	}
+
+	// A named failure that LEAVES the short bytes on disk is only half honest:
+	// they sit under the FINAL name in the sidecar directory, which is exactly
+	// what `import --with-blobs` walks and PUTs back.
+	blobDir := outFile + ".blobs"
+	dest := filepath.Join(blobDir, "2026", "07", "short-11112222.png")
+	if _, serr := os.Stat(dest); !os.IsNotExist(serr) {
+		body, _ := os.ReadFile(dest)
+		t.Fatalf("the truncated blob survived at %s (%q, stat err %v)", dest, body, serr)
+	}
+	// sidecarBlobPaths IS the upload half's input, so an empty answer is the
+	// upload half being unable to pick the truncated blob up.
+	paths, perr := sidecarBlobPaths(blobDir)
+	if perr != nil && !os.IsNotExist(perr) {
+		t.Fatalf("sidecarBlobPaths: %v", perr)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("the upload half can still see %v, want nothing to re-upload", paths)
+	}
+}
+
+// TestBlobFetchAbsentDeclaredSizeIsNotAPass: media_files.size is NULLABLE (a
+// blob pushed through put_blob/2 creates no row at all), so a NULL size has
+// NOTHING to verify against. The transfer still succeeds — but it is reported as
+// unverified, never counted as a size-verified pass. That distinction is the
+// whole difference between a verify and the vacuous green it replaces.
+func TestBlobFetchAbsentDeclaredSizeIsNotAPass(t *testing.T) {
+	workspaceEnvIsolate(t)
+	bundle := makeBundleTar(t,
+		[]string{"id", "path", "size"},
+		[][]string{
+			{"id-1", "2026/07/known-11112222.png", "5"},
+			{"id-2", "2026/07/unknown-33334444.png", "\\N"},
+		})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/media/files/") {
+			_, _ = w.Write([]byte("BYTES"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-tar")
+		_, _ = w.Write(bundle)
+	}))
+	t.Cleanup(srv.Close)
+
+	outFile := filepath.Join(t.TempDir(), "acme.tar")
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "table", "export", "acme", "--file", outFile, "--with-blobs")
+	if code != exitOK {
+		t.Fatalf("an absent declared size is not a failure\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	if !strings.Contains(stdout, "declared size absent") {
+		t.Fatalf("the CLI must SAY a blob had no declared size:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "1 size-verified") || !strings.Contains(stdout, "1 with no declared size") {
+		t.Fatalf("an unverifiable blob must never be counted as verified:\n%s", stdout)
+	}
+}
+
+// seedBlobSidecar writes a stub bundle tar plus its `<tar>.blobs/` sidecar tree
+// and returns the tar path — the shape `import --with-blobs` walks.
+func seedBlobSidecar(t *testing.T, blobs map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	tarFile := filepath.Join(dir, "acme.tar")
+	if err := os.WriteFile(tarFile, []byte("BUNDLE"), 0o644); err != nil {
+		t.Fatalf("seed tar: %v", err)
+	}
+	for p, body := range blobs {
+		dest := filepath.Join(tarFile+".blobs", filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			t.Fatalf("seed blob dir: %v", err)
+		}
+		if err := os.WriteFile(dest, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed blob %s: %v", p, err)
+		}
+	}
+	return tarFile
+}
+
+// shortBundleServer answers the export route with a Content-Length that LIES: it
+// declares declaredBytes and then sends `body` (shorter) before hanging up. It
+// has to hijack the connection because net/http's own writer truncates or errors
+// a handler that disagrees with its declared length — the only way to put a
+// genuinely over-declared response on the wire is to write the response
+// ourselves. This is the failure the export sink previously reported as a
+// success: `bytes: n` with nothing to compare n against.
+func shortBundleServer(t *testing.T, declaredBytes int, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Errorf("test server does not support hijacking")
+			return
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		defer conn.Close()
+		fmt.Fprintf(buf, "HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nContent-Length: %d\r\n\r\n", declaredBytes)
+		_, _ = buf.WriteString(body)
+		_ = buf.Flush()
+	}))
+}
+
+// TestCloudWorkspaceExportFailedTransferLeavesBackupIntact: the destination is a
+// PRE-EXISTING backup. `os.Create` truncated it before the first byte arrived,
+// so a transfer that then died destroyed the very artifact the verb exists to
+// protect. The bytes now land in a temp file beside the destination and only a
+// verified transfer renames over it — a failed export leaves the old bundle byte
+// for byte, and leaves no `.part` litter behind either.
+func TestCloudWorkspaceExportFailedTransferLeavesBackupIntact(t *testing.T) {
+	workspaceEnvIsolate(t)
+	srv := shortBundleServer(t, 4096, "SHORT")
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	outFile := filepath.Join(dir, "acme.tar")
+	const previous = "PREVIOUS-GOOD-BUNDLE-BYTES"
+	if err := os.WriteFile(outFile, []byte(previous), 0o644); err != nil {
+		t.Fatalf("seed previous backup: %v", err)
+	}
+
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "table", "export", "acme", "--file", outFile)
+	if code == exitOK {
+		t.Fatalf("a transfer that did not deliver the declared bytes MUST NOT exit 0\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	got, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("read destination after failed export: %v", err)
+	}
+	if string(got) != previous {
+		t.Fatalf("failed export clobbered the existing backup: file = %q, want %q", string(got), previous)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "acme.tar" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("failed export left litter in the destination dir: %v", names)
+	}
+}
+
+// TestCloudWorkspaceExportSizeMismatchIsANamedFailure: when the server DECLARES a
+// length, the receipt is checked against it. A short delivery is a named,
+// non-zero failure that says both numbers — never a `bytes: n` success claim
+// about a truncated bundle — and the partial never reaches the destination path.
+func TestCloudWorkspaceExportSizeMismatchIsANamedFailure(t *testing.T) {
+	workspaceEnvIsolate(t)
+	srv := shortBundleServer(t, 4096, "SHORT")
+	t.Cleanup(srv.Close)
+
+	outFile := filepath.Join(t.TempDir(), "acme.tar")
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "table", "export", "acme", "--file", outFile)
+	if code == exitOK {
+		t.Fatalf("size mismatch must exit non-zero\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "size mismatch") || !strings.Contains(stderr, "4096") {
+		t.Fatalf("the failure must NAME the mismatch and the declared size:\n%s", stderr)
+	}
+	if _, err := os.Stat(outFile); !os.IsNotExist(err) {
+		t.Fatalf("the partial download must NOT be renamed into place (stat err = %v)", err)
+	}
+	if strings.Contains(stdout, "Exported workspace") {
+		t.Fatalf("a failed export must not print a success receipt:\n%s", stdout)
+	}
+}
+
+// TestCloudWorkspaceExportVerifiesDeclaredSize: the happy path carries an
+// EXPLICIT verified field, not a bare byte count. The receipt states what the
+// server declared alongside what arrived, so a reader can see the comparison was
+// actually made.
+func TestCloudWorkspaceExportVerifiesDeclaredSize(t *testing.T) {
+	workspaceEnvIsolate(t)
+	const tarBytes = "BUNDLE-TAR-BYTES-\x00\x01\x02-verified"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-tar")
+		// net/http sets Content-Length itself for a body this small; state it
+		// anyway so the declared length is the mock's claim, not a side effect.
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(tarBytes)))
+		_, _ = w.Write([]byte(tarBytes))
+	}))
+	t.Cleanup(srv.Close)
+
+	outFile := filepath.Join(t.TempDir(), "acme.tar")
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "json", "export", "acme", "--file", outFile)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	// The declared length is READ from the response, never pinned to a literal:
+	// the real bundle is not byte-reproducible (three consecutive live runs
+	// produced three different sizes), so the only honest assertion is that the
+	// receipt's numbers agree with the body this run actually carried.
+	if !strings.Contains(stdout, `"verified": true`) && !strings.Contains(stdout, `"verified":true`) {
+		t.Fatalf("receipt must carry verified:true, never a bare byte count:\n%s", stdout)
+	}
+	want := fmt.Sprintf("%d", len(tarBytes))
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("receipt must state the byte count the response carried (%s):\n%s", want, stdout)
+	}
+	if !strings.Contains(stdout, "declared_bytes") {
+		t.Fatalf("receipt must state what the server declared:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "size-verified") {
+		t.Fatalf("the human line must say the size was verified:\n%s", stderr)
+	}
+}
+
+// TestCloudWorkspaceExportAbsentDeclaredSizeIsNotAFailure: Go's transport adds
+// `Accept-Encoding: gzip` itself, and when a response comes back gzipped it
+// decompresses transparently and STRIPS Content-Length to -1. Probed live on the
+// deployed stack: /api/schemas answers ContentLength=-1 Uncompressed=true. This
+// route ends in send_file/2 today so it keeps its length — but PDS-D204 already
+// moved this route once, and a naive `n != resp.ContentLength` would fail EVERY
+// successful export the moment it moves back. -1 means unverifiable, which is
+// reported honestly and is NEVER a failure.
+func TestCloudWorkspaceExportAbsentDeclaredSizeIsNotAFailure(t *testing.T) {
+	workspaceEnvIsolate(t)
+	const tarBytes = "BUNDLE-TAR-BYTES-gzipped-on-the-wire-so-the-length-is-stripped"
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write([]byte(tarBytes)); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			t.Errorf("Go's transport should have offered gzip itself; Accept-Encoding = %q", r.Header.Get("Accept-Encoding"))
+		}
+		w.Header().Set("Content-Type", "application/x-tar")
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(gz.Bytes())
+	}))
+	t.Cleanup(srv.Close)
+
+	outFile := filepath.Join(t.TempDir(), "acme.tar")
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "json", "export", "acme", "--file", outFile)
+	if code != exitOK {
+		t.Fatalf("an absent declared size is NOT a failure: exit = %d\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	got, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("read export file: %v", err)
+	}
+	if string(got) != tarBytes {
+		t.Fatalf("export file bytes = %q, want the decompressed body verbatim", string(got))
+	}
+	if !strings.Contains(stdout, `"verified": false`) && !strings.Contains(stdout, `"verified":false`) {
+		t.Fatalf("an unverifiable transfer must report verified:false, never true:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "declared_bytes") {
+		t.Fatalf("there was no declared size — the receipt must not invent one:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "declared size absent") {
+		t.Fatalf("the CLI must SAY the declared size was absent:\n%s", stderr)
 	}
 }

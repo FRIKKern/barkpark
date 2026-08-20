@@ -185,7 +185,9 @@ defmodule BarkparkWeb.AccessController do
   defp invalid_grant(conn) do
     conn
     |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "invalid_grant", message: "This access link is invalid or has expired."}})
+    |> json(%{
+      error: %{code: "invalid_grant", message: "This access link is invalid or has expired."}
+    })
   end
 
   defp forbidden(conn, message) do

@@ -1,0 +1,48 @@
+{
+  "id": "grip-stw9-graph-truth",
+  "wave": "search-template-wave-9-2026-07-26",
+  "question": "Authenticated truth of the /v1/graph payload the Next demo consumes: node/edge counts, per-node facets available for color, truncation honesty, D13 scope, and whether a types= filter exists.",
+  "answer": "1803 nodes / 987 edges (3182 REFUTED, ~1804 off-by-one). Node fields are EXACTLY {id,type,title,doc_id,phantom} — no kind, no status; `type` IS a real 6-value facet (task 996, paper 551, tag 146, command 22, metric 6, session 3) plus 79 type:null phantoms, so fullColor is viable TODAY, but the template palette TYPE_HEX only colors task+paper — 235 of 1803 nodes (13%) fall to SLATE. truncated:false is returned but is a HALF-TRUTH: the flag only covers the 2000-node budget; the per-type limit:1000 in graph_corpus silently caps tasks at 996 while ~3100 published tasks exist, so the graph is a ~26%-of-corpus fragment reported as complete. No types= param exists (graph_corpus ignores params entirely) — it is a NEW capability. D13 CONFIRMED on origin/main: :api pipeline = OptionalToken (assigns only :api_token) -> AssignDefaultScope, and scope_opts/1 reads only :current_workspace/:current_project, so token binding is structurally ignored and the graph is always the seeded Default workspace.",
+  "recipes": [
+    {
+      "claim": "Live authenticated graph = 1803 nodes, 987 edges, fields {id,type,title,doc_id,phantom}, truncated:false",
+      "rerun": "curl -s -H \"Authorization: Bearer $(python3 -c 'import json;print(json.load(open(\\\"$HOME/.config/barkpark/config.json\\\"))[\\\"token\\\"])')\" 'https://guerrilla.barkpark.cloud/v1/graph?dataset=production' | python3 -c 'import json,sys;d=json.load(sys.stdin);print(len(d[\"nodes\"]),len(d[\"edges\"]),list(d[\"nodes\"][0].keys()),{k:d.get(k) for k in (\"truncated\",\"truncation_reason\")})'",
+      "expect": "1803 987 ['id', 'type', 'title', 'doc_id', 'phantom'] {'truncated': False, 'truncation_reason': None}"
+    },
+    {
+      "claim": "type is a 6-value facet + 79 type:null phantoms; no other facet exists",
+      "rerun": "curl -s -H 'Authorization: Bearer <token>' 'https://guerrilla.barkpark.cloud/v1/graph?dataset=production' | python3 -c 'import json,sys;from collections import Counter;d=json.load(sys.stdin);print(Counter((str(n.get(\"type\")),n[\"phantom\"]) for n in d[\"nodes\"]))'",
+      "expect": "Counter({('task', False): 996, ('paper', False): 551, ('tag', False): 146, ('None', True): 79, ('command', False): 22, ('metric', False): 6, ('session', False): 3})"
+    },
+    {
+      "claim": "types= is silently ignored (no filter capability on the route)",
+      "rerun": "curl -s -H 'Authorization: Bearer <token>' 'https://guerrilla.barkpark.cloud/v1/graph?dataset=production&types=paper' | python3 -c 'import json,sys;d=json.load(sys.stdin);print(len(d[\"nodes\"]),len(d[\"edges\"]))'",
+      "expect": "1803 987 (identical to unfiltered)"
+    },
+    {
+      "claim": "graph_corpus ignores all params and applies limit:1000 per type",
+      "rerun": "git show origin/main:api/lib/barkpark_web/controllers/tasks_controller.ex | sed -n '929,940p'",
+      "expect": "def graph_corpus(conn, _params) ... Keyword.put(:limit, 1000)"
+    },
+    {
+      "claim": "The 996 task nodes are a silent truncation: ~3100 published tasks exist",
+      "rerun": "bp search query \"e\" -o json | python3 -c 'import json,sys;print(json.load(sys.stdin)[\"facets\"][\"type\"])'",
+      "expect": "[{'count': 3101, 'label': 'task'}, {'count': 545, 'label': 'paper'}, ...]"
+    },
+    {
+      "claim": "D13: /v1/graph rides :api, whose OptionalToken assigns ONLY :api_token; AssignDefaultScope supplies the Default workspace",
+      "rerun": "git show origin/main:api/lib/barkpark_web/plugs/optional_token.ex | grep -n assign; git show origin/main:api/lib/barkpark_web/router.ex | sed -n '30,47p'",
+      "expect": "only `assign(conn, :api_token, token)`; pipeline :api ends OptionalToken -> AssignDefaultScope (no DeriveWorkspaceFromToken)"
+    },
+    {
+      "claim": "Deployed Next demo embeds the SAME 1803/987 payload — graph DATA is live even though the deploy is stale",
+      "rerun": "curl -sL 'https://guerrilla.barkpark.cloud/sites/search-ember/' | python3 -c 'import sys,re;from collections import Counter;h=sys.stdin.read();print(Counter(re.findall(r\\\"\\\\\\\\\\\\\\\"type\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"([\\\\w-]+)\\\\\\\\\\\\\\\"\\\",h)).most_common());print(h.count(\\\"from_id\\\"))'",
+      "expect": "task 996, paper 551, tag 146, _unknown 79, command 22, metric 6, session 3; from_id 987"
+    },
+    {
+      "claim": "TYPE_HEX covers neither tag, command, metric nor session",
+      "rerun": "sed -n '/var TYPE_HEX/,/};/p' templates/search-starter/public/bp-graph.js",
+      "expect": "post,page,paper,task,author,category,book,asset,mediaAsset,sheet,project,game-data,_unknown — no tag/command/metric/session"
+    }
+  ]
+}

@@ -307,6 +307,175 @@ defmodule BarkparkCloud.AccountsTest do
       assert DateTime.compare(after_touch.last_used_at, before.last_used_at) in [:eq, :gt]
       assert DateTime.compare(after_touch.last_used_at, past) == :gt
     end
+
+    # The backdate above is EXACTLY the throttle window (60s), and it stays that
+    # way on purpose: it pins the boundary as STALE (`>=`), which is what
+    # `touch_last_used/2`'s `last_used_at <= now - 60s` clause encodes. A `>`
+    # predicate would leave this test red at left: :lt.
+
+    test "touch: false verifies WITHOUT stamping — the plug pipeline owns the stamp" do
+      user = user_fixture()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+
+      past = DateTime.utc_now() |> DateTime.add(-1, :hour) |> DateTime.truncate(:microsecond)
+      Repo.update_all(UserToken, set: [last_used_at: past])
+
+      assert Accounts.verify_user_session_token(plaintext, touch: false).id == user.id
+
+      [row] = Accounts.list_user_sessions(user)
+
+      assert DateTime.compare(row.last_used_at, past) == :eq,
+             "verify stamped anyway — Web.Auth could not then withhold it from a refused request"
+    end
+
+    test "the stamp is throttled: a second touch inside the 60s window writes nothing" do
+      user = user_fixture()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+
+      past = DateTime.utc_now() |> DateTime.add(-1, :hour) |> DateTime.truncate(:microsecond)
+      Repo.update_all(UserToken, set: [last_used_at: past])
+
+      :ok = Accounts.touch_session_last_used(plaintext)
+      [first] = Accounts.list_user_sessions(user)
+      assert DateTime.compare(first.last_used_at, past) == :gt
+
+      :ok = Accounts.touch_session_last_used(plaintext)
+      [second] = Accounts.list_user_sessions(user)
+
+      assert DateTime.compare(second.last_used_at, first.last_used_at) == :eq,
+             "the second stamp wrote inside the window — every request is an UPDATE again"
+    end
+
+    test "touching an unknown plaintext is a no-op, not a raise" do
+      assert Accounts.touch_session_last_used("not-a-real-token") == :ok
+    end
+  end
+
+  describe "create_user_session_token/2 origin (gr-p5-session-provenance)" do
+    # THE ROUND TRIP. Column existence proves nothing here: the migration, the
+    # schema field and the write-site keyword all land happily while `cast/3`
+    # silently DISCARDS `:origin` — no Ecto warning, no compiler warning — and
+    # the whole suite stays green while every row is written NULL. So this reads
+    # the value back TWICE: off the loaded struct, and via raw SQL against the
+    # actual column. The raw-SQL leg is the one a struct default could never
+    # satisfy, and it is what reds when `:origin` leaves UserToken.changeset/2's
+    # cast allowlist (`left: nil, right: "device_link"`).
+    test "a real mint round-trips the origin to the COLUMN, not just the struct" do
+      user = user_fixture()
+
+      {:ok, plaintext} =
+        Accounts.create_user_session_token(user, user_agent: "bp/agent", origin: "device_link")
+
+      hash = UserToken.hash_token(plaintext)
+
+      # Leg 1 — off the struct, through the normal read path the UI uses.
+      [row] = Accounts.list_user_sessions(user)
+      assert row.origin == "device_link"
+
+      # Leg 2 — the column itself, bypassing Ecto's field defaults entirely.
+      assert %Postgrex.Result{rows: [["device_link"]]} =
+               Repo.query!("SELECT origin FROM user_tokens WHERE token_hash = $1", [hash])
+    end
+
+    test "omitting :origin stores NULL — it is never inferred from the other opts" do
+      user = user_fixture()
+
+      {:ok, plaintext} =
+        Accounts.create_user_session_token(user, ip_address: "203.0.113.7", user_agent: "Chrome")
+
+      [row] = Accounts.list_user_sessions(user)
+      assert is_nil(row.origin)
+
+      assert %Postgrex.Result{rows: [[nil]]} =
+               Repo.query!("SELECT origin FROM user_tokens WHERE token_hash = $1", [
+                 UserToken.hash_token(plaintext)
+               ])
+    end
+
+    test "nothing backfills: a pre-existing NULL row stays NULL when a NEW row is minted" do
+      user = user_fixture()
+      {:ok, legacy} = Accounts.create_user_session_token(user)
+      {:ok, _fresh} = Accounts.create_user_session_token(user, origin: "password")
+
+      assert %Postgrex.Result{rows: [[nil]]} =
+               Repo.query!("SELECT origin FROM user_tokens WHERE token_hash = $1", [
+                 UserToken.hash_token(legacy)
+               ])
+    end
+
+    test "a PAT can neither receive nor expose an origin (separate cast list)" do
+      {user, team} = user_with_team()
+
+      {:ok, _plaintext, pat} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "ci-token",
+          origin: "device_link"
+        })
+
+      assert is_nil(Repo.get!(UserToken, pat.id).origin)
+    end
+
+    # The CLOSED-SET guard. Three of the six mint sites (login, password change,
+    # device link) carry end-to-end round-trip probes above, and since cch-w10 the
+    # OAuth site has two of its own in router_oauth_test.exs (a github code yields
+    # origin "oauth:github", a google code "oauth:google"); only `register/4` still
+    # has none — it needs the full billing/trial transaction. This reads the source
+    # instead, so a
+    # seventh mint site added without an origin, or a literal typo'd at either
+    # untested site, reds HERE rather than shipping a silently-NULL column.
+    # Source-text by construction: it is refactor-brittle on purpose, and the
+    # failure message is its documentation.
+    test "every Accounts.create_user_session_token/2 call site stamps an origin (closed set of six)" do
+      lib = Path.expand("../../lib/barkpark_cloud", __DIR__)
+
+      sources =
+        for f <- ["web/router.ex", "device_auth.ex"], do: File.read!(Path.join(lib, f))
+
+      calls =
+        sources
+        |> Enum.flat_map(&(String.split(&1, "Accounts.create_user_session_token(") |> tl()))
+
+      assert length(calls) == 6,
+             "the mint-site set moved (#{length(calls)} call sites, expected 6) — a NEW site must " <>
+               "stamp its own origin, and this count must move with it"
+
+      for {tail, i} <- Enum.with_index(calls) do
+        assert String.contains?(String.slice(tail, 0, 400), "origin:"),
+               "mint call site ##{i} passes no :origin — it would write NULL silently"
+      end
+
+      router = hd(sources)
+
+      for literal <- ~w(password two_factor password_change register),
+          do:
+            assert(
+              String.contains?(router, "origin: \"#{literal}\""),
+              "the #{literal} origin literal is gone from router.ex"
+            )
+
+      # cch-w10 — the OAuth origin no longer has a literal in router.ex. The mint
+      # moved off the callback (whose 302's `location` header was handing out a
+      # live session token) to POST /v1/auth/oauth/exchange, and the provider
+      # travels there on the exchange code's own `sent_to`, so the router now
+      # forwards a BOUND value. That makes the seam — not a literal — the thing to
+      # guard, in three links, each of which fails silently on its own: the
+      # callback must name its provider, the mint must carry it, and the exchange
+      # must forward what it consumed.
+      assert String.contains?(router, ~S|Accounts.create_oauth_exchange_code(user, provider)|),
+             "the callback stopped handing its own provider to the exchange code"
+
+      assert String.contains?(router, "session_opts(conn) ++ [origin: origin]"),
+             "the exchange stopped forwarding the consumed code's own origin"
+
+      assert String.contains?(
+               File.read!(Path.join(lib, "accounts.ex")),
+               ~S|sent_to: "oauth:#{provider}"|
+             ),
+             "the exchange code stopped carrying the provider that authenticated the user"
+
+      assert String.contains?(List.last(sources), ~s|origin: "device_link"|),
+             "device_auth stopped stamping device_link"
+    end
   end
 
   describe "revoke_user_session/2 (ownership-scoped row revoke)" do
@@ -353,6 +522,35 @@ defmodule BarkparkCloud.AccountsTest do
       assert Accounts.verify_user_session_token(keep).id == user.id
       assert [survivor] = Accounts.list_user_sessions(user)
       assert survivor.token_hash == UserToken.hash_token(keep)
+    end
+
+    # cch-w53-s4. The sweep is `context in ["session", "sse"]`, and the two tests
+    # below are the fences on each side of that widening: everything a signed-out
+    # user could still stream with must die, and NOTHING else may.
+    test "it also burns the user's live SSE stream tickets" do
+      user = user_fixture()
+      {:ok, _} = Accounts.create_user_session_token(user)
+      ticket = elem(Accounts.create_sse_ticket(user), 1)
+
+      # Without this, a ticket minted a second before "sign out everywhere"
+      # opened a fresh authenticated /v1/events stream for the rest of its 60s
+      # TTL — the row-level half of the "signed out immediately" claim.
+      assert {:ok, 1} = Accounts.revoke_all_user_sessions(user)
+      assert Accounts.consume_sse_ticket(ticket) == nil
+    end
+
+    test "the count it reports is SESSIONS only — tickets are not padding" do
+      # The number goes straight to the console as `{revoked: N}` ("N sessions
+      # signed out"). Counting swept tickets would inflate it into a new number
+      # the product cannot support, which is the exact defect class this wave is
+      # closing. Two sessions + two tickets is still 2.
+      user = user_fixture()
+      {:ok, _} = Accounts.create_user_session_token(user)
+      {:ok, _} = Accounts.create_user_session_token(user)
+      {:ok, _} = Accounts.create_sse_ticket(user)
+      {:ok, _} = Accounts.create_sse_ticket(user)
+
+      assert {:ok, 2} = Accounts.revoke_all_user_sessions(user)
     end
   end
 
@@ -583,6 +781,36 @@ defmodule BarkparkCloud.AccountsTest do
       assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(pat_plain)
     end
 
+    test "the SSE widening stops at 'sse' — a PAT row is not swept with it" do
+      # cch-w53-s4 widened the sweep from `context == "session"` to
+      # `context in ["session", "sse"]`. One character further ("pat" in the same
+      # list, or dropping the context filter for a plain user_id sweep) kills the
+      # user's programmatic credentials on a password change and nothing in the
+      # UI would say so. Assert on the ROWS, not just on verify/2, so a future
+      # verify that tolerates revoked_at cannot hide it.
+      {user, team} = user_with_team()
+      {:ok, _s} = Accounts.create_user_session_token(user)
+      {:ok, _ticket} = Accounts.create_sse_ticket(user)
+
+      {:ok, _pat_plain, pat} =
+        Accounts.create_personal_access_token(user, team, %{name: "ci-key", abilities: ["read"]})
+
+      assert {:ok, 1} = Accounts.revoke_all_user_sessions(user)
+
+      live = fn context ->
+        Repo.one(
+          from t in UserToken,
+            where: t.user_id == ^user.id and t.context == ^context and is_nil(t.revoked_at),
+            select: count(t.id)
+        )
+      end
+
+      assert live.("session") == 0
+      assert live.("sse") == 0
+      assert live.("pat") == 1
+      assert is_nil(Repo.get!(UserToken, pat.id).revoked_at)
+    end
+
     test "a password change does NOT revoke the user's PATs" do
       {user, team} = user_with_team()
 
@@ -609,7 +837,10 @@ defmodule BarkparkCloud.AccountsTest do
       assert Enum.all?(rows, &(&1.context == "session"))
     end
 
-    test "member removal (delete_user_session_tokens) preserves the user's PATs" do
+    # The session eviction PRIMITIVE never touches PATs. Membership removal
+    # itself does end them, but through the separate, team-scoped
+    # `revoke_team_pats/2` step — see the describe block below.
+    test "delete_user_session_tokens/1 alone preserves the user's PATs" do
       {user, team} = user_with_team()
 
       {:ok, pat_plain, _} =
@@ -628,6 +859,108 @@ defmodule BarkparkCloud.AccountsTest do
       # The PAT's row id is not a session → :not_found (no cross-context revoke).
       assert {:error, :not_found} = Accounts.revoke_user_session(user, pat.id)
       refute Repo.get(UserToken, pat.id).revoked_at
+    end
+  end
+
+  describe "membership changes revoke team-scoped PATs (cch-w30-s6)" do
+    test "remove_member/2 revokes every PAT the ex-member held on THAT team" do
+      {_owner, team} = user_with_team()
+      user = user_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "admin")
+      other_team = team_fixture()
+      {:ok, _} = Accounts.add_member(other_team, user, "admin")
+
+      {:ok, here, _} =
+        Accounts.create_personal_access_token(user, team, %{name: "here", abilities: ["read"]})
+
+      {:ok, elsewhere, _} =
+        Accounts.create_personal_access_token(user, other_team, %{
+          name: "elsewhere",
+          abilities: ["read"]
+        })
+
+      assert {:ok, :removed} = Accounts.remove_member(team, user)
+
+      assert Accounts.verify_personal_access_token(here) == nil
+      # Team-scoped: the other team's credential is NOT collateral.
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(elsewhere)
+    end
+
+    test "update_member_role/3 demotion revokes only the PATs the new role could not mint" do
+      {owner, team} = user_with_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      # Keep the owner around so the last-owner guard is not what we measure.
+      assert Accounts.team_role(owner, team) == "owner"
+
+      {:ok, deploy, _} =
+        Accounts.create_personal_access_token(admin, team, %{
+          name: "deploy",
+          abilities: ["deploy"]
+        })
+
+      {:ok, read, _} =
+        Accounts.create_personal_access_token(admin, team, %{name: "read", abilities: ["read"]})
+
+      assert {:ok, %TeamMembership{role: "member"}} =
+               Accounts.update_member_role(team, admin, "member")
+
+      assert Accounts.verify_personal_access_token(deploy) == nil
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(read)
+    end
+
+    test "a promotion (member -> admin) revokes nothing" do
+      {_owner, team} = user_with_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      {:ok, read, _} =
+        Accounts.create_personal_access_token(member, team, %{name: "read", abilities: ["read"]})
+
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role(team, member, "admin")
+
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(read)
+    end
+
+    test "revoked PAT rows survive as tombstones (stamped, never deleted)" do
+      {_owner, team} = user_with_team()
+      user = user_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "member")
+      {:ok, _plain, pat} = Accounts.create_personal_access_token(user, team, %{name: "audit-me"})
+
+      assert {:ok, :removed} = Accounts.remove_member(team, user)
+
+      row = Repo.get(UserToken, pat.id)
+      assert row, "the PAT row must remain for audit"
+      refute is_nil(row.revoked_at)
+    end
+
+    test "a PAT cannot be minted without a team — the revoke filter's own precondition" do
+      # cch-w30-s6 review. `revoke_team_pats/2` is scoped `team_id == ^tid`
+      # (team-scoped on purpose: a user_id-only sweep would cross tenants), so a
+      # PAT row with a NULL team_id is INVISIBLE to it and would outlive the
+      # membership it was minted under — the very defect this slice fixes,
+      # reintroduced through the back door.
+      #
+      # The column is nullable (session rows legitimately leave it NULL) and the
+      # only thing binding PATs to a team was one cond branch at POST /v1/tokens
+      # (`is_nil(current_team)` → 422). That is a property of a ROUTE, not of the
+      # row: a second minting call site would have produced credentials nothing
+      # could revoke. The changeset now refuses, so the precondition holds for
+      # every caller present and future.
+      {user, _team} = user_with_team()
+
+      cs =
+        UserToken.pat_changeset(%UserToken{}, %{
+          token_hash: :crypto.strong_rand_bytes(32),
+          name: "teamless",
+          abilities: ["read"],
+          user_id: user.id
+        })
+
+      refute cs.valid?, "a PAT with no team_id must not be mintable"
+      assert %{team_id: ["can't be blank"]} = errors_on(cs)
     end
   end
 

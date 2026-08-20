@@ -44,23 +44,34 @@ defmodule BarkparkCloud.Push do
   by tap-time, and widening the payload would leak conversation content through
   two third-party push clouds for zero freshness gain.
 
-  ## Wave-2 design notes (deliberately NOT built in the spike)
+  ## Built in the wave-2 relay BUILD
 
-    * Instance-side wiring: provision the chat_blocked webhook row on the box
-      via the admin relay (the `create_site` content-publish idiom), carrying
-      `url: <cloud>/v1/relay/chat-blocked/<barkpark_id>` +
-      `secret: Registry.mint_push_relay_secret/1`'s plaintext.
-    * Real APNs/FCM adapters behind `Push.Adapter` (creds human-gate documented
-      in `Push.Adapters.NotConfigured`).
+    * Instance-side wiring: `Registry.provision_push_relay_webhook/2` creates
+      the box's `chat_blocked` webhook row over the admin relay, pointed at
+      `<cloud>/v1/relay/chat-blocked/<barkpark_id>` and signed with
+      `Registry.mint_push_relay_secret/1`'s plaintext.
+    * Real adapters behind `Push.Adapter`: `Adapters.APNS` (HTTP/2 + ES256
+      provider token) and `Adapters.FCM` (HTTP v1 + service-account OAuth2),
+      selected PER PLATFORM by `adapter_for/1` iff their credentials exist.
+      With none, `Adapters.NotConfigured` cancels terminally — and that module's
+      moduledoc is the exact credential gate an operator opens.
+
+  ## Still deliberately NOT built
+
     * Stale-token reaper: a periodic sweep revoking rows whose `last_used_at`
       is ancient. NOTE the delivery path already self-heals the loud half —
       `deliver/3` revokes a row the platform reports unregistered/invalid — so
       the reaper only collects devices that never get sends.
+    * A pooled, multiplexed APNs connection (see `Push.HTTP.Mint`): worth doing
+      when fan-out volume justifies a supervised pool, not before.
   """
 
   import Ecto.Query
 
+  require Logger
+
   alias BarkparkCloud.Accounts.{TeamMembership, User}
+  alias BarkparkCloud.Push.Adapters
   alias BarkparkCloud.Push.DevicePushToken
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Repo
@@ -208,11 +219,11 @@ defmodule BarkparkCloud.Push do
             }
             |> PushDeliveryWorker.new()
             |> Oban.insert()
-            |> case do
-              {:ok, %Oban.Job{conflict?: true}} -> false
-              {:ok, _job} -> true
-              {:error, _} -> false
-            end
+            |> record_insert_result(%{
+              device_push_token_id: device.id,
+              barkpark_id: barkpark.id,
+              session_id: trimmed["session_id"]
+            })
           end)
 
         {:ok, enqueued}
@@ -220,6 +231,54 @@ defmodule BarkparkCloud.Push do
       _ ->
         {:error, :invalid_payload}
     end
+  end
+
+  @doc """
+  Classify ONE `Oban.insert/2` verdict from the fan-out: `true` when a NEW job
+  was enqueued, `false` otherwise. The `{:error, _}` branch also LOGS.
+
+  Public (and `@doc false`-adjacent — it is an internal seam, not API) for one
+  reason: it is the fan-out's whole failure policy, and `Oban.insert/2` cannot
+  be made to fail on demand inside a test that is otherwise real. Extracting it
+  makes the policy directly provable instead of untestable-and-therefore-untested
+  — which is exactly how it shipped silently wrong in the first place.
+
+  ## Why an insert failure was worth extracting
+
+  Before the wave-2 relay build, `{:error, _}` was folded into the same `false`
+  as a dedupe conflict (PR #6097 review advisory). The consequences were
+  invisible by construction: the receiver still answered `202` with a
+  SILENTLY UNDERCOUNTED `enqueued`, so a notification that was never enqueued
+  left no trace in the response, in the job table, or in the log. A dropped
+  needs-you ping is precisely the failure this relay exists to prevent.
+
+  It stays NON-FATAL — one failed insert must not abort the fan-out to the
+  user's other devices — but it is now loud, and the log names the device row,
+  the barkpark and the session, so a missing notification is traceable to the
+  device that lost it.
+  """
+  @spec record_insert_result({:ok, Oban.Job.t()} | {:error, term()}, map()) :: boolean()
+  def record_insert_result({:ok, %Oban.Job{conflict?: true}}, _context) do
+    # Dedupe: an EXPECTED, silent outcome — a replayed webhook inside the
+    # worker's uniqueness window. Not a failure; nothing to say.
+    false
+  end
+
+  def record_insert_result({:ok, %Oban.Job{}}, _context), do: true
+
+  def record_insert_result({:error, reason}, context) do
+    # WARNING, not error: it matches `Registry.maybe_register_content_webhook/3`'s
+    # level for the same class of event (a best-effort side channel that did not
+    # take) and keeps prod error budgets meaningful. The severity that matters
+    # is that it is SAID AT ALL — before this, nothing was.
+    Logger.warning(
+      "push fan-out: could not enqueue delivery " <>
+        "device_push_token_id=#{context[:device_push_token_id]} " <>
+        "barkpark_id=#{context[:barkpark_id]} " <>
+        "session_id=#{inspect(context[:session_id])} reason=#{inspect(reason)}"
+    )
+
+    false
   end
 
   ## Delivery (the worker's core)
@@ -245,7 +304,7 @@ defmodule BarkparkCloud.Push do
         {:cancel, :token_revoked}
 
       %DevicePushToken{} = device ->
-        case adapter().send_push(device, notification(event, payload)) do
+        case adapter_for(device.platform).send_push(device, notification(event, payload)) do
           {:ok, _} ->
             touch_last_used(device)
             :ok
@@ -301,11 +360,54 @@ defmodule BarkparkCloud.Push do
     |> Repo.update()
   end
 
-  defp adapter do
-    Application.get_env(
-      :barkpark_cloud,
-      :push_adapter,
-      BarkparkCloud.Push.Adapters.NotConfigured
-    )
+  @doc """
+  The `Push.Adapter` module that will handle a send to `platform`, right now.
+
+  Resolution (wave-2 relay build):
+
+    * `config :barkpark_cloud, :push_adapter, SomeModule` — an explicit
+      OVERRIDE, used by every platform. config/test.exs pins
+      `PushFakeAdapter` here, so the worker suite is untouched by this change.
+    * `:auto` (the config.exs default, and prod) — per platform, the REAL
+      adapter iff its credentials are present, else `NotConfigured`.
+
+  Per-platform, not global, because a device row is `apns` XOR `fcm`: shipping
+  Android first must not make iOS rows silently take the FCM path, and one
+  platform's missing credential must not disable the other.
+
+  This IS the credential half of severability, and it is the same shape as the
+  row half: absence, not a flag. Nothing to switch on at deploy — the relay
+  starts delivering on the first send after a credential exists.
+  """
+  @spec adapter_for(String.t() | nil) :: module()
+  def adapter_for(platform) do
+    case Application.get_env(:barkpark_cloud, :push_adapter, :auto) do
+      :auto -> auto_adapter(platform)
+      module when is_atom(module) -> module
+    end
+  end
+
+  defp auto_adapter("apns") do
+    if Adapters.APNS.configured?(), do: Adapters.APNS, else: Adapters.NotConfigured
+  end
+
+  defp auto_adapter("fcm") do
+    if Adapters.FCM.configured?(), do: Adapters.FCM, else: Adapters.NotConfigured
+  end
+
+  defp auto_adapter(_other), do: Adapters.NotConfigured
+
+  @doc """
+  Which platforms this control plane can actually deliver to, right now —
+  `%{"apns" => bool, "fcm" => bool}`. The operator-facing answer to "is the
+  credential gate open?", and the thing an ops probe should read instead of
+  guessing from the absence of notifications.
+  """
+  @spec credential_status() :: %{String.t() => boolean()}
+  def credential_status do
+    %{
+      "apns" => adapter_for("apns") != Adapters.NotConfigured,
+      "fcm" => adapter_for("fcm") != Adapters.NotConfigured
+    }
   end
 end

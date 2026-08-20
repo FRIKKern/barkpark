@@ -317,6 +317,118 @@ func TestMidTurnQueuedUserFixturePreservesTurnOneUntilFreshInit(t *testing.T) {
 	}
 }
 
+// TestSettleRaceStaleTailFetchDoesNotCorrupt proves charter D77: a stale turn-1
+// tail-settle GET landing AFTER a queued turn-2's init already flipped Phase must
+// still settle turn 1 into a single row AND clear the stale tail — the old
+// Phase==TurnIdle guard mis-read the resumed streaming phase and left turn 1
+// rendered twice, then turn-2 deltas concatenated onto the stale tail. Reverting
+// the guard to `st.Phase == TurnIdle` makes this test fail (mutation-proof).
+func TestSettleRaceStaleTailFetchDoesNotCorrupt(t *testing.T) {
+	st := State{SessionID: "s1"}
+	st, _ = drive(st, t0, initFrame(t), deltaFrame(t, "turn one"))
+
+	// Turn 1's result emits the settle GET, which captures turn 1's generation.
+	st, effs := drive(st, t0, resultFrame(t, "", false))
+	fetch, ok := hasFetchTail(effs)
+	if !ok {
+		t.Fatal("result must emit the tail-settle FetchTailEffect")
+	}
+	if st.Phase != TurnIdle || st.Tail != "turn one" {
+		t.Fatalf("turn one settling: phase=%v tail=%q", st.Phase, st.Tail)
+	}
+
+	// A queued turn 2's init lands BEFORE turn 1's GET returns — it flips Phase to
+	// TurnStreaming, exactly the signal the old guard (Phase==TurnIdle) mis-read.
+	st, _ = drive(st, t0, initFrame(t))
+	if st.Phase != TurnStreaming {
+		t.Fatalf("turn two init must resume streaming, got %v", st.Phase)
+	}
+
+	// Turn 1's stale GET finally lands, carrying turn 1's generation and turn 1's
+	// settled row. Its Gen still matches TailGen (turn 2 has not appended a delta
+	// yet), so it settles turn 1 into ONE row AND clears the stale tail.
+	settled := Session{ID: "s1", Messages: []Message{
+		{Seq: 1, Role: "assistant", Blocks: json.RawMessage(`[{"type":"paragraph","content":[{"type":"text","value":"turn one"}]}]`)},
+	}}
+	st, _ = drive(st, t0, TailFetchedEvent{Session: settled, Gen: fetch.Gen})
+	if len(st.Messages) != 1 {
+		t.Fatalf("turn one must settle into exactly one row, got %d", len(st.Messages))
+	}
+	if st.Tail != "" {
+		t.Fatalf("the stale settle must clear turn one's tail (no double render), got %q", st.Tail)
+	}
+
+	// Turn 2's deltas now build a CLEAN tail — never concatenated onto a stale
+	// turn-1 prefix.
+	st, _ = drive(st, t0, deltaFrame(t, "turn two"))
+	if st.Tail != "turn two" {
+		t.Fatalf("turn two tail must be clean, got %q (stale-tail corruption)", st.Tail)
+	}
+}
+
+// TestSettleRaceLiveTailSurvivesStaleFetch proves the OTHER wrong-fix the guard
+// must avoid (charter D77): an unconditional `st.Tail = ""` would wipe turn 2's
+// LIVE text when turn 1's stale GET lands after turn 2 already streamed a delta.
+// The generation mismatch protects it.
+func TestSettleRaceLiveTailSurvivesStaleFetch(t *testing.T) {
+	st := State{SessionID: "s1"}
+	st, _ = drive(st, t0, initFrame(t), deltaFrame(t, "one"))
+	st, effs := drive(st, t0, resultFrame(t, "", false))
+	fetch, ok := hasFetchTail(effs)
+	if !ok {
+		t.Fatal("result must emit the tail-settle FetchTailEffect")
+	}
+
+	// Turn 2 init + a delta re-stamp the tail to generation 2 BEFORE turn 1's GET
+	// lands. (The stale "one" prefix is a bounded transient that clears at turn
+	// 2's own settle; the load-bearing invariant is that turn 2's text is NOT lost.)
+	st, _ = drive(st, t0, initFrame(t), deltaFrame(t, "two"))
+
+	st, _ = drive(st, t0, TailFetchedEvent{
+		Session: Session{ID: "s1", Messages: []Message{{Seq: 1, Role: "assistant", Blocks: json.RawMessage(`[]`)}}},
+		Gen:     fetch.Gen,
+	})
+	if !strings.Contains(st.Tail, "two") {
+		t.Fatalf("turn two's live text must survive a stale settle, got %q", st.Tail)
+	}
+}
+
+// TestAnsweredRefetchClearsTailAtGeneration proves the answered-refetch path
+// (since=0) carries the current generation and clears the tail at its boundary
+// when no new turn has advanced it (charter D77 explicit decision).
+func TestAnsweredRefetchClearsTailAtGeneration(t *testing.T) {
+	st := State{SessionID: "s1", Gen: 2, TailGen: 2, Tail: "live", AnswerInFlight: map[string]string{"r1": "allow"}}
+	st, effs := drive(st, t0, AnsweredEvent{RequestID: "r1"})
+	fetch, ok := hasFetchTail(effs)
+	if !ok || fetch.Gen != 2 {
+		t.Fatalf("answered refetch must carry the current generation, got %+v ok=%v", fetch, ok)
+	}
+	st, _ = drive(st, t0, TailFetchedEvent{Session: Session{ID: "s1"}, Gen: fetch.Gen})
+	if st.Tail != "" {
+		t.Fatalf("the answered refetch must clear the tail at its boundary, got %q", st.Tail)
+	}
+}
+
+// TestWedgeRefetchClearsTailAtGeneration proves the 8s interrupt-wedge refetch
+// path carries the current generation and clears the degraded tail at its
+// boundary (charter D77 explicit decision).
+func TestWedgeRefetchClearsTailAtGeneration(t *testing.T) {
+	st := State{SessionID: "s1", Phase: TurnStreaming, Gen: 1, TailGen: 1, Tail: "degraded"}
+	st, _ = drive(st, t0, InterruptEvent{})
+	st, effs := drive(st, t0.Add(9*time.Second), TickEvent{})
+	fetch, ok := hasFetchTail(effs)
+	if !ok || fetch.Gen != 1 {
+		t.Fatalf("the wedge refetch must carry the current generation, got %+v ok=%v", fetch, ok)
+	}
+	if st.Phase != TurnIdle {
+		t.Fatalf("the wedge must degrade to idle, got %v", st.Phase)
+	}
+	st, _ = drive(st, t0, TailFetchedEvent{Session: Session{ID: "s1"}, Gen: fetch.Gen})
+	if st.Tail != "" {
+		t.Fatalf("the wedge refetch must clear the degraded tail, got %q", st.Tail)
+	}
+}
+
 // TestFreshSendStartsWaiting proves the idle-send path: a send with no active
 // turn flips to waiting and is NOT badged.
 func TestFreshSendStartsWaiting(t *testing.T) {
@@ -605,5 +717,202 @@ func TestPlanApproveNoticePromisesAutopilot(t *testing.T) {
 	st2, _ = drive(st2, t0, AnswerEvent{RequestID: "r1", Decision: "deny"})
 	if strings.Contains(st2.Notice, "Autopilot") {
 		t.Fatalf("plan-keep must not promise Autopilot, got %q", st2.Notice)
+	}
+}
+
+// ── the runtime lane (codex + remote/RemoteRef) ─────────────────────────────
+// The wire has TWO live text lanes: event:chat (raw claude stream-json) and
+// event:runtime (the normalized Runtime.Event struct codex and RemoteRef emit,
+// with the text at native.params.delta). Before this lane existed a codex frame
+// fell through reduceFrame inert — no tail, no phase flip, and no settle at
+// all, so the persisted answer never reached the transcript.
+
+// runtimeFrame builds an event:runtime FrameEvent from the serialized
+// %Runtime.Event{} shape chat_controller.ex puts on the wire.
+func runtimeFrame(t *testing.T, kind string, extra map[string]any) FrameEvent {
+	t.Helper()
+	obj := map[string]any{
+		"version":    1,
+		"provider":   "codex",
+		"session_id": "s1",
+		"durability": "delta",
+		"kind":       kind,
+	}
+	for k, v := range extra {
+		obj[k] = v
+	}
+	raw, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatalf("marshal runtime frame: %v", err)
+	}
+	return FrameEvent{Name: "runtime", Data: raw}
+}
+
+// runtimeTextFrame is a codex text frame of the given kind. text_delta,
+// thinking_delta and tool_delta ALL carry their text at native.params.delta
+// (codex protocol.ex maps item/agentMessage/delta, item/reasoning/textDelta and
+// item/commandExecution/outputDelta to the same place) — which is exactly why
+// the kind match must be exact.
+func runtimeTextFrame(t *testing.T, kind, delta string) FrameEvent {
+	return runtimeFrame(t, kind, map[string]any{
+		"item_id": "item_1",
+		"native": map[string]any{
+			"method": "item/agentMessage/delta",
+			"params": map[string]any{"itemId": "item_1", "delta": delta},
+		},
+	})
+}
+
+// TestRuntimeTextDeltasStreamAndTurnCompletedSettles proves the codex lane
+// streams and — the correctness half — settles: without the turn_completed arm
+// the phase never returns to idle and the persisted answer never lands.
+func TestRuntimeTextDeltasStreamAndTurnCompletedSettles(t *testing.T) {
+	// A codex session never emits a claude system/init frame, so the phase must
+	// leave TurnWaiting on the first delta.
+	st, _ := drive(State{SessionID: "s1"}, t0, SendEvent{Content: "hi"})
+	if st.Phase != TurnWaiting {
+		t.Fatalf("send should wait, got %v", st.Phase)
+	}
+
+	st, effs := drive(st, t0,
+		runtimeTextFrame(t, "text_delta", "Hel"),
+		runtimeTextFrame(t, "text_delta", "lo, "),
+		runtimeTextFrame(t, "text_delta", "world"),
+	)
+	if st.Tail != "Hello, world" {
+		t.Fatalf("tail = %q, want %q", st.Tail, "Hello, world")
+	}
+	if st.Phase != TurnStreaming {
+		t.Fatalf("a runtime delta must start streaming, got %v", st.Phase)
+	}
+	if len(effs) != 0 {
+		t.Fatalf("a delta must trigger no IO (tail is live truth), got %d effects", len(effs))
+	}
+	if st.TailGen != st.Gen {
+		t.Fatalf("TailGen = %d, want the issuing Gen %d (D77 stamp)", st.TailGen, st.Gen)
+	}
+
+	st, effs = drive(st, t0, runtimeFrame(t, "turn_completed", map[string]any{
+		"durability": "durable", "terminal_state": "completed",
+	}))
+	if st.Phase != TurnIdle {
+		t.Fatalf("turn_completed must end the turn, phase = %v", st.Phase)
+	}
+	if !st.Settling {
+		t.Fatal("turn_completed must mark the state settling")
+	}
+	f, ok := hasFetchTail(effs)
+	if !ok {
+		t.Fatal("turn_completed must emit the turn-boundary FetchTailEffect")
+	}
+	if f.SinceSeq != st.LastSeq || f.Gen != st.Gen {
+		t.Fatalf("refetch = {SinceSeq %d, Gen %d}, want {%d, %d}", f.SinceSeq, f.Gen, st.LastSeq, st.Gen)
+	}
+	// The tail stays painted until the fetch returns — never a blank flash.
+	if st.Tail != "Hello, world" {
+		t.Fatalf("tail must survive until settlement lands, got %q", st.Tail)
+	}
+}
+
+// TestRuntimeKindMatchIsExact pins THE TRAP: thinking_delta (reasoning) and
+// tool_delta (command output) carry their text at the SAME native.params.delta
+// location as the answer, so a loose match splices them into the transcript.
+func TestRuntimeKindMatchIsExact(t *testing.T) {
+	st, _ := drive(State{SessionID: "s1"}, t0,
+		initFrame(t),
+		runtimeTextFrame(t, "text_delta", "The answer is "),
+	)
+	if st.Tail != "The answer is " {
+		t.Fatalf("tail = %q, want the streamed answer", st.Tail)
+	}
+
+	st, effs := drive(st, t0,
+		runtimeTextFrame(t, "thinking_delta", "let me reconsider the premise…"),
+		runtimeTextFrame(t, "tool_delta", "$ rm -rf build\nremoved 412 files"),
+		runtimeFrame(t, "item_started", map[string]any{
+			"native": map[string]any{"params": map[string]any{"item": map[string]any{"id": "i1"}}},
+		}),
+		runtimeFrame(t, "usage", map[string]any{"usage": map[string]any{"input_tokens": 10}}),
+	)
+	if st.Tail != "The answer is " {
+		t.Fatalf("reasoning/tool output must NEVER enter the tail, got %q", st.Tail)
+	}
+	if len(effs) != 0 {
+		t.Fatalf("non-terminal runtime kinds must trigger no IO, got %d effects", len(effs))
+	}
+
+	// The answer keeps streaming around them — the tail is picky, not frozen.
+	st, _ = drive(st, t0, runtimeTextFrame(t, "text_delta", "42."))
+	if st.Tail != "The answer is 42." {
+		t.Fatalf("tail = %q, want the answer to keep streaming", st.Tail)
+	}
+}
+
+// TestRuntimeTurnCompletedTerminalState proves an interrupted or failed codex
+// turn is still a settle, with an honest notice — the D11 rule on this lane.
+func TestRuntimeTurnCompletedTerminalState(t *testing.T) {
+	base := State{SessionID: "s1", Phase: TurnStreaming, Tail: "partial"}
+
+	st, effs := drive(base, t0, runtimeFrame(t, "turn_completed", map[string]any{
+		"terminal_state": "interrupted",
+	}))
+	if st.Phase != TurnIdle || !strings.Contains(st.Notice, "Interrupted") {
+		t.Fatalf("interrupted turn: phase %v notice %q", st.Phase, st.Notice)
+	}
+	if _, ok := hasFetchTail(effs); !ok {
+		t.Fatal("an interrupted codex turn must still settle")
+	}
+
+	st, effs = drive(base, t0, runtimeFrame(t, "turn_completed", map[string]any{
+		"terminal_state": "failed",
+	}))
+	if !strings.Contains(st.Notice, "error") {
+		t.Fatalf("failed turn notice = %q, want an honest error line", st.Notice)
+	}
+	if _, ok := hasFetchTail(effs); !ok {
+		t.Fatal("a failed codex turn must still settle")
+	}
+
+	st, _ = drive(base, t0, runtimeFrame(t, "turn_completed", map[string]any{
+		"terminal_state": "completed",
+	}))
+	if st.Notice != "" {
+		t.Fatalf("a clean turn must carry no notice, got %q", st.Notice)
+	}
+}
+
+// TestRuntimeFrameTolerance proves a malformed or payload-less runtime frame is
+// inert — the decoder never throws and never moves the tail on garbage.
+func TestRuntimeFrameTolerance(t *testing.T) {
+	base := State{SessionID: "s1", Phase: TurnStreaming, Tail: "kept"}
+
+	for name, ev := range map[string]FrameEvent{
+		"garbage":       {Name: "runtime", Data: []byte("not json")},
+		"no native":     runtimeFrame(t, "text_delta", nil),
+		"delta not str": runtimeFrame(t, "text_delta", map[string]any{"native": map[string]any{"params": map[string]any{"delta": 42}}}),
+		"empty delta":   runtimeTextFrame(t, "text_delta", ""),
+	} {
+		st, effs := drive(base, t0, ev)
+		if st.Tail != "kept" {
+			t.Fatalf("%s: tail = %q, want it untouched", name, st.Tail)
+		}
+		if len(effs) != 0 {
+			t.Fatalf("%s: want no effects, got %d", name, len(effs))
+		}
+	}
+}
+
+// TestRuntimeAndClaudeLanesShareTheTail is the CONTROL LEG: the same drive()
+// harness observes the claude lane streaming and settling, so none of the
+// runtime assertions above can be vacuously green on a dead harness.
+func TestRuntimeAndClaudeLanesShareTheTail(t *testing.T) {
+	st, effs := drive(State{SessionID: "s1"}, t0, initFrame(t), deltaFrame(t, "Hel"), deltaFrame(t, "lo"))
+	if st.Tail != "Hello" || st.Phase != TurnStreaming {
+		t.Fatalf("control: claude lane must still stream, tail %q phase %v", st.Tail, st.Phase)
+	}
+	st, effs = drive(st, t0, resultFrame(t, "", false))
+	f, ok := hasFetchTail(effs)
+	if !ok || f.Gen != st.Gen {
+		t.Fatalf("control: claude lane must still settle, effs %v", effs)
 	}
 }

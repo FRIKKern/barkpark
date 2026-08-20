@@ -12,12 +12,17 @@ defmodule BarkparkCloud.DomainStatus do
   can render a Vercel-grade "DNS found → points here → TLS issued → serving"
   checklist that says exactly where a domain is stuck AND what to do about it.
 
-  ## The estate (never parse a URL ad hoc)
+  ## The estate (the name the plane actually serves)
 
-  Every instance has one PLATFORM domain — `Barkpark.provisioning_fqdn/1`, the
-  same FQDN the warm-pool worker provisions — and, when attached, one CUSTOM
-  domain (`custom_host`, a scalar: 0 or 1). Each is checked against the
-  instance's reported `host` (the box's actual address).
+  Every instance has one PLATFORM domain — the host of its stored `url`, which
+  is the name go-live reserved, the worker stood up, and TLS was issued for —
+  and, when attached, one CUSTOM domain (`custom_host`, a scalar: 0 or 1). Each
+  is checked against the instance's reported `host` (the box's actual address).
+
+  `Barkpark.provisioning_fqdn/1` is NOT that name in general: it is always the
+  suffixed `<slug>-<team_short_id>` form, while go-live prefers the clean
+  `<slug>` form whenever the label is free. It remains the fallback for a row
+  that has no `url` yet.
 
   ## The four ordered stages
 
@@ -40,6 +45,31 @@ defmodule BarkparkCloud.DomainStatus do
 
   A stage DOWNSTREAM of a non-ok stage is `pending` (skipped, not probed) — the
   chain stops at the first blocker so the operator reads top-down to the cause.
+
+  ## `unknown`: a check we could not MAKE is not a check that failed to pass
+
+  A stage that was ATTEMPTED and could not be measured is `unknown` — the word
+  this schema already ratified for exactly this condition (`Registry` health:
+  `~w(unknown up down)`, and `mark_offline/1`'s "NOT `down` — we cannot probe").
+  Today's only source is the resolver: a raise, an exit, a `{:error, _}` return
+  or a nameserver-less box makes `resolve_all/2` unable to answer, and folding
+  that into an empty address list would make the control plane say "no A/AAAA
+  record has propagated yet" — a definite claim about the OPERATOR's DNS — with
+  "give it a moment and re-check" attached, when the truth is "our lookup
+  failed". Three rules make it honest:
+
+    * ORDERING is `failed > unknown > pending > ok`, an explicit clause in
+      `overall/1`. `pending` is a PROMISE (this will turn green on its own);
+      `unknown` promises nothing, so it must OUTRANK pending — otherwise a
+      domain with one unmeasurable rung still tells the person to wait.
+    * CONTAINMENT: only a stage that actually RAN may be `unknown`. Stages
+      skipped behind a blocker (`run_or_skip/5`) stay `pending`, so a normally
+      waiting domain never flips.
+    * NO REMEDIATION: `build_stage/5` returns `nil` for an `unknown` stage.
+      `FailureCopy.domain_stage_remediation/2` is keyed on the STAGE and can only
+      advise about the operator's own configuration; it structurally cannot say
+      "we could not check". The honest copy lives in the EVIDENCE string, and the
+      fix is the ABSENCE of advice.
 
   ## Two subjects: a Barkpark box, or a co-located Site
 
@@ -89,7 +119,7 @@ defmodule BarkparkCloud.DomainStatus do
   # so a pathological host string can never bloat the envelope.
   @max_evidence_bytes 240
 
-  @type status :: :ok | :pending | :failed | :proxied
+  @type status :: :ok | :pending | :failed | :proxied | :unknown
 
   @type serving_mode :: :direct | :cf_proxied
 
@@ -168,16 +198,47 @@ defmodule BarkparkCloud.DomainStatus do
 
   # ── estate ──
 
-  # Platform FQDN always; the one custom host only when attached. Never parse the
-  # stored url — provisioning_fqdn/1 is the single source the worker also uses.
+  # The platform domain always; the one custom host only when attached.
+  #
+  # The platform domain is the host of the STORED `url` — NOT
+  # `Barkpark.provisioning_fqdn/1`. `provisioning_fqdn/1` is unconditionally the
+  # SUFFIXED `<slug>-<team_short_id>` form, but go-live PREFERS the clean form
+  # (`Registry.insert_with_url_reservation/4`: `if reserved?(slug), do: suffixed,
+  # else: clean_url(slug)`) and the router hands the provisioner
+  # `Barkpark.subdomain_from_url(bp)` — the url-derived label. So the name that
+  # is actually stood up, issued a certificate, and sent to the customer is the
+  # one in `url`, and checking the suffixed name instead left live instances
+  # stuck at `dns_found: pending` ("give it a moment and re-check") for a
+  # hostname nothing ever creates. `url` IS the domain of record; the suffixed
+  # FQDN is only the fallback for pre-reservation rows that have no url yet.
   defp domain_estate(bp) do
-    platform = {Barkpark.provisioning_fqdn(bp), "platform"}
+    platform = {platform_host(bp), "platform"}
 
     case bp.custom_host do
       host when is_binary(host) and host != "" -> [platform, {host, "custom"}]
       _ -> [platform]
     end
   end
+
+  # The hostname of the stored `url`: scheme stripped, path and any port
+  # dropped. A row with no url (or a url that yields no host) falls back to
+  # `provisioning_fqdn/1` — the pre-reservation shape, where the suffixed FQDN
+  # genuinely IS the only name there is.
+  defp platform_host(%Barkpark{url: url} = bp) when is_binary(url) do
+    host =
+      url
+      |> String.trim()
+      |> String.replace_prefix("https://", "")
+      |> String.replace_prefix("http://", "")
+      |> String.split("/", parts: 2)
+      |> hd()
+      |> String.split(":", parts: 2)
+      |> hd()
+
+    if host == "", do: Barkpark.provisioning_fqdn(bp), else: host
+  end
+
+  defp platform_host(bp), do: Barkpark.provisioning_fqdn(bp)
 
   # A Site's estate is its custom domains array (the apex, www, and any attached
   # hostnames). Each is a "custom" domain for remediation-copy purposes. A site
@@ -240,6 +301,26 @@ defmodule BarkparkCloud.DomainStatus do
   # pending stage (still reason-bearing — every non-ok stage carries remediation).
   defp run_or_skip(:ok, _stage, _label, _kind, fun), do: fun.()
 
+  # Skipped behind an UNMEASURABLE stage. Its own status stays `pending` (it was
+  # never attempted — containment), but it carries NO advice: the whole chain
+  # below a check we could not make is un-diagnosed, and FailureCopy's
+  # stage-keyed copy ("this domain resolves, but not to this instance's
+  # address…") would be exactly the guess this fix removes one rung up. The
+  # CONTROL-FLOW atom stays :unknown so the rest of the chain inherits the same
+  # silence — the rendered status does not.
+  defp run_or_skip(:unknown, stage, label, kind, _fun) do
+    skipped =
+      build_stage(
+        stage,
+        label,
+        :pending,
+        "Not checked yet — an earlier step couldn't be checked.",
+        kind
+      )
+
+    {:unknown, %{skipped | remediation: nil}}
+  end
+
   defp run_or_skip(_blocked, stage, label, kind, _fun) do
     {:pending,
      build_stage(
@@ -255,26 +336,38 @@ defmodule BarkparkCloud.DomainStatus do
   # pending (propagating), never failed. Carries the resolved address set forward
   # so points_here doesn't resolve twice.
   defp probe_dns(host, kind, seams) do
-    addrs = resolve_all(host, seams.dns)
+    case resolve_all(host, seams.dns) do
+      # The lookup itself could not be made — NOT a verdict on the operator's
+      # records. Say so, and attach no advice (build_stage nils it).
+      {:error, reason} ->
+        {:unknown,
+         build_stage(
+           :dns_found,
+           @dns_label,
+           :unknown,
+           "Could not check whether #{host} resolves — this control plane's DNS lookup failed (#{describe(reason)}). This is not a verdict on your records.",
+           kind
+         ), []}
 
-    if addrs == [] do
-      {:pending,
-       build_stage(
-         :dns_found,
-         @dns_label,
-         :pending,
-         "No A/AAAA record for #{host} has propagated yet.",
-         kind
-       ), addrs}
-    else
-      {:ok,
-       build_stage(
-         :dns_found,
-         @dns_label,
-         :ok,
-         "Resolves to #{Enum.join(addrs, ", ")}.",
-         kind
-       ), addrs}
+      {:ok, []} ->
+        {:pending,
+         build_stage(
+           :dns_found,
+           @dns_label,
+           :pending,
+           "No A/AAAA record for #{host} has propagated yet.",
+           kind
+         ), []}
+
+      {:ok, addrs} ->
+        {:ok,
+         build_stage(
+           :dns_found,
+           @dns_label,
+           :ok,
+           "Resolves to #{Enum.join(addrs, ", ")}.",
+           kind
+         ), addrs}
     end
   end
 
@@ -301,7 +394,20 @@ defmodule BarkparkCloud.DomainStatus do
   # elsewhere is failed.
   defp probe_points_here(host, kind, :direct, expected, addrs) do
     case expected do
-      [] ->
+      # The box's OWN address is a name we could not resolve — the second lie
+      # from the same collapse. "This instance hasn't reported an address yet"
+      # would be false (it reported a hostname); we simply could not look it up.
+      {:error, reason} ->
+        {:unknown,
+         build_stage(
+           :points_here,
+           @points_label,
+           :unknown,
+           "Could not check where #{host} points — looking up this instance's own address failed (#{describe(reason)}). This is not a verdict on your records.",
+           kind
+         )}
+
+      {:ok, []} ->
         {:pending,
          build_stage(
            :points_here,
@@ -311,7 +417,7 @@ defmodule BarkparkCloud.DomainStatus do
            kind
          )}
 
-      expected ->
+      {:ok, expected} ->
         case Enum.find(addrs, &(&1 in expected)) do
           nil ->
             {:failed,
@@ -349,12 +455,15 @@ defmodule BarkparkCloud.DomainStatus do
   # The box's address set: a literal IP host is itself the target (round-tripped
   # through parse+ntoa so a non-canonical stored IPv6 like "2001:0db8::1" still
   # matches the resolver's canonical form); a hostname host is resolved (so a
-  # CNAME-style box still compares honestly). An empty/nil host is [] (pending).
-  defp expected_addrs(host, _seams) when not is_binary(host) or host == "", do: []
+  # CNAME-style box still compares honestly). An empty/nil host is `{:ok, []}`
+  # (genuinely nothing reported → pending); a resolver that could not answer for
+  # the box host is `{:error, reason}` (→ points_here unknown), NEVER an empty
+  # set — "hasn't reported an address yet" would be a different, false claim.
+  defp expected_addrs(host, _seams) when not is_binary(host) or host == "", do: {:ok, []}
 
   defp expected_addrs(host, seams) do
     case :inet.parse_address(to_charlist(host)) do
-      {:ok, addr} -> [ip_to_string(addr)]
+      {:ok, addr} -> {:ok, [ip_to_string(addr)]}
       {:error, _} -> resolve_all(host, seams.dns)
     end
   end
@@ -455,20 +564,28 @@ defmodule BarkparkCloud.DomainStatus do
 
   # ── envelope helpers ──
 
-  # A domain is failed if any stage failed, else pending if any stage is pending,
-  # else ok. `ok` beats `pending` beats `failed` in severity ordering.
+  # Severity ordering: failed > unknown > pending > ok. The `unknown` clause is
+  # EXPLICIT and sits ABOVE both `pending` and the terminal `ok` on purpose —
+  # without it a rung nobody could measure either reads as a promise ("pending",
+  # it'll turn green on its own) or, with no pending rungs left, lets the
+  # envelope seal `ok: true` over an unmeasured rung.
   defp overall(stages) do
     cond do
       Enum.any?(stages, &(&1.status == "failed")) -> "failed"
+      Enum.any?(stages, &(&1.status == "unknown")) -> "unknown"
       Enum.any?(stages, &(&1.status == "pending")) -> "pending"
       true -> "ok"
     end
   end
 
   # Build one stage map. A healthy stage (:ok, or the informational :proxied)
-  # carries no remediation; every actionable non-ok stage (:pending / :failed)
-  # gets server-owned copy from FailureCopy (which has a terminal default clause,
-  # so no such stage is ever reason-less).
+  # carries no remediation, and neither does an :unknown one — FailureCopy is
+  # keyed on the STAGE and can only advise about the operator's configuration, so
+  # attaching it to a check we could not MAKE turns "we could not look" into
+  # "your DNS hasn't propagated, give it a moment". The honest copy is the
+  # evidence string; the fix is the ABSENCE of advice. Every actionable non-ok
+  # stage (:pending / :failed) still gets server-owned copy from FailureCopy
+  # (which has a terminal default clause, so no such stage is ever reason-less).
   defp build_stage(stage, label, status, evidence, kind) do
     stage_name = to_string(stage)
 
@@ -478,7 +595,7 @@ defmodule BarkparkCloud.DomainStatus do
       status: to_string(status),
       evidence: truncate(evidence),
       remediation:
-        if status in [:ok, :proxied] do
+        if status in [:ok, :proxied, :unknown] do
           nil
         else
           FailureCopy.domain_stage_remediation(kind, stage_name)
@@ -489,20 +606,64 @@ defmodule BarkparkCloud.DomainStatus do
   # ── outbound plumbing ──
 
   # Resolve a host over inet + inet6 (the SafeUrl.resolve_and_check/1 idiom) and
-  # return de-duplicated address STRINGS. A resolver error on either family is an
-  # empty contribution, never a raise.
+  # return de-duplicated address STRINGS — DISCRIMINATED, never collapsed:
+  #
+  #   * `{:ok, addrs}` — at least one family answered with addresses.
+  #   * `{:ok, []}`    — every family answered, and the answer was empty (an
+  #     empty list, or an authoritative `:nxdomain`). This is a MEASUREMENT: the
+  #     record genuinely hasn't propagated.
+  #   * `{:error, reason}` — nothing answered and at least one family faulted
+  #     (a raise, an exit, a timeout, a nameserver-less box, or an off-contract
+  #     return value). This is the ABSENCE of a measurement.
+  #
+  # A fault on ONE family while the other answers is still `{:ok, addrs}` — we
+  # measured the thing we needed to measure. Never raises (`safe_call/1`).
+  #
+  # `:nxdomain` IS AN ANSWER, NOT A FAULT — decided at review, superseding the
+  # letter of charter D332 (which listed it among the faults). The builder
+  # measured the transport and filed the contradiction rather than deciding it
+  # (task-3fbfff8c97b50c8f): `:inet.getaddrs(~c"no-such-host.example", :inet)`
+  # and the same on `:inet6` BOTH return `{:error, :nxdomain}`, re-measured at
+  # review on this host. That is exactly what a freshly-attached, still-
+  # propagating domain looks like through the real resolver — so classifying it
+  # as a fault would turn the MOST COMMON waiting state into "we could not
+  # check", strip its propagation advice, and replace one lie with another in
+  # the same rung this slice exists to make honest. `{:ok, []}` would otherwise
+  # be a shape only the test fakes can produce, which is the wave's own fourth
+  # standing clause (a fixture that cannot produce the production condition).
+  #
+  # NXDOMAIN means the resolver ANSWERED: this name does not exist. That is a
+  # measurement, and its honest rendering is `pending` + "hasn't propagated
+  # yet". A FAULT is the absence of an answer: a raise, an exit, a timeout, a
+  # nameserver-less box, an off-contract return.
+  @answered_empty [:nxdomain]
+
   defp resolve_all(host, dns_fun) do
     charlist = to_charlist(host)
 
-    [:inet, :inet6]
-    |> Enum.flat_map(fn family ->
-      case safe_call(fn -> dns_fun.(charlist, family) end) do
-        {:ok, list} when is_list(list) -> list
-        _ -> []
-      end
-    end)
-    |> Enum.map(&ip_to_string/1)
-    |> Enum.uniq()
+    results =
+      Enum.map([:inet, :inet6], fn family ->
+        case safe_call(fn -> dns_fun.(charlist, family) end) do
+          {:ok, list} when is_list(list) -> {:ok, list}
+          {:error, reason} when reason in @answered_empty -> {:ok, []}
+          {:error, reason} -> {:error, reason}
+          other -> {:error, {:unexpected_resolver_result, other}}
+        end
+      end)
+
+    addrs =
+      results
+      |> Enum.flat_map(fn
+        {:ok, list} -> list
+        {:error, _} -> []
+      end)
+      |> Enum.map(&ip_to_string/1)
+      |> Enum.uniq()
+
+    case {addrs, Enum.find(results, &match?({:error, _}, &1))} do
+      {[], {:error, reason}} -> {:error, reason}
+      {addrs, _} -> {:ok, addrs}
+    end
   end
 
   defp ip_to_string(addr) when is_tuple(addr), do: addr |> :inet.ntoa() |> to_string()
@@ -556,6 +717,7 @@ defmodule BarkparkCloud.DomainStatus do
   defp describe(:econnrefused), do: "connection refused"
   defp describe(:closed), do: "connection closed"
   defp describe(:nxdomain), do: "no such host"
+  defp describe(:no_nameservers), do: "no nameservers configured"
   defp describe({:tls_alert, _} = alert), do: inspect(alert)
   defp describe(reason) when is_atom(reason), do: to_string(reason)
   defp describe(reason), do: reason |> inspect() |> truncate()

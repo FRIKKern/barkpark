@@ -786,8 +786,9 @@ defmodule Barkpark.PortableDoc.Render.Components do
   @doc """
   Render a `chat-tool-diff` block: the terminal-style `+`/`−` line diff beneath a
   tool call (dispatch on input SHAPE, never tool name — `ChatToolRenderer`). A
-  diff over `@chat_diff_budget` lines folds behind a `<details>` with an honest
-  `+N more lines`. Re-derives from `block["input"]` via the ONE `TextDiff` engine,
+  diff over `@chat_diff_budget` DRAWABLE lines (gaps never spend budget — D40)
+  folds behind a `<details>` with an honest `+N more lines` counting drawable
+  rows only. Re-derives from `block["input"]` via the ONE `TextDiff` engine,
   so it is byte-faithful to `ChatToolRenderer.tool_diff/1`. Evergreen tokens only.
   """
   def chat_tool_diff_html(block) when is_map(block) do
@@ -798,7 +799,8 @@ defmodule Barkpark.PortableDoc.Render.Components do
       lines ->
         added = Enum.count(lines, &(&1["op"] == "+"))
         removed = Enum.count(lines, &(&1["op"] == "-"))
-        {head, rest} = Enum.split(lines, @chat_diff_budget)
+        drawable = Enum.count(lines, &(&1["op"] != "gap"))
+        {head, rest} = chat_diff_budget_split(lines)
 
         counts =
           ~s|<div class="text-dim" style="font-size: 11px; margin-bottom: 4px;">| <>
@@ -806,8 +808,8 @@ defmodule Barkpark.PortableDoc.Render.Components do
             ~s|<span style="color: var(--danger);">−#{removed}</span></div>|
 
         body =
-          if length(lines) > @chat_diff_budget do
-            overflow = length(lines) - @chat_diff_budget
+          if drawable > @chat_diff_budget do
+            overflow = drawable - @chat_diff_budget
 
             ~s|<details><summary style="cursor: pointer; list-style: none;">| <>
               chat_diff_rows_html(head) <>
@@ -885,7 +887,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
         diff_section_rows_html(head)
       end
 
-    ~s|<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
+    ~s|<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
       counts <> body <> ~s|</div>|
   end
 
@@ -915,7 +917,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
         else:
           ~s|<div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">#{escape_html(legend)}</div>|
 
-    ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
+    ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
       rows <> legend_html <> ~s|</div>|
   end
 
@@ -1310,6 +1312,26 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   defp chat_multi_edit_lines(_), do: []
+
+  # Split the diff after the budget-th DRAWABLE row (charter D40): a `gap` hunk
+  # separator never spends budget — it rides free in the head — and never stays
+  # in the summary once the budget is spent (a gap at or past the fold belongs to
+  # the `<details>` tail it separates). The overflow footnote counts undisplayed
+  # DRAWABLE rows only; the web surface keeps the folded tail behind `<details>`
+  # — parity with the terminal/mobile discard is the budget arithmetic, never
+  # the DOM. Mirrors chat_blocks.go / mobile chat.tsx / react chat.ts.
+  defp chat_diff_budget_split(lines) do
+    {head, rest, _drawn} =
+      Enum.reduce(lines, {[], [], 0}, fn line, {head, rest, drawn} ->
+        if drawn < @chat_diff_budget do
+          {[line | head], rest, drawn + if(line["op"] == "gap", do: 0, else: 1)}
+        else
+          {head, [line | rest], drawn}
+        end
+      end)
+
+    {Enum.reverse(head), Enum.reverse(rest)}
+  end
 
   defp chat_diff_rows_html(lines) do
     Enum.map_join(lines, "", fn %{"op" => op, "text" => text} ->

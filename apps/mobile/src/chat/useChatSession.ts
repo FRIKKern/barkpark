@@ -5,12 +5,14 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
 import type { InstanceConnection } from '../api/instance'
-import { ChatSessionStore, type SessionSnapshot } from './sessionStore'
+import { ChatSessionStore, type SessionChoices, type SessionSnapshot } from './sessionStore'
 
 export interface ChatSessionHandle extends SessionSnapshot {
   send: (content: string) => void
   interrupt: () => void
   answer: (requestId: string, decision: 'allow' | 'deny') => void
+  /** Writes one picker choice (optimistic + PATCH). */
+  setChoice: (key: keyof SessionChoices, value: string) => void
   retry: () => void
 }
 
@@ -38,7 +40,11 @@ export function useChatSession(
     (requestId: string, decision: 'allow' | 'deny') => store.answer(requestId, decision),
     [store],
   )
+  const setChoice = useCallback(
+    (key: keyof SessionChoices, value: string) => store.setChoice(key, value),
+    [store],
+  )
   const retry = useCallback(() => setAttempt((a) => a + 1), [])
 
-  return { ...snapshot, send, interrupt, answer, retry }
+  return { ...snapshot, send, interrupt, answer, setChoice, retry }
 }

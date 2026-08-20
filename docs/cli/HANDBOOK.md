@@ -35,10 +35,10 @@ Command tree is a **pure function** of `GET /v1/capabilities` — plugins add no
 ## Context precedence
 
 ```
-flags  >  env (BARKPARK_*)  >  active context  >  defaults
+flags  >  env (BARKPARK_*)  >  .barkpark.json (repo)  >  active context  >  defaults
 ```
 
-Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup`, `bp use <name>`).
+Source: `manifest.Resolve` + `internal/cli/repofile.go`. Active context is persisted `config.json` (`bp setup`, `bp use <name>`). The repo layer is a `.barkpark.json` discovered by walking up from cwd (nearest wins): fields `server` (a saved-server name or URL — a name resolves like `-s <name>`, adopting the entry's token), `workspace`, `project`, `dataset` — each field independent, unknown keys ignored. A `token` field is **rejected loudly** — tokens never live in the repo file.
 
 ## Auth tiers
 
@@ -132,7 +132,7 @@ On-ramp CLI-native built-in (no manifest needed). Four targets:
 
 `--dry-run` prints the plan object (`-o json` → machine-readable Plan). `--yes` gates destructive/outbound runs. Wizard on bare `bp setup` only when stdin+stdout are a TTY with no `--target`/`-o json`/`--yes`.
 
-Server cache: every successful `connect` upserts into `known_servers` in `~/.config/barkpark/config.json` (0600, 0700 dir; tokens never exposed). `bp use <name>` switches the active server. `bp servers` lists all. `-s <name>` targets one command without switching.
+Server cache: every successful `connect` upserts into `known_servers` in `~/.config/barkpark/config.json` (0600, 0700 dir; tokens never exposed). `bp use <name>` switches the active server. `bp servers` lists all. `-s <name>` targets one command without switching. A committed `.barkpark.json` (`{"server":"<name-or-url>"}`) pins a whole repo without switching (see Context precedence).
 
 ## `bp migrate`
 
@@ -150,7 +150,7 @@ CLI-native built-ins (no manifest), like `setup`/`migrate`:
 - `bp make schema <name>` — print a fill-the-blanks **schema v2 JSON skeleton** (stdout or file; purely local, no network).
 - `bp seed <type> [--count N] [--publish]` — fabricate schema-valid sample docs as **drafts** (honours the prod write-guard); `--publish` also publishes them so they're visible to the public read API.
 - `bp tinker [--dataset <ds>]` — interactive authenticated **REPL** (query/doc/mutate) against a live dataset.
-- `bp export [--type <t>] [--perspective <p>]` — stream the active dataset as **NDJSON** (one doc per line) for backup: `bp export > backup.ndjson`. CLI twin of the SDK `exportDataset`.
+- `bp export [--type <t>] [--perspective <p>] [--out <file>]` — stream the active dataset as **NDJSON** (one doc per line) for backup: `bp export > backup.ndjson`. CLI twin of the SDK `exportDataset`. `--out` streams into `<file>.partial` (same directory, so the promoting rename is atomic) and moves it onto `<file>` **only after a clean completion**, followed by its `<file>.meta` sidecar `{documents,bytes,sha256,scope,completed_at}` — artifact renamed first, the stale sidecar removed, the new sidecar renamed LAST, so the only reachable in-between state is file-without-sidecar. A run that dies leaves the stub at `<file>.partial` and does **not** touch the backup already at `<file>` or its sidecar; a sidecar's ABSENCE is still the truncation signal on an unattended box. `bp export --verify <file>` re-derives sha/count/bytes from the artifact alone and **fails closed** on a missing, empty, unparsable or sha-less sidecar.
 
 ## Other built-ins (CLI-native, no manifest)
 

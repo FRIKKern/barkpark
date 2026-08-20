@@ -1,0 +1,3 @@
+# Barkpark Cloud console - authenticated control plane; nothing here is content.
+User-agent: *
+Disallow: /

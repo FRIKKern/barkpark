@@ -1,0 +1,47 @@
+{
+  "id": "seam-placement-measured",
+  "kind": "re-derivation-recipe",
+  "topic": "Where the stable-prefix accumulator lives — measured cost of the three candidate seams (Recorder-owned / per-SSE-connection / new per-session process), the real text_delta rate, and the FromMarkdown+Render cost curve",
+  "authored_by": "v6-seam-placement-measured (barkpark-tasks-mobile wave 2026-07-28 verifier)",
+  "authored_utc": "2026-07-28T00:00:00Z",
+  "origin_main_commit": "c69cc0b1ee0b9ea546daf4bfc56e36d86f94dbe9",
+  "one_line": "The parse (FromMarkdown.blocks), not the render, is the quadratic: 6ms @4KiB -> 82ms @32KiB -> 409ms @128KiB -> 1.3-2.4s @256KiB, while Render.render_blocks stays 0.2-28ms. Whole-turn cumulative full-prefix cost is 2.41s for a REALISTIC 12 KiB turn (115x append-only) and 51.7s for 49 KiB (609x). Real measured claude-CLI stream-json rate is only 2.11 text_delta/s at ~94 B/delta (median gap 470ms), so a realistic turn is ~12 KiB / 61s. With append-only segments a whole 12 KiB turn costs 21ms of holder CPU => CPU stops discriminating the seams; memory, viewer multiplicity and late-joiner completeness decide.",
+  "reruns": {
+    "cost_curve_and_whole_turn": "cd /Volumes/SATECHI/github/barkpark/api && CC=/usr/bin/clang MIX_ENV=dev mix run --no-start <scratchpad>/seam_probe_v6b.exs",
+    "size_split_and_segment_cost": "cd /Volumes/SATECHI/github/barkpark/api && CC=/usr/bin/clang MIX_ENV=dev mix run --no-start <scratchpad>/seam_probe_v6.exs",
+    "retained_memory_and_frame_axis": "cd /Volumes/SATECHI/github/barkpark/api && CC=/usr/bin/clang MIX_ENV=dev mix run --no-start <scratchpad>/seam_probe_v6c.exs",
+    "cumulative_naive_boundary_scan": "cd /Volumes/SATECHI/github/barkpark/api && CC=/usr/bin/clang MIX_ENV=dev mix run --no-start <scratchpad>/seam_probe_v6d.exs",
+    "real_delta_rate": "claude -p '<1500-word prompt>' --output-format stream-json --include-partial-messages --verbose --model claude-sonnet-4-5 | python3 -u -c '<timestamp each content_block_delta/text_delta, print frames/s + gap percentiles>'",
+    "supervisor_child_list": "git show origin/main:api/lib/barkpark/studio_chat/supervisor.ex",
+    "heap_cap_census": "grep -rn max_heap_size api/lib/ | grep -v _build",
+    "hmax_absence": "find /Volumes/SATECHI/github/barkpark/api -name 'vm.args*' -not -path '*/deps/*' -not -path '*/_build/*'",
+    "recorder_demand_start_precedent": "git show origin/main:api/lib/barkpark/studio_chat/recorder.ex | sed -n '36,62p'",
+    "fleethub_reproject_precedent": "git show origin/main:api/lib/barkpark/studio_chat/fleet_hub.ex | sed -n '1,60p'"
+  },
+  "numbers": {
+    "text_delta_rate_frames_per_s": 2.11,
+    "text_delta_mean_bytes": 93.7,
+    "text_delta_gap_ms": {"min": 192.8, "med": 470.4, "p90": 523.8, "max": 736.1},
+    "turn_total_text_bytes_1500_words": 12179,
+    "full_pipeline_median_ms_by_prefix_bytes": {"3740": 6.0, "7854": 11.4, "16082": 43.6, "32538": 81.6, "48994": 124.4, "65450": 179.0, "97988": 218.0, "130900": 408.6},
+    "whole_turn_cumulative_s": {"12KiB": {"full_prefix": 2.41, "append_only": 0.021, "ratio": 114.9}, "49KiB": {"full_prefix": 51.74, "append_only": 0.085, "ratio": 609.4}},
+    "single_segment_pipeline_us": {"1KiB": 574, "70B": 96},
+    "naive_boundary_scan_single_us": {"12KiB": 43, "64KiB": 137, "256KiB": 469},
+    "naive_boundary_scan_cumulative_s": {"64KiB_2480_advances": 0.301, "256KiB_9925_advances": 18.355},
+    "retained_blocks_term_words": {"12KiB": 7232, "64KiB": 39550, "1MiB": 633478},
+    "boundary_advances_per_KiB_realistic": 13.7,
+    "boundary_advances_pathological_a_nn_1MiB": 349525,
+    "sse_conn_max_heap_words": 10000000
+  },
+  "structural": {
+    "studio_chat_supervisor_children": ["Registry SessionRegistry (unique)", "Registry RecorderRegistry (unique)", "DynamicSupervisor RuntimeSupervisor (one_for_one)", "AgentStateSweeper", "BlockedSweeper", "FleetHub"],
+    "max_heap_size_installed_on": ["listen_controller.ex:17 (conn)", "chat_controller.ex:397 (chat SSE conn)", "chat_controller.ex:454 (fleet SSE conn)"],
+    "no_hmax_vm_flag": true,
+    "forwarder_is_uncapped": "chat_controller.ex:606 spawn_link, no max_heap_size, no +hmax -> its mailbox has no guard; only the conn it forwards to is capped",
+    "recorder_has_no_heap_cap": true,
+    "recorder_lifetime": "restart: :temporary, DynamicSupervisor RuntimeSupervisor, :via Registry unique name, idle reap 30 min (recorder.ex:32) -> exists for the WHOLE turn, from the send that started it",
+    "recorder_already_accumulates_runtime_text_uncapped": "recorder.ex:1046 state.runtime_text <> delta (codex/runtime lane only; cleared at :turn_started/:turn_completed)",
+    "no_mid_turn_tail_endpoint": "router.ex has no chat tail route; the only in-flight truth is the live SSE stream",
+    "agent_state_clocks": {"heartbeat_ms": 60000, "sweeper_stale_after_s": 150, "sweeper_every_ms": 300000}
+  }
+}

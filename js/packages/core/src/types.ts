@@ -894,8 +894,11 @@ export interface SearchOptions {
   types?: string[]
   /** Perspective override for this search; defaults to the client's `perspective`. */
   perspective?: Perspective
-  /** Search engine — `postgres` (default) or `indx`. */
-  engine?: 'postgres' | 'indx' | (string & {})
+  /** Search engine — `postgres` (the default, always provisioned). Any other
+   *  registered engine name passes through via the open string escape; an
+   *  unprovisioned/unknown engine is served by Postgres and the response's
+   *  `engineUsed` reports which retriever actually answered. */
+  engine?: 'postgres' | (string & {})
   /** AbortSignal forwarded to fetch. */
   signal?: AbortSignal
 }
@@ -924,6 +927,11 @@ export interface SearchResult<T = BarkparkDocument> {
   /** Whether the engine capped the result/count scan — when set, `count` is a
    *  lower bound, not exact (engine-specific; indx surfaces it, postgres omits). */
   truncation?: { truncated: boolean; scanned?: number; limit?: number; [k: string]: unknown }
+  /** Which retriever ACTUALLY served this result, reported by the query
+   *  pipeline — `"postgres"` even when another engine was requested but
+   *  silently substituted (zero-hit recovery, unprovisioned engine). Null/
+   *  absent on servers predating the field. */
+  engineUsed?: string | null
   /** Server-side query latency in milliseconds. */
   ms?: number
   /** Opaque id for this search event — report it back to the `/search/interaction`

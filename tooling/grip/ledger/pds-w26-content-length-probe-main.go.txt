@@ -1,0 +1,40 @@
+// Probe used by tooling/grip/ledger/pds-w26-content-length-probe-2026-07-31.md
+// (.txt so it never joins the Go build; copy to a scratch dir, `go mod init`, run).
+// The transport is copied VERBATIM from internal/cli/run.go:969 newTransferClient
+// so the answer describes the client bp actually uses, not a stdlib default.
+package main
+
+import (
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"time"
+)
+
+func newTransferClient() *http.Client {
+	return &http.Client{Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+	}}
+}
+
+func main() {
+	req, _ := http.NewRequest("GET", os.Args[1], nil)
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("T"))
+	req.Header.Set("Accept", "application/x-tar, application/json")
+	resp, err := newTransferClient().Do(req)
+	if err != nil {
+		fmt.Println("ERR", err)
+		return
+	}
+	defer resp.Body.Close()
+	fmt.Printf("status=%d ContentLength=%d Uncompressed=%v hdrCL=%q hdrCE=%q\n",
+		resp.StatusCode, resp.ContentLength, resp.Uncompressed,
+		resp.Header.Get("Content-Length"), resp.Header.Get("Content-Encoding"))
+	n, cerr := io.Copy(io.Discard, resp.Body)
+	fmt.Printf("copied=%d copyErr=%v match=%v\n", n, cerr, n == resp.ContentLength)
+}

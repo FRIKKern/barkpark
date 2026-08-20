@@ -1,0 +1,191 @@
+name: windows-smoke
+
+# The Windows installer, EXECUTED — not just source-grepped (onboarding
+# composition charter D41).
+#
+# scripts/install-cli.ps1 is the Windows counterpart to install-cli.sh, and the
+# only proof it had until now was install-cli.test.sh proof (e): a handful of
+# STATIC greps for the function names it should contain. That certifies the
+# text, never the behavior. Meanwhile every runs-on in this repo is
+# ubuntu-latest (cli-release.yml's bp-windows-*.exe strings are cross-compiled
+# artifacts, not a Windows runner), so the installer's RUNTIME — arch detect,
+# release fetch, checksum branch, the registry PATH write, and above all the
+# D19 fresh-terminal postcondition — has never once run on Windows in CI.
+#
+# This workflow runs it on a real windows-latest host, HERMETICALLY:
+#   * a stub bp.exe (a tiny Add-Type console app that answers `version` with
+#     JSON) stands in for the released binary — no compiler toolchain, no repo
+#     source, no network;
+#   * a shadowing `Invoke-WebRequest` FUNCTION intercepts the installer's two
+#     GETs (functions outrank cmdlets in PowerShell command resolution): the
+#     binary fetch is served the stub from a temp dir, checksums.txt "404s" so
+#     the installer takes its documented warn-and-continue branch — exactly how
+#     install-cli.test.sh fakes the release for bash via a shadowing `curl`;
+#   * BARKPARK_CLI_RELEASE_BASE is pinned to an .invalid host so the GitHub-API
+#     release-resolution branch is never entered and nothing touches the network;
+#   * the install dir lives under $RUNNER_TEMP.
+# The installer runs under `pwsh -NoProfile`, and then — INDEPENDENTLY of the
+# installer's own probe — a freshly-spawned `pwsh -NoProfile` child whose PATH
+# is rebuilt from the Machine + User registry (what a brand-new terminal sees,
+# NOT this job's in-memory $env:Path) must resolve bp and get a `version`
+# answer. An in-process PATH export that dies with the process is precisely the
+# bug class D19 named; this is the Windows mirror of that clean-shell assert.
+#
+# ADVISORY BY CONSTRUCTION. It is paths-filtered to install-cli.ps1 + this file,
+# so it can never auto-join the generated required-check set (that set is
+# derived from unfiltered jobs; check-deployyml-filters.sh scans only deploy.yml
+# — no collision), and .github/required-checks.json is deliberately left
+# untouched. Windows CI runners are minutes-expensive; there is no reason to run
+# them on a diff that cannot change installer behavior.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/install-cli.ps1"
+      - ".github/workflows/windows-smoke.yml"
+  pull_request:
+    paths:
+      - "scripts/install-cli.ps1"
+      - ".github/workflows/windows-smoke.yml"
+
+concurrency:
+  group: windows-smoke-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  install-ps1:
+    name: install-cli.ps1 runs on windows-latest (hermetic)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Parse the installer before running it: a syntax error should name
+      # itself here, not surface as a confusing mid-install failure.
+      - name: Syntax-check install-cli.ps1
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/install-cli.ps1'),
+            [ref]$null, [ref]$errors) | Out-Null
+          if ($errors -and $errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host "install-cli.ps1 parses clean"
+
+      - name: Hermetic install + fresh-child bp resolution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # ── Isolated workspace under RUNNER_TEMP ────────────────────────────
+          $work = Join-Path $env:RUNNER_TEMP ("bp-smoke-" + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          $binDir = Join-Path $work 'bin'
+
+          # ── The "released" bp: a real console exe so both the installer's
+          # `bp version` readout and the fresh-child probe actually execute.
+          # Built with the .NET Framework csc.exe (always present on Windows) —
+          # NOT Add-Type -OutputType ConsoleApplication, which under pwsh 7 can
+          # emit an assembly that won't run standalone. Self-tested below so a
+          # non-runnable stub fails HERE with a clear message, not mid-install. ─
+          $stubSrc = @'
+          using System;
+          class BpStub {
+            static int Main(string[] args) {
+              if (args.Length > 0 && args[0] == "version") {
+                Console.WriteLine("{\"cli_version\":\"9.9.9-smoke\"}");
+              }
+              return 0;
+            }
+          }
+          '@
+          $stubCs = Join-Path $work 'bp-stub.cs'
+          Set-Content -LiteralPath $stubCs -Value $stubSrc -Encoding UTF8
+          $fakeBp = Join-Path $work 'fake-bp.exe'
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (-not (Test-Path $csc)) { throw "csc.exe not found at $csc" }
+          & $csc /nologo "/out:$fakeBp" $stubCs
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $fakeBp)) { throw "failed to compile stub bp.exe" }
+          $selfTest = & $fakeBp version
+          if (($selfTest | Out-String) -notmatch 'cli_version') {
+            throw "stub bp.exe did not answer version: $selfTest"
+          }
+          Write-Host "built + self-tested stub bp.exe"
+
+          # ── Wrapper: shadow Invoke-WebRequest, then dot-source the installer
+          # so the shadow is in scope for its GETs. Functions outrank cmdlets. ─
+          $wrapper = Join-Path $work 'run-installer.ps1'
+          $wrapperSrc = @'
+          $ErrorActionPreference = 'Stop'
+          function Invoke-WebRequest {
+            param(
+              [Parameter(Mandatory=$true)] $Uri,
+              $OutFile,
+              [switch] $UseBasicParsing,
+              [Parameter(ValueFromRemainingArguments=$true)] $Rest
+            )
+            if ("$Uri" -like '*checksums.txt') {
+              throw "smoke: no checksums.txt (forces the installer's warn-and-continue branch)"
+            }
+            Copy-Item -LiteralPath $env:SMOKE_FAKE_BP -Destination $OutFile -Force
+          }
+          . $env:SMOKE_INSTALLER
+          '@
+          Set-Content -LiteralPath $wrapper -Value $wrapperSrc -Encoding UTF8
+
+          # ── Env seams: pinned .invalid base skips the GitHub-API release
+          # resolution (no network); temp bin dir; no BARKPARK_CLI_VERSION. ────
+          $env:BARKPARK_CLI_RELEASE_BASE = 'https://example.invalid/rel'
+          $env:BARKPARK_BIN_DIR = $binDir
+          $env:SMOKE_FAKE_BP = $fakeBp
+          $env:SMOKE_INSTALLER = Join-Path $env:GITHUB_WORKSPACE 'scripts/install-cli.ps1'
+
+          Write-Host "== running install-cli.ps1 under pwsh -NoProfile (hermetic) =="
+          $out = & pwsh -NoProfile -File $wrapper 2>&1
+          $code = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host "  $_" }
+          if ($code -ne 0) { throw "installer exited $code" }
+
+          $joined = ($out | Out-String)
+          if ($joined -notmatch 'installed bp 9\.9\.9-smoke') {
+            throw "installer did not report the stub version readout"
+          }
+          if ($joined -notmatch "already-running agent") {
+            throw "installer did not print the GUI-agent stale-PATH caveat"
+          }
+          if (-not (Test-Path (Join-Path $binDir 'bp.exe'))) {
+            throw "bp.exe did not land in $binDir"
+          }
+          Write-Host "install OK: bp.exe in bin dir, version readout + caveat printed"
+
+          # ── THE postcondition: a freshly-spawned pwsh -NoProfile child whose
+          # PATH is rebuilt from the registry (Machine + User) — what a brand-new
+          # terminal sees — must resolve bp AND get a version answer. Computed
+          # INDEPENDENTLY of the installer's own probe. ───────────────────────
+          $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $user    = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $env:SMOKE_FRESH_PATH = (@($machine, $user) | Where-Object { $_ }) -join ';'
+
+          $probe = Join-Path $work 'probe.ps1'
+          $probeSrc = @'
+          $env:Path = $env:SMOKE_FRESH_PATH
+          if (-not (Get-Command bp -ErrorAction SilentlyContinue)) {
+            Write-Error "fresh terminal cannot resolve bp on the registry PATH"
+            exit 3
+          }
+          bp version
+          '@
+          Set-Content -LiteralPath $probe -Value $probeSrc -Encoding UTF8
+
+          Write-Host "== fresh-child (pwsh -NoProfile) bp resolution, registry PATH only =="
+          $verOut = & pwsh -NoProfile -NonInteractive -File $probe 2>&1
+          $vcode = $LASTEXITCODE
+          $verOut | ForEach-Object { Write-Host "  $_" }
+          if ($vcode -ne 0) { throw "fresh child failed (exit $vcode): $verOut" }
+          if (($verOut | Out-String) -notmatch 'cli_version') {
+            throw "fresh child resolved bp but did not answer version with JSON: $verOut"
+          }
+          Write-Host "PASS: a fresh terminal resolves bp and it answers version"

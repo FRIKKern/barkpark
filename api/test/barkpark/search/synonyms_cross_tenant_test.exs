@@ -110,7 +110,9 @@ defmodule Barkpark.Search.SynonymsCrossTenantTest do
 
       # Fail-before: with no Synonym.changeset the duplicate raised
       # Ecto.ConstraintError (→ 500). Now it is caught as a changeset error.
-      assert {:error, %Ecto.Changeset{} = cs} = Synonyms.create("documents", @scope, attrs, ws_a.id)
+      assert {:error, %Ecto.Changeset{} = cs} =
+               Synonyms.create("documents", @scope, attrs, ws_a.id)
+
       refute cs.valid?
 
       # Still exactly one row for this workspace's tuple.

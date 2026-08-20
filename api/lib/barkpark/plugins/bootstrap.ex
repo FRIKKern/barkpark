@@ -234,6 +234,18 @@ defmodule Barkpark.Plugins.Bootstrap do
         )
 
         {:error, {:changeset, changeset.errors}}
+
+      # Fail-closed scope stamp (felix-w26): `Content.upsert_schema/3` can now
+      # also refuse with `{:error, {:invalid_dataset, details}}` /
+      # `{:error, :conflict}` from dataset resolution. Plugin-declared dataset
+      # slugs are valid today, so this arm is defensive — but a case clause
+      # crash during plugin bootstrap is the wrong failure mode either way.
+      {:error, reason} ->
+        Logger.warning(
+          "Plugins.Bootstrap: upsert_schema refused for plugin #{inspect(plugin_name)} schema #{inspect(Map.get(attrs, "name"))}: #{inspect(reason)}"
+        )
+
+        {:error, reason}
     end
   end
 

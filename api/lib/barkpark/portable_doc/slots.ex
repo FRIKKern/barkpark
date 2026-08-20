@@ -196,8 +196,9 @@ defmodule Barkpark.PortableDoc.Slots do
       all live under it) plus the `tone` accent chrome. (#5731)
     * `callout` (census follow-up) consumes `content` (the legacy inline body
       array `callout_body_inline/1` reads), `slots` (the materialized `body`
-      slot) and `title`; `tone` / `collapsible` / `collapsed` are chrome. Prose
-      authored under `text` (the note vocabulary) renders an EMPTY callout.
+      slot) and `title`; `tone` / `collapsible` / `collapsed` are chrome. The
+      proven legacy `text` dialect is also consumed and canonicalized at write
+      boundaries.
     * `pipeline` (census follow-up) consumes `nodes` alone — the node list whose
       per-node `kind`/`title`/`detail`/`files` `pipeline_html/1` reads. An empty
       or mis-keyed node list (e.g. prose stranded under `steps`/`stages`)
@@ -299,8 +300,24 @@ defmodule Barkpark.PortableDoc.Slots do
   @spec callout_body_inline(term()) :: [map()]
   def callout_body_inline(block) do
     case slot_elements(block, "body") do
-      [first | _] when is_map(first) -> Map.get(first, "content") || []
-      _ -> []
+      [first | _] when is_map(first) ->
+        case Map.get(first, "content") do
+          content when is_list(content) and content != [] -> content
+          _ -> callout_text_inline(block)
+        end
+
+      _ ->
+        callout_text_inline(block)
+    end
+  end
+
+  defp callout_text_inline(block) do
+    case is_map(block) && Map.get(block, "text") do
+      text when is_binary(text) and text != "" ->
+        [%{"type" => "text", "value" => text}]
+
+      _ ->
+        []
     end
   end
 
@@ -652,8 +669,8 @@ defmodule Barkpark.PortableDoc.Slots do
   # A callout renders no prose when BOTH its body inline (from the `content`
   # legacy array or the materialized `body` slot, read through the renderer's own
   # `callout_body_inline/1`) is blank AND its optional `title` is blank — the two
-  # surfaces `Compose.compose_block(callout)` paints. Prose stranded under `text`
-  # (or any other unread key) leaves both blank.
+  # surfaces `Compose.compose_block(callout)` paints. The proven legacy `text`
+  # dialect is consumed by `callout_body_inline/1`; other unread keys stay loud.
   defp renders_no_prose?(%{"type" => "callout"} = block) do
     blank?(flatten_inline_text(callout_body_inline(block))) and
       blank?(to_text(Map.get(block, "title")))

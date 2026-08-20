@@ -28,7 +28,7 @@ import {
   openableUrl,
   paragraphInline,
 } from '../src/papers/portabledoc/model'
-import type { Theme } from '../src/ui/theme'
+import { light, type Theme } from '../src/ui/theme'
 
 // react-native-webview is a native TurboModule with no jest mock of its own;
 // the suite never renders the island (stateful leaf), so a null stub is
@@ -39,17 +39,12 @@ const capstone = require('../../../tooling/webview-spike/assets/capstone.json') 
   blocks: ({ type: string } & Record<string, unknown>)[]
 }
 
-const theme: Theme = {
-  bg: '#f6f7f6',
-  surface: '#ffffff',
-  border: '#e2e6e3',
-  text: '#17211b',
-  textMuted: '#5d6b62',
-  accent: '#1f6f4a',
-  accentText: '#ffffff',
-  danger: '#b3372e',
-  success: '#1f6f4a',
-}
+// The REAL light palette, not a literal duplicate: the suite predates the
+// tsconfig __tests__/**/*.tsx include and its hand-copied mock silently
+// drifted (it lacked the #6126 `bubble` role — the live proof the gate was
+// typecheck-blind). Importing from theme.ts means future role additions can
+// never drift here silently again.
+const theme: Theme = light
 const ctx: BlockCtx = { theme }
 
 /* ── element-tree walker ────────────────────────────────────────────────────── */
@@ -321,14 +316,20 @@ describe('table', () => {
 /* ── unknown block degrade ──────────────────────────────────────────────────── */
 
 describe('unknown blocks', () => {
+  // THE SPECIMENS ARE DELIBERATE (mob-zb-s5). This test used `gauge-list` and
+  // `chart` until those became real renderers, which disarmed it silently — the
+  // fallback assertions simply stopped describing a fallback. `embed` and
+  // `dashboard` cannot repeat that: they are D48's RECORDED exclusions —
+  // server/Go-registry types with no @barkpark/react emitter — and mobile's
+  // registry is react ∖ EXCLUSIONS, so no renderer slice can ever claim them.
   it('renders the honest labeled fallback and logs once per type', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-    const first = render({ type: 'gauge-list', items: [] })
-    expect(first.text).toContain('Unsupported block: gauge-list')
-    render({ type: 'gauge-list' })
-    render({ type: 'gauge-list' })
+    const first = render({ type: 'embed', items: [] })
+    expect(first.text).toContain('Unsupported block: embed')
+    render({ type: 'embed' })
+    render({ type: 'embed' })
     expect(warn).toHaveBeenCalledTimes(1)
-    render({ type: 'chart' })
+    render({ type: 'dashboard' })
     expect(warn).toHaveBeenCalledTimes(2)
     warn.mockRestore()
   })

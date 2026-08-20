@@ -49,12 +49,20 @@ defmodule Barkpark.Content.WriteScope do
   # changeset casts these keys only when present. New rows created under a
   # resolved scope are stamped on insert from that scope.
   #
+  # Returns `{:ok, attrs}` | `{:error, reason}` (fail-closed contract,
+  # felix-w26-bl-write-scope-swallow-nil).
+  #
   # W2 dual-write: alongside the workspace/project scope, resolve the row's
   # `dataset` STRING → its `dataset_id` (within the resolved project) and stamp
   # BOTH. The string stays the safety-net mirror; `dataset_id` is the new
   # authoritative scoping key. Degrades to no `dataset_id` key (string-only)
-  # when the project or dataset string can't be resolved — never crashes a
-  # write, and the changeset leaves an existing row's dataset_id untouched.
+  # ONLY in the legit-nil cases — nil resolved project (incl. the wykb
+  # projectless-workspace NEVER-WORSE arm) or a non-binary `dataset` — and the
+  # changeset leaves an existing row's dataset_id untouched. A REFUSED
+  # resolution (the Tenancy.Dataset changeset rejected the slug, or the
+  # insert-ok/reload-nil race persisted past one retry) fails CLOSED with
+  # `{:error, {:invalid_dataset, details}}` / `{:error, :conflict}` — never a
+  # silent dataset_id=NULL stamp on a dataset string the row nominally names.
   # Scope-id keys a client must never choose — dropped (string AND atom form)
   # before the scope is resolved from server-authoritative opts / Default.
   @client_scope_keys [
@@ -77,14 +85,19 @@ defmodule Barkpark.Content.WriteScope do
     # may assign ownership; a non-admin user write is forced to the acting user).
     attrs = Map.drop(attrs, @client_scope_keys)
     {ws_id, project_id} = resolve_write_scope(opts)
-    dataset_id = resolve_dataset_id_for_write(attrs, project_id)
-    owner_id = resolve_owner_id_for_write(attrs, opts)
 
-    attrs
-    |> maybe_put_scope_attr("workspace_id", ws_id)
-    |> maybe_put_scope_attr("project_id", project_id)
-    |> maybe_put_scope_attr("dataset_id", dataset_id)
-    |> maybe_put_scope_attr("owner_id", owner_id)
+    with {:ok, dataset_id} <- resolve_dataset_id_for_write(attrs, project_id) do
+      owner_id = resolve_owner_id_for_write(attrs, opts)
+
+      attrs =
+        attrs
+        |> maybe_put_scope_attr("workspace_id", ws_id)
+        |> maybe_put_scope_attr("project_id", project_id)
+        |> maybe_put_scope_attr("dataset_id", dataset_id)
+        |> maybe_put_scope_attr("owner_id", owner_id)
+
+      {:ok, attrs}
+    end
   end
 
   # Row/ownership ACL stamp (Phase 4, core-auth). Returns the `owner_id` to
@@ -129,23 +142,85 @@ defmodule Barkpark.Content.WriteScope do
   end
 
   # Resolve the `dataset_id` to stamp on a write from the row's `dataset` STRING
-  # + the resolved `project_id`. Returns the id, or nil when either is missing
-  # (the caller then stamps nothing — keeping the string-only mirror). Uses
-  # get_or_create_dataset so a brand-new dataset string lands a row on first
-  # write rather than silently dropping the id.
+  # + the resolved `project_id`. Returns `{:ok, id}`, or `{:ok, nil}` when
+  # either input is missing (the LEGIT-nil arm: the caller then stamps nothing —
+  # keeping the string-only mirror; this covers the wykb projectless-workspace
+  # NEVER-WORSE case). Uses get_or_create_dataset so a brand-new dataset string
+  # lands a row on first write rather than silently dropping the id.
+  #
+  # FAIL-CLOSED (felix-w26-bl-write-scope-swallow-nil): a resolution the
+  # Tenancy layer REFUSED is an error, never nil. The `@spec` of
+  # get_or_create_dataset admits exactly two error shapes, split here:
+  #
+  #   * `{:error, %Ecto.Changeset{}}` — the dataset slug failed validation
+  #     (format/length). The caller sent it; surface it as
+  #     `{:error, {:invalid_dataset, details}}` → 422 validation_failed, with
+  #     the changeset messages re-keyed under "dataset" (the key the caller
+  #     actually supplied — the row's :slug field is an internal name).
+  #   * `{:error, :dataset_not_found}` — the insert-ok/reload-nil race
+  #     (on_conflict: :nothing swallowed a concurrent duplicate and the
+  #     re-fetch ALSO missed). Not the caller's fault: retry exactly once;
+  #     a second miss returns `{:error, :conflict}` → the existing 409
+  #     envelope. NEVER 422, never nil.
   defp resolve_dataset_id_for_write(attrs, project_id) do
     dataset = Map.get(attrs, "dataset") || Map.get(attrs, :dataset)
 
     cond do
       is_nil(project_id) or not is_binary(dataset) ->
-        nil
+        {:ok, nil}
 
       true ->
-        case Barkpark.Tenancy.get_or_create_dataset(project_id, dataset) do
-          {:ok, %Barkpark.Tenancy.Dataset{id: id}} -> id
-          _ -> nil
-        end
+        resolve_dataset_id_with_retry(project_id, dataset)
     end
+  end
+
+  # Public ONLY for the retry-seam unit test (write_scope_fail_closed_test),
+  # which injects a resolver fun to prove "retry exactly once, then conflict"
+  # without racing the real DB. Production callers never pass `resolver`.
+  @doc false
+  def resolve_dataset_id_with_retry(
+        project_id,
+        dataset,
+        resolver \\ &Barkpark.Tenancy.get_or_create_dataset/2
+      ) do
+    case resolve_dataset_id_once(project_id, dataset, resolver) do
+      {:error, :dataset_not_found} ->
+        case resolve_dataset_id_once(project_id, dataset, resolver) do
+          {:error, :dataset_not_found} -> {:error, :conflict}
+          other -> other
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp resolve_dataset_id_once(project_id, dataset, resolver) do
+    case resolver.(project_id, dataset) do
+      {:ok, %Barkpark.Tenancy.Dataset{id: id}} ->
+        {:ok, id}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:error, {:invalid_dataset, invalid_dataset_details(changeset)}}
+
+      {:error, :dataset_not_found} ->
+        {:error, :dataset_not_found}
+    end
+  end
+
+  # Flatten the Dataset changeset's per-field messages and RE-KEY them under
+  # "dataset" — the caller supplied a `dataset` string, not a :slug field.
+  defp invalid_dataset_details(%Ecto.Changeset{} = changeset) do
+    messages =
+      changeset
+      |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
+        Enum.reduce(opts, msg, fn {k, v}, acc ->
+          String.replace(acc, "%{#{k}}", to_string(v))
+        end)
+      end)
+      |> Enum.flat_map(fn {_field, msgs} -> msgs end)
+
+    %{"dataset" => messages}
   end
 
   # Resolve the {workspace_id, project_id} to stamp on a write. The scope comes

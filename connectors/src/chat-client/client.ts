@@ -24,11 +24,19 @@ import { openEventStream } from "./sse.js";
 
 /**
  * Codes that are safe to retry on ANY method. Keyed off the canonical
- * `error.code`, NOT the raw status (charter). `chat_unavailable` (503) arrives
+ * `error.code`, NOT the raw status (charter). Each is a 503 that arrives
  * as a REAL HTTP response, which proves the server refused the request before
- * doing any work — so replaying it cannot duplicate a side effect.
+ * doing any work — so replaying it cannot duplicate a side effect. The D26
+ * reason split retired `chat_unavailable` in favor of `runtime_capacity` /
+ * `runtime_unavailable` (transient) and `chat_create_failed`; `chat_unsupported`
+ * (422) is deliberately absent — it is permanent, and retrying it forever is
+ * the exact failure the split exists to prevent.
  */
-const RETRYABLE_CODES: ReadonlySet<string> = new Set(["chat_unavailable"]);
+const RETRYABLE_CODES: ReadonlySet<string> = new Set([
+  "runtime_capacity",
+  "runtime_unavailable",
+  "chat_create_failed",
+]);
 
 /**
  * `network_error` is different: no response came back, so we CANNOT know whether

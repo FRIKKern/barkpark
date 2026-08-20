@@ -6,16 +6,25 @@ package cli
 // faked, so every assertion reads the actual S3 request bp would send.
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/FRIKKern/barkpark/internal/hetzner/objstore"
 )
@@ -61,13 +70,119 @@ type s3Req struct {
 	Auth   string
 }
 
-// fakeS3 is the recording RoundTripper. handler (optional) picks the response
-// per request; the default is 200 with an empty body. Every response carries
-// an ETag so the multipart UploadPart path completes.
+// fakeS3 is the recording RoundTripper AND a minimal in-memory S3. It FAILS
+// CLOSED: a request the in-memory store cannot serve comes back as an S3-shaped
+// error, never as the old 200-with-an-empty-body, so a post-read against this
+// fake can actually prove something. HeadObject on a key nothing stored surfaces
+// as *types.NotFound — the error a real absent object produces.
+//
+// handler (optional) still gets first refusal on every request, for the few
+// wire shapes a test wants to script by hand; returning status 0 defers to the
+// in-memory engine. Every response carries an ETag so the multipart UploadPart
+// path completes.
+// declaredLen (optional) makes the response DECLARE a Content-Length that is
+// decoupled from the body it actually sends — the only way to reproduce, in a
+// test, an endpoint that promises N bytes and hangs up early. Left nil, nothing
+// is declared, which is Hetzner's S3-compatible-not-S3 worst case.
+// dropWrites is the silent-drop endpoint: it answers every write 200/OK and
+// persists NOTHING, so a verb that trusts its own exit code passes while a verb
+// that reads back fails.
 type fakeS3 struct {
-	mu      sync.Mutex
-	reqs    []s3Req
-	handler func(r s3Req) (int, string)
+	mu          sync.Mutex
+	reqs        []s3Req
+	handler     func(r s3Req) (int, string)
+	declaredLen *int64
+	dropWrites  bool
+
+	buckets map[string]time.Time
+	objects map[string]fakeObject
+	uploads map[string]map[int][]byte
+	parts   [][]byte
+	uploadN int
+}
+
+// fakeObject is one stored object: its bytes and the modification time the
+// listing reports.
+type fakeObject struct {
+	body     []byte
+	modified time.Time
+}
+
+const fakeS3Suffix = ".your-objectstorage.com"
+
+// fakeSeedTime is the modification time seeded objects carry unless a test asks
+// for a specific one — deterministic so listings never depend on the clock.
+var fakeSeedTime = time.Date(2026, 6, 1, 0, 0, 1, 0, time.UTC)
+
+// newFakeS3 is the seeding constructor. The zero value `&fakeS3{}` stays valid
+// (an empty store), so every existing construction keeps working.
+func newFakeS3() *fakeS3 { return &fakeS3{} }
+
+// init lazily allocates the store. Callers hold f.mu.
+func (f *fakeS3) init() {
+	if f.buckets == nil {
+		f.buckets = map[string]time.Time{}
+		f.objects = map[string]fakeObject{}
+		f.uploads = map[string]map[int][]byte{}
+	}
+}
+
+// seedBucket puts a bucket in the store with the creation date ListBuckets will
+// report. created is RFC3339; empty means fakeSeedTime.
+func (f *fakeS3) seedBucket(name, created string) *fakeS3 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.init()
+	ts := fakeSeedTime
+	if created != "" {
+		parsed, err := time.Parse(time.RFC3339, created)
+		if err != nil {
+			panic("seedBucket: bad RFC3339 " + created + ": " + err.Error())
+		}
+		ts = parsed
+	}
+	f.buckets[name] = ts
+	return f
+}
+
+// seedObject stores an object (creating its bucket) so GET/HEAD/list can serve
+// it. modified is RFC3339; empty means fakeSeedTime.
+func (f *fakeS3) seedObject(bucket, key, body, modified string) *fakeS3 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.init()
+	ts := fakeSeedTime
+	if modified != "" {
+		parsed, err := time.Parse(time.RFC3339, modified)
+		if err != nil {
+			panic("seedObject: bad RFC3339 " + modified + ": " + err.Error())
+		}
+		ts = parsed
+	}
+	if _, ok := f.buckets[bucket]; !ok {
+		f.buckets[bucket] = fakeSeedTime
+	}
+	f.objects[bucket+"/"+key] = fakeObject{body: []byte(body), modified: ts}
+	return f
+}
+
+// stored reports whether a key is in the store — the post-read a test performs
+// on the harness itself.
+func (f *fakeS3) stored(bucket, key string) ([]byte, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.init()
+	o, ok := f.objects[bucket+"/"+key]
+	return o.body, ok
+}
+
+// hasBucket reports whether the store still holds a bucket.
+func (f *fakeS3) hasBucket(name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.init()
+	_, ok := f.buckets[name]
+	return ok
 }
 
 func (f *fakeS3) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -88,19 +203,45 @@ func (f *fakeS3) RoundTrip(req *http.Request) (*http.Response, error) {
 	f.reqs = append(f.reqs, rec)
 	f.mu.Unlock()
 
-	status, respBody := 200, ""
+	status, respBody := 0, ""
 	if f.handler != nil {
 		status, respBody = f.handler(rec)
 	}
-	return &http.Response{
+	if status == 0 {
+		status, respBody = f.serve(rec)
+	}
+	resp := &http.Response{
 		StatusCode: status,
 		Header: http.Header{
 			"Content-Type": []string{"application/xml"},
 			"Etag":         []string{`"fake-etag"`},
 		},
-		Body:    io.NopCloser(strings.NewReader(respBody)),
-		Request: req,
-	}, nil
+		Body:          io.NopCloser(strings.NewReader(respBody)),
+		Request:       req,
+		ContentLength: -1,
+	}
+	if f.declaredLen != nil && req.Method == http.MethodGet {
+		resp.ContentLength = *f.declaredLen
+		resp.Header.Set("Content-Length", strconv.FormatInt(*f.declaredLen, 10))
+	}
+	if req.Method == http.MethodHead {
+		// A REAL HEAD carries the entity headers and NO body. serve() hands the
+		// stored bytes back so the length can be derived here; the body is then
+		// dropped. Without this the response declared ContentLength:-1 and a
+		// length-comparing post-read was structurally unable to verify anything
+		// in test while being real in production — a green that proves nothing,
+		// which is the exact vacuity this harness exists to make impossible.
+		if status == 200 {
+			n := int64(len(respBody))
+			if f.declaredLen != nil {
+				n = *f.declaredLen
+			}
+			resp.ContentLength = n
+			resp.Header.Set("Content-Length", strconv.FormatInt(n, 10))
+		}
+		resp.Body = io.NopCloser(strings.NewReader(""))
+	}
+	return resp, nil
 }
 
 func (f *fakeS3) requests() []s3Req {
@@ -118,6 +259,197 @@ func (f *fakeS3) find(method, path string) (s3Req, bool) {
 	return s3Req{}, false
 }
 
+// fakeBucketOf reads the bucket out of a virtual-hosted host name; the bare
+// location endpoint (no bucket subdomain) yields "".
+func fakeBucketOf(host string) string {
+	h := strings.TrimSuffix(host, fakeS3Suffix)
+	if i := strings.Index(h, "."); i >= 0 {
+		return h[:i]
+	}
+	return ""
+}
+
+// fakeS3Error renders an S3-shaped error document — the fail-closed answer.
+func fakeS3Error(status int, code, message string) (int, string) {
+	return status, `<?xml version="1.0" encoding="UTF-8"?><Error><Code>` + code +
+		`</Code><Message>` + message + `</Message><RequestId>fake</RequestId></Error>`
+}
+
+// serve is the in-memory S3: PUT/GET/HEAD/DELETE object, create/delete/list
+// bucket, ListObjectsV2 and the three-step multipart conversation. Anything it
+// does not recognise is a 501, never a 200 — the whole point of the harness.
+func (f *fakeS3) serve(r s3Req) (int, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.init()
+
+	bucket := fakeBucketOf(r.Host)
+	key := strings.TrimPrefix(r.Path, "/")
+
+	if bucket == "" {
+		if r.Method == "GET" && key == "" {
+			return 200, f.listBucketsXML()
+		}
+		return fakeS3Error(501, "NotImplemented", "fakeS3 has no route for "+r.Method+" "+r.Host+r.Path)
+	}
+
+	if key == "" {
+		switch {
+		case r.Method == "PUT":
+			f.buckets[bucket] = fakeSeedTime
+			return 200, ""
+		case r.Method == "DELETE":
+			if _, ok := f.buckets[bucket]; !ok {
+				return fakeS3Error(404, "NoSuchBucket", "no such bucket: "+bucket)
+			}
+			delete(f.buckets, bucket)
+			return 204, ""
+		case r.Method == "GET" && r.Query.Get("list-type") == "2":
+			return 200, f.listObjectsXML(bucket, r.Query.Get("prefix"))
+		}
+		return fakeS3Error(501, "NotImplemented", "fakeS3 has no bucket route for "+r.Method+" "+r.Host+r.Path)
+	}
+
+	full := bucket + "/" + key
+	switch {
+	case r.Method == "POST" && r.Query.Has("uploads"):
+		f.uploadN++
+		id := "upload-" + strconv.Itoa(f.uploadN)
+		f.uploads[id] = map[int][]byte{}
+		return 200, `<?xml version="1.0"?><InitiateMultipartUploadResult><Bucket>` + bucket +
+			`</Bucket><Key>` + key + `</Key><UploadId>` + id + `</UploadId></InitiateMultipartUploadResult>`
+
+	case r.Method == "PUT" && r.Query.Get("partNumber") != "":
+		id := r.Query.Get("uploadId")
+		parts, ok := f.uploads[id]
+		if !ok {
+			return fakeS3Error(404, "NoSuchUpload", "no such upload: "+id)
+		}
+		n, err := strconv.Atoi(r.Query.Get("partNumber"))
+		if err != nil {
+			return fakeS3Error(400, "InvalidArgument", "bad partNumber "+r.Query.Get("partNumber"))
+		}
+		f.parts = append(f.parts, append([]byte(nil), r.Body...))
+		if !f.dropWrites {
+			parts[n] = append([]byte(nil), r.Body...)
+		}
+		return 200, ""
+
+	case r.Method == "POST" && r.Query.Get("uploadId") != "":
+		id := r.Query.Get("uploadId")
+		parts, ok := f.uploads[id]
+		if !ok {
+			return fakeS3Error(404, "NoSuchUpload", "no such upload: "+id)
+		}
+		delete(f.uploads, id)
+		nums := make([]int, 0, len(parts))
+		for n := range parts {
+			nums = append(nums, n)
+		}
+		sort.Ints(nums)
+		var joined []byte
+		for _, n := range nums {
+			joined = append(joined, parts[n]...)
+		}
+		if !f.dropWrites {
+			f.putLocked(full, joined)
+		}
+		return 200, `<?xml version="1.0"?><CompleteMultipartUploadResult><Bucket>` + bucket +
+			`</Bucket><Key>` + key + `</Key><ETag>"fake-etag"</ETag></CompleteMultipartUploadResult>`
+
+	case r.Method == "DELETE" && r.Query.Get("uploadId") != "":
+		delete(f.uploads, r.Query.Get("uploadId"))
+		return 204, ""
+
+	case r.Method == "PUT":
+		if !f.dropWrites {
+			f.putLocked(full, r.Body)
+		}
+		return 200, ""
+
+	case r.Method == "GET":
+		o, ok := f.objects[full]
+		if !ok {
+			return fakeS3Error(404, "NoSuchKey", "no such key: "+key)
+		}
+		return 200, string(o.body)
+
+	case r.Method == "HEAD":
+		o, ok := f.objects[full]
+		if !ok {
+			// A HEAD carries no body; the SDK maps the bare 404 to
+			// *types.NotFound, which is what an absent object must look like.
+			return 404, ""
+		}
+		// The STORED bytes are returned so RoundTrip can declare their length in
+		// the Content-Length header; it then sends the empty body a real HEAD
+		// has. The length must come from the store, not from a constant, or a
+		// post-read that compares it is comparing the fake to itself.
+		return 200, string(o.body)
+
+	case r.Method == "DELETE":
+		// Real S3 answers 204 whether or not the key existed — the fake keeps
+		// that, because pretending a delete can report absence is exactly the
+		// lie a post-read exists to catch.
+		delete(f.objects, full)
+		return 204, ""
+	}
+	return fakeS3Error(501, "NotImplemented", "fakeS3 has no object route for "+r.Method+" "+r.Host+r.Path)
+}
+
+// putLocked stores body under full ("bucket/key"), registering the bucket.
+// Callers hold f.mu.
+func (f *fakeS3) putLocked(full string, body []byte) {
+	if bucket, _, ok := strings.Cut(full, "/"); ok {
+		if _, seen := f.buckets[bucket]; !seen {
+			f.buckets[bucket] = fakeSeedTime
+		}
+	}
+	f.objects[full] = fakeObject{body: append([]byte(nil), body...), modified: fakeSeedTime}
+}
+
+// listBucketsXML renders the store's buckets. Callers hold f.mu.
+func (f *fakeS3) listBucketsXML() string {
+	names := make([]string, 0, len(f.buckets))
+	for name := range f.buckets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0"?><ListAllMyBucketsResult><Buckets>`)
+	for _, name := range names {
+		b.WriteString(`<Bucket><Name>` + name + `</Name><CreationDate>` +
+			f.buckets[name].UTC().Format("2006-01-02T15:04:05.000Z") + `</CreationDate></Bucket>`)
+	}
+	b.WriteString(`</Buckets></ListAllMyBucketsResult>`)
+	return b.String()
+}
+
+// listObjectsXML renders a ListObjectsV2 page for one bucket+prefix. Callers
+// hold f.mu.
+func (f *fakeS3) listObjectsXML(bucket, prefix string) string {
+	keys := make([]string, 0, len(f.objects))
+	for full := range f.objects {
+		b, key, ok := strings.Cut(full, "/")
+		if !ok || b != bucket || !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0"?><ListBucketResult><Name>` + bucket + `</Name><KeyCount>` +
+		strconv.Itoa(len(keys)) + `</KeyCount><IsTruncated>false</IsTruncated>`)
+	for _, key := range keys {
+		o := f.objects[bucket+"/"+key]
+		b.WriteString(`<Contents><Key>` + key + `</Key><Size>` + strconv.Itoa(len(o.body)) +
+			`</Size><LastModified>` + o.modified.UTC().Format("2006-01-02T15:04:05.000Z") +
+			`</LastModified></Contents>`)
+	}
+	b.WriteString(`</ListBucketResult>`)
+	return b.String()
+}
+
 // withFakeS3 points the storage/backup client seam at the fake transport; the
 // client itself — signing, addressing, XML — stays real.
 func withFakeS3(t *testing.T, f *fakeS3) {
@@ -130,27 +462,184 @@ func withFakeS3(t *testing.T, f *fakeS3) {
 	t.Cleanup(func() { newObjstoreClient = old })
 }
 
-// multipartS3 answers the multipart conversation (initiate → parts → complete)
-// and records the part bodies in order, so a test can reassemble exactly what
-// was uploaded.
+// multipartS3 returns the stateful fake plus a handle on the part bodies it
+// recorded, in arrival order, so a test can reassemble exactly what was
+// uploaded. The conversation itself (initiate → parts → complete) is served by
+// the in-memory engine, which also ASSEMBLES the parts into a stored object —
+// so a post-read of the completed key finds the real bytes.
 func multipartS3() (*fakeS3, *[][]byte) {
-	parts := &[][]byte{}
-	f := &fakeS3{}
-	f.handler = func(r s3Req) (int, string) {
-		switch {
-		case r.Method == "POST" && r.Query.Has("uploads"):
-			return 200, `<?xml version="1.0"?><InitiateMultipartUploadResult><Bucket>b</Bucket><Key>k</Key><UploadId>upload-1</UploadId></InitiateMultipartUploadResult>`
-		case r.Method == "PUT" && r.Query.Get("partNumber") != "":
-			*parts = append(*parts, r.Body)
-			return 200, ""
-		case r.Method == "POST" && r.Query.Get("uploadId") != "":
-			return 200, `<?xml version="1.0"?><CompleteMultipartUploadResult><ETag>"fake-etag"</ETag></CompleteMultipartUploadResult>`
-		case r.Method == "DELETE":
-			return 204, ""
-		}
-		return 200, ""
+	f := newFakeS3()
+	return f, &f.parts
+}
+
+// fakeS3Client builds the REAL objstore client over one fake, for the tests
+// that interrogate the harness itself rather than a bp verb.
+func fakeS3Client(t *testing.T, f *fakeS3) *objstore.Client {
+	t.Helper()
+	c, err := objstore.NewClient("fsn1", "AKTEST", "SKTEST",
+		objstore.WithHTTPClient(&http.Client{Transport: f}))
+	if err != nil {
+		t.Fatalf("build objstore client over the fake: %v", err)
 	}
-	return f, parts
+	return c
+}
+
+// TestFakeS3FailsClosed is the harness's own protective test, and it is the
+// reason this file can prove anything about a post-read. Before it, fakeS3
+// answered EVERY unhandled request 200-with-an-empty-body: a HeadObject
+// post-read added to `object put` reported confirmed:true for a key the fake
+// had never stored, and all 21 tests here stayed green while proving nothing.
+//
+// The fence keys on *types.NotFound, never on *awshttp.ResponseError — measured:
+// ResponseError is true for BOTH a 404 and a connection refusal (status 404 vs
+// 0), so keying on it conflates "absent" with "unreachable".
+func TestFakeS3FailsClosed(t *testing.T) {
+	f := newFakeS3()
+	c := fakeS3Client(t, f)
+	ctx := context.Background()
+
+	_, err := c.S3().HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String("bkt"), Key: aws.String("never/stored.txt"),
+	})
+	if err == nil {
+		t.Fatal("HeadObject on a key the fake never stored returned no error — the fake is answering 200 to everything again")
+	}
+	var missing *types.NotFound
+	if !errors.As(err, &missing) {
+		t.Errorf("HeadObject error = %v (%T), want *types.NotFound", err, err)
+	}
+
+	// A GET of the same absent key is NoSuchKey, with an S3-shaped body.
+	if _, gerr := c.S3().GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String("bkt"), Key: aws.String("never/stored.txt"),
+	}); gerr == nil {
+		t.Error("GetObject on an unstored key succeeded")
+	} else {
+		var noKey *types.NoSuchKey
+		if !errors.As(gerr, &noKey) {
+			t.Errorf("GetObject error = %v (%T), want *types.NoSuchKey", gerr, gerr)
+		}
+	}
+
+	// A route the in-memory S3 does not implement is a refusal, not a 200.
+	if _, uerr := c.S3().GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{
+		Bucket: aws.String("bkt"),
+	}); uerr == nil {
+		t.Error("an unrecognised request succeeded; the fake must fail closed")
+	} else if !strings.Contains(uerr.Error(), "NotImplemented") {
+		t.Errorf("unrecognised-request error = %v, want an S3-shaped NotImplemented", uerr)
+	}
+}
+
+// TestFakeS3IsStatefulAcrossASequence proves the property a post-read depends
+// on: a PUT is REMEMBERED, and an endpoint that silently drops writes — 200 on
+// the PUT, nothing persisted — is caught by the very next HEAD. Flipping
+// dropWrites is the mutation: with it false the HEAD succeeds, with it true the
+// identical sequence fails, so this test can red for the right reason.
+func TestFakeS3IsStatefulAcrossASequence(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		dropWrites bool
+		wantHead   bool
+	}{
+		{"honest endpoint", false, true},
+		{"silent-drop endpoint", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeS3()
+			f.dropWrites = tc.dropWrites
+			c := fakeS3Client(t, f)
+			ctx := context.Background()
+
+			if _, err := c.S3().PutObject(ctx, &s3.PutObjectInput{
+				Bucket: aws.String("bkt"), Key: aws.String("seq/one.txt"),
+				Body: strings.NewReader("stateful bytes"),
+			}); err != nil {
+				t.Fatalf("PUT failed: %v — a silent-drop endpoint still 200s the write", err)
+			}
+
+			_, herr := c.S3().HeadObject(ctx, &s3.HeadObjectInput{
+				Bucket: aws.String("bkt"), Key: aws.String("seq/one.txt"),
+			})
+			if tc.wantHead {
+				if herr != nil {
+					t.Fatalf("HEAD after PUT failed: %v, want the stored object", herr)
+				}
+				body, ok := f.stored("bkt", "seq/one.txt")
+				if !ok || string(body) != "stateful bytes" {
+					t.Errorf("stored body = %q (%v), want the PUT bytes", body, ok)
+				}
+				return
+			}
+			var missing *types.NotFound
+			if herr == nil || !errors.As(herr, &missing) {
+				t.Fatalf("HEAD after a SILENTLY DROPPED PUT = %v, want *types.NotFound — this is the vacuous pass the harness must make impossible", herr)
+			}
+			if _, ok := f.stored("bkt", "seq/one.txt"); ok {
+				t.Error("dropWrites persisted the object anyway")
+			}
+		})
+	}
+}
+
+// TestFakeS3HandlerOverridesTheStore keeps the scripting seam honest: a handler
+// still gets first refusal, so a test can inject a wire fault the in-memory
+// store would never produce. Returning 0 defers to the store — which is why no
+// handler can silently 200 an unimplemented route any more.
+func TestFakeS3HandlerOverridesTheStore(t *testing.T) {
+	f := newFakeS3().seedObject("bkt", "a/b.txt", "stored bytes", "")
+	f.handler = func(r s3Req) (int, string) {
+		if r.Method == "HEAD" {
+			return fakeS3Error(403, "AccessDenied", "scripted fault")
+		}
+		return 0, "" // everything else: the store answers
+	}
+	c := fakeS3Client(t, f)
+	ctx := context.Background()
+
+	if _, err := c.S3().HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String("bkt"), Key: aws.String("a/b.txt"),
+	}); err == nil {
+		t.Error("the scripted 403 did not surface; the handler no longer overrides")
+	} else {
+		var missing *types.NotFound
+		if errors.As(err, &missing) {
+			t.Errorf("a scripted 403 read as *types.NotFound (%v) — denial must not look like absence", err)
+		}
+	}
+	out, err := c.S3().GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String("bkt"), Key: aws.String("a/b.txt"),
+	})
+	if err != nil {
+		t.Fatalf("GET should have fallen through to the store: %v", err)
+	}
+	got, _ := io.ReadAll(out.Body)
+	if string(got) != "stored bytes" {
+		t.Errorf("GET body = %q, want the seeded bytes", got)
+	}
+}
+
+// TestFakeS3MultipartAssembles proves the multipart conversation ends in a
+// STORED object, not just a 200 on complete — so a post-read of a streamed
+// upload (backup create, object put -) has something real to find.
+func TestFakeS3MultipartAssembles(t *testing.T) {
+	f, parts := multipartS3()
+	withFakeS3(t, f)
+	oldStdin := storageStdin
+	storageStdin = strings.NewReader("multipart body bytes")
+	t.Cleanup(func() { storageStdin = oldStdin })
+
+	_, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "storage", "object", "put", "--bucket", "bkt", "--key", "mp/stream.bin", "-")...)
+	if code != exitOK {
+		t.Fatalf("multipart put exited %d, stderr: %s", code, stderr)
+	}
+	if len(*parts) == 0 {
+		t.Fatal("the recorder saw no part bodies")
+	}
+	body, ok := f.stored("bkt", "mp/stream.bin")
+	if !ok || string(body) != "multipart body bytes" {
+		t.Errorf("stored object = %q (%v), want the assembled stdin bytes", body, ok)
+	}
 }
 
 // s3CredArgs are the flag-based credentials every test passes so nothing leans
@@ -171,12 +660,20 @@ func TestHetznerStorageBucketCreate(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("bucket create exited %d, stderr: %s", code, stderr)
 	}
-	if len(f.requests()) != 1 {
-		t.Fatalf("bucket create issued %d requests, want 1", len(f.requests()))
+	// TWO requests, not one, and the second is the POINT: bucket create now
+	// re-reads (the credentials' own ListBuckets) before it claims the bucket
+	// exists, because CreateBucket returning no error is the transport's opinion
+	// and not the world's. This tripwire fired the moment the post-read landed —
+	// it is updated here, in the same commit, with the count and the reason.
+	if len(f.requests()) != 2 {
+		t.Fatalf("bucket create issued %d requests, want 2 (the PUT plus the confirming ListBuckets)", len(f.requests()))
 	}
 	req := f.requests()[0]
 	if req.Method != "PUT" {
 		t.Errorf("method = %s, want PUT", req.Method)
+	}
+	if last := f.requests()[1]; last.Method != "GET" || last.Host != "nbg1.your-objectstorage.com" {
+		t.Errorf("confirming read = %s %s, want GET on the bare location endpoint (ListBuckets)", last.Method, last.Host)
 	}
 	if want := "barkpark-backups.nbg1.your-objectstorage.com"; req.Host != want {
 		t.Errorf("host = %q, want virtual-hosted %q (honouring --location)", req.Host, want)
@@ -192,20 +689,56 @@ func TestHetznerStorageBucketCreate(t *testing.T) {
 	if payload["ok"] != true || payload["action"] != "create" || bucket["name"] != "barkpark-backups" || payload["location"] != "nbg1" {
 		t.Errorf("receipt = %v, want ok/create/barkpark-backups/nbg1", payload)
 	}
+	// The confirmation is NAMED, and `location` is honest about being declared:
+	// nothing in an S3 response says where a bucket lives, so the flag's value is
+	// printed with a flag beside it rather than beside the observed fields.
+	if payload["confirmed_present"] != true {
+		t.Errorf("receipt = %v, want confirmed_present true off the listing", payload)
+	}
+	if payload["location_confirmed"] != false {
+		t.Errorf("receipt = %v, want location_confirmed false — no S3 response reports a bucket's location", payload)
+	}
+	if reason, _ := payload["location_basis"].(string); !strings.Contains(reason, "DECLARED") {
+		t.Errorf("receipt = %v, want location_basis to say the value is declared", payload)
+	}
+}
+
+// TestHetznerStorageBucketCreateSilentDropRefuses is bucket create's fail-closed
+// proof. The endpoint answers the PUT 200 and keeps nothing — the shape a real
+// misconfigured or degraded object store takes. BEFORE this slice the verb
+// printed `✓ create — bucket … / location: nbg1` on exactly this endpoint,
+// because the receipt was built from the flag the operator typed and the exit
+// code of a write nobody read back. Now the listing is the claim, and a bucket
+// the listing does not carry refuses at a non-zero exit.
+func TestHetznerStorageBucketCreateSilentDropRefuses(t *testing.T) {
+	f := newFakeS3()
+	f.handler = func(r s3Req) (int, string) {
+		if r.Method == "PUT" {
+			return 200, "" // accepted, and persisted NOWHERE
+		}
+		return 0, "" // everything else: the (empty) store answers
+	}
+	withFakeS3(t, f)
+
+	stdout, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "storage", "bucket", "create", "--name", "ghost", "--location", "nbg1")...)
+	if code == exitOK {
+		t.Fatalf("a bucket that was never created exited 0\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	said := stdout + stderr
+	if !strings.Contains(said, "NOT READABLE") || !strings.Contains(said, "ghost") {
+		t.Errorf("the refusal must name the unreadable bucket:\n%s", said)
+	}
+	if f.hasBucket("ghost") {
+		t.Fatal("the fake persisted the bucket; this test would prove nothing")
+	}
 }
 
 // TestHetznerStorageBucketGet asserts get looks the bucket up in ListBuckets,
 // reports name/location/created, and 404s (exitNotFound) on an unknown name.
 func TestHetznerStorageBucketGet(t *testing.T) {
-	f := &fakeS3{handler: func(r s3Req) (int, string) {
-		if r.Method == "GET" {
-			return 200, `<?xml version="1.0"?><ListAllMyBucketsResult><Buckets>
-				<Bucket><Name>backups</Name><CreationDate>2026-06-01T10:00:00.000Z</CreationDate></Bucket>
-				<Bucket><Name>media</Name><CreationDate>2026-06-15T08:30:00.000Z</CreationDate></Bucket>
-			</Buckets></ListAllMyBucketsResult>`
-		}
-		return 204, ""
-	}}
+	f := newFakeS3().
+		seedBucket("backups", "2026-06-01T10:00:00Z").
+		seedBucket("media", "2026-06-15T08:30:00Z")
 	withFakeS3(t, f)
 
 	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "storage", "bucket", "get", "--name", "media", "--location", "nbg1")...)
@@ -233,15 +766,9 @@ func TestHetznerStorageBucketGet(t *testing.T) {
 // TestHetznerStorageBucketListAndDelete asserts list parses the XML into rows
 // (bare endpoint, no bucket subdomain) and delete issues DELETE.
 func TestHetznerStorageBucketListAndDelete(t *testing.T) {
-	f := &fakeS3{handler: func(r s3Req) (int, string) {
-		if r.Method == "GET" {
-			return 200, `<?xml version="1.0"?><ListAllMyBucketsResult><Buckets>
-				<Bucket><Name>backups</Name><CreationDate>2026-06-01T10:00:00.000Z</CreationDate></Bucket>
-				<Bucket><Name>media</Name><CreationDate>2026-06-15T08:30:00.000Z</CreationDate></Bucket>
-			</Buckets></ListAllMyBucketsResult>`
-		}
-		return 204, ""
-	}}
+	f := newFakeS3().
+		seedBucket("backups", "2026-06-01T10:00:00Z").
+		seedBucket("media", "2026-06-15T08:30:00Z")
 	withFakeS3(t, f)
 
 	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "storage", "bucket", "list")...)
@@ -268,9 +795,24 @@ func TestHetznerStorageBucketListAndDelete(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("bucket delete exited %d, stderr: %s", code, stderr)
 	}
-	del := f.requests()[len(f.requests())-1]
+	// The DELETE is no longer the LAST request: a destroy now re-reads (the
+	// declared non-binding ListBuckets) before it claims anything, so this looks
+	// the DELETE up by shape instead of by position.
+	var del s3Req
+	for _, r := range f.requests() {
+		if r.Method == "DELETE" {
+			del = r
+		}
+	}
 	if del.Method != "DELETE" || del.Host != "media.fsn1.your-objectstorage.com" {
 		t.Errorf("delete = %s %s, want DELETE on media.fsn1…", del.Method, del.Host)
+	}
+	// …and the store agrees: the bucket is gone, not merely 204'd.
+	if f.hasBucket("media") {
+		t.Error("bucket delete exited 0 but the bucket is still in the store")
+	}
+	if !f.hasBucket("backups") {
+		t.Error("bucket delete removed the wrong bucket")
 	}
 }
 
@@ -306,6 +848,100 @@ func TestHetznerStorageObjectPutFile(t *testing.T) {
 	if payload["ok"] != true || payload["action"] != "put" || payload["bytes"] != float64(len(content)) {
 		t.Errorf("receipt = %v, want ok/put/bytes=%d", payload, len(content))
 	}
+	// That number is now the length the STORE reported, checked against the
+	// source: the HEAD is in the request log and the receipt says it compared.
+	if _, ok := f.find("HEAD", "/dir/payload.txt"); !ok {
+		t.Errorf("no confirming HEAD was issued; requests = %+v", f.requests())
+	}
+	if payload["confirmed_present"] != true || payload["bytes_verified"] != true {
+		t.Errorf("receipt = %v, want confirmed_present and bytes_verified true", payload)
+	}
+}
+
+// TestHetznerStorageObjectPutReportsTheStoredLengthNotTheLocalOne is the
+// mutation that separates a read-back from an echo. The endpoint stores the file
+// and then DECLARES a different length for it — so a receipt built from the
+// pre-upload os.Stat would print a happy, self-agreeing number, and one built
+// from the post-read cannot: it disagrees, names the field, and refuses.
+func TestHetznerStorageObjectPutReportsTheStoredLengthNotTheLocalOne(t *testing.T) {
+	lying := int64(4096)
+	f := newFakeS3()
+	f.declaredLen = &lying
+	withFakeS3(t, f)
+	content := "nine bytes short of four thousand and ninety six\n"
+	path := filepath.Join(t.TempDir(), "payload.txt")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "storage", "object", "put", "--bucket", "bkt", "--key", "dir/payload.txt", "--file", path)...)
+	if code == exitOK {
+		t.Fatalf("a stored length that contradicts the source exited 0\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	said := stdout + stderr
+	if !strings.Contains(said, "UNMET") || !strings.Contains(said, `"bytes"`) ||
+		!strings.Contains(said, "4096") || !strings.Contains(said, strconv.Itoa(len(content))) {
+		t.Errorf("the refusal must name the field and BOTH numbers (%d vs 4096):\n%s", len(content), said)
+	}
+}
+
+// TestHetznerStorageObjectPutSilentDropRefuses is the fail-closed proof, on the
+// endpoint shape this whole apparatus exists for: every write answered 200,
+// nothing persisted. The pre-slice behaviour on exactly this endpoint was
+// `✓ put — object dir/payload.txt / bytes: 24` — the size of a LOCAL file that
+// never arrived anywhere. The post-read makes that receipt impossible.
+func TestHetznerStorageObjectPutSilentDropRefuses(t *testing.T) {
+	f := newFakeS3()
+	f.dropWrites = true
+	withFakeS3(t, f)
+	path := filepath.Join(t.TempDir(), "payload.txt")
+	if err := os.WriteFile(path, []byte("the exact payload bytes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "storage", "object", "put", "--bucket", "bkt", "--key", "dir/payload.txt", "--file", path)...)
+	if code == exitOK {
+		t.Fatalf("a silently dropped put exited 0\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	said := stdout + stderr
+	if !strings.Contains(said, "NOT READABLE") || !strings.Contains(said, "dir/payload.txt") {
+		t.Errorf("the refusal must name the object that is not there:\n%s", said)
+	}
+	if _, ok := f.stored("bkt", "dir/payload.txt"); ok {
+		t.Fatal("dropWrites persisted the object; this test would prove nothing")
+	}
+}
+
+// TestHetznerStorageObjectPutStdinStatesTheUnknownLength: the multipart path
+// never learns the source size, so `bytes` used to be silently ABSENT there —
+// two production paths, two different receipt shapes, and no way to tell an
+// unmeasured upload from a measured one. Now both paths confirm existence, the
+// stored length is reported, and the receipt SAYS it was compared against
+// nothing.
+func TestHetznerStorageObjectPutStdinStatesTheUnknownLength(t *testing.T) {
+	f, _ := multipartS3()
+	withFakeS3(t, f)
+	oldStdin := storageStdin
+	storageStdin = strings.NewReader("streamed via stdin")
+	t.Cleanup(func() { storageStdin = oldStdin })
+
+	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "storage", "object", "put", "--bucket", "bkt", "--key", "stream.bin", "-")...)
+	if code != exitOK {
+		t.Fatalf("stdin put exited %d, stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("receipt is not JSON: %v\n%s", err, stdout)
+	}
+	if payload["confirmed_present"] != true || payload["bytes"] != float64(len("streamed via stdin")) {
+		t.Errorf("receipt = %v, want confirmed_present with the STORED byte count", payload)
+	}
+	if payload["bytes_verified"] != false {
+		t.Errorf("receipt = %v, want bytes_verified false — nothing measured the pipe", payload)
+	}
+	if reason, _ := payload["bytes_reason"].(string); !strings.Contains(reason, "never learns the source length") {
+		t.Errorf("receipt = %v, want a stated reason for the unverified byte count", payload)
+	}
 }
 
 // TestHetznerStorageObjectPutStdin asserts the trailing `-` streams stdin via
@@ -336,12 +972,7 @@ func TestHetznerStorageObjectPutStdin(t *testing.T) {
 // TestHetznerStorageObjectGetAndRm asserts get streams the RAW body to stdout
 // (pipe-friendly, no envelope) and rm issues DELETE on the key.
 func TestHetznerStorageObjectGetAndRm(t *testing.T) {
-	f := &fakeS3{handler: func(r s3Req) (int, string) {
-		if r.Method == "GET" {
-			return 200, "raw object bytes — no envelope"
-		}
-		return 204, ""
-	}}
+	f := newFakeS3().seedObject("bkt", "a/b.txt", "raw object bytes — no envelope", "")
 	withFakeS3(t, f)
 
 	stdout, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "storage", "object", "get", "--bucket", "bkt", "--key", "a/b.txt")...)
@@ -362,16 +993,123 @@ func TestHetznerStorageObjectGetAndRm(t *testing.T) {
 	if req, ok := f.find("DELETE", "/a/b.txt"); !ok || req.Host != "bkt.fsn1.your-objectstorage.com" {
 		t.Errorf("rm request = %+v, want DELETE bk.fsn1…/a/b.txt", req)
 	}
+	// The store agrees the key is gone — the read-back a 204 alone cannot give.
+	if _, ok := f.stored("bkt", "a/b.txt"); ok {
+		t.Error("object rm exited 0 but the key is still stored")
+	}
+}
+
+// hzGetJSON runs `object get --out <path>` against f and returns the decoded
+// receipt, so the size verdict is read as data rather than scraped from prose.
+func hzGetJSON(t *testing.T, outPath string) (map[string]any, string, int) {
+	t.Helper()
+	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "storage", "object", "get", "--bucket", "bkt", "--key", "a/b.txt", "--out", outPath)...)
+	payload := map[string]any{}
+	if code == exitOK {
+		if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+			t.Fatalf("get receipt is not JSON: %v\n%s", err, stdout)
+		}
+	}
+	return payload, stderr, code
+}
+
+// TestHetznerStorageObjectGetVerifiesDeclaredLength: the receipt's byte count
+// is CHECKED against the length the endpoint declared in the same response, and
+// says so. Before this, `bytes` was io.Copy's own counter echoed back — a number
+// that agreed with itself no matter what arrived.
+func TestHetznerStorageObjectGetVerifiesDeclaredLength(t *testing.T) {
+	body := "exactly-these-bytes"
+	n := int64(len(body))
+	f := newFakeS3().seedObject("bkt", "a/b.txt", body, "")
+	f.declaredLen = &n
+	withFakeS3(t, f)
+
+	outPath := filepath.Join(t.TempDir(), "obj.bin")
+	payload, stderr, code := hzGetJSON(t, outPath)
+	if code != exitOK {
+		t.Fatalf("get exited %d, stderr: %s", code, stderr)
+	}
+	if payload["bytes"] != float64(n) || payload["declared_bytes"] != float64(n) {
+		t.Errorf("receipt = %v, want bytes and declared_bytes both %d", payload, n)
+	}
+	if payload["size_verified"] != true || payload["unverified"] != float64(0) {
+		t.Errorf("receipt = %v, want size_verified true with a zero unverified counter", payload)
+	}
+	got, rerr := os.ReadFile(outPath)
+	if rerr != nil || string(got) != body {
+		t.Errorf("file = %q (%v), want the object's bytes", got, rerr)
+	}
+}
+
+// TestHetznerStorageObjectGetShortBodyIsNotSuccess is the mutation this whole
+// leg exists for: the endpoint DECLARES 4096 bytes and sends nine. The verb must
+// not exit 0, must NAME the mismatch — and must leave the operator's
+// pre-existing file byte-identical, because it now writes to a temp beside the
+// destination instead of truncating it before the first byte arrives.
+func TestHetznerStorageObjectGetShortBodyIsNotSuccess(t *testing.T) {
+	declared := int64(4096)
+	f := newFakeS3().seedObject("bkt", "a/b.txt", "TRUNCATED", "")
+	f.declaredLen = &declared
+	withFakeS3(t, f)
+
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "yesterdays-good-backup.tar.gz")
+	if err := os.WriteFile(outPath, []byte("THE OPERATOR'S GOOD COPY"), 0o644); err != nil {
+		t.Fatalf("seed pre-existing file: %v", err)
+	}
+	before := sha256.Sum256([]byte("THE OPERATOR'S GOOD COPY"))
+
+	stdout, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "storage", "object", "get", "--bucket", "bkt", "--key", "a/b.txt", "--out", outPath)...)
+	if code == exitOK {
+		t.Fatalf("a short body exited 0\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	said := stdout + stderr
+	if !strings.Contains(said, "size mismatch") || !strings.Contains(said, "4096") || !strings.Contains(said, "wrote 9") {
+		t.Errorf("failure must name the mismatch and both numbers:\n%s", said)
+	}
+	after, rerr := os.ReadFile(outPath)
+	if rerr != nil {
+		t.Fatalf("the pre-existing file is gone: %v", rerr)
+	}
+	if sha256.Sum256(after) != before {
+		t.Errorf("the pre-existing file changed: %q", after)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("temp litter left behind: %v", entries)
+	}
+}
+
+// TestHetznerStorageObjectGetUndeclaredLengthIsUnverified: Hetzner is
+// S3-COMPATIBLE, not S3. When no length comes back there is nothing to check
+// against, and the receipt says exactly that — with its own counter — instead of
+// reporting a verification it never performed.
+func TestHetznerStorageObjectGetUndeclaredLengthIsUnverified(t *testing.T) {
+	f := newFakeS3().seedObject("bkt", "a/b.txt", "some bytes", "") // declaredLen nil
+	withFakeS3(t, f)
+
+	outPath := filepath.Join(t.TempDir(), "obj.bin")
+	payload, stderr, code := hzGetJSON(t, outPath)
+	if code != exitOK {
+		t.Fatalf("an undeclared length must still transfer, exited %d: %s", code, stderr)
+	}
+	if payload["size_verified"] != false || payload["unverified"] != float64(1) {
+		t.Errorf("receipt = %v, want size_verified false with unverified=1", payload)
+	}
+	if _, ok := payload["declared_bytes"]; ok {
+		t.Errorf("receipt = %v, must not invent a declared_bytes it never received", payload)
+	}
+	if reason, _ := payload["unverified_reason"].(string); !strings.Contains(reason, "declared no object length") {
+		t.Errorf("receipt = %v, want a stated reason", payload)
+	}
 }
 
 // TestHetznerStorageObjectList asserts the prefix rides the query and the XML
 // listing lands in structured rows.
 func TestHetznerStorageObjectList(t *testing.T) {
-	f := &fakeS3{handler: func(r s3Req) (int, string) {
-		return 200, `<?xml version="1.0"?><ListBucketResult><Name>bk</Name><KeyCount>1</KeyCount><IsTruncated>false</IsTruncated>
-			<Contents><Key>prod/a.sql.gz</Key><Size>123</Size><LastModified>2026-07-01T00:00:00.000Z</LastModified></Contents>
-		</ListBucketResult>`
-	}}
+	f := newFakeS3().
+		seedObject("bkt", "prod/a.sql.gz", strings.Repeat("x", 123), "2026-07-01T00:00:00Z").
+		seedObject("bkt", "other/skip.txt", "not under the prefix", "")
 	withFakeS3(t, f)
 
 	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "storage", "object", "list", "--bucket", "bkt", "--prefix", "prod/")...)

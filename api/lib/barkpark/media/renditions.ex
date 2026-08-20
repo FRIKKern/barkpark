@@ -8,7 +8,7 @@ defmodule Barkpark.Media.Renditions do
   """
 
   alias Barkpark.Media
-  alias Barkpark.Media.ImageBackend
+  alias Barkpark.Media.{Blobstore, ImageBackend}
   alias Barkpark.Media.Storage.MediaFile
 
   # MIME types the rendition backend can actually decode. This mirrors the
@@ -108,24 +108,66 @@ defmodule Barkpark.Media.Renditions do
     :ok
   end
 
+  # Reachability: `dest` is `Media.file_path/1` over `cache_relative/4` — the
+  # fixed `_renditions` prefix, a DB-issued `MediaFile` UUID, a `@presets` key
+  # and its format; no caller-supplied path component reaches the mkdir.
+  # sobelow_skip ["Traversal.FileModule"]
   defp generate(%MediaFile{} = file, preset, spec, dest, rel, profile) do
-    src = Media.file_path(file.path)
-    File.mkdir_p!(Path.dirname(dest))
+    # The SOURCE original comes via the blobstore (a local path join today; a
+    # one-time cache download under an object-storage backend). The rendition
+    # OUTPUT stays a plain local write regardless of backend — renditions are
+    # a regenerable cache, never routed through remote storage.
+    case Blobstore.ensure_local(file.path) do
+      {:ok, src} ->
+        File.mkdir_p!(Path.dirname(dest))
 
-    # libvips on macOS/Linux/Docker; ImageMagick CLI on Windows. See ImageBackend.
-    case ImageBackend.impl().render(src, dest, spec, normalize_profile(profile)) do
-      :ok ->
-        {:ok, rel}
+        # libvips on macOS/Linux/Docker; ImageMagick CLI on Windows. See ImageBackend.
+        case ImageBackend.impl().render(src, dest, spec, normalize_profile(profile)) do
+          :ok ->
+            # Post-generate parent recheck — closes the delete-vs-generate race.
+            # A lazy generate that loaded `file` before an admin DELETE, then
+            # ran mkdir_p!+render AFTER the delete's rm_rf, would re-create an
+            # orphan dir under a now-deleted media_files id (never served, but
+            # wasted disk). We re-read the row and reap our own write if the
+            # parent is gone.
+            #
+            # RACE-SOUND on a strict ordering dependency: `Media.delete_file`
+            # commits `Repo.delete` BEFORE the deferred `delete_for_file` rm_rf
+            # (see media.ex — Repo.delete, then defer_media_effect). So:
+            #   * any render landing AFTER that rm_rf sees the row gone here and
+            #     reaps its own dir (the reap branch below);
+            #   * any render the recheck KEEPS committed before the delete saw
+            #     the row present, meaning its write predates the deferred rm_rf,
+            #     which then sweeps it.
+            # No interleaving survives an orphan. A refactor moving
+            # `delete_for_file` BEFORE the Repo.delete commit would break this —
+            # a kept render could then outlive the rm_rf. Keep rm_rf last.
+            case Media.get_file(file.id) do
+              {:ok, _} ->
+                {:ok, rel}
+
+              {:error, :not_found} ->
+                File.rm_rf(Path.dirname(dest))
+                {:error, :parent_deleted}
+            end
+
+          {:error, reason} ->
+            log_generate_failure(preset, file, reason)
+            {:error, reason}
+        end
 
       {:error, reason} ->
-        require Logger
-
-        Logger.warning(
-          "Barkpark.Media.Renditions.generate #{preset} for #{file.id}: #{inspect(reason)}"
-        )
-
+        log_generate_failure(preset, file, reason)
         {:error, reason}
     end
+  end
+
+  defp log_generate_failure(preset, file, reason) do
+    require Logger
+
+    Logger.warning(
+      "Barkpark.Media.Renditions.generate #{preset} for #{file.id}: #{inspect(reason)}"
+    )
   end
 
   # Collapse the "no watermark" sentinels to nil for the backend contract.

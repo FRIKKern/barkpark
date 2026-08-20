@@ -55,6 +55,9 @@ export const PROSE_GOLDEN: Record<string, string> = {
   footnote: 'The board updates live.\n\nYou always feel progress.',
   // grown (pbw-stier-equation): the tex source is reading content, the `code` precedent
   equation: 'E = mc^2',
+  // grown (jarl-dogfood, toPlainText silent-drop sweep): the summary line + the
+  // nested blocks' prose — collapsed content is still reading content
+  expandable: 'Show the full trace\n\nHidden detail.',
   // code-story blocks (W7 grow: diff reads its verbatim `diff` attr (D75),
   // filetree its verbatim `text` tree lines (D78) — the `code` precedent)
   diff:
@@ -102,9 +105,10 @@ export const TEXTLESS_SKIP: Record<string, string> = {
   // scaffy:add-block-type BarChart MARK:plaintext-skip-bar-chart
   'bar-chart': 'attrs-derived categorical counts (labels + numeric values) — no reading-flow prose, same textless family as chart/heatmap',
   // scaffy:add-block-type Expandable MARK:plaintext-skip-expandable
-  'expandable': 'starter block — no blockText dispatch clause yet, so toPlainText returns empty; move to PROSE_GOLDEN with a clause + golden when the block grows reading-flow prose (manual step 7)',
+  // (expandable moved to PROSE_GOLDEN — jarl-dogfood silent-drop sweep: its
+  // summary + nested blocks ARE reading-flow prose; the marker stays for scaffy.)
   // scaffy:add-block-type Toc MARK:plaintext-skip-toc
-  'toc': 'starter block — no blockText dispatch clause yet, so toPlainText returns empty; move to PROSE_GOLDEN with a clause + golden when the block grows reading-flow prose (manual step 7)',
+  'toc': 'navigation apparatus — its items are anchors DUPLICATING heading text already extracted from the headings themselves; including it would double every heading in excerpts/search',
   // ── structural / interactive ──────────────────────────────────────────────
   divider: 'structural rule — a decorative separator, carries no text',
   action:
@@ -115,10 +119,13 @@ export const TEXTLESS_SKIP: Record<string, string> = {
   diagram: 'media/diagram (mermaid) — `source` is diagram DSL, `caption` a viz label',
   // ── data-viz ────────────────────────────────────────────────────────────────
   chart: 'data-viz — numeric series + axis labels; `caption` is a viz label',
+  route: 'data-viz sport track — the polyline is coordinate data, sport/distance/caption are viz chrome, same textless family as chart/heatmap',
   heatmap: 'data-viz — a numeric cell matrix, no prose',
   stat: 'data-viz metric — `label`/`value` are viz chrome, not prose',
   'stat-grid': 'data-viz metric grid — label/value chrome',
   stats: 'data-viz metric grid (alias of stat-grid) — label/value chrome',
+  duel: 'data-viz two-arm comparison (jarl figure family) — legend/value/delta chrome, not prose',
+  lineage: 'data-viz dated nodes (jarl figure family) — overline/value chrome; node bodies are figure captions, not reading flow',
   'status-legend': 'data-viz legend — generated glyph/name/meaning chrome, no content',
   pipeline: 'data-viz flow diagram — node titles are diagram labels',
   stage: 'data-viz flow node — kind/title/detail are diagram labels',

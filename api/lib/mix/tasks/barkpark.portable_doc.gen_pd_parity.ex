@@ -11,10 +11,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   Modeled on `Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity` as a SIBLING
   (pure `build/1` → byte-equal N-mirror write → freshness lock), NOT an extension:
   that task freezes a HAND-DERIVED structural projection for 13 component types;
-  this one freezes the REAL `:article` HTML emission for the 46 blog-grammar types
+  this one freezes the REAL `:article` HTML emission for the 62 blog-grammar types
   plus a parser-derived DOM-shape the JS Layer-2 comparator reads.
 
-  ## The 46 in-scope types (charter D7)
+  ## The 62 in-scope types (charter D7)
 
   `compose.ex` dispatches 61 distinct block types (incl. the 3 interactive chat
   cards from #3514 — chat-approval/chat-question/chat-plan — and gauge-list from
@@ -22,7 +22,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   (`field-{string,slug,text,boolean,select,datetime,color,reference,image,number}`,
   `composite`, `arrayOf`, `codelist`, `localizedText`, `embed`) are OUT — they have
   zero web-fork seed, are schema-editor renderers not blog grammar, and are never
-  named in the wish. The remaining 46 ARE the kitchen-sink array. BOTH members of
+  named in the wish. The remaining in-scope types ARE the kitchen-sink array. BOTH members of
   the 3 alias pairs are present so the harness exercises alias dispatch:
   `questionnaire`/`form`, `stat-grid`/`stats`, `task-list`/`tasks`. `quiz` (a
   LiveView plugin, no Pd-tree block) and `onix` (separate XML) are NOT compose.ex
@@ -73,7 +73,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
 
   alias Barkpark.PortableDoc.Render
 
-  # ── the 46 in-scope authored inputs ───────────────────────────────────────────
+  # ── the 62 in-scope authored inputs ───────────────────────────────────────────
   #
   # ONE realistic block per in-scope type. Every string is whitespace-clean so the
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
@@ -293,7 +293,12 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
     "asciicast" => %{
       "type" => "asciicast",
       "src" => "https://example.com/casts/demo.cast",
-      "caption" => "A terminal walkthrough"
+      "caption" => "A terminal walkthrough",
+      # `poster` is the OPTIONAL resting frame (data-cast-poster). It rides the
+      # fixture so the Elixir ⇄ TS twins are proven byte-identical WITH the
+      # attribute — the unset leg (no attribute at all) is covered by the
+      # figures_test / PortableDoc.test unit pairs.
+      "poster" => "npt:0:12"
     },
     "figure" => %{
       "type" => "figure",
@@ -358,7 +363,12 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
           "prompt" => "Which renderers to keep",
           "options" => ["Elixir", "Go", "JS"]
         },
-        %{"id" => "q4", "type" => "scale", "prompt" => "Confidence", "scale" => %{"min" => 1, "max" => 5}},
+        %{
+          "id" => "q4",
+          "type" => "scale",
+          "prompt" => "Confidence",
+          "scale" => %{"min" => 1, "max" => 5}
+        },
         %{"id" => "q5", "type" => "text", "prompt" => "Anything else?"}
       ]
     },
@@ -383,7 +393,11 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "type" => "chat-todo",
       "todos" => [
         %{"content" => "Author the array", "status" => "completed"},
-        %{"content" => "Wire the generator", "status" => "in_progress", "active_form" => "Wiring the generator"},
+        %{
+          "content" => "Wire the generator",
+          "status" => "in_progress",
+          "active_form" => "Wiring the generator"
+        },
         %{"content" => "Prove parity", "status" => "pending"}
       ]
     },
@@ -417,15 +431,19 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "type" => "stat",
       "value" => "71",
       "denom" => "118",
+      "unit" => "blokker",
       "label" => "Blocks covered",
+      "body" => "Hver blokk består sine egne mekaniske porter.",
       "max" => 118,
-      "spark" => [3, 5, 8, 13, 21]
+      "spark" => [3, 5, 8, 13, 21],
+      "source" => "commit:591fdcd53"
     },
     "stats" => %{
       "type" => "stats",
+      "sourceDefault" => "paper:scaffy-benchmark",
       "items" => [
         %{"value" => "42", "label" => "In-scope types"},
-        %{"value" => "3", "label" => "Renderers"}
+        %{"value" => "3", "label" => "Renderers", "source" => "task:jdf-bl-historiene"}
       ]
     },
     "stat-grid" => %{
@@ -450,6 +468,66 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
         %{"label" => "Covered", "points" => [10, 20, 35, 42]}
       ],
       "axes" => %{"xLabels" => ["W1", "W2", "W3", "W4"]}
+    },
+    # route (sport track): a small fixed loop — encoded polyline is DATA, so the
+    # golden freezes the projection + marker geometry alongside the meta row.
+    "route" => %{
+      "type" => "route",
+      "sport" => "sykling",
+      "distance" => "4.2 km",
+      "elevation" => "61 m",
+      "duration" => "12m",
+      "caption" => "Testrunden",
+      "polyline" => "}ujlJgxgcAyPqOgO~JsLc[wF{aAdJ{[hSeE~MzTbInh@aB~e@"
+    },
+    # duel + lineage (jdf-bl-historiene-renderer-reconciliation): the jarl figure
+    # family, with THE KILDE LAW exercised — per-row/node `source` refs plus a
+    # `sourceDefault` fallback, deduped into the «kilde» stamp.
+    "duel" => %{
+      "type" => "duel",
+      "legendA" => "Med katalogen",
+      "legendB" => "Bare hendene",
+      "sourceDefault" => "commit:591fdcd53",
+      "rows" => [
+        %{
+          "label" => "add-error-shape",
+          "delta" => "−30 %",
+          "valueA" => "1 478",
+          "valueB" => "2 121"
+        },
+        %{
+          "label" => "add-oban-worker",
+          "delta" => "−34,8 %",
+          "valueA" => "1 788",
+          "valueB" => "2 743",
+          "source" => "task:jdf-bl-historiene"
+        }
+      ]
+    },
+    "lineage" => %{
+      "type" => "lineage",
+      "sourceDefault" => "paper:scaffy-benchmark",
+      "nodes" => [
+        %{
+          "overline" => "jan–sep 2025",
+          "title" => "nextgen-go-cli",
+          "value" => "335",
+          "unit" => "commits",
+          "body" => "Et kveldsprosjekt med én forfatter."
+        },
+        %{
+          "overline" => "2026",
+          "title" => "Navnebyttet: Scaffy",
+          "body" => "Idéen ble født på nytt."
+        },
+        %{
+          "overline" => "i dag",
+          "title" => "Kommandoer som innhold",
+          "value" => "22",
+          "unit" => "kommandoer",
+          "source" => "https://jarl.no/prosjekter/scaffy"
+        }
+      ]
     },
     # gauge-list share mode (#3670): `rows` present without `snapshot` → share. The
     # values 2/1/1 over a summed denom of 4 give exactly-representable props
@@ -492,18 +570,35 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "slots" => %{
         "title" => [%{"type" => "heading", "text" => "Card title"}],
         "body" => [
-          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Card body text."}]}
+          %{
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Card body text."}]
+          }
         ],
         "action" => [
-          %{"type" => "action", "label" => "Open the board", "href" => "https://example.com/board"}
+          %{
+            "type" => "action",
+            "label" => "Open the board",
+            "href" => "https://example.com/board"
+          }
         ]
       }
     },
     "pipeline" => %{
       "type" => "pipeline",
       "nodes" => [
-        %{"kind" => "source", "title" => "Ingest", "detail" => "reads the queue", "source" => true},
-        %{"kind" => "emit", "title" => "Transform", "detail" => "maps the rows", "source" => "queue.ex:42"},
+        %{
+          "kind" => "source",
+          "title" => "Ingest",
+          "detail" => "reads the queue",
+          "source" => true
+        },
+        %{
+          "kind" => "emit",
+          "title" => "Transform",
+          "detail" => "maps the rows",
+          "source" => "queue.ex:42"
+        },
         %{"kind" => "gate", "title" => "Publish", "detail" => "writes the board"}
       ]
     },
@@ -539,13 +634,23 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
         %{"title" => "Wire the harness", "status" => "ready", "priority" => "1"},
         %{"title" => "Render the board", "status" => "in_progress", "priority" => "0"},
         %{"title" => "Await review", "status" => "blocked"},
-        %{"title" => "Ship the legend", "status" => "done", "criteria" => %{"met" => 2, "total" => 2}}
+        %{
+          "title" => "Ship the legend",
+          "status" => "done",
+          "criteria" => %{"met" => 2, "total" => 2}
+        }
       ]
     },
     "roadmap" => %{
       "type" => "roadmap",
       "snapshot" => [
-        %{"title" => "Foundation", "status" => "done", "phase_row" => true, "left" => 0, "width" => 40},
+        %{
+          "title" => "Foundation",
+          "status" => "done",
+          "phase_row" => true,
+          "left" => 0,
+          "width" => 40
+        },
         %{"title" => "Ship the board", "status" => "in_progress", "left" => 40, "width" => 35}
       ],
       "scale" => ["Q1", "Q2", "Q3"]
@@ -572,8 +677,18 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
     "columns" => %{
       "type" => "columns",
       "columns" => [
-        [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Left column body."}]}],
-        [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Right column body."}]}]
+        [
+          %{
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Left column body."}]
+          }
+        ],
+        [
+          %{
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Right column body."}]
+          }
+        ]
       ]
     },
     "terminal" => %{
@@ -582,15 +697,25 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "live" => true,
       "footer" => "q to quit",
       "children" => [
-        %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Inside the frame."}]}
+        %{
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Inside the frame."}]
+        }
       ]
     },
     "section" => %{
       "type" => "section",
       "layout" => %{"mode" => "grid", "tracks" => 2, "gap" => "md"},
       "blocks" => [
-        %{"type" => "card", "slots" => %{"title" => [%{"type" => "heading", "text" => "Alpha cell"}]}},
-        %{"type" => "card", "span" => 2, "slots" => %{"title" => [%{"type" => "heading", "text" => "Beta cell"}]}}
+        %{
+          "type" => "card",
+          "slots" => %{"title" => [%{"type" => "heading", "text" => "Alpha cell"}]}
+        },
+        %{
+          "type" => "card",
+          "span" => 2,
+          "slots" => %{"title" => [%{"type" => "heading", "text" => "Beta cell"}]}
+        }
       ]
     },
     "status-legend" => %{"type" => "status-legend"}
@@ -625,7 +750,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   @doc "The 3 alias pairs whose BOTH members are in-scope."
   def alias_pairs, do: @alias_pairs
 
-  @doc "The 46 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
+  @doc "The 62 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
   def types, do: @inputs |> Map.keys() |> Enum.sort()
 
   @doc "The authored input block for a type slug."

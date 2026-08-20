@@ -23,7 +23,7 @@
                           ┌──────────────────────────┐                          
                           │ Viewport                 │                          
                           └──────────────────────────┘                          
-Figure 1. The render pipeline as a flow.                                        
+The render pipeline as a flow.                                                  
                                                                                 
 ┌───────────────────────┐  ┌───────────────────────┐  ┌───────────────────────┐ 
 │        Caller         │  │       Registry        │  │       Renderer        │ 
@@ -36,7 +36,7 @@ Figure 1. The render pipeline as a flow.
             │                      []string                       │             
             ◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤             
             │                          │                          │             
-Figure 2. A sequence, for kind detection.                                       
+A sequence, for kind detection.                                                 
                                                                                 
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ ▶ Asciicast · 0:42 · 80x24 · open in browser                                 │

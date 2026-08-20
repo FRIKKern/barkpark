@@ -22,9 +22,11 @@ export interface SeedState {
 // `count`, …) — the exact payload `handleFind` receives over HTTP — NOT an
 // already-shaped FindResponse. The finder reads `initialData.hits`, so the
 // island MUST run the same `shapeFindResponse` mapping the live route uses
-// (browse, engine=indx — the engine the seed was baked with). Without this the
-// first-paint browse landing renders EMPTY (raw JSON has no `.hits`) and the
-// finder skips its refetch on the matching seed key.
+// (browse, engine=postgres — the engine the seed is baked with, see
+// `bp.ts` → `browseSeed`; the payload's own server-reported `engineUsed` wins
+// over the fallback here). Without this the first-paint browse landing renders
+// EMPTY (raw JSON has no `.hits`) and the finder skips its refetch on the
+// matching seed key.
 //
 // The build (`src/lib/bp.ts` → `browseSeed`) bakes `initialSeed` as the RANKED
 // CORPUS — a flat `SeedDoc[]` — NOT an already-built `PrefixSeed`. The island is
@@ -44,8 +46,8 @@ export function shapeSeed(raw: RawSeed | null): SeedState {
   if (!raw) return { initialData: null, initialSeed: null }
   const initialData = raw.initialData
     ? shapeFindResponse(raw.initialData, {
-        engine: 'indx',
-        engineUsed: 'indx',
+        engine: 'postgres',
+        engineUsed: 'postgres',
         browse: true,
         cache: false,
         upstreamMs: null,

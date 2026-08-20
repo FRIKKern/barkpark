@@ -113,6 +113,22 @@ The `env` block is the whole instance override. `bp`'s environment layer sits
 instance, a teammate's, or `http://localhost:4000` — no matter what `bp setup`
 saved.
 
+## Claude Code on the web (cloud sessions)
+
+Web sessions run in a fresh remote container, so this repo ships the wiring:
+the committed `.mcp.json` (stanza B above) plus a `SessionStart` hook
+(`scripts/ensure-bp.sh`) that installs the prebuilt `bp` binary when missing —
+fail-soft, never blocks session start. Two things only the **environment
+settings** (web UI) can provide:
+
+- **Network egress allowlist** — add `guerrilla.barkpark.cloud` (and
+  `github.com` for the installer); a blocked host fails with "Host not in
+  allowlist".
+- **Env vars** — `BARKPARK_API_URL` and `BARKPARK_API_TOKEN` (scoped token,
+  never admin — [Token scoping](REMOTE.md#token-scoping)).
+
+Verify inside a session: `bp task ready` (empty list = connected, no open work).
+
 ## Teach Claude Code the task contract
 
 The MCP tools carry the claim-first contract in their own descriptions, but you
@@ -175,3 +191,102 @@ the default `tasks` unless you know exactly which handful you need.
 - **Wrong server** — `bp` talks to whatever the `env` block (or
   `~/.config/barkpark/`) points at; edit `BARKPARK_API_URL` or re-run
   `bp setup` to switch.
+
+## Run an epic wave from any machine
+
+The `*.workflow.js` orchestration engines under
+[`.claude/workflows/`](../../.claude/workflows/README.md) are tracked — a
+fresh clone carries them, byte-identical to `origin/main`. What the clone does
+**not** carry is the environment around them. This is the honest prerequisite
+list, each item verified against the shipped code.
+
+### Prerequisites
+
+1. **The `bp` binary** — it is not in the clone (`/barkpark` is gitignored).
+   Build it with a Go toolchain:
+
+   ```bash
+   make cli-install
+   ```
+
+2. **Barkpark auth is two steps, not one.** `bp login` writes ONLY the three
+   cloud keys (`cloud_url`, `cloud_token`, `cloud_team`). The tail that would
+   also connect you to a content server (the `server` + `token` keys) is
+   TTY-gated (`internal/cli/cloud12_cmd.go:261`) — on a headless or agent
+   machine it silently never runs. So also point `bp` at a server:
+
+   ```bash
+   bp login                  # cloud identity — cloud_* keys only
+   bp setup --target cloud   # or: bp use <name> — writes server + token
+   ```
+
+3. **Verify with fields, never the exit code.** `bp whoami` exits 0 even when
+   the server is unreachable — its exit code is a vacuous green. Assert on the
+   JSON fields instead:
+
+   ```bash
+   bp whoami -o json
+   # require: .reachable == true, .token_present == true,
+   #          .cloud.logged_in == true; .server names the host bp talks to
+   ```
+
+4. **`gh` auth** with the `repo` scope — plus the `workflow` scope if any
+   slice touches `.github/`.
+
+5. **A real git identity** (`git config user.name` / `user.email`) — worktree
+   builders inherit the checkout-local identity, and their commits carry it.
+
+6. **Disk headroom for worktrees** — every builder runs in an isolation
+   worktree under `.claude/worktrees/`; hundreds accumulate across waves.
+
+7. **Workflows enabled for your Claude Code account.** Enablement is
+   account/org-gated, not machine-gated: the Pro tier defaults **off**
+   (settings `enableWorkflows: true` turns it on), an org policy
+   `allow_workflows` can gate it, managed settings `disableWorkflows` kills
+   it, and the env escape hatch is `CLAUDE_CODE_WORKFLOWS=true`.
+
+### Launch
+
+Always launch by `scriptPath`, and take the invocation from here in full — the
+harness skill listing cannot be relied on for it (per-skill text is cut at
+1536 chars; a tight global listing budget can reduce a workflow to a bare name
+on other accounts):
+
+```js
+Workflow({
+  scriptPath: ".claude/workflows/bp-epic-cycle.workflow.js",
+  args: {
+    wish: "<the user's request, verbatim — required>",
+    charter_path: ".claude/workflows/<epic>-charter.md",
+    charter_exists: true,     // false on a charterless first wave
+    epic_task_id: "task-…",   // when the epic task already exists
+    no_fable: true            // when Fable is unavailable — without it,
+                              // fable-assigned phases and slices are
+                              // lost with no retry
+  }
+})
+```
+
+- `scriptPath` resolves against the **session cwd** — launch from the repo
+  root, or pass an absolute path.
+- **Never launch by name.** The name registry is a session-start snapshot; a
+  freshly cloned engine is not in it. `scriptPath` reads the file at invoke
+  time, which is why it works on a clone the session has never seen.
+- **The args-string trap.** `args` must be an object. If it arrives as a
+  string, that string must be valid JSON — the engine parses it or throws.
+
+### Launch-portable / resume-host-bound
+
+The rule is launch-portable/resume-host-bound. Launching travels with the
+clone; resuming does not: run state lives under
+`$HOME/.claude/projects/<abs-cwd-key>/<session-uuid>/workflows/scripts` — on
+the machine, keyed by absolute cwd + session, never in the repo. Resume only
+on the same machine and only with **byte-identical args** — one edited
+character forks the wave into a new run. Cross-machine recovery is a
+relaunch, and its cost is the cached survey/verify rounds.
+
+### The paper wall
+
+Wave Papers (tag `epic-cycle-wave-paper`) are gated by a publish-time quality
+wall. A rejected publish is a `422 invalid_epic_paper_quality`, and it names
+every failed rule in `details.failures` — read that list, fix, republish.

@@ -363,6 +363,56 @@ delete_doc() { # base bearer id type — best-effort; census re-reads are the tr
   rm -f "$out"
 }
 
+# ── the teardown-credential seam (EITHER path) + the PDF-D75 raw reaper ──────
+#
+# The NAMED teardown credential is EITHER the env token OR the hcloud context —
+# the R0 money-safety gate accepts both, so the emergency teardown must reach
+# the box on both too. (The old cleanup guarded on the token ONLY: a
+# context-using operator's red run got just a printed "may be BILLING" and the
+# box outlived the trap.)
+
+hc_teardown() { # hcloud … under the NAMED teardown credential (token OR context)
+  if [ -n "$TEARDOWN_HC_TOKEN" ]; then
+    HCLOUD_TOKEN="$TEARDOWN_HC_TOKEN" hcloud "$@"
+  else
+    hcloud --context "$TEARDOWN_HC_CTX" "$@"
+  fi
+}
+
+# PDF-D75's raw last resort, regained (it was dropped in the D90 fold):
+# list-then-delete by the fleet label — `bp cloud support remove` is itself
+# under test, and `hcloud server delete` has NO --selector, so scan for ids
+# first, then delete each one.
+# shellcheck disable=SC2329  # invoked from `cleanup` via the EXIT trap
+reap_support_box_by_label() {
+  if ! command -v hcloud >/dev/null 2>&1; then
+    say "cleanup: hcloud not on PATH — cannot raw-reap $FLEET_LABEL=$SUPPORT_NAME; a surviving box is BILLING, delete it by hand"
+    return 0
+  fi
+  local ids id n; n=0
+  ids="$(hc_teardown server list -l "$FLEET_LABEL=$SUPPORT_NAME" -o json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin) or []
+except Exception:
+    d = []
+print("\n".join(str(s.get("id")) for s in d if s.get("id")))' || true)"
+  if [ -z "$ids" ]; then
+    say "cleanup: raw label scan $FLEET_LABEL=$SUPPORT_NAME through the teardown credential → no boxes (nothing to reap)"
+    return 0
+  fi
+  for id in $ids; do
+    if hc_teardown server delete "$id" >/dev/null 2>&1; then
+      say "cleanup: raw hcloud server delete $id (label $FLEET_LABEL=$SUPPORT_NAME) — DELETED"
+      n=$((n + 1))
+    else
+      say "cleanup: raw hcloud server delete $id FAILED — the box is BILLING; delete it by hand"
+    fi
+  done
+  [ "$n" -gt 0 ] && SUPPORT_REMOVED=1
+  return 0
+}
+
 # ── the teardown trap: installed BEFORE any write (D82(9)) ────────────────────
 #
 # Every write is cleaned by its own teardown; the trap is the always-runs
@@ -395,20 +445,37 @@ cleanup() {
     say ""
     say "cleanup: the run died before R5 — emergency support teardown of $SUPPORT_NAME"
     say "cleanup: server-side support remove is backlog (pdf-bl-support-remove-serverside);"
-    say "cleanup: the box lives in the CP's provisioning project — remove it with the"
-    say "cleanup: NAMED teardown credential:  bp cloud support remove $SUPPORT_NAME"
-    if [ -n "$BP" ] && [ -x "$BP" ] && [ -n "$TEARDOWN_HC_TOKEN" ]; then
-      # shellcheck disable=SC2015
-      HCLOUD_TOKEN="$TEARDOWN_HC_TOKEN" BP_COLOR=none "$BP" ${JMAIN_URL:+-s "$JMAIN_URL"} ${JMAIN_TOKEN:+--token "$JMAIN_TOKEN"} cloud support remove "$SUPPORT_NAME" --dataset "$DATASET" \
-        && SUPPORT_REMOVED=1 \
-        || say "cleanup: bp cloud support remove did not converge — remove $SUPPORT_NAME BY HAND (it is billing)"
-      if [ -n "$SUPPORT_ID" ] && [ -n "$JTEAM_TOKEN" ]; then
-        say "cleanup: deleting the CP support row (journey session)"
-        local cpo; cpo="$WORKDIR/cleanup-cp-row.json"
-        jcp_delete_code "/v1/fleet/supports/$SUPPORT_ID" "$cpo" >/dev/null 2>&1 || true
+    say "cleanup: the box lives in the CP's provisioning project — removing it with the"
+    say "cleanup: NAMED teardown credential (env token OR the '$TEARDOWN_HC_CTX' hcloud context):"
+    say "cleanup:   bp cloud support remove $SUPPORT_NAME"
+    if [ -n "$BP" ] && [ -x "$BP" ]; then
+      # EITHER credential path — the R0 money-safety gate accepts token or
+      # context, so the emergency teardown reaches the box on both (the old
+      # token-only guard left a context operator's box billing).
+      if [ -n "$TEARDOWN_HC_TOKEN" ]; then
+        # shellcheck disable=SC2015
+        HCLOUD_TOKEN="$TEARDOWN_HC_TOKEN" BP_COLOR=none "$BP" ${JMAIN_URL:+-s "$JMAIN_URL"} ${JMAIN_TOKEN:+--token "$JMAIN_TOKEN"} cloud support remove "$SUPPORT_NAME" --dataset "$DATASET" \
+          && SUPPORT_REMOVED=1 \
+          || say "cleanup: bp cloud support remove did not converge — falling through to the raw label reaper"
+      else
+        # shellcheck disable=SC2015
+        HCLOUD_CONTEXT="$TEARDOWN_HC_CTX" BP_COLOR=none "$BP" ${JMAIN_URL:+-s "$JMAIN_URL"} ${JMAIN_TOKEN:+--token "$JMAIN_TOKEN"} cloud support remove "$SUPPORT_NAME" --dataset "$DATASET" \
+          && SUPPORT_REMOVED=1 \
+          || say "cleanup: bp cloud support remove did not converge — falling through to the raw label reaper"
       fi
     else
-      say "cleanup: NO named teardown credential in scope — support $SUPPORT_NAME may be BILLING; remove it by hand"
+      say "cleanup: bp is not built in this run — going straight to the raw label reaper"
+    fi
+    # PDF-D75's raw last resort (regained): `bp cloud support remove` is itself
+    # under test — a failed remove MUST NOT leave the box billing.
+    if [ -z "$SUPPORT_REMOVED" ]; then
+      reap_support_box_by_label
+    fi
+    # CP row LAST (PDF-D68 — the sole durable token-id holder dies last).
+    if [ -n "$SUPPORT_ID" ] && [ -n "$JTEAM_TOKEN" ]; then
+      say "cleanup: deleting the CP support row (journey session; last, PDF-D68)"
+      local cpo; cpo="$WORKDIR/cleanup-cp-row.json"
+      jcp_delete_code "/v1/fleet/supports/$SUPPORT_ID" "$cpo" >/dev/null 2>&1 || true
     fi
   fi
   if [ -n "$MAIN_CREATED" ] && [ -z "$MAIN_REMOVED" ] && [ -n "$MAIN_ID" ]; then
@@ -500,7 +567,7 @@ if [ "$MODE" = "plan" ]; then
   say "  the never-onlines assert must FIRE AS A FAILURE (the row DOES online) => NEGCTL OK, exit 0."
   say ""
   say "  --scan-transcript <file>: grep for the guerrilla admin bearer, the cloud_token, the named"
-  say "  teardown token, and the sk-ant prefix — ZERO hits or no commit."
+  say "  teardown token, and the Anthropic key prefix — ZERO hits or no commit."
   rule
   say "Run it:  $0            (the proof — LIVE, provisions + tears down a main + a support)"
   say "         $0 --negctl   (the control that must fire — free)"
@@ -1309,7 +1376,8 @@ import json, sys
 i, t, w, d = sys.argv[1:5]
 doc = {"_id": i, "_type": "task", "kind": "task", "lifecycle_status": "open",
        "title": t, "description": d, "assignee": w, "priority": 2,
-       "tags": [{"tag": "order", "strength": 80, "rationale": "fleet order"}]}
+       "tags": [{"tag": "order", "strength": 80,
+                "rationale": "fleet order routed to the support listener by the MVP-0 journey proof"}]}
 print(json.dumps([{"createOrReplace": doc}, {"publish": {"id": i, "type": "task"}}]))
 PY
 )"

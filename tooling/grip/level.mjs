@@ -317,6 +317,86 @@ function firstRemoteUrlHost(command) {
 // reads the LOCAL dev server, which is a property of the checkout — L3.
 const REMOTE_API_HEADS = new Set(["bp", "gh"]);
 
+// The `bp scaffy` carve-out: five verbs are PURE LOCAL and touch no server.
+// scaffy_cmd.go's own header states it (verbatim): "PURE LOCAL like make/style:
+// no network, no auth, no manifest — this file never touches the server." Its
+// engine (internal/scaffy: Parse/Lint/ValidateFile/Format/Run/Remove and the
+// git-mining discover pass) reads and writes the cwd tree only. So a URL-free
+// `bp scaffy validate|fmt|run|remove|discover …` re-derives its fact from the
+// LOCAL CHECKOUT — L3 — exactly like `mix test` or `node <script>`, and filing
+// it at the remote-API L2 is a one-level authority INFLATION: checkCeiling
+// accepts an author's L2 claim on a fact only the local tree can settle.
+//
+// The boundary is the whole judgment, re-derived from the two source files, not
+// assumed: `pull` and `ls --remote` live in scaffy_remote_cmd.go, carry a
+// `Server` and hit `<server>/v1/data/query/<dataset>/command` — they stay L2.
+// The demotion therefore requires BOTH (a) a local verb AND (b) NO url token in
+// the command: a non-loopback `-s https://…` reaches the L2 branch below, and a
+// loopback `-s http://localhost…` is already caught by hasOnlyLoopbackTargets
+// (L3). Only the URL-FREE local-verb invocation is demoted here.
+const LOCAL_SCAFFY_VERBS = new Set(["validate", "fmt", "run", "remove", "discover"]);
+
+// The value-taking global flags, mirrored from internal/cli/globals.go's
+// `valueFlags` map (the arity AUTHORITY — 13 keys). The subcommand anchor below
+// must skip the VALUE each of these consumes, not just the flag, or it lands one
+// token early on the flag's argument. Every OTHER flag (`--json`, `-q`, an
+// unknown command-local `--check`) is boolean-shaped: it consumes itself only.
+// Getting either arity wrong reopens the over-refusal in the opposite direction
+// — see isLocalScaffyInvocation.
+const SCAFFY_ANCHOR_VALUE_GLOBALS = new Set([
+  "-s", "--server", "--token", "-w", "--workspace", "-p", "--project",
+  "-d", "--dataset", "-o", "--output", "--limit", "--offset", "--manifest",
+]);
+
+// isLocalScaffyInvocation(command) → true when the command is a URL-free `bp`
+// invocation whose SUBCOMMAND is `scaffy` and whose scaffy VERB is one of the
+// five pure-local verbs.
+//
+// THE ANCHOR (why not tokens.indexOf("scaffy")): a bare indexOf matches the word
+// "scaffy" ANYWHERE in the token stream, so a genuine REMOTE `bp` read that
+// merely carries 'scaffy' as an ARGUMENT — `bp task get scaffy validate x.scaffy`,
+// `bp search query scaffy validate` — was mis-read as a local scaffy verb and
+// OVER-DEMOTED L2→L3, making checkCeiling refuse an honest L2 claim. The verb is
+// only a scaffy verb when `scaffy` sits at the SUBCOMMAND position: the first
+// token after `bp` that is not a global flag (nor a value a value-taking global
+// consumed). We locate `bp` via headToken (which already unwraps env-assignments
+// and prefix wrappers), then walk the remainder skipping each global flag AND the
+// value it eats, per the globals.go arity authority.
+function isLocalScaffyInvocation(command) {
+  URL_TOKEN.lastIndex = 0;
+  if (URL_TOKEN.exec(command) !== null) return false; // any url ⇒ not the URL-free local shape
+  const { head, rest } = headToken(command);
+  if (head !== "bp") return false;
+  // Walk to the subcommand: skip leading global flags, consuming the value each
+  // value-taking global takes (i += 2) vs a boolean/unknown flag (i += 1). A
+  // long `--flag=value` is self-contained (i += 1); a short `-o=json` is NOT the
+  // globals.go inline form, so it falls through to the i += 1 branch — also
+  // self-contained (the value is attached), which lands correctly either way.
+  let i = 0;
+  while (i < rest.length) {
+    const tok = rest[i];
+    if (tok[0] !== "-") break; // first non-flag token = the subcommand
+    let key = tok;
+    const eq = tok.indexOf("=");
+    const inlineLong = eq >= 0 && tok.startsWith("--");
+    if (inlineLong) key = tok.slice(0, eq);
+    if (!inlineLong && SCAFFY_ANCHOR_VALUE_GLOBALS.has(key)) {
+      i += 2; // value-taking global: skip the flag AND its separate value token
+    } else {
+      i += 1; // boolean flag, --json, inline --flag=value, or unknown local flag
+    }
+  }
+  if (i >= rest.length || rest[i] !== "scaffy") return false;
+  // The scaffy VERB is the first non-flag token after the `scaffy` subcommand
+  // (`ls --remote` → `ls`, `discover --since X` → `discover`, `fmt --check f`
+  // → `fmt`). Only the five pure-local verbs demote.
+  for (let j = i + 1; j < rest.length; j += 1) {
+    if (rest[j][0] === "-") continue;
+    return LOCAL_SCAFFY_VERBS.has(rest[j]);
+  }
+  return false;
+}
+
 function hasOnlyLoopbackTargets(command) {
   URL_TOKEN.lastIndex = 0;
   let seen = false;
@@ -464,13 +544,35 @@ const READER_HEADS = new Set(["cat", "head", "tail", "less", "more", "jq", "grep
 
 // The level of ONE segment of a compound, or null when the segment classifies
 // nothing (a `cd`, a loop keyword, an unknown head).
-function segmentLevel(text) {
+function segmentLevel(text, maskText = text) {
   const command = trimSegment(text);
   if (command === "") return null;
+  // Mention-immunity: the blessed remote tokens are read from the QUOTE-MASKED
+  // segment, exactly as curl/wget is head-gated. `grep -rn "ssh root@host" doc.md`
+  // MENTIONS a production command; it does not run one.
+  const masked = trimSegment(maskText);
+  const { head, raw, rest } = headToken(command);
+  // A READER head can never itself BE an ssh/gh/git-show invocation, so a
+  // blessed token under one is always a mention — including the unquoted
+  // `grep -rn ssh root@host docs/`, which quote-masking alone cannot see.
+  // …but a process/command substitution under a reader head is a REAL
+  // invocation, not a mention: `diff <(git show origin/main:x) x` genuinely
+  // reads origin. The corpus contains exactly that shape, and demoting it
+  // would break the standing zero-false-demotion bar.
+  const mentionOnly = READER_HEADS.has(head) && !/[<>$]\(/.test(masked);
+  // …and a segment HEADED BY the command itself is never a mention of it: its
+  // own quoted arguments belong to it. `ssh "root@host" uptime` and
+  // `git show 'origin/main:api/mix.exs'` quote a DESTINATION, they do not name
+  // a command inside prose — and reading those through the mask demoted a live
+  // production read L1→L6 and an origin read L2→L3, the exact false-demotion
+  // direction this change is barred from moving. `headToken` already unwraps
+  // PREFIX_WRAPPERS, so `timeout 30 ssh "root@h" …` is covered too. Masking
+  // still governs every OTHER head, which is what keeps `echo "ssh root@host"`
+  // at L6.
+  const probe = (name) => (head === name ? command : masked);
 
   // L1 — a running system was touched.
-  if (SSH_READ.test(command)) return "L1";
-  const { head, raw, rest } = headToken(command);
+  if (!mentionOnly && SSH_READ.test(probe("ssh"))) return "L1";
   if (head === "curl" || head === "wget") {
     // The URL is read from the ORIGINAL segment, quotes and all: `curl 'https://…'`
     // is a real remote target. The head gate is what keeps a MENTIONED url —
@@ -480,8 +582,13 @@ function segmentLevel(text) {
   if (!head) return null;
 
   // L2 — origin/main, or another remote read through a remote-API client.
-  if (GIT_SHOW_REMOTE.test(command) || GH_API.test(command)) return "L2";
-  if (REMOTE_API_HEADS.has(head)) return hasOnlyLoopbackTargets(command) ? "L3" : "L2";
+  if (!mentionOnly && (GIT_SHOW_REMOTE.test(probe("git")) || GH_API.test(probe("gh")))) return "L2";
+  if (REMOTE_API_HEADS.has(head)) {
+    if (hasOnlyLoopbackTargets(command)) return "L3";
+    // A URL-free local `bp scaffy` verb touches only the cwd tree — L3.
+    if (head === "bp" && isLocalScaffyInvocation(command)) return "L3";
+    return "L2";
+  }
 
   // L4 — the read's TARGET is a known generated artifact. Checked before the
   // generic L3 family: `cat docs/openapi.json` is an artifact read, not source.
@@ -523,7 +630,7 @@ export function deriveLevel(rerun) {
   let best = null;
   let sawArtifactRead = false;
   for (const segment of splitSegments(command, mask)) {
-    const level = segmentLevel(segment.raw);
+    const level = segmentLevel(segment.raw, segment.mask);
     if (level === null) continue;
     if (level === "L4") { sawArtifactRead = true; continue; }
     if (best === null || LEVELS[level] < LEVELS[best]) best = level;

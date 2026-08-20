@@ -1,0 +1,63 @@
+name: bp-graph-drift
+
+# DIRECTIONAL byte-identity tripwire for the four bp-graph.js copies
+# (search-template epic D72). bp-graph.js declares its own direction in its
+# header — the canonical is api/priv/static/assets/bp-graph.js and the other
+# three are verbatim mirrors — so this job compares each MIRROR against the
+# CANONICAL and names the one that rotted.
+#
+# WHY A DEDICATED WORKFLOW AND NOT doc-gates.yml: doc-gates.yml triggers on
+# web/** and templates/** but has NO api/priv/** path and no **/*.js glob, so a
+# CANONICAL-ONLY edit — exactly the edit the mirror doctrine mandates — would
+# never fire it. The trigger list below therefore names all four literal copies
+# plus this script and this workflow.
+#
+# ADVISORY, honestly labelled — and the ORIGINAL ground for that label is DEAD.
+# It read "there is nothing to register against", true only while protection was
+# a 404. Since 2026-07-28T22:42:10Z main IS protected, with enforce_admins: true
+# and a required-context list committed at .github/required-checks.json. This
+# workflow is simply not on that list, so it REDS THE PR PAGE and gates nothing.
+# (`/rulesets` -> [] is TRUE and is the wrong reading: protection here is
+# classic branch protection, not a ruleset.) Putting a check ON that list is a
+# repo-settings decision taken through scripts/required-checks-*.sh — never a
+# side effect of this file. Names are deliberately not repeated here: the spec
+# file is the one source, and required-checks-verify.sh reads prose near them.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/priv/static/assets/bp-graph.js"
+      - "web/public/bp-graph.js"
+      - "templates/search-starter/public/bp-graph.js"
+      - "templates/astro-search-starter/public/bp-graph.js"
+      - "scripts/check-bp-graph-drift.sh"
+      - ".github/workflows/bp-graph-drift.yml"
+  pull_request:
+    paths:
+      - "api/priv/static/assets/bp-graph.js"
+      - "web/public/bp-graph.js"
+      - "templates/search-starter/public/bp-graph.js"
+      - "templates/astro-search-starter/public/bp-graph.js"
+      - "scripts/check-bp-graph-drift.sh"
+      - ".github/workflows/bp-graph-drift.yml"
+
+concurrency:
+  group: bp-graph-drift-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  drift:
+    name: bp-graph.js mirror identity (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Prove the tripwire can fail before trusting that it passed: the selftest
+      # asserts the REASON STRINGS (DRIFTED / MISSING MIRROR / MISSING
+      # CANONICAL), not just drift counts.
+      - name: Self-test the tripwire
+        run: bash scripts/check-bp-graph-drift.sh --selftest
+
+      - name: Check mirror identity
+        run: bash scripts/check-bp-graph-drift.sh

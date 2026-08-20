@@ -45,6 +45,52 @@ defmodule Barkpark.Search.InteractionTest do
     assert click.query_normalized == "hero post"
   end
 
+  test "record_interaction discriminates a switched-off recorder from a lost signal" do
+    attrs = %{"queryEventId" => Ecto.UUID.generate(), "objectId" => "p1", "type" => "select"}
+
+    assert {:skipped, :recording_disabled} =
+             Intelligence.record_interaction(@surface, @scope, attrs, disabled: true)
+
+    assert {:skipped, :incomplete_reference} =
+             Intelligence.record_interaction(@surface, @scope, %{"objectId" => "p1"})
+
+    assert {:skipped, :incomplete_reference} =
+             Intelligence.record_interaction(@surface, @scope, %{
+               "queryEventId" => Ecto.UUID.generate(),
+               "objectId" => ""
+             })
+
+    assert {:skipped, :unknown_query_event} =
+             Intelligence.record_interaction(@surface, @scope, attrs)
+  end
+
+  test "record_correction reports which outcome produced the empty counters" do
+    assert {:ok, %{status: :recording_disabled, promoted: false, distinct_sessions: 0}} =
+             Intelligence.record_correction(
+               @surface,
+               @scope,
+               %{"from" => "helo", "to" => "hello"},
+               disabled: true
+             )
+
+    assert {:ok, %{status: :blank}} =
+             Intelligence.record_correction(@surface, @scope, %{"from" => "  ", "to" => "hello"})
+
+    assert {:ok, %{status: :identical}} =
+             Intelligence.record_correction(@surface, @scope, %{
+               "from" => "hello",
+               "to" => "hello"
+             })
+
+    assert {:ok, %{status: :recorded, promoted: false, distinct_sessions: 1}} =
+             Intelligence.record_correction(
+               @surface,
+               @scope,
+               %{"from" => "helo", "to" => "hello"},
+               session_key: "s1"
+             )
+  end
+
   test "crystallize rolls click_count and ctr into query crystals" do
     day = ~D[2026-05-23]
     at = DateTime.new!(day, ~T[09:00:00.000000], "Etc/UTC")

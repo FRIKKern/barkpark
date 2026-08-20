@@ -96,7 +96,9 @@
 //  Exit codes: 0 = every authored selector reached the CSSOM · 1 = at least one
 //  MISS or a baseline-count mismatch — a fact about the CSS · 2 = GUARD (no Chrome,
 //  no stylesheet, no baseline sidecar, wrong Node) — a fact about the ENVIRONMENT,
-//  refused before anything is spawned. The 1/2 split is load-bearing, see D19 below.
+//  refused before anything is spawned, PLUS (D101) a Chrome that was spawned and
+//  never came up, refused at the bring-up boundary. The 1/2 split is load-bearing,
+//  see D19 and D101 below.
 //
 //  WIRED INTO CI (cch-w1-cssom-ci-wiring, epic decisions D17-D20). It runs as its
 //  OWN job in .github/workflows/console-harness.yml — deliberately not a fourth
@@ -104,10 +106,16 @@
 //  It had been unwired on purpose (GR93(b)): a gate promoted before it is trusted
 //  is a gate that gets disabled. It has now survived a wave of real use.
 //
-//  NOTE THE LIMIT, HONESTLY: main is NOT branch-protected, so a red here reds the
-//  PR page but does not BLOCK the merge until a human registers this check by name
-//  in branch-protection settings. That registration is a human gate, not something
-//  this file or that workflow can claim.
+//  NOTE THE LIMIT, HONESTLY — AND NOTE THAT THE PREMISE FLIPPED. Through wave 8
+//  this paragraph read "main is NOT branch-protected". That is FALSE as of
+//  2026-07-28: `main` carries branch protection with `enforce_admins: true`, and
+//  the required contexts are recorded in .github/required-checks.json. The limit
+//  that survives is narrower and still real: THIS job is not one of them, so a red
+//  here reds the PR page and does not yet block the merge. Registration is also NOT
+//  "a human clicking in settings" — the roster is committed in
+//  .github/required-checks.json and applied by scripts/required-checks-apply.sh, and
+//  the name to register is the aggregator `Console gate`, never this leaf (a leaf can
+//  be legitimately `skipped`). That registration is `cch-w9-register-console-and-cloud-gates`.
 //
 //  D19 — AN ENVIRONMENT FAILURE MUST EXIT 2, NOT 1. This instrument speaks CDP over
 //  a bare global `WebSocket`, stable-by-default only from Node 22. Under Node 20 it
@@ -159,6 +167,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CSS = path.resolve(HERE, "..", "app.css");
@@ -382,8 +391,22 @@ const COLLECT_JS = `(function () {
 
 // ── 4. plumbing (the CDP client and reap are modal-oracle.mjs's, unchanged) ───
 
+// The accessSync check MUST cover the CHROME env branch, not only the candidate
+// sweep. .github/workflows/console-harness.yml pins CHROME=/usr/bin/google-chrome
+// for every console run, so on CI the env branch is the ONLY branch taken — an
+// unchecked `return process.env.CHROME` makes the exit-2 "no Chrome" GUARD below
+// dead code, and a runner image that drops the binary dies instead with a raw
+// `spawn … ENOENT` node stack at exit 1. Exit 1 means "a measured CSS defect";
+// a missing browser is an ENVIRONMENTAL REFUSAL and must speak as exit 2.
 function findChrome() {
-  if (process.env.CHROME) return process.env.CHROME;
+  if (process.env.CHROME) {
+    try {
+      fs.accessSync(process.env.CHROME, fs.constants.X_OK);
+      return process.env.CHROME;
+    } catch {
+      return null; // fall through to the exit-2 GUARD naming the missing path
+    }
+  }
   const candidates = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -396,6 +419,15 @@ function findChrome() {
     try { fs.accessSync(c, fs.constants.X_OK); return c; } catch { /* next */ }
   }
   return null;
+}
+
+// The refusal line for a findChrome() miss — names the path that was pinned and
+// not found, so a runner-image regression reads as "this binary is gone", never
+// as an anonymous red.
+function chromeGuardLine() {
+  return process.env.CHROME
+    ? `!! GUARD (exit 2): CHROME=${process.env.CHROME} is not an executable file. Environment refusal, not a CSS defect.\n`
+    : "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n";
 }
 
 class Cdp {
@@ -469,7 +501,7 @@ async function main() {
   }
   const chromeBin = findChrome();
   if (!chromeBin) {
-    process.stderr.write("!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n");
+    process.stderr.write(chromeGuardLine());
     process.exit(2);
   }
 
@@ -509,7 +541,33 @@ async function main() {
     }
   }
 
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "cssom-parity-"));
+  // D101 (deploy-reliability charter, PR #9905) — the BRING-UP class.
+  // Chrome failing to come up is an environment fact, never a CSS fact: no
+  // stylesheet was ever parsed, so there is nothing to accuse. Until D101 the
+  // bring-up throw below was a PLAIN Error, so the classifier at the bottom of
+  // this block scored it as a MEASURED defect (exit 1) and console-harness.yml's
+  // `1)` arm told the reviewer "This is a REAL CSS defect in app.css" on a run
+  // whose own stderr said Chrome never started. The workflow's case block is
+  // correct; this instrument was lying to it. Sibling overflow-guard.mjs routes
+  // the IDENTICAL fault through die() → exit 2 = REFUSED TO MEASURE; this is the
+  // same vocabulary, deliberately not a third one.
+  //
+  // The class is carried on the error OBJECT, never sniffed out of its message.
+  // A message match would widen silently every time someone reworded a throw,
+  // and a refusal class that widens until nothing can ever be accused is a gate
+  // that can never fail — strictly worse than the bug it replaces. So exactly
+  // the three bring-up steps are tagged: the DevToolsActivePort wait, the
+  // /json/version handshake, and the CDP socket connect. Everything the browser
+  // tells us AFTER it is up — injection threw, ZERO rules parsed, unreadable
+  // sheets — is a claim about the stylesheet and stays exit 1.
+  const REFUSED = Symbol("cssom-parity refused to measure");
+  const bringUpFailure = (message) => Object.assign(new Error(message), { [REFUSED]: true });
+
+  // The profile dir is allocated PER BRING-UP ATTEMPT (bringup-retry.mjs), not
+  // once here: a retry into the dead attempt's directory would re-race the same
+  // DevToolsActivePort path. This holds whichever attempt's dir is live, so
+  // teardown removes the right one.
+  let profile = null;
   const t0 = Date.now();
   let chrome = null;
   let cdp = null;
@@ -538,48 +596,125 @@ async function main() {
         }
       }
     }
-    try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ }
+    if (profile) { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ } }
     teardownMs = Date.now() - td0;
   };
 
   let cssom;
   try {
-    chrome = spawn(
-      chromeBin,
-      [
-        "--headless=new",
-        "--disable-gpu",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-extensions",
-        "--disable-background-networking",
-        `--user-data-dir=${profile}`,
-        "--remote-debugging-port=0",
-        "about:blank",
-      ],
-      { stdio: "ignore" },
-    );
+    // REVIEW ADDITION to D101 — the FOURTH bring-up step, and the one that was
+    // still misclassified after the slice landed. An EXEC failure is not the
+    // same fault as "Chrome started and never came up": findChrome()'s X_OK
+    // preflight proves the file is there and executable, but it cannot see
+    // exec-time faults — a wrong-architecture or non-binary file (ENOEXEC, the
+    // arm64/amd64 runner-image mismatch class), EACCES from a mount option,
+    // ETXTBSY mid-download, or the file being swapped between the check and the
+    // spawn. Measured on this host (node v22.22.0, darwin): `spawn` throws
+    // ENOEXEC SYNCHRONOUSLY, so it landed in the catch block below UNTAGGED and
+    // printed `!! PARITY ERROR: spawn ENOEXEC` at exit 1 —
+    // console-harness.yml's `1)` arm, i.e. "This is a REAL CSS defect in
+    // app.css", over a message that says the browser could not be executed.
+    // Both delivery shapes are covered because node picks between them by
+    // platform and errno: the try/catch takes the synchronous throw, and the
+    // 'error' listener takes the asynchronous emit (which, with no listener,
+    // would be an uncaughtException — also exit 1, also a lie).
+    // D101 BRING-UP RETRY (deploy-reliability wave 8). Bounded, fresh profile
+    // per attempt, every failed attempt's Chrome stderr printed — see
+    // bringup-retry.mjs for the measurement that justified it and for the line
+    // this retry must never cross: cch-w19-bl-gr115's "do not paper over the
+    // race" governs exit-1 MEASURED intermittency (the stylesheet WAS parsed
+    // and the instrument disagreed with itself). This retries only the exit-2
+    // case where Chrome never came up, so no parity claim exists to hide.
+    // Everything after `devPort` is a claim about app.css and is never retried.
+    let attemptSpawnError = null;
+    const brought = await bringUpChrome({
+      label: "cssom-parity",
+      attempts: BRINGUP_ATTEMPTS,
+      newProfile: () => fs.mkdtempSync(path.join(os.tmpdir(), "cssom-parity-")),
+      launch: (dir) => {
+        attemptSpawnError = null;
+        let child;
+        try {
+          child = spawn(
+            chromeBin,
+            [
+              "--headless=new",
+              "--disable-gpu",
+              "--no-sandbox",
+              "--disable-dev-shm-usage",
+              "--no-first-run",
+              "--no-default-browser-check",
+              "--disable-extensions",
+              "--disable-background-networking",
+              `--user-data-dir=${dir}`,
+              "--remote-debugging-port=0",
+              "about:blank",
+            ],
+            // stderr is a PIPE, never "ignore": a refusal whose cause Chrome
+            // already explained, thrown away by the instrument, is a refusal
+            // nobody can audit.
+            { stdio: ["ignore", "ignore", "pipe"] },
+          );
+        } catch (err) {
+          // See the REVIEW ADDITION note above: node delivers exec faults
+          // (ENOEXEC, EACCES, ETXTBSY) either synchronously here or
+          // asynchronously on 'error'. Both shapes are covered.
+          throw new Error(`Chrome could not be executed (${err.code || err.message}): ${chromeBin}`);
+        }
+        child.on("error", (e) => { attemptSpawnError = e; });
+        return { child, readStderr: captureStderr(child) };
+      },
+      awaitDevToolsPort: async ({ profile: dir }) => {
+        const portFile = path.join(dir, "DevToolsActivePort");
+        for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+          if (attemptSpawnError) break; // no point waiting DEVTOOLS_CAP on a process that never execed
+          try {
+            const raw = fs.readFileSync(portFile, "utf8").split("\n");
+            if (raw[0] && Number(raw[0])) return Number(raw[0]);
+          } catch { /* not written yet */ }
+          await sleep(100);
+        }
+        if (attemptSpawnError) {
+          throw new Error(`Chrome could not be executed (${attemptSpawnError.code || attemptSpawnError.message}): ${chromeBin}`);
+        }
+        return null;
+      },
+      abandon: async ({ profile: dir, child }) => {
+        if (child && child.pid != null) {
+          try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        }
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      },
+      log: (s) => process.stderr.write(s),
+    }).catch((err) => {
+      // Every bounded attempt refused. Re-tag onto THIS file's refusal class so
+      // the classifier below still reaches exit 2 — a refusal is not a defect.
+      if (err && err.refused) throw bringUpFailure(err.message);
+      throw err;
+    });
+    chrome = brought.child;
+    profile = brought.profile;
+    const devPort = brought.devPort;
 
-    const portFile = path.join(profile, "DevToolsActivePort");
-    let devPort = null;
-    for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
-      try {
-        const raw = fs.readFileSync(portFile, "utf8").split("\n");
-        if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
-      } catch { /* not written yet */ }
-      await sleep(100);
+    let version;
+    try {
+      version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
+    } catch (err) {
+      throw bringUpFailure(`Chrome wrote port ${devPort} but /json/version never answered: ${err.message}`);
     }
-    if (!devPort) throw new Error("Chrome never wrote DevToolsActivePort — it did not start");
-
-    const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
     process.stdout.write(
       `>> chrome     ${chromeBin}\n` +
         `>> build      ${version.Browser} · node ${process.version}\n` +
         `>> stylesheet ${path.relative(process.cwd(), cssPath)} · ${bytes} B · sha256 ${sha.slice(0, 12)}…\n\n`,
     );
-    cdp = await Cdp.connect(version.webSocketDebuggerUrl);
+    try {
+      cdp = await Cdp.connect(version.webSocketDebuggerUrl);
+    } catch (err) {
+      // A ReferenceError here (no global WebSocket) must keep its OWN class —
+      // D19's arm names the runtime fix, this one names the browser. Both refuse.
+      if (err instanceof ReferenceError) throw err;
+      throw bringUpFailure(`CDP bring-up failed: ${err.message}`);
+    }
 
     const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
@@ -614,15 +749,28 @@ async function main() {
     // GUARD path like the preflight above. The preflight already catches the one
     // known case (WebSocket); this keeps a FUTURE missing global from being
     // reported to a reviewer as a stylesheet defect.
-    const envFailure = err instanceof ReferenceError;
+    //
+    // D101, first line of defence. A tagged bring-up failure means the browser
+    // never came up, so this run measured NOTHING about app.css. It refuses on
+    // the GUARD path too — two distinct environment classes, one exit code (2),
+    // each naming the thing a human should actually go fix.
+    const missingGlobal = err instanceof ReferenceError;
+    const neverStarted = Boolean(err && err[REFUSED]);
+    const envFailure = missingGlobal || neverStarted;
     const detail = err && err.message ? err.message : err;
     process.stderr.write(
-      envFailure
+      missingGlobal
         ? `\n!! GUARD (exit 2): ENVIRONMENT — ${detail}\n` +
             `   A required global is missing from this runtime. No parity claim was made about\n` +
             `   the stylesheet. Fix the environment (Node 22+), not the CSS.\n` +
             `   teardown ${teardownMs}ms\n`
-        : `\n!! PARITY ERROR: ${detail}\n   teardown ${teardownMs}ms\n`,
+        : neverStarted
+          ? `\n!! GUARD (exit 2): REFUSED TO MEASURE — ${detail}\n` +
+              `   Headless Chrome never came up, so NOT ONE rule of the stylesheet was parsed.\n` +
+              `   No parity claim was made about ${path.relative(process.cwd(), cssPath)} — this is NOT a CSS defect.\n` +
+              `   Fix the browser in this environment (CHROME=${chromeBin}), then re-run.\n` +
+              `   teardown ${teardownMs}ms\n`
+          : `\n!! PARITY ERROR: ${detail}\n   teardown ${teardownMs}ms\n`,
     );
     process.exit(envFailure ? 2 : 1);
   }

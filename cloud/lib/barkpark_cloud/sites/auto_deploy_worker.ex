@@ -35,11 +35,39 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   what prevents the race, not the `(site_id, build_id)` index). Fail-closed HEALTH
   + the force nonce then inherit for free from the proven manual deploy path.
 
-  The build itself runs the SAME way a manual deploy does — `Deploy.start/1`
-  spawns the supervised, claim-fenced, reaper-recoverable driver — so a crashed
+  The build itself runs the SAME way a manual deploy does — `Deploy.start_reported/1`
+  spawns the supervised, claim-fenced, reaper-recoverable driver AND reports whether
+  the spawn happened (the fire-and-forget `Deploy.start/1` that used to be named here
+  was deleted in deploy-reliability W17: it laundered a refusal into `:ok`) — so a crashed
   auto-rebuild is swept exactly like a crashed manual one. The `:site_deploy`
   queue is concurrency-1 so the enqueue+start step is serial per box, and the box
   itself flock-serializes the build.
+
+  ## The PREBUILT REFUSAL (charter D92/D105) — with a USER-VISIBLE row
+
+  A site whose CURRENT release was uploaded (`source = "prebuilt"`) is REFUSED
+  here. Unguarded, this worker is the FAST half of the unbidden overwrite: it
+  enqueues with `source` at its `"box-build"` default, the box rebuilds from
+  source, HEALTH passes honestly on the box's OWN bytes, SWITCH is
+  provenance-blind — and the uploaded release is replaced by bytes this fleet
+  invented, then eventually DELETED by RETIRE (keep newest 5) so rollback cannot
+  recover it. It fires on the next content publish, i.e. within the debounce
+  window; the hourly `TemplateFreshnessWorker` sweep is the slower half (a
+  one-hour ceiling — see its moduledoc).
+
+  The refusal MINTS A ROW (status `cancelled`, trigger `content-auto`, source
+  `prebuilt`) and only then returns a cancel tuple. It owes that row because the
+  content-publish webhook already answered `202 ok` BEFORE any guard could run:
+  a silent Oban cancel would make the control plane's only trace of a refused
+  promise a job record no user surface reads. No migration — `cancelled` is
+  already in the status enum, and `detail`/`failure_reason` already exist.
+
+  It MUST be `{:cancel, _}`, never `{:error, _}`: Oban maps an error tuple to a
+  failure, retries to `max_attempts`, then DISCARDS — a permanent, correct
+  refusal would then be indistinguishable from a box outage.
+
+  The guard keys on the CURRENT RELEASE'S `source`, NEVER on
+  `sites.prebuilt_enabled` — the flag is an opt-in, not a provenance fact.
   """
 
   use Oban.Worker,
@@ -58,8 +86,11 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   # headroom; the [:available, :scheduled] state filter is what actually gates.
   @unique [keys: [:site_id], states: [:available, :scheduled], period: 300]
 
+  import Ecto.Query, only: [from: 2]
+
   alias BarkparkCloud.Registry
-  alias BarkparkCloud.Registry.{Barkpark, Site}
+  alias BarkparkCloud.Registry.{Barkpark, Deployment, Site}
+  alias BarkparkCloud.Repo
   alias BarkparkCloud.Sites.Deploy
 
   require Logger
@@ -77,6 +108,17 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   # wasted intermediate builds. 60s coalesces a publishing session into ~one
   # build per site per minute; override per deployment with AUTODEPLOY_DEBOUNCE_S.
   @schedule_in_default 60
+
+  @doc """
+  The debounce window (seconds) a plain publish-triggered enqueue schedules at —
+  `@schedule_in_default`, or `AUTODEPLOY_DEBOUNCE_S` when it parses and clears
+  the floor. Public because `Sites.Deploy` derives the DEFER backoff from it
+  (`Deploy.deferral_backoff_seconds/1`): the backoff is a MULTIPLE of the
+  operator's own window, never a second, independently-tuned constant that could
+  silently disagree with it.
+  """
+  @spec debounce_seconds() :: pos_integer()
+  def debounce_seconds, do: schedule_in()
 
   defp schedule_in do
     case System.get_env("AUTODEPLOY_DEBOUNCE_S") do
@@ -99,8 +141,37 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   """
   @spec enqueue(binary()) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue(site_id) when is_binary(site_id) do
+    enqueue(site_id, schedule_in())
+  end
+
+  @doc """
+  Enqueue at an EXPLICIT window (seconds) — the DEFER paths' form
+  (deploy-reliability W20).
+
+  Two callers pass a window: `defer_behind_running_build/2` here, and
+  `Sites.Deploy`'s deferral arm via `requeue_rebuild/2`. Both derive it from
+  `Deploy.deferral_backoff_seconds/1`, so a chain that is already six rounds deep
+  stops re-firing on the same blind 60s clock that paced it there (measured: p50
+  61.6s between consecutive deferrals of a site, 63.7% inside the 55-75s band —
+  the clock, not the box, set the cadence).
+
+  It is a SEPARATE ARITY, not a default argument, on purpose: the publish webhook
+  and the manual/API trigger must keep the plain debounce, and a default argument
+  would let a mis-edit hand them the backoff while every existing test stayed
+  green. `auto_deploy_worker_test.exs` pins both untouched callers on arity 1.
+
+  NO `replace:` OPTION IS PASSED, HERE OR ANYWHERE (charter W19 probe P6):
+  `replace` has no max/min semantics, so with a 900s deferral pending an ordinary
+  60s publish would drag it back to 59s — a publish-triggered reset of the very
+  backoff this exists to hold, with all tests still green. Without it the defer
+  insert is written VERBATIM, because the sibling it would have conflicted with is
+  `:executing` (∉ `@unique` states) or already gone.
+  """
+  @spec enqueue(binary(), pos_integer()) :: {:ok, Oban.Job.t()} | {:error, term()}
+  def enqueue(site_id, schedule_in)
+      when is_binary(site_id) and is_integer(schedule_in) and schedule_in > 0 do
     %{site_id: site_id}
-    |> new(schedule_in: schedule_in(), unique: @unique)
+    |> new(schedule_in: schedule_in, unique: @unique)
     |> Oban.insert()
   end
 
@@ -108,12 +179,82 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   def perform(%Oban.Job{args: %{"site_id" => site_id}}) do
     with %Site{} = site <- Registry.get_site(site_id),
          %Barkpark{} = bp <- Registry.get_barkpark(site.barkpark_id) do
-      drive(site, bp)
+      if prebuilt_release?(site) do
+        refuse(site)
+      else
+        drive(site, bp)
+      end
     else
       # The site (or its box) was deleted between the publish and this run — there
       # is nothing to rebuild. Cancel, not retry: a retry would never find it.
       _ -> {:cancel, :site_or_box_gone}
     end
+  end
+
+  # Does this site's CURRENT release carry uploaded bytes? See the moduledoc: the
+  # live release's `source` is the provenance fact; `site.prebuilt_enabled` is
+  # only an opt-in and a site can be enabled while still serving a box build.
+  defp prebuilt_release?(%Site{current_deployment_id: nil}), do: false
+
+  defp prebuilt_release?(%Site{current_deployment_id: id}) do
+    case Registry.get_deployment(id) do
+      %Deployment{} = deployment -> Deployment.prebuilt?(deployment)
+      nil -> false
+    end
+  end
+
+  @refusal_detail "refused: this site's live release was uploaded (prebuilt), so a content publish must not trigger a box rebuild — it would replace bytes this fleet cannot reproduce. Ship new bytes with `bp cloud site deploy <site> --prebuilt <dir>`."
+
+  # The USER-VISIBLE refusal (charter D92/D105). The webhook already answered 202,
+  # so the refusal owes a row in the deployment stream — not just a job record.
+  #
+  # `status` is not castable on create (the schema forbids it; transition_changeset
+  # is the sole status mutator), so the row is born `queued` and moved
+  # `queued → cancelled` (a legal edge) in the SAME transaction: there is no
+  # window in which a claimer or the stale-deployment reaper can observe a
+  # claimable row that was never meant to build.
+  #
+  # `source: "prebuilt"` labels WHAT was protected, not what was built — the row
+  # is the record of a refusal to build, and reading it as a box build would
+  # invert its meaning.
+  defp refuse(%Site{} = site) do
+    result =
+      Repo.transaction(fn ->
+        with {:ok, queued} <-
+               Registry.create_deployment(site, %{
+                 trigger: "content-auto",
+                 source: "prebuilt"
+               }),
+             {:ok, cancelled} <-
+               Registry.transition_deployment(queued, %{
+                 status: "cancelled",
+                 failure_reason: @refusal_detail,
+                 detail: @refusal_detail
+               }) do
+          cancelled
+        else
+          {:error, %Ecto.Changeset{} = cs} -> Repo.rollback(cs)
+        end
+      end)
+
+    case result do
+      {:ok, _cancelled} ->
+        Logger.info(
+          "auto-deploy refused for site #{site.id}: live release is prebuilt — cancelled row minted"
+        )
+
+      {:error, reason} ->
+        # The row is the courtesy; the REFUSAL is the contract. A row we could not
+        # write must never degrade into a box rebuild, and must not retry either
+        # (the retry would rebuild nothing and re-fail the same way).
+        Logger.warning(
+          "auto-deploy refusal row failed for site #{site.id}: #{inspect(reason)} — refusing anyway"
+        )
+    end
+
+    # NEVER {:error, _}: Oban would retry to max_attempts and then DISCARD, making
+    # a permanent, correct refusal look exactly like a box outage.
+    {:cancel, :prebuilt_release_protected}
   end
 
   defp drive(site, bp) do
@@ -122,14 +263,26 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
     # suspenders against a republish whose content_rev happened not to change).
     case Deploy.enqueue(site, bp, true, "content-auto") do
       {:ok, deployment} ->
-        :ok = Deploy.start(deployment)
-        :ok
+        start_and_report(site, deployment)
 
-      # force should never dedup (fresh nonce every run) — but if it somehow does,
-      # re-drive the existing row rather than dropping the rebuild.
+      # force should never dedup on build_id (fresh nonce every run). What DOES
+      # land here since the active-deployment re-key (deploy-truth W1, charter
+      # D10) is the site's row already in flight: `(site_id, environment)` now
+      # refuses a second concurrent production build, so this publish coalesces
+      # onto it. Re-driving is right either way — a still-`queued` row reads the
+      # NEW content when it starts, and an already-building one answers
+      # `:not_queued`, which defers below instead of dropping the publish.
+      {:duplicate, %Deployment{status: "queued"} = deployment} ->
+        start_and_report(site, deployment)
+
+      # The row it coalesced onto is ALREADY BUILDING (or settled). Driving it
+      # again would either lose the claim race or re-run a finished build, and
+      # the content this publish carries would never be read — so defer HERE,
+      # where it is knowable. In production the starter is asynchronous, so a
+      # claim failure discovered inside the spawned driver could never travel
+      # back to this job; this is the arm that actually fires.
       {:duplicate, deployment} ->
-        :ok = Deploy.start(deployment)
-        :ok
+        defer_behind_running_build(site, deployment)
 
       # A transient enqueue failure (e.g. the box's content-rev read) — let Oban
       # retry within max_attempts rather than silently swallow the publish.
@@ -140,5 +293,129 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
 
         {:error, reason}
     end
+  end
+
+  # THE OUTCOME IS INSPECTED (deploy-truth W1, charter D9). This used to be
+  # `:ok = Deploy.start(deployment); :ok` — a match against a starter that
+  # returned a literal `:ok` no matter what happened, which is why production's
+  # `site_deploy` queue holds 11,868 completed jobs and ZERO retryable ones while
+  # 8,830 deploys were refused by a busy box.
+  defp start_and_report(site, deployment) do
+    case Deploy.start_reported(deployment) do
+      # Production: the supervised driver is running. Its outcome settles on the
+      # row (and a busy box defers + re-fires from inside the run).
+      {:ok, :started} ->
+        :ok
+
+      # A synchronous driver ran to a settled state. `:failed` is RECORDED on the
+      # row with the box's own reason — returning an Oban error would retry a
+      # build that just failed for a reason a retry cannot change — but the value
+      # travels so the job record says which it was.
+      {:ok, outcome} when outcome in [:live, :failed, :deferred] ->
+        {:ok, outcome}
+
+      # The row is already claimed — the site is mid-build. THIS is the publish
+      # that used to be lost: it minted a second row, the box answered 409, and
+      # the row died terminal-`failed` with nothing to re-drive it. Re-fire the
+      # debounce instead: the trailing job re-reads the site's CURRENT content
+      # after the in-flight build finishes.
+      {:error, :not_queued} ->
+        defer_behind_running_build(site, deployment)
+
+      # The driver never started and nothing recorded the build. The row is still
+      # `queued`, so a retry (and, failing that, the stale-deployment reaper) can
+      # still pick it up — never report success.
+      {:error, reason} ->
+        Logger.warning(
+          "auto-deploy could not start the driver for site #{site.id}: #{inspect(reason)} — retrying"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  # A COUNTED, RE-FIRING deferral (charter D9) for the case where the control
+  # plane refuses the second build itself rather than letting the box refuse it.
+  #
+  # There is no new row to mark `deferred` here — the active-deployment index
+  # (correctly) refused to mint one, and the row in flight is a real build that
+  # must not be relabelled. The promise is the re-queued job, so a re-queue that
+  # FAILS must not be reported as success: it becomes an Oban error, which retries.
+  #
+  # NOT `{:snooze, n}`: snooze increments `attempt` against `max_attempts: 3`, so
+  # three busy rounds would DISCARD the job. A fresh debounced job carries no
+  # attempt history at all, and its `site_id` unique collapses repeats onto one.
+  #
+  # THE RE-FIRE IS NO LONGER BLIND (deploy-reliability W20). This path holds only
+  # the site and the in-flight row — it has no `cause` and mints no row of its
+  # own, so it cannot count its own chain. It asks `Sites.Deploy` for the depth
+  # instead of inventing a second, differently-shaped backoff: one owner for the
+  # window, so the two defer paths can never disagree about how long a chain of a
+  # given depth waits.
+  defp defer_behind_running_build(site, %Deployment{} = in_flight) do
+    case enqueue(site.id, Deploy.deferral_backoff_seconds(site)) do
+      {:ok, _job} ->
+        # THE ATTEMPT THAT MINTS NO ROW NOW SPEAKS (deploy-reliability W12, S6).
+        # Everything above this line stays true — no fake `deferred` row is
+        # minted, and the real build in flight is not relabelled — but the
+        # attempt is no longer INVISIBLE: it is counted on the row it coalesced
+        # ONTO, which is the only truthful home for it. This attempt did not
+        # produce a build; it joined one.
+        record_coalesced_attempt(in_flight)
+
+        Logger.info(
+          "auto-deploy deferred for site #{site.id}: deployment #{in_flight.id} is already #{in_flight.status} — rebuild re-queued"
+        )
+
+        {:ok, :deferred}
+
+      {:error, reason} ->
+        Logger.warning(
+          "auto-deploy could not re-queue the deferred rebuild for site #{site.id}: #{inspect(reason)} — retrying"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  # HOW MANY PUBLISHES THIS BUILD IS ANSWERING FOR — the count of attempts that
+  # minted no row of their own, hung on the in-flight row they coalesced onto.
+  #
+  # WHY IT MATTERS EVEN THOUGH IT IS QUIET TODAY, measured from Oban rather than
+  # guessed: in the twelve hours 2026-08-06 08:00-20:00Z there were 2,256
+  # `AutoDeployWorker` jobs against 1,052 deployment rows — 1,204 ATTEMPTS THAT
+  # MINTED NO ROW against 277 counted deferrals (4.35:1). Since 22:00Z the same
+  # ratio is 0.086:1 and zero per minute. That is DORMANT, not fixed: the gap is
+  # a function of publish load against build duration, so it returns precisely
+  # when the number is worth having.
+  #
+  # "Attempts that minted no row", never "uncounted deferrals": the
+  # `{:duplicate, %{status: "queued"}}` re-drive arm above has the same shape and
+  # the two are indistinguishable once written down, so the honest name is the
+  # one that describes what was observed rather than what it is assumed to mean.
+  #
+  # ATOMIC `UPDATE`, never a changeset: N publishes can race one build from N
+  # processes, and a read-modify-write would drop every attempt but the last —
+  # which is the whole count. `COALESCE` because the 30,633 rows that predate the
+  # column are NULL (honestly unknown), and `NULL + 1` is NULL.
+  #
+  # Best-effort telemetry: the return value is discarded and a row that vanished
+  # between the coalesce and this write updates zero rows without raising. The
+  # DEFERRAL is the contract; the count is the record of it.
+  defp record_coalesced_attempt(%Deployment{id: id}) do
+    now = DateTime.utc_now()
+
+    from(d in Deployment,
+      where: d.id == ^id,
+      update: [
+        set: [
+          coalesced_attempts: fragment("COALESCE(?, 0) + 1", d.coalesced_attempts),
+          coalesced_last_at: ^now
+        ]
+      ]
+    )
+    |> Repo.update_all([])
+
+    :ok
   end
 end

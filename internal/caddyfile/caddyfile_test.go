@@ -284,7 +284,7 @@ func TestRender_AllValidGolden(t *testing.T) {
 		},
 	})
 	want := "{\n  on_demand_tls {\n    ask https://cloud.barkpark.cloud/v1/tls/ask\n  }\n}\n\n" +
-		"# site shop (port 7001)\n" +
+		"# Managed by barkpark-runtime — site shop (port 7001). Do not edit by hand.\n" +
 		"shop.com, www.shop.com {\n" +
 		"  tls {\n    on_demand\n  }\n" +
 		"  reverse_proxy 127.0.0.1:7001\n" +
@@ -306,7 +306,7 @@ func TestRender_StaticKindGolden(t *testing.T) {
 		},
 	})
 	want := "{\n  on_demand_tls {\n    ask https://cloud.barkpark.cloud/v1/tls/ask\n  }\n}\n\n" +
-		"# site blog (static /srv/sites/blog/current)\n" +
+		"# Managed by barkpark-runtime — site blog (static /srv/sites/blog/current). Do not edit by hand.\n" +
 		"blog.com, www.blog.com {\n" +
 		"  tls {\n    on_demand\n  }\n" +
 		"  root * /srv/sites/blog/current\n" +
@@ -333,7 +333,7 @@ func TestRender_MixedBox_StaticAndReverseProxy(t *testing.T) {
 	})
 
 	// Static block: root + file_server, no proxy, no maintenance handler.
-	if !strings.Contains(got, "# site flat (static /srv/sites/flat/current)\n") {
+	if !strings.Contains(got, "# Managed by barkpark-runtime — site flat (static /srv/sites/flat/current). Do not edit by hand.\n") {
 		t.Errorf("static site header missing:\n%s", got)
 	}
 	if !strings.Contains(got, "docs.com {\n  tls {\n    on_demand\n  }\n  root * /srv/sites/flat/current\n  file_server\n}") {
@@ -439,7 +439,7 @@ func TestRender_OriginCAGolden(t *testing.T) {
 		"    client_ip_headers CF-Connecting-IP\n" +
 		"  }\n" +
 		"}\n\n" +
-		"# site shop (port 7001)\n" +
+		"# Managed by barkpark-runtime — site shop (port 7001). Do not edit by hand.\n" +
 		"shop.com, www.shop.com {\n" +
 		"  tls /etc/caddy/certs/shop.pem /etc/caddy/certs/shop.key\n" +
 		"  reverse_proxy 127.0.0.1:7001\n" +
@@ -495,7 +495,7 @@ func TestRender_InternalGolden(t *testing.T) {
 		"    client_ip_headers CF-Connecting-IP\n" +
 		"  }\n" +
 		"}\n\n" +
-		"# site shop (port 7001)\n" +
+		"# Managed by barkpark-runtime — site shop (port 7001). Do not edit by hand.\n" +
 		"shop.com, www.shop.com {\n" +
 		"  tls internal\n" +
 		"  reverse_proxy 127.0.0.1:7001\n" +
@@ -649,7 +649,7 @@ func TestRender_TrustedProxies_EmittedOnceForManyCFSites(t *testing.T) {
 		t.Errorf("expected exactly one client_ip_headers line, got %d:\n%s", n, got)
 	}
 	// Global option precedes the first site block.
-	if iProxies, iSite := strings.Index(got, "trusted_proxies"), strings.Index(got, "# site a"); !(iProxies >= 0 && iProxies < iSite) {
+	if iProxies, iSite := strings.Index(got, "trusted_proxies"), strings.Index(got, "site a (port"); !(iProxies >= 0 && iProxies < iSite) {
 		t.Errorf("trusted_proxies must precede the site blocks: proxies=%d site=%d", iProxies, iSite)
 	}
 	// The CF sites load certs; the on-demand neighbour keeps its on_demand block.

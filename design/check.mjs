@@ -8,9 +8,10 @@
 // Dependency-free (Node built-ins only). Pairs with design/validate.mjs (shape)
 // and design/emit.mjs (the single source of the emitted bytes).
 import {
-  evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, glyphOf, ARTIFACTS, repoRoot,
+  evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, AIR_STEPS, EVIDENCE_KEYS, EVIDENCE_UNITS, SECTION_KEYS, SECTION_UNITS, RULE_KEYS, RULE_UNITS, glyphOf, ARTIFACTS, repoRoot,
   INST_ORDER, PROVIDERS, INST_ROLE_CSS, instRoleChannels, hslToHex,
   readManifest, attribute, lostLines, regionDigest, MANIFEST_PATH,
+  auditActions, AUDIT_ACTIONS_PATH,
 } from "./emit.mjs";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
 import { derive, contrast, SLOTS, PASSTHROUGH_FAMILIES } from "./derive.mjs";
@@ -20,6 +21,32 @@ import { fileURLToPath } from "node:url";
 
 let failed = false;
 const fail = (msg) => { console.error(msg); failed = true; };
+
+// ── Part 0: the audit verb table's own shape (charter cch-w65) ────────────────
+// cloud/priv/audit-actions.json is the SOLE authority for TWO vocabularies — the
+// server's closed @actions allowlist (read at compile time by AuditEvent) and the
+// console's ACTION_LABELS region emitted below. Its shape gate runs FIRST and
+// exits immediately, because the ACTION_LABELS build() reads the table: a
+// malformed row would otherwise surface as a stack trace from inside Part A
+// instead of the one sentence that says which row is wrong and why. The predicate
+// is auditActions() itself, so this gate and the emitter cannot disagree about
+// what "well-formed" means.
+try {
+  const rows = auditActions();
+  const nulls = rows.filter((r) => r.label === null);
+  console.log(
+    `design/check.mjs — Part 0: ${AUDIT_ACTIONS_PATH} well-formed — ${rows.length} declared verbs, ` +
+    `${rows.length - nulls.length} labelled, ${nulls.length} declared unlabelled WITH a reason.`,
+  );
+} catch (e) {
+  console.error(`design/check.mjs — Part 0 FAIL: ${e.message}`);
+  console.error(`
+  ${AUDIT_ACTIONS_PATH} is the ONE table both audit vocabularies read. Until it is
+  well-formed nothing downstream can be trusted: the console's ACTION_LABELS region is
+  built from it and AuditEvent's @actions allowlist is derived from it at compile time.
+`);
+  process.exit(1);
+}
 
 // ── Part A: per-artifact byte-compare against committed ──────────────────────
 function firstDiff(a, b) {
@@ -934,6 +961,411 @@ if (failed === failedBeforeH)
 
   if (failed === failedBeforeI)
     console.log(`  ok   ${cases.length} attribution outcomes + 3 lostLines properties`);
+}
+
+// ── Part J: the AIR scale reaches a real consumer ────────────────────────────
+// space.air emits `--tok-air-<step>` onto the paper surface, paper-surface.css
+// bridges each onto `--bp-air-<step>`, and the six consumers live in THREE files —
+// two of them Elixir renderers that emit the beat as an inline `var(--bp-air-*)`
+// on markup this CSS gate would otherwise never see.
+//
+// That spread is exactly the shape pe-w1-reader-editorial-typography found and
+// fixed: `--bp-*-tracking` was declared in tokens.json and consumed NOWHERE, and
+// nothing failed, because "single-source" and "single-source and unread" look
+// identical until you measure the page. So this part refuses the silence in both
+// directions — emitted-but-unbridged, and bridged-but-unconsumed. A step whose
+// consumer is deleted (or renamed) reds here instead of quietly flattening the
+// reader's evidence spacing back to zero.
+console.log("\ndesign/check.mjs — Part J: air-scale consumer census");
+{
+  const failedBeforeJ = failed;
+  const surfaceCss = readFileSync(join(repoRoot, "api/assets/paper-surface/paper-surface.css"), "utf8");
+  // Consumers may live in the stylesheet OR inline on renderer output. Both are
+  // legitimate: a figure's beat has to survive a stylesheet-less sink, so it
+  // rides `var(--bp-air-figure, <fallback>)` in the emitting Elixir source.
+  const consumerSources = [
+    "api/assets/paper-surface/paper-surface.css",
+    "api/lib/barkpark/portable_doc/render/figures.ex",
+    "api/lib/barkpark/portable_doc/render/compose.ex",
+  ].map((p) => ({ path: p, text: readFileSync(join(repoRoot, p), "utf8") }));
+
+  for (const step of AIR_STEPS) {
+    const ratio = tokens.space.air[step];
+    // 1. emitted, as a ratio of the beat — never a resolved literal.
+    const emitted = new RegExp(`--tok-air-${step}: calc\\(var\\(--tok-air-beat\\) \\* ${String(ratio).replace(".", "\\.")}\\);`);
+    if (!emitted.test(surfaceCss))
+      fail(`  Part J FAIL: --tok-air-${step} is not emitted as calc(var(--tok-air-beat) * ${ratio}) in paper-surface.css`);
+
+    // 2. bridged onto the --bp-* name every rule reads.
+    if (!surfaceCss.includes(`--bp-air-${step}: var(--tok-air-${step});`))
+      fail(`  Part J FAIL: --bp-air-${step} has no bridge onto --tok-air-${step} in paper-surface.css`);
+
+    // 3. actually READ by something. The bridge declaration itself is excluded,
+    //    so a bridge that only feeds itself does not count as a consumer.
+    const hits = consumerSources.flatMap(({ path, text }) =>
+      text
+        .split("\n")
+        .filter((l) => l.includes(`var(--bp-air-${step}`) && !l.includes(`--bp-air-${step}: var(`))
+        .map((l) => `${path}: ${l.trim().slice(0, 80)}`),
+    );
+    if (hits.length === 0)
+      fail(
+        `  Part J FAIL: --bp-air-${step} is emitted and bridged but NOTHING consumes it.\n` +
+          `    A token with no reader is not a single source — it is a dead one. Either give it\n` +
+          `    a rule (paper-surface.css) or an inline var() on the emitting renderer, or drop\n` +
+          `    the step from space.air + AIR_STEPS.`,
+      );
+  }
+  if (failed === failedBeforeJ)
+    console.log(`  ok   ${AIR_STEPS.length} air steps emitted as beat ratios, bridged onto --bp-air-*, and each read by a live consumer`);
+}
+
+// ── Part K: the EVIDENCE BAND reaches a real consumer ────────────────────────
+// space.evidence emits five `--tok-evidence-*` inputs; paper-surface.css bridges
+// each onto `--bp-evidence-*` and composes four of them into ONE derived width,
+// which the breakout rules and the article <figure> emitters then read.
+//
+// That chain has three distinct ways to go quietly dead, and Part J's shape only
+// catches the first:
+//
+//   1. a token emitted and bridged but read by nothing — the pe-w1 defect.
+//   2. a token bridged and read ONLY by its own bridge, i.e. dropped out of the
+//      `--bp-evidence-width` composition. The band would still resolve, still
+//      look plausible, and silently stop honouring (say) the gutter — which is
+//      the one term standing between the band and a sideways-scrolling page.
+//   3. a breakout rule that takes the WIDTH but not the PULL. The component
+//      grows to the right instead of growing about its centre: still wide, still
+//      green on any width assertion, and visibly off-axis on the page. So the
+//      two are censused as a PAIR, per rule, and a half-breakout reds.
+console.log("\ndesign/check.mjs — Part K: evidence-band consumer census");
+{
+  // Part K counts its OWN failures rather than reading the shared `failed`
+  // boolean the parts above it use. That flag is sticky: once ANY earlier part
+  // has tripped, `failed === failedBefore<X>` is true again and the part prints
+  // its green line beside its own red ones. Proven while mutation-testing this
+  // part — dropping the gutter term reds the mirror check first, and Part K then
+  // printed both two FAILs and its `ok`. The run still exits 1, so nothing ships
+  // on it, but a green line under a red one is the kind of output that teaches a
+  // reader to skim. Parts D-J share the pattern and are left alone here: they
+  // belong to other changes in flight.
+  let kFailed = false;
+  const kFail = (msg) => { kFailed = true; fail(msg); };
+  const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+  const surfacePath = "api/assets/paper-surface/paper-surface.css";
+  const surfaceCss = readFileSync(join(repoRoot, surfacePath), "utf8");
+  // Consumers may live in the stylesheet OR inline on renderer output — a figure
+  // has to survive a stylesheet-less sink, so its width and pull ride inline
+  // `var(--bp-evidence-*, <fallback>)` in the emitting Elixir source, exactly as
+  // its air beat does.
+  const consumerSources = [
+    surfacePath,
+    "api/lib/barkpark/portable_doc/render/figures.ex",
+    "api/lib/barkpark/portable_doc/render/compose.ex",
+    "api/lib/barkpark/portable_doc/render/components.ex",
+  ].map((p) => ({ path: p, text: readFileSync(join(repoRoot, p), "utf8") }));
+
+  const readsOf = (name) =>
+    consumerSources.flatMap(({ path, text }) =>
+      text
+        .split("\n")
+        .filter((l) => l.includes(`var(--bp-evidence-${name}`) && !l.includes(`--bp-evidence-${name}: var(`))
+        .map((l) => `${path}: ${l.trim().slice(0, 80)}`),
+    );
+
+  for (const key of EVIDENCE_KEYS) {
+    const name = kebab(key);
+    const value = `${tokens.space.evidence[key]}${EVIDENCE_UNITS[key]}`;
+    // 1. emitted, with its authored unit — `fill` is a bare ratio and `caption`
+    //    is a character count; emitting either as px is the drift this catches.
+    if (!surfaceCss.includes(`--tok-evidence-${name}: ${value};`))
+      kFail(`  Part K FAIL: --tok-evidence-${name} is not emitted as ${value} in ${surfacePath}`);
+
+    // 2. bridged onto the --bp-* name every rule reads.
+    if (!surfaceCss.includes(`--bp-evidence-${name}: var(--tok-evidence-${name});`))
+      kFail(`  Part K FAIL: --bp-evidence-${name} has no bridge onto --tok-evidence-${name} in ${surfacePath}`);
+
+    // 3. actually READ. The bridge line itself is excluded, so a bridge that only
+    //    feeds itself does not count as a consumer.
+    if (readsOf(name).length === 0)
+      kFail(
+        `  Part K FAIL: --bp-evidence-${name} is emitted and bridged but NOTHING consumes it.\n` +
+          `    A token with no reader is not a single source — it is a dead one. Either fold it\n` +
+          `    into the --bp-evidence-width composition, give it a rule, or drop it from\n` +
+          `    space.evidence + EVIDENCE_KEYS in design/emit.mjs.`,
+      );
+  }
+
+  // The derived pair. `width` composes the four geometry inputs; `pull` re-centres
+  // the wider box on the column's axis. Neither is a token — both are the law —
+  // so they are censused for consumers the same way.
+  const widthDecl = surfaceCss.split("\n").find((l) => l.includes("--bp-evidence-width: "));
+  if (!widthDecl) {
+    kFail(`  Part K FAIL: ${surfacePath} declares no --bp-evidence-width — the band has no composed law`);
+  } else {
+    for (const key of ["band", "bandMax", "fill", "gutter"]) {
+      const name = kebab(key);
+      if (!widthDecl.includes(`var(--bp-evidence-${name})`))
+        kFail(
+          `  Part K FAIL: --bp-evidence-width does not read --bp-evidence-${name}.\n` +
+            `    The band would still resolve and still look plausible while silently ignoring\n` +
+            `    that term — and 'gutter' is the only thing keeping the band off the viewport edge.`,
+        );
+    }
+  }
+  for (const derived of ["width", "pull"]) {
+    if (readsOf(derived).length === 0)
+      kFail(`  Part K FAIL: --bp-evidence-${derived} is composed but NOTHING consumes it — the band is computed and never applied`);
+  }
+
+  // The shipped breakout SET, each rule censused for the width/pull PAIR. These
+  // are the components the wave decided improve with width; a class listed here
+  // that stops breaking out reds, and so does one that breaks out by half.
+  const BREAKOUT_RULES = [".bp-table", ".bp-stats", ".bp-chart", ".bp-diff", ".bp-filetree"];
+  for (const cls of BREAKOUT_RULES) {
+    const rule = surfaceCss
+      .split("}")
+      .find((block) => block.includes(`.bp-paper-surface ${cls} {`) || block.includes(`.bp-paper-surface ${cls},`));
+    if (!rule) {
+      kFail(`  Part K FAIL: no .bp-paper-surface ${cls} rule in ${surfacePath} — the breakout set names a component that is not styled here`);
+      continue;
+    }
+    for (const half of ["width", "pull"]) {
+      if (!rule.includes(`var(--bp-evidence-${half}`))
+        kFail(
+          `  Part K FAIL: .bp-paper-surface ${cls} does not read --bp-evidence-${half}.\n` +
+            `    A component takes the band's width and its centring pull TOGETHER; with only\n` +
+            `    one it grows off-axis instead of about the column's centre.`,
+        );
+    }
+  }
+
+  // The four article <figure> emitters carry the same pair inline. Counted, not
+  // just found: three of the four live in figures.ex and one in compose.ex, and a
+  // figure family that silently loses the breakout is exactly the regression the
+  // count catches.
+  const figureBreakouts = consumerSources
+    .filter(({ path }) => path.endsWith(".ex"))
+    .flatMap(({ text }) => text.split("\n").filter((l) => l.includes("<figure style=") && l.includes("--bp-evidence-width")));
+  if (figureBreakouts.length !== 4)
+    kFail(
+      `  Part K FAIL: ${figureBreakouts.length} article <figure> emitter(s) carry the evidence breakout, expected 4\n` +
+        `    (diagram + asciicast + video in render/figures.ex, generic figure in render/compose.ex).`,
+    );
+
+  // diff + filetree are INLINE-produced breakouts. Their emitters write the whole
+  // box as an inline `style=`, which beats any class rule, so the pair has to be
+  // on the EMITTER — and the CSS rule that mirrors it must agree. Censusing only
+  // the stylesheet would have called the half-breakout green: measured, the diff
+  // took the band's width from CSS, left the pull to an inline `margin: 4px 0`,
+  // and overflowed the page by 110px.
+  const componentsEx = consumerSources.find(({ path }) => path.endsWith("components.ex")).text;
+  for (const cls of ["bp-diff", "bp-filetree"]) {
+    const line = componentsEx.split("\n").find((l) => l.includes(`<div class="${cls} `));
+    if (!line) {
+      kFail(`  Part K FAIL: no <div class="${cls} …"> emitter found in render/components.ex`);
+      continue;
+    }
+    for (const half of ["width", "pull"]) {
+      if (!line.includes(`var(--bp-evidence-${half}`))
+        kFail(
+          `  Part K FAIL: the ${cls} emitter's inline style does not read --bp-evidence-${half}.\n` +
+            `    An inline style beats the class rule, so declaring one half in CSS and leaving the\n` +
+            `    other to the emitter grows the component off-axis instead of about the column.`,
+        );
+    }
+  }
+
+  if (!kFailed)
+    console.log(
+      `  ok   ${EVIDENCE_KEYS.length} evidence tokens emitted with their authored units, bridged onto --bp-evidence-*, ` +
+        `all four geometry terms folded into one composed width, and ${BREAKOUT_RULES.length} breakout rules + 4 article figures reading the width/pull pair`,
+    );
+}
+
+// ── Part L: the SECTION BOUNDARY reaches a real consumer, on BOTH surfaces ───
+// space.section emits `--tok-section-{beat,rule,gap}`, each surface bridges them
+// onto `--bp-section-*`, and ONE declaration per surface spends all three on the
+// section head. Part J's shape (emitted → bridged → read) is necessary here and
+// not sufficient, because this device is a TWIN: the reader's
+// `.bp-paper-surface > #paper-body > h2` and the editor's
+// `.bp-paper-editor-body > h2` are two hand-maintained declarations of one law,
+// and the way this fails is not a deleted token — it is one surface keeping the
+// air while the other keeps the rule, which every per-surface census passes.
+//
+// So Part L checks the three tokens on BOTH surfaces AND that each surface's
+// section-head declaration spends all three properties, AND that the reader
+// carries the keyed-stream leg — the one that actually ships (bulldocs_live.ex
+// wraps every top-level block in a class-less div; a reader rule written only
+// against the flat shape is dead on the live page and green in every gate that
+// does not look at the selector).
+console.log("\ndesign/check.mjs — Part L: section-boundary consumer census");
+{
+  let lFailed = 0;
+  const lFail = (m) => { console.error(m); lFailed++; failed++; };
+
+  const SECTION_SURFACES = [
+    { path: "api/assets/paper-surface/paper-surface.css", head: ".bp-paper-surface > #paper-body > h2" },
+    { path: "api/assets/paper-editor/src/styles.css", head: ".bp-paper-editor-body > h2" },
+  ];
+  // The three properties that make the device. Air without a rule is a long
+  // pause; a rule without the gap is underlined text. A surface that declares
+  // two of three has a HALF device, which is the exact drift a twin invites.
+  const HEAD_PROPS = [
+    ["margin-top", "beat"],
+    ["border-top", "rule"],
+    ["padding-top", "gap"],
+  ];
+
+  for (const { path, head } of SECTION_SURFACES) {
+    const css = readFileSync(join(repoRoot, path), "utf8");
+
+    for (const key of SECTION_KEYS) {
+      const value =
+        key === "beat"
+          ? `calc(var(--tok-air-beat) * ${String(tokens.space.section.beat).replace(".", "\\.")})`
+          : `${tokens.space.section[key]}${SECTION_UNITS[key]}`;
+      // 1. emitted — `beat` as a ratio of the air beat, never a resolved pixel,
+      //    so section rhythm cannot drift away from evidence rhythm.
+      if (!new RegExp(`--tok-section-${key}: ${value.replace(/[()*]/g, "\\$&")};`).test(css))
+        lFail(`  Part L FAIL: --tok-section-${key} is not emitted as ${value} in ${path}`);
+      // 2. bridged onto the --bp-* name the rules read.
+      if (!css.includes(`--bp-section-${key}: var(--tok-section-${key});`))
+        lFail(`  Part L FAIL: --bp-section-${key} has no bridge onto --tok-section-${key} in ${path}`);
+      // 3. actually READ (the bridge declaration itself excluded, so a bridge
+      //    feeding only itself does not count as a consumer).
+      const read = css
+        .split("\n")
+        .some((l) => l.includes(`var(--bp-section-${key}`) && !l.includes(`--bp-section-${key}: var(`));
+      if (!read)
+        lFail(
+          `  Part L FAIL: --bp-section-${key} is emitted and bridged in ${path} but NOTHING consumes it.\n` +
+            `    A token with no reader is not a single source — it is a dead one. Either spend it on\n` +
+            `    the ${head} rule, or drop it from space.section + SECTION_KEYS in design/emit.mjs.`,
+        );
+    }
+
+    // 4. the section-head declaration exists on this surface and is WHOLE.
+    const at = css.indexOf(head);
+    if (at === -1) {
+      lFail(`  Part L FAIL: ${path} has no ${head} rule — this surface has no section head at all`);
+      continue;
+    }
+    const block = css.slice(at, css.indexOf("}", at) + 1);
+    for (const [prop, key] of HEAD_PROPS) {
+      if (!new RegExp(`${prop}:[^;]*var\\(--bp-section-${key}\\)`).test(block))
+        lFail(
+          `  Part L FAIL: the ${head} rule in ${path} does not set ${prop} from --bp-section-${key}.\n` +
+            `    The section boundary is air + rule + gap TOGETHER; two of the three is a half device,\n` +
+            `    and a half device on ONE surface is View<->Edit drift that every other gate passes.`,
+        );
+    }
+  }
+
+  // 5. the reader's keyed-stream leg. bulldocs_live.ex streams each top-level
+  //    block as a class-less `<div id data-block-id>`, so `#paper-body > h2`
+  //    alone matches only the legacy whole-body path and the render rig — the
+  //    live reader would show no section heads and nothing here would notice.
+  const surfaceCss = readFileSync(join(repoRoot, "api/assets/paper-surface/paper-surface.css"), "utf8");
+  if (!surfaceCss.includes(".bp-paper-surface > #paper-body > div:not([class]) > h2"))
+    lFail(
+      `  Part L FAIL: paper-surface.css has no keyed-stream leg for the section head.\n` +
+        `    The block-backed reader wraps every top-level block in <div id data-block-id> — without\n` +
+        `    \`> #paper-body > div:not([class]) > h2\` the device is dead on the page that ships.`,
+    );
+
+  if (!lFailed)
+    console.log(
+      `  ok   ${SECTION_KEYS.length} section tokens emitted, bridged and consumed on both the reader and the editor surface, ` +
+        `each head spending all three on one declaration, and the reader carrying its keyed-stream leg`,
+    );
+}
+
+// ── Part M: the RULE LADDER — one weight for structure, one for everything ───
+// space.rule emits `--tok-rule-hairline`, each surface bridges it onto
+// `--bp-rule-hairline`, and the rules that draw chrome spend it. That is Part J's
+// shape and Part J's shape alone would be satisfied by a stylesheet where the
+// token is consumed in one place and every OTHER line still draws 2px from a
+// literal — which is precisely the state this part was written to end.
+//
+// So Part M has a second arm the other consumer censuses do not: it reads every
+// HORIZONTAL border declaration in both stylesheets and refuses any literal at or
+// above the structural weight, wherever it appears. That is the arm that can see
+// what a photograph cannot. The rig's census (tooling/paper-excellence/rig/shoot.mjs)
+// counts the rules that PAINT on the seven committed fixtures — authoritative
+// about what ships, and blind to a heavy rule on a class no fixture happens to
+// render. `.bp-board__col` was exactly that: a 3px accent across a task board, in
+// none of the seven papers. Neither arm subsumes the other; a declaration census
+// alone would miss an inline style, a rendered census alone would miss this.
+//
+// VERTICAL edges are deliberately not censused. A left edge is a margin accent —
+// the verdict colour `.bp-callout`, `.bp-card` and `.bp-board__col` all carry, and
+// the benchmark artifact's own `border-left: 3px` device — and it cannot compete
+// with a horizontal boundary because it does not draw a horizontal line.
+console.log("\ndesign/check.mjs — Part M: rule-ladder consumer census + heavy-declaration scan");
+{
+  let mFailed = 0;
+  const mFail = (m) => { console.error(m); mFailed++; failed++; };
+
+  const RULE_SURFACES = [
+    "api/assets/paper-surface/paper-surface.css",
+    "api/assets/paper-editor/src/styles.css",
+  ];
+
+  // ── arm 1: the token reaches a real consumer on both surfaces ──────────────
+  for (const path of RULE_SURFACES) {
+    const css = readFileSync(join(repoRoot, path), "utf8");
+    for (const key of RULE_KEYS) {
+      const value = `${tokens.space.rule[key]}${RULE_UNITS[key]}`;
+      if (!css.includes(`--tok-rule-${key}: ${value};`))
+        mFail(`  Part M FAIL: --tok-rule-${key} is not emitted as ${value} in ${path}`);
+      if (!css.includes(`--bp-rule-${key}: var(--tok-rule-${key});`))
+        mFail(`  Part M FAIL: --bp-rule-${key} has no bridge onto --tok-rule-${key} in ${path}`);
+      const read = css
+        .split("\n")
+        .some((l) => l.includes(`var(--bp-rule-${key}`) && !l.includes(`--bp-rule-${key}: var(`));
+      if (!read)
+        mFail(
+          `  Part M FAIL: --bp-rule-${key} is emitted and bridged in ${path} but NOTHING consumes it.\n` +
+            `    Every chrome rule on this surface is then drawing a hardcoded weight, which is the\n` +
+            `    drift the token exists to prevent. Spend it, or drop it from space.rule + RULE_KEYS.`,
+        );
+    }
+  }
+
+  // ── arm 2: no horizontal border literal at or above the structural weight ──
+  // Only the section head may declare one, and it declares it through
+  // `--bp-section-rule` rather than a literal, so the allowlist is empty by
+  // construction: there is no legitimate literal.
+  const HEAVY_PX = tokens.space.section.rule;
+  // `border`, `border-top`, `border-bottom` and their `-width` forms. NOT
+  // `border-left/right` (a margin accent is not a rule), and not `border-radius`
+  // — the `(?![a-z-])` is what keeps `radius`, `color` and `style` out.
+  const HORIZONTAL_BORDER = /border(?:-top|-bottom)?(?:-width)?(?![a-z-])\s*:\s*([^;}]*)/g;
+  for (const path of RULE_SURFACES) {
+    const css = readFileSync(join(repoRoot, path), "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+    for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      for (const [decl, value] of body.matchAll(HORIZONTAL_BORDER)) {
+        const px = /(\d*\.?\d+)px/.exec(value);
+        if (!px || parseFloat(px[1]) < HEAVY_PX) continue;
+        mFail(
+          `  Part M FAIL: ${path} declares a ${px[1]}px HORIZONTAL rule outside the section head:\n` +
+            `      ${selector.trim().replace(/\s+/g, " ").slice(0, 110)}\n` +
+            `        ${decl.trim().slice(0, 90)}\n` +
+            `    ${HEAVY_PX}px is the STRUCTURAL weight (space.section.rule) and a section boundary is the\n` +
+            `    only thing allowed to spend it — a component drawing at that weight makes the boundary\n` +
+            `    stop meaning anything. Use var(--bp-rule-hairline) for chrome; if the line carries a\n` +
+            `    VERDICT rather than structure, put it on the left edge where .bp-callout and .bp-card\n` +
+            `    already carry theirs, and it leaves this census by being vertical.`,
+        );
+      }
+    }
+  }
+
+  if (!mFailed)
+    console.log(
+      `  ok   --tok-rule-hairline emitted, bridged and consumed on both surfaces, and neither stylesheet ` +
+        `declares a horizontal border at or above the ${HEAVY_PX}px structural weight`,
+    );
 }
 
 // ── verdict ──────────────────────────────────────────────────────────────────

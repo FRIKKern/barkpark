@@ -147,6 +147,36 @@ defmodule Barkpark.ChatGoldenToolrowsParityTest do
              "multi-edit hunks must be gap-separated (ChatToolRenderer parity)."
     end
 
+    test "the budget variant has the exact geometry that adjudicates the fold (D40)" do
+      budget = Enum.find(variants(), &(&1["name"] == "multi_edit_budget_diff"))
+      assert budget, "the adjudicating budget variant is missing — regen shed the D40 lock."
+
+      ops = budget["block"]["lines"] |> Enum.map(& &1["op"])
+      drawable = Enum.count(ops, &(&1 != "gap"))
+
+      gap_idx =
+        ops
+        |> Enum.with_index()
+        |> Enum.filter(fn {op, _i} -> op == "gap" end)
+        |> Enum.map(fn {_op, i} -> i end)
+
+      # 24 drawable rows + 2 gaps, BOTH gaps inside the first 20 RAW elements —
+      # the exact geometry on which the two fold readings disagree: drawable-only
+      # (the ruling) folds 4 rows, a raw-element budget would fold 6.
+      assert drawable == 24
+      assert length(ops) == 26
+      assert length(gap_idx) == 2 and Enum.all?(gap_idx, &(&1 < 20))
+      assert budget["projection"]["overflow"] == 4
+    end
+
+    test "every diff projection carries the budget-aware overflow field" do
+      for v <- variants(), v["kind"] == "tool-diff" do
+        assert is_integer(v["projection"]["overflow"]) and v["projection"]["overflow"] >= 0,
+               "variant #{inspect(v["name"])}: chat-tool-diff projections must carry " <>
+                 "the drawable-only overflow count (D40)."
+      end
+    end
+
     test "the todo variant carries all three statuses" do
       todo = Enum.find(variants(), &(&1["name"] == "todo_card"))
       statuses = todo["block"]["todos"] |> Enum.map(& &1["status"]) |> MapSet.new()
@@ -203,6 +233,40 @@ defmodule Barkpark.ChatGoldenToolrowsParityTest do
       assert html =~ "bp-chat-tool-diff"
       assert html =~ "var(--ok)"
       assert html =~ "var(--danger)"
+    end
+
+    test "the budget variant folds at the drawable-only number — +4, never the raw +6 (D40)" do
+      budget = Enum.find(variants(), &(&1["name"] == "multi_edit_budget_diff"))
+      html = render_article(budget["block"])
+
+      # The literal NUMBER adjudicates: word-presence is blind to it — a
+      # raw-element budget would honestly claim "+6 more lines" here.
+      assert html =~ "… +4 more lines"
+      refute html =~ "+6 more lines"
+
+      # The web surface KEEPS the folded tail behind <details> — parity with
+      # the terminal/mobile discard is the budget arithmetic, never the DOM.
+      assert html =~ "<details>"
+      assert html =~ "hunkcharlie8"
+    end
+
+    test "ChatToolRenderer.tool_diff (the Studio live surface) folds at the same drawable row" do
+      edits =
+        for hunk <- ["alpha", "bravo", "charlie"] do
+          %{"old_string" => "", "new_string" => Enum.map_join(1..8, "\n", &"live#{hunk}#{&1}")}
+        end
+
+      html =
+        render_component(
+          &BarkparkWeb.Studio.ChatToolRenderer.tool_diff/1,
+          %{input: %{"file_path" => "lib/live.ex", "edits" => edits}}
+        )
+
+      assert html =~ "+4 more lines"
+      refute html =~ "+6 more lines"
+      # The 20th drawable row stays in the summary; the 21st folds.
+      assert html =~ "livecharlie4"
+      assert html =~ "livecharlie5"
     end
 
     test "the todo render carries the ☐/◐/☒ checklist glyphs and progress read" do

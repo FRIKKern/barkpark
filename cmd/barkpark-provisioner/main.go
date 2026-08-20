@@ -216,6 +216,29 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, "barkpark-provisioner: mail relay not configured (SMTP_RELAY_* unset) — provisioned instances will NOT send email")
 	}
 
+	// The control plane's own EGRESS address (BARKPARK_CLOUD_EGRESS_IPS), written
+	// into every provisioned instance as BARKPARK_TRUSTED_PROXIES. An instance only
+	// believes x-forwarded-for from loopback or a LISTED peer, so without this the
+	// caller address the control plane relays on a proxied revoke is DISBELIEVED and
+	// the bucket keys on the control plane's own address — one bucket for the whole
+	// team instead of one per phone. Same value as the CP_HOST deploy secret (this
+	// worker runs ON that box); see deploy/barkpark-provisioner.env.example.
+	//
+	// Reported at startup either way, and a MALFORMED value is reported HERE rather
+	// than discovered mid-provision: runtime.exs raises on a non-IP entry, so a bad
+	// value would refuse to boot the instance it was just written to. The value is
+	// still passed through (the go-live fails closed on it) — the log is what makes
+	// an operator's typo visible before the first job lands.
+	seams.CloudEgressIPs = strings.TrimSpace(os.Getenv("BARKPARK_CLOUD_EGRESS_IPS"))
+	switch egress, err := cloud.NormalizeTrustedProxies(seams.CloudEgressIPs); {
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: BARKPARK_CLOUD_EGRESS_IPS is MALFORMED — %v; every go-live fails closed on it until it is fixed (a non-IP entry raises at the instance's next boot)\n", err)
+	case egress == "":
+		fmt.Fprintln(os.Stderr, "barkpark-provisioner: BARKPARK_CLOUD_EGRESS_IPS unset — provisioned instances will DISBELIEVE the caller address this control plane relays (per-caller rate-limit buckets collapse to one bucket per team)")
+	default:
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: control-plane egress %s — provisioned instances trust it as an x-forwarded-for hop (BARKPARK_TRUSTED_PROXIES)\n", egress)
+	}
+
 	// Warm pool (dwb-10): OPT-IN via WARM_POOL_SIZE (default 0 = DISABLED, one-shot
 	// only). When enabled, wire the control-plane claim-store client (same
 	// ControlURL + WORKER_TOKEN as the job queue) so a go-live assigns a pre-baked
@@ -253,6 +276,10 @@ func run(args []string) int {
 			Store:      bundleDeps.Store, // nil when the env is missing — never reached (translate fails first)
 			Mail:       seams.Mail,
 			ControlURL: *controlURL,
+			// A resurrect is its own chain (no configureHost), so it needs the egress
+			// address threaded separately or a resurrected box comes back trusting only
+			// loopback — one rate-limit bucket per team for every proxied request.
+			TrustedProxies: seams.CloudEgressIPs,
 		},
 	}
 
@@ -283,6 +310,11 @@ func run(args []string) int {
 		// payload and is NEVER logged or written to the box.
 		SupportProvision: provisioner.DefaultSupportProvision(provisioner.SupportSeams{
 			Provider: provider,
+			// Full public identity: the support chain's secure step stands up
+			// <slug>.barkpark.cloud + Caddy/TLS exactly like a main, so the box
+			// needs the SAME Cloud DNS seam the go-live chain uses. Caddy/Health
+			// left nil → the real cloud-package defaults.
+			DNS: dns,
 			StepReporter: (&provisioner.HTTPStepReporter{
 				ControlURL: *controlURL,
 				Token:      tok,

@@ -60,6 +60,20 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    # Structural backstop for the public-read tier on the flat CycleFleet read
+    # (arpss-cycle-api-publicread-followup). The LIVE guard stays the controller
+    # seal `CycleFleetController.authorize_cycle/3` (cycle_fleet_controller.ex:412),
+    # which 403s a public-read token via `Plugs.PublicRead.public_read_token?/1`
+    # — ONE tier definition, shared. This mount closes the STRUCTURAL gap the
+    # seal cannot: a FUTURE flat read route added under `:cycle_api` would
+    # silently reopen the class, because the plug denies deny-by-default while a
+    # new controller action would have to re-derive the seal by hand. Mounted at
+    # the TAIL so `:api_token` (RequireToken) and `:current_workspace`
+    # (DeriveWorkspaceFromToken/AssignDefaultScope) are assigned before it runs.
+    # The `/v1/cycles/:epic/:wave` path is not in the plug allowlist, so a
+    # public-read token is denied with the plug canonical message; a read/write/
+    # admin token no-ops through it (`public_read_token?/1` is false).
+    plug(BarkparkWeb.Plugs.PublicRead)
   end
 
   # Grant-fold overlay for the FLAT `/v1/data` READ routes (airdrop-grants
@@ -357,6 +371,23 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.PaperReaderCsp)
   end
 
+  # Reader conditional (http-edge-truth D9/D10/D11): weak time-bucketed ETag +
+  # honored 304 for the FLAT paper reader spellings. Layered AFTER
+  # :paper_reader_csp so the 304 branch can delete the freshly-nonced CSP that
+  # plug just minted (a 304 delivering a new nonce would permanently break the
+  # cached reader's inline scripts). Self-gates to `.../papers/:slug` paths, so
+  # on the shared `:public_root` bucket it is a pure no-op for the sheets/quiz
+  # sibling readers. See BarkparkWeb.Plugs.PaperRevisionHeaders @moduledoc.
+  pipeline :paper_revision_headers do
+    plug(BarkparkWeb.Plugs.PaperRevisionHeaders)
+  end
+
+  # Papers are shareable, not searchable, out of the box — see the plug's
+  # @moduledoc. Rides BEFORE :paper_revision_headers so the 304 carries it.
+  pipeline :reader_noindex do
+    plug(BarkparkWeb.Plugs.ReaderNoindex)
+  end
+
   # :scoped_browser + the :docs share gate (P4) — the scoped STUDIO pipeline.
   # An anonymous request for a `:docs`-shared scope is pre-resolved by
   # RequireShareScope (read-only; LiveScope attaches the server-side write
@@ -430,6 +461,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :papers)
     plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true)
     plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.ReaderNoindex)
     plug(BarkparkWeb.Plugs.PaperRevisionHeaders)
   end
 
@@ -460,6 +492,14 @@ defmodule BarkparkWeb.Router do
 
   pipeline :require_token do
     plug(BarkparkWeb.Plugs.RequireToken)
+    # Deny-by-default clamp for a `public-read` token (site-spawner D6/D106).
+    # RequireToken has just proven a token exists; PublicRead then allows ONLY
+    # `GET /v1/data/query|doc` — which no route on this pipeline is — so the
+    # public tier is denied the whole bearer-gated surface it was never meant to
+    # reach (export/analytics/history/revision returned 200 and `listen` held an
+    # open SSE stream before this line). No-op for read/write/admin/ops tokens by
+    # the plug's own construction, so every other principal is byte-identical.
+    plug(BarkparkWeb.Plugs.PublicRead)
   end
 
   # The low-trust TICKET-KEY tier (Barkpark Tickets, charter Decision 1 + 7).
@@ -540,6 +580,16 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(:fetch_session)
+  end
+
+  # Second, TIGHTER meter for anonymous account creation, stacked ON TOP of
+  # `:user_auth` (which already bills the shared 60/min anon-write bucket). Its
+  # own per-IP per-hour bucket — default 5/h, BARKPARK_AUTH_RATE_REGISTER — so a
+  # register flood neither starves the other anonymous writes from that IP nor
+  # turns the API-shaped 60/min ceiling into a 3600-mail/hour amplifier against a
+  # third party. Only `POST /v1/auth/register` rides this.
+  pipeline :auth_register_throttle do
+    plug(BarkparkWeb.Plugs.AuthWriteRateLimit, class: :register)
   end
 
   # Core user-login session gate (distinct from API-token auth): login bearer
@@ -1173,7 +1223,7 @@ defmodule BarkparkWeb.Router do
   # modules are fully qualified. Expands to nothing until a plugin contributes
   # a `:public_root` route.
   scope "/" do
-    pipe_through([:browser, :paper_reader_csp])
+    pipe_through([:browser, :paper_reader_csp, :reader_noindex, :paper_revision_headers])
 
     plugin_routes(scope: :public_root)
   end
@@ -1462,11 +1512,27 @@ defmodule BarkparkWeb.Router do
     get("/openapi.json", OpenApiController, :index)
   end
 
+  # ── Anonymous account creation — its OWN, tighter bucket ────────────────
+  # POST /v1/auth/register is an UNAUTHENTICATED write that mails a third party
+  # (a fresh address gets a confirmation mail; an existing one re-mails the
+  # account holder). It rides `:user_auth` exactly as the other public auth
+  # routes do — so it keeps the shared 60/min anon-write meter — and then bills a
+  # SECOND, per-IP, per-hour bucket of its own (default 5/h,
+  # BARKPARK_AUTH_RATE_REGISTER). Two independent buckets mean a register flood
+  # can neither starve the other anonymous writes from that IP nor use the
+  # API-shaped 60/min ceiling as a 3600-mail/hour amplifier. Throttle only —
+  # invite codes / allowlists / closing signup are the owner's policy call.
+  # See BarkparkWeb.Plugs.AuthWriteRateLimit.
+  scope "/v1/auth", BarkparkWeb do
+    pipe_through([:user_auth, :auth_register_throttle])
+
+    post("/register", AuthController, :register)
+  end
+
   # ── Core user auth (login/sessions/MFA/email flows) — public entry ───────
   scope "/v1/auth", BarkparkWeb do
     pipe_through(:user_auth)
 
-    post("/register", AuthController, :register)
     post("/login", AuthController, :login)
     post("/verify-email", AuthController, :verify_email)
     post("/request-reset", AuthController, :request_reset)
@@ -1545,6 +1611,9 @@ defmodule BarkparkWeb.Router do
     post("/tokens", AuthController, :create_token)
     get("/export", AuthController, :export)
     post("/erase", AuthController, :erase)
+    # Self-service password change, gated on the current password — same
+    # re-auth shape as /erase. See AuthController.change_password/2.
+    patch("/password", AuthController, :change_password)
     post("/mfa/enroll", AuthController, :mfa_enroll)
     post("/mfa/verify", AuthController, :mfa_verify)
     # Present a current factor to make this session step-up-fresh (clears a
@@ -1592,10 +1661,16 @@ defmodule BarkparkWeb.Router do
     get("/capabilities", CapabilitiesController, :index)
   end
 
-  # ── Instance machine meter: rolling req/s + p95 window (cloud-console W5) ──
+  # ── Instance machine meter: rolling req/s + p95 + 5xx window (cloud-console
+  # W5; 5xx added dr-w5-s2) ──
   # Authed with the SAME Bearer-token seam the agent health gate probes
-  # (`RequireToken`); never unauthenticated. Contract pinned by charter OC24:
-  # {"req_per_s": float, "p95_ms": int|null, "window_s": int}.
+  # (`RequireToken`); never unauthenticated. Contract owned by
+  # `BarkparkWeb.RequestStats` and pinned by `RequestStatsControllerTest`:
+  # {"req_per_s": float, "p95_ms": int|null, "err_5xx_per_s": float|null,
+  #  "window_s": int}.
+  # Both nullable keys are `null` — never 0 — on an empty window: the agent maps
+  # a null (or an absent key, from an instance that predates it) to its -1
+  # unmeasured sentinel, and the control plane renders that unmetered.
   scope "/v1", BarkparkWeb do
     pipe_through(:cycle_api)
 
@@ -1606,6 +1681,19 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     get("/instance/request-stats", RequestStatsController, :show)
+
+    # Can this box deploy sites? Answered WITHOUT spending a deploy (dr-w15-s1).
+    # Same Bearer seam, same never-unauthenticated rule as request-stats.
+    # {"configured": bool, "runner_alive": bool, "door": {…}, "serving": {…}}
+    # — was six keys until dr-w26-s7 deleted `build_slots` and
+    # `runner_queue_len`, neither of which ever had a reader. Contract owned by
+    # `BarkparkWeb.InstanceSiteDeployController` (read its moduledoc for why
+    # each field's producer is the one that cannot lie) and pinned by
+    # `InstanceSiteDeployControllerTest`. No field makes a GenServer.call, so a
+    # WEDGED runner still gets an answer — true of the code, but NO LONGER
+    # PINNED BY A TEST: the wedge control observed the wedge only through
+    # `runner_queue_len` and went with it (dr-w26-s7).
+    get("/instance/site-deploy", InstanceSiteDeployController, :show)
 
     # Prometheus scrape of the telemetry aggregates (p95 Ecto query, per-route
     # latency, VM memory/run-queue). Same Bearer seam — NOT the public `/metrics`
@@ -1741,6 +1829,14 @@ defmodule BarkparkWeb.Router do
     post("/sessions/:id/messages", ChatController, :create_message)
     post("/sessions/:id/interrupt", ChatController, :interrupt)
     post("/sessions/:id/approval", ChatController, :approval)
+
+    # Archive shelf flips (charter D28): POST verbs (NOT a PATCH key — archived
+    # is lifecycle, not a continuity field), same tenant oracle as every other
+    # id route. They ride THIS :require_chat_access scope, never the
+    # :registered_chat_host scope below.
+    post("/sessions/:id/archive", ChatController, :archive)
+    post("/sessions/:id/unarchive", ChatController, :unarchive)
+
     get("/sessions/:id/events", ChatController, :events)
   end
 
@@ -1868,8 +1964,9 @@ defmodule BarkparkWeb.Router do
   # search-surface-config settings — per-workspace attributed (charter D45/D49).
   # These two routes run the bespoke admin pipeline that derives the caller's
   # OWN workspace before the admin gate, so a shared dataset slug no longer means
-  # a shared config row. The sibling insights/synonyms routes stay on
-  # `[:api, :require_admin]` below (different tables, not part of this bleed).
+  # a shared config row. The sibling insights/synonyms routes below run the SAME
+  # bespoke pipeline (charter D85/D86 — repoint) so their reads and writes land
+  # on the caller's own workspace instead of collapsing to Default.
   scope "/v1/data", BarkparkWeb do
     pipe_through(:search_settings_admin)
 
@@ -1877,8 +1974,15 @@ defmodule BarkparkWeb.Router do
     put("/search/:dataset/settings", SearchController, :update_search_settings)
   end
 
+  # insights + synonyms — per-workspace attributed (charter D85/D86). Repointed
+  # off `[:api, :require_admin]` (which ran AssignDefaultScope with NO
+  # DeriveWorkspaceFromToken → collapsed every caller to Default) onto the
+  # bespoke `:search_settings_admin` pipeline: DeriveWorkspaceFromToken (fail-
+  # SOFT) runs before AssignDefaultScope, so a workspace-bound admin token
+  # resolves ITS workspace while a nil-workspace token still falls through to
+  # Default/global (READs stay global-legacy by D59 — never over-blocked).
   scope "/v1/data", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:search_settings_admin)
 
     get("/search/:dataset/insights", SearchController, :search_insights)
     get("/search/:dataset/synonyms", SearchController, :search_synonyms)
@@ -2077,8 +2181,12 @@ defmodule BarkparkWeb.Router do
     put("/:dataset/search/settings", V1.MediaController, :update_search_settings)
   end
 
+  # media insights + synonyms — per-workspace attributed (charter D85/D86),
+  # repointed onto the same bespoke `:search_settings_admin` pipeline as the
+  # documents block above so a workspace-bound admin token resolves ITS workspace
+  # instead of collapsing to Default; a nil-workspace token still falls through.
   scope "/v1/media", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:search_settings_admin)
 
     get("/:dataset/search/insights", V1.MediaController, :search_insights)
     get("/:dataset/search/synonyms", V1.MediaController, :search_synonyms)
@@ -2592,14 +2700,23 @@ defmodule BarkparkWeb.Router do
   # gracefully), so nothing user-facing raises — this is the only way to reach
   # the crash path. Compiled out unless :error_test_routes is set (config/test.exs).
   #
-  # Sobelow Config.Headers (justified, stays baselined — task-f76e9b7b): this
-  # pipeline is COMPILED OUT of dev and prod (the compile_env guard is only true
-  # under MIX_ENV=test). It exists solely to reach the raw crash path so the
-  # RenderErrors tests can assert ErrorHTML/ErrorJSON render — no real browser
-  # ever hits it, so missing put_secure_browser_headers exposes nothing.
+  # This pipeline used to carry a permanent Sobelow Config.Headers waiver on the
+  # grounds that it is compiled out of dev and prod. That reasoning was sound but
+  # the waiver was not free: a baselined finding is a line-anchored fingerprint
+  # that has to be re-anchored on every drift, and a permanently-red security
+  # gate cannot report a regression. Setting the headers costs three lines, so
+  # the waiver is deleted instead. The two-arg map form is the house pattern
+  # (see :browser, :shared_paper_browser) and is what Sobelow's syntactic
+  # Config.CSP check credits — the one-arg form would merely trade this finding
+  # for an uncredited Config.CSP one. Honest price: because the pipeline is
+  # compile_env-gated to MIX_ENV=test, this prevents no production failure.
   if Application.compile_env(:barkpark, :error_test_routes, false) do
     pipeline :error_test do
       plug(:accepts, ["json", "html"])
+
+      plug(:put_secure_browser_headers, %{
+        "content-security-policy" => "default-src 'none'"
+      })
     end
 
     scope "/__error_test__", BarkparkWeb do

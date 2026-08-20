@@ -24,11 +24,35 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   members are the RAW `COPY … TO STDOUT` text bytes — the byte carrier
   (charter D2), never `Envelope.render` output (charter D9).
 
-  Packing is FILE-TO-FILE and constant-memory (PDS-D207): each table member is
-  a per-table SPILL file the producer streamed to disk, added to the tar by
-  PATH — `:erl_tar` reads an added file in bounded 64 KiB chunks — and deleted
-  the moment it is in. Extraction is still fully in-memory from the bundle
-  binary (the import path is deliberately unchanged, PDS-D214).
+  Packing is FILE-TO-FILE and constant-memory (PDS-D199 + PDS-D204): each table
+  member is a per-table SPILL file the producer streamed to disk, added to the
+  tar by PATH — `:erl_tar` reads an added file in bounded 64 KiB chunks — and
+  deleted the moment it is in. (PDS-D207 is the BYTE-IDENTITY gate on that
+  packing, not the constant-memory ruling; the moduledoc used to mis-credit it.)
+
+  Unpacking has TWO shapes and they are not interchangeable:
+
+    * `unpack/1` takes the whole bundle as a BINARY and answers
+      `%{table => copy_bytes}`. Peak is ~3x the archive. It is kept — not
+      deprecated — because it is the contract the bundle test suite asserts
+      against: twenty `refute dumps[table] =~ "<marker>"` CROSS-TENANT
+      ISOLATION tripwires read those bytes directly, and under a path-valued
+      map every one of them would pass VACUOUSLY (a path does not contain the
+      marker; the bytes it names do). Small bundles and tests use this.
+    * `unpack_to_dir/2` takes a bundle PATH and extracts to a directory,
+      answering `%{table => member_path}`. This is the production import path.
+      Peak is **1x the largest single member** — measured, and deliberately NOT
+      called "constant memory": `:erl_tar` has no chunked EXTRACT API, so the
+      largest member is still materialised once inside `:erl_tar` while it is
+      written out. On guerrilla today that residual is ~1.31 GB
+      (`mutation_events`), down from ~7.8 GB of BEAM for the binary shape.
+
+  Extracting to a directory writes ATTACKER-SUPPLIED MEMBER NAMES to disk,
+  which `[:memory]` extraction was immune to by construction. `unpack_to_dir/2`
+  therefore validates the tar's table of contents BEFORE a single byte lands:
+  only `manifest.json` and `tables/<name>.copy` with a name carrying no path
+  separator and no `..` are accepted, every member must be a REGULAR file (no
+  symlinks, no directories), and anything else is refused BY NAME.
   """
 
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
@@ -44,6 +68,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   # the same box must never collide on a filename.
   @spill_prefix "bp-ws-spill-"
   @bundle_prefix "bp-ws-bundle-"
+  # A THIRD prefix, and the first that names a DIRECTORY: the import scratch
+  # holding the spilled request body plus the extracted members. The janitor's
+  # `remove/1` already `File.rm_rf`s, so a directory is collectable — but its
+  # `candidates/1` sweeps by prefix, so an unregistered prefix is invisible to
+  # it. Registered there in the same commit that introduced this one.
+  @scratch_prefix "bp-ws-import-"
 
   # A memory-backed filesystem defeats the entire point of spilling: the bytes
   # we "wrote to disk" would still be resident, and a ~941 MB export would
@@ -181,6 +211,116 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
     end
   end
 
+  @doc """
+  The janitor-visible filename prefix of an import scratch DIRECTORY.
+  """
+  def scratch_prefix, do: @scratch_prefix
+
+  @doc """
+  Create a fresh import scratch directory under `spill_dir/0` and return it.
+
+  The caller OWNS it and must `File.rm_rf/1` it in an `after` clause. It lives
+  under `spill_dir/0` for two reasons that are both load-bearing: that path is
+  asserted disk-backed (a tmpfs scratch would reinstate the very RSS peak
+  disk-backed extraction removes — `assert_not_tmpfs!/2`), and it is the one
+  directory the janitor sweeps, so a SIGKILL mid-import leaves a scratch the
+  next boot collects instead of a permanent multi-GB squatter.
+  """
+  # File.mkdir_p! creates a path built from spill_dir/0 (operator config) plus
+  # System.unique_integer/1 — no request input reaches it.
+  # sobelow_skip ["Traversal.FileModule"]
+  def open_scratch_dir! do
+    dir = Path.join(spill_dir(), "#{@scratch_prefix}#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    dir
+  end
+
+  @doc """
+  Bytes currently available on the filesystem carrying `dir`.
+
+  `{:ok, bytes}` or `{:error, reason}` — never a guess. There is no BIF for
+  statvfs, so this shells out to POSIX `df -Pk` (`-P` guarantees one line per
+  filesystem, so a long device name cannot wrap the columns apart).
+  """
+  @spec free_space(Path.t()) :: {:ok, non_neg_integer()} | {:error, atom()}
+  # `df` is resolved by System.find_executable/1 and every argument is passed as
+  # a separate argv element; no shell parses `dir` or any caller-controlled text.
+  # sobelow_skip ["CI.System"]
+  def free_space(dir) do
+    case System.find_executable("df") do
+      nil ->
+        {:error, :df_unavailable}
+
+      df ->
+        case System.cmd(df, ["-Pk", dir], stderr_to_stdout: true) do
+          {out, 0} -> parse_df(out)
+          {_out, _status} -> {:error, :df_failed}
+        end
+    end
+  rescue
+    _ -> {:error, :df_unavailable}
+  end
+
+  defp parse_df(out) do
+    # Header line, then `<fs> <1024-blocks> <used> <available> <capacity> <mount>`.
+    case String.split(out, "\n", trim: true) do
+      [_header | [line | _]] ->
+        case String.split(line, ~r/\s+/, trim: true) do
+          [_fs, _blocks, _used, avail | _] ->
+            case Integer.parse(avail) do
+              {kb, ""} -> {:ok, kb * 1024}
+              _ -> {:error, :df_unparsable}
+            end
+
+          _ ->
+            {:error, :df_unparsable}
+        end
+
+      _ ->
+        {:error, :df_unparsable}
+    end
+  end
+
+  @doc """
+  Refuse BEFORE the spill opens when `dir`'s filesystem cannot hold
+  `required_bytes`.
+
+  Disk is the risk this whole slice INTRODUCES. Extraction-to-disk trades a
+  diagnosable BEAM OOM for an ENOSPC that surfaces as a half-written member and
+  an opaque failure, and there was ZERO free-space precondition anywhere in the
+  bundle path before this. guerrilla carries `/`, `/tmp` AND `/opt/barkpark` on
+  ONE filesystem, so an import that fills it takes the box down with it.
+
+  Three answers, and the middle one is the point — a precondition that cannot
+  be performed SAYS SO rather than printing a tick (the wave's law):
+
+    * `{:ok, {:verified, free_bytes}}` — measured, and sufficient.
+    * `{:ok, {:unverified, reason}}` — `df` is absent/unreadable, or the caller
+      could not derive a requirement (no Content-Length). The import proceeds,
+      and the receipt carries the reason so nobody reads it as "checked".
+    * `{:error, {:insufficient_disk_space, info}}` — measured, and short.
+
+  The margin is the caller's to add. NOT covered, stated rather than hidden:
+  the import's `CREATE TEMP TABLE` + COPY holds another ~1x the largest member
+  inside Postgres, which on a single-filesystem box is the SAME disk.
+  """
+  @spec check_free_space(Path.t(), non_neg_integer()) ::
+          {:ok, {:verified, non_neg_integer()} | {:unverified, atom()}}
+          | {:error, {:insufficient_disk_space, map()}}
+  def check_free_space(dir, required_bytes) do
+    case free_space(dir) do
+      {:ok, free} when free >= required_bytes ->
+        {:ok, {:verified, free}}
+
+      {:ok, free} ->
+        {:error,
+         {:insufficient_disk_space, %{dir: dir, free_bytes: free, required_bytes: required_bytes}}}
+
+      {:error, reason} ->
+        {:ok, {:unverified, reason}}
+    end
+  end
+
   @doc false
   def spill_path(dir, table) do
     Path.join(dir, "#{@spill_prefix}#{table}-#{System.unique_integer([:positive])}.copy")
@@ -245,8 +385,147 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
     {decode_manifest!(manifest_bytes, bundle), dumps}
   end
 
+  @doc """
+  Extract the bundle tar at `bundle_path` into `dir`, returning
+  `{manifest_map, %{table => member_path}}`.
+
+  The disk-backed twin of `unpack/1` — same manifest, same member set, same
+  `InvalidBundleError` refusals, but the members stay ON DISK and the caller
+  streams them. Peak is 1x the largest single member (`:erl_tar` has no chunked
+  extract), NOT constant memory.
+
+  ## The traversal gate (new surface)
+
+  `[:memory]` extraction cannot write anywhere, so member names were inert.
+  `{:cwd, dir}` writes them. The table of contents is therefore validated in
+  full BEFORE extraction — it is a read of the tar's headers, not of its
+  bodies — and one bad name refuses the WHOLE bundle by name rather than
+  extracting the good members first and discovering the escape afterwards.
+  Accepted: `manifest.json`, and `tables/<name>.copy` where `<name>` carries no
+  `/`, no `\\`, no NUL and is not `.`/`..`. Every member must be a REGULAR file:
+  a symlink member is how a tar escapes a cwd even with clean names.
+  """
+  @spec unpack_to_dir(Path.t(), Path.t()) :: {map(), %{optional(String.t()) => Path.t()}}
+  # `manifest_path` is the fixed manifest filename under the caller-owned
+  # scratch directory. All archive member names are validated before extraction.
+  # sobelow_skip ["Traversal.FileModule"]
+  def unpack_to_dir(bundle_path, dir) when is_binary(bundle_path) and is_binary(dir) do
+    members = Enum.map(table!(bundle_path), &classify_member!(&1, bundle_path))
+
+    extract_to_dir!(bundle_path, dir)
+
+    manifest_path = Path.join(dir, "manifest.json")
+
+    unless File.regular?(manifest_path) do
+      raise InvalidBundleError,
+        code: "invalid_bundle",
+        message:
+          "bundle carries no manifest.json — not a #{@format} bundle " <>
+            "(#{bundle_size(bundle_path)} bytes read)"
+    end
+
+    dumps =
+      for {:table, table, name} <- members, into: %{} do
+        {table, Path.join(dir, name)}
+      end
+
+    # manifest.json is the ONLY member ever read whole: it is the few-KB index,
+    # not a dump. No table member is ever File.read!/1'd on this path — that is
+    # the invariant the whole slice exists to hold.
+    {decode_manifest!(File.read!(manifest_path), bundle_path), dumps}
+  end
+
   def format, do: @format
   def grain, do: @grain
+
+  defp bundle_size(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{size: size}} -> size
+      _ -> 0
+    end
+  end
+
+  # PDS-D50 again, from the file side: an empty or truncated body is a caller
+  # fault answered honestly, never a MatchError-driven 500.
+  defp table!(bundle_path) do
+    case :erl_tar.table(String.to_charlist(bundle_path), [:verbose]) do
+      {:ok, entries} ->
+        entries
+
+      {:error, reason} ->
+        raise InvalidBundleError,
+          code: "invalid_bundle",
+          message:
+            "request body is not a readable tar (#{bundle_size(bundle_path)} bytes, " <>
+              "#{inspect(reason)}) — the bundle is empty or truncated"
+    end
+  end
+
+  # `:verbose` entries are {name, type, size, mtime, mode, uid, gid}.
+  defp classify_member!({name, type, _size, _mtime, _mode, _uid, _gid}, bundle_path) do
+    name = to_string(name)
+
+    cond do
+      type != :regular ->
+        refuse_member!(name, bundle_path, "member type #{inspect(type)} is not a regular file")
+
+      name == "manifest.json" ->
+        {:manifest, name}
+
+      String.starts_with?(name, "tables/") and String.ends_with?(name, ".copy") ->
+        table =
+          name |> String.replace_prefix("tables/", "") |> String.replace_suffix(".copy", "")
+
+        if safe_table_name?(table) do
+          {:table, table, name}
+        else
+          refuse_member!(name, bundle_path, "table member name escapes the extraction root")
+        end
+
+      true ->
+        refuse_member!(name, bundle_path, "not a manifest.json or tables/<name>.copy member")
+    end
+  end
+
+  defp classify_member!(other, bundle_path) do
+    refuse_member!(inspect(other), bundle_path, "unreadable tar header")
+  end
+
+  defp safe_table_name?(table) do
+    table != "" and table not in [".", ".."] and
+      not String.contains?(table, ["/", "\\", <<0>>]) and
+      not String.contains?(table, "..")
+  end
+
+  defp refuse_member!(name, bundle_path, why) do
+    raise InvalidBundleError,
+      code: "invalid_bundle",
+      message:
+        "bundle member #{inspect(name)} refused: #{why} — a #{@format} bundle carries " <>
+          "manifest.json plus tables/<name>.copy members and nothing else " <>
+          "(#{bundle_size(bundle_path)} bytes read)"
+  end
+
+  # `dir` is engine-built (open_scratch_dir!/0 under the fetch_env! spill dir)
+  # and every member name has already been proven separator-free and regular by
+  # classify_member!/2 above — the traversal gate IS that validation, run before
+  # a byte is written. PDS wave 23 security review.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp extract_to_dir!(bundle_path, dir) do
+    File.mkdir_p!(dir)
+
+    case :erl_tar.extract(String.to_charlist(bundle_path), [{:cwd, String.to_charlist(dir)}]) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        raise InvalidBundleError,
+          code: "invalid_bundle",
+          message:
+            "bundle could not be extracted (#{bundle_size(bundle_path)} bytes, " <>
+              "#{inspect(reason)}) — the bundle is truncated or corrupt"
+    end
+  end
 
   # PDS-D50: :erl_tar answers {:error, :eof} for BOTH an empty body and a
   # truncated one — the two cases a streamed pull actually produces. Refuse

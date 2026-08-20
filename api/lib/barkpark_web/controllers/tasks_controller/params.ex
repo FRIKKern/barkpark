@@ -132,6 +132,11 @@ defmodule BarkparkWeb.TasksController.Params do
   def papers_of(%{"papers" => papers}) when is_list(papers), do: papers
   def papers_of(_), do: []
 
+  # Task 5 (session-handoff): content.sessions is a session-doc-id array,
+  # written via /v1/tasks/:id/sessions. Mirrors papers_of/1 byte-for-byte.
+  def sessions_of(%{"sessions" => sessions}) when is_list(sessions), do: sessions
+  def sessions_of(_), do: []
+
   # ─── Render / shape ─────────────────────────────────────────────────────
 
   # axi-s1 (R1): parse the optional `?view=` request param into a render view.
@@ -217,6 +222,9 @@ defmodule BarkparkWeb.TasksController.Params do
       # Phase A: surface content.papers at the top level the same way labels
       # are, so callers can read `doc.papers[]` without digging into content.
       papers: papers_of(content),
+      # Task 5 (session-handoff): surface content.sessions the same way papers
+      # are, so callers can read `doc.sessions[]` without digging into content.
+      sessions: sessions_of(content),
       content: Map.delete(content, "claim"),
       inserted_at: doc.inserted_at,
       updated_at: doc.updated_at
@@ -269,6 +277,7 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_unless(:lifecycle_status, Map.get(content, "lifecycle_status"), "open")
     |> put_brief_criteria(content)
     |> put_brief_engagement(content)
+    |> put_brief_disposition(content)
     |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
     |> prune_nils()
   end
@@ -327,6 +336,40 @@ defmodule BarkparkWeb.TasksController.Params do
   defp put_brief_engagement(map, content) do
     case Map.get(content, "engagement") do
       %{} = engagement when map_size(engagement) > 0 -> Map.put(map, :engagement, engagement)
+      _ -> map
+    end
+  end
+
+  # pds-w27: the ADJUDICATION TERM rides the brief card, same additive law as
+  # put_brief_engagement/2 above — present only when the row carries a term,
+  # omitted (never "" and never null) when it does not, so the exact-key-set
+  # contract on a minimal open row is untouched.
+  #
+  # THE TERM ONLY, and that is MEASURED, not taste. The hostile 50-card
+  # tripwire below params' own tests had 2080 B of headroom under its 30,720 B
+  # ceiling. Marginal cost over 50 cards:
+  #
+  #   * `,"disposition":"parked"`   = 23 B × 50 = 1150 B — fits, ~930 B spare.
+  #   * `,"reopen_trigger":""`      = 20 B × 50 = 1000 B MORE, with a
+  #     ZERO-LENGTH value: 1150 + 1000 = 2150 B > 2080 B. The trigger overflows
+  #     the ceiling before a single character of content — no grapheme cap can
+  #     rescue it, the cap would have to be negative.
+  #   * `disposition_reason` averages 753 B (max 1612 B) per row — the worst-50
+  #     full triple is 72,232 B, 34.7× the headroom.
+  #
+  # Both omitted companions already ride the FULL view (render_doc(_, :full) is
+  # a whole-content passthrough): `bp task get <doc_id>` is the escape hatch
+  # AXI charter law 2 asks for.
+  #
+  # NOTE for whoever caps a future brief field: brief_truncated?/1 below
+  # inspects ONLY `title` and `claim.now.text`, and Tasks.Stage caps NEITHER
+  # `reopen_trigger` NOR `disposition_reason`. A capped field shipped without a
+  # third clause there truncates SILENTLY — charter law 2 violated by omission.
+  # (Free reach: internal/cli/mcp_tasks.go forces view=brief on both its list
+  # and prime reads, so the MCP agent surface gains this term with no change.)
+  defp put_brief_disposition(map, content) do
+    case Map.get(content, "disposition") do
+      term when is_binary(term) and term != "" -> Map.put(map, :disposition, term)
       _ -> map
     end
   end
@@ -455,6 +498,16 @@ defmodule BarkparkWeb.TasksController.Params do
   #
   # Returns %{drafts-stripped parent doc_id => child_count}; parents with no
   # children are simply absent (callers default to 0).
+  #
+  # dr-w34-s4 (review): TWIN COLLAPSE APPLIES HERE TOO, and this is the FIFTH
+  # producer of a child count — the one the slice's brief called the "only
+  # producer" list and missed. It groups on the SAME drafts-stripped
+  # `parent_id` key that `maybe_filter_parent_id/2` matches on, so a
+  # `drafts.<id>` shadow child is guaranteed to fall in its published parent's
+  # bucket and count +2 exactly as `child_tasks/2` did. Without the collapse
+  # here, `bp task get <epic>` and `bp task ls --view=brief` report DIFFERENT
+  # child counts for the same epic — one number with two meanings, which is the
+  # defect this wave exists to remove rather than relocate.
   def batch_child_counts(docs, scope \\ [])
   def batch_child_counts([], _scope), do: %{}
 
@@ -479,6 +532,7 @@ defmodule BarkparkWeb.TasksController.Params do
             {fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content),
              count(d.id)}
         )
+        |> TaskQuery.collapse_twins()
         |> maybe_filter_workspace(Keyword.get(scope, :workspace_id))
         |> maybe_filter_project(Keyword.get(scope, :project_id))
         |> Repo.all()
@@ -606,6 +660,15 @@ defmodule BarkparkWeb.TasksController.Params do
   # Stamp (and any future holder-gated verb) on a task with no live claim —
   # mirror the invalid_lifecycle wire shape instead of leaking inspect() output.
   def reason_to_string({:not_in_progress, s}), do: "not_in_progress:#{s}"
+  # Close honesty gates (PDS-D288/D289/D290). Each gets a STABLE wire token —
+  # `inspect/1` on the tuple would leak Elixir syntax (`{:not_holder, "w"}`) into
+  # a JSON `reason` field that the bp CLI and the pr-task gate both string-match.
+  def reason_to_string({:not_holder, held}), do: "not_holder:#{held || "?"}"
+
+  def reason_to_string({:criteria_unmet, indices}) when is_list(indices),
+    do: "criteria_unmet:#{Enum.join(indices, ",")}"
+
+  def reason_to_string({:sentinel_worker_id, worker}), do: "sentinel_worker_id:#{worker}"
   def reason_to_string(other), do: inspect(other)
 
   # ─── Criteria-conflict hints (D56 — the guard must TEACH, not just refuse) ──
@@ -640,6 +703,31 @@ defmodule BarkparkWeb.TasksController.Params do
   def criteria_hint(:criteria_index_out_of_range, _surface),
     do:
       ~s|that criterion index is past the end of acceptance_criteria. The index is 0-BASED: the FIRST criterion is 0. Nothing was written.|
+
+  # Close honesty gates (PDS-D288/D289/D290). Same law as the D56 hints above:
+  # a refusal that does not teach the escape hatch is just a wall. Each names the
+  # exact body field to add — both overrides are plain close-body params, so on
+  # the CLI they ride `--set <field>="<reason>"`.
+  def criteria_hint({:not_holder, held}, :close),
+    do:
+      ~s|this task's claim is held by "#{held || "someone else"}", not by the worker you named, so closing it | <>
+        ~s|would record THEM as having finished the work. If that is deliberate (a lead sealing a merge-gated | <>
+        ~s|task is the normal case), say so and it lands, recorded: | <>
+        ~s|--set holder_override="<why you are closing someone else's claim>". | <>
+        ~s|This is an HONESTY gate, not authorization — it stops accidents and makes deliberate foreign closes auditable.|
+
+  def criteria_hint({:criteria_unmet, indices}, :close) when is_list(indices),
+    do:
+      ~s|acceptance criteria #{Enum.join(indices, ", ")} (0-BASED) are not met on the task AS STORED, and criteria | <>
+        ~s|flipped in this very close command do not count — that would be the closer grading its own homework. | <>
+        ~s|Stamp them as you prove them (`bp task stamp <id> <worker> <epoch> --criterion N --criterion-text "…" | <>
+        ~s|--met --evidence "…"`), or close over them on the record: --set criteria_override="<why it is done anyway>".|
+
+  def criteria_hint({:sentinel_worker_id, worker}, _surface),
+    do:
+      ~s|"#{worker}" is not a worker id — it is a missing value wearing a worker's clothes (empty, "None", | <>
+        ~s|"null", "nil" or "-"). A close attributed to it reads as a real close to every downstream gate. | <>
+        ~s|Pass the worker that actually holds the claim.|
 
   def criteria_hint(_reason, _surface), do: nil
 

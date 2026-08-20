@@ -43,12 +43,28 @@ async function chatSend(
   return { status: response.status, body }
 }
 
-/** GET /v1/chat/sessions — the sidebar list, workspace-scoped at the DB by
- * the token (D10: the workspace's sessions ARE the floor, by design). */
+/** GET /v1/chat/sessions[?archived=] — the sidebar list, workspace-scoped at
+ * the DB by the token (D10: the workspace's sessions ARE the floor, by
+ * design).
+ *
+ * `archived` selects WHICH SHELF, and the shelf — not the row — is how the
+ * client answers "is this session archived" (charter D28). The row's own
+ * `archived_at` is projected (the server does send it) but never overrules the
+ * shelf: a row can go stale, the question you asked cannot. The flag is always
+ * sent explicitly — the same
+ * discipline as the Go client's ListChatSessions — so the server never has to
+ * guess a default. */
 export async function listChatSessions(
   connection: InstanceConnection,
+  archived = false,
 ): Promise<ChatSessionSummary[]> {
-  const { body } = await chatSend(connection, 'GET', '/sessions', undefined, [200])
+  const { body } = await chatSend(
+    connection,
+    'GET',
+    `/sessions?archived=${archived ? 'true' : 'false'}`,
+    undefined,
+    [200],
+  )
   const parsed = JSON.parse(body) as { sessions?: ChatSessionSummary[] }
   return parsed.sessions ?? []
 }
@@ -105,6 +121,101 @@ export async function respondChatApproval(
 export async function fetchChatRollup(connection: InstanceConnection): Promise<ChatRollup> {
   const { body } = await chatSend(connection, 'GET', '/rollup', undefined, [200])
   return JSON.parse(body) as ChatRollup
+}
+
+/** PATCH /v1/chat/sessions/:id — the writable continuity keys (mode /
+ * model_choice / effort_choice / title / draft). `archived` is deliberately
+ * NOT one of them (charter D28: archive is a lifecycle ACTION with its own
+ * POST verbs, not a continuity field) — the server's allowlist rejects it and
+ * this client never offers it.
+ *
+ * PATCH mode and model_choice also LIVE-STEER a running session server-side
+ * (the S5 steer parity); effort_choice persists only — there is no set_effort
+ * control verb, so the honest client-side line is "applies from the next
+ * resume". */
+export async function patchChatSession(
+  connection: InstanceConnection,
+  id: string,
+  fields: Record<string, string>,
+): Promise<void> {
+  await chatSend(connection, 'PATCH', `/sessions/${encodeURIComponent(id)}`, fields, [200])
+}
+
+/** POST /v1/chat/sessions/:id/archive — stamp archived_at (200, body = the
+ * refreshed session at the top level, which this caller has no use for),
+ * idempotent. A foreign-tenant or missing id joins the not-found oracle (404),
+ * so a failure here is indistinguishable from "never existed" BY DESIGN.
+ *
+ * The server emits NO fleet frame for an archive (charter D28 — no broadcast
+ * path exists): callers remove the row OPTIMISTICALLY on the 200 and reconcile
+ * on the next list poll. */
+export async function archiveChatSession(
+  connection: InstanceConnection,
+  id: string,
+): Promise<void> {
+  await chatSend(connection, 'POST', `/sessions/${encodeURIComponent(id)}/archive`, undefined, [200])
+}
+
+/** POST /v1/chat/sessions/:id/unarchive — clear archived_at. Same oracle, same
+ * idempotency, same no-fleet-frame optimism as archive. */
+export async function unarchiveChatSession(
+  connection: InstanceConnection,
+  id: string,
+): Promise<void> {
+  await chatSend(
+    connection,
+    'POST',
+    `/sessions/${encodeURIComponent(id)}/unarchive`,
+    undefined,
+    [200],
+  )
+}
+
+// ── picker discovery (charter D27) ───────────────────────────────────────────
+
+/** One provider's picker vocabulary. Empty arrays are the HONEST degrade
+ * signal (codex ships all-empty today): offer no picker rather than invent
+ * values. */
+export interface ChatProviderCaps {
+  modes: string[]
+  models: string[]
+  efforts: string[]
+}
+
+/** The root `chat` discovery block, keyed by provider id. */
+export interface ChatCapabilities {
+  providers: Record<string, ChatProviderCaps>
+}
+
+/** GET /v1/capabilities?chat=1 — the picker vocabulary (charter D27).
+ *
+ * NOT a /v1/chat route, so it does not ride chatUrl. The `?chat=1` opt-in
+ * mirrors ?build=1/?views=1: the server emits the root `chat` key only to
+ * callers that ask (and never at auth tier "none"), because bp strict-decodes
+ * the manifest and an unconditional new top-level key would brick every
+ * deployed binary at parse time.
+ *
+ * Returns undefined when the server does not advertise the block at all (an
+ * older instance, or a tier that never gets it). undefined and an empty
+ * provider are DIFFERENT facts and the sheet renders them differently:
+ * undefined = "this server tells us nothing", empty = "this provider has no
+ * vocabulary". */
+export async function fetchChatCapabilities(
+  connection: InstanceConnection,
+): Promise<ChatCapabilities | undefined> {
+  const url = connection.projectUrl.replace(/\/+$/, '') + '/v1/capabilities?chat=1'
+  const response = await expoFetch(url, {
+    method: 'GET',
+    headers: { Accept: 'application/json', Authorization: `Bearer ${connection.token}` },
+  })
+  const body = await response.text()
+  if (response.status !== 200) {
+    throw new ChatHttpError(response.status, `chat capabilities: HTTP ${response.status}`)
+  }
+  const parsed = JSON.parse(body) as { chat?: { providers?: Record<string, ChatProviderCaps> } }
+  const providers = parsed.chat?.providers
+  if (providers === undefined || providers === null) return undefined
+  return { providers }
 }
 
 // ── SSE ──────────────────────────────────────────────────────────────────────
@@ -174,46 +285,147 @@ export function parseSseFrame(raw: string): SseFrame | undefined {
   return frame
 }
 
+// ── connection truth ─────────────────────────────────────────────────────────
+
+/** The five-state stream vocabulary (charter D24), OWNED here — the transport
+ * produces it, sessionStore and the screens import it. 'degraded' replaced
+ * 'reconnecting' (the stream is retrying forever, honestly labeled); 'blocked'
+ * is forbidden (agent_state owns it) and 'settle' is reserved for D77. */
+export type StreamStatus = 'connecting' | 'open' | 'degraded' | 'refused' | 'closed'
+
+/** The transport's failure vocabulary: `transient` keeps retrying forever on
+ * the jittered 1s→16s ladder; `refused` terminates into the refused state. */
+export type StreamFailureClass = 'transient' | 'refused'
+
+export interface StreamFailure {
+  class: StreamFailureClass
+  /** Set when the failure was an HTTP response (4xx/5xx); absent on
+   * network-level failures (DNS, socket, timeout). */
+  httpStatus?: number
+  message: string
+}
+
+/** A non-2xx answer from the events route — carries the status so the
+ * classifier can split transient (5xx) from refused (4xx). */
+export class ChatHttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'ChatHttpError'
+  }
+}
+
+/** Charter D26 client contract: 5xx (incl runtime_capacity/runtime_unavailable
+ * and overloaded) and network-level errors are `transient` — the server may
+ * come back, so the stream degrades and retries. Every 4xx (401/403/404/422
+ * chat_unsupported…) is `refused` — permanent for this session/token; retrying
+ * would loop forever against a wall. */
+export function classifyStreamFailure(err: unknown): StreamFailure {
+  if (err instanceof ChatHttpError) {
+    return {
+      class: err.status >= 400 && err.status < 500 ? 'refused' : 'transient',
+      httpStatus: err.status,
+      message: err.message,
+    }
+  }
+  return { class: 'transient', message: err instanceof Error ? err.message : String(err) }
+}
+
+// The reconnect discipline ported from @barkpark/core listen.ts (withJitter +
+// counted clean closes) — a port, not a fork: terminal behavior here is
+// degraded-retry-forever, never a throw. Jitter (0.5–1.0×) keeps a fleet of
+// phones from reconnecting in lockstep; the exponential ladder means a dead
+// endpoint costs ~4 requests/min at the cap, not 60.
+const BACKOFF_BASE_MS = 1_000
+const BACKOFF_CAP_MS = 16_000
+
+function withJitter(ms: number): number {
+  return (ms * (1 + Math.random())) / 2
+}
+
+/** Jittered exponential backoff: attempt 0 → ~1s … attempt ≥4 → ~16s cap.
+ * Exported for the bounded-window proof (a simulated window must show
+ * exponentially few connects, not one per second). */
+export function backoffDelayMs(attempt: number): number {
+  return withJitter(Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_CAP_MS))
+}
+
 export interface ChatStreamOptions {
   signal: AbortSignal
   /** Replay cursor: the server replays rows with seq > lastEventId as
    * `event: message` frames before going live. */
   lastEventId?: string
   onFrame: (frame: SseFrame) => void
-  /** Honest connection-state surface for the UI. */
-  onStatus?: (status: 'connecting' | 'open' | 'reconnecting' | 'closed') => void
+  /** Honest connection-state surface for the UI (the D24 five-state
+   * vocabulary). `failure` rides along on 'degraded' and 'refused'. */
+  onStatus?: (status: StreamStatus, failure?: StreamFailure) => void
 }
 
-const MAX_RECONNECTS = 5
-
 /** Opens GET /v1/chat/sessions/:id/events and pumps frames until aborted.
- * Reconnects with backoff + Last-Event-ID on drops (the server replays the
- * missed seq range); gives up after MAX_RECONNECTS consecutive failures. */
+ * Transient failures (5xx/network) and clean closes retry FOREVER on the
+ * jittered 1s→16s ladder with Last-Event-ID resume (the server replays the
+ * missed seq range); a refused-class failure (any 4xx) terminates into the
+ * 'refused' state — the screen renders the actionable wall, not a spinner. */
 export async function streamChatEvents(
   connection: InstanceConnection,
   sessionId: string,
   opts: ChatStreamOptions,
 ): Promise<void> {
-  let lastEventId = opts.lastEventId
-  let failures = 0
+  return pumpSse(connection, `/sessions/${encodeURIComponent(sessionId)}/events`, opts)
+}
 
+/** Opens GET /v1/chat/events — the ONE herd fleet stream (snapshot-then-live
+ * four-state frames for the whole in-scope fleet, herd charter D45h/D54h).
+ *
+ * A SECOND CALL SITE OF pumpSse, NEVER A FORK: same SseSplitter, same
+ * classifier, same jittered ladder, same abort contract as the per-session
+ * stream. The only difference is the URL — which is exactly why this is four
+ * lines and not four hundred. Frames arrive as event `snapshot` / `state` /
+ * `heartbeat` and go straight into herd.ts's applyFleetFrame.
+ *
+ * The opaque cursor is threaded verbatim through `lastEventId`; the herd
+ * resets off the next event:snapshot, never on reconnect (D49h), so there is
+ * no onReconnect hook here either. */
+export async function streamFleetEvents(
+  connection: InstanceConnection,
+  opts: ChatStreamOptions,
+): Promise<void> {
+  return pumpSse(connection, '/events', opts)
+}
+
+/** The ONE SSE pump: connect → read → split → dispatch, with the D24 status
+ * vocabulary and the counted jittered ladder. Both chat streams are this
+ * function at a different suffix. */
+async function pumpSse(
+  connection: InstanceConnection,
+  suffix: string,
+  opts: ChatStreamOptions,
+): Promise<void> {
+  let lastEventId = opts.lastEventId
+  // ONE counter feeds the backoff ladder: transient failures AND clean closes
+  // both count (the old flat uncounted 1s clean-close loop hammered a dead
+  // endpoint 60×/min); any bytes from the server reset it.
+  let attempt = 0
+
+  opts.onStatus?.('connecting')
   while (!opts.signal.aborted) {
-    opts.onStatus?.(failures === 0 ? 'connecting' : 'reconnecting')
     try {
       const headers: Record<string, string> = {
         Accept: 'text/event-stream',
         Authorization: `Bearer ${connection.token}`,
       }
       if (lastEventId !== undefined) headers['Last-Event-ID'] = lastEventId
-      const response = await expoFetch(
-        chatUrl(connection, `/sessions/${encodeURIComponent(sessionId)}/events`),
-        { method: 'GET', headers, signal: opts.signal },
-      )
+      const response = await expoFetch(chatUrl(connection, suffix), {
+        method: 'GET',
+        headers,
+        signal: opts.signal,
+      })
       if (!response.ok || response.body === null) {
-        throw new Error(`chat events: HTTP ${response.status}`)
+        throw new ChatHttpError(response.status, `chat events: HTTP ${response.status}`)
       }
       opts.onStatus?.('open')
-      failures = 0
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder('utf-8')
@@ -222,6 +434,7 @@ export async function streamChatEvents(
         for (;;) {
           const { done, value } = await reader.read()
           if (done) break
+          attempt = 0 // bytes prove a live stream — reset the ladder
           for (const frame of splitter.push(decoder.decode(value, { stream: true }))) {
             if (frame.id !== undefined) lastEventId = frame.id
             opts.onFrame(frame)
@@ -234,15 +447,25 @@ export async function streamChatEvents(
           // ignore
         }
       }
-      // Clean close: reconnect with the cursor (EventSource semantics) after a
-      // floor delay so an instantly-closing endpoint cannot busy-spin us.
+      // Clean close: reconnect with the cursor (EventSource semantics), COUNTED
+      // against the same jittered ladder as failures — an instantly-closing
+      // endpoint backs off to the 16s cap instead of busy-looping at 1 Hz.
       if (opts.signal.aborted) break
-      await sleep(1000, opts.signal)
-    } catch {
+      opts.onStatus?.('degraded')
+      await sleep(backoffDelayMs(attempt), opts.signal)
+      attempt += 1
+    } catch (err) {
       if (opts.signal.aborted) break
-      failures += 1
-      if (failures > MAX_RECONNECTS) break
-      await sleep(Math.min(500 * 2 ** failures, 8000), opts.signal)
+      const failure = classifyStreamFailure(err)
+      if (failure.class === 'refused') {
+        // Terminal: a 4xx is a wall (signed out / session gone / unsupported) —
+        // "reconnecting…" forever would be a lie.
+        opts.onStatus?.('refused', failure)
+        return
+      }
+      opts.onStatus?.('degraded', failure)
+      await sleep(backoffDelayMs(attempt), opts.signal)
+      attempt += 1
     }
   }
   opts.onStatus?.('closed')

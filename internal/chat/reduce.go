@@ -74,6 +74,22 @@ type State struct {
 	Local    []LocalSend // optimistic sends not yet settled into Messages
 	WedgeAt  time.Time   // interrupt wedge deadline (zero unless interrupting)
 
+	// Gen is the turn generation, bumped once per system/init frame. It is the
+	// settle-race token (charter D77): a turn's tail-settle GET carries the Gen
+	// that issued it, so a STALE turn-1 fetch landing after a queued turn-2's init
+	// already flipped Phase (reduce.go's init handler) can be told apart from a
+	// fetch that still owns the live tail. The old clear guard keyed off
+	// Phase==TurnIdle, which the queued-send init defeats — turn-1 then rendered
+	// twice and turn-2 deltas concatenated onto the stale tail.
+	Gen int
+	// TailGen is the generation the current Tail text belongs to — stamped every
+	// time a delta appends. reduceTailFetched clears the tail ONLY when the
+	// landing GET's Gen equals TailGen (same generation), so a turn-1 settle can
+	// neither blank nor corrupt turn-2's live stream. Init deliberately does NOT
+	// touch Tail/TailGen (that would blank-flash the still-painted prior tail —
+	// the no-blank-flash invariant); the tail carries its generation with it.
+	TailGen int
+
 	// Rail is the decoded agents-rail (charter D47) hydrated from the session's
 	// rail_snapshot — task-keyed mission control that survives a surface switch
 	// (Law-2). Re-decoded on every full session load / turn-boundary refetch.
@@ -130,6 +146,12 @@ type TickEvent struct{}
 type TailFetchedEvent struct {
 	Session Session
 	Err     error
+	// Gen is the generation of the FetchTailEffect that issued this GET, threaded
+	// through the shell (FetchTailEffect.Gen → tailFetchedMsg.gen → here). The
+	// settle guard clears the tail only when Gen == State.TailGen (charter D77) —
+	// zero for the pre-generation call sites (answered/wedge/legacy tests), which
+	// matches a zero TailGen, so their single-turn clear is unchanged.
+	Gen int
 }
 
 // AnswerEvent is the user answering the focused card via a keystroke (charter
@@ -164,7 +186,16 @@ type Effect interface{ isChatEffect() }
 // FetchTailEffect — GET the session with ?since=SinceSeq (turn boundary). A
 // SinceSeq of 0 is a FULL refetch (every row, so an in-place metadata flip like
 // a resolved approval is picked up); a positive SinceSeq returns only newer rows.
-type FetchTailEffect struct{ SinceSeq int }
+type FetchTailEffect struct {
+	SinceSeq int
+	// Gen stamps the turn generation live when this GET was issued so the landing
+	// TailFetchedEvent can prove it belongs to the tail it would clear (charter
+	// D77 settle-race token). Every settle-boundary emit site (result, answered,
+	// wedge-tick, permission) carries State.Gen; the D42 workflow-expand
+	// HYDRATION refetch (keys.go) carries -1 — not a boundary, so its landing
+	// must never clear a live tail.
+	Gen int
+}
 
 // SendEffect — POST the message body.
 type SendEffect struct{ Content string }
@@ -248,7 +279,11 @@ func reduceAnswered(st State, ev AnsweredEvent) (State, []Effect) {
 		return st, nil
 	}
 	st.Settling = true
-	return st, []Effect{FetchTailEffect{SinceSeq: 0}}
+	// The answer refetch carries the CURRENT generation: if no new turn has begun
+	// by the time it lands, its Gen still matches TailGen and the tail clears at
+	// this boundary; if a fresh turn's init/delta advanced TailGen meanwhile, the
+	// mismatch protects that live text (charter D77).
+	return st, []Effect{FetchTailEffect{SinceSeq: 0, Gen: st.Gen}}
 }
 
 // reduceSend appends the optimistic echo and always POSTs immediately — the
@@ -297,7 +332,10 @@ func reduceTick(st State, now time.Time) (State, []Effect) {
 		st.WedgeAt = time.Time{}
 		st.Settling = true
 		st.Notice = "interrupt unacknowledged after 8s — degraded locally; refetching"
-		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq}}
+		// The wedge refetch clears the degraded tail at its boundary: it carries
+		// the current generation, which matches TailGen unless a fresh turn already
+		// advanced it (charter D77).
+		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq, Gen: st.Gen}}
 	}
 	return st, nil
 }
@@ -317,6 +355,8 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 		return st, nil
 	case "chat":
 		return reduceClaudeFrame(st, ev.Data)
+	case "runtime":
+		return reduceRuntimeFrame(st, ev.Data)
 	case "workflow":
 		// Live workflow delta (wsc-bl-workflow-sse): the COMPACT summary pushed
 		// mid-turn so the collapsed strip refreshes without a turn-boundary
@@ -333,7 +373,7 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 		// answerable card renders from replay truth (request_id + pending status
 		// in its metadata); the operator then answers it with the card keys.
 		st.Settling = true
-		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq}}
+		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq, Gen: st.Gen}}
 	case "exit":
 		// The public exit frame is EXACTLY {status, reason} over the fixed enum
 		// (charter D23): the transport DROPS the stderr tail, so it is never a
@@ -380,7 +420,13 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 
 	switch {
 	case frame.Type == "system" && frame.Subtype == "init":
-		// A fresh turn began. Any queued sends' badges clear — the queue is
+		// A fresh turn began — bump the generation FIRST so a still-in-flight
+		// prior-turn settle GET (which captured the OLD Gen) can be told apart when
+		// it lands (charter D77). Tail/TailGen are deliberately untouched: the prior
+		// tail stays painted until its own settle lands (no blank flash), carrying
+		// its own generation with it.
+		st.Gen++
+		// Any queued sends' badges clear — the queue is
 		// now draining, oldest first, exactly like ChatLive's
 		// clear_queued_badges (charter D12).
 		for i := range st.Local {
@@ -406,6 +452,10 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 		frame.Event.Type == "content_block_delta" &&
 		frame.Event.Delta.Type == "text_delta":
 		st.Tail += frame.Event.Delta.Text
+		// Stamp the tail with the generation it now belongs to (charter D77): the
+		// settle guard clears the tail only for a GET issued in THIS generation, so
+		// a stale prior-turn fetch can neither wipe nor duplicate this text.
+		st.TailGen = st.Gen
 		if st.Phase == TurnIdle || st.Phase == TurnWaiting {
 			st.Phase = TurnStreaming
 		}
@@ -431,9 +481,81 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 		st.Settling = true
 		// Settle: refetch the tail so the plain-text stream becomes pdrender
 		// blocks AND the AI title lands (charter D8/D15). The tail stays
-		// painted until the fetch returns — never a blank flash.
-		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq}}
+		// painted until the fetch returns — never a blank flash. The GET carries
+		// THIS turn's generation so its landing clears only this turn's tail.
+		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq, Gen: st.Gen}}
 	}
+	return st, nil
+}
+
+// reduceRuntimeFrame handles one normalized Runtime.Event frame (event:
+// runtime) — the codex and remote/RemoteRef text lane, the sibling of
+// event: chat. The wire is the serialized %Runtime.Event{} struct
+// (chat_controller.ex sse_runtime_frame): `kind` is the normalized verb and
+// `native` retains the lossless provider envelope, so the text lives at
+// native.params.delta.
+//
+// The kind is matched EXACTLY, and that is load-bearing: codex's protocol maps
+// item/reasoning/textDelta → thinking_delta and item/commandExecution/
+// outputDelta → tool_delta to the SAME native.params.delta location, so a loose
+// match would splice reasoning and command output into the answer. Everything
+// that is not text_delta or turn_completed is inert here — those rows arrive as
+// persisted truth at the turn boundary, exactly as on the claude lane.
+func reduceRuntimeFrame(st State, data []byte) (State, []Effect) {
+	var frame struct {
+		Kind          string          `json:"kind"`
+		TerminalState string          `json:"terminal_state"`
+		Native        json.RawMessage `json:"native"`
+	}
+	if err := json.Unmarshal(data, &frame); err != nil {
+		return st, nil
+	}
+
+	switch frame.Kind {
+	case "text_delta":
+		// native is decoded lazily and tolerantly: a provider envelope whose
+		// params.delta is not a string leaves the tail untouched rather than
+		// killing the frame's whole decode.
+		var native struct {
+			Params struct {
+				Delta string `json:"delta"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(frame.Native, &native); err != nil || native.Params.Delta == "" {
+			return st, nil
+		}
+		st.Tail += native.Params.Delta
+		// Stamped with the current generation exactly as the claude lane stamps
+		// it (charter D77), so the settle guard sees the same shape on both lanes.
+		// Residual, recorded: Gen advances only on a claude system/init frame, so
+		// a codex turn keeps the generation it started in — the fence is inert
+		// there rather than wrong, and advancing it on runtime turn boundaries is
+		// a separate parity slice.
+		st.TailGen = st.Gen
+		if st.Phase == TurnIdle || st.Phase == TurnWaiting {
+			st.Phase = TurnStreaming
+		}
+		return st, nil
+
+	case "turn_completed":
+		// The codex turn boundary — the sibling of the claude result frame, and
+		// the ONLY settle a codex turn gets. Without it the phase never returns to
+		// idle and the Recorder's persisted answer never reaches the transcript.
+		interrupted := st.Phase == TurnInterrupting || frame.TerminalState == "interrupted"
+		switch {
+		case interrupted:
+			st.Notice = "⊘ Interrupted — session live"
+		case frame.TerminalState == "failed":
+			st.Notice = "the turn ended with an error"
+		default:
+			st.Notice = ""
+		}
+		st.Phase = TurnIdle
+		st.WedgeAt = time.Time{}
+		st.Settling = true
+		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq, Gen: st.Gen}}
+	}
+
 	return st, nil
 }
 
@@ -492,7 +614,13 @@ func reduceTailFetched(st State, ev TailFetchedEvent) (State, []Effect) {
 	if m := strings.TrimSpace(ev.Session.Mode); m != "" {
 		st.Mode = m
 	}
-	if st.Phase == TurnIdle {
+	// Settle-race guard (charter D77): clear the streamed tail ONLY when this GET
+	// was issued in the generation the tail still belongs to. A stale prior-turn
+	// settle (its Gen < TailGen because a queued send's init already bumped the
+	// generation and a delta re-stamped the tail) leaves the LIVE tail intact —
+	// the old Phase==TurnIdle guard cleared on the wrong signal and let turn-1
+	// render twice while turn-2 deltas concatenated onto the stale tail.
+	if ev.Gen == st.TailGen {
 		st.Tail = ""
 	}
 	return st, nil

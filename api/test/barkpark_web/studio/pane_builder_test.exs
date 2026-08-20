@@ -116,6 +116,81 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
     end
   end
 
+  # session-handoff Task 3 review fix: both blocks-type-whitelist gate sites
+  # (`walk_path(["open", type, id | _], ...)` and `build_editor/6`'s dispatch
+  # cond) were changed from a hardcoded `type == "paper"` equality to
+  # `Content.blocks_type?/1`, but only PAPER coverage existed anywhere in this
+  # suite (none, in fact — `walk_path` for "paper"/"open" had zero prior
+  # tests either). These pin that a "session" — the second, non-paper member
+  # of the whitelist — resolves through BOTH gate sites into the same
+  # `view: :paper` pane shape a paper gets.
+  describe "session blocks-doc pane dispatch (blocks-type whitelist, session-handoff Task 3)" do
+    defp register_session_schema!(dataset) do
+      for schema_def <- Barkpark.Plugins.Bulldocs.register_schemas([]),
+          schema_def.name == "session" do
+        attrs =
+          schema_def
+          |> Map.from_struct()
+          |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
+          |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+        {:ok, _} = Content.upsert_schema(attrs, dataset, [])
+      end
+
+      :ok
+    end
+
+    defp seed_session!(dataset, slug) do
+      register_session_schema!(dataset)
+
+      {:ok, doc} =
+        Content.upsert_blocks_doc("session", %{
+          "slug" => slug,
+          "title" => "Pane session",
+          "status" => "open",
+          "blocks" => [%{"id" => "s1", "type" => "paragraph", "content" => ["hi"]}],
+          "dataset" => dataset
+        })
+
+      doc
+    end
+
+    test "walk_path/build via the [\"open\", \"session\", id] literal segment resolves a paper-view editor" do
+      dataset = "pb_session_open"
+      seed_session!(dataset, "sess-open-1")
+
+      {_panes, editor} = PaneBuilder.build(dataset, ["open", "session", "sess-open-1"])
+
+      assert is_map(editor), "expected a session editor via the open-segment gate, got nil"
+      assert editor.view == :paper
+      assert editor.type == "session"
+      assert editor.doc.doc_id == "sess-open-1"
+    end
+
+    test "walk_path/build via the [\"open\", \"session\", id] literal segment is nil for an unknown slug" do
+      dataset = "pb_session_open_missing"
+      register_session_schema!(dataset)
+
+      {_panes, editor} = PaneBuilder.build(dataset, ["open", "session", "nope"])
+
+      assert editor == nil
+    end
+
+    test "ordinary structure nav [\"session\", id] resolves a paper-view editor via build_editor/6's dispatch cond" do
+      dataset = "pb_session_nav"
+      seed_session!(dataset, "sess-nav-1")
+
+      {_panes, editor} = PaneBuilder.build(dataset, ["session", "sess-nav-1"])
+
+      assert is_map(editor),
+             "expected a session editor via the build_editor dispatch cond, got nil"
+
+      assert editor.view == :paper
+      assert editor.type == "session"
+      assert editor.doc.doc_id == "sess-nav-1"
+    end
+  end
+
   describe "collapse?/3" do
     test "no collapse with 1 or 2 panes (no editor)" do
       refute PaneBuilder.collapse?(0, 1, false)

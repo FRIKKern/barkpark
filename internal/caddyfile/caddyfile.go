@@ -294,6 +294,10 @@ func anyCloudflareFronted(sites []Site) bool {
 // pointless Caddy reload. Domains are deduped both within and across sites (a
 // duplicate site address makes Caddy reject the whole config); since sites are
 // processed in slug order, the first site to claim a contested domain wins it.
+//
+// Every site block is stamped with the runtime's managed-block marker (see
+// ManagedMarkerPrefix), so a later Parse/Rewrite can tell the runtime's own
+// blocks from foreign vhosts it must preserve.
 func Render(box Box) string {
 	var sb strings.Builder
 
@@ -349,83 +353,91 @@ func Render(box Box) string {
 	seen := map[string]bool{}
 
 	for _, s := range sites {
-		// Skip a not-yet-ready site before consuming its domains, so it can't
-		// squat a domain and steal it from a serving site that also lists it.
-		// Readiness is kind-specific: a static site needs a served Root; a
-		// reverse_proxy site needs a live upstream Port. A static site's Root is
-		// also spliced verbatim into `root * <Root>`, so a Root that would break
-		// Caddyfile syntax (whitespace, braces, control bytes) fails closed —
-		// the whole file must never be wedged by one bad value.
-		//
-		// TLS readiness is orthogonal to kind and gates both: an Origin-CA site
-		// without a safe cert/key pair is skipped rather than downgraded to
-		// on-demand (which would be a 526 outage, not a fallback).
-		if !s.tlsReady() {
-			continue
+		if writeSiteBlock(&sb, s, seen) {
+			sb.WriteString("\n")
 		}
-		if s.isStatic() {
-			if !safeCaddyPath(s.Root) {
-				continue
-			}
-		} else if s.Port <= 0 {
-			continue
-		}
-		// Filter customer-supplied domains: a hostile or malformed domain
-		// spliced verbatim into the host key would break Caddyfile syntax
-		// (one bad domain fails the whole file) or inject directives; a
-		// valid-but-already-claimed domain is dropped to avoid a duplicate key.
-		var clean []string
-		for _, d := range s.Domains {
-			if validDomain(d) && !seen[d] {
-				seen[d] = true
-				clean = append(clean, d)
-			}
-		}
-		if len(clean) == 0 {
-			continue
-		}
-		sort.Strings(clean)
-
-		if s.isStatic() {
-			fmt.Fprintf(&sb, "# site %s (static %s)\n", s.Slug, s.Root)
-		} else {
-			fmt.Fprintf(&sb, "# site %s (port %d)\n", s.Slug, s.Port)
-		}
-		fmt.Fprintf(&sb, "%s {\n", strings.Join(clean, ", "))
-		switch {
-		case s.usesOriginCA():
-			// Pre-issued Cloudflare Origin CA cert (CF Full-Strict): load it from
-			// disk, never ask ACME. tlsReady() has already vetted both paths for
-			// splice safety.
-			fmt.Fprintf(&sb, "  tls %s %s\n", s.CertPath, s.KeyPath)
-		case s.usesInternalTLS():
-			// Self-signed cert Caddy mints locally (CF Full, non-Strict): no cert
-			// files, no ACME. The on-demand challenge could not complete through
-			// the CF proxy (error 526), and CF does not validate the origin cert
-			// in Full mode, so a locally-minted cert is exactly right.
-			sb.WriteString("  tls internal\n")
-		default:
-			sb.WriteString("  tls {\n")
-			sb.WriteString("    on_demand\n")
-			sb.WriteString("  }\n")
-		}
-		if s.isStatic() {
-			// Serve the immutable release directory. A static site has no
-			// process to restart — the deploy swaps the `current` symlink
-			// atomically (charter D11), so there is no unreachable window and
-			// therefore NO MaintenanceHandler: file_server's own 404 for a
-			// missing page must surface as a real 404, not get masked into the
-			// "Back in a moment" deploy page that handle_errors would impose.
-			fmt.Fprintf(&sb, "  root * %s\n", s.Root)
-			sb.WriteString("  file_server\n")
-		} else {
-			fmt.Fprintf(&sb, "  reverse_proxy 127.0.0.1:%d\n", s.Port)
-			sb.WriteString(MaintenanceHandler("  "))
-		}
-		sb.WriteString("}\n\n")
 	}
 
 	return sb.String()
+}
+
+// writeSiteBlock emits one runtime-managed site block — its marker comment,
+// host key, TLS directive, and serving directives, ending "}\n" — and reports
+// whether anything was written. Shared by Render (full file) and Rewrite
+// (foreign-preserving regeneration), so the two paths can never drift.
+//
+// A not-yet-ready site is skipped BEFORE consuming its domains, so it can't
+// squat a domain and steal it from a serving site that also lists it.
+// Readiness is kind-specific: a static site needs a served Root; a
+// reverse_proxy site needs a live upstream Port. A static site's Root is
+// also spliced verbatim into `root * <Root>`, so a Root that would break
+// Caddyfile syntax (whitespace, braces, control bytes) fails closed —
+// the whole file must never be wedged by one bad value.
+//
+// TLS readiness is orthogonal to kind and gates both: an Origin-CA site
+// without a safe cert/key pair is skipped rather than downgraded to
+// on-demand (which would be a 526 outage, not a fallback).
+func writeSiteBlock(sb *strings.Builder, s Site, seen map[string]bool) bool {
+	if !s.tlsReady() {
+		return false
+	}
+	if s.isStatic() {
+		if !safeCaddyPath(s.Root) {
+			return false
+		}
+	} else if s.Port <= 0 {
+		return false
+	}
+	// Filter customer-supplied domains: a hostile or malformed domain
+	// spliced verbatim into the host key would break Caddyfile syntax
+	// (one bad domain fails the whole file) or inject directives; a
+	// valid-but-already-claimed domain is dropped to avoid a duplicate key.
+	var clean []string
+	for _, d := range s.Domains {
+		if validDomain(d) && !seen[d] {
+			seen[d] = true
+			clean = append(clean, d)
+		}
+	}
+	if len(clean) == 0 {
+		return false
+	}
+	sort.Strings(clean)
+
+	sb.WriteString(managedMarker(s) + "\n")
+	fmt.Fprintf(sb, "%s {\n", strings.Join(clean, ", "))
+	switch {
+	case s.usesOriginCA():
+		// Pre-issued Cloudflare Origin CA cert (CF Full-Strict): load it from
+		// disk, never ask ACME. tlsReady() has already vetted both paths for
+		// splice safety.
+		fmt.Fprintf(sb, "  tls %s %s\n", s.CertPath, s.KeyPath)
+	case s.usesInternalTLS():
+		// Self-signed cert Caddy mints locally (CF Full, non-Strict): no cert
+		// files, no ACME. The on-demand challenge could not complete through
+		// the CF proxy (error 526), and CF does not validate the origin cert
+		// in Full mode, so a locally-minted cert is exactly right.
+		sb.WriteString("  tls internal\n")
+	default:
+		sb.WriteString("  tls {\n")
+		sb.WriteString("    on_demand\n")
+		sb.WriteString("  }\n")
+	}
+	if s.isStatic() {
+		// Serve the immutable release directory. A static site has no
+		// process to restart — the deploy swaps the `current` symlink
+		// atomically (charter D11), so there is no unreachable window and
+		// therefore NO MaintenanceHandler: file_server's own 404 for a
+		// missing page must surface as a real 404, not get masked into the
+		// "Back in a moment" deploy page that handle_errors would impose.
+		fmt.Fprintf(sb, "  root * %s\n", s.Root)
+		sb.WriteString("  file_server\n")
+	} else {
+		fmt.Fprintf(sb, "  reverse_proxy 127.0.0.1:%d\n", s.Port)
+		sb.WriteString(MaintenanceHandler("  "))
+	}
+	sb.WriteString("}\n")
+	return true
 }
 
 // safeCaddyPath reports whether p is safe to splice verbatim into a Caddyfile

@@ -36,14 +36,26 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
   defp resolve(_), do: :evergreen
 
   # Semantic status tones (design/tokens.json color.status, light theme → hex).
-  @status %{evergreen: %{ok: "#137236", info: "#3b82f6", warn: "#ba7008", danger: "#b42222"}, charple: %{ok: "#31854a", info: "#4a6ebd", warn: "#986600", danger: "#b74840"}, ember: %{ok: "#36844c", info: "#4c6fb9", warn: "#986600", danger: "#b54b43"}, fjord: %{ok: "#4d7f58", info: "#5871a5", warn: "#91692d", danger: "#a35a52"}, iris: %{ok: "#05893e", info: "#406bce", warn: "#986600", danger: "#c53732"}}
+  @status %{
+    evergreen: %{ok: "#137236", info: "#3b82f6", warn: "#ba7008", danger: "#b42222"},
+    charple: %{ok: "#31854a", info: "#4a6ebd", warn: "#986600", danger: "#b74840"},
+    ember: %{ok: "#36844c", info: "#4c6fb9", warn: "#986600", danger: "#b54b43"},
+    fjord: %{ok: "#4d7f58", info: "#5871a5", warn: "#91692d", danger: "#a35a52"},
+    iris: %{ok: "#05893e", info: "#406bce", warn: "#986600", danger: "#c53732"}
+  }
   def tone_ok(theme \\ :evergreen), do: @status[resolve(theme)].ok
   def tone_info(theme \\ :evergreen), do: @status[resolve(theme)].info
   def tone_warn(theme \\ :evergreen), do: @status[resolve(theme)].warn
   def tone_danger(theme \\ :evergreen), do: @status[resolve(theme)].danger
 
   # Warm reading accent — the paper terracotta, tokenized.
-  @reading_accent %{evergreen: "#a23925", charple: "#302ba5", ember: "#bf321d", fjord: "#0f8299", iris: "#3692e6"}
+  @reading_accent %{
+    evergreen: "#a23925",
+    charple: "#302ba5",
+    ember: "#bf321d",
+    fjord: "#0f8299",
+    iris: "#3692e6"
+  }
   def reading_accent(theme \\ :evergreen), do: @reading_accent[resolve(theme)]
 
   # Reading type (design/tokens.json font.reading / type.reading). Theme-INVARIANT.

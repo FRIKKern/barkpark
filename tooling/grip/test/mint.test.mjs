@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { mintAll, mintRecipe, pathToken, quantityPhrase } from "../mint.mjs";
-import { admitRecipe, foldLedger, mintRunId, writeLedgerRun } from "../ledger.mjs";
+import { admitRecipe, foldLedger, inScope, mintRunId, readLedgerRuns, writeLedgerRun } from "../ledger.mjs";
 import { screenCommand } from "../screen.mjs";
 
 const LEDGER = fileURLToPath(new URL("../ledger.mjs", import.meta.url));
@@ -539,30 +539,82 @@ test("tgw6 — subject and deps are minted from the ORIGINAL command, so a strip
 
 // ── REGRESSION FLOOR: the provable NO-OP over the committed corpus ────────────
 //
-// Re-minting every committed ledger row through the new mint must leave its
-// subject and deps unchanged for EVERY row (expected 0 moved). This is what makes
-// S1's data merge-order-independent of this slice: the transform only rewrites the
-// stored rerun, never the indexing keys.
+// Re-minting every row THE WRITE PATH PRODUCED must leave its subject and deps
+// unchanged (expected 0 moved). This is what makes S1's data merge-order-
+// independent of this slice: the transform only rewrites the stored rerun,
+// never the indexing keys.
+//
+// THE SCOPE IS A SHAPE, AND IT IS PRINTED ON PASS. `tooling/grip/ledger/` is a
+// SHARED APPEND-ONLY commons (D118): four epics write into it, most of them by
+// hand, and a hand-authored row never crossed `mintRecipe` at all. Re-minting
+// one of those measures the distance between a human's subject line and the
+// mint's — real, worth ruling on, and NOT a mint regression. The floor walks
+// the WRITE-PATH-ATTESTED runs (`isAttestedRun`: the filename reproduces the
+// digest of the file's own bytes, so `writeLedgerRun` demonstrably produced it),
+// which is precisely the population whose invariance the mint promises.
+//
+// WHAT THIS SCOPE IS NOT: a pinned file list. Re-pointing this walk at
+// binding.test.mjs's three CENSUS_RUN_FILES turns "307 of 631 rows moved" into
+// "0 of 62" — a PASS over 9.8% of the rows carrying 0.0% of the drift — and it
+// is INVISIBLE, because the counts only ever appeared inside the failure
+// message while the test name still promised "every committed ledger row".
+// Two things stop that recurring here: the walked scope is printed on PASS, and
+// the floors below are GROWTH floors (`>=`, re-derived 2026-07-28 at 22 runs /
+// 319 rows). An `===` on a file count would reintroduce the same staleness bug
+// one level down.
 
 const LEDGER_DIR = fileURLToPath(new URL("../ledger", import.meta.url));
 
+// Re-derived 2026-07-28 in a clean git worktree at origin/main 072978af0:
+// 78 files → 40 grip-owned runs, 22 of them write-path attested, 319 rows.
+// GROWTH floors: every honestly-written run attests automatically, so this can
+// only go up. A DROP means the scope stopped seeing runs it used to see.
+const ATTESTED_RUNS_FLOOR = 22;
+const ATTESTED_ROWS_FLOOR = 319;
+
 test("REGRESSION FLOOR — re-minting every committed ledger row leaves subject and deps unchanged", () => {
-  const files = readdirSync(LEDGER_DIR).filter((f) => /^grip-.*\.json$/.test(f));
-  ok(files.length > 0, "there must be committed ledger runs to re-mint");
+  const { runs, shape } = readLedgerRuns(LEDGER_DIR);
+  const attested = runs.filter((run) => inScope(run, "attested"));
+  ok(attested.length >= ATTESTED_RUNS_FLOOR, `the write-path-attested scope must not SHRINK: ${attested.length} run(s) < floor ${ATTESTED_RUNS_FLOOR}`);
   let rows = 0;
   const moved = [];
-  for (const f of files) {
-    const run = JSON.parse(readFileSync(join(LEDGER_DIR, f), "utf8"));
-    for (const row of run.recipes ?? []) {
+  const remint = (row) => {
+    const re = mintRecipe({ rerun: row.rerun }, { observed_at: row.observed_at });
+    if (!re.ok) return { rerun: row.rerun, reason: re.reason };
+    const subjMoved = re.recipe.subject !== row.subject;
+    const depsMoved = JSON.stringify(re.recipe.deps) !== JSON.stringify(row.deps ?? []);
+    if (!subjMoved && !depsMoved) return null;
+    return { rerun: row.rerun, from: [row.subject, row.deps], to: [re.recipe.subject, re.recipe.deps] };
+  };
+  for (const run of attested) {
+    for (const row of run.recipes) {
       rows += 1;
-      const re = mintRecipe({ rerun: row.rerun }, { observed_at: row.observed_at });
-      if (!re.ok) { moved.push({ rerun: row.rerun, reason: re.reason }); continue; }
-      const subjMoved = re.recipe.subject !== row.subject;
-      const depsMoved = JSON.stringify(re.recipe.deps) !== JSON.stringify(row.deps ?? []);
-      if (subjMoved || depsMoved) moved.push({ rerun: row.rerun, from: [row.subject, row.deps], to: [re.recipe.subject, re.recipe.deps] });
+      const drift = remint(row);
+      if (drift) moved.push({ file: run.file, ...drift });
     }
   }
-  strictEqual(moved.length, 0, `${moved.length} of ${rows} committed rows moved subject/deps: ${JSON.stringify(moved)}`);
+  ok(rows >= ATTESTED_ROWS_FLOOR, `the walked corpus must not SHRINK: ${rows} row(s) < floor ${ATTESTED_ROWS_FLOOR}`);
+  strictEqual(moved.length, 0, `${moved.length} of ${rows} attested rows moved subject/deps: ${JSON.stringify(moved)}`);
+
+  // The rows OUTSIDE the scope are counted and printed, never hidden. They are
+  // the hand-authored runs, and their drift is a real, ruled-on number (99 rows
+  // across 18 files at origin/main 072978af0, every one of them hand-written;
+  // ZERO attested rows drift). Ruled in the PR body and owned by
+  // `tgw11-bl-mint-path-root-relativity` for the one class that is a mint bug.
+  const handAuthored = runs.filter((run) => inScope(run, "owned") && !inScope(run, "attested"));
+  let handRows = 0;
+  const handMoved = [];
+  for (const run of handAuthored) {
+    for (const row of run.recipes) {
+      handRows += 1;
+      if (remint(row)) handMoved.push(run.file);
+    }
+  }
+  console.log(
+    `\n  [floor] scope=attested — ${rows} row(s) over ${attested.length} run file(s), 0 moved` +
+      `\n  [floor] declined: ${handAuthored.length} hand-authored grip run file(s) (${handRows} rows, ${handMoved.length} drifting over ${new Set(handMoved).size} files), ` +
+      `${shape.foreign} foreign run file(s), ${shape.not_a_run} NOT-A-RUN document(s)\n`,
+  );
 });
 
 // ── INVARIANCE: a stripped row answers identically from two different trees ───

@@ -34,9 +34,9 @@ const DISPATCH: Record<string, Emit> = {
 /** The full set of registered block types this renderer handles — every key in
  * the emitter maps above, including canonical types AND authoring-drift aliases
  * (bulletList / bullet_list / bulleted-list / bulleted_list / numbered_list /
- * quote). Do NOT trust a hand-counted literal here — `Object.keys(DISPATCH)` IS
- * the count (the PortableDoc suite pins the exact number and asserts CASES ≡ this
- * set). Used by the self-proof harness. */
+ * quote / h1 / h2 / h3 / ordered-list). Do NOT trust a hand-counted literal
+ * here — `Object.keys(DISPATCH)` IS the count (the PortableDoc suite pins the
+ * exact number and asserts CASES ≡ this set). Used by the self-proof harness. */
 export const REGISTERED_TYPES: string[] = Object.keys(DISPATCH)
 
 /** Render one type-keyed block to an HTML string (article surface). */

@@ -76,13 +76,21 @@ defmodule BarkparkWeb.BulldocsFormController do
   defp envelope(conn, status, code, message) do
     conn
     |> put_status(status)
-    |> json(%{ok: false, error: Barkpark.Content.Errors.stamp(%{code: code, message: message}, conn)})
+    |> json(%{
+      ok: false,
+      error: Barkpark.Content.Errors.stamp(%{code: code, message: message}, conn)
+    })
   end
 
   # ── guards ─────────────────────────────────────────────────────────────────
 
   defp rate_limit(conn) do
-    ip = conn.remote_ip |> :inet.ntoa() |> to_string()
+    # `client_ip/1`, never `conn.remote_ip`: Caddy is co-located and dials
+    # localhost:4000, so the peer is always 127.0.0.1 and this was ONE global
+    # 20-submission budget for the entire internet — one abuser closed every
+    # public form on the box. The resolver only believes `x-forwarded-for` from a
+    # trusted front, so a direct caller cannot mint itself a fresh budget.
+    ip = Barkpark.RateLimiter.client_ip(conn)
 
     case Barkpark.RateLimiter.check({:bulldocs_form, ip},
            capacity: @rate_capacity,

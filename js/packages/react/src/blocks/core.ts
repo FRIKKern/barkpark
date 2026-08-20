@@ -49,7 +49,22 @@ const heading: Emit = (b) => {
   return `<h${level}>${renderInlines(paragraphInline(b))}</h${level}>`
 }
 
-const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${escapeHtml(str(b.text))}</p>`
+// The h1/h2/h3 authoring-drift aliases (charter D57), the JS twin of compose.ex's
+// @heading_aliases clause. The level comes from the TYPE, not from `level`: SIX
+// of the 18 drifted headings (1 h2 + all 5 h3s) carry no `level` key, so
+// `h3: heading` alone would emit `<h2>`. Spreading the level in makes the type
+// authoritative — zero live blocks contradict their own type spelling.
+const headingAtLevel =
+  (level: 1 | 2 | 3): Emit =>
+  (b) =>
+    heading({ ...b, level } as Block)
+
+// Swept sibling of the heading/list content[] defect: eyebrow read `text` alone,
+// so the 3 live eyebrows persisted as `{content:[…]}` rendered an empty
+// `<p class="bp-role-eyebrow"></p>`. The `text` path is byte-identical (the
+// fallback only fires when `content` is absent/empty), so the golden parity
+// fixture is untouched.
+const eyebrow: Emit = (b) => `<p class="bp-role-eyebrow">${renderInlines(paragraphInline(b))}</p>`
 
 // scaffy:add-block-type Tabs MARK:js-emitter-tabs
 // Mirrors compose_block(tabs) (compose.ex, :article leg): a tab strip
@@ -168,9 +183,19 @@ const apiEndpoint: Emit = (b) => {
   const path = str(b.path)
   if (method === '' && path === '') return ''
 
+  // The method-class modifier is a FAIL-CLOSED lowercase [a-z0-9-] slug of the
+  // user-controlled method (hyphen kept) — mirrors compose.ex's slug so a value
+  // like `"><img src=x onerror=alert(1)>` cannot break out of the class
+  // attribute into live markup. An empty slug drops the modifier class entirely.
+  const methodSlug = method.toLowerCase().replace(/[^a-z0-9-]/g, '')
+  const methodClass =
+    methodSlug === ''
+      ? 'bp-api-endpoint__method'
+      : `bp-api-endpoint__method bp-api-endpoint__method--${methodSlug}`
+
   const head =
     `<div class="bp-api-endpoint__head">` +
-    `<span class="bp-api-endpoint__method bp-api-endpoint__method--${method.toLowerCase()}">${escapeHtml(method)}</span>` +
+    `<span class="${methodClass}">${escapeHtml(method)}</span>` +
     `<code class="bp-api-endpoint__path">${escapeHtml(path)}</code>` +
     `</div>`
 
@@ -395,7 +420,7 @@ const diff: Emit = (b) => {
   }
 
   return (
-    `<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
+    `<div class="bp-diff text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
     counts +
     body +
     `</div>`
@@ -437,7 +462,7 @@ const filetree: Emit = (b) => {
       ? ''
       : `<div class="bp-filetree-legend text-dim" style="font-size: 11px; margin-top: 4px;">${escapeHtml(legend)}</div>`
   return (
-    `<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px 0; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
+    `<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">` +
     rows +
     legendHtml +
     `</div>`
@@ -452,7 +477,38 @@ const byline: Emit = (b) => {
 
 const ingress: Emit = (b) => `<p class="bp-role-ingress">${renderInlines(paragraphInline(b))}</p>`
 
-const paragraph: Emit = (b) => `<p>${renderInlines(paragraphInline(b))}</p>`
+// Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
+// 2026-07-31): published readers emit only visible semantic groups — an empty
+// paragraph scaffold (Enter, Enter) is editable authoring state, NEVER published
+// layout, so it renders NOTHING (no element at all), not an empty `<p>`.
+// Suppression is exact and narrow (doctrine invariant 4): only a paragraph whose
+// inline run is nothing but whitespace text vanishes — any authored non-text
+// inline (link/code/tag/valueref/…) or marked run keeps its `<p>` byte-faithful.
+// Cadence between the REMAINING blocks stays reader-owned CSS margins (invariant
+// 3 — `renderBlocks` joins emitted strings, never spacing by raw array index).
+// The Elixir twin is walk.ex `paragraph/3`; legacy cached `<p></p>` HTML is
+// belt-and-braces suppressed by `.bp-paper-surface p:empty` in paper-surface.css.
+function isBlankParagraphRun(nodes: unknown): boolean {
+  if (typeof nodes === 'string') return nodes.trim() === ''
+  if (!Array.isArray(nodes)) return false
+  return nodes.every(isBlankParagraphNode)
+}
+
+function isBlankParagraphNode(n: unknown): boolean {
+  if (typeof n === 'string') return n.trim() === ''
+  if (typeof n === 'number') return false // renders its digits
+  if (Array.isArray(n)) return isBlankParagraphRun(n) // shallow-flattened shape
+  if (!isMap(n)) return true // null/bool — renderInline emits '' for these
+  // Only an UNMARKED whitespace text leaf counts as scaffold; every other node
+  // type (and any marked run) is authored content and keeps the paragraph.
+  return str(n.type) === 'text' && asList(n.marks).length === 0 && str(n.value).trim() === ''
+}
+
+const paragraph: Emit = (b) => {
+  const inline = paragraphInline(b)
+  if (isBlankParagraphRun(inline)) return ''
+  return `<p>${renderInlines(inline)}</p>`
+}
 
 // Pullquote is a PdParagraph with _role pullquote + italic:true → the role class
 // plus the inline italic author mark (walk.ex paragraph/3).
@@ -462,8 +518,27 @@ const pullquote: Emit = (b) =>
 const list: Emit = (b) => {
   const tag = b.ordered === true ? 'ol' : 'ul'
   const items = asList(b.items)
-  const inner = items.map((item) => `<li><span>${renderInlines(normalizeListItem(item))}</span></li>`).join('')
+  const inner = items.map((item) => `<li><span>${renderInlines(itemInlines(item))}</span></li>`).join('')
   return `<${tag}>${inner}</${tag}>`
+}
+
+// The inline content of ONE list item, whatever authored shape it took. The RN
+// twin is apps/mobile/src/papers/portabledoc/model.ts `itemInlines` (shipped
+// af9d64d61) — the reference normalization, ported here rather than re-derived:
+//
+//   array  → inline nodes verbatim
+//   string → JSON-decoded inline array (see normalizeListItem), else plain text
+//   map    → its own `content` inline array, else its bare `text` (the D12
+//            content||text law the heading emitter already carries)
+//
+// The MAP arm is the fix: it is the DOMINANT authored shape in the live corpus
+// (2,033 of 10,455 published list items scanned 2026-07-25 across 537 papers),
+// and `renderInlines` returns '' for a map — so every one of those items shipped
+// as an empty `<li><span></span></li>` on web. Same defect class as the
+// content[]-shape heading fix (289b46b1a / PR #6009), a different emitter.
+function itemInlines(item: unknown): unknown {
+  const n = normalizeListItem(item)
+  return isMap(n) ? paragraphInline(n as Block) : n
 }
 
 // Decode a list item persisted as a JSON-encoded inline array (the drifted
@@ -559,9 +634,14 @@ function codeBlockHtml(value: string): string {
 
 const code: Emit = (b) => codeBlockHtml(str(b.value))
 
+// The `bp-section-divider` classes carry no styling (every value is inline, the
+// same bytes figures.ex emits) — they are the handle the reader shell needs to
+// say something about a divider's POSITION, e.g. that one sitting directly in
+// front of a section head draws a boundary the head already draws. Kept here so
+// an SDK-rendered document is the same document the reader renders.
 const divider: Emit = () =>
-  `<div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">` +
-  `<span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;` +
+  `<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">` +
+  `<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;` +
   `background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>`
 
 const image: Emit = (b) => {
@@ -591,7 +671,7 @@ function figcaptionInner(caption: string): string {
 
 function articleFigcaption(caption: string): string {
   if (caption === '') return ''
-  return `<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">${figcaptionInner(caption)}</figcaption>`
+  return `<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">${figcaptionInner(caption)}</figcaption>`
 }
 
 // asciicast_html/3 (:article) uses a PLAIN `#55635e` figcaption color — NOT the
@@ -599,7 +679,7 @@ function articleFigcaption(caption: string): string {
 // vs 88). Mirror that divergence exactly, or the DOM-shape style attribute diverges.
 function asciicastFigcaption(caption: string): string {
   if (caption === '') return ''
-  return `<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">${figcaptionInner(caption)}</figcaption>`
+  return `<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">${figcaptionInner(caption)}</figcaption>`
 }
 
 // Entity-encode ONLY & < > for the Mermaid source (Figures.encode_mermaid/1).
@@ -611,26 +691,34 @@ const figure: Emit = (b) => {
   const child = b.child
   const caption = str(b.caption)
   const childHtml = isMap(child) ? renderBlock(child as Block) : ''
-  return `<figure style="margin:1.6rem 0">${childHtml}${articleFigcaption(caption)}</figure>`
+  return `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">${childHtml}${articleFigcaption(caption)}</figure>`
 }
 
 const diagram: Emit = (b) => {
   const source = str(b.source)
   const caption = str(b.caption)
   return (
-    `<figure style="margin:1.6rem 0;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px">` +
+    `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto">` +
     `<pre class="mermaid">${encodeMermaid(source)}</pre>` +
     articleFigcaption(caption) +
     `</figure>`
   )
 }
 
+// `poster` (optional) is the block's resting frame — the asciinema-player
+// `poster` option, an npt timestamp (`"npt:1:23"`) or `"end"`. It rides
+// `data-cast-poster` and is emitted ONLY when set, so an unset poster keeps
+// the mount byte-identical to Figures.asciicast_html's and leaves the
+// `npt:0:1` fallback with the hydrating clients (client.ts / the LiveView
+// hook). Attribute-escaped, NOT `safeUrl` — a poster is a timestamp, not a URL.
 const asciicast: Emit = (b) => {
   const src = str(b.src)
   const caption = str(b.caption)
+  const poster = str(b.poster).trim()
+  const posterAttr = poster === '' ? '' : ` data-cast-poster="${escapeAttr(poster)}"`
   return (
-    `<figure style="margin:1.6rem 0">` +
-    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}" style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
+    `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
+    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
     asciicastFigcaption(caption) +
     `</figure>`
   )
@@ -660,7 +748,7 @@ const video: Emit = (b) => {
     .join('')
 
   return (
-    `<figure style="margin:1.6rem 0">` +
+    `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
     `<video controls playsinline style="max-width:100%;border-radius:6px"${posterAttr}${loopAttr} src="${safeUrl(src)}">` +
     tracks +
     `</video></figure>`
@@ -857,7 +945,10 @@ const statusLegend: Emit = () => {
 function noteItemHtml(item: unknown): string {
   const m = isMap(item) ? item : {}
   const label = escapeHtml(str(m.label))
-  const text = escapeHtml(str(m.text))
+  // Swept sibling of the heading/list content[] defect: the note body read
+  // `text` alone, blanking the live note persisted as `{content:[…]}`. The
+  // `text` path is byte-identical, so notes.golden.json is untouched.
+  const text = renderInlines(paragraphInline(m as Block))
   const lead = str(m.lead).trim()
   const leadHtml = lead === '' ? '' : `<b>${escapeHtml(lead)}</b> `
   return `<div class="bp-note"><span class="bp-note__k">${label}</span><div class="bp-note__d">${leadHtml}${text}</div></div>`
@@ -1157,6 +1248,11 @@ const roadmap: Emit = (b) => {
 
 export const coreEmitters: Record<string, Emit> = {
   heading,
+  // h-tag spellings → heading at the level the TYPE names (charter D57): 18 live
+  // blocks emitted `bp-unknown-block` on every surface until this landed.
+  h1: headingAtLevel(1),
+  h2: headingAtLevel(2),
+  h3: headingAtLevel(3),
   eyebrow,
   byline,
   ingress,
@@ -1171,6 +1267,9 @@ export const coreEmitters: Record<string, Emit> = {
   'bulleted-list': list,
   bulleted_list: list,
   numbered_list: numberedList,
+  // `ordered-list` is the same emitter under a second spelling (charter D57) — 2
+  // live blocks, both with map-shaped items the list emitter already normalizes.
+  'ordered-list': numberedList,
   quote: blockquote,
   callout,
   code,

@@ -573,6 +573,8 @@ USAGE
   bp cloud support add <name>           grow your Personal Dev Fleet: provision +
                                         bind + scrubbed pull + supervised listener
   bp cloud workspace <export|import>    per-workspace bundle over the content API
+  bp cloud site <verb>                  spawn a website next to a Barkpark box
+                                        (create · deploy · rollback · status)
   bp cloud open <target>                open a dashboard deep link
   bp cloud verify <instance>            re-run the golden-path probe suite
   bp cloud deploy <target>              push any git ref to an instance over SSH
@@ -589,6 +591,14 @@ FLEET (control plane — needs 'bp login')
             box; exit 0 only when all pass             (bp cloud verify -h)
   deploy    push any git ref (branch/PR/main) to an instance over SSH — the
             same blue/green mechanics, pointed anywhere (bp cloud deploy -h)
+  deployments
+            the FLEET deploy rate over a pinned window, printed WITH its
+            denominator — and a named refusal, never a fake zero, when it could
+            not be read                            (bp cloud deployments -h)
+  deliveries
+            what actually happened to ONE merge: the PLATFORM delivery record for
+            a sha — merged · waited · built · serving, and the run that delivered
+            it — NOT the webhook log above    (bp cloud deliveries -h)
   domain    a domain's DNS/TLS checklist (found · points here · TLS · serving);
             exit 0 only when it's serving              (bp cloud domain -h)
   usage     an instance's usage meters — honest counts, "unmetered" where a
@@ -601,6 +611,9 @@ FLEET (control plane — needs 'bp login')
                                                         (bp cloud rollout -h)
   rollback  roll ONE instance back to its previous blue/green code slot; pins it
             at that version, health-gated flip           (bp cloud rollback -h)
+  site      spawn a website that builds and serves next to a Barkpark box:
+            create · deploy (--prebuilt ./dist ships a build made elsewhere) ·
+            rollback · status · open · settings              (bp cloud site -h)
 
 PROVIDERS (the provider's own API, YOUR credentials — no control plane)
   providers registered + planned providers and the capabilities each honours

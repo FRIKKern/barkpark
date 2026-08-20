@@ -15,6 +15,7 @@
 // use-live-search flips to the persistent Phoenix channel per keystroke (that
 // channel carries both engines too — D39). No separate Postgres transport.
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Finder } from '../finder/finder'
 import { FinderErrorBoundary } from './FinderErrorBoundary'
 import GraphPane from './GraphPane'
@@ -101,8 +102,10 @@ async function handleFind(reqUrl: URL): Promise<Response> {
   }
 
   const q = (reqUrl.searchParams.get('q') ?? '').trim()
+  // Same unbiased reader as the Next editions: explicit `engine=indx` opts in,
+  // anything else is postgres (the engine every instance actually provisions).
   const engine: SearchEngine =
-    reqUrl.searchParams.get('engine') === 'postgres' ? 'postgres' : 'indx'
+    reqUrl.searchParams.get('engine') === 'indx' ? 'indx' : 'postgres'
   const sid = reqUrl.searchParams.get('sid')
   const browse = !q
 
@@ -127,8 +130,9 @@ async function handleFind(reqUrl: URL): Promise<Response> {
     })
     const json = await r.json()
     const upstreamMs = Math.round(performance.now() - t0)
-    // The engine actually served IS what was asked for on the flat route (indx
-    // retrieval is anonymous); shape identically to the Next route.
+    // Shape identically to the Next route. `engineUsed: engine` is only the
+    // fallback — the server-reported `engineUsed` in the payload wins in the
+    // shaper (the pipeline is the only place that knows what actually served).
     return jsonResponse(
       shapeFindResponse(json, {
         engine,
@@ -232,7 +236,55 @@ installInterceptor()
 // a React-free module unit-tested by `shape-seed.test.ts` so the seed-shape
 // contract (baked `SeedDoc[]` → built `PrefixSeed`) can't silently regress.
 
+/** Shared by both compositions so the rail is the SAME object on every page —
+ * identical widths and border to the Next edition's `(finder)/layout.tsx`
+ * aside. Below `md` the landing rail is the whole screen; on a document page it
+ * hides, because the document owns the small screen there (the Next edition
+ * reaches the same end state by mounting the detail as a `fixed inset-0`
+ * overlay ON TOP of the rail). */
+const RAIL_CLASS =
+  'shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[480px] lg:w-[640px] xl:w-[860px] 2xl:w-[1080px] dark:border-zinc-800'
+
+/** The id of the page-owned node the corpus graph is PORTALLED into. Only the
+ * landing renders one; a document page does not, which is exactly how the graph
+ * disappears when a document opens without this island ever unmounting. */
+const GRAPH_SLOT_ID = 'bp-graph-slot'
+
+/**
+ * Track the graph slot across client-side navigations.
+ *
+ * THE PROBLEM THIS SOLVES. The island is `transition:persist`ed, so ClientRouter
+ * REUSES it across pages — that is what keeps the finder's query, results and
+ * scroll alive (the whole point). But persistence means the island's own markup
+ * cannot change per page, while the graph must appear on the landing and vanish
+ * on a document page.
+ *
+ * A React PORTAL is the resolution: the graph stays inside THIS React tree — so
+ * the finder↔graph context bridge (`useGraphMatches` / `useHoveredDoc`) is fully
+ * intact, which is the constraint that forced one island in the first place —
+ * while its DOM lands in a node the PAGE owns and ClientRouter swaps. Landing
+ * renders the slot, document pages don't, so the graph follows the page without
+ * the island ever unmounting.
+ *
+ * `astro:page-load` fires after every swap (and on the initial load), which is
+ * when the new page's DOM — and therefore the presence or absence of the slot —
+ * is finally readable.
+ */
+function useGraphSlot(): HTMLElement | null {
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const read = () => setSlot(document.getElementById(GRAPH_SLOT_ID))
+    read()
+    document.addEventListener('astro:page-load', read)
+    return () => document.removeEventListener('astro:page-load', read)
+  }, [])
+
+  return slot
+}
+
 export default function FinderIsland() {
+  const slot = useGraphSlot()
   // The 0ms head-start seed + first-paint browse are baked into a static
   // `search-seed.json` by the seed slice; fetch it at runtime and degrade
   // gracefully when it is absent (D40) — the finder still works, just without
@@ -265,23 +317,35 @@ export default function FinderIsland() {
   // HoveredDoc) — two Astro islands would be two roots with no shared state.
   // On mobile the rail is full-width and the graph hides (the original's
   // `hidden md:flex` welcome-pane behaviour); rail widths mirror the original.
+  const finder = (
+    <Finder
+      variant="master"
+      initialData={seed.initialData}
+      initialSeed={seed.initialSeed}
+      initialEngine="postgres"
+    />
+  )
+
+  // ONE composition on EVERY page — required, not tidiness: a persisted island
+  // is REUSED across navigations, so its own markup can never be per-page. The
+  // rail is always this aside; the graph rides a portal into whatever slot the
+  // current page provides (landing: yes, document: no).
+  //
+  // `hidden md:block` on a document page vs full-width on the landing is the one
+  // per-page difference, and it is driven by the SLOT, not by a prop: with a
+  // graph slot present the rail shares the screen (`w-full` under `md`, where
+  // the graph is hidden anyway); with no slot the document owns the small screen
+  // and the rail steps aside — the end state the Next edition reaches by
+  // mounting its detail as a `fixed inset-0 md:static` overlay.
+  const railClass = slot ? `w-full ${RAIL_CLASS}` : `hidden md:block ${RAIL_CLASS}`
+
   return (
     <FinderErrorBoundary>
       <HoveredDocProvider>
         <FinderNavProvider>
-          <div className="flex h-screen w-full overflow-hidden">
-            <aside className="w-full shrink-0 overflow-y-auto border-r border-zinc-200 md:w-[480px] lg:w-[640px] xl:w-[860px] 2xl:w-[1080px] dark:border-zinc-800">
-              <Finder
-                variant="master"
-                initialData={seed.initialData}
-                initialSeed={seed.initialSeed}
-                initialEngine="indx"
-              />
-            </aside>
-            <div className="hidden min-w-0 flex-1 md:block">
-              <GraphPane />
-            </div>
-          </div>
+          <aside className={`h-screen ${railClass}`}>{finder}</aside>
+          {/* The graph: same React tree (bridge intact), page-owned DOM. */}
+          {slot ? createPortal(<GraphPane />, slot) : null}
         </FinderNavProvider>
       </HoveredDocProvider>
     </FinderErrorBoundary>

@@ -28,7 +28,8 @@ defmodule Barkpark.PortableDoc.Render.RenderToleranceTest do
     # 4. nested list where an inline node was expected
     {"nested list inline", %{"type" => "paragraph", "content" => [["a"]]}},
     # 5. numeric text value
-    {"numeric text value", %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => 123}]}},
+    {"numeric text value",
+     %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => 123}]}},
     # 6. list block whose `items` is a bare string, not a list
     {"list items not a list", %{"type" => "list", "items" => "oops"}},
     # 7. heading whose `text` is a map, not a string
@@ -84,6 +85,48 @@ defmodule Barkpark.PortableDoc.Render.RenderToleranceTest do
     end
   end
 
+  # ── raw-tree entry: a PRESENT `children` key with a non-list value ────────────
+  # render_blocks/2 (above) is the COMPOSE-FIRST path; render_html/2 is the RAW Pd
+  # tree entry (reachable by the TUI, plugins, and tests ahead of any compose
+  # coercion). Every children-bearing kind piped `Map.get(node, "children", [])`
+  # straight into Enum.map — a default that fires ONLY on an ABSENT key. A PRESENT
+  # `"children": null` (→ nil) or a bare scalar therefore hit Enum.map(non_list)
+  # and RAISED, 500-ing every reader of the document. children_of/1 (walk.ex)
+  # coerces any non-list to [] so the render degrades to empty instead.
+  #
+  # Mutation proof (origin/main, WITHOUT the walk.ex fix): all 11 kinds raise on
+  # both shapes — Enum.map(nil) → Protocol.UndefinedError. Crucially the 5 INLINE
+  # kinds (PdText, PdParagraph, PdHeading, PdLink, PdWikilink) bypass BOTH shared
+  # helpers, so a two-helper guard on render_children/paragraph_inner alone would
+  # leave them raising — proving the full children_of/1 coercion is required.
+  @children_bearing_kinds ~w(
+    PdContainer PdBox PdCallout PdList PdListItem PdBlockquote
+    PdText PdParagraph PdHeading PdLink PdWikilink
+  )
+
+  describe "render_html/2 tolerates a non-list `children` on the raw-tree entry" do
+    for kind <- @children_bearing_kinds do
+      test "#{kind} with children: null degrades instead of raising" do
+        node = %{"kind" => unquote(kind), "children" => nil}
+        html = Render.render_html(node, @opts)
+        assert is_binary(html)
+      end
+
+      test "#{kind} with children: a bare scalar degrades instead of raising" do
+        node = %{"kind" => unquote(kind), "children" => 5}
+        html = Render.render_html(node, @opts)
+        assert is_binary(html)
+      end
+    end
+
+    # Regression: the compose-first path stays green for the same poisoned key.
+    test "render_blocks/2 on a children: null paragraph still returns ok" do
+      block = %{"type" => "paragraph", "children" => nil}
+      html = Render.render_blocks([block], @opts)
+      assert is_binary(html)
+    end
+  end
+
   # ── junk generators ─────────────────────────────────────────────────────────
   # Top-level blocks are always maps (the documented shape render_block/2 guards
   # on); the junk lives in their fields (content / items / text / children) and
@@ -124,12 +167,23 @@ defmodule Barkpark.PortableDoc.Render.RenderToleranceTest do
   defp gen_block do
     Enum.random([
       %{"type" => "paragraph", "content" => gen_content()},
-      %{"type" => "heading", "level" => Enum.random([1, 2, 3, 99, "2", nil]), "text" => gen_scalar()},
+      %{
+        "type" => "heading",
+        "level" => Enum.random([1, 2, 3, 99, "2", nil]),
+        "text" => gen_scalar()
+      },
       %{"type" => "list", "items" => Enum.random([gen_scalar(), gen_content()])},
       %{"type" => "callout", "content" => gen_content(), "tone" => Enum.random(["info", nil, 5])},
-      %{"type" => Enum.random(["future-widget", "text", "list", "unknownblock"]), "content" => gen_content()},
+      %{
+        "type" => Enum.random(["future-widget", "text", "list", "unknownblock"]),
+        "content" => gen_content()
+      },
       %{"value" => gen_scalar()},
-      %{"type" => "section", "title" => "Sec", "blocks" => [gen_scalar(), %{"nope" => true}, gen_block_leaf()]}
+      %{
+        "type" => "section",
+        "title" => "Sec",
+        "blocks" => [gen_scalar(), %{"nope" => true}, gen_block_leaf()]
+      }
     ])
   end
 

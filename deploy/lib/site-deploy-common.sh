@@ -18,6 +18,10 @@
 #   * meta_value() — the content-truth marker reader HEALTH rests on: it reads the
 #     VALUE of a <meta name=…> tag, so a gate can assert bp-build-id == the build
 #     it ships, never merely that the marker is present (D26).
+#   * build_failure_reason() — the ONE extractor that picks the most useful line
+#     out of a failed build log for the `BUILD failed` detail. It was duplicated
+#     byte-for-byte in both engines, so every repair to it had to be made twice
+#     and the DEFAULT (static) target silently kept the older, narrower one.
 #   * BUILD_ALLOW — the env allow-list a build may see (the Vite process.env-
 #     precedence scrub, D7): only these BARKPARK_* vars cross into npm.
 #
@@ -76,6 +80,54 @@ emit() { # <PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE> <started|ok|skipped|noop|fail
 # ---------------------------------------------------------------------------
 disk_free() { # <path>
   df -Ph "$1" 2>/dev/null | awk 'NR==2 {print $4" free ("$5" used)"}'
+}
+
+# ---------------------------------------------------------------------------
+# build_failure_reason — the most useful ONE LINE of a failed build log, for the
+# `BUILD failed` stage detail. The real reason (`FATAL: 401 Unauthorized … the
+# site read token is invalid`) used to go to STDERR while the generic "BUILD
+# failed" went to stdout — a stdout-only orchestrator could never tell the user
+# WHY.
+#
+# ONE COPY, BOTH ENGINES (charter D33). This body used to exist TWICE, byte-
+# identical (md5 181029d3bc98b876d99d67ae704841a4), in site-deploy.sh and
+# site-deploy-node.sh. runtime_target DEFAULTS to :static
+# (api/lib/barkpark/sites/deploy_request.ex), so repairing the node copy alone
+# left the DEFAULT engine compressing every failed build to a line nobody had
+# looked at. It lives here because THIS file is the one both engines already
+# source — and because it is the file the Console harness already reads, so the
+# lift buys a blocking assertion over BOTH engines for free.
+#
+# IT IS A SUMMARY, NOT THE RECORD, AND IT CANNOT BECOME ONE. emit() above
+# collapses newlines and cuts every detail to 240 chars, and the control plane's
+# @stage_re is single-line — a multi-line reason structurally cannot cross that
+# wire (D24). The whole-truth channel is the build_id-keyed durable build log;
+# this function's only job is to pick the line most likely to start a diagnosis.
+#
+# THE TIERS ARE MEASURED, NOT GUESSED, against a RECORDED REAL producer:
+# deploy/testdata/capstone-turbopack-build-fail.txt (30,993 bytes, captured live
+# off guerrilla from a real search-capstone Turbopack failure). On those exact
+# bytes:
+#   tier 1 (FATAL)                 0 matches — no FATAL in a Turbopack failure
+#   tier 2 (npm ERR! | [Ee]rror:)  EXACTLY 1 match, and it is the RIGHT one:
+#                                  "Error: Turbopack build failed with 29 errors:"
+#                                  (not a `tail -1` accident — the 29 error
+#                                  bodies carry no `Error:` token, and npm 11
+#                                  prints "npm error", so that arm is dead)
+#   tier 3 (last non-blank)        strictly WORSE — it yields
+#                                  "at <unknown> (…/module-not-found)"
+# No reordering of the predicates improves that, so there is NO fifth tier: a
+# fifth grep would be a guess at a producer nobody has recorded. When a NEW
+# producer shape shows up, record its log as a fixture first, then measure.
+# Pinned by both engines' --self-test against that fixture.
+# ---------------------------------------------------------------------------
+build_failure_reason() { # <build-log>
+  local f="$1" r
+  r="$(grep -a 'FATAL' "$f" 2>/dev/null | tail -1)"
+  [ -n "$r" ] || r="$(grep -aE 'npm ERR!|[Ee]rror:' "$f" 2>/dev/null | grep -av 'complete log of this run' | tail -1)"
+  [ -n "$r" ] || r="$(grep -av '^[[:space:]]*$' "$f" 2>/dev/null | tail -1)"
+  [ -n "$r" ] || r="npm ci / npm run build failed with no output"
+  printf '%s' "$r"
 }
 
 # ---------------------------------------------------------------------------
@@ -167,4 +219,134 @@ with_caddy_lock() { # <fn> [args…] — run a Caddyfile read-modify-write seria
   local rc=$?
   exec 8>&-
   return "$rc"
+}
+
+# ---------------------------------------------------------------------------
+# THE FLEET BUILD ADMISSION GATE (D95/D104) — ONE BOX, ONE BUILD.
+#
+# The deploy lock both engines take is PER-SLUG
+# (/var/lock/barkpark-site-deploy-<slug>.lock), so D7's "serialized, queue depth
+# 1" is true PER SITE and false FLEET-WIDE: N sites build concurrently BY
+# CONSTRUCTION. Measured on guerrilla (2 cores / 3.8G): 20 per-slug lock files,
+# four stamped inside the same minute; peak 8 concurrent BUILD windows in 7
+# days; 2,432 sweep points at 3+; and 80% of astro getPathsForRoute crashes,
+# 52% of 503s and 49% of unreachable fired with a FOREIGN build mid-flight. The
+# box is MEMORY-bound (304-894M available of 3,819; 1.25-1.65G of 2G swap used,
+# kswapd hot). So this is a SECOND lock, fleet-wide: one lock file for the whole
+# box, taken ONLY by the arm that actually compiles.
+#
+# WHY N=1 AND NO SEMAPHORE. D95 sketched an N-file semaphore with a poller. N is
+# arithmetically FORCED to 1 on BOTH axes by the caps the control plane already
+# puts on every deploy's transient unit (api/lib/barkpark/sites/deploy_runner.ex
+# @default_cpu_quota "150%", @default_memory_max "1500M"):
+#   CPU    : floor(2 cores * 100% / 150%)        = 1
+#   MEMORY : floor(894M MemAvailable / 1500M)    = 1  (0 at the low-water mark)
+# At N=1 the semaphore collapses to ONE exclusive lock and the poller becomes
+# dead code, so neither is shipped. Raising N means raising those caps FIRST —
+# they move together or this gate lies about what the box can hold.
+#
+# FAIL OPEN, LOUDLY. A gate that cannot take its lock ADMITS the build: a broken
+# gate that denies every deploy is worse than the contention it prevents. Both
+# fail-open paths log WARN and name the fix.
+#
+# THE FD FORM IS MANDATORY. Neither engine sets a script-level EXIT trap (the
+# only trap in either file is inside its self-test) and there is no reaper — so
+# the ONLY release that survives SIGKILL is the kernel dropping the fd when the
+# holder dies. `flock -w <budget> 7` against an `exec 7>` fd is exactly that.
+# fd 7 is free fleet-wide: 8 is the shared Caddyfile leaf lock, 9 the per-slug
+# deploy lock.
+#
+# ...AND SO IS THE EXPLICIT RELEASE. fd 7 is inherited by children (deliberate —
+# an orphaned build keeps holding its slot honestly), and the node engine's HEALTH
+# stage BOOTS THE SLOT PROCESS, which OUTLIVES the run by design. If that process
+# ever inherits fd 7 it holds the box's only build slot for the LIFETIME OF THE
+# SITE — one deploy denying every other site's build, fleet-wide, with no reaper
+# to notice. On a systemd box today it does NOT: start_slot goes through
+# `systemctl restart`, so PID 1 does the spawn and inherits nothing. That is a
+# property of the LAUNCH MECHANISM, not of this gate, and it is exactly the kind
+# of property a future non-systemd fallback would quietly drop — so the contract
+# does not rest on it. Every caller releases right after `emit BUILD ok`, before
+# staging and before anything that starts a long-lived process, and the node
+# self-test pins it against a harness that DOES spawn the slot as a direct child.
+#
+# NOT OPERATOR-TUNABLE FROM A CONTROL-PLANE DEPLOY. BARKPARK_BUILD_GATE_LOCK and
+# BARKPARK_BUILD_GATE_WAIT are dev/self-test knobs ONLY: DeployRunner's
+# write_env_file/4 writes an EXPLICIT ALLOWLIST into the transient unit's
+# EnvironmentFile (PATH, the D7 build vars, SITE_SLUG/BUILD_ID/CONTENT_REV, the
+# prebuilt vars, the status + log files) and systemd-run boots the unit with that
+# file as its environment — nothing ambient crosses, so neither var can reach the
+# engine on the real path. To change the box's behaviour, change the constants
+# below.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2034  # BUILD_GATE_SLOTS documents the forced N; the code needs no loop over it
+BUILD_GATE_SLOTS=1                  # forced by CPUQuota=150% and MemoryMax=1500M (above)
+# 900s, bounded by the two clocks that already exist: it must be SHORTER than the
+# per-slug deploy lock's own 1200s wait (else a queued redeploy dies on the outer
+# lock with a vaguer message than this gate would have given) and shorter than
+# DeployRunner's 1,800,000ms run deadline (else the unit is killed mid-wait and
+# the operator never sees the refusal). A cold `npm ci && astro build` on
+# guerrilla runs 2-4 min, so 900s absorbs a build ahead of us plus its stage.
+BUILD_GATE_WAIT_DEFAULT=900
+BUILD_GATE_LOCK=""                  # resolved by build_gate_acquire (callers log it)
+BUILD_GATE_WAIT=""                  # resolved by build_gate_acquire (callers log it)
+BUILD_GATE_HELD=0                   # 1 while THIS process holds the slot
+
+# build_gate_holders — one line naming what is compiling on this box right now,
+# for the refusal detail. "cp/mv carry no forensic of their own" is this file's
+# standing lesson; a fleet refusal with no ps read is the same dead end (the
+# operator cannot even tell WHICH site is holding the box). Best-effort: empty
+# when ps is restricted. `ps -Ao` (never `-e`: on BSD/macOS -e means "print the
+# environment", which would put the scrubbed build env on our own stdout).
+build_gate_holders() {
+  ps -Ao pid,etime,args 2>/dev/null \
+    | grep -Ea 'npm (ci|run build)|astro build|next build|site-deploy' \
+    | grep -av 'grep -Ea' \
+    | head -3 \
+    | awk '{ $1=$1; print }' \
+    | tr '\n' ';'
+}
+
+# build_gate_acquire — 0 = ADMITTED (slot held, or the gate failed open), 1 = the
+# wait budget lapsed and the caller must refuse (emit BUILD failed, then exit 15).
+build_gate_acquire() {
+  BUILD_GATE_WAIT="${BARKPARK_BUILD_GATE_WAIT:-$BUILD_GATE_WAIT_DEFAULT}"
+  BUILD_GATE_LOCK="${BARKPARK_BUILD_GATE_LOCK:-/var/lock/barkpark-site-build.lock}"
+  if ! command -v flock >/dev/null 2>&1; then
+    log "WARN: no flock(1) on this box — the fleet build admission gate is OPEN and this build is NOT serialized against other sites' builds; install util-linux to restore one-box-one-build"
+    return 0
+  fi
+  if ! mkdir -p "$(dirname "$BUILD_GATE_LOCK")" 2>/dev/null; then
+    log "WARN: cannot create $(dirname "$BUILD_GATE_LOCK") — the fleet build lock falls back to ${TMPDIR:-/tmp}/barkpark-site-build.lock; every engine on this box MUST resolve the same path or the builds do not serialize"
+    BUILD_GATE_LOCK="${TMPDIR:-/tmp}/barkpark-site-build.lock"
+  fi
+  if ! ( : > "$BUILD_GATE_LOCK" ) 2>/dev/null || ! exec 7>"$BUILD_GATE_LOCK"; then
+    log "WARN: cannot open the fleet build lock $BUILD_GATE_LOCK — the build admission gate is OPEN (admitting this build unserialized); check the path's ownership/permissions"
+    return 0
+  fi
+  if flock -n 7; then
+    BUILD_GATE_HELD=1
+    log "BUILD: fleet build slot acquired (1 of $BUILD_GATE_SLOTS, $BUILD_GATE_LOCK)"
+    return 0
+  fi
+  # Held by another site's build. Say so IMMEDIATELY — a silent multi-minute
+  # stall is the state an operator reads as "the deploy hung".
+  log "BUILD: the box's only build slot is busy — queueing up to ${BUILD_GATE_WAIT}s (in flight: $(build_gate_holders))"
+  if ! flock -w "$BUILD_GATE_WAIT" 7; then
+    exec 7>&-
+    return 1
+  fi
+  BUILD_GATE_HELD=1
+  log "BUILD: fleet build slot acquired after queueing (1 of $BUILD_GATE_SLOTS, $BUILD_GATE_LOCK)"
+  return 0
+}
+
+# build_gate_release — drop the slot. Idempotent, and a no-op when the gate failed
+# open (nothing was ever held). Closing fd 7 releases the flock; the kernel would
+# do it at process exit too, but "at exit" is TOO LATE for the node engine, whose
+# booted slot process inherits the fd and outlives the run.
+build_gate_release() {
+  [ "$BUILD_GATE_HELD" = 1 ] || return 0
+  exec 7>&-
+  BUILD_GATE_HELD=0
+  log "BUILD: fleet build slot released"
 }

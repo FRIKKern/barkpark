@@ -14,8 +14,8 @@
   },
   {
    "path": "cloud/priv/static/app.css",
-   "count": 33,
-   "note": "Cloud SPA, outside the single GENERATED block. Ratcheted 57\u219235 by the GUI-remake GR7 alias bridge (wave 2); 35\u219233 by GR37 (gr-p4-hygiene, phase 4): the dark --btn-bg/--btn-fg hsl literals (hsl(163 45% 30%) / hsl(0 0% 100%)) became identity-aware var(--primary)/var(--primary-fg), tokenizing 2 more hand-stamps. The residue is mask geometry + overlay/shadow tints + the --btn-danger-*/--console-*/--ring-soft/--elev-* literals the emitter does not yet own (alias retirement continues screen-by-screen in phases 2\u20134). The `#940` PR-ref in the /* Pre-claim queued state */ comment is excluded by comment-stripping."
+   "count": 31,
+   "note": "Cloud SPA, outside the single GENERATED block. Ratcheted 57\u219235 by the GUI-remake GR7 alias bridge (wave 2); 35\u219233 by GR37 (gr-p4-hygiene, phase 4): the dark --btn-bg/--btn-fg hsl literals (hsl(163 45% 30%) / hsl(0 0% 100%)) became identity-aware var(--primary)/var(--primary-fg), tokenizing 2 more hand-stamps. 33\u219231 by gr-p5r7-ring-soft-accent-invariant: the two hand-stamped --ring-soft declarations (hsl(163 42% 30% / 0.15) light, hsl(160 42% 62% / 0.2) dark) were PROMOTED into cloudAccentVars(), so the focus ring now rides each identity's own ring channel instead of a frozen evergreen green. The residue is mask geometry + overlay/shadow tints + the --btn-danger-*/--console-*/--elev-* literals the emitter does not yet own (alias retirement continues screen-by-screen in phases 2\u20134). The `#940` PR-ref in the /* Pre-claim queued state */ comment is excluded by comment-stripping."
   },
   {
    "path": "internal/cli/setup/assets/deploy.sh",
@@ -39,13 +39,13 @@
   },
   {
    "path": "web/public/bp-graph.js",
-   "count": 91,
-   "note": "Graph-view Canvas renderer (web copy), one of a byte-identical mirror pair reconciled by 5c10b76e / #2248: 33 hex + 58 literal rgb/rgba. Canvas 2D `ctx.fillStyle`/`strokeStyle` cannot consume CSS `var()` \u2014 the renderer assigns concrete color strings at paint time, so these are structurally un-tokenizable in place. Tokenization (resolve tokens to concrete hex in JS at init, fed from the lockstep \u2014 never a parallel palette) is spun off as backlog task au-r6; until then the pair is byte-frozen so it cannot drift while exempt. MUST stay byte-identical to api/priv/static/assets/bp-graph.js below. Frozen here; previously blind to every gate."
+   "count": 114,
+   "note": "Graph-view Canvas renderer (web copy), one of a byte-identical mirror pair reconciled by 5c10b76e / #2248: 33 hex + 58 literal rgb/rgba. Canvas 2D `ctx.fillStyle`/`strokeStyle` cannot consume CSS `var()` \u2014 the renderer assigns concrete color strings at paint time, so these are structurally un-tokenizable in place. Tokenization (resolve tokens to concrete hex in JS at init, fed from the lockstep \u2014 never a parallel palette) is spun off as backlog task au-r6; until then the pair is byte-frozen so it cannot drift while exempt. MUST stay byte-identical to api/priv/static/assets/bp-graph.js below. Frozen here; previously blind to every gate. RAISED 91 -> 114 (+23) by stw9-graph-constellation (#6213): the constellation's type-hue palette (tag/command/metric/session hues), theme-aware tooltip chrome, and the light/dark legend+controls panel objects \u2014 all Canvas-paint-time or JS-injected inline styles under the same fillStyle-can't-take-var() rationale; au-r6 (init-time token resolution fed from the lockstep) remains the tokenization path."
   },
   {
    "path": "api/priv/static/assets/bp-graph.js",
-   "count": 91,
-   "note": "Graph-view Canvas renderer (api-served copy), the byte-identical mirror of web/public/bp-graph.js above (pair reconciled by 5c10b76e / #2248): 33 hex + 58 literal rgb/rgba. Same Canvas-fillStyle-can't-take-var() rationale, same au-r6 tokenization backlog. MUST stay byte-identical to its web counterpart; if one baseline moves the other moves in the SAME diff."
+   "count": 114,
+   "note": "Graph-view Canvas renderer (api-served copy), the byte-identical mirror of web/public/bp-graph.js above (pair reconciled by 5c10b76e / #2248): 33 hex + 58 literal rgb/rgba. Same Canvas-fillStyle-can't-take-var() rationale, same au-r6 tokenization backlog. MUST stay byte-identical to its web counterpart; if one baseline moves the other moves in the SAME diff. RAISED 91 -> 114 (+23) by stw9-graph-constellation (#6213): the constellation's type-hue palette (tag/command/metric/session hues), theme-aware tooltip chrome, and the light/dark legend+controls panel objects \u2014 all Canvas-paint-time or JS-injected inline styles under the same fillStyle-can't-take-var() rationale; au-r6 (init-time token resolution fed from the lockstep) remains the tokenization path."
   }
  ]
 }

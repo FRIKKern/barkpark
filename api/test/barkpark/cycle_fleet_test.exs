@@ -2793,6 +2793,112 @@ defmodule Barkpark.CycleFleetTest do
                )
     end
 
+    test "numeric experiment round keys reconcile and unlock the seal", %{scope: scope} do
+      assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 15))
+
+      for {round_key, round} <-
+            Enum.with_index(~w(baseline diverge attack converge pilot), 1),
+          candidate <- 1..3 do
+        id = "numeric-key-#{round}-#{candidate}"
+
+        assert {:ok, assignment} =
+                 CycleFleet.create_assignment(
+                   assignment_attrs(scope, id, "experiment", "legendary-experimenter", [])
+                 )
+
+        assert {:ok, _result} =
+                 complete_result(assignment, "terminal-#{id}", "completed", %{
+                   round: round,
+                   round_key: round_key,
+                   candidate: candidate
+                 })
+      end
+
+      assert {:ok, summary} = CycleFleet.reconcile(scope)
+
+      assert summary.experiment.round_counts == %{
+               "baseline" => 3,
+               "diverge" => 3,
+               "attack" => 3,
+               "converge" => 3,
+               "pilot" => 3
+             }
+
+      assert summary.experiment.missing_rounds == []
+      assert {:ok, _plan} = CycleFleet.seal_build_plan(scope, build_plan_attrs(5))
+    end
+
+    test "numeric experiment rounds fall back to matching canonical round names", %{scope: scope} do
+      assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 15))
+
+      for candidate <- 1..3 do
+        id = "numeric-baseline-#{candidate}"
+
+        assert {:ok, assignment} =
+                 CycleFleet.create_assignment(
+                   assignment_attrs(scope, id, "experiment", "legendary-experimenter", [])
+                 )
+
+        assert {:ok, _result} =
+                 complete_result(assignment, "terminal-#{id}", "completed", %{
+                   round: 1,
+                   round_name: "baseline",
+                   candidate: candidate
+                 })
+      end
+
+      for candidate <- 1..3 do
+        id = "canonical-diverge-#{candidate}"
+
+        assert {:ok, assignment} =
+                 CycleFleet.create_assignment(
+                   assignment_attrs(scope, id, "experiment", "legendary-experimenter", [])
+                 )
+
+        assert {:ok, _result} =
+                 complete_result(assignment, "terminal-#{id}", "completed", %{
+                   round: "diverge",
+                   candidate: candidate
+                 })
+      end
+
+      assert {:ok, summary} = CycleFleet.reconcile(scope)
+      assert summary.experiment.round_counts["baseline"] == 3
+      assert summary.experiment.round_counts["diverge"] == 3
+      assert summary.experiment.missing_rounds == ~w(attack converge pilot)
+    end
+
+    test "numeric experiment round keys reject mismatched canonical names", %{scope: scope} do
+      assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 15))
+
+      for {round_key, round} <-
+            Enum.with_index(~w(baseline diverge attack converge pilot), 1),
+          candidate <- 1..3 do
+        id = "mismatched-key-#{round}-#{candidate}"
+        submitted_key = if round == 1, do: "diverge", else: round_key
+
+        assert {:ok, assignment} =
+                 CycleFleet.create_assignment(
+                   assignment_attrs(scope, id, "experiment", "legendary-experimenter", [])
+                 )
+
+        assert {:ok, _result} =
+                 complete_result(assignment, "terminal-#{id}", "completed", %{
+                   round: round,
+                   round_key: submitted_key,
+                   candidate: candidate
+                 })
+      end
+
+      assert {:ok, summary} = CycleFleet.reconcile(scope)
+      assert summary.experiment.round_counts["baseline"] == 0
+      assert summary.experiment.round_counts["diverge"] == 3
+      assert summary.experiment.missing_rounds == ["baseline"]
+
+      assert {:error, :experiment_assignments_incomplete} =
+               CycleFleet.seal_build_plan(scope, build_plan_attrs(5))
+    end
+
     test "Legendary becomes exact only after every planned phase is complete", %{scope: scope} do
       assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 30))
       complete_experiments(scope)
@@ -2973,6 +3079,142 @@ defmodule Barkpark.CycleFleetTest do
             error =
               assert_raise Postgrex.Error, fn ->
                 CycleFleet.bind_assignment_task(assignment, task.id)
+              end
+
+            assert error.postgres.code == :lock_not_available
+            assert error.postgres.pg_code == "55P03"
+          after
+            Repo.query!("SET lock_timeout = 0")
+            send(holder.pid, :release)
+            Task.await(holder, 10_000)
+          end
+        after
+          assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+        end
+      end)
+    end
+
+    # Charter D115 / felix-w19 — prepare_runtime_attempt/3 acquires FOR UPDATE on the
+    # assignment's authority join (assignment -> wave -> binding -> task document ->
+    # dataset) BEFORE freezing the RuntimeAttempt row. The dataset row is the
+    # mutation-sensitive lock target: the assignment row is FK-masked (the attempt's
+    # insert_all FOR-KEY-SHAREs it via assignment_id, so 55P03 fires even with the
+    # SELECT lock removed) and the task document row is independently FOR-SHAREd by
+    # Tasks.ClaimFence.verify inside the same transaction — both are false-green.
+    # Spike-proven 2026-08-17: lock present -> 55P03 at the authority SELECT; delete
+    # the `lock: "FOR UPDATE"` clause from runtime_attempt_authority/1 and this same
+    # drive returns {:ok, %RuntimeAttempt{}}.
+    #
+    # Runs unboxed (two real Postgres connections that actually block each other);
+    # manual teardown via Tenancy.delete_workspace/1 since unboxed writes are not
+    # rolled back. The 55P03 rollback leaves no attempt/session rows behind.
+    test "prepare_runtime_attempt FOR UPDATE serializes against a concurrent dataset-row lock (55P03)" do
+      Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+        suffix = System.unique_integer([:positive])
+        workspace = Barkpark.TenancyFixtures.create_workspace!("attempt-lock-mutation-#{suffix}")
+
+        project =
+          Barkpark.TenancyFixtures.create_project!(workspace, "attempt-lock-mutation-#{suffix}")
+
+        try do
+          scope = [workspace_id: workspace.id, project_id: project.id]
+          {:ok, dataset} = Tenancy.get_or_create_dataset(project, "production")
+
+          for schema_def <- Barkpark.Tasks.schema_definitions("production") do
+            attrs =
+              schema_def
+              |> Map.from_struct()
+              |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
+              |> Map.new(fn {key, value} -> {to_string(key), value} end)
+
+            {:ok, _} = Barkpark.Content.upsert_schema(attrs, "production", scope)
+          end
+
+          {:ok, task} =
+            Barkpark.Content.create_document(
+              "task",
+              %{
+                "doc_id" => "attempt-lock-task-#{suffix}",
+                "title" => "Attempt lock mutation task",
+                "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+              },
+              "production",
+              scope
+            )
+
+          {:ok, claimed} =
+            Barkpark.Tasks.claim_by_id(task.doc_id, "attempt-lock-worker", scope)
+
+          cycle_scope = %{
+            workspace_id: workspace.id,
+            project_id: project.id,
+            epic_id: "attempt-lock-epic-#{suffix}",
+            wave_id: "wave-1"
+          }
+
+          {:ok, _wave} =
+            CycleFleet.open_wave(
+              Map.merge(cycle_scope, %{
+                profile: "epic",
+                inventory: ["attempt-lock-unit"],
+                scale_contract: %{}
+              })
+            )
+
+          {:ok, assignment} =
+            CycleFleet.create_assignment(
+              Map.merge(cycle_scope, %{
+                assignment_id: "attempt-lock-unit",
+                phase: "survey",
+                agent_type: "epic-surveyor",
+                effort: "medium",
+                task_id: claimed.id,
+                snapshot: %{"purpose" => "runtime attempt authority lock"}
+              })
+            )
+
+          claim = %{
+            task_id: claimed.id,
+            worker_id: "attempt-lock-worker",
+            epoch: get_in(claimed.content, ["claim", "epoch"]),
+            work_digest: get_in(claimed.content, ["claim", "work_digest"])
+          }
+
+          parent = self()
+
+          # Connection A: a real second connection holds FOR UPDATE on the task's
+          # dataset row and rendezvous-signals the parent BEFORE releasing.
+          holder =
+            Task.async(fn ->
+              Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+                Repo.transaction(fn ->
+                  Repo.query!("SELECT id FROM datasets WHERE id = $1 FOR UPDATE", [
+                    Ecto.UUID.dump!(dataset.id)
+                  ])
+
+                  send(parent, :dataset_row_locked)
+
+                  receive do
+                    :release -> :ok
+                  after
+                    10_000 -> :timeout
+                  end
+                end)
+              end)
+            end)
+
+          assert_receive :dataset_row_locked, 5_000
+
+          # Connection B: drive the REAL prepare_runtime_attempt/3 under a
+          # SESSION-level lock_timeout (SET LOCAL outside its txn is a no-op);
+          # RESET to 0 in the after-block — the GUC persists on the pooled
+          # connection and would poison later tests.
+          try do
+            Repo.query!("SET lock_timeout = '750ms'")
+
+            error =
+              assert_raise Postgrex.Error, fn ->
+                CycleFleet.prepare_runtime_attempt(assignment, claim)
               end
 
             assert error.postgres.code == :lock_not_available

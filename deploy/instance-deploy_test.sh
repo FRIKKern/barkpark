@@ -33,6 +33,19 @@
 #     succeeds and the tsx runner exists, and is DISABLED again if it does not
 #     stay active (no crash-loop); connectors.env is 0600, pins the stable
 #     public front, and carries NO chat token (the multi-tenant hole)
+#   - the name-encoding pin: the committed slot unit pins a UTF-8 locale BEFORE
+#     its EnvironmentFile (so a per-slot env file still wins) and api/start.sh
+#     defaults the same mode without clobbering an operator LANG — asserted by
+#     replaying start.sh's own guard, because a fresh host image has no
+#     /etc/default/locale and boots the VM in latin1
+#   - advance vs stall (D292): the fake git keeps a STATEFUL HEAD, so a deploy
+#     that reports SUCCESS without moving the box off its pre-deploy sha is
+#     distinguishable from one that advances — the script's own claims (STATE,
+#     slot stamp, HEALTHY line) are cross-checked against the box's actual HEAD
+#   - the slot sha stamp (D291) is written only AFTER the health gate: a build
+#     that fails (exit 12/13) never stamps, a slot that already held a good
+#     stamp keeps it, and --rollback is therefore never offered a sha the slot
+#     never successfully built
 # The fake git records every invocation to $GITLOG so the channel asserts can
 # see which git verb ran. Never touches a real server.
 # Run: bash deploy/instance-deploy_test.sh
@@ -44,6 +57,22 @@ pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
 check() { if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
 
+# Replays api/start.sh's committed name-encoding guard in a clean shell, so the
+# start.sh half of the pin is asserted BEHAVIOURALLY (what LANG ends up as) and
+# not by grepping for a line. $1 is an operator-supplied LANG; '' means unset.
+start_sh_locale_guard() {
+  local guard body
+  guard="$(awk '/name-encoding pin \(start\)/,/name-encoding pin \(end\)/' "$HERE/../api/start.sh")"
+  body="$guard"$'\n''printf %s "${LANG:-}"'
+  if [ -n "$1" ]; then
+    LANG="$1" bash -c "unset LC_ALL
+$body"
+  else
+    bash -c "unset LANG LC_ALL
+$body"
+  fi
+}
+
 command -v caddy >/dev/null 2>&1 || { echo "SKIP: caddy binary required (real validation)"; exit 0; }
 
 make_fakes() {
@@ -53,6 +82,20 @@ make_fakes() {
 # Fake git: record the invocation, honor refs. Skip leading -c KV / -C PATH
 # option pairs to find the subcommand (the script calls e.g.
 # `git -c core.hooksPath=/dev/null fetch origin <ref>`).
+#
+# STATEFUL HEAD (D292). This used to answer every `rev-parse` with one per-run
+# CONSTANT, which made an ADVANCING deploy and a STALLED one byte-identical:
+# both exited 0, both logged HEALTHY, both wrote the state file — so a harness
+# assert of the form `[ current != target ]` was false in BOTH and no case here
+# could ever fail on advance. The box's HEAD now lives in $GITSTATE/head.sha and
+# the remote's offer in $GITSTATE/fetch_head:
+#   fetch <remote> <ref>      -> fetch_head := $REMOTE_SHA (defaults to FAKE_SHA)
+#   reset --hard FETCH_HEAD   -> head.sha  := fetch_head   (the advance)
+#   reset --hard <sha>        -> head.sha  := <sha>        (rollback / failure reset)
+#   rev-parse [--short] HEAD  -> head.sha  (truncated for --short)
+#   merge-base --is-ancestor  -> 0 (no divergence warning)
+# With $GITSTATE unset the old constant behaviour is kept, so any other caller
+# of make_fakes is unaffected.
 [ -n "${GITLOG:-}" ] && echo "git $*" >> "$GITLOG"
 args=("$@"); i=0; sub=""
 while [ "$i" -lt "${#args[@]}" ]; do
@@ -61,12 +104,44 @@ while [ "$i" -lt "${#args[@]}" ]; do
     *) sub="${args[$i]}"; break ;;
   esac
 done
-[ "$sub" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeef}"; exit 0; }
+if [ -z "${GITSTATE:-}" ]; then
+  [ "$sub" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeef}"; exit 0; }
+  exit 0
+fi
+mkdir -p "$GITSTATE"
+case "$sub" in
+  fetch)
+    printf '%s' "${REMOTE_SHA:-${FAKE_SHA:-deadbeef}}" > "$GITSTATE/fetch_head"
+    ;;
+  reset)
+    ref=""; k=0
+    while [ "$k" -lt "${#args[@]}" ]; do
+      [ "${args[$k]}" = "--hard" ] && { ref="${args[$((k + 1))]:-}"; break; }
+      k=$((k + 1))
+    done
+    if [ "$ref" = "FETCH_HEAD" ]; then
+      [ -f "$GITSTATE/fetch_head" ] && cp "$GITSTATE/fetch_head" "$GITSTATE/head.sha"
+    elif [ -n "$ref" ]; then
+      printf '%s' "$ref" > "$GITSTATE/head.sha"
+    fi
+    ;;
+  rev-parse)
+    head="$(cat "$GITSTATE/head.sha" 2>/dev/null || true)"
+    [ -z "$head" ] && head="${FAKE_SHA:-deadbeef}"
+    for a in "$@"; do
+      [ "$a" = "--short" ] && head="$(printf '%s' "$head" | cut -c1-7)"
+    done
+    echo "$head"
+    ;;
+esac
 exit 0
 EOF
   cat > "$dir/mix" <<'EOF'
 #!/usr/bin/env bash
 echo "mix $* [MIX_BUILD_ROOT=${MIX_BUILD_ROOT:-}]" >> "$MIXLOG"
+# MIX_FAIL=<subcommand> fails exactly that step (e.g. compile -> exit 12,
+# ecto.migrate -> exit 13): the build-failure half of the slot-stamp ordering.
+[ -n "${MIX_FAIL:-}" ] && [ "$1" = "${MIX_FAIL}" ] && exit 1
 if [ "$1" = "compile" ]; then
   mkdir -p "${MIX_BUILD_ROOT:-_build}/prod"
   echo built > "${MIX_BUILD_ROOT:-_build}/prod/MARKER"
@@ -182,7 +257,9 @@ EOF
   cp "$HERE/systemd/barkpark-connectors.service" "$APP/deploy/systemd/"
   CADDY="$TMP/Caddyfile"
   printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$CADDY"
-  export MIXLOG="$TMP/mix.log" SYSCTLLOG="$TMP/sysctl.log" GITLOG="$TMP/git.log"
+  # The fake git's HEAD/FETCH_HEAD store — per case, so cases never bleed.
+  GITSTATE="$TMP/gitstate"; mkdir -p "$GITSTATE"
+  export MIXLOG="$TMP/mix.log" SYSCTLLOG="$TMP/sysctl.log" GITLOG="$TMP/git.log" GITSTATE
   : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
 }
 
@@ -197,6 +274,8 @@ run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NOD
     BARKPARK_SANDBOX_RUNNER_BIN="$TMP/cloud-sandbox-runner" \
     BARKPARK_SANDBOX_RUNNER_MJS="$TMP/cloud-sandbox-runner.mjs" \
     HOME="$TMP/home" FAKE_SHA="$2" HEALTH_CODE="$1" \
+    REMOTE_SHA="${REMOTE_SHA:-$2}" MIX_FAIL="${MIX_FAIL:-}" \
+    BARKPARK_CLOUD_EGRESS_IPS="${BARKPARK_CLOUD_EGRESS_IPS:-}" \
     DEPLOY_REF="${DEPLOY_REF:-}" DEPLOY_REMOTE="${DEPLOY_REMOTE:-}" \
     GO_HTTP="${GO_HTTP:-}" GO_FAIL="${GO_FAIL:-}" \
     NODE_MISSING="${NODE_MISSING:-}" NPM_FAIL="${NPM_FAIL:-}" NPM_NO_TSX="${NPM_NO_TSX:-}" \
@@ -280,6 +359,19 @@ check "committed unit holds NO token env line" "! grep -qiE '^(Environment|ExecS
 check "committed unit is PLAIN (never the slot@ template)" "! grep -q '%i' '$HERE/systemd/barkpark-connectors.service'"
 check "committed unit ExecStart uses the deploy-resolved node link" "grep -q '^ExecStart=/usr/local/bin/barkpark-node ' '$HERE/systemd/barkpark-connectors.service'"
 check "committed unit hardcodes NO node version" "! grep -qE 'ExecStart=.*(asdf|nodejs/[0-9])' '$HERE/systemd/barkpark-connectors.service'"
+# NAME-ENCODING PIN. The live box runs utf8 only because /etc/default/locale
+# leaks LANG through systemd's MANAGER environment — strip it and the same erl
+# reports latin1 with the VM warning it may malfunction, so a fresh image boots
+# latin1. Both reachable paths are asserted: the slot unit (the service) and
+# api/start.sh (a manual `mix` invocation). The ordering row matters — an
+# Environment= placed AFTER EnvironmentFile= would stop a per-slot env file from
+# overriding it. start.sh is asserted behaviourally, by replaying its guard.
+check "committed slot unit pins a UTF-8 name-encoding locale" "grep -qE '^Environment=(LANG|LC_ALL)=(C|[A-Za-z_]+)\.(UTF-8|utf8)\$' '$HERE/systemd/barkpark-slot@.service'"
+check "committed slot unit pins it BEFORE EnvironmentFile (slot env can still override)" "[ \"\$(grep -n '^Environment=' '$HERE/systemd/barkpark-slot@.service' | head -1 | cut -d: -f1)\" -lt \"\$(grep -n '^EnvironmentFile=' '$HERE/systemd/barkpark-slot@.service' | head -1 | cut -d: -f1)\" ]"
+check "committed slot unit records WHY (host-image accident, not a staging fix)" "grep -q 'host-image accident' '$HERE/systemd/barkpark-slot@.service' && grep -q 'NOT A STAGING FIX' '$HERE/systemd/barkpark-slot@.service'"
+check "start.sh guard defaults the name mode to UTF-8 (fresh image, no locale)" "[ \"\$(start_sh_locale_guard '')\" = 'C.UTF-8' ]"
+check "start.sh guard does NOT clobber an operator-supplied LANG" "[ \"\$(start_sh_locale_guard 'en_US.UTF-8')\" = 'en_US.UTF-8' ]"
+check "start.sh records the measurement trap (Elixir readback measures the decoder)" "grep -q 'MEASUREMENT TRAP' '$HERE/../api/start.sh' && grep -q 'shell find/od' '$HERE/../api/start.sh'"
 check "old slot + legacy unit retired"    "grep -q 'disable --now barkpark-slot@blue' '$SYSCTLLOG' && grep -q 'disable --now barkpark' '$SYSCTLLOG'"
 check "green slot enabled (reboot-safe)"  "grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
 check "state file = newsha"               "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'newsha' ]"
@@ -677,6 +769,166 @@ rc="$(run_deploy 200 norunnersha)"
 check "no runner source: deploy still exit 0 (non-fatal)" "[ '$rc' = '0' ]"
 check "no runner source: nothing installed"               "[ ! -e '$TMP/cloud-sandbox-runner' ]"
 check "no runner source: refused honestly (binary_not_found until next deploy)" "grep -q 'cloud-sandbox-runner NOT installed' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo "== Case 16: BARKPARK_TRUSTED_PROXIES backfill — the x-forwarded-for trust boundary =="
+# The control plane's egress address must reach the box's .env or the caller
+# address it relays is DISBELIEVED and every proxied request keys on ONE bucket per
+# team (the pre-#6224 coarseness). Four states, all of them here: configured,
+# already-set (never clobbered), malformed (refused — runtime.exs would raise at
+# boot), absent (commented placeholder + a loud log, deploy still green).
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=203.0.113.7 run_deploy 200 xffsha)"
+check "configured: exit 0"                        "[ '$rc' = '0' ]"
+check "configured: exact line written"            "grep -q '^BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env'"
+check "configured: logged honestly"               "grep -q 'added BARKPARK_TRUSTED_PROXIES=203.0.113.7' '$TMP/out.log'"
+check "configured: no placeholder comment"        "! grep -q '^# BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+# A second deploy must NOT duplicate or rewrite the line — provisioning may have
+# written it, and an operator may trust a different front.
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rm -f "$APP/.instance-deploy-last"
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=198.51.100.9 run_deploy 200 xffsha2)"
+check "existing line: exit 0"                     "[ '$rc' = '0' ]"
+check "existing line: NEVER overwritten"          "grep -q '^BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env'"
+check "existing line: exactly one, no duplicate"  "[ \"\$(grep -c '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env')\" = '1' ]"
+check "existing line: left-untouched logged"      "grep -q 'BARKPARK_TRUSTED_PROXIES already set' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# Malformed: a CIDR range (the tempting wrong answer — the Elixir side REFUSES it
+# because trusting a range lets any host in it forge every bucket key) and a
+# hostname. Neither may be written: runtime.exs raises on a non-IP entry, so the
+# write would brick the app at the slot restart later in this very run.
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=10.0.0.0/8 run_deploy 200 cidrsha)"
+check "CIDR: deploy still exit 0 (non-fatal)"     "[ '$rc' = '0' ]"
+check "CIDR: NOT written"                         "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "CIDR: refused loudly"                      "grep -q 'WARN: BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+rm -rf "$TMP"
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=barkpark.cloud run_deploy 200 hostsha)"
+check "hostname: NOT written (runtime.exs takes IPs only)" "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "hostname: refused loudly"                  "grep -q 'WARN: BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+rm -rf "$TMP"
+# A mixed list must be refused WHOLE — one good hop does not license a bad one.
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS='203.0.113.7,notanip' run_deploy 200 mixedsha)"
+check "mixed list: refused whole (no partial write)" "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+rm -rf "$TMP"
+# A valid v4+v6 pair IS accepted (a CP that reaches instances over both).
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS='203.0.113.7, 2a01:4f9::1' run_deploy 200 v6sha)"
+check "v4+v6 pair accepted verbatim"              "grep -q '^BARKPARK_TRUSTED_PROXIES=203.0.113.7, 2a01:4f9::1\$' '$APP/.env'"
+rm -rf "$TMP"
+
+# Absent: the honest gap. A commented placeholder lands in .env, the log names the
+# cost, and the deploy stays green — a missing trust list is coarse bucketing, not
+# an outage, so it must never fail a deploy.
+setup_case
+rc="$(run_deploy 200 noxffsha)"
+check "absent: exit 0"                            "[ '$rc' = '0' ]"
+check "absent: no live line written"              "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "absent: commented placeholder written"     "grep -q '^# BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env'"
+check "absent: gap logged loudly"                 "grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+# The placeholder must survive being SOURCED (the script does `set -a; . ./.env`)
+# and must not become a live value on the next deploy either.
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 noxffsha2)"
+check "absent redeploy: exit 0 (comment is sourceable)" "[ '$rc' = '0' ]"
+check "absent redeploy: still no live line"       "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "absent redeploy: placeholder NOT re-appended (.env does not grow)" "[ \"\$(grep -c '^# BARKPARK_TRUSTED_PROXIES=' '$APP/.env')\" = '1' ]"
+check "absent redeploy: gap still logged (visible every deploy)" "grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo "== Case 17: ADVANCE vs STALL — a deploy that reports SUCCESS without moving HEAD is now VISIBLE =="
+# THE FAILURE CLASS (D292): "deploy said SUCCESS while the box stayed one commit
+# behind". Until the fake git became stateful this harness could not even STATE
+# the question: `rev-parse` answered one per-run CONSTANT, so an advancing run and
+# a stalled run produced byte-identical evidence (exit 0, HEALTHY, state file) and
+# an assert of the form `[ current != target ]` was false in BOTH.
+# The discriminator is a CROSS-CHECK, never a self-report: box_head() reads the
+# fake VCS state directly (what the box actually holds) and is compared against
+# what the SCRIPT claims (its STATE file, its slot stamp, its HEALTHY line).
+# MUTATION PROOF: put the old one-line constant handler back
+# (`[ "$sub" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeef}"; exit 0; }`) and
+# exactly three checks flip RED — "advance: the deploy's STATE claim matches the
+# box's actual HEAD", "advance: the slot stamp records the sha that was built"
+# and "stall: HEALTHY log line carries a SHORT sha" — i.e. the script's claim and
+# the box's truth come apart, which is exactly the class this case exists for.
+# Everything else, including the whole STALL block, stays green: the stall half
+# was ALWAYS green, which is precisely why the old harness proved nothing.
+box_head() { cat "$GITSTATE/head.sha" 2>/dev/null; }
+setup_case
+run_deploy 200 basesha >/dev/null                      # box lands at basesha, green live
+check "pre-state: box HEAD is basesha"          "[ \"\$(box_head)\" = 'basesha' ]"
+# --- ADVANCE: the remote offers a NEW sha; the box must end up on it.
+pre="$(box_head)"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(REMOTE_SHA=advancesha run_deploy 200 basesha)"
+check "advance: exit 0"                                  "[ '$rc' = '0' ]"
+check "advance: HEAD moved off the pre-deploy sha"       "[ \"\$(box_head)\" != '$pre' ]"
+check "advance: HEAD == the sha the remote offered"      "[ \"\$(box_head)\" = 'advancesha' ]"
+check "advance: the deploy's STATE claim matches the box's actual HEAD" "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = \"\$(box_head)\" ]"
+check "advance: the slot stamp records the sha that was built" "[ \"\$(cat '$APP/.slots/blue.sha' 2>/dev/null)\" = 'advancesha' ]"
+# --- STALL: the remote offers what the box already has. The run still succeeds
+# (nothing is broken — the deploy is just a re-deploy), but "success" must NOT be
+# readable as "advanced". STATE is removed first so the coalesce no-op does not
+# short-circuit the run: this is the full deploy path, landing on the same sha.
+pre2="$(box_head)"
+rm -f "$APP/.instance-deploy-last"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(REMOTE_SHA=advancesha run_deploy 200 advancesha)"
+check "stall: the run still reports SUCCESS (exit 0)"    "[ '$rc' = '0' ]"
+check "stall: the run still logs HEALTHY"                "grep -q 'HEALTHY — slot' '$TMP/out.log'"
+check "stall: the run still writes the state file"       "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'advancesha' ]"
+check "stall: but HEAD did NOT advance — and the harness can SEE it" "[ \"\$(box_head)\" = '$pre2' ]"
+check "stall: HEALTHY log line carries a SHORT sha (7 chars)" "grep -qE 'HEALTHY — slot (blue|green) live at [0-9a-z]{7}\$' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo "== Case 18: a failed build never stamps the slot (the poisoned rollback target) =="
+# .slots/<slot>.sha used to be written BEFORE deps.get/deps.compile/compile/
+# ecto.migrate, and no exit-12/13 path reverted it — so a deploy that never built
+# left the idle slot claiming a sha it does not hold, and --rollback (which reads
+# exactly that file) would reset the checkout to it and reboot a stale build root.
+# FAIL-BEFORE: with the pre-fix ordering these four checks are RED (blue.sha =
+# brokensha; preflight exits 0 offering a build that does not exist).
+setup_case
+run_deploy 200 goodsha >/dev/null                       # green live + stamped at goodsha
+rm -f "$APP/.instance-deploy-last"                      # defeat the coalesce
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(MIX_FAIL=compile REMOTE_SHA=brokensha run_deploy 200 goodsha)"
+check "compile failure: exit 12"                        "[ '$rc' = '12' ]"
+check "compile failure: target slot NOT stamped"        "[ ! -e '$APP/.slots/blue.sha' ]"
+check "compile failure: live slot stamp untouched"      "[ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'goodsha' ]"
+check "compile failure: STATE not advanced"             "[ ! -f '$APP/.instance-deploy-last' ]"
+rc="$(run_preflight goodsha)"
+check "compile failure: rollback still refuses (21 no_previous_slot)" "[ '$rc' = '21' ]"
+# ecto.migrate failure (exit 13) is the same law one step later.
+rm -f "$APP/.instance-deploy-last"
+rc="$(MIX_FAIL=ecto.migrate REMOTE_SHA=brokensha2 run_deploy 200 goodsha)"
+check "migrate failure: exit 13"                        "[ '$rc' = '13' ]"
+check "migrate failure: target slot still NOT stamped"  "[ ! -e '$APP/.slots/blue.sha' ]"
+rm -rf "$TMP"
+
+# A slot that ALREADY holds a good stamp keeps it when the next deploy into it
+# fails: the previous build is still what that build root contains, so it stays
+# the honest rollback target.
+setup_case
+run_deploy 200 v1sha >/dev/null                          # green stamped v1sha
+run_deploy 200 v2sha >/dev/null                          # blue  stamped v2sha, blue live
+rm -f "$APP/.instance-deploy-last"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(MIX_FAIL=compile REMOTE_SHA=v3sha run_deploy 200 v2sha)"   # targets green, fails
+check "failed redeploy: exit 12"                         "[ '$rc' = '12' ]"
+check "failed redeploy: green keeps its PREVIOUS stamp (v1sha)" "[ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'v1sha' ]"
+check "failed redeploy: live blue stamp untouched (v2sha)" "[ \"\$(cat '$APP/.slots/blue.sha' 2>/dev/null)\" = 'v2sha' ]"
+# The stamp is honest, but rollback is still refused — the clean build wiped
+# _build_green before compiling, so the old build root is gone. That refusal is
+# TYPED and fail-closed (21 no_previous_slot, naming the missing build root),
+# which is the point: the box never offers a rollback it cannot perform.
+rc="$(run_preflight v2sha)"
+check "failed redeploy: preflight refuses fail-closed (21)" "[ '$rc' = '21' ]"
+check "failed redeploy: refusal names the wiped build root, not a bogus sha" "grep -q 'no complete build root' '$TMP/preflight.log'"
 rm -rf "$TMP"
 
 echo

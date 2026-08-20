@@ -14,6 +14,48 @@ import { MetaCard } from "@/components/meta-card";
 import { DetailChrome } from "@/components/detail-chrome";
 import { RelatedPapers } from "@/components/related-papers";
 
+/** The server-rendered HTML body, for the ~2.5% of corpus papers that carry
+ * ONLY `body_html` (the API's own Walk render of the same PortableDocument
+ * grammar) and no `blocks` array. Returns null when absent/blank — blocks
+ * always win when both exist (the caller checks blocks first). */
+function docBodyHtml(doc: import("@/lib/get-document").GenericDoc): string | null {
+  const html = doc.body_html;
+  return typeof html === "string" && html.trim().length > 0 ? html : null;
+}
+
+/**
+ * Defense-in-depth pass over the trusted corpus HTML before it reaches
+ * `dangerouslySetInnerHTML`. `body_html` is produced by the API's own
+ * server-side renderer (`Barkpark.PortableDoc.Render` behind its
+ * `HtmlSanitizer`) from the SAME published corpus the block arrays come from,
+ * so this is a belt-and-braces strip of active content — script elements,
+ * inline `on*` handlers, `javascript:` URLs — not a general-purpose sanitizer
+ * for untrusted input.
+ */
+function sanitizeTrustedHtml(html: string): string {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/<script\b[^>]*\/?>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "")
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "")
+    .replace(/(href|src)\s*=\s*(["']?)\s*javascript:[^"'\s>]*\2/gi, '$1="#"');
+}
+
+/** `body_html` rendered into the SAME `.bp-paper-surface` column PortableDoc
+ * uses — paper-surface.css styles bare h1/p/li/pre/code descendants, so the
+ * HTML twin reads with the identical paper typography. */
+function HtmlSurface({ html }: { html: string }) {
+  return (
+    <article className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-10">
+      <div
+        className="bp-paper-surface"
+        dangerouslySetInnerHTML={{ __html: sanitizeTrustedHtml(html) }}
+      />
+    </article>
+  );
+}
+
 /**
  * Render the body for a resolved document, dispatched on `_type`. Text types
  * (post / paper) sit in a centred, narrow column; the sheet gets the full pane
@@ -45,15 +87,23 @@ function renderBody(
       // nothing (RelatedPapers returns null).
       const relatedId =
         typeof doc.slug === "string" && doc.slug ? doc.slug : doc._id;
+      // ~2.5% of corpus papers carry ONLY body_html (no blocks) — render the
+      // server-rendered HTML twin into the same paper surface instead of an
+      // empty article (or, worse, MetaCard escaping it as a 12KB dump).
+      const bodyHtml = blocks.length === 0 ? docBodyHtml(doc) : null;
       return (
         <>
-          <article className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-10">
-            {paperReadMode ? (
-              <PaperEditorDoc blocks={blocks} />
-            ) : (
-              <PortableDoc value={blocks} />
-            )}
-          </article>
+          {bodyHtml ? (
+            <HtmlSurface html={bodyHtml} />
+          ) : (
+            <article className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-10">
+              {paperReadMode ? (
+                <PaperEditorDoc blocks={blocks} />
+              ) : (
+                <PortableDoc value={blocks} />
+              )}
+            </article>
+          )}
           <RelatedPapers docId={relatedId} />
         </>
       );
@@ -64,9 +114,14 @@ function renderBody(
           <SheetGrid tabs={(doc.tabs as SheetTab[]) ?? []} />
         </div>
       );
-    default:
-      // page / author / category / project / anything unknown.
+    default: {
+      // page / author / category / project / anything unknown. A blocks-less
+      // doc carrying body_html still renders as real prose, never a MetaCard
+      // fallback that would drop (or worse, escape) its body.
+      const bodyHtml = docBodyHtml(doc);
+      if (bodyHtml) return <HtmlSurface html={bodyHtml} />;
       return <MetaCard doc={doc} type={type} />;
+    }
   }
 }
 

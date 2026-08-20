@@ -16,6 +16,9 @@
 //     design — the snapshot/list title is the one worth keeping);
 //   - HEARTBEATS bump lastFrameAtMs only — never agentState, never
 //     lastFlipAtMs;
+//   - a TITLE frame (D69h) renames the row IN PLACE and touches NOTHING else —
+//     not the state, not either clock (the async titler is a server-side write,
+//     never a sign of agent life);
 //   - STALL is computed FRESH from lastFrameAtMs at sort/render time (D53h):
 //     a fresh frame un-stalls for free, and there is no stored bool to go
 //     stale.
@@ -99,6 +102,14 @@ export function applyFleetFrame(
       if (typeof sid !== 'string' || sid === '') return { state: h, ok: false }
       const ts = typeof obj.ts === 'string' ? obj.ts : undefined
       return { state: herdHeartbeat(h, sid, parseHerdTime(ts)), ok: true }
+    }
+    case 'title': {
+      // The D69h frame carries ONLY {session_id,title} — id-less, seq-less,
+      // unreplayable (chat_controller.fleet_title_frame/2's pinned shape).
+      const sid = obj.session_id
+      if (typeof sid !== 'string' || sid === '') return { state: h, ok: false }
+      const title = typeof obj.title === 'string' ? obj.title : ''
+      return { state: herdTitle(h, sid, title), ok: true }
     }
   }
   return { state: h, ok: false }
@@ -184,6 +195,34 @@ export function herdHeartbeat(h: HerdState, sessionId: string, tsMs: number): He
   const row = { ...prev }
   if (tsMs > row.lastFrameAtMs) row.lastFrameAtMs = tsMs
   return { rows: { ...h.rows, [sessionId]: row } }
+}
+
+/** Folds the D69h `title` frame: it renames the row IN PLACE and touches
+ * NOTHING else — never agentState, never lastFlipAtMs, and deliberately NOT
+ * lastFrameAtMs either. The async AI titler is a SERVER-side write that lands
+ * once per session, typically while the runtime sits idle; treating it as a
+ * sign of life would let a rename silently un-stall a wedged session — the one
+ * lie the D53h badge exists to prevent. A blank title keeps the held one (the
+ * shared trimTitle law), and a title for a session the herd does not hold is
+ * IGNORED: the roster is list-sourced and {session_id,title} carries no
+ * agent_state to mount an honest row from (the herdHeartbeat rule). */
+export function herdTitle(h: HerdState, sessionId: string, title: string): HerdState {
+  const prev = h.rows[sessionId]
+  if (prev === undefined) return h
+  const t = trimTitle(title)
+  if (t === '') return h
+  return { rows: { ...h.rows, [sessionId]: { ...prev, title: t } } }
+}
+
+/** The row's honest title: the HERD's held title when it holds one, else the
+ * cold list's. The herd is the fresher source by construction — herdSeed /
+ * herdSnapshot copy every non-blank list/snapshot title into the row, and the
+ * live D69h `title` frame lands THERE and nowhere else, so a session renamed
+ * after the last list read (the async titler, a rename from Studio) updates the
+ * row in place instead of waiting for the next roster refetch. */
+export function herdTitleFor(h: HerdState, id: string, listTitle: string | undefined): string {
+  const held = trimTitle(herdRowFor(h, id).title)
+  return held !== '' ? held : trimTitle(listTitle)
 }
 
 /** The D53h stall badge, computed FRESH from lastFrameAtMs at sort/render

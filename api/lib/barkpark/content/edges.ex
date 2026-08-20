@@ -241,6 +241,23 @@ defmodule Barkpark.Content.Edges do
   invariant). Resolves EACH target → O(edges) DB round-trips; the Phase-3
   projector runs it off the request path.
 
+  ## `dangling: :skip` — the OPT-IN escape from O(edges) round-trips
+
+  Dangling resolution is ONE un-batched DB round-trip per reference value per
+  document. `/v1/graph`'s corpus derivation discards the boolean entirely (it
+  maps raw edges to `%{from_id, to_id, kind, weight, plugin_source}`), so on a
+  4096-document corpus it paid ~1,300 serial queries — and held a pool
+  connection for all of them — to produce a value nobody read. A caller that
+  does not read `dangling` passes `dangling: :skip`; the edge then carries
+  `dangling: nil`, meaning NOT COMPUTED (never "not dangling"), and no
+  existence query is issued.
+
+  The DEFAULT is `:resolve` and is unchanged — `Graph.dangling/1` (the
+  `/v1/graph/dangling` report), `EdgeProjector` and `corpus_edges/3` all read
+  through the default and must keep resolving. A default flip here would
+  silently EMPTY the dangling report, since it filters on `& &1.dangling` and
+  `nil` is falsy.
+
   Returns `[%{from_id, to_id, kind, field, refType, dangling}]`. `kind` is the
   source reference field's NAME (e.g. `"dependencies"`, `"intentions"`,
   `"related"`) so distinct reference fields become distinct edge kinds in
@@ -254,7 +271,7 @@ defmodule Barkpark.Content.Edges do
             kind: String.t(),
             field: String.t(),
             refType: String.t() | nil,
-            dangling: boolean()
+            dangling: boolean() | nil
           }
         ]
   def extract_edges(doc, opts \\ []) do
@@ -265,10 +282,23 @@ defmodule Barkpark.Content.Edges do
 
     from_id = DraftId.published_id(doc_id)
 
+    # `:schemas` is a caller-supplied PREFETCH of this dataset's schema list —
+    # the exact value `Content.list_schemas(dataset, opts)` would return. It
+    # exists because this function is called once PER DOCUMENT while the schema
+    # list is invariant across the whole fold: a 4096-document corpus issued
+    # 4096 identical schema queries (the dominant cost in the /v1/graph
+    # derivation — measured live: a 34s first paint on the flagship demo).
+    # Absent, the read happens exactly as before, so every existing caller keeps
+    # its semantics; `corpus_edges/3` supplies it.
     schema =
-      dataset
-      |> Content.list_schemas(opts)
+      opts
+      |> Keyword.get_lazy(:schemas, fn -> Content.list_schemas(dataset, opts) end)
       |> Enum.find(fn s -> s.name == type end)
+
+    # `:dangling` is the OPT-IN round-trip escape (see the `dangling: :skip`
+    # section of this function's doc). DEFAULT `:resolve` — every existing
+    # caller keeps its per-target existence query and its boolean.
+    dangling_mode = Keyword.get(opts, :dangling, :resolve)
 
     case schema do
       nil ->
@@ -281,7 +311,10 @@ defmodule Barkpark.Content.Edges do
           to_id = DraftId.published_id(raw_target)
 
           dangling =
-            not resolve_target_existence(to_id, ref_type, dataset, opts)
+            case dangling_mode do
+              :skip -> nil
+              _ -> not resolve_target_existence(to_id, ref_type, dataset, opts)
+            end
 
           %{
             from_id: from_id,
@@ -557,9 +590,23 @@ defmodule Barkpark.Content.Edges do
 
   Because `extract_edges/2` emits scope-relative slug `doc_id`s, the resolution
   `dataset` (and optional `workspace_id`/`project_id`) MUST be passed via
-  `opts` so each `add_edge/4` can resolve the slugs to `documents.id` UUIDs in
-  the SAME scope they were extracted under. A per-edge `dataset` key wins over
-  the batch `opts` default.
+  `opts` so the endpoints resolve to `documents.id` UUIDs in the SAME scope
+  they were extracted under. A per-edge `dataset` key wins over the batch
+  `opts` default.
+
+  ## Batched (the projector's write path)
+
+  This is a BATCHED write, not N sequential `add_edge/4` calls (which cost 4
+  queries per edge — 2x endpoint resolve + insert + canonical reload — ~70% of
+  the projector's rebuild budget): ONE endpoint-resolve query per resolution
+  dataset, chunked `Repo.insert_all` with the same
+  `on_conflict: {:replace, [:weight, :plugin_source, :updated_at]}` /
+  `conflict_target: [:from_id, :to_id, :kind]` upsert, then ONE reload of the
+  surviving rows by triple. The `add_edge/4` contract is preserved per entry:
+  same result shapes, canonical-row identity (the same triple upserted twice
+  returns the SAME row id — charter D12), and the same fail-closed
+  `require_workspace` tenancy resolution. `add_edge/4` itself is untouched for
+  single-edge callers.
   """
   @spec add_edges([map()], keyword()) ::
           [
@@ -568,34 +615,222 @@ defmodule Barkpark.Content.Edges do
             | {:error, Ecto.Changeset.t()}
           ]
   def add_edges(edges, opts \\ []) when is_list(edges) do
-    scope = %{
-      "dataset" => Keyword.get(opts, :dataset),
-      "dataset_id" => Keyword.get(opts, :dataset_id),
-      "workspace_id" => Keyword.get(opts, :workspace_id),
-      "project_id" => Keyword.get(opts, :project_id),
+    scope_opts =
+      []
+      |> maybe_put_kw(:dataset_id, Keyword.get(opts, :dataset_id))
+      |> maybe_put_kw(:workspace_id, Keyword.get(opts, :workspace_id))
+      |> maybe_put_kw(:project_id, Keyword.get(opts, :project_id))
       # FAIL-CLOSED tenancy (Goal ges/graph-edge-seam, FIX 3). When the
       # projector runs in a multi-tenant install it sets this so a nil-workspace
       # endpoint is REFUSED across tenants (→ {:error, :no_target}) instead of
       # resolving a colliding-slug doc in another tenant and storing a
       # cross-tenant content_edges row. Absent/false = the documented
       # single-tenant or-global back-compat resolution.
-      "require_workspace" => Keyword.get(opts, :require_workspace, false)
-    }
+      |> maybe_put_kw(:require_workspace, truthy(Keyword.get(opts, :require_workspace, false)))
 
-    Enum.map(edges, fn e ->
-      from_id = e[:from_id] || e["from_id"]
-      to_id = e[:to_id] || e["to_id"]
-      kind = e[:kind] || e["kind"]
+    batch_dataset = Keyword.get(opts, :dataset)
 
-      attrs =
-        scope
-        |> Map.put("dataset", e[:dataset] || e["dataset"] || scope["dataset"])
-        |> Map.put("weight", e[:weight] || e["weight"])
-        |> Map.put("plugin_source", e[:plugin_source] || e["plugin_source"])
-        |> Map.put("require_workspace", scope["require_workspace"])
+    items =
+      Enum.map(edges, fn e ->
+        %{
+          from: e[:from_id] || e["from_id"],
+          to: e[:to_id] || e["to_id"],
+          # to_string(kind) mirrors add_edge/4; nil → "" → rejected by the
+          # changeset's non-empty validation, same as before.
+          kind: to_string(e[:kind] || e["kind"] || ""),
+          weight: e[:weight] || e["weight"],
+          plugin_source: e[:plugin_source] || e["plugin_source"],
+          dataset: e[:dataset] || e["dataset"] || batch_dataset
+        }
+      end)
 
-      add_edge(from_id, to_id, kind, attrs)
+    # ONE endpoint-resolve query per resolution dataset (in practice one — the
+    # projector extracts a whole corpus under a single dataset; a per-edge
+    # `dataset` override gets its own resolve query, keeping the documented
+    # per-edge-dataset-wins contract).
+    pks_by_dataset =
+      items
+      |> Enum.group_by(& &1.dataset)
+      |> Map.new(fn {dataset, group} ->
+        ids =
+          group
+          |> Enum.flat_map(fn item -> [item.from, item.to] end)
+          |> Enum.filter(&is_binary/1)
+          |> Enum.uniq()
+
+        {dataset, resolve_doc_pks(ids, dataset, scope_opts)}
+      end)
+
+    items
+    |> Enum.map(fn item ->
+      pks = Map.fetch!(pks_by_dataset, item.dataset)
+      from_pk = if is_binary(item.from), do: Map.get(pks, item.from)
+      to_pk = if is_binary(item.to), do: Map.get(pks, item.to)
+
+      if is_binary(from_pk) and is_binary(to_pk) do
+        changeset =
+          Barkpark.Content.Edge.changeset(%Barkpark.Content.Edge{}, %{
+            "from_id" => from_pk,
+            "to_id" => to_pk,
+            "kind" => item.kind,
+            "weight" => item.weight,
+            "plugin_source" => item.plugin_source
+          })
+
+        if changeset.valid? do
+          # Changeset-cast values (so e.g. an integer weight lands as the
+          # schema's :float, exactly as Repo.insert would have cast it).
+          applied = Ecto.Changeset.apply_changes(changeset)
+
+          {:insert,
+           %{
+             from_id: applied.from_id,
+             to_id: applied.to_id,
+             kind: applied.kind,
+             weight: applied.weight,
+             plugin_source: applied.plugin_source
+           }}
+        else
+          {:error, changeset}
+        end
+      else
+        {:error, :no_target}
+      end
     end)
+    |> insert_and_reload_edges()
+  end
+
+  # Keep each insert_all statement well under Postgres's 65_535 bind-parameter
+  # cap (7 params per row → ~9k rows max; 5k leaves headroom).
+  @edge_insert_chunk 5_000
+
+  # BATCHED resolve_doc_pk/3 — ONE query resolving EVERY endpoint id of an
+  # add_edges/2 batch to its `documents.id` PK. Same resolution contract per
+  # id: match the published slug, its `drafts.` twin, or a raw `documents.id`
+  # UUID; the same tenancy scope (`scope_edge_endpoint/2` — strict under
+  # `require_workspace`) and dataset scope; published row preferred over the
+  # draft twin, the raw-UUID match last. Returns %{input_id => pk} (unresolved
+  # ids are absent — the caller turns that into {:error, :no_target}).
+  defp resolve_doc_pks([], _dataset, _scope_opts), do: %{}
+
+  defp resolve_doc_pks(ids, dataset, scope_opts) do
+    pub_by_id = Map.new(ids, fn id -> {id, DraftId.published_id(id)} end)
+
+    slugs =
+      pub_by_id
+      |> Enum.flat_map(fn {_id, pub} -> [pub, DraftId.draft_id(pub)] end)
+      |> Enum.uniq()
+
+    # Only well-formed UUIDs join the `d.id` disjunct (mirrors add_edge/4's
+    # CastError rescue, without the raise).
+    #
+    # THE PREDICATE MUST BE `dump/1`, NOT `cast/1`, AND THE DIFFERENCE IS A LIVE
+    # CRASH. `Ecto.UUID.cast/1` has a second clause — `def cast(<<_::128>> =
+    # raw_uuid), do: {:ok, encode(raw_uuid)}` — that accepts ANY 16-BYTE binary
+    # as a raw UUID. `dump/1` has no such clause: it only accepts the 36-char
+    # hyphenated form. So a `cast`-guarded filter that then passes the RAW id to
+    # the query is asymmetric — it tests one function and feeds another. Any
+    # doc_id exactly 16 characters long (e.g. `wire-loop-186755`) passes `cast`,
+    # joins this disjunct, and blows up at dump time with
+    # `Ecto.Query.CastError: value ... cannot be dumped to type {:in, :binary_id}`,
+    # taking the whole projector job with it. Re-derive the clauses with
+    # `grep -n 'def cast(<<_::128>>' deps/ecto/lib/ecto/uuid.ex`.
+    uuids = Enum.filter(ids, fn id -> match?({:ok, _}, Ecto.UUID.dump(id)) end)
+
+    query =
+      Document
+      |> where([d], d.doc_id in ^slugs or d.id in ^uuids)
+      |> scope_edge_endpoint(scope_opts)
+
+    query =
+      if is_binary(dataset) and dataset != "" do
+        WriteScope.scope_to_dataset(query, dataset, scope_opts)
+      else
+        query
+      end
+
+    rows = query |> select([d], %{id: d.id, doc_id: d.doc_id}) |> Repo.all()
+    by_slug = Enum.group_by(rows, & &1.doc_id)
+    by_pk = Map.new(rows, fn row -> {row.id, row} end)
+
+    Enum.reduce(ids, %{}, fn id, acc ->
+      pub = Map.fetch!(pub_by_id, id)
+      draft = DraftId.draft_id(pub)
+
+      resolved =
+        List.first(Map.get(by_slug, pub, [])) ||
+          List.first(Map.get(by_slug, draft, [])) ||
+          Map.get(by_pk, id)
+
+      case resolved do
+        %{id: pk} -> Map.put(acc, id, pk)
+        _ -> acc
+      end
+    end)
+  end
+
+  # The write half of the batched add_edges/2: chunked insert_all with the
+  # add_edge/4 upsert (replace weight/plugin_source/updated_at on the triple),
+  # then ONE reload of the surviving rows by triple, results re-zipped onto the
+  # input order. `resolved` entries are {:insert, row} | {:error, _}.
+  defp insert_and_reload_edges(resolved) do
+    rows =
+      resolved
+      |> Enum.flat_map(fn
+        {:insert, row} -> [row]
+        _ -> []
+      end)
+      # A batch may repeat a triple; ON CONFLICT DO UPDATE cannot touch the
+      # same row twice in one statement, so dedup keeping the LAST occurrence —
+      # the same final metadata the sequential per-edge upserts converged on.
+      |> Enum.reverse()
+      |> Enum.uniq_by(fn r -> {r.from_id, r.to_id, r.kind} end)
+      |> Enum.reverse()
+
+    now = DateTime.utc_now()
+
+    rows
+    |> Enum.map(&Map.merge(&1, %{inserted_at: now, updated_at: now}))
+    |> Enum.chunk_every(@edge_insert_chunk)
+    |> Enum.each(fn chunk ->
+      Repo.insert_all(Barkpark.Content.Edge, chunk,
+        on_conflict: {:replace, [:weight, :plugin_source, :updated_at]},
+        conflict_target: [:from_id, :to_id, :kind]
+      )
+    end)
+
+    by_triple = reload_edges_by_triples(rows)
+
+    Enum.map(resolved, fn
+      {:insert, r} ->
+        case Map.get(by_triple, {r.from_id, r.to_id, r.kind}) do
+          %Barkpark.Content.Edge{} = edge -> {:ok, edge}
+          # Unreachable short of a concurrent delete between insert and reload;
+          # shaped as the resolve failure it amounts to.
+          _ -> {:error, :no_target}
+        end
+
+      other ->
+        other
+    end)
+  end
+
+  # ONE reload of the batch's canonical rows. The query narrows by the three
+  # id-lists (indexed) and the exact-triple filter happens in memory — the
+  # over-fetch is bounded and avoids a composite-tuple IN clause.
+  defp reload_edges_by_triples([]), do: %{}
+
+  defp reload_edges_by_triples(rows) do
+    triples = MapSet.new(rows, fn r -> {r.from_id, r.to_id, r.kind} end)
+    from_ids = rows |> Enum.map(& &1.from_id) |> Enum.uniq()
+    to_ids = rows |> Enum.map(& &1.to_id) |> Enum.uniq()
+    kinds = rows |> Enum.map(& &1.kind) |> Enum.uniq()
+
+    Barkpark.Content.Edge
+    |> where([e], e.from_id in ^from_ids and e.to_id in ^to_ids and e.kind in ^kinds)
+    |> Repo.all()
+    |> Enum.filter(fn e -> MapSet.member?(triples, {e.from_id, e.to_id, e.kind}) end)
+    |> Map.new(fn e -> {{e.from_id, e.to_id, e.kind}, e} end)
   end
 
   @doc """
@@ -653,6 +888,24 @@ defmodule Barkpark.Content.Edges do
 
     type
     |> Content.list_documents(dataset, list_opts)
-    |> Enum.flat_map(fn doc -> extract_edges(doc, opts) end)
+    |> corpus_edges_for_docs(dataset, opts)
+  end
+
+  @doc """
+  `corpus_edges/3` over documents the caller ALREADY holds — same edges, same
+  order, without re-reading the type's documents.
+
+  `/v1/graph` reads every type's published documents to build its node list and
+  then called `corpus_edges/3`, which read them a second time; the corpus graph
+  paid two full document scans per type. The schema list is prefetched ONCE here
+  and threaded into `extract_edges/2` (see its `:schemas` note) instead of being
+  re-queried per document.
+  """
+  @spec corpus_edges_for_docs([map() | Document.t()], String.t(), keyword()) :: [map()]
+  def corpus_edges_for_docs(docs, dataset, opts \\ []) do
+    edge_opts =
+      Keyword.put_new_lazy(opts, :schemas, fn -> Content.list_schemas(dataset, opts) end)
+
+    Enum.flat_map(docs, fn doc -> extract_edges(doc, edge_opts) end)
   end
 end

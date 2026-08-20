@@ -135,7 +135,14 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     ".image-picker" => :layout_sibling,
     ".history-modal" => :layout_sibling,
     ".delete-modal" => :layout_sibling,
-    ".profile-modal" => :layout_sibling
+    ".profile-modal" => :layout_sibling,
+    # spd-w19 — `#bp-press-answer`, the press-answer live region. Rendered in
+    # root.html.heex as a DIRECT SIBLING of `{@inner_content}`, i.e. outside the
+    # LiveView root entirely (that placement is the point: inside the root
+    # morphdom can patch the node mid-announce and the announcement is dropped).
+    # It can therefore never sit under an `.editor-panel`, and it carries
+    # `pointer-events: none` so it never eats a press either.
+    ".bp-press-answer" => :layout_sibling
   }
 
   # Every selector in the paper-editor stylesheet whose rule block declares
@@ -713,7 +720,8 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
 
   describe "the cross-engine carve-out" do
     test ".editor-panel.sheet-editor keeps container-type: normal" do
-      assert root_css() =~ ~r/\.editor-panel\.sheet-editor\s*\{\s*container-type:\s*normal;?\s*\}/,
+      assert root_css() =~
+               ~r/\.editor-panel\.sheet-editor\s*\{\s*container-type:\s*normal;?\s*\}/,
              """
              The Sheets containment carve-out is gone.
 

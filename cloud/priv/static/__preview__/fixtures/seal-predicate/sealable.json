@@ -1,0 +1,51 @@
+{
+  "_comment": "Happy path. A resolvable successor, zero residue (no live AND no considering rows), every hardcoded gate of charter D89 resolving. The ONLY non-terminal fixture here that may exit 0. `unmeasuredWaivers` names CCH-D5, which was a rung-3 entry until wave 8 measured it — the key is kept, and the waiver branch it feeds is kept measured by mutation in seal-predicate.test.mjs. A waiver can only arrive through --ledger, so no live run can carry one.",
+  "successor": "cch-fixture-successor-epic",
+  "tasks": {
+    "cch-fixture-successor-epic": {
+      "_id": "cch-fixture-successor-epic",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-goal"
+    }
+  },
+  "children": [
+    { "_id": "gr-fixture-done-1", "lifecycle_status": "done" },
+    { "_id": "gr-fixture-done-2", "lifecycle_status": "done" },
+    { "_id": "gr-fixture-cancelled-1", "lifecycle_status": "cancelled" }
+  ],
+  "forwarded": [],
+  "gates": {
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "cch-hg-compose-network-recreation": {
+      "_id": "cch-hg-compose-network-recreation",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "open",
+      "parent_id": "cloud-console-hardening-epic"
+    }
+  },
+  "landed": [
+    "481d6f231",
+    "8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4",
+    "d157d098c78bc6604d00d84e22d038bdb176ef58",
+    "26acc7a91be0f0352efdb3e89b2017accb786367",
+    "58862f621"
+  ],
+  "unmeasuredWaivers": ["CCH-D5-rate-limiter-sees-every-user-as-one"],
+  "defectCommits": {}
+}

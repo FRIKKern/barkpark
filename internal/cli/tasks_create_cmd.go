@@ -69,8 +69,10 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	}
 
 	// Prod write-guard parity with the manifest write path: a write against a
-	// prod-looking target needs confirmation unless --yes.
-	if isProdServer(ctx.Server) && !g.yes {
+	// prod-looking target needs confirmation unless --yes, or unless the server
+	// itself advertises production:false on /v1/meta (absence stays fail-closed).
+	// Deliberately NOT confirmProdWrite: this path hard-aborts non-interactively.
+	if isProdServer(ctx.Server) && !g.yes && !serverDeclaredNonProd(ctx.Server) {
 		out.userErr("prod write to %s needs confirmation — re-run with --yes", ctx.Server)
 		return exitGeneric
 	}
@@ -84,16 +86,21 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		out.userErr("task create: %s", mutateErrorMessage(httpStatus, respBody))
 		return exitGeneric
 	}
-	draftID, ok := firstMutationID(respBody)
-	if !ok || draftID == "" {
+	created, ok := firstMutationRecord(respBody)
+	if !ok {
 		out.userErr("task create: server returned no id")
 		return exitGeneric
 	}
 
 	// The server hands back a "drafts.<type>-<n>" id; the BARE published id (used
 	// by publish/get) is that with the "drafts." prefix stripped.
+	draftID := created.id
 	bareID := strings.TrimPrefix(draftID, "drafts.")
-	status := "draft"
+
+	// The record the receipt speaks for. Publishing writes a SECOND record (the
+	// published twin), and that is the one the receipt then describes, so the
+	// publish response's document replaces the draft's.
+	record := created
 
 	if publish {
 		// Publish is a second mutation over the same scoped-mutate endpoint; the
@@ -110,24 +117,124 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			out.userErr("task create: created %s but publish failed: %s", bareID, mutateErrorMessage(pStatus, pBody))
 			return exitGeneric
 		}
-		status = "published"
+		// PDS wave 48: "published" used to be asserted here off the 2xx alone.
+		// It is now read off the record the publish mutation returned, so a
+		// publish that did not produce a published twin cannot print one.
+		published, pok := firstMutationRecord(pBody)
+		if !pok {
+			out.userErr("task create: created %s but the publish response carried no result — the publish may or may not have landed; re-read with `bp task get %s`", bareID, bareID)
+			return exitGeneric
+		}
+		record = published
 	}
 
-	// tlv-s6 (TLV charter D14): the receipt echoes the lifecycle_status the
-	// task was actually born with (the body value the server accepted — default
-	// "open", overridable via --set), so a birth-as-considering is visible in
-	// the receipt instead of silently assumed open.
-	born := body["lifecycle_status"]
+	return renderTaskCreated(out, draftID, record)
+}
+
+// taskCreateRecord is the record the SERVER persisted for one mutation:
+// results[].document, which the API builds with Envelope.render(doc, schema,
+// caller) from the row it just wrote (PDS-D313 class A2 — a persisted-record
+// echo). The create receipt reads every claim off this and never off the
+// locally-built request map.
+type taskCreateRecord struct {
+	// id is the document id the server assigned — the echoed record's _id when
+	// it carried one, else the mutation result's id.
+	id string
+	// draft is the record's _draft, and hasDraft says whether the server echoed
+	// it at all. An un-echoed _draft is reported as unconfirmed, never guessed.
+	draft    bool
+	hasDraft bool
+	// lifecycle is the record's stored lifecycle_status ("" when the server
+	// echoed none).
+	lifecycle string
+}
+
+// firstMutationRecord decodes the first result of a raw mutate response,
+// including the document the server echoed back
+// ({"results":[{"id":"drafts.task-N","document":{…}}]}). It reports false when
+// the body does not decode or carries no usable id — the two cases in which
+// nothing about the write can be claimed.
+func firstMutationRecord(body []byte) (taskCreateRecord, bool) {
+	var parsed struct {
+		Results []struct {
+			ID       string `json:"id"`
+			Document *struct {
+				ID        string  `json:"_id"`
+				Draft     *bool   `json:"_draft"`
+				Lifecycle *string `json:"lifecycle_status"`
+			} `json:"document"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return taskCreateRecord{}, false
+	}
+	if len(parsed.Results) == 0 {
+		return taskCreateRecord{}, false
+	}
+	r := parsed.Results[0]
+	rec := taskCreateRecord{id: r.ID}
+	if r.Document != nil {
+		if r.Document.ID != "" {
+			rec.id = r.Document.ID
+		}
+		if r.Document.Draft != nil {
+			rec.draft, rec.hasDraft = *r.Document.Draft, true
+		}
+		if r.Document.Lifecycle != nil {
+			rec.lifecycle = *r.Document.Lifecycle
+		}
+	}
+	return rec, rec.id != ""
+}
+
+// renderTaskCreated is the create receipt, and it is PURE: the id, the
+// publication status and the born lifecycle are all read off `rec` — the record
+// the SERVER persisted — so a server that stored something else prints
+// something else. `draftID` is the id the create mutation returned and is
+// carried only so the machine receipt keeps naming the draft twin.
+//
+// tlv-s6 (TLV charter D14) put the born lifecycle in the receipt so a
+// birth-as-considering is visible instead of silently assumed "open". PDS wave
+// 48 fixed WHERE it comes from: it used to be `body["lifecycle_status"]`, the
+// locally-built REQUEST map, under a comment claiming it was "the body value the
+// server accepted". Since the CLI itself defaults that field into the request,
+// the printed value could never disagree with what was sent — a tautology no
+// test could have caught. A field the server did not echo is now reported as
+// unknown rather than filled in from what we asked for.
+func renderTaskCreated(out *writer, draftID string, rec taskCreateRecord) int {
+	bareID := strings.TrimPrefix(rec.id, "drafts.")
+
+	status := "unconfirmed"
+	if rec.hasDraft {
+		status = "published"
+		if rec.draft {
+			status = "draft"
+		}
+	}
+
 	if out.machineOut() {
-		out.renderJSON(map[string]any{
+		receipt := map[string]any{
 			"id":               bareID,
 			"draft":            draftID,
 			"status":           status,
-			"lifecycle_status": born,
-		})
+			"lifecycle_status": nil,
+		}
+		if rec.lifecycle != "" {
+			receipt["lifecycle_status"] = rec.lifecycle
+		}
+		out.renderJSON(receipt)
 		return exitOK
 	}
-	out.outf("created task %s (%s, lifecycle %v)", bareID, status, born)
+
+	statusText := status
+	if !rec.hasDraft {
+		statusText = "publication unconfirmed — the server echoed no _draft"
+	}
+	bornText := "unknown — the server echoed no lifecycle_status"
+	if rec.lifecycle != "" {
+		bornText = rec.lifecycle
+	}
+	out.outf("created task %s (%s, lifecycle %s)", bareID, statusText, bornText)
 	return exitOK
 }
 
@@ -147,18 +254,17 @@ func ensureTaskPortableBrief(body map[string]any) {
 	if description == "" {
 		description = "Complete the work described by “" + strings.TrimSpace(title) + "” and record verifiable evidence."
 	}
-	blocks := []any{
-		map[string]any{"id": "purpose", "type": "heading", "level": 2, "text": "Purpose"},
-		map[string]any{"id": "purpose-copy", "type": "paragraph", "content": []any{map[string]any{"type": "text", "value": description}}},
-		map[string]any{"id": "state", "type": "heading", "level": 2, "text": "Current state"},
-		map[string]any{"id": "state-callout", "type": "callout", "tone": "info", "title": "Ready to begin", "content": []any{map[string]any{"type": "text", "value": "This task is open and has not yet recorded completion evidence."}}},
-	}
+	blocks := make([]any, 0, 4)
 	if items := taskCriterionTexts(body["acceptance_criteria"]); len(items) > 0 {
 		blocks = append(blocks,
-			map[string]any{"id": "done", "type": "heading", "level": 2, "text": "Definition of done"},
-			map[string]any{"id": "done-list", "type": "list", "ordered": false, "items": items},
+			map[string]any{"id": "criteria", "type": "heading", "level": 2, "text": "Criteria"},
+			map[string]any{"id": "criteria-list", "type": "list", "ordered": false, "items": items},
 		)
 	}
+	blocks = append(blocks,
+		map[string]any{"id": "purpose", "type": "heading", "level": 2, "text": "Purpose"},
+		map[string]any{"id": "purpose-copy", "type": "paragraph", "content": []any{map[string]any{"type": "text", "value": description}}},
+	)
 	body["brief"] = map[string]any{"version": 1, "blocks": blocks}
 }
 
@@ -456,14 +562,16 @@ func taskCreateDryRun(out *writer, ctx manifest.Context, mutations []map[string]
 }
 
 // isProdServer mirrors run.go's isProd URL heuristic for the builtin write path
-// (which has no manifest to read m.Server.Name from): a prod-looking host needs
-// --yes. localhost is never prod.
+// (which has no manifest to read m.Server.Name from). FAIL CLOSED, matching
+// isProd's flip (onb-backlog-isprod-custom-host-write-confirm): any host that
+// is not provably local IS prod. Both twins now collapse onto the ONE pinned
+// exact-host classifier (isLocalHost, run.go) — the former hand-copied
+// substring body left this builtin write path fail-open on hosts like
+// localhost.evil.com even after run.go was fixed. --yes and a
+// server-advertised production:false (/v1/meta) are the only ways past the
+// guard.
 func isProdServer(server string) bool {
-	s := strings.ToLower(server)
-	if strings.Contains(s, "localhost") || strings.Contains(s, "127.0.0.1") || strings.Contains(s, "0.0.0.0") {
-		return false
-	}
-	return strings.Contains(s, "api.barkpark.cloud") || strings.Contains(s, "prod")
+	return !isLocalHost(server)
 }
 
 func printTaskCreateHelp(out *writer) {

@@ -2262,6 +2262,9 @@ func clearBarkparkEnv(t *testing.T) {
 func TestResolveContextNamedServer(t *testing.T) {
 	withTempConfigHome(t)
 	clearBarkparkEnv(t)
+	// A .barkpark.json anywhere above the test's cwd would inject a repo layer
+	// under the flags being asserted — run from a guaranteed-clean tree.
+	t.Chdir(t.TempDir())
 
 	cfg := &Config{
 		Server:    "http://localhost:4000",
@@ -2645,26 +2648,8 @@ func TestBuildBodyTypedSet(t *testing.T) {
 // renders to stderr, receipts to stdout.
 func captureExecute(t *testing.T, args []string) string {
 	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	origOut, origErr := os.Stdout, os.Stderr
-	os.Stdout, os.Stderr = w, w
-	// Drain concurrently — see captureExecuteCode: reading only after Execute
-	// returns deadlocks once output exceeds the OS pipe buffer (~512 bytes on
-	// some hosts). The goroutine reads while Execute writes.
-	done := make(chan string, 1)
-	go func() {
-		body, _ := io.ReadAll(r)
-		done <- string(body)
-	}()
-	Execute(args)
-	os.Stdout, os.Stderr = origOut, origErr
-	_ = w.Close()
-	body := <-done
-	_ = r.Close()
-	return string(body)
+	out, _ := captureExecuteCode(t, args)
+	return out
 }
 
 // TestExecuteCommandHelpShowsCommandSignature pins the fix for `bp <noun> <verb>

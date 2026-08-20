@@ -4,8 +4,9 @@ defmodule Barkpark.Content.AuthoringWall do
   enforcement chain every route that births or republishes walled content runs
   through:
 
-      exemption read ONCE → label spine (E1/E2) → tag registry (E3) →
-      dedup wall (E4) → clear-exemption-on-FULL-pass → main_tag stamp
+      exemption read ONCE → label spine (E1/E2) → canonical Epic Paper quality →
+      tag registry (E3) → dedup wall (E4) →
+      clear-exemption-on-FULL-pass → main_tag stamp
 
   Extracted from `Barkpark.Content.Lifecycle`'s inline chain (charter D26) so
   the second producer of published walled documents —
@@ -23,12 +24,16 @@ defmodule Barkpark.Content.AuthoringWall do
        → 422 `{:error, {:label_spine, details}}`. A grandfathered doc
        (exemption-ledger member, read ONCE at wall entry) passes a spine
        failure unchanged (D6 — "grandfathered republishes pass unchanged").
-    2. **Tag registry** (E3) — `TagRegistry.validate_publish/3`, NEVER
+    2. **Canonical Epic Paper quality** — exact-tag-scoped and paper-only.
+       `EpicQuality.validate/1` rejects malformed openings, outlines,
+       first-pass overload, empty layout scaffolds, and failed declared reader
+       checks. Tasks carrying the same taxonomy tag remain outside this gate.
+    3. **Tag registry** (E3) — `TagRegistry.validate_publish/3`, NEVER
        exempted (D25): it self-scopes to weighted entries, so flat/tagless
        grandfathered docs skip it, but a grandfathered doc ADOPTING an
        unregistered weighted tag 422s regardless of exemption.
        → 422 `{:error, {:unknown_tag, payload}}`.
-    3. **Dedup wall** (E4, `@walled_types` only) — refuse → 409
+    4. **Dedup wall** (E4, `@walled_types` only) — refuse → 409
        `{:error, {:duplicate_of, payload}}`; the advise band rides the
        warnings channel and never blocks. A grandfathered doc skips E4
        entirely (the legacy corpus holds legitimately similar titles), and
@@ -52,13 +57,14 @@ defmodule Barkpark.Content.AuthoringWall do
   drops it, so an advisory for a write that never happened is never surfaced.
 
   An error tuple is returned RAW — never flattened into the plugin
-  `{:halted, _}` shape (D1/D27): the three codes map to distinct
-  status codes (422/422/409) and flattening would mis-route them.
+  `{:halted, _}` shape (D1/D27): the four codes map to distinct
+  status codes (422/422/422/409) and flattening would mis-route them.
   """
 
   require Logger
 
   alias Barkpark.Content.{DedupWall, Document, Exemptions, LabelSpine, TagRegistry, Warnings}
+  alias Barkpark.Content.Papers.EpicQuality
 
   # The publish wall enforces the label spine on Barkpark's own knowledge
   # types — the corpus the epic exists to keep findable. Deliberately a module
@@ -87,10 +93,12 @@ defmodule Barkpark.Content.AuthoringWall do
 
   Returns `{:ok, content}` — the ref's content with the `main_tag` stamp
   applied (put on derivation, DROPPED when stale, passthrough for non-walled
-  types) — or one of the three raw wall error tuples.
+  types) — or one of the four raw wall error tuples.
   """
   @spec enforce(Document.t() | map(), String.t(), String.t() | nil, String.t(), keyword()) ::
-          {:ok, map() | nil} | {:error, {:label_spine | :unknown_tag | :duplicate_of, term()}}
+          {:ok, map() | nil}
+          | {:error,
+             {:label_spine | :unknown_tag | :duplicate_of | :invalid_epic_paper_quality, term()}}
   def enforce(ref, type, pid, dataset, opts \\ []) do
     # Exemption is read ONCE at wall entry: a grandfathered (pre-wall) doc
     # passes the WHOLE wall unchanged (D6), including E4. The ledger only
@@ -99,6 +107,7 @@ defmodule Barkpark.Content.AuthoringWall do
     exempt? = type in @walled_types and is_binary(pid) and Exemptions.member?(pid, dataset)
 
     with {:ok, spine_passed?} <- label_gate(ref, type, pid, exempt?),
+         :ok <- epic_quality_gate(ref, type),
          :ok <- TagRegistry.validate_publish(ref, dataset, opts),
          :ok <- dedup_gate(ref, type, dataset, opts, exempt?) do
       # The ratchet shrink fires ONLY on a FULL wall pass (D28): a doc whose
@@ -111,13 +120,14 @@ defmodule Barkpark.Content.AuthoringWall do
       # The wall's FIRST observability (charter D28), CARRIED across the
       # extraction seam: today a label_spine 422 is indistinguishable from any
       # other 422 in prod logs (proven: a 3h live window carried 32 anonymous
-      # "Sent 422" lines, none attributable). Each of the three rejection
+      # "Sent 422" lines, none attributable). Each of the four rejection
       # shapes emits a telemetry event + Logger.warning here — the ONE seam
       # every gate failure funnels through, shared now by BOTH producers
       # (Lifecycle.publish_document and BlockOps.upsert_paper) — then returns
       # the tuple UNCHANGED: the exact shape the controllers map to 422
-      # (label_spine/unknown_tag) or 409 (duplicate_of), RAW (never flattened
-      # into {:halted, _}, which would mis-route the 422s to the 409 head).
+      # (label_spine/unknown_tag/Epic quality) or 409 (duplicate_of), RAW
+      # (never flattened into {:halted, _}, which would mis-route the 422s to
+      # the 409 head).
       {:error, {:label_spine, _}} = error ->
         emit_wall_rejection(:label_spine, type, dataset)
         error
@@ -129,14 +139,65 @@ defmodule Barkpark.Content.AuthoringWall do
       {:error, {:duplicate_of, _}} = error ->
         emit_wall_rejection(:duplicate_of, type, dataset)
         error
+
+      # E4 could not RUN (its bounded scan timed out / the pool died). A
+      # DIFFERENT rejection code from :duplicate_of on purpose: this one is
+      # TRANSIENT and countable as an outage, not as a policy refusal — and it
+      # must reach the caller, because swallowing it here is exactly the silent
+      # fail-open the DedupWall rewrite killed.
+      {:error, {:dedup_unavailable, _}} = error ->
+        emit_wall_rejection(:dedup_unavailable, type, dataset)
+        error
+
+      {:error, {:invalid_epic_paper_quality, _}} = error ->
+        emit_wall_rejection(:invalid_epic_paper_quality, type, dataset)
+        error
     end
+  end
+
+  @doc """
+  Dry-run the whole wall and return EVERY failing gate at once (BPML
+  masterplan W0's validate-all): where `enforce/5` is a `with` chain that
+  stops at the first refusal — correct for a real write — this runs each gate
+  independently and collects the raw error tuples, so a producer learns all
+  its violations in ONE round trip instead of one 4xx at a time.
+
+  Deliberately side-effect-free: no exemption ratchet (a dry-run must never
+  spend a grandfathering), no rejection telemetry (dashboards count real
+  refusals, not rehearsals), nothing persisted. Returns `[]` on a clean pass.
+  """
+  @spec validate_all(Document.t() | map(), String.t(), String.t() | nil, String.t(), keyword()) ::
+          [{atom(), term()}]
+  def validate_all(ref, type, pid, dataset, opts \\ []) do
+    exempt? = type in @walled_types and is_binary(pid) and Exemptions.member?(pid, dataset)
+
+    [
+      case label_gate(ref, type, pid, exempt?) do
+        {:ok, _spine_passed?} -> nil
+        {:error, tuple} -> tuple
+      end,
+      case epic_quality_gate(ref, type) do
+        :ok -> nil
+        {:error, tuple} -> tuple
+      end,
+      case TagRegistry.validate_publish(ref, dataset, opts) do
+        :ok -> nil
+        {:error, tuple} -> tuple
+      end,
+      case dedup_gate(ref, type, dataset, opts, exempt?) do
+        :ok -> nil
+        {:error, tuple} -> tuple
+      end
+    ]
+    |> Enum.reject(&is_nil/1)
   end
 
   # The wall's first observability (charter D28): a structured telemetry event
   # + a Logger.warning at every publish-wall rejection, so a label_spine 422 is
   # attributable in prod logs and countable on a dashboard (BarkparkWeb.Telemetry
   # can subscribe a counter tagged by :code/:type/:dataset). `code` is the
-  # rejection atom (`:label_spine` | `:unknown_tag` | `:duplicate_of`).
+  # rejection atom (`:label_spine` | `:unknown_tag` | `:invalid_epic_paper_quality`
+  # | `:duplicate_of` | `:dedup_unavailable`).
   defp emit_wall_rejection(code, type, dataset) do
     :telemetry.execute(
       [:barkpark, :authoring, :wall_rejection],
@@ -148,6 +209,9 @@ defmodule Barkpark.Content.AuthoringWall do
 
     :ok
   end
+
+  defp epic_quality_gate(ref, "paper"), do: EpicQuality.validate(content_of(ref))
+  defp epic_quality_gate(_ref, _type), do: :ok
 
   # ── E1/E2 — the label spine ─────────────────────────────────────────────────
   #
@@ -166,6 +230,7 @@ defmodule Barkpark.Content.AuthoringWall do
     case LabelSpine.validate(content_of(ref)) do
       :ok ->
         emit_tag_norm_advisory(ref, pid)
+        emit_spacing_norm_advisory(ref, pid, type)
         {:ok, true}
 
       {:error, {:label_spine, _details}} = error ->
@@ -197,6 +262,13 @@ defmodule Barkpark.Content.AuthoringWall do
         :ok
 
       {:error, {:duplicate_of, _payload}} = error ->
+        error
+
+      # The wall could not RUN (bounded scan timed out / pool death). Forward it
+      # — swallowing it here would restore the exact silent fail-open the
+      # DedupWall rewrite killed, with publish answering 200 on a duplicate
+      # check that never happened. `content.dedup_bypass: true` is the escape.
+      {:error, {:dedup_unavailable, _message}} = error ->
         error
     end
   end
@@ -249,6 +321,66 @@ defmodule Barkpark.Content.AuthoringWall do
       )
     end
   end
+
+  # Advisory, never blocking: an empty paragraph is an editor scaffold, not
+  # published layout. Reader-owned section tokens provide cross-surface rhythm;
+  # persisting spacer content creates empty HTML, terminal rows, accessibility
+  # nodes, and noisy outlines. Papers only: task briefs ride a different
+  # envelope.
+  # Emitted at spine-pass for the same reason as the tag-count norm — the
+  # request-scoped queue is dropped with a failed write, never surfaced.
+  defp emit_spacing_norm_advisory(ref, pid, "paper") do
+    content = content_of(ref) || %{}
+    blocks = List.wrap(content["blocks"])
+
+    spacer_count = count_spacer_paragraphs(blocks)
+
+    if content["style"] == "article" and spacer_count > 0 do
+      Warnings.put(
+        "spacing_norm",
+        "#{pid}: article paper contains #{spacer_count} empty paragraph block(s) used as " <>
+          "layout — remove them from published composition; reader tokens own section rhythm " <>
+          "while the editor may retain an unpublished scaffold."
+      )
+    end
+
+    :ok
+  end
+
+  defp emit_spacing_norm_advisory(_ref, _pid, _type), do: :ok
+
+  # The advisory's counter mirrors the tagged HARD gate's semantics
+  # (`EpicQuality.empty_paragraph?/1` and its whole-tree walk): a paragraph is
+  # a spacer only when it has no content AND no non-blank `text` key — a
+  # text-keyed paragraph is legal prose, not a scaffold — and every container
+  # key the gate's walk descends is descended HERE too, read from
+  # `EpicQuality.nested_keys/0` (one owner), so the advisory warns exactly
+  # where the tagged gate would refuse instead of passing an author it later
+  # 422s. The independent review of #11616 caught the previous two-key walk
+  # missing spacers inside columns/steps/panels/tabs/sections/content/items/rows.
+  defp count_spacer_paragraphs(blocks) when is_list(blocks),
+    do: blocks |> Enum.map(&spacer_paragraphs_in/1) |> Enum.sum()
+
+  defp count_spacer_paragraphs(_), do: 0
+
+  defp spacer_paragraphs_in(%{"type" => "paragraph"} = block) do
+    text = Map.get(block, "text")
+
+    if List.wrap(block["content"]) == [] and not (is_binary(text) and String.trim(text) != ""),
+      do: 1,
+      else: 0
+  end
+
+  defp spacer_paragraphs_in(%{} = block) do
+    Enum.reduce(EpicQuality.nested_keys(), 0, fn key, acc ->
+      case Map.get(block, key) do
+        children when is_list(children) -> acc + count_spacer_paragraphs(children)
+        _ -> acc
+      end
+    end)
+  end
+
+  defp spacer_paragraphs_in(_), do: 0
 
   defp content_of(%Document{content: content}), do: content
   defp content_of(%{content: content}), do: content

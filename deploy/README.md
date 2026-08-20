@@ -91,7 +91,8 @@ NEXT TO Phoenix on a content box, at `https://<instance>/sites/<slug>/`. It is a
 NEW state machine — deliberately not a parameterization of `instance-deploy.sh`
 (that one is Phoenix-specific: mix/ecto, port-pair slots, `/api/schemas` gate,
 git-reset rollback) — but it mirrors the same proven skeleton: per-slug `flock`
-serialize (queue depth 1), typed exit codes, Caddy backup+`validate`+reload-or-
+serialize (queue depth 1 *per site*; the fleet-wide build gate below is what keeps
+N sites from compiling at once), typed exit codes, Caddy backup+`validate`+reload-or-
 revert, fail-closed on any error. Deploy is one state machine over an immutable
 `sites/<slug>/releases/<build_id>/` layout: **PLAN** (caller passes `BUILD_ID`;
 already-live ⇒ exit 0 no-op) → **BUILD** (`npm ci && npm run build` under
@@ -151,16 +152,23 @@ the shared lock → backup → `caddy validate` → reload → revert — delibe
 `instance-deploy.sh`'s whole-file global `sed`, which was RUN-proven to corrupt a
 second site sharing a port literal) → **RETIRE** (keep the current slot + **1
 warm previous** slot running for `<1 s` rollback, stop the rest, keep the newest
-`N` release dirs on disk). Two slots per site (`a`/`b`), blue/green: build+boot
+`N` release dirs on disk, never the builds slot `a`, slot `b` or `.previous`
+still point at — those three skip the prune *on top of* the newest-`N` window, so
+the honest bound is `N+3`, not `N`: at `RETAIN=5` with 10 releases and all three
+protected builds outside the window, **8** dirs remain). Two slots per site (`a`/`b`), blue/green: build+boot
 the idle slot, health-gate it, THEN flip — a slot that won't boot or fails its
 probe NEVER takes the Caddy upstream. `--rollback`: a warm previous slot = a pure
 Caddy port-flip back (`<1 s`, no reboot/re-gate); a cold older release reboots the
 idle slot onto it + gates + flips. The slot unit is
 `deploy/systemd/barkpark-site@.service` (§below). Offline gate (fake
 `systemctl`/`caddy`/`npm`, no real systemd/network): `bash
-deploy/site-deploy-node.sh --self-test` — 50 checks: the six-stage protocol,
+deploy/site-deploy-node.sh --self-test` — 124 checks: the six-stage protocol,
 boot-in-place HEALTH with the marker-value gate, the marker-anchored port flip,
-retire protecting both live slots, and the warm-rollback flip.
+retire protecting both live slots, the warm-rollback flip, and the fleet build
+admission gate (below) — including the hazard specific to THIS engine: HEALTH
+boots the slot process, which outlives the run, so the gate must be released
+before it. Deleting the release call is proven to leave the box's only build slot
+held after a *successful* deploy, with no reaper to free it.
 
 **The slot unit (`deploy/systemd/barkpark-site@.service`).** ONE generic template
 for every node site's every slot — `%i = <slug>__<slot>`. `EnvironmentFile=/opt/
@@ -222,11 +230,45 @@ writable). Both acquire in the same order — own lock (fd 9) → Caddyfile lock
 8) — and the Caddyfile lock is a leaf, never held across a build, so a site
 deploy never waits on the instance deploy's multi-minute run.
 
+**One box, one build (the fleet build admission gate).** The lock above is
+PER-SLUG, so "queue depth 1" is true per site and false FLEET-WIDE: N sites built
+concurrently on 2 cores BY CONSTRUCTION (measured on guerrilla: 20 per-slug lock
+files, four stamped in one minute; peak 8 concurrent BUILD windows in 7 days; 80%
+of astro crashes / 52% of 503s / 49% of unreachable fired with a *foreign* build
+mid-flight, on a MEMORY-bound box). So both engines take a SECOND, fleet-wide lock
+— `/var/lock/barkpark-site-build.lock` on **fd 7** (`build_gate_acquire` /
+`build_gate_release` in `lib/site-deploy-common.sh`; `BARKPARK_BUILD_GATE_LOCK` /
+`BARKPARK_BUILD_GATE_WAIT` are dev+self-test knobs only — `write_env_file/4` is an
+explicit allowlist, so neither can reach the engine from a control-plane deploy).
+`N=1` is not a preference: `CPUQuota=150%` on 2 cores and `MemoryMax=1500M`
+against 304–894M available each floor to one, so the semaphore D95 sketched
+collapses to one exclusive lock (raise the caps first if you want N>1). Taken
+INSIDE the build arm only — after `BUILD started` and the two cheap validations —
+and released right after `BUILD ok`, before STAGE: **nothing that compiles nothing
+is admission-controlled** (a rollback, a preflight, a prebuilt STAGE and an
+already-staged re-gate all run with the slot pinned; those are exactly the moves
+an operator makes *while* the box is busy). Budget lapse ⇒ `BUILD failed` with the
+reason and a `ps` read, THEN the typed **15** — emitted before the exit, because
+this refusal fires after `PLAN ok` and a bare exit would hang a stage-watching
+caller. Neither engine has a script-level EXIT trap and there is no reaper, so the
+fd form is mandatory: the kernel dropping fd 7 is the only release that survives
+SIGKILL. Fails OPEN and loudly (no `flock(1)`, unopenable lock) — a gate that
+denies every deploy is worse than the contention it prevents.
+
 Offline gate (no npm/caddy/systemd): `bash deploy/site-deploy.sh --self-test` —
-77 checks: the symlink flip, forward/back rollback and retire-N over fixture
+228 checks: the symlink flip, forward/back rollback and retire-N over fixture
 release dirs, the marker reader, then the real script driven end-to-end against a
 fake npm (the six-stage protocol, a lying build failing HEALTH with exit 14 and
-being purged, the retry rebuilding, a BUILD failure carrying its 401 to stdout).
+being purged, the retry rebuilding, a BUILD failure carrying its 401 to stdout),
+and the admission gate against a REAL `flock(1)`: two genuinely concurrent deploys
+of DIFFERENT slugs whose build windows are measured DISJOINT via a shared
+START/END ledger (nesting depth 1), each oracle shown non-vacuous by mutating the
+engine (delete the acquire ⇒ depth 2 and interleaved; delete the refusal's `emit`
+⇒ only the anti-hang check reds), a SIGKILLed build whose slot the kernel frees so
+the next deploy is admitted, and both fail-open paths. That block needs a real
+`flock`, so it SKIPS on stock macOS and HARD-FAILS under
+`BARKPARK_SELFTEST_REQUIRE_E2E=1` (set on both harness steps in CI) — a gate
+proven against the harness's exit-0 `flock` stub would prove the stub.
 `bash deploy/instance-deploy_test.sh` covers the blue/green script, including the
 Caddyfile-lock regression (fail-before: the flip is lost; fixed: both writers
 survive) — it needs a real `caddy` and `flock(1)`, so that case skips on macOS.
@@ -245,7 +287,7 @@ Add under **Settings → Secrets and variables → Actions**:
 | Secret | Value |
 |---|---|
 | `DEPLOY_SSH_KEY` | The private key that can `ssh root@` both hosts (the Barkpark account key — locally `~/.ssh/barkpark_indx`). Paste the full PEM, including the BEGIN/END lines. |
-| `CP_HOST` | Control-plane IP — `178.105.92.191` |
+| `CP_HOST` | Control-plane IP — `178.105.92.191`. Doubles as the control plane's **egress** address: the instance job passes it as `BARKPARK_CLOUD_EGRESS_IPS` so each box trusts the caller address the control plane relays (see §Control-plane egress below). |
 | `GUERRILLA_HOST` | Content-instance IP — `157.180.90.121` |
 | `HETZNER_DNS_TOKEN` | Hetzner Cloud DNS-capable API token (the `barkpark.cloud`-zone project's token, NOT `CP_HOST`'s own server token — see `cloud/postfix/README.md` §1). Only used by `renew-mail-cert.yml`. |
 
@@ -346,6 +388,39 @@ and skipped rather than shipping a broken `.env`; a good one logs `mail relay
 ENABLED`. The relay submission port (587) is published for instances by
 `cloud/docker-compose.yml`; it is SASL-gated (not an open relay).
 
+## Control-plane egress → instance `BARKPARK_TRUSTED_PROXIES`
+
+An instance believes `x-forwarded-for` **only** from loopback or a peer listed in
+`BARKPARK_TRUSTED_PROXIES` (`Barkpark.RateLimiter.client_ip`, individual addresses
+only — a CIDR range is refused at boot, because trusting a range lets any host in
+it forge every client's bucket key). The control plane relays the phone's address
+on a proxied revoke and the instance's own Caddy appends the **control plane's
+egress address** to the right of it, so until that egress address is listed the
+rightmost non-listed hop *is* the control plane and every proxied request keys on
+**one bucket per team** instead of one per caller. Not a forgery, not a 5xx — a
+silent loss of per-caller bucketing.
+
+The address is authored **once**, as the `CP_HOST` secret above (the control
+plane's own IP), and read by both deployers under one name,
+`BARKPARK_CLOUD_EGRESS_IPS`:
+
+| Box | Reader | Where the value comes from |
+|---|---|---|
+| freshly provisioned | `barkpark-provisioner` → the go-live step right before secrets-install (its restart loads it) | `barkpark-cp:/etc/barkpark-provisioner.env` (`deploy/barkpark-provisioner.env.example`) |
+| resurrected from a bundle | same worker → the resurrect chain's identity merge (a resurrect never runs the go-live's configure) | same worker env — the trust list belongs to the CURRENT control plane, never to the archive |
+| already-running (guerrilla/prod) | `instance-deploy.sh` `.env` backfill | `deploy.yml`'s instance job passes `secrets.CP_HOST` over the SSH command |
+
+`instance-deploy.sh` **never overwrites** an existing `BARKPARK_TRUSTED_PROXIES`
+line — provisioning already wrote the right value on a managed box, and a
+self-hosted operator may trust a different front. Both readers **validate the
+shape before writing** (bare IPs, no ranges): the Elixir side raises on a
+malformed entry, so an unvalidated write would not degrade a bucket key, it would
+refuse to boot the box. Value absent on both paths → the script appends a
+commented placeholder and logs the gap (`WARN: no BARKPARK_CLOUD_EGRESS_IPS …`),
+the worker logs it at startup, and the deploy still succeeds.
+
+Check a box: `grep BARKPARK_TRUSTED_PROXIES /opt/barkpark/.env`.
+
 ## Mail relay TLS renewal
 
 `.github/workflows/renew-mail-cert.yml` runs `deploy/renew-mail-cert.sh` on
@@ -398,6 +473,57 @@ bp cloud site deploy   my-blog     # streams the six stages
 bp cloud site open     my-blog     # https://guerrilla.barkpark.cloud/sites/my-blog/
 bp cloud site rollback my-blog     # sub-second flip to the previous build
 ```
+
+### Shipping a build made somewhere else (`--prebuilt ./dist`)
+
+The default lane builds ON the serving box: `npm ci && npm run build` runs on the
+same two cores that answer the API. `--prebuilt` is the opt-in lane where that
+build happens anywhere else — your laptop, CI, a PDS box — and only the OUTPUT
+travels:
+
+```bash
+bp cloud site deploy my-blog --prebuilt ./dist
+```
+
+It is **two calls**, and the order is forced by build identity:
+
+1. **mint** — `POST /v1/sites/:id/deploy {"source":"prebuilt"}` creates the
+   deployment without starting a build and answers with the `build_id` (and the
+   `content_rev`, which only the box can compute). `bp` prints them as
+   `BARKPARK_BUILD_ID` / `BARKPARK_CONTENT_REV` / `BARKPARK_SITE_BASE` exports.
+2. **upload** — the packed `dist/` goes to the deployment-scoped artifact route
+   with a real `Content-Length` and the sha256 the client computed over exactly
+   those wire bytes. The box re-verifies that digest, extracts, and runs
+   STAGE → HEALTH → SWITCH → RETIRE with **BUILD reported `skipped`** — no npm
+   runs there.
+
+What it refuses, all before the upload: a directory that is empty, one with no
+root `index.html` (that is the project dir, not the output dir), and — after the
+mint — bytes whose `<meta name="bp-build-id">` is not the id this deployment
+minted, because HEALTH asserts that marker **by value** and such an upload is a
+guaranteed red one round trip later. Build with the printed exports and then ship
+to **that** deployment:
+
+```bash
+bp cloud site deploy my-blog --prebuilt ./dist --deployment <id>   # the refusal prints this line
+```
+
+`--deployment` is not a convenience — it is what makes the loop terminate. A
+prebuilt mint is deliberately **nonced** on the control plane (so two different
+`dist/` builds of the same content can never collide on one `build_id`), which
+means a plain re-run mints a *new* id and refuses again. The second run mints
+nothing, reads the named row, and uploads.
+
+What it packs: the directory's contents at the archive ROOT (no `dist/` prefix).
+The dotenv family, `.git` and `.DS_Store` are excluded; the ignore list is
+explicit precisely because the *default* project ignores (`dist`, `build`, `out`,
+`.next`, `.astro`) would delete this payload.
+
+What the digest certifies and what it does not: it closes tampering **in
+transit** — the box serves the bytes you packed. It says nothing about who built
+them or from what content. HEALTH is unchanged and still certifies integrity and
+identity only; provenance (`source=prebuilt`, the digest, the uploading
+principal) lives on the deployment record.
 
 ### The proof script
 

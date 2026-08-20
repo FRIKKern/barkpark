@@ -94,6 +94,31 @@ export async function hydratePortableDoc(
   return { mermaid, asciicast, codeTabs, tabs }
 }
 
+/**
+ * The mermaid theme for the ACTIVE color mode. Mermaid bakes its palette into
+ * the rendered SVG (it never reads CSS custom properties), so an un-themed
+ * `initialize` paints light-palette diagrams that are illegible on a dark
+ * `.bp-paper-surface`. Resolution order mirrors how `paper-surface.css` itself
+ * resolves dark mode: an explicit `data-theme` stamp on `<html>` wins (the
+ * Studio/blog-starter toggle contract — `dark` → dark, any other stamp → light),
+ * else the OS `prefers-color-scheme` decides (the Phoenix reader hooks'
+ * `matchMedia` leg in bulldocs.html.heex / bp-paper-mermaid.js).
+ *
+ * Exported for tests; safe anywhere `document` exists.
+ */
+export function activeMermaidTheme(
+  doc: Document = document,
+): 'dark' | 'default' {
+  const stamped = doc.documentElement?.getAttribute('data-theme')
+  if (stamped === 'dark') return 'dark'
+  if (stamped != null && stamped !== '') return 'default'
+  const win = doc.defaultView
+  return typeof win?.matchMedia === 'function' &&
+    win.matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'default'
+}
+
 async function hydrateMermaid(root: ParentNode): Promise<number> {
   const nodes = Array.from(
     root.querySelectorAll<HTMLElement>(MERMAID_SELECTOR),
@@ -109,8 +134,9 @@ async function hydrateMermaid(root: ParentNode): Promise<number> {
 
   const mermaid = (await import('mermaid')).default as unknown as MermaidLike
   // Manual mode (`startOnLoad:false`): we drive rendering, mirroring the hook —
-  // `mermaid.run` marks each processed node `data-processed="true"`.
-  mermaid.initialize({ startOnLoad: false })
+  // `mermaid.run` marks each processed node `data-processed="true"`. Theme
+  // derives from the active mode so dark-surface diagrams stay legible.
+  mermaid.initialize({ startOnLoad: false, theme: activeMermaidTheme() })
   await mermaid.run({ nodes })
   return nodes.length
 }
@@ -145,10 +171,15 @@ async function hydrateAsciicast(root: ParentNode): Promise<number> {
   for (const el of nodes) {
     const src = el.dataset.castSrc
     if (!src) continue
-    // Same options the Phoenix `runAsciicast` mounts with.
+    // Same options the Phoenix `runAsciicast` mounts with. `poster` is the ONE
+    // per-block option: the emitter writes `data-cast-poster` only when the
+    // block names a resting frame (an npt timestamp, or `end`), so an unset
+    // one falls back to `npt:0:1` and nothing changes for existing content. A
+    // recording that opens on a banner + a reading pause is near-empty black at
+    // t=1s; naming a later frame makes the resting state show real terminal.
     player.create(src, el, {
       fit: 'width',
-      poster: 'npt:0:1',
+      poster: el.dataset.castPoster || 'npt:0:1',
       idleTimeLimit: 2,
       theme: 'asciinema',
     })

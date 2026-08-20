@@ -208,23 +208,49 @@ if config_env() == :prod do
     bucket: System.get_env("BARKPARK_BUNDLE_BUCKET"),
     location: System.get_env("BARKPARK_BUNDLE_LOCATION") || "fsn1"
 
+  # ── Push relay credentials (mobile charter D15) — THE HUMAN GATE ───────────
+  #
+  # These five (+ one) env vars are the ONLY thing standing between the built,
+  # tested relay and real notifications. Set them and restart; nothing else
+  # changes. Absent, BarkparkCloud.Push.adapter_for/1 resolves to
+  # Adapters.NotConfigured and every send cancels terminally — no flag, no dead
+  # code, no half-state. The full acquisition steps (which Apple/Firebase
+  # console page, what the value looks like, and the CLIENT-side entitlements
+  # that must land in the same wave) live in the moduledoc of
+  # BarkparkCloud.Push.Adapters.NotConfigured — read that before opening the
+  # gate. cloud/.env.example carries the same list in env form.
+  #
+  # The two platforms are INDEPENDENT: Android alone is a valid state.
+  config :barkpark_cloud, BarkparkCloud.Push.Adapters.APNS,
+    # The FULL .p8 PEM contents. Docker/systemd env cannot carry raw newlines,
+    # so a literal "\n" in the value is expanded back — paste the file with
+    # `awk '{printf "%s\\n", $0}' AuthKey_XXX.p8` or with real newlines; both work.
+    key_p8: System.get_env("APNS_KEY_P8") |> then(&(&1 && String.replace(&1, "\\n", "\n"))),
+    key_id: System.get_env("APNS_KEY_ID"),
+    team_id: System.get_env("APNS_TEAM_ID"),
+    topic: System.get_env("APNS_BUNDLE_ID"),
+    # "sandbox" (default) or "production". The wrong value 400s every send with
+    # BadDeviceToken on a perfectly valid token — the classic APNs trap.
+    env: System.get_env("APNS_ENV") || "sandbox"
+
+  config :barkpark_cloud, BarkparkCloud.Push.Adapters.FCM,
+    service_account_json: System.get_env("FCM_SERVICE_ACCOUNT_JSON")
+
   # Web (cloud-12a): the JSON API's listen port in prod, from PORT (default 4100).
   config :barkpark_cloud, BarkparkCloud.Web.Endpoint,
     server: true,
     port: String.to_integer(System.get_env("PORT") || "4100")
 
-  # Artifact uploads (P7): the on-disk dir where the control plane writes the
-  # tarballs streamed in via POST /v1/sites/:id/artifact. The builder reads
-  # them back via the returned `file://` URL, so the dir must be shared with
-  # the builder process. In prod we default to /var/lib/barkpark-cloud/artifacts
-  # — a writable system path that survives restarts. Override via
-  # BARKPARK_CLOUD_ARTIFACT_DIR (e.g. point at a tmpfs or a mounted volume).
-  # Max upload bytes default to 100 MB; raise via BARKPARK_CLOUD_MAX_ARTIFACT_BYTES.
-  config :barkpark_cloud, BarkparkCloud.Web.Router,
-    artifact_dir:
-      System.get_env("BARKPARK_CLOUD_ARTIFACT_DIR") || "/var/lib/barkpark-cloud/artifacts",
-    max_artifact_bytes:
-      String.to_integer(System.get_env("BARKPARK_CLOUD_MAX_ARTIFACT_BYTES") || "104857600")
+  # Artifact uploads: NO on-disk config, deliberately (site-spawner W9, charter
+  # D91). This block used to set `artifact_dir` — a host-local path the upload
+  # route wrote tarballs to, returned as a `file://` URL, with a comment claiming
+  # it "survives restarts". The compose file refutes that: the control-plane
+  # container declares no volume for it, and the box that would read the path
+  # runs on a different host entirely, so nothing could ever open the URL. The
+  # sink is now Postgres (`site_artifacts` on cloud_pgdata, the CP's only durable
+  # volume) and the 32 MB cap is a module attribute on the router — a size that
+  # bounds a build OUTPUT rather than a whole project dir needs no per-deploy
+  # tuning knob.
 
   # Provisioning: the shared WORKER token the off-box Go warm-pool
   # provisioner presents to /v1/internal/provision-jobs/*. May be nil here — the

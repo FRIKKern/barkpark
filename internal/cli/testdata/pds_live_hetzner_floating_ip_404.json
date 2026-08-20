@@ -1,0 +1,7 @@
+{
+    "error": {
+        "code": "not_found",
+        "message": "Floating IP with ID 999999999 not found",
+        "details": null
+    }
+}

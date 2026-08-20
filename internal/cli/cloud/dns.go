@@ -14,7 +14,9 @@
 //
 // YAGNI on purpose: UpsertRecord / DeleteRecord / Resolve and A records only.
 // No CNAME/TXT, no wildcard automation (the `*.barkpark.cloud` delegation is a
-// human task, cloud-15), no record listing beyond Resolve.
+// human task, cloud-15). Record listing exists ONLY for the by-value teardown
+// sweep (RecordLister + SweepARecordsByValue below, PDF-D101) — never for
+// general zone management.
 package cloud
 
 import (
@@ -153,8 +155,11 @@ func (f *FakeDNS) DeleteRecord(_ context.Context, zone, name, typ string) error 
 	return nil
 }
 
-// compile-time assertion that *FakeDNS satisfies the interface.
+// compile-time assertion that *FakeDNS satisfies the interface, and the
+// by-value sweep's optional RecordLister with it — the test seam must not be
+// able to keep the sweep tests green after the capability is dropped.
 var _ DNSProvider = (*FakeDNS)(nil)
+var _ RecordLister = (*FakeDNS)(nil)
 
 // hetznerDNSBase is the Hetzner DNS API root. Hetzner-first to match the
 // provisioning strategy (HcloudProvider in provider.go).
@@ -367,6 +372,143 @@ func (h *HetznerDNS) list(ctx context.Context) ([]hetznerRecord, error) {
 	return parsed.Records, nil
 }
 
+// ── the by-value sweep (PDF-D101) ────────────────────────────────────────────
+//
+// `bp cloud support remove` tears down leaked A records by VALUE, not name:
+// the support chain writes <name>.<zone> while the main go-live path writes
+// <slug>-<team>.<zone> at the SAME IP — a by-name delete removes one, leaves
+// the sibling, and a by-name census still reads clean. These helpers list the
+// zone and match record VALUES against the box IP instead.
+
+// RecordLister is the optional listing capability the by-value sweep needs on
+// top of DNSProvider. All three providers implement it; a provider that does
+// not is an ERROR at sweep time, never a silent empty result.
+type RecordLister interface {
+	// ListRecords returns every record in the zone.
+	ListRecords(ctx context.Context, zone string) ([]Record, error)
+}
+
+// ListRecords returns every record FakeDNS holds in the zone, sorted by
+// (Name, Type) for deterministic assertions.
+func (f *FakeDNS) ListRecords(_ context.Context, zone string) ([]Record, error) {
+	zone = strings.Trim(strings.TrimSpace(zone), ".")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []Record{}
+	for _, recs := range f.records {
+		for _, r := range recs {
+			if strings.EqualFold(strings.Trim(strings.TrimSpace(r.Zone), "."), zone) {
+				out = append(out, r)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Type < out[j].Type
+	})
+	return out, nil
+}
+
+// ListRecords returns every record in the configured zone. The zone argument
+// is carried into the returned Records; the listing itself is scoped by the
+// configured ZoneID (Hetzner's legacy API addresses zones by id, not name).
+func (h *HetznerDNS) ListRecords(ctx context.Context, zone string) ([]Record, error) {
+	recs, err := h.list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Record, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, Record{Zone: zone, Name: r.Name, Type: r.Type, Value: r.Value})
+	}
+	return out, nil
+}
+
+// ListRecords lists the zone's rrsets via `hcloud zone rrset list -o json`,
+// flattened to one Record per (name, value). The apex "@" maps back to the
+// empty label so Fqdn renders it as the bare zone. (Defined here rather than
+// in dns_cloud.go so the whole by-value seam lives in one place.)
+func (c *CloudDNS) ListRecords(ctx context.Context, zone string) ([]Record, error) {
+	argv := hcloudZoneRRSetListArgv(zone)
+	out, err := c.run(ctx, argv[0], argv[1:]...)
+	if err != nil {
+		return nil, fmt.Errorf("hcloud zone rrset list %q: %w: %s", zone, err, strings.TrimSpace(out))
+	}
+	var rrsets []cloudRRSet
+	if err := json.Unmarshal([]byte(out), &rrsets); err != nil {
+		return nil, fmt.Errorf("hcloud zone rrset list %q: decode: %w", zone, err)
+	}
+	recs := make([]Record, 0, len(rrsets))
+	for _, rr := range rrsets {
+		name := rr.Name
+		if name == "@" {
+			name = ""
+		}
+		for _, v := range rr.Records {
+			recs = append(recs, Record{Zone: zone, Name: name, Type: rr.Type, Value: v.Value})
+		}
+	}
+	return recs, nil
+}
+
+// ARecordNamesByValue returns the sorted, de-duplicated names of every A rrset
+// in zone holding a record whose value equals ip — the teardown census's fifth
+// leg. A provider without RecordLister is an ERROR, not an empty result: a
+// check that cannot list must never read as clean.
+func ARecordNamesByValue(ctx context.Context, dns DNSProvider, zone, ip string) ([]string, error) {
+	lister, ok := dns.(RecordLister)
+	if !ok {
+		return nil, fmt.Errorf("cloud: DNS provider %T cannot list records — the by-value sweep needs RecordLister", dns)
+	}
+	recs, err := lister.ListRecords(ctx, zone)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	names := []string{}
+	for _, r := range recs {
+		typ := r.Type
+		if typ == "" {
+			typ = "A"
+		}
+		if !strings.EqualFold(typ, "A") || strings.TrimSpace(r.Value) != ip {
+			continue
+		}
+		if !seen[r.Name] {
+			seen[r.Name] = true
+			names = append(names, r.Name)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// SweepARecordsByValue deletes every A rrset in zone that resolves to ip. It
+// returns the names it actually deleted. An individual delete failure does not
+// stop the sweep (the siblings still go); the failures aggregate into the
+// returned error, alongside whatever WAS deleted.
+func SweepARecordsByValue(ctx context.Context, dns DNSProvider, zone, ip string) ([]string, error) {
+	names, err := ARecordNamesByValue(ctx, dns, zone, ip)
+	if err != nil {
+		return nil, err
+	}
+	deleted := []string{}
+	var errs []string
+	for _, name := range names {
+		if derr := dns.DeleteRecord(ctx, zone, name, "A"); derr != nil {
+			errs = append(errs, derr.Error())
+			continue
+		}
+		deleted = append(deleted, name)
+	}
+	if len(errs) > 0 {
+		return deleted, fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return deleted, nil
+}
+
 // readBody reads an error-response body for inclusion in an error message,
 // capped so a runaway body can't bloat the message.
 func readBody(r io.Reader) string {
@@ -374,5 +516,7 @@ func readBody(r io.Reader) string {
 	return strings.TrimSpace(string(b))
 }
 
-// compile-time assertion that *HetznerDNS satisfies the interface.
+// compile-time assertion that *HetznerDNS satisfies the interface, and the
+// by-value sweep's optional RecordLister with it.
 var _ DNSProvider = (*HetznerDNS)(nil)
+var _ RecordLister = (*HetznerDNS)(nil)

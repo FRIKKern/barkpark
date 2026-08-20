@@ -78,7 +78,8 @@
 // a fold bug into its own headline.
 
 import { spawnSync } from "node:child_process";
-import { openSync, closeSync, readFileSync, rmSync, mkdtempSync } from "node:fs";
+import { openSync, closeSync, readSync, readFileSync, rmSync, mkdtempSync, statSync } from "node:fs";
+import { constants as bufferConstants } from "node:buffer";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -224,12 +225,89 @@ export const FILEPATH_QUERIES = Object.freeze([
 export const SINGLETON_MAX = 1; // a 1-row key: nothing to index, grep ties trivially
 export const LARGE_BUCKET_MIN = 21; // > 20 rows: a dump, leads' precision is the story not its win
 
+// ── the V8 string ceiling, named once ────────────────────────────────────────
+//
+// A JavaScript string cannot exceed `buffer.constants.MAX_STRING_LENGTH`
+// (0x1fffffe8 = 536,870,888 on 64-bit V8). `readFileSync(path, "utf8")` on a
+// larger file throws ERR_STRING_TOO_LONG BEFORE the caller sees a single byte.
+// This is not a hypothetical: a repo-wide `grep -rIn` here emits HUNDREDS of
+// megabytes — a handful of multi-megabyte single-line JSON files supply most of
+// the bytes off comparatively few matching lines, so the byte total tracks the
+// working tree's contents, not its match count. On a working checkout carrying
+// agent/session state it crossed the ceiling and took the repo-wide arm of
+// scoreQuery down with it. Growth, not a code change, moved it past.
+//
+// The rule that follows: a capture whose SIZE is unbounded is never read as a
+// string. It is either consumed as bytes (`captureLineCountToFile` below) or,
+// where the body is genuinely needed, read as a string behind a size guard that
+// fails with a message naming this ceiling instead of an opaque V8 error.
+export const MAX_STRING_LENGTH = bufferConstants.MAX_STRING_LENGTH;
+
+// Count newline BYTES in the first `end` bytes of a buffer. Pure, exported, and
+// the single place the line arithmetic lives — so the guard that proves this
+// path survives an over-ceiling capture can drive it directly on a synthetic
+// buffer instead of manufacturing half a gigabyte of grep output.
+export function countNewlinesInBuffer(buf, end = buf.length) {
+  let n = 0;
+  for (let i = 0; i < end; i += 1) if (buf[i] === 0x0a) n += 1;
+  return n;
+}
+
+// Count the lines of a file WITHOUT materialising it as a string: a fixed-size
+// buffer is refilled until EOF, so peak memory is `chunkSize`, not file size.
+// For `grep -n` output — every line non-empty and newline-terminated — the
+// newline count IS the line count, which is exactly what `out.split("\n")
+// .filter((l) => l !== "").length` used to compute out of a whole-file string.
+export function countLinesInFile(path, { chunkSize = 1 << 20 } = {}) {
+  const fd = openSync(path, "r");
+  const buf = Buffer.allocUnsafe(chunkSize);
+  let lines = 0;
+  try {
+    for (;;) {
+      const n = readSync(fd, buf, 0, chunkSize, null);
+      if (n === 0) break;
+      lines += countNewlinesInBuffer(buf, n);
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return lines;
+}
+
 // ── the D92-critical capture: a child stdout redirected to a real file ────────
 //
 // The child writes straight to an open descriptor, so there is no pipe buffer to
 // truncate and no flush race. Returns the full captured text plus the child's
 // status, and always cleans up its temp file.
+//
+// The redirect makes the capture UNBOUNDED, which is the point — and the reason
+// the string read is guarded. A caller that only needs a line count must use
+// `captureLineCountToFile`, which never builds the string at all.
 function captureToFile(cmd, args, { cwd } = {}) {
+  return withCaptureFile(cmd, args, { cwd }, (outPath) => {
+    const { size } = statSync(outPath);
+    if (size > MAX_STRING_LENGTH) {
+      throw new Error(
+        `capture of \`${cmd}\` is ${size} bytes, past V8's ${MAX_STRING_LENGTH}-byte string ceiling — `
+        + "read it as bytes (see countLinesInFile) rather than as a string",
+      );
+    }
+    return readFileSync(outPath, "utf8");
+  });
+}
+
+// The same D92 redirect, but the capture is consumed as BYTES and only a line
+// count comes back. Size-independent: a 400 MB or a 4 GB capture costs one
+// 1 MiB buffer and never touches the string ceiling.
+function captureLineCountToFile(cmd, args, { cwd } = {}) {
+  const { out: lines, status, error } = withCaptureFile(cmd, args, { cwd }, countLinesInFile);
+  return { lines, status, error };
+}
+
+// Spawn with stdout redirected to a temp file, hand the closed file to `consume`,
+// and always clean up. The `stdio: ["ignore", fd, "ignore"]` shape is D92 itself:
+// the child's stdout IS the descriptor, never a pipe.
+function withCaptureFile(cmd, args, { cwd }, consume) {
   const dir = mkdtempSync(join(tmpdir(), "grip-trial-"));
   const outPath = join(dir, "out");
   const fd = openSync(outPath, "w");
@@ -242,13 +320,11 @@ function captureToFile(cmd, args, { cwd } = {}) {
   } finally {
     closeSync(fd);
   }
-  let out = "";
   try {
-    out = readFileSync(outPath, "utf8");
+    return { out: consume(outPath), status, error };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  return { out, status, error };
 }
 
 // Run `leads <term> --dir <store> --json` and return the parsed result. The
@@ -276,10 +352,23 @@ export function runLeadsRender(term, storeDir) {
 // are handled as "no answer here" rather than thrown, because a subsystem the
 // store does not cover is a legitimate ZERO-COVERAGE reading, not a crash.
 export function runGrep(term, dir, { excludeDirs = [] } = {}) {
-  const flags = ["-rIn", ...excludeDirs.map((d) => `--exclude-dir=${d}`)];
-  const { out, status } = captureToFile("grep", [...flags, "--", term, dir]);
+  const { out, status } = captureToFile("grep", [...grepFlags(excludeDirs), "--", term, dir]);
   const lines = status === 0 ? out.split("\n").filter((l) => l !== "") : [];
   return { lines, count: lines.length, status };
+}
+
+// The same grep, counted rather than read. Callers that scan the WHOLE TREE take
+// this path: the repo-wide output is hundreds of megabytes on this tree and its
+// BODY is never used — only `count` reaches the report — so materialising it as
+// a string buys nothing and costs an ERR_STRING_TOO_LONG the moment the tree
+// crosses V8's ceiling. Same command, same definition of a line, same number.
+export function runGrepCount(term, dir, { excludeDirs = [] } = {}) {
+  const { lines, status } = captureLineCountToFile("grep", [...grepFlags(excludeDirs), "--", term, dir]);
+  return { count: status === 0 ? lines : 0, status };
+}
+
+function grepFlags(excludeDirs) {
+  return ["-rIn", ...excludeDirs.map((d) => `--exclude-dir=${d}`)];
 }
 
 // lines-to-answer for LEADS: the 1-based line index, in the human render, of the
@@ -340,7 +429,9 @@ export function scoreQuery({ term, prefix }, storeDir, { exact = false, repoWide
   const bucket = rows.length;
 
   const scopedGrep = runGrep(term, storeDir);
-  const repoWideGrep = repoWide ? runGrep(term, ".", { excludeDirs: REPO_WIDE_EXCLUDES }) : { count: null };
+  // COUNTED, not read: the repo-wide body is never consumed, and its SIZE is
+  // unbounded — see MAX_STRING_LENGTH for the read this replaces.
+  const repoWideGrep = repoWide ? runGrepCount(term, ".", { excludeDirs: REPO_WIDE_EXCLUDES }) : { count: null };
 
   const leadsAnswer = leadsLinesToAnswer(renderLines, prefix, exact);
   const grepAnswer = grepLinesToAnswer(scopedGrep.lines);

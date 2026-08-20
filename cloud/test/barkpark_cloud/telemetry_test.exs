@@ -11,9 +11,12 @@ defmodule BarkparkCloud.TelemetryTest do
     * `health_checks` rolls up to correct {pass, total, failing}, including the
       some-failing case
     * a full `%AgentEvent{}` stamps `reported_at` from its `inserted_at`
+    * a REAL stored beat (captured verbatim from the control plane, not a
+      hand-built map) folds into the envelope — see `real_guerrilla_beat/0`
   """
   use ExUnit.Case, async: true
 
+  alias BarkparkCloud.RealAgentBeats
   alias BarkparkCloud.Telemetry
   alias BarkparkCloud.Registry.AgentEvent
 
@@ -23,6 +26,14 @@ defmodule BarkparkCloud.TelemetryTest do
     %{
       "disk_used_percent" => 42,
       "pg_size_bytes" => 123_456_789,
+      "pg_top_relations" => [
+        %{"name" => "mutation_events", "bytes" => 80_000_000},
+        %{"name" => "revisions", "bytes" => 30_000_000}
+      ],
+      "swap_used_percent" => 51,
+      "swap_total_bytes" => 2_147_479_552,
+      "beam_pss_bytes" => 1_843_045_376,
+      "beam_swap_bytes" => 12_345_678,
       "cpu_percent" => 37,
       "mem_used_percent" => 58,
       "load1" => 0.42,
@@ -44,6 +55,12 @@ defmodule BarkparkCloud.TelemetryTest do
       assert Telemetry.normalize(full_payload()) == %{
                disk: %{used_pct: 42},
                db_size: 123_456_789,
+               top_relations: [
+                 %{name: "mutation_events", bytes: 80_000_000},
+                 %{name: "revisions", bytes: 30_000_000}
+               ],
+               swap: %{used_pct: 51, total_bytes: 2_147_479_552},
+               beam: %{pss_bytes: 1_843_045_376, swap_bytes: 12_345_678},
                cpu: 37,
                mem: 58,
                load1: 0.42,
@@ -99,6 +116,9 @@ defmodule BarkparkCloud.TelemetryTest do
       assert Telemetry.normalize(%{}) == %{
                disk: %{used_pct: nil},
                db_size: nil,
+               top_relations: nil,
+               swap: %{used_pct: nil, total_bytes: nil},
+               beam: %{pss_bytes: nil, swap_bytes: nil},
                cpu: nil,
                mem: nil,
                load1: nil,
@@ -133,12 +153,20 @@ defmodule BarkparkCloud.TelemetryTest do
         "backup_ok" => "yes",
         "backup_detail" => 500,
         "dirty_tree" => 1,
-        "health_checks" => "not a list"
+        "health_checks" => "not a list",
+        "pg_top_relations" => "not a list",
+        "swap_used_percent" => "lots",
+        "swap_total_bytes" => nil,
+        "beam_pss_bytes" => %{},
+        "beam_swap_bytes" => "big"
       }
 
       assert Telemetry.normalize(payload) == %{
                disk: %{used_pct: nil},
                db_size: nil,
+               top_relations: nil,
+               swap: %{used_pct: nil, total_bytes: nil},
+               beam: %{pss_bytes: nil, swap_bytes: nil},
                cpu: nil,
                mem: nil,
                load1: nil,
@@ -225,6 +253,91 @@ defmodule BarkparkCloud.TelemetryTest do
                total: 2,
                failing: ["b"]
              }
+    end
+  end
+
+  describe "normalize/1 — swap / BEAM / top relations (the new vitals)" do
+    test "the -1 sentinel pair passes through VERBATIM — the normalizer never words it" do
+      payload =
+        Map.merge(full_payload(), %{
+          "swap_used_percent" => -1,
+          "swap_total_bytes" => -1,
+          "beam_pss_bytes" => -1,
+          "beam_swap_bytes" => -1
+        })
+
+      env = Telemetry.normalize(payload)
+
+      # NOT nil, NOT "unmeasured" — the raw sentinel. Deciding what -1 MEANS is a
+      # view concern (Metrics.latest/1 nils it; the CLI words it), never here.
+      assert env.swap == %{used_pct: -1, total_bytes: -1}
+      assert env.beam == %{pss_bytes: -1, swap_bytes: -1}
+    end
+
+    test "a swapless box's honest 0 pair survives — it is data, not a sentinel" do
+      payload = Map.merge(full_payload(), %{"swap_used_percent" => 0, "swap_total_bytes" => 0})
+      assert Telemetry.normalize(payload).swap == %{used_pct: 0, total_bytes: 0}
+    end
+
+    test "an absent pg_top_relations is nil, an EMPTY list stays [] — different facts" do
+      # nil: the probe never ran (a pre-upgrade agent, or a failed read).
+      assert Telemetry.normalize(Map.delete(full_payload(), "pg_top_relations")).top_relations ==
+               nil
+
+      # A JSON null lands the same way.
+      assert Telemetry.normalize(Map.put(full_payload(), "pg_top_relations", nil)).top_relations ==
+               nil
+
+      # []: it DID run and found nothing to report. Never collapsed into nil.
+      assert Telemetry.normalize(Map.put(full_payload(), "pg_top_relations", [])).top_relations ==
+               []
+    end
+
+    test "malformed relation rows are dropped; the agent's biggest-first order is kept" do
+      rows = [
+        %{"name" => "mutation_events", "bytes" => 3},
+        %{"name" => "nameless"},
+        %{"bytes" => 9},
+        "junk",
+        %{"name" => 42, "bytes" => 1},
+        %{"name" => "revisions", "bytes" => 2}
+      ]
+
+      assert Telemetry.normalize(%{"pg_top_relations" => rows}).top_relations == [
+               %{name: "mutation_events", bytes: 3},
+               %{name: "revisions", bytes: 2}
+             ]
+    end
+  end
+
+  describe "normalize/1 — a REAL stored beat (the producer envelope, not a hand-built map)" do
+    test "the real beat's new vitals fold through verbatim" do
+      env = Telemetry.normalize(RealAgentBeats.guerrilla())
+
+      assert env.swap == %{used_pct: 55, total_bytes: 2_147_479_552}
+      assert env.beam == %{pss_bytes: 1_258_798_080, swap_bytes: 329_543_680}
+      assert env.db_size == 3_525_639_191
+
+      # The named breakdown is what turns "3.5 GB" into a diagnosis: the two
+      # biggest relations alone are most of the database.
+      assert [%{name: "mutation_events", bytes: 1_534_328_832} | _] = env.top_relations
+      assert length(env.top_relations) == 5
+
+      named = env.top_relations |> Enum.map(& &1.bytes) |> Enum.sum()
+      assert named / env.db_size > 0.9
+    end
+
+    test "the real PRE-upgrade beat degrades honestly — nil, never a fabricated zero" do
+      env = Telemetry.normalize(RealAgentBeats.pre_upgrade())
+
+      assert env.swap == %{used_pct: nil, total_bytes: nil}
+      assert env.beam == %{pss_bytes: nil, swap_bytes: nil}
+      assert env.top_relations == nil
+      # The signals that box DOES report still land.
+      assert env.disk == %{used_pct: 95}
+      assert env.cpu == 12
+      # …and its sentinels ride verbatim, as ever.
+      assert env.db_size == -1
     end
   end
 

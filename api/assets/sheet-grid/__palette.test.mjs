@@ -12,8 +12,8 @@
 //     so the text bound governs (the charter's 3:1 outline floor follows);
 //   • all 8 are pairwise distinct within a theme;
 //   • each .sheet-refc-N class index-locks --rc AND color to token N;
-//   • the rainbow is disjoint from the LIVE presence palette (parsed out of
-//     presence_state.ex, not a pinned copy that could rot);
+//   • the rainbow is disjoint from the LIVE presence palette (followed from
+//     presence_state.ex into TokensGen, not a pinned copy that could rot);
 //   • .sheet-ghost's token (--fg-muted) is text-legible in both themes.
 // Zero dependencies. Fails loudly with the offending token name.
 //
@@ -77,12 +77,120 @@ function hslToRgb(str) {
 
 // ── extract tokens from the heex ─────────────────────────────────────────────
 
-// The two sheet backgrounds are the global --bg tokens: dark is authored first
-// (:root / html[data-theme="dark"]), light second (html[data-theme="light"]).
-const bgMatches = [...SRC.matchAll(/--bg:\s*(hsl\([^)]*\))/gi)].map((m) => m[1]);
-assert.ok(bgMatches.length >= 2, `expected >=2 --bg declarations, found ${bgMatches.length}`);
-const bgDark = hslToRgb(bgMatches[0]);
-const bgLight = hslToRgb(bgMatches[1]);
+// Tokens are resolved through the SELECTOR that declares them, never by their
+// ordinal position in the file. Ordinal position is not a selector: this file
+// used to take the first --bg as dark and the second as light, and when the
+// GENERATED token block (design/emit.mjs) landed above the dark block the gate
+// silently began scoring the dark hues against the LIGHT background — #5b9dff
+// vs white is 2.72:1, which is the only reason this harness ever failed.
+// Swapping the two indices back would have re-broken on the next reorder.
+//
+// Comments are stripped first: a /* … */ banner sits between the closing brace
+// of one rule and the selector of the next, so leaving it in makes the selector
+// unrecognisable (and its commas fake a selector list).
+const CSS_WITH_MEDIA = SRC.replace(/\/\*[\s\S]*?\*\//g, " ");
+
+// `@media (prefers-color-scheme: …)` blocks are dropped WHOLE before the rule
+// table is built. Theme resolution in this harness is ATTRIBUTE-driven
+// (html[data-theme]); the media queries are the no-attribute OS fallback, and
+// root.html.heex:231 wraps a bare `:root { … }` in a prefers-dark query — which
+// the flat rule regex would otherwise hand to the LIGHT cascade as a
+// single-selector `:root` rule. It declares no background token today, so this
+// is a latent hazard rather than a live one: the day emit.mjs adds --bg there,
+// the light anchor would silently take a DARK value and this gate would score
+// light hues against a dark background — the exact failure it was just repaired
+// for, in the other direction. Removing the blocks kills the class instead of
+// waiting for the tripwire to mis-name it.
+function stripMediaBlocks(css) {
+  let out = "";
+  let i = 0;
+
+  while (i < css.length) {
+    const at = css.indexOf("@media", i);
+    if (at === -1) {
+      out += css.slice(i);
+      break;
+    }
+
+    const open = css.indexOf("{", at);
+    const prelude = open === -1 ? "" : css.slice(at, open);
+    if (open === -1 || !/prefers-color-scheme/i.test(prelude)) {
+      out += css.slice(i, at + 6);
+      i = at + 6;
+      continue;
+    }
+
+    out += css.slice(i, at);
+
+    let depth = 0;
+    let j = open;
+    for (; j < css.length; j++) {
+      if (css[j] === "{") depth++;
+      else if (css[j] === "}" && --depth === 0) break;
+    }
+    i = j === css.length ? j : j + 1;
+  }
+
+  return out;
+}
+
+const CSS = stripMediaBlocks(CSS_WITH_MEDIA);
+// The strip must actually have removed something — a silent no-op (a renamed
+// at-rule, a rewritten regex) would restore the hazard without a signal.
+// (The bare string also appears inside the theme <script>'s matchMedia calls,
+// so the probe is the AT-RULE shape, not the word.)
+const MEDIA_AT_RULE = /@media[^{]*prefers-color-scheme/i;
+assert.ok(
+  MEDIA_AT_RULE.test(CSS_WITH_MEDIA) && !MEDIA_AT_RULE.test(CSS),
+  "prefers-color-scheme media blocks were not stripped from the rule table",
+);
+const RULES = [...CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+  selectors: m[1].trim().split(",").map((s) => s.trim().replace(/\s+/g, " ")),
+  body: m[2],
+}));
+
+// The dark cascade is every rule naming html[data-theme="dark"] — the generated
+// dark block plus the hand-authored `:root, html[data-theme="dark"]` alias
+// block. The light cascade is html[data-theme="light"] plus the BARE :root
+// rules: :root alone carries the light values, while a `:root,` paired with the
+// dark attribute is the attribute-less DARK fallback and must not count light.
+function cascade(theme) {
+  return RULES.filter(({ selectors }) =>
+    theme === "dark"
+      ? selectors.includes('html[data-theme="dark"]')
+      : selectors.includes('html[data-theme="light"]') ||
+        (selectors.length === 1 && selectors[0] === ":root"),
+  );
+}
+
+// Last declaration in the theme's cascade wins, then a bare var(--alias) is
+// followed WITHIN THE SAME THEME — e.g. --fg-muted is authored as
+// var(--muted-text) and only the generated per-theme block carries the hsl().
+function token(theme, name, seen = new Set()) {
+  assert.ok(!seen.has(name), `${theme} --${name}: circular var() chain`);
+  seen.add(name);
+  const re = new RegExp(`(?:^|[;\\s])--${name}:\\s*([^;]+);`);
+  let value = null;
+  for (const rule of cascade(theme)) {
+    const m = re.exec(rule.body);
+    if (m) value = m[1].trim();
+  }
+  assert.ok(value, `${theme}: no --${name} declaration under a ${theme}-theme selector`);
+  const alias = /^var\(\s*--([\w-]+)\s*\)$/.exec(value);
+  return alias ? token(theme, alias[1], seen) : value;
+}
+
+const bgDarkSrc = token("dark", "bg");
+const bgLightSrc = token("light", "bg");
+const bgDark = hslToRgb(bgDarkSrc);
+const bgLight = hslToRgb(bgLightSrc);
+// The tripwire the ordinal read never had: the dark sheet must actually BE
+// darker. If the anchors ever drift again this fails by name instead of
+// blaming an innocent hue for a background it is never painted on.
+assert.ok(
+  relLuminance(bgDark) < relLuminance(bgLight),
+  `--bg theme anchors are inverted: dark resolved to ${bgDarkSrc}, light to ${bgLightSrc}`,
+);
 
 // The ref hues live in two labelled blocks. Split the source at the light
 // override so a --sheet-ref-N is attributed to the right theme regardless of
@@ -159,15 +267,28 @@ for (let i = 0; i < 8; i++) {
 }
 
 // Disjointness: the rainbow must NOT collide with the presence-cursor palette
-// — a collaborator cursor must never read as one of your refs. Parse the LIVE
-// @colors sigil out of presence_state.ex so this check tracks that palette
-// instead of rotting against a pinned copy.
+// — a collaborator cursor must never read as one of your refs. The palette used
+// to be a literal `@colors ~w(…)` sigil in presence_state.ex; 9a327b298
+// (Unified Aesthetic W2) replaced it with TokensGen.presence_palette(), so
+// re-parsing that sigil finds nothing forever. Follow the CALL instead: assert
+// presence_state.ex still delegates (an inlined literal must fail loudly here),
+// then read the list out of the generator that answers the call.
 const PRESENCE_SRC = fs.readFileSync(
   new URL("../../lib/barkpark_web/studio/presence_state.ex", import.meta.url),
   "utf8",
 );
-const presenceMatch = /@colors\s+~w\(([^)]+)\)/.exec(PRESENCE_SRC);
-assert.ok(presenceMatch, "could not find @colors ~w(...) in presence_state.ex");
+assert.ok(
+  /@colors\s+TokensGen\.presence_palette\(\)/.test(PRESENCE_SRC),
+  "presence_state.ex no longer sources @colors from TokensGen.presence_palette() — re-point this check at whatever now feeds the cursor palette",
+);
+// tokens_gen.ex is itself emitted from design/tokens.json (color.presence.palette)
+// by design/emit.mjs, so this is the value that actually compiles into presence.
+const TOKENS_GEN_SRC = fs.readFileSync(
+  new URL("../../lib/barkpark_web/studio/tokens_gen.ex", import.meta.url),
+  "utf8",
+);
+const presenceMatch = /def\s+presence_palette,\s*do:\s*~w\(([^)]+)\)/.exec(TOKENS_GEN_SRC);
+assert.ok(presenceMatch, "could not find `def presence_palette, do: ~w(...)` in tokens_gen.ex");
 const presenceHexes = presenceMatch[1].trim().split(/\s+/).map((h) => h.toLowerCase());
 assert.ok(presenceHexes.length >= 4, `presence palette suspiciously small: ${presenceHexes.length}`);
 for (const h of presenceHexes) hexToRgb(h); // every entry must be a real hex
@@ -189,12 +310,14 @@ assert.ok(
   /\.sheet-ghost\s*\{[^}]*var\(--fg-muted/.test(SRC),
   ".sheet-ghost no longer uses var(--fg-muted) — re-verify ghost text legibility",
 );
-const fgMutedMatches = [...SRC.matchAll(/--fg-muted:\s*(hsl\([^)]*\))/gi)].map((m) => m[1]);
-assert.ok(fgMutedMatches.length >= 2, `expected >=2 --fg-muted declarations, found ${fgMutedMatches.length}`);
-for (const [theme, fgMuted, bg] of [
-  ["dark", fgMutedMatches[0], bgDark],
-  ["light", fgMutedMatches[1], bgLight],
+// --fg-muted is an ALIAS (var(--muted-text)) in both themes, so it is resolved
+// through the same selector-anchored cascade as --bg rather than pattern-matched
+// for an hsl() it no longer literally carries.
+for (const [theme, bg] of [
+  ["dark", bgDark],
+  ["light", bgLight],
 ]) {
+  const fgMuted = token(theme, "fg-muted");
   const ratio = contrast(hslToRgb(fgMuted), bg);
   assert.ok(
     ratio >= 4.5,

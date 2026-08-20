@@ -21,6 +21,9 @@ defmodule BarkparkCloud.Web.RouterRollbackTest do
       fail-closed: wrong-team admin gets the SAME 404 as a nonexistent id;
       unauthenticated → 401; not-live → 409 not_live; transport failure →
       502 instance_unreachable
+    * cch-w54-bl: a BILLING-SUSPENDED box is refused 409 `suspended` BEFORE the
+      relay — zero upstream requests, the credential never on the wire, the pin
+      untouched
   """
   use BarkparkCloud.DataCase, async: true
   use Oban.Testing, repo: BarkparkCloud.Repo
@@ -307,6 +310,42 @@ defmodule BarkparkCloud.Web.RouterRollbackTest do
     end
   end
 
+  describe "POST /v1/barkparks/:id/rollback — billing suspension" do
+    test "SUSPENDED box → 409 suspended; ZERO upstream requests; credential never on the wire; pin untouched" do
+      {user, team} = user_with_team()
+
+      bp =
+        team
+        |> live_barkpark()
+        |> Ecto.Changeset.change(
+          suspended: true,
+          suspended_reason: "billing_lapsed",
+          pinned_release: "v0.2.24"
+        )
+        |> Repo.update!()
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # Program the 202 the box WOULD have answered: a refusal that moved below
+      # the relay would still 409 on some other arm, so the WIRE is the proof.
+      StudioLinkFakeHttpClient.program([instance_202()])
+
+      conn = rollback(bp.id, token)
+
+      # THE WIRE FIRST (cch-w54-bl): nothing reached the instance — the stored
+      # admin credential was never decrypted for a suspended box.
+      assert StudioLinkFakeHttpClient.requests() == []
+
+      assert conn.status == 409
+      assert json_body(conn) == %{"ok" => false, "error" => %{"code" => "suspended"}}
+      refute conn.resp_body =~ @instance_admin_token
+
+      # A refusal re-pins nothing and schedules nothing.
+      assert Registry.get_barkpark(bp.id).pinned_release == "v0.2.24"
+      refute_enqueued(worker: UpdateStatusWorker)
+    end
+  end
+
   describe "POST /v1/barkparks/:id/rollback — auth + team scope" do
     test "a plain team member → 403, instance never called, pin untouched" do
       {_owner, team} = user_with_team()
@@ -341,6 +380,39 @@ defmodule BarkparkCloud.Web.RouterRollbackTest do
 
       # And the instance was never called for either.
       assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    test "a REFUTED box → 409 identity_refused; ZERO upstream requests; never 502 unreachable" do
+      {user, team} = user_with_team()
+
+      bp =
+        team
+        |> live_barkpark()
+        |> Ecto.Changeset.change(
+          update_state: "unknown",
+          update_unavailable_reason: "identity_refused"
+        )
+        |> Repo.update!()
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # The 202 the box WOULD have answered — a refusal that slipped below the
+      # relay could otherwise pass on status alone. There is no pin clause on
+      # the rollback trigger, so the refusal is the ONLY verdict here.
+      StudioLinkFakeHttpClient.program([instance_202()])
+
+      conn = rollback(bp.id, token)
+
+      # THE WIRE FIRST (cch-w60-s4): the stored credential never left the plane.
+      assert StudioLinkFakeHttpClient.requests() == []
+
+      assert conn.status == 409
+      assert json_body(conn) == %{"error" => %{"code" => "identity_refused"}}
+      refute conn.resp_body =~ @instance_admin_token
+
+      # A refusal is not a flip: nothing was pinned and no refresh was queued.
+      assert Registry.get_barkpark(bp.id).pinned_release == nil
+      refute_enqueued(worker: UpdateStatusWorker)
     end
 
     test "no token → 401" do

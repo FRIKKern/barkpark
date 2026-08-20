@@ -1,0 +1,49 @@
+{
+  "grip_id": "v-fleet-frame-reconcile-2026-07-26",
+  "verifier": "v-fleet-frame-reconcile",
+  "wave": "barkpark-tasks-mobile-wave-2026-07-26-seal",
+  "assignment": "archive-fleet-frame build-vs-ratify: (a) does the cold list poll carry archived truth so a client missing a lifecycle frame fully reconciles; (b) can the FleetHub handshake snapshot restate archived state after a hub restart, or is it in-memory-only; (c) does Studio LiveView subscribe to the fleet topic (a third reducer)?",
+  "verdict": "PREMISE PARTLY WRONG. (a) YES — cold poll reconciles completely: the row carries archived_at AND the shelf filter makes absence authoritative. (b) The hub snapshot IS a fresh DB query (StudioChat.fleet_snapshot/1), so it CAN restate archived state — by ABSENCE — after any hub restart; the gap is narrower than believed: only the REPLAY arm (in-ring cursor) is archive-blind, and a hub restart forces the snapshot arm by construction. (c) NO — Studio LiveView subscribes the ACTIVITY topic, never the fleet topic; the fleet wire has exactly two client reducers (internal/chat/herd.go, apps/mobile/src/chat/herd.ts) and NEITHER folds the already-shipped D69h 'title' frame. Net: the unreplayable-frame precedent holds and the cheap arm is real, but ratify-optimistic-only is the honest arm — the only thing a frame buys is sub-poll latency, not correctness.",
+  "recipes": [
+    {
+      "claim": "GET /v1/chat/sessions rows carry archived_at, and the endpoint is shelf-filtered: default returns 39 rows with 0 archived; ?archived=true returns the 1 archived row with a non-null archived_at; ?scope=all is NOT a parameter (identical to default)",
+      "rerun": "T=$(python3 -c \"import json,os;print(json.load(open(os.path.expanduser('~/.config/barkpark/config.json')))['token'])\"); for q in '' '?archived=true' '?scope=all'; do curl -s -H \"Authorization: Bearer $T\" \"https://guerrilla.barkpark.cloud/v1/chat/sessions$q\" | python3 -c \"import json,sys;s=json.load(sys.stdin)['sessions'];print(len(s),sum(1 for x in s if x.get('archived_at')))\"; done"
+    },
+    {
+      "claim": "the fleet SSE connect snapshot EXCLUDES the archived session entirely (id absent, 0 hits) and carries no 'archived' key at all — its tuple is {title,session_id,agent_state,ts}",
+      "rerun": "T=$(python3 -c \"import json,os;print(json.load(open(os.path.expanduser('~/.config/barkpark/config.json')))['token'])\"); A=$(curl -s -H \"Authorization: Bearer $T\" 'https://guerrilla.barkpark.cloud/v1/chat/sessions?archived=true' | python3 -c \"import json,sys;print(json.load(sys.stdin)['sessions'][0]['id'])\"); curl -s --max-time 3 -H \"Authorization: Bearer $T\" 'https://guerrilla.barkpark.cloud/v1/chat/events' > /tmp/fleet.sse; grep -c \"$A\" /tmp/fleet.sse; grep -c archiv /tmp/fleet.sse"
+    },
+    {
+      "claim": "the handshake snapshot is NOT built from hub memory: resolve_handshake returns {:snapshot, epoch, seq, []} with EMPTY entries and the controller emits StudioChat.fleet_snapshot(scope) — a live DB query that applies archived_filter(false)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:api/lib/barkpark/studio_chat/fleet_hub.ex | grep -n 'def resolve_handshake' -A 3 && git show origin/main:api/lib/barkpark_web/controllers/chat_controller.ex | grep -n 'defp emit_fleet_open(conn, :snapshot' -A 3 && git show origin/main:api/lib/barkpark/studio_chat.ex | grep -n 'def fleet_snapshot' -A 3"
+    },
+    {
+      "claim": "set_archived_at/3 broadcasts NOTHING on any topic (a bare Ecto change + Repo.update), and FleetHub subscribes ONLY Recorder.activity_topic() — so a lifecycle frame needs a NEW broadcast at the context seam, not just a hub clause",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:api/lib/barkpark/studio_chat.ex | grep -n 'defp set_archived_at' -A 11 && git show origin/main:api/lib/barkpark/studio_chat/fleet_hub.ex | grep -n 'PubSub.subscribe'"
+    },
+    {
+      "claim": "the literal fleet topic string \"studio_chat:fleet\" appears in exactly ONE file (fleet_hub.ex:59) and no LiveView subscribes it; Studio chat_live subscribes Recorder.activity_topic() and has a catch-all handle_info(_msg)",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -rn '\"studio_chat:fleet\"' api/lib && grep -n 'defp subscribe_activity' -A 4 api/lib/barkpark_web/live/studio/chat_live.ex && grep -n 'def handle_info(_' api/lib/barkpark_web/live/studio/chat_live.ex"
+    },
+    {
+      "claim": "BOTH fleet client reducers fold exactly snapshot/state/heartbeat and NEITHER has a 'title' case — the D69h title frame (server-emitted, charter-ratified) is folded by zero clients, the empirical cost precedent for adding a frame kind",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:apps/mobile/src/chat/herd.ts | grep -n \"case '\" && git show origin/main:internal/chat/herd.go | grep -n 'case \"'"
+    },
+    {
+      "claim": "both client folds are additive-upsert: herdSnapshot iterates the snapshot's sessions and upserts each via herdFlip — a row ABSENT from the snapshot is never removed, so snapshot-by-absence does not by itself evict a stale herd row",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:apps/mobile/src/chat/herd.ts | grep -n 'export function herdSnapshot' -A 8 && git show origin/main:internal/chat/herd.go | grep -n 'func herdSnapshot' -A 10"
+    },
+    {
+      "claim": "charter D28 already RULES on this: 'No fleet frame on archive (proven: no broadcast path exists) — clients remove optimistically on the 200 and reconcile on the next list poll; a lifecycle frame is a filed follow-up, never smuggled in'",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -n 'No fleet frame on archive' .claude/workflows/bp-barkpark-tasks-mobile-charter.md"
+    },
+    {
+      "claim": "no test anywhere asserts that fleet_snapshot excludes archived sessions — fleet_snapshot appears in only two test files and neither mentions 'archiv' in a fleet/snapshot assertion",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && grep -rln fleet_snapshot api/test && grep -rn archiv api/test/barkpark_web/controllers/chat_fleet_events_test.exs | wc -l"
+    },
+    {
+      "claim": "mobile's ChatSessionSummary type omits archived_at even though the server sends it — the ChatScreen.tsx header comment 'the sidebar row carries no archived boolean' is true of the client TYPE, false of the WIRE",
+      "rerun": "cd /Volumes/SATECHI/github/barkpark && git show origin/main:apps/mobile/src/chat/wire.ts | grep -n 'interface ChatSessionSummary' -A 13"
+    }
+  ]
+}

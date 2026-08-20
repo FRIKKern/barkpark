@@ -22,9 +22,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -55,9 +53,9 @@ func hzResolve[T any](ctx context.Context, get func(context.Context, string) (*T
 // resource kind as the payload key so scripts can key on it.
 func hzResDone(out *writer, action, kind string, id any, name string, extra map[string]any) int {
 	payload := map[string]any{
-		"ok":                               true,
-		"action":                           action,
-		strings.ReplaceAll(kind, "-", "_"): map[string]any{"id": id, "name": name},
+		"ok":                  true,
+		"action":              action,
+		hzResPayloadKey(kind): map[string]any{"id": id, "name": name},
 	}
 	for k, v := range extra {
 		payload[k] = v
@@ -66,14 +64,7 @@ func hzResDone(out *writer, action, kind string, id any, name string, extra map[
 		return exitOK
 	}
 	out.outf("✓ %s — %s %s (id %v)", action, kind, name, id)
-	keys := make([]string, 0, len(extra))
-	for k := range extra {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		out.outf("  %s: %s", k, cellString(extra[k]))
-	}
+	hzResPrintExtra(out, extra)
 	return exitOK
 }
 
@@ -97,6 +88,100 @@ func hzCreated(t time.Time) (string, bool) {
 // ---------------------------------------------------------------------------
 // volume
 // ---------------------------------------------------------------------------
+
+// THE VOLUME / NETWORK / FIREWALL OBSERVERS (PDS wave 32, the last of the debt)
+// ----------------------------------------------------------------------------
+// Every hcloud ACTION endpoint returns `{action}` and nothing else, so for the
+// mutating verbs here the SINGLE-RESOURCE GET on the RESOLVED id is the only
+// server-side source there is. Each observer below is handed the FRESH resource
+// and reports what it says — never the flag the operator typed.
+//
+// THE POLARITY IS THE WHOLE POINT (PDS-D415). These plug into hzResObserved,
+// whose (nil, nil) branch REFUSES; hzResDestroyed's means the opposite. Two
+// v2.44 read paths swallow a 404 into `(nil, resp, nil)` verbatim — Zone's
+// getByIDOrName (zone.go) and GetRRSetByNameAndType (zone_rrset.go) — and the
+// hcloud GetByID readers here do the same, which is exactly the shape
+// hzResGoneRead[T] models. Paying any of these with the destroy helper would
+// emit `confirmed_gone:true` on a create.
+//
+// THE PAIRED DIRECTIONS (add-subnet/delete-subnet, add-route/delete-route,
+// apply-to-resource/remove-from-resource, attach/detach) each get an explicit
+// PRESENT and ABSENT observer rather than one predicate with a boolean: NO ARM
+// OF THE RECEIPT CENSUS READS THE DIRECTION BRANCH, so a payment that confirms
+// "present" on both arms of a pair is fully green there. Only the both-direction
+// fakes in hetzner_net_cmd_test.go can catch that, which is why they exist.
+
+// hzVolumeServerID reports the server a volume is attached to. One reader, so
+// the attach and detach observers cannot disagree about what "attached" means.
+func hzVolumeServerID(vol *hcloud.Volume) (int64, bool) {
+	if vol.Server == nil {
+		return 0, false
+	}
+	return vol.Server.ID, true
+}
+
+// hzObserveVolumeCreated reads the create receipt off the create RESPONSE
+// object, which for a create IS server truth: the linux device and the settled
+// status are things nobody typed.
+func hzObserveVolumeCreated(vol *hcloud.Volume) hzResObservation {
+	extra := map[string]any{"size_gb": vol.Size}
+	if vol.Status != "" {
+		extra["status"] = string(vol.Status)
+	}
+	if vol.LinuxDevice != "" {
+		extra["linux_device"] = vol.LinuxDevice
+	}
+	if vol.Location != nil {
+		extra["location"] = vol.Location.Name
+	}
+	return hzResAgrees(extra)
+}
+
+// hzObserveVolumeAttached confirms attach against the RESOLVED server id — a
+// volume's nested server ref carries an id and, on a live read, no name at all
+// (PDS-D399 trap (a)), so the human name rides through the call site's extra.
+func hzObserveVolumeAttached(serverID int64) hzResObserveFn[hcloud.Volume] {
+	return func(vol *hcloud.Volume) hzResObservation {
+		got, attached := hzVolumeServerID(vol)
+		if !attached {
+			return hzResDisagrees("server", "no server at all", fmt.Sprintf("server id %d", serverID))
+		}
+		if got != serverID {
+			return hzResDisagrees("server", fmt.Sprintf("server id %d", got), fmt.Sprintf("server id %d", serverID))
+		}
+		return hzResAgrees(map[string]any{"attached": true, "server_id": got, "status": string(vol.Status)})
+	}
+}
+
+// hzObserveVolumeDetached is the inverse: the volume must now report no server.
+func hzObserveVolumeDetached(vol *hcloud.Volume) hzResObservation {
+	if id, attached := hzVolumeServerID(vol); attached {
+		return hzResDisagrees("server", fmt.Sprintf("STILL attached to server id %d", id), "no server")
+	}
+	return hzResAgrees(map[string]any{"attached": false, "status": string(vol.Status)})
+}
+
+// hzObserveVolumeSize confirms resize by reading the size the volume NOW
+// reports. A volume only grows, so a short read is a real post-condition miss.
+func hzObserveVolumeSize(want int) hzResObserveFn[hcloud.Volume] {
+	return func(vol *hcloud.Volume) hzResObservation {
+		if vol.Size != want {
+			return hzResDisagrees("size_gb", strconv.Itoa(vol.Size), strconv.Itoa(want))
+		}
+		return hzResAgrees(map[string]any{"size_gb": vol.Size})
+	}
+}
+
+// hzObserveVolumeProtection confirms change-protection off the volume's own
+// protection block, not the flag that asked for it.
+func hzObserveVolumeProtection(want bool) hzResObserveFn[hcloud.Volume] {
+	return func(vol *hcloud.Volume) hzResObservation {
+		if vol.Protection.Delete != want {
+			return hzResDisagrees("delete_protection", strconv.FormatBool(vol.Protection.Delete), strconv.FormatBool(want))
+		}
+		return hzResAgrees(map[string]any{"delete_protection": vol.Protection.Delete})
+	}
+}
 
 func runHetznerVolume(out *writer, g globals, args []string) int {
 	if g.help {
@@ -293,14 +378,10 @@ func runHetznerVolumeCreate(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, actions...); werr != nil {
 		return hzFail(out, "create volume "+name+": create action failed", werr)
 	}
-	extra := map[string]any{"size_gb": result.Volume.Size}
-	if result.Volume.LinuxDevice != "" {
-		extra["linux_device"] = result.Volume.LinuxDevice
-	}
-	if result.Volume.Location != nil {
-		extra["location"] = result.Volume.Location.Name
-	}
-	return hzResDone(out, "create", "volume", result.Volume.ID, result.Volume.Name, extra)
+	// CLASS A2: the create RESPONSE object is server truth, so the receipt is
+	// read off it and carries no request-only extra beside it.
+	return hzResObservedResponse(out, "create", "volume", result.Volume.ID, result.Volume.Name,
+		nil, result.Volume, hzObserveVolumeCreated)
 }
 
 func runHetznerVolumeDelete(out *writer, g globals, args []string) int {
@@ -324,7 +405,10 @@ func runHetznerVolumeDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.Volume.Delete(ctx, vol); derr != nil {
 		return hzFail(out, "delete volume "+vol.Name, derr)
 	}
-	return hzResDone(out, "delete", "volume", vol.ID, vol.Name, nil)
+	// PDS-D400: the gone-check binds to vol.ID — the id ALREADY RESOLVED — and
+	// never re-runs `target`, which a volume merely NAMED "42" would hijack.
+	return hzResDestroyed(out, ctx, "delete", "volume", vol.ID, vol.Name, nil,
+		func(c context.Context) (*hcloud.Volume, *hcloud.Response, error) { return hc.Volume.GetByID(c, vol.ID) })
 }
 
 func runHetznerVolumeAttach(out *writer, g globals, args []string) int {
@@ -361,7 +445,13 @@ func runHetznerVolumeAttach(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "attach volume "+vol.Name+": action failed", werr)
 	}
-	return hzResDone(out, "attach", "volume", vol.ID, vol.Name, map[string]any{"server": srv.Name})
+	// The action endpoint returns `{action}` and nothing else, so the
+	// single-resource GET on the RESOLVED id is the only server-side source.
+	// srv.Name rides through `extra` — the sanctioned trap-(a) carve-out: it is
+	// the name the RESOLVE read returned for the id being compared, not argv.
+	return hzResObserved(out, ctx, "attach", "volume", vol.ID, vol.Name, map[string]any{"server": srv.Name},
+		func(c context.Context) (*hcloud.Volume, *hcloud.Response, error) { return hc.Volume.GetByID(c, vol.ID) },
+		hzObserveVolumeAttached(srv.ID))
 }
 
 func runHetznerVolumeDetach(out *writer, g globals, args []string) int {
@@ -386,7 +476,9 @@ func runHetznerVolumeDetach(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "detach volume "+vol.Name+": action failed", werr)
 	}
-	return hzResDone(out, "detach", "volume", vol.ID, vol.Name, nil)
+	return hzResObserved(out, ctx, "detach", "volume", vol.ID, vol.Name, nil,
+		func(c context.Context) (*hcloud.Volume, *hcloud.Response, error) { return hc.Volume.GetByID(c, vol.ID) },
+		hzObserveVolumeDetached)
 }
 
 func runHetznerVolumeResize(out *writer, g globals, args []string) int {
@@ -419,7 +511,9 @@ func runHetznerVolumeResize(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "resize volume "+vol.Name+": action failed", werr)
 	}
-	return hzResDone(out, "resize", "volume", vol.ID, vol.Name, map[string]any{"size_gb": size})
+	return hzResObserved(out, ctx, "resize", "volume", vol.ID, vol.Name, nil,
+		func(c context.Context) (*hcloud.Volume, *hcloud.Response, error) { return hc.Volume.GetByID(c, vol.ID) },
+		hzObserveVolumeSize(size))
 }
 
 // hzProtectionFlag parses the shared change-protection tail: exactly one of
@@ -461,12 +555,175 @@ func runHetznerVolumeChangeProtection(out *writer, g globals, args []string) int
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "change-protection volume "+vol.Name+": action failed", werr)
 	}
-	return hzResDone(out, "change-protection", "volume", vol.ID, vol.Name, map[string]any{"delete_protection": protect})
+	return hzResObserved(out, ctx, "change-protection", "volume", vol.ID, vol.Name, nil,
+		func(c context.Context) (*hcloud.Volume, *hcloud.Response, error) { return hc.Volume.GetByID(c, vol.ID) },
+		hzObserveVolumeProtection(protect))
 }
 
 // ---------------------------------------------------------------------------
 // network
 // ---------------------------------------------------------------------------
+
+// hzNetIPNet renders a *net.IPNet for a receipt, tolerating the nil the SDK
+// hands back for a field the API omitted.
+func hzNetIPNet(n *net.IPNet) string {
+	if n == nil {
+		return ""
+	}
+	return n.String()
+}
+
+// hzNetworkSubnetSummary describes the subnets a network NOW carries, so a
+// refusal says what IS there instead of only what is not.
+func hzNetworkSubnetSummary(netw *hcloud.Network) []string {
+	seen := make([]string, 0, len(netw.Subnets))
+	for _, s := range netw.Subnets {
+		seen = append(seen, fmt.Sprintf("%s %s in %s", s.Type, hzNetIPNet(s.IPRange), s.NetworkZone))
+	}
+	return seen
+}
+
+// hzNetworkRouteSummary is the same for routes.
+func hzNetworkRouteSummary(netw *hcloud.Network) []string {
+	seen := make([]string, 0, len(netw.Routes))
+	for _, r := range netw.Routes {
+		seen = append(seen, fmt.Sprintf("%s via %s", hzNetIPNet(r.Destination), r.Gateway))
+	}
+	return seen
+}
+
+// hzNetworkSubnetMatch identifies ONE subnet. add-subnet may omit --ip-range
+// (the API picks one), so an empty ipRange matches on type+zone alone and the
+// receipt reports the range the API CHOSE.
+type hzNetworkSubnetMatch struct {
+	subnetType  hcloud.NetworkSubnetType
+	networkZone hcloud.NetworkZone
+	ipRange     string
+	describe    string
+}
+
+func (m hzNetworkSubnetMatch) matches(s hcloud.NetworkSubnet) bool {
+	if m.ipRange != "" {
+		return hzNetIPNet(s.IPRange) == m.ipRange
+	}
+	return s.Type == m.subnetType && s.NetworkZone == m.networkZone
+}
+
+// hzObserveNetworkCreated reads the create receipt off the create RESPONSE
+// object. The ADVISORY pair is the POST-hzCIDR token (PDS-D432 + wave 32):
+// hzCIDR is bare net.ParseCIDR and MASKS HOST BITS, so enrolling the raw
+// --ip-range flag would advise `you asked for 10.0.0.5/16, the server reports
+// 10.0.0.0/16` on a create that did exactly what was asked. The normalised
+// token is what actually left the client, so that is what is compared.
+func hzObserveNetworkCreated(askedIPRange string) hzResObserveFn[hcloud.Network] {
+	return func(netw *hcloud.Network) hzResObservation {
+		observed := hzNetIPNet(netw.IPRange)
+		extra := map[string]any{"subnets": len(netw.Subnets), "routes": len(netw.Routes)}
+		if observed != "" {
+			extra["ip_range"] = observed
+		}
+		return hzResAgreesWith(extra, hzResDivergence(
+			hzResAsked{"ip_range", askedIPRange, observed},
+		))
+	}
+}
+
+// hzObserveNetworkIPRange confirms change-ip-range against the range the
+// network NOW reports.
+func hzObserveNetworkIPRange(want string) hzResObserveFn[hcloud.Network] {
+	return func(netw *hcloud.Network) hzResObservation {
+		observed := hzNetIPNet(netw.IPRange)
+		if observed != want {
+			return hzResDisagrees("ip_range", strconv.Quote(observed), strconv.Quote(want))
+		}
+		return hzResAgrees(map[string]any{"ip_range": observed})
+	}
+}
+
+// hzObserveNetworkSubnetPresent confirms add-subnet: the network NOW carries the
+// subnet, and the receipt reports the range the API settled on.
+func hzObserveNetworkSubnetPresent(m hzNetworkSubnetMatch) hzResObserveFn[hcloud.Network] {
+	return func(netw *hcloud.Network) hzResObservation {
+		for _, s := range netw.Subnets {
+			if !m.matches(s) {
+				continue
+			}
+			return hzResAgrees(map[string]any{
+				"subnet_observed": true,
+				"type":            string(s.Type),
+				"network_zone":    string(s.NetworkZone),
+				"ip_range":        hzNetIPNet(s.IPRange),
+				"subnets":         len(netw.Subnets),
+			})
+		}
+		return hzResDisagrees("subnets", fmt.Sprintf("%v", hzNetworkSubnetSummary(netw)), m.describe)
+	}
+}
+
+// hzObserveNetworkSubnetAbsent is delete-subnet's half — the same containment
+// predicate, INVERTED. Separate functions, not one flag, because no census arm
+// reads a direction branch.
+func hzObserveNetworkSubnetAbsent(m hzNetworkSubnetMatch) hzResObserveFn[hcloud.Network] {
+	return func(netw *hcloud.Network) hzResObservation {
+		for _, s := range netw.Subnets {
+			if m.matches(s) {
+				return hzResDisagrees("subnets", m.describe+" is STILL present", "no "+m.describe)
+			}
+		}
+		return hzResAgrees(map[string]any{
+			"subnet_absent": true,
+			"subnets":       len(netw.Subnets),
+			"subnet_list":   hzNetworkSubnetSummary(netw),
+		})
+	}
+}
+
+// hzNetworkRouteMatches binds a route on the NORMALISED destination and the
+// gateway, both as the client sent them.
+func hzNetworkRouteMatches(destination, gateway string) func(hcloud.NetworkRoute) bool {
+	return func(r hcloud.NetworkRoute) bool {
+		return hzNetIPNet(r.Destination) == destination && r.Gateway.String() == gateway
+	}
+}
+
+// hzObserveNetworkRoutePresent confirms add-route.
+func hzObserveNetworkRoutePresent(destination, gateway string) hzResObserveFn[hcloud.Network] {
+	match := hzNetworkRouteMatches(destination, gateway)
+	return func(netw *hcloud.Network) hzResObservation {
+		for _, r := range netw.Routes {
+			if !match(r) {
+				continue
+			}
+			return hzResAgrees(map[string]any{
+				"route_observed": true,
+				"destination":    hzNetIPNet(r.Destination),
+				"gateway":        r.Gateway.String(),
+				"routes":         len(netw.Routes),
+			})
+		}
+		return hzResDisagrees("routes", fmt.Sprintf("%v", hzNetworkRouteSummary(netw)),
+			fmt.Sprintf("a route to %s via %s", destination, gateway))
+	}
+}
+
+// hzObserveNetworkRouteAbsent confirms delete-route.
+func hzObserveNetworkRouteAbsent(destination, gateway string) hzResObserveFn[hcloud.Network] {
+	match := hzNetworkRouteMatches(destination, gateway)
+	return func(netw *hcloud.Network) hzResObservation {
+		for _, r := range netw.Routes {
+			if match(r) {
+				return hzResDisagrees("routes",
+					fmt.Sprintf("the route to %s via %s is STILL present", destination, gateway),
+					fmt.Sprintf("no route to %s via %s", destination, gateway))
+			}
+		}
+		return hzResAgrees(map[string]any{
+			"route_absent": true,
+			"routes":       len(netw.Routes),
+			"route_list":   hzNetworkRouteSummary(netw),
+		})
+	}
+}
 
 func runHetznerNetwork(out *writer, g globals, args []string) int {
 	if g.help {
@@ -657,7 +914,23 @@ func runHetznerNetworkCreate(out *writer, g globals, args []string) int {
 	if err != nil {
 		return hzFail(out, "create network "+name, err)
 	}
-	return hzResDone(out, "create", "network", netw.ID, netw.Name, map[string]any{"ip_range": ipRange.String()})
+	// THE EMPTY-ID COLLAPSE. hcloud-go's generated NetworkFromSchema takes a
+	// schema VALUE and returns a freshly-allocated pointer, so `netw == nil` is
+	// unreachable and the naive paint would report confirmed_present:true with
+	// empty observed fields on a response carrying no network at all. Collapsing
+	// an id-less object to nil makes hzResObservedResponse's refusal REACHABLE —
+	// and it also removes the nil dereference this line used to carry.
+	obj := netw
+	var id any = name
+	observedName := name
+	if obj != nil && obj.ID == 0 {
+		obj = nil
+	}
+	if obj != nil {
+		id, observedName = obj.ID, obj.Name
+	}
+	return hzResObservedResponse(out, "create", "network", id, observedName, nil, obj,
+		hzObserveNetworkCreated(ipRange.String()))
 }
 
 func runHetznerNetworkDelete(out *writer, g globals, args []string) int {
@@ -681,7 +954,10 @@ func runHetznerNetworkDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.Network.Delete(ctx, netw); derr != nil {
 		return hzFail(out, "delete network "+netw.Name, derr)
 	}
-	return hzResDone(out, "delete", "network", netw.ID, netw.Name, nil)
+	return hzResDestroyed(out, ctx, "delete", "network", netw.ID, netw.Name, nil,
+		func(c context.Context) (*hcloud.Network, *hcloud.Response, error) {
+			return hc.Network.GetByID(c, netw.ID)
+		})
 }
 
 func runHetznerNetworkAddSubnet(out *writer, g globals, args []string) int {
@@ -724,11 +1000,23 @@ func runHetznerNetworkAddSubnet(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "add-subnet to network "+netw.Name+": action failed", werr)
 	}
-	extra := map[string]any{"type": string(subnetType), "network_zone": a.val("network-zone")}
-	if subnet.IPRange != nil {
-		extra["ip_range"] = subnet.IPRange.String()
+	// --ip-range is OPTIONAL here: when it is omitted the API picks the range,
+	// so the match falls back to (type, zone) and the receipt reports whichever
+	// range the network now carries.
+	match := hzNetworkSubnetMatch{
+		subnetType:  subnetType,
+		networkZone: hcloud.NetworkZone(a.val("network-zone")),
+		ipRange:     hzNetIPNet(subnet.IPRange),
+		describe:    fmt.Sprintf("a %s subnet in %s", subnetType, a.val("network-zone")),
 	}
-	return hzResDone(out, "add-subnet", "network", netw.ID, netw.Name, extra)
+	if match.ipRange != "" {
+		match.describe = fmt.Sprintf("the subnet %s", match.ipRange)
+	}
+	return hzResObserved(out, ctx, "add-subnet", "network", netw.ID, netw.Name, nil,
+		func(c context.Context) (*hcloud.Network, *hcloud.Response, error) {
+			return hc.Network.GetByID(c, netw.ID)
+		},
+		hzObserveNetworkSubnetPresent(match))
 }
 
 func runHetznerNetworkDeleteSubnet(out *writer, g globals, args []string) int {
@@ -763,7 +1051,14 @@ func runHetznerNetworkDeleteSubnet(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "delete-subnet from network "+netw.Name+": action failed", werr)
 	}
-	return hzResDone(out, "delete-subnet", "network", netw.ID, netw.Name, map[string]any{"ip_range": ipRange.String()})
+	return hzResObserved(out, ctx, "delete-subnet", "network", netw.ID, netw.Name, nil,
+		func(c context.Context) (*hcloud.Network, *hcloud.Response, error) {
+			return hc.Network.GetByID(c, netw.ID)
+		},
+		hzObserveNetworkSubnetAbsent(hzNetworkSubnetMatch{
+			ipRange:  ipRange.String(),
+			describe: "the subnet " + ipRange.String(),
+		}))
 }
 
 // runHetznerNetworkRoute is the shared executor for add-route/delete-route —
@@ -808,10 +1103,20 @@ func runHetznerNetworkRoute(out *writer, g globals, verb string, args []string) 
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, verb+" on network "+netw.Name+": action failed", werr)
 	}
-	return hzResDone(out, verb, "network", netw.ID, netw.Name, map[string]any{
-		"destination": dest.String(),
-		"gateway":     gw.String(),
-	})
+	// THE DIRECTION BRANCH THE CENSUS CANNOT SEE. This one call site carries two
+	// (kind, action) keys, and every census arm reads it as one — a payment that
+	// confirmed "route present" on BOTH arms would be fully green there. The
+	// observer is therefore chosen by the SAME `verb` that chose the API call,
+	// and TestHetznerNetworkRouteBothDirections pins both halves.
+	observe := hzObserveNetworkRoutePresent(dest.String(), gw.String())
+	if verb != "add-route" {
+		observe = hzObserveNetworkRouteAbsent(dest.String(), gw.String())
+	}
+	return hzResObserved(out, ctx, verb, "network", netw.ID, netw.Name, nil,
+		func(c context.Context) (*hcloud.Network, *hcloud.Response, error) {
+			return hc.Network.GetByID(c, netw.ID)
+		},
+		observe)
 }
 
 func runHetznerNetworkChangeIPRange(out *writer, g globals, args []string) int {
@@ -844,12 +1149,154 @@ func runHetznerNetworkChangeIPRange(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "change-ip-range on network "+netw.Name+": action failed", werr)
 	}
-	return hzResDone(out, "change-ip-range", "network", netw.ID, netw.Name, map[string]any{"ip_range": ipRange.String()})
+	return hzResObserved(out, ctx, "change-ip-range", "network", netw.ID, netw.Name, nil,
+		func(c context.Context) (*hcloud.Network, *hcloud.Response, error) {
+			return hc.Network.GetByID(c, netw.ID)
+		},
+		hzObserveNetworkIPRange(ipRange.String()))
 }
 
 // ---------------------------------------------------------------------------
 // firewall
 // ---------------------------------------------------------------------------
+
+// hzFirewallResourceMatch identifies ONE firewall attachment across the
+// server|label_selector union WITHOUT ever reading a field the resource's Type
+// does not have (PDS-D399 trap (b): the union is flattened into one struct, so
+// reading .Server on a label-selector resource yields a ZERO VALUE, not an
+// error — a confident false "confirmed").
+type hzFirewallResourceMatch struct {
+	kind     hcloud.FirewallResourceType
+	serverID int64
+	selector string
+	describe string
+}
+
+func hzFirewallServerMatch(srv *hcloud.Server) hzFirewallResourceMatch {
+	return hzFirewallResourceMatch{
+		kind: hcloud.FirewallResourceTypeServer, serverID: srv.ID,
+		describe: fmt.Sprintf("an attachment to server id %d", srv.ID),
+	}
+}
+
+func hzFirewallSelectorMatch(selector string) hzFirewallResourceMatch {
+	return hzFirewallResourceMatch{
+		kind: hcloud.FirewallResourceTypeLabelSelector, selector: selector,
+		describe: fmt.Sprintf("a label-selector attachment for %q", selector),
+	}
+}
+
+// matches switches on Type BEFORE any pointer is dereferenced.
+func (m hzFirewallResourceMatch) matches(r hcloud.FirewallResource) bool {
+	if r.Type != m.kind {
+		return false
+	}
+	switch m.kind {
+	case hcloud.FirewallResourceTypeServer:
+		return r.Server != nil && r.Server.ID == m.serverID
+	case hcloud.FirewallResourceTypeLabelSelector:
+		return r.LabelSelector != nil && r.LabelSelector.Selector == m.selector
+	default:
+		return false
+	}
+}
+
+// hzFirewallAppliedSummary describes what the firewall is NOW applied to, by
+// union arm, so a refusal says what IS there.
+func hzFirewallAppliedSummary(fw *hcloud.Firewall) []string {
+	seen := make([]string, 0, len(fw.AppliedTo))
+	for _, r := range fw.AppliedTo {
+		switch r.Type {
+		case hcloud.FirewallResourceTypeServer:
+			if r.Server != nil {
+				seen = append(seen, fmt.Sprintf("server id %d", r.Server.ID))
+				continue
+			}
+			seen = append(seen, "server (unreadable)")
+		case hcloud.FirewallResourceTypeLabelSelector:
+			if r.LabelSelector != nil {
+				seen = append(seen, fmt.Sprintf("label_selector %q", r.LabelSelector.Selector))
+				continue
+			}
+			seen = append(seen, "label_selector (unreadable)")
+		default:
+			seen = append(seen, string(r.Type))
+		}
+	}
+	return seen
+}
+
+// hzObserveFirewallCreated reads the create receipt off the create RESPONSE
+// object. Its ADVISORY pair is `rule_count`, and the GRADE is stated where a
+// reader will meet it: EQUAL COUNTS DO NOT MEAN EQUAL RULES. A count is what a
+// create response can be compared on cheaply and honestly; asserting rule
+// EQUALITY would need a normalising comparison of the whole rule set, which the
+// API is free to reorder and canonicalise. So the count is reported as an
+// observation, the mismatch is advisory (the API accepted the create), and the
+// receipt names the field `rule_count` rather than `rules` — the old key was a
+// pure argv echo of len(rules).
+func hzObserveFirewallCreated(askedRuleCount string) hzResObserveFn[hcloud.Firewall] {
+	return func(fw *hcloud.Firewall) hzResObservation {
+		return hzResAgreesWith(map[string]any{
+			"rule_count":  len(fw.Rules),
+			"applied_to":  len(fw.AppliedTo),
+			"rule_grade":  "COUNT — equal counts do not mean equal rules",
+			"rule_source": "the create response",
+		}, hzResDivergence(
+			hzResAsked{"rule_count", askedRuleCount, strconv.Itoa(len(fw.Rules))},
+		))
+	}
+}
+
+// hzObserveFirewallRuleCount confirms set-rules. set-rules REPLACES the whole
+// set, so a differing count is a genuine post-condition miss and refuses — but
+// the grade is still COUNT, and the receipt says so rather than implying the
+// rules were compared.
+func hzObserveFirewallRuleCount(want int) hzResObserveFn[hcloud.Firewall] {
+	return func(fw *hcloud.Firewall) hzResObservation {
+		if len(fw.Rules) != want {
+			return hzResDisagrees("rule_count", strconv.Itoa(len(fw.Rules)), strconv.Itoa(want))
+		}
+		return hzResAgrees(map[string]any{
+			"rule_count": len(fw.Rules),
+			"rule_grade": "COUNT — equal counts do not mean equal rules",
+		})
+	}
+}
+
+// hzObserveFirewallApplied confirms apply-to-resource.
+func hzObserveFirewallApplied(m hzFirewallResourceMatch) hzResObserveFn[hcloud.Firewall] {
+	return func(fw *hcloud.Firewall) hzResObservation {
+		for _, r := range fw.AppliedTo {
+			if !m.matches(r) {
+				continue
+			}
+			return hzResAgrees(map[string]any{
+				"attachment_observed": true,
+				"attachment_type":     string(r.Type),
+				"applied_to":          len(fw.AppliedTo),
+			})
+		}
+		return hzResDisagrees("applied_to", fmt.Sprintf("%v", hzFirewallAppliedSummary(fw)), m.describe)
+	}
+}
+
+// hzObserveFirewallRemoved is remove-from-resource's half — the same predicate,
+// INVERTED, and a separate function because no census arm reads the direction.
+func hzObserveFirewallRemoved(m hzFirewallResourceMatch) hzResObserveFn[hcloud.Firewall] {
+	return func(fw *hcloud.Firewall) hzResObservation {
+		for _, r := range fw.AppliedTo {
+			if m.matches(r) {
+				return hzResDisagrees("applied_to", m.describe+" is STILL attached", "no "+m.describe)
+			}
+		}
+		return hzResAgrees(map[string]any{
+			"attachment_absent": true,
+			"applied_to":        len(fw.AppliedTo),
+			"applied_to_list":   hzFirewallAppliedSummary(fw),
+		})
+	}
+}
 
 func runHetznerFirewall(out *writer, g globals, args []string) int {
 	if g.help {
@@ -1104,7 +1551,11 @@ func runHetznerFirewallCreate(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Actions...); werr != nil {
 		return hzFail(out, "create firewall "+name+": create action failed", werr)
 	}
-	return hzResDone(out, "create", "firewall", result.Firewall.ID, result.Firewall.Name, map[string]any{"rules": len(rules)})
+	// CLASS A2. The nil guard above is the file's existing one and stays; a
+	// second nil check here would be unreachable (the generated converter always
+	// allocates), so hzResObservedResponse is handed the object directly.
+	return hzResObservedResponse(out, "create", "firewall", result.Firewall.ID, result.Firewall.Name,
+		nil, result.Firewall, hzObserveFirewallCreated(strconv.Itoa(len(rules))))
 }
 
 func runHetznerFirewallDelete(out *writer, g globals, args []string) int {
@@ -1128,7 +1579,10 @@ func runHetznerFirewallDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.Firewall.Delete(ctx, fw); derr != nil {
 		return hzFail(out, "delete firewall "+fw.Name, derr)
 	}
-	return hzResDone(out, "delete", "firewall", fw.ID, fw.Name, nil)
+	return hzResDestroyed(out, ctx, "delete", "firewall", fw.ID, fw.Name, nil,
+		func(c context.Context) (*hcloud.Firewall, *hcloud.Response, error) {
+			return hc.Firewall.GetByID(c, fw.ID)
+		})
 }
 
 func runHetznerFirewallSetRules(out *writer, g globals, args []string) int {
@@ -1161,7 +1615,11 @@ func runHetznerFirewallSetRules(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, actions...); werr != nil {
 		return hzFail(out, "set-rules on firewall "+fw.Name+": action failed", werr)
 	}
-	return hzResDone(out, "set-rules", "firewall", fw.ID, fw.Name, map[string]any{"rules": len(rules)})
+	return hzResObserved(out, ctx, "set-rules", "firewall", fw.ID, fw.Name, nil,
+		func(c context.Context) (*hcloud.Firewall, *hcloud.Response, error) {
+			return hc.Firewall.GetByID(c, fw.ID)
+		},
+		hzObserveFirewallRuleCount(len(rules)))
 }
 
 // runHetznerFirewallResource is the shared executor for apply-to-resource and
@@ -1190,6 +1648,7 @@ func runHetznerFirewallResource(out *writer, g globals, verb string, args []stri
 	}
 
 	var resource hcloud.FirewallResource
+	var match hzFirewallResourceMatch
 	extra := map[string]any{}
 	if s := a.val("server"); s != "" {
 		srv, rerr := resolveHzServer(ctx, hc, s)
@@ -1200,13 +1659,17 @@ func runHetznerFirewallResource(out *writer, g globals, verb string, args []stri
 			Type:   hcloud.FirewallResourceTypeServer,
 			Server: &hcloud.FirewallResourceServer{ID: srv.ID},
 		}
+		// Trap (a): the nested server ref carries an id and no name, so the
+		// human name rides through `extra` while the match binds on the id.
 		extra["server"] = srv.Name
+		match = hzFirewallServerMatch(srv)
 	} else {
 		resource = hcloud.FirewallResource{
 			Type:          hcloud.FirewallResourceTypeLabelSelector,
 			LabelSelector: &hcloud.FirewallResourceLabelSelector{Selector: a.val("label-selector")},
 		}
 		extra["label_selector"] = a.val("label-selector")
+		match = hzFirewallSelectorMatch(a.val("label-selector"))
 	}
 
 	var actions []*hcloud.Action
@@ -1221,7 +1684,17 @@ func runHetznerFirewallResource(out *writer, g globals, verb string, args []stri
 	if werr := hzWait(ctx, hc, actions...); werr != nil {
 		return hzFail(out, verb+" on firewall "+fw.Name+": action failed", werr)
 	}
-	return hzResDone(out, verb, "firewall", fw.ID, fw.Name, extra)
+	// THE SECOND DIRECTION BRANCH THE CENSUS CANNOT SEE — same shape as
+	// runHetznerNetworkRoute above, same reason, same both-direction fake.
+	observe := hzObserveFirewallApplied(match)
+	if verb != "apply-to-resource" {
+		observe = hzObserveFirewallRemoved(match)
+	}
+	return hzResObserved(out, ctx, verb, "firewall", fw.ID, fw.Name, extra,
+		func(c context.Context) (*hcloud.Firewall, *hcloud.Response, error) {
+			return hc.Firewall.GetByID(c, fw.ID)
+		},
+		observe)
 }
 
 // ---------------------------------------------------------------------------

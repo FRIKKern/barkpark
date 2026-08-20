@@ -1,12 +1,18 @@
 package cloudclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -621,25 +627,81 @@ func TestDeployOmitsEmptyFields(t *testing.T) {
 	}
 }
 
-// TestListDeployments: GET /v1/sites/:id/deployments newest-first.
+// TestListDeployments: GET /v1/sites/:id/deployments newest-first, with no
+// query string when the caller asks for no window.
 func TestListDeployments(t *testing.T) {
-	var gotPath string
+	var gotPath, gotQuery string
 	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
 		_, _ = io.WriteString(w, `{"deployments":[
 			{"id":"dep-2","site_id":"site-1","status":"live","image_tag":"sha:b","inserted_at":"2026-06-26T02:00:00Z"},
 			{"id":"dep-1","site_id":"site-1","status":"failed","failure_reason":"boom","inserted_at":"2026-06-26T01:00:00Z"}
 		]}`)
 	})
-	ds, err := c.ListDeployments(context.Background(), "site-1")
+	page, err := c.ListDeployments(context.Background(), "site-1", DeploymentQuery{})
 	if err != nil {
 		t.Fatalf("ListDeployments: %v", err)
 	}
 	if gotPath != "/v1/sites/site-1/deployments" {
 		t.Fatalf("hit %q, want /v1/sites/site-1/deployments", gotPath)
 	}
-	if len(ds) != 2 || ds[0].Status != "live" || ds[1].FailureReason != "boom" {
+	if gotQuery != "" {
+		t.Fatalf("zero-value query must send NO query string; got %q", gotQuery)
+	}
+	ds := page.Deployments
+	if len(ds) != 2 || ds[0].Status != "live" {
 		t.Fatalf("decoded deployments = %+v", ds)
+	}
+	if ds[1].FailureReason == nil || *ds[1].FailureReason != "boom" {
+		t.Fatalf("failure_reason not decoded: %+v", ds[1])
+	}
+	// The absent key must stay absent — a nil, not an empty string that a
+	// render path would print as a measured value.
+	if ds[0].FailureReason != nil {
+		t.Fatalf("a row with no failure_reason must decode nil, got %q", *ds[0].FailureReason)
+	}
+	if page.NextCursor != "" {
+		t.Fatalf("no next_cursor on the wire must be \"\", got %q", page.NextCursor)
+	}
+}
+
+// TestListDeploymentsWindowAndCursor: deploy-reliability W9. The call used to
+// send no query at all, so it could never page past the server's default 100 —
+// and every rate computed from those rows was a rate over an unstated window.
+func TestListDeploymentsWindowAndCursor(t *testing.T) {
+	var gotQuery string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = io.WriteString(w, `{"deployments":[
+			{"id":"dep-9","site_id":"site-1","status":"failed","failure_class":"BOX_AT_CAPACITY_DEFERRED","stage":"queue","trigger":"push","content_rev":"rev-7","inserted_at":"2026-06-26T02:00:00Z"}
+		],"next_cursor":"cur-abc"}`)
+	})
+	page, err := c.ListDeployments(context.Background(), "site-1", DeploymentQuery{Limit: 250, Before: "cur-prev"})
+	if err != nil {
+		t.Fatalf("ListDeployments: %v", err)
+	}
+	if gotQuery != "before=cur-prev&limit=250" {
+		t.Fatalf("query = %q, want before=cur-prev&limit=250", gotQuery)
+	}
+	if page.NextCursor != "cur-abc" {
+		t.Fatalf("next_cursor = %q, want cur-abc", page.NextCursor)
+	}
+	d := page.Deployments[0]
+	for name, got := range map[string]*string{
+		"failure_class": d.FailureClass,
+		"stage":         d.Stage,
+		"trigger":       d.Trigger,
+		"content_rev":   d.ContentRev,
+	} {
+		if got == nil {
+			t.Fatalf("%s decoded nil — the key was on the wire", name)
+		}
+	}
+	if *d.FailureClass != "BOX_AT_CAPACITY_DEFERRED" {
+		t.Fatalf("failure_class = %q", *d.FailureClass)
+	}
+	if d.BecameLiveAt != nil {
+		t.Fatalf("became_live_at absent on the wire must be nil, got %q", *d.BecameLiveAt)
 	}
 }
 
@@ -697,53 +759,6 @@ func TestAddDomain(t *testing.T) {
 	}
 }
 
-// TestUploadArtifact exercises the streaming tarball upload (P7).
-func TestUploadArtifact(t *testing.T) {
-	var gotPath, gotCT, gotAuth string
-	var gotBody []byte
-	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotCT = r.Header.Get("Content-Type")
-		gotAuth = r.Header.Get("Authorization")
-		gotBody, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusCreated)
-		_, _ = io.WriteString(w, `{"artifact_url":"file:///tmp/x.tar.gz","bytes":7,"filename":"x.tar.gz"}`)
-	})
-
-	body := strings.NewReader("hello!\n")
-	up, err := c.UploadArtifact(context.Background(), "site-1", body)
-	if err != nil {
-		t.Fatalf("UploadArtifact: %v", err)
-	}
-	if gotPath != "/v1/sites/site-1/artifact" {
-		t.Fatalf("hit %q, want /v1/sites/site-1/artifact", gotPath)
-	}
-	if gotCT != "application/octet-stream" {
-		t.Fatalf("content-type = %q, want application/octet-stream", gotCT)
-	}
-	if gotAuth != "Bearer sess-abc" {
-		t.Fatalf("auth = %q, want Bearer sess-abc", gotAuth)
-	}
-	if string(gotBody) != "hello!\n" {
-		t.Fatalf("body = %q, want %q", string(gotBody), "hello!\n")
-	}
-	if up.ArtifactURL != "file:///tmp/x.tar.gz" || up.Bytes != 7 || up.Filename != "x.tar.gz" {
-		t.Fatalf("decoded ArtifactUpload = %+v", up)
-	}
-}
-
-// TestUploadArtifact413 surfaces the control plane's 413 too-large response.
-func TestUploadArtifact413(t *testing.T) {
-	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusRequestEntityTooLarge)
-		_, _ = io.WriteString(w, `{"error":"artifact_too_large","max_bytes":104857600}`)
-	})
-	_, err := c.UploadArtifact(context.Background(), "site-1", strings.NewReader("x"))
-	if err == nil || !strings.Contains(err.Error(), "artifact_too_large") {
-		t.Fatalf("413 should surface artifact_too_large; got %v", err)
-	}
-}
-
 // slowReader delivers its payload after a fixed delay, forcing the request body
 // stream to outlast a wall-clock http.Client.Timeout.
 type slowReader struct {
@@ -761,40 +776,51 @@ func (s *slowReader) Read(p []byte) (int, error) {
 	return copy(p, s.data), nil
 }
 
-// TestUploadArtifactNoWallClockCap pins the fix: the upload path must NOT carry
-// an absolute http.Client.Timeout (which ctx cannot extend), so a body that
-// streams longer than such a cap still completes. A client whose Timeout is set
-// (mimicking the old shared 30s DefaultTimeout, scaled down) dies mid-stream;
-// the production path (nil HTTP → no Timeout) rides the ctx only and succeeds.
-func TestUploadArtifactNoWallClockCap(t *testing.T) {
+// TestUploadDeploymentArtifactNoWallClockCap pins a property that outlived the
+// route it was first written against: an upload path must NOT carry an absolute
+// http.Client.Timeout, because that is a deadline over the whole body stream and
+// ctx cannot extend it — a big artifact on a slow link would die mid-stream with
+// a deadline the caller never asked for.
+//
+// site-spawner W10: this was TestUploadArtifactNoWallClockCap, aimed at the
+// retired site-scoped upload. The property is REPOINTED, not dropped, because
+// UploadDeploymentArtifact is now the only upload in the client and inherited the
+// same nil-HTTP-means-no-cap construction.
+func TestUploadDeploymentArtifactNoWallClockCap(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusCreated)
-		_, _ = io.WriteString(w, `{"artifact_url":"file:///tmp/x.tar.gz","bytes":7,"filename":"x.tar.gz"}`)
+		_, _ = io.WriteString(w, `{"bytes":7}`)
 	}))
 	t.Cleanup(srv.Close)
 
+	slow := func() *slowReader {
+		return &slowReader{data: []byte("hello!\n"), delay: 250 * time.Millisecond}
+	}
+
 	// A wall-clock-capped client kills the slow upload — the pre-fix behavior.
 	capped := &Client{BaseURL: srv.URL, Token: "t", HTTP: &http.Client{Timeout: 50 * time.Millisecond}}
-	if _, err := capped.UploadArtifact(context.Background(), "s", &slowReader{data: []byte("hello!\n"), delay: 250 * time.Millisecond}); err == nil {
+	if _, err := capped.UploadDeploymentArtifact(context.Background(), "s", "dep-1", slow(), 7, "abc"); err == nil {
 		t.Fatal("a wall-clock-capped client must kill an upload slower than its Timeout")
 	}
 
 	// The production path (nil HTTP, no absolute Timeout) completes regardless.
 	uncapped := &Client{BaseURL: srv.URL, Token: "t"}
-	up, err := uncapped.UploadArtifact(context.Background(), "s", &slowReader{data: []byte("hello!\n"), delay: 250 * time.Millisecond})
+	up, err := uncapped.UploadDeploymentArtifact(context.Background(), "s", "dep-1", slow(), 7, "abc")
 	if err != nil {
 		t.Fatalf("nil-HTTP upload must have no wall-clock cap: %v", err)
 	}
-	if up.ArtifactURL != "file:///tmp/x.tar.gz" {
+	if up.Bytes != 7 {
 		t.Fatalf("decoded ArtifactUpload = %+v", up)
 	}
 }
 
-// TestUploadArtifactNilBody refuses a nil reader (a misuse of the SDK).
-func TestUploadArtifactNilBody(t *testing.T) {
+// TestUploadDeploymentArtifactNilBody refuses a nil reader (a misuse of the SDK).
+// Repointed from TestUploadArtifactNilBody in site-spawner W10 — the same misuse,
+// on the surviving upload.
+func TestUploadDeploymentArtifactNilBody(t *testing.T) {
 	c := &Client{BaseURL: "http://x", Token: "t"}
-	if _, err := c.UploadArtifact(context.Background(), "site-1", nil); err == nil {
+	if _, err := c.UploadDeploymentArtifact(context.Background(), "site-1", "dep-1", nil, 7, "abc"); err == nil {
 		t.Fatal("nil body must error")
 	}
 }
@@ -951,4 +977,149 @@ func TestVerifyInstance401KeepsUnauthorizedPrefix(t *testing.T) {
 	if !strings.HasPrefix(err.Error(), "unauthorized:") {
 		t.Fatalf("error = %q, want the unauthorized: prefix", err.Error())
 	}
+}
+
+// --- FleetDeployCensus per-call timeout (dr-w33-s2) -------------------------
+//
+// The census aggregates the whole deploy ledger over the caller's window, so its
+// latency grows with the window's WIDTH. On the shared 30s DefaultTimeout the
+// reader could not reach the window that contains the epic's own never-covered
+// production rows (27 days back): the plane answered 200 in 57.9s under curl
+// while the CLI died on `Client.Timeout exceeded while awaiting headers`.
+//
+// A wall-clock difference of 30s vs 90s is not observable in a unit test without
+// actually waiting, so the install is pinned STRUCTURALLY (go/ast over this
+// package's own source, the same technique as internal/cli's resource census):
+// delete the install line and this test reds. The behavioral half — that the
+// copy-the-client pattern still honors an injected client untouched — is pinned
+// by TestFleetDeployCensusHonorsInjectedClient below, which is the real
+// regression risk of `cc := *c`.
+
+// widestMeasuredCensus is the slowest window the live control plane was
+// observed answering HTTP 200 on 2026-08-09 — the 27-day window, the narrowest
+// one containing the epic's 3 never-covered production rows. It is the FLOOR the
+// cap has to clear; anything at or below it puts the exit gauge's own number
+// back out of reach.
+const widestMeasuredCensus = 58 * time.Second
+
+func TestFleetDeployCensusTimeoutExceedsDefault(t *testing.T) {
+	if FleetDeployCensusTimeout <= DefaultTimeout {
+		t.Fatalf("FleetDeployCensusTimeout = %s, must exceed DefaultTimeout %s — the "+
+			"27-day window the exit gauge needs answered in 57.9s", FleetDeployCensusTimeout, DefaultTimeout)
+	}
+	// The load-bearing property is the MEASUREMENT, not the constant. Pinning
+	// equality with the two 90s precedents would red on a future bump made for a
+	// good reason (a wider window, a slower plane); pinning the measured floor
+	// reds only when the cap stops covering the window it exists to reach.
+	if FleetDeployCensusTimeout < widestMeasuredCensus {
+		t.Fatalf("FleetDeployCensusTimeout = %s, below the widest window measured answering 200 (%s) — "+
+			"the census cannot reach the 27-day window that holds the epic's only non-zero",
+			FleetDeployCensusTimeout, widestMeasuredCensus)
+	}
+	// And a cap is still a cap: an unbounded one turns a sick plane into a hung
+	// CLI, which is the failure this constant exists to make loud rather than
+	// silent. Both precedents in this file sit well inside this band.
+	if FleetDeployCensusTimeout > 5*time.Minute {
+		t.Fatalf("FleetDeployCensusTimeout = %s exceeds 5m — a cap that large hangs the CLI on a "+
+			"sick control plane instead of failing it", FleetDeployCensusTimeout)
+	}
+	for _, precedent := range []struct {
+		name string
+		d    time.Duration
+	}{{"DomainStatusTimeout", DomainStatusTimeout}, {"VerifyTimeout", VerifyTimeout}} {
+		if FleetDeployCensusTimeout < precedent.d {
+			t.Fatalf("FleetDeployCensusTimeout = %s, want at least the headroom of its precedent %s (%s) — "+
+				"the census is the heaviest read in this file, not the lightest",
+				FleetDeployCensusTimeout, precedent.name, precedent.d)
+		}
+	}
+}
+
+// TestFleetDeployCensusInstallsItsOwnTimeout fails if FleetDeployCensus falls
+// back to DefaultTimeout — i.e. if the `cc.HTTP = &http.Client{Timeout: ...}`
+// install line is removed, or if the request is issued through the original
+// receiver instead of the widened copy.
+func TestFleetDeployCensusInstallsItsOwnTimeout(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "client.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse client.go: %v", err)
+	}
+	var body string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "FleetDeployCensus" || fn.Recv == nil {
+			continue
+		}
+		var buf bytes.Buffer
+		if err := printer.Fprint(&buf, fset, fn.Body); err != nil {
+			t.Fatalf("print FleetDeployCensus body: %v", err)
+		}
+		body = buf.String()
+	}
+	if body == "" {
+		t.Fatal("FleetDeployCensus method not found in client.go")
+	}
+	if !strings.Contains(body, "FleetDeployCensusTimeout") {
+		t.Fatalf("FleetDeployCensus does not install FleetDeployCensusTimeout — it falls back to "+
+			"the shared %s DefaultTimeout, which cannot reach the 27-day window.\nbody:\n%s", DefaultTimeout, body)
+	}
+	if !strings.Contains(body, "cc := *c") {
+		t.Fatalf("FleetDeployCensus must widen a COPY of the client (cc := *c), so an injected "+
+			"client is honored untouched.\nbody:\n%s", body)
+	}
+	// `cc.do(` CONTAINS `c.do(`, so a substring check would pass vacuously — match
+	// the bare receiver only when it is not preceded by an identifier character.
+	if regexp.MustCompile(`(^|[^A-Za-z0-9_])c\.do\(`).MatchString(body) {
+		t.Fatalf("FleetDeployCensus still issues its request through the un-widened receiver "+
+			"(c.do), so the installed timeout is dead code.\nbody:\n%s", body)
+	}
+}
+
+// TestFleetDeployCensusHonorsInjectedClient pins the regression risk of the
+// copy-the-client pattern: a caller-supplied *http.Client must reach the request
+// unchanged — same pointer, same Timeout — and must NOT be replaced by the
+// 90s fallback.
+func TestFleetDeployCensusHonorsInjectedClient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"total":5,"never_covered":3,"scope":{"kind":"team"}}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	rt := &countingTransport{inner: srv.Client().Transport}
+	injected := &http.Client{Timeout: 7 * time.Second, Transport: rt}
+	c := &Client{BaseURL: srv.URL, Token: "sess", HTTP: injected}
+
+	from := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
+	if _, err := c.FleetDeployCensus(context.Background(), from, from.Add(20*24*time.Hour)); err != nil {
+		t.Fatalf("FleetDeployCensus: %v", err)
+	}
+	if rt.n != 1 {
+		t.Fatalf("injected client carried %d requests, want 1 — the census built its own client "+
+			"instead of honoring the injected one", rt.n)
+	}
+	if injected.Timeout != 7*time.Second {
+		t.Fatalf("injected client Timeout = %s, want 7s untouched", injected.Timeout)
+	}
+	if c.HTTP != injected {
+		t.Fatal("FleetDeployCensus mutated the receiver's HTTP client; it must widen a copy only")
+	}
+}
+
+// countingTransport counts the requests that actually travelled through the
+// injected client — the only way to prove the injected client was USED rather
+// than silently replaced by the lazily-built fallback.
+type countingTransport struct {
+	inner http.RoundTripper
+	n     int
+}
+
+func (t *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	t.n++
+	inner := t.inner
+	if inner == nil {
+		inner = http.DefaultTransport
+	}
+	return inner.RoundTrip(r)
 }

@@ -191,6 +191,18 @@ defmodule BarkparkCloud.DeviceAuthTest do
       assert session.ip_address == "5.6.7.8"
       assert session.user_agent == "bp/agent"
 
+      # ...and saying so: the ONE mint site outside the router stamps its own
+      # origin, so the sessions list can honestly show "via device link" for a
+      # session nobody typed a password into this browser for
+      # (gr-p5-session-provenance). Read off the COLUMN, not just the struct —
+      # a struct default would satisfy the field read alone.
+      assert session.origin == "device_link"
+
+      assert %Postgrex.Result{rows: [["device_link"]]} =
+               Repo.query!("SELECT origin FROM user_tokens WHERE token_hash = $1", [
+                 UserToken.hash_token(token)
+               ])
+
       # The request row is consumed.
       assert Repo.aggregate(Request, :count) == 0
     end

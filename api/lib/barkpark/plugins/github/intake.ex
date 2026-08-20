@@ -215,6 +215,21 @@ defmodule Barkpark.Plugins.Github.Intake do
 
             {:refused, doc_id}
 
+          # The dedup gate could not RUN (PDS wave 24). This looks like the
+          # veto above and is its exact opposite: the veto is deterministic, so
+          # answering 2xx is right; a dedup outage is TRANSIENT, so answering
+          # 2xx would drop this issue FOREVER — GitHub never redelivers a 2xx —
+          # while logging it as a policy refusal that never happened. It must
+          # fall through to the 5xx path so redelivery re-runs the check, which
+          # the deterministic `gh-<num>` doc_id keeps idempotent.
+          {:error, {:dedup_unavailable, reason}} ->
+            Logger.warning(
+              "github intake: dedup gate unavailable for #{doc_id}: #{inspect(reason)} — " <>
+                "answering 5xx so GitHub redelivers rather than dropping the issue"
+            )
+
+            {:error, {:dedup_unavailable, reason}}
+
           # A genuine, non-dedup/non-gate failure (transient DB, etc.) stays an error so
           # the controller answers 5xx and GitHub redelivers — the deterministic
           # `gh-<num>` doc_id keeps that redelivery idempotent.
@@ -306,12 +321,26 @@ defmodule Barkpark.Plugins.Github.Intake do
   # rendered to GitHub); `state: "intake"` marks a not-yet-adopted task. NO
   # `synced_rev` — this is inbound-born, not outbound-mirrored. The description
   # is left ABSENT when the issue has no body (never fabricated).
+  #
+  # BORN ADJUDICATED, NOT EXEMPTED (PDS wave 28). The birth fence
+  # (`Content.Writer.ensure_task_born_adjudicated/5`) exempts every non-`:api`
+  # source, and this write is stamped `source: :github` — so the bridge would
+  # pass the fence by carve-out while filing exactly the unadjudicated row the
+  # fence exists to stop. It states its adjudication instead: `"open"` (the term
+  # is honest — an intake row IS open and untriaged) plus a reason that is
+  # RE-DERIVABLE rather than prose, because it names the issue number, the repo
+  # and the author a reader can go and check. The carve-out remains behind this
+  # as the fail-safe, and that ordering is load-bearing: an unmatched intake
+  # error falls through `birth/2` to the controller's 500, and GitHub redelivers
+  # a 5xx forever — so the bridge must never be the thing a fence refuses.
   defp build_attrs(doc_id, number, issue, payload) do
     content =
       %{
         "kind" => "task",
         "labels" => @intake_labels,
         "lifecycle_status" => "open",
+        "disposition" => "open",
+        "disposition_reason" => intake_disposition_reason(number, issue, payload),
         "github" => %{
           "repo" => issue_repo(payload),
           "issue" => number,
@@ -325,6 +354,28 @@ defmodule Barkpark.Plugins.Github.Intake do
       "title" => Map.get(issue, "title") || "",
       "content" => content
     }
+  end
+
+  # The birth reason, built ONLY from facts carried on the delivery: the issue
+  # number, the repo it lives in, and the login that opened it. Every clause is
+  # something a reader can re-derive by opening that issue — deliberately NOT a
+  # prose judgement, which is the class of reason nothing can ever check.
+  defp intake_disposition_reason(number, issue, payload) do
+    where =
+      case issue_repo(payload) do
+        repo when is_binary(repo) and repo != "" -> " in #{repo}"
+        _ -> ""
+      end
+
+    who =
+      case Map.get(issue, "user") || Map.get(payload, "sender") do
+        %{"login" => login} when is_binary(login) and login != "" -> " opened by @#{login}"
+        _ -> ""
+      end
+
+    "inbound GitHub intake: issue ##{number}#{where}#{who} — born open and UNADOPTED, " <>
+      "labelled #{Enum.join(@intake_labels, "/")} and awaiting human triage. Re-derive from " <>
+      "the issue itself."
   end
 
   # The repo the issue lives in — read ONCE at birth from the webhook's

@@ -58,6 +58,32 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
     as(build_conn(), bearer) |> delete("/v1/auth/app-tokens", Jason.encode!(body))
   end
 
+  # Same revoke, but arriving THROUGH a proxy that names the original caller —
+  # the shape every cloud-proxied revoke has now that the control plane relays
+  # X-Forwarded-For (Registry.revoke_app_token/3).
+  defp revoke_from(bearer, ip, body) do
+    as(build_conn(), bearer)
+    |> put_req_header("x-forwarded-for", ip)
+    |> delete("/v1/auth/app-tokens", Jason.encode!(body))
+  end
+
+  # The same revoke arriving DIRECTLY from a public peer that forges the header —
+  # the shape the trust boundary exists for (Barkpark.RateLimiter.client_ip/1).
+  defp revoke_direct(bearer, peer, forged_ip, body) do
+    as(build_conn(), bearer)
+    |> Map.put(:remote_ip, peer)
+    |> put_req_header("x-forwarded-for", forged_ip)
+    |> delete("/v1/auth/app-tokens", Jason.encode!(body))
+  end
+
+  # A chain as our own front actually produces it: the control plane relayed the
+  # phone's address, Caddy appended the control plane's egress on the right.
+  defp revoke_relayed(bearer, phone_ip, relay_ip, body) do
+    as(build_conn(), bearer)
+    |> put_req_header("x-forwarded-for", "#{phone_ip}, #{relay_ip}")
+    |> delete("/v1/auth/app-tokens", Jason.encode!(body))
+  end
+
   defp self_revoke(bearer) do
     as(build_conn(), bearer) |> delete("/v1/auth/app-tokens/current")
   end
@@ -70,7 +96,13 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
       # Alive before: the verifier resolves it.
       assert {:ok, _} = Auth.verify_token(raw)
 
-      assert self_revoke(raw) |> json_response(200) == %{"revoked" => true}
+      # pds w40: the receipt now descends from `Auth.revoke_token/1`'s returned
+      # row (`revoked_at`, `id`) instead of a literal `true`; `revoked` is still
+      # truthy, so the wire contract this test guards is unchanged.
+      assert %{"revoked" => true, "revoked_at" => stamp} =
+               self_revoke(raw) |> json_response(200)
+
+      assert is_binary(stamp)
 
       # Fail-closed at the single choke point (WHERE clause, no read-path edit)…
       assert Auth.verify_token(raw) == {:error, :unauthorized}
@@ -106,12 +138,12 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
 
       assert {:ok, _} = Auth.verify_token(raw)
 
-      assert revoke(admin, %{token: raw}) |> json_response(200) == %{"revoked" => true}
+      assert %{"revoked" => true} = revoke(admin, %{token: raw}) |> json_response(200)
       assert Auth.verify_token(raw) == {:error, :unauthorized}
 
       # Idempotent: re-revoking the already-dead token is another 200, not a
       # 404 — a logout retry must never error.
-      assert revoke(admin, %{token: raw}) |> json_response(200) == %{"revoked" => true}
+      assert %{"revoked" => true} = revoke(admin, %{token: raw}) |> json_response(200)
     end
 
     test "a non-admin bearer gets the SAME generic unauthorized as an invalid one (no tier oracle)",
@@ -145,6 +177,25 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
 
     test "a body with neither token nor email → 422", %{admin: admin} do
       assert revoke(admin, %{}) |> json_response(422)
+    end
+
+    test ~s|an EMPTY "token" is a 422 naming the field, not a fall-through|, %{admin: admin} do
+      body = revoke(admin, %{token: ""}) |> json_response(422)
+      assert body["error"]["message"] =~ ~s("token")
+      assert body["error"]["message"] =~ "non-empty"
+    end
+
+    test "a body carrying BOTH token and email → 422 (token no longer silently wins)",
+         %{admin: admin} do
+      ws = create_workspace!()
+      email = unique_email()
+      raw = mint_app_token(admin, email, ws)
+
+      body = revoke(admin, %{token: raw, email: email}) |> json_response(422)
+      assert body["error"]["message"] =~ "exactly one of"
+
+      # NEITHER victim died — the ambiguous body revoked nothing at all.
+      assert {:ok, _} = Auth.verify_token(raw)
     end
   end
 
@@ -194,6 +245,68 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
 
       throttled = revoke(admin, %{email: email}) |> json_response(429)
       assert throttled["error"]["code"] == "rate_limited"
+    end
+
+    test "two DISTINCT proxied callers do not share a bucket: A exhausting its allowance leaves B untouched",
+         %{admin: admin} do
+      email = unique_email()
+      caller_a = "203.0.113.7"
+      caller_b = "198.51.100.9"
+
+      # Caller A burns its whole 10/min…
+      for _ <- 1..10 do
+        assert revoke_from(admin, caller_a, %{email: email}) |> json_response(200)
+      end
+
+      assert revoke_from(admin, caller_a, %{email: email}) |> json_response(429)
+
+      # …and caller B — a different phone behind the SAME control plane — is
+      # completely unaffected. Before the Cloud proxy relayed X-Forwarded-For
+      # every proxied revoke keyed on the single Cloud egress IP, so one busy
+      # teammate spent the whole team's allowance and the 429 surfaced at the
+      # proxy as a misleading 502 instance_unreachable.
+      assert revoke_from(admin, caller_b, %{email: email}) |> json_response(200)
+    end
+
+    test "a DIRECT caller cannot forge its way out of the bucket: 11 hits, 11 forged IPs, still 429",
+         %{admin: admin} do
+      email = unique_email()
+      # A public peer reaching the endpoint without passing our own front, so its
+      # x-forwarded-for carries no authority at all.
+      peer = {203, 0, 113, 66}
+
+      for i <- 1..10 do
+        assert revoke_direct(admin, peer, "9.9.9.#{i}", %{email: email}) |> json_response(200)
+      end
+
+      # A fresh forgery on the 11th hit does NOT buy a fresh allowance: the
+      # bucket keyed on the verified peer, not on the header. Restore the old
+      # first-hop read (RateLimiter.client_ip/1 → first hop unconditionally) and
+      # this is a 200 — every request its own bucket, i.e. no limit at all.
+      throttled = revoke_direct(admin, peer, "9.9.9.11", %{email: email}) |> json_response(429)
+      assert throttled["error"]["code"] == "rate_limited"
+    end
+
+    test "behind a LISTED relay the per-phone bucketing still holds (the #6224 relay keeps working)",
+         %{admin: admin} do
+      email = unique_email()
+      relay = "198.51.100.55"
+      original = Application.get_env(:barkpark, :trusted_proxies)
+      Application.put_env(:barkpark, :trusted_proxies, [{198, 51, 100, 55}])
+      on_exit(fn -> Application.put_env(:barkpark, :trusted_proxies, original || []) end)
+
+      # Phone A burns its whole 10/min through the relay…
+      for _ <- 1..10 do
+        assert revoke_relayed(admin, "203.0.113.7", relay, %{email: email}) |> json_response(200)
+      end
+
+      assert revoke_relayed(admin, "203.0.113.7", relay, %{email: email}) |> json_response(429)
+
+      # …and its teammate on the SAME control plane is untouched: the ORIGINAL
+      # first hop is still the bucket key once the relay's egress address is
+      # listed. Drop the allowlist entry and both phones collapse onto the
+      # relay's own address — the pre-#6224 one-bucket-per-team behaviour.
+      assert revoke_relayed(admin, "198.51.100.9", relay, %{email: email}) |> json_response(200)
     end
   end
 end

@@ -153,6 +153,10 @@ defmodule Barkpark.StudioChat do
   def rollup(scope) do
     counts =
       Session
+      # Archived sessions leave the rollup (charter D28): every other read
+      # funnel (list_sessions, fleet_snapshot) already filters the shelf; an
+      # archived blocked session must not light the needs-you badge forever.
+      |> archived_filter(false)
       |> scope_sessions(scope)
       |> group_by([s], s.agent_state)
       |> select([s], {s.agent_state, count(s.id)})

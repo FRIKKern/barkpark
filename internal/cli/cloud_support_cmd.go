@@ -34,12 +34,13 @@ package cli
 //     printing the exact SSH one-liner the developer runs themselves.
 //   - barkpark.service is baked into the warm image — never authored here.
 //
-// `remove` is the mirror verb (PDF-D68): tear a support down across all FOUR
-// surfaces — token (main), box (provider), roster row (main), control-plane row
-// (CP, deleted LAST because it is the sole durable holder of the token id) —
-// then RE-READ every surface (delete responses prove nothing, D33) and exit
-// non-zero naming every survivor. Idempotent: a double remove reports
-// already-gone; partial state converges.
+// `remove` is the mirror verb (PDF-D68): tear a support down across all FIVE
+// surfaces — token (main), box (provider), leaked A records (DNS, swept by
+// VALUE: every A rrset resolving to the box IP goes, PDF-D101), roster row
+// (main), control-plane row (CP, deleted LAST because it is the sole durable
+// holder of the token id) — then RE-READ every surface (delete responses prove
+// nothing, D33) and exit non-zero naming every survivor. Idempotent: a double
+// remove reports already-gone; partial state converges.
 
 import (
 	"bytes"
@@ -47,6 +48,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -86,6 +88,19 @@ var supportConfigureHost = cloud.ConfigureSupportHost
 // production crypto/rand generator inside the cloud package. Tests inject
 // deterministic (but validation-passing) secrets.
 var supportSecretsGen cloud.SecretGen
+
+// supportDNSFor resolves the DNS provider the remove-side A-record sweep rides,
+// given the already-resolved DNS token ("" ⇔ compute fallback: CloudDNS
+// inherits the process HCLOUD_TOKEN / `hcloud context`). The token precedence
+// is instDNSClient's law (--dns-token > BARKPARK_DNS_HCLOUD_TOKEN > compute,
+// PDF-D101): the fleet compute token that owns every box sees ZERO zones, so a
+// one-token sweep would fail silently on every real teardown. A seam so tests
+// inject FakeDNS and assert the credential that actually arrived.
+var supportDNSFor = func(dnsToken string) cloud.DNSProvider {
+	d := cloud.NewCloudDNS()
+	d.Token = dnsToken
+	return d
+}
 
 // supportReadyTimeout / poll knobs — vars so tests never sleep for real.
 var (
@@ -382,6 +397,55 @@ func (r *supportAddRun) run() int {
 }
 
 // ── narration helpers ────────────────────────────────────────────────────────
+//
+// The three composers below are PURE: no receiver, no I/O, one server answer in
+// and the printed sentence out. They exist so the success-claim registry
+// (success_claim_registry_test.go) can CALL the production sentence instead of
+// mirroring its format string — stepOnline and stepDNS drive ssh + network and
+// cannot be rendered, and a mirror only ever pins the mirror.
+//
+// PDS-D431: each one takes the SERVER'S ANSWER WHOLE and does its own
+// extraction. Handing them pre-destructured leaves (a status, a capacity map, a
+// fqdn list) would move the destructuring back into the caller — and an
+// argument the caller stops passing is exactly the drop these rows exist to
+// catch, so the hole would re-open one frame up.
+
+// supportOnlineNarration composes stepOnline's ONLINE receipt from the MAIN'S
+// ROSTER ROW — a decoded JSON body (supportRosterRow returns map[string]any),
+// never from anything the local verb already knew. Both measured facts (the
+// row's status and its capacity) are read HERE.
+func supportOnlineNarration(name string, row map[string]any) string {
+	st, _ := row["status"].(string)
+	capMap, _ := row["capacity"].(map[string]any)
+	return fmt.Sprintf("%s reads %s with capacity %s on the main's roster", name, st, supportCompactJSON(capMap))
+}
+
+// supportDNSNarration composes stepDNS's sweep receipt — BOTH branches, so the
+// clean/swept fork and the fqdn mapping live in one place. `deleted` is what
+// the ZONE returned (the rrset names it actually removed), and the names are
+// qualified against the zone here rather than by the caller.
+func supportDNSNarration(zone, ip string, deleted []string) string {
+	if len(deleted) == 0 {
+		return fmt.Sprintf("no A records in %s resolve to %s (already clean)", zone, ip)
+	}
+	fqdns := make([]string, 0, len(deleted))
+	for _, n := range deleted {
+		fqdns = append(fqdns, cloud.Fqdn(n, zone))
+	}
+	return fmt.Sprintf("%d A record(s) deleted: %s (the census re-reads the zone)", len(deleted), strings.Join(fqdns, ", "))
+}
+
+// supportCapacityNarration renders the box's MEASURED size class for the human
+// receipt. Until now max_class rode the machine envelope only, so the human
+// sentence carried no measured fact at all and arm 3 had nothing to attribute
+// on both surfaces. A degraded measure is stated as degraded — never silently
+// omitted and never guessed.
+func supportCapacityNarration(maxClass string) string {
+	if maxClass == "" {
+		return "not measured (degraded) — the listener measures itself at each beat"
+	}
+	return maxClass + " (measured on the box by fleet-run.sh capacity)"
+}
 
 func (r *supportAddRun) state(step, msg string) { r.out.progressf("→ %s: %s", step, msg) }
 func (r *supportAddRun) done(step, msg string)  { r.out.progressf("✓ %s — %s", step, msg) }
@@ -576,7 +640,15 @@ func (r *supportAddRun) stepBind() (int, bool) {
 				written,
 				"the Cloud session is missing or dead — not logged in; run `bp login` first, then re-run `bp cloud support add "+r.name+"`",
 				exitAuth)
-		case status == http.StatusUnprocessableEntity && supportCPErrorCode(resp) == "no_team":
+		// The teamless refusal, on BOTH sides of the control plane's status
+		// conversion: today 422 {"error":"no_team"}, after #9956
+		// 403 {"error":"forbidden","reason":"no_team","scope":"team"}. Reading the
+		// STATUS alone would drop this caller into the 403 arm below and hand a
+		// user who HAS NO TEAM a sentence about a team-admin ROLE — which cannot be
+		// granted without a team, and which points at re-authenticating a
+		// credential that is fine. The CAUSE the server named decides, so the
+		// sentence, the fix and the exit code are identical across the flip.
+		case supportCPNoTeam(status, resp):
 			return r.fail("bind", "control-plane support registration refused: "+reason,
 				written,
 				"your Cloud login has no active team — run `bp team use <team>`, then re-run `bp cloud support add "+r.name+"`",
@@ -646,6 +718,33 @@ func (r *supportAddRun) stepDataset() (int, bool) {
 			exitGeneric)
 	}
 
+	// ws=="default" is the ONE slug whose import target is PRE-POLLUTED: the
+	// warm image's baked Postgres carries the seed lineage's docs forward
+	// (bake-server-image.sh snapshots the data dir), so the box's own "default"
+	// flunks the merge engine's fail-closed empty-shell proof (PDS-D9) and the
+	// import 409s workspace_slug_conflict. Reset: delete the seeded workspace
+	// (absent → no-op), then re-mint the box admin token the delete cascaded
+	// (api_tokens.workspace_id :delete_all; the mint's ensure_default_scope
+	// also recreates the empty default scope). Same latent bug as the worker
+	// chain — a laptop-added support serving a template-less main hits it too.
+	resetDefault := r.ws == cloud.SupportDefaultWorkspaceSlug
+	if resetDefault {
+		r.state("dataset", "resetting the box's seeded default workspace to an empty import target")
+		if err := r.runner.Run(supportCtx(), cloud.SupportResetDefaultWorkspaceStep()); err != nil {
+			return r.fail("dataset", "default-workspace reset on the box failed: "+err.Error(),
+				fmt.Sprintf("box %s bound at %s; bundle staged but not imported", r.host.Name, r.host.IP),
+				fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
+				exitGeneric)
+		}
+		r.state("dataset", "re-minting the box admin token (the reset delete cascaded it)")
+		if err := r.runner.Run(supportCtx(), cloud.SupportAdminTokenStep(r.secrets.AdminToken)); err != nil {
+			return r.fail("dataset", "admin-token re-mint after reset failed: "+err.Error(),
+				fmt.Sprintf("box %s bound at %s; default workspace reset but the box holds NO admin token", r.host.Name, r.host.IP),
+				fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
+				exitGeneric)
+		}
+	}
+
 	r.state("dataset", fmt.Sprintf("ensuring workspace %q exists on the box (already-exists is fine)", r.ws))
 	if err := r.runner.Run(supportCtx(), supportEnsureWorkspaceStep(r.ws, r.secrets.AdminToken)); err != nil {
 		return r.fail("dataset", "workspace ensure on the box failed: "+err.Error(),
@@ -660,6 +759,21 @@ func (r *supportAddRun) stepDataset() (int, bool) {
 			fmt.Sprintf("box %s bound at %s; bundle staged at /opt/barkpark-fleet/dataset.tar but not imported", r.host.Name, r.host.IP),
 			fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
 			exitGeneric)
+	}
+
+	if resetDefault {
+		// The import's adopt branch deleted the empty "default" shell
+		// IN-TRANSACTION (PDS-D9), cascading the token minted above a SECOND
+		// time. Restore it so the credential this chain reported to the CP at
+		// bind stays live; ensure_default_scope now resolves slug "default" to
+		// the IMPORTED workspace, scoping the token to the content it governs.
+		r.state("dataset", "restoring the box admin token (the import's adopt-delete cascaded it)")
+		if err := r.runner.Run(supportCtx(), cloud.SupportAdminTokenStep(r.secrets.AdminToken)); err != nil {
+			return r.fail("dataset", "admin-token restore after import failed: "+err.Error(),
+				fmt.Sprintf("box %s bound at %s; dataset imported but the box holds NO admin token", r.host.Name, r.host.IP),
+				fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
+				exitGeneric)
+		}
 	}
 	r.done("dataset", fmt.Sprintf("scrubbed %s/%s merged into the box", r.ws, r.dataset))
 	return exitOK, false
@@ -739,7 +853,7 @@ func (r *supportAddRun) stepOnline() (int, bool) {
 			lastStatus = st
 			capMap, hasCap := row["capacity"].(map[string]any)
 			if (st == "idle" || st == "working" || st == "blocked") && hasCap && len(capMap) > 0 {
-				r.done("online", fmt.Sprintf("%s reads %s with capacity %s on the main's roster", r.name, st, supportCompactJSON(capMap)))
+				r.done("online", supportOnlineNarration(r.name, row))
 				return exitOK, false
 			}
 		}
@@ -781,6 +895,7 @@ func (r *supportAddRun) success() int {
 	r.out.outf("  main:   %s (%s/%s, scrubbed pull)", r.base, r.ws, r.dataset)
 	r.out.outf("  box:    %s at %s (hetzner, label %s=%s)", r.host.Name, r.host.IP, cloud.FleetSupportLabelKey, r.name)
 	r.out.outf("  agent:  %s (hand it %s via the ssh one-liner above)", r.agent, spec.keyVar)
+	r.out.outf("  size:   max class %s", supportCapacityNarration(r.maxClass))
 	r.out.outf("  next:   `bp fleet roster` shows it; route an order by naming assignee=%s", r.name)
 	return exitOK
 }
@@ -796,8 +911,9 @@ const supportProbeSecretScript = `grep '^BARKPARK_API_TOKEN=' /etc/barkpark/flee
 // supportRemoveRun carries one `support remove` invocation's resolved inputs +
 // accumulated truth. Teardown ORDER is law (PDF-D68): read the CP record FIRST
 // (sole durable token-id holder), then token revoke on the main, then the
-// identity-fenced box delete, then the roster row, then the CP row LAST — so a
-// crash at any point never strands the token id. Then the four-surface census.
+// identity-fenced box delete, then the leaked-A-record sweep (by VALUE,
+// PDF-D101), then the roster row, then the CP row LAST — so a crash at any
+// point never strands the token id. Then the five-surface census.
 type supportRemoveRun struct {
 	out *writer
 	g   globals
@@ -821,11 +937,18 @@ type supportRemoveRun struct {
 	probeBefore int    // pre-revoke probe status (0 = never probed)
 
 	revoked map[string]string // token_id → "revoked" | "already gone (404)"
+
+	dnsToken    string            // resolved DNS credential (--dns-token > BARKPARK_DNS_HCLOUD_TOKEN > "" = compute)
+	dnsTokenSrc string            // which rung resolved it — "compute" earns a loud warning
+	dns         cloud.DNSProvider // built at stepDNS; nil ⇔ the DNS leg never ran
+	dnsZone     string            // zone derived from the CP row's url host
+	dnsIP       string            // the box IP the sweep + census match A-record VALUES against
+	dnsSkip     string            // non-empty ⇔ why the DNS leg was skipped (printed honestly, never reported clean)
 }
 
 func runCloudSupportRemove(out *writer, g globals, args []string) int {
-	const usage = "bp cloud support remove <name> [--dataset <slug>]"
-	a, err := parseHzArgs(args, []string{"dataset"}, nil, usage)
+	const usage = "bp cloud support remove <name> [--dataset <slug>] [--dns-token <token>]"
+	a, err := parseHzArgs(args, []string{"dataset", "dns-token"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -860,15 +983,30 @@ func runCloudSupportRemove(out *writer, g globals, args []string) int {
 		return useError(out, "usage", fmt.Sprintf("invalid dataset slug %q", r.dataset), exitUsage)
 	}
 
+	// The DNS sweep credential — instDNSClient's precedence (PDF-D101). The
+	// compute fallback is remembered so the sweep can warn loudly: the fleet
+	// compute token sees ZERO zones, and a silent zero-record sweep is exactly
+	// the lie the by-value census exists to catch.
+	r.dnsToken = strings.TrimSpace(a.val("dns-token"))
+	r.dnsTokenSrc = "--dns-token"
+	if r.dnsToken == "" {
+		r.dnsToken = strings.TrimSpace(os.Getenv("BARKPARK_DNS_HCLOUD_TOKEN"))
+		r.dnsTokenSrc = "BARKPARK_DNS_HCLOUD_TOKEN"
+	}
+	if r.dnsToken == "" {
+		r.dnsTokenSrc = "compute"
+	}
+
 	if g.dryRun {
 		out.progressf("DRY RUN — bp cloud support remove %s would run, in order (PDF-D68):", r.name)
 		out.progressf("  1. cp-read   GET /v1/barkparks on the control plane — capture the support row id + token id FIRST")
 		out.progressf("  2. locate    list boxes labeled %s=%s (identity-fenced; foreign identity refused)", cloud.FleetSupportLabelKey, r.name)
 		out.progressf("  3. token     revoke the support token on the main (idempotent — 404 is already-gone)")
 		out.progressf("  4. server    delete the box (only an exact identity match; >1 match refused)")
-		out.progressf("  5. roster    delete listener-%s on %s (dataset %s)", r.name, r.base, r.dataset)
-		out.progressf("  6. cp-row    DELETE /v1/fleet/supports/:id on the control plane — LAST (sole durable token-id holder)")
-		out.progressf("  7. census    RE-READ all four surfaces; any survivor is named and exits non-zero")
+		out.progressf("  5. dns       sweep every A record in the zone that resolves to the box IP — by VALUE, not name (PDF-D101; credential: --dns-token > BARKPARK_DNS_HCLOUD_TOKEN > compute)")
+		out.progressf("  6. roster    delete listener-%s on %s (dataset %s)", r.name, r.base, r.dataset)
+		out.progressf("  7. cp-row    DELETE /v1/fleet/supports/:id on the control plane — LAST (sole durable token-id holder)")
+		out.progressf("  8. census    RE-READ all five surfaces; any survivor is named and exits non-zero")
 		return exitOK
 	}
 
@@ -890,6 +1028,7 @@ func (r *supportRemoveRun) run() int {
 		r.stepLocate,
 		r.stepToken,
 		r.stepServer,
+		r.stepDNS,
 		r.stepRoster,
 		r.stepCPRow,
 	}
@@ -1078,6 +1217,76 @@ func (r *supportRemoveRun) stepServer() (int, bool) {
 	return exitOK, false
 }
 
+// dnsTarget derives the sweep inputs: the ZONE from the CP row's url (hostOf
+// returns the FULL host, e.g. "hex.barkpark.cloud" — the zone is everything
+// after its first label, so no import of internal/provisioner's Zone constant
+// is needed) and the VALUE to sweep by from the located box's IP (the same IP
+// census leg 1 re-reads). A non-empty skip names the honest reason the leg
+// cannot run — an absence is said, never silently passed (PDS-D287).
+func (r *supportRemoveRun) dnsTarget() (zone, ip, skip string) {
+	if len(r.rows) == 0 {
+		return "", "", "no control-plane row — no url to derive the DNS zone from"
+	}
+	var host string
+	for _, row := range r.rows {
+		if u := strings.TrimSpace(row.URL); u != "" {
+			host = hostOf(u)
+			break
+		}
+	}
+	if host == "" {
+		return "", "", "the control-plane row carries no url — cannot derive the DNS zone"
+	}
+	if net.ParseIP(strings.Trim(host, "[]")) != nil {
+		return "", "", fmt.Sprintf("the control-plane row's url points at raw IP %s — no DNS zone to sweep", host)
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) < 3 {
+		return "", "", fmt.Sprintf("url host %q carries no subdomain label — cannot derive the zone", host)
+	}
+	if len(r.boxes) == 0 {
+		return "", "", "no box was located — no box IP to sweep A-record values by"
+	}
+	if strings.TrimSpace(r.boxes[0].IP) == "" {
+		return "", "", fmt.Sprintf("box %s has no IP on record — no value to sweep A records by", r.boxes[0].Name)
+	}
+	return strings.Join(parts[1:], "."), r.boxes[0].IP, ""
+}
+
+// stepDNS sweeps the support's leaked A records — by VALUE (PDF-D101): the CP
+// support chain writes <name>.<zone> (TTL 60) while the main go-live path
+// writes <slug>-<team>.<zone> at the SAME IP, so a by-name delete removes one
+// and leaves the sibling standing while a by-name census still reads clean.
+// Every A rrset in the zone resolving to the box IP is deleted. WARN-AND-
+// CONTINUE, never a stop — the census's fifth leg is the truth. No CP row, no
+// URL, or no box IP → the leg is SKIPPED and says so; the census repeats the
+// skip and never reports the zone clean.
+func (r *supportRemoveRun) stepDNS() (int, bool) {
+	zone, ip, skip := r.dnsTarget()
+	if skip != "" {
+		r.dnsSkip = skip
+		r.state("dns", fmt.Sprintf("SKIPPED — %s (the zone is NOT verified clean)", skip))
+		return exitOK, false
+	}
+	r.dnsZone, r.dnsIP = zone, ip
+	if r.dnsTokenSrc == "compute" {
+		r.out.errf("⚠ dns: no dedicated DNS credential (--dns-token / BARKPARK_DNS_HCLOUD_TOKEN) — riding the compute token; the fleet project's token sees ZERO zones, so the sweep may find nothing while records survive — the census below is the truth")
+	}
+	r.dns = supportDNSFor(r.dnsToken)
+	r.state("dns", fmt.Sprintf("sweeping A records in %s that resolve to %s — by VALUE, not name (a by-name delete leaves the go-live sibling standing)", zone, ip))
+	deleted, err := cloud.SweepARecordsByValue(supportCtx(), r.dns, zone, ip)
+	if err != nil {
+		got := ""
+		if len(deleted) > 0 {
+			got = fmt.Sprintf(" (%s deleted before the failure)", strings.Join(deleted, ", "))
+		}
+		r.out.errf("⚠ dns: sweep failed: %s%s — continuing; the census below is the truth", err, got)
+		return exitOK, false
+	}
+	r.done("dns", supportDNSNarration(zone, ip, deleted))
+	return exitOK, false
+}
+
 // stepRoster deletes the listener row via the PDF-D44d dataset-in-path mutate
 // (the query-param form 404s). A non-2xx is a WARNING, not a stop — delete
 // responses prove nothing either way (D33); the census re-read is the truth.
@@ -1128,11 +1337,12 @@ func (r *supportRemoveRun) stepCPRow() (int, bool) {
 	return exitOK, false
 }
 
-// census — the deliverable (PDF-D68): RE-READ all four surfaces; delete-call
-// 200s prove nothing (D33: bp doc delete can exit 4 on success — verify by
-// re-read, never by exit code). Any survivor is named and the exit is non-zero.
+// census — the deliverable (PDF-D68, five surfaces since PDF-D101): RE-READ
+// every surface; delete-call 200s prove nothing (D33: bp doc delete can exit 4
+// on success — verify by re-read, never by exit code). Any survivor is named
+// and the exit is non-zero.
 func (r *supportRemoveRun) census() int {
-	r.state("census", "re-reading all four surfaces (delete responses prove nothing)")
+	r.state("census", "re-reading all five surfaces (delete responses prove nothing)")
 	var residue []string
 
 	// 1. SERVER — the label listing must come back empty.
@@ -1198,11 +1408,34 @@ func (r *supportRemoveRun) census() int {
 		r.out.progressf("  · token: no token id was on record")
 	}
 
+	// 5. DNS — BY VALUE (PDF-D101): zero A rrsets in the zone may still resolve
+	// to the box IP. A by-name check would read clean while the go-live sibling
+	// (<slug>-<team>) survives — the VALUE is the truth. A skipped leg says so
+	// and is never reported clean.
+	dnsNote := "dns verified by value"
+	switch {
+	case r.dnsSkip != "":
+		dnsNote = "dns SKIPPED — " + r.dnsSkip
+		r.out.progressf("  · dns: SKIPPED — %s (the zone is NOT verified clean)", r.dnsSkip)
+	case r.dns == nil:
+		dnsNote = "dns SKIPPED — the dns step did not run"
+		r.out.progressf("  · dns: SKIPPED — the dns step did not run (the zone is NOT verified clean)")
+	default:
+		if names, err := cloud.ARecordNamesByValue(supportCtx(), r.dns, r.dnsZone, r.dnsIP); err != nil {
+			residue = append(residue, "could not verify dns: "+err.Error())
+		} else {
+			for _, n := range names {
+				residue = append(residue, fmt.Sprintf("A record %s still resolves to box IP %s", cloud.Fqdn(n, r.dnsZone), r.dnsIP))
+			}
+		}
+	}
+
 	report := map[string]any{
 		"ok":      len(residue) == 0,
 		"support": r.name,
 		"dataset": r.dataset,
 		"residue": residue,
+		"dns":     dnsNote,
 	}
 	if r.out.emitStructured(report) {
 		if len(residue) > 0 {
@@ -1219,7 +1452,7 @@ func (r *supportRemoveRun) census() int {
 		return exitGeneric
 	}
 	r.out.outf("")
-	r.out.outf("✓ remove %s — census delta zero (server, roster, control plane, token all clean)", r.name)
+	r.out.outf("✓ remove %s — census delta zero (server, roster, control plane, token clean; %s)", r.name, dnsNote)
 	return exitOK
 }
 
@@ -1270,6 +1503,40 @@ func supportCPErrorCode(body []byte) string {
 		return ""
 	}
 	return m.Error
+}
+
+// supportCPRefusalReason reads the CAUSE an authority gate names alongside the
+// generic code — {"error":"forbidden","reason":"no_team","scope":"team"}. Decoded
+// SEPARATELY from the code (the cloudclient idiom) so a route sending a non-string
+// reason costs only the reason, never the code the branch above keys on.
+func supportCPRefusalReason(body []byte) string {
+	var m struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(m.Reason)
+}
+
+// supportCPNoTeam reports whether the control plane refused because the caller's
+// login has NO ACTIVE TEAM, in either shape the team gate emits: the 422 whose
+// code IS the cause, and the 403 whose code is the generic "forbidden" and whose
+// `reason` names it. One predicate, so the two shapes cannot drift into two
+// different narrations.
+func supportCPNoTeam(status int, body []byte) bool {
+	switch status {
+	case http.StatusUnprocessableEntity:
+		return supportCPErrorCode(body) == "no_team"
+	case http.StatusForbidden:
+		// Either shape at the new status: the cause in `reason` beside the generic
+		// code, or the cause AS the code. Reading only the first would drop a flat
+		// 403 {"error":"no_team"} into the role arm — the exact mis-narration this
+		// predicate exists to prevent, one status later.
+		return supportCPRefusalReason(body) == "no_team" || supportCPErrorCode(body) == "no_team"
+	default:
+		return false
+	}
 }
 
 // supportParseCPRowID reads the created row id out of the CP's 201 {barkpark}.
@@ -1359,8 +1626,13 @@ sh /opt/barkpark/scripts/install-cli.sh`
 // and importing such a bundle live-failed box-side; pre-creating an empty
 // same-slug shell routes the merge-import through the live-proven PDS-D9
 // adopt branch (empty shell → delete → import). 409/422 (already exists) is
-// tolerated so a re-run converges and ws="default" is byte-neutral. ws is
-// fenced by supportSlugRe before any step builds.
+// tolerated so a re-run converges. For ws=="default" this is a guaranteed 409
+// no-op — but only because stepDataset runs the reset bracket FIRST: the warm
+// image's baked Postgres carries seed docs, so the box's pre-existing
+// "default" was never the empty shell the old "byte-neutral" claim assumed
+// (three live 409s, 2026-07-26); the reset deletes it and the re-mint's
+// ensure_default_scope recreates it provably empty. ws is fenced by
+// supportSlugRe before any step builds.
 func supportEnsureWorkspaceStep(ws, adminToken string) cloud.CaddyStep {
 	script := `set -e; export BP_TOK='` + adminToken + `'
 code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://localhost:4000/api/workspaces \
@@ -1688,15 +1960,18 @@ FLAGS
   --dry-run              print the named states and do nothing
   -o json|yaml           one machine-readable receipt on stdout
 
-REMOVE (the mirror verb — PDF-D68)
-  Tears one support down across all FOUR surfaces, in a crash-safe order:
+REMOVE (the mirror verb — PDF-D68, five surfaces since PDF-D101)
+  Tears one support down across all FIVE surfaces, in a crash-safe order:
   read the control-plane record first (it alone holds the token id), revoke
   the token on the main, delete the box (identity-fenced by its
   barkpark-fleet-support label — a foreign identity is refused loudly),
-  delete the roster row, and delete the control-plane row LAST. Then a
-  census RE-READS every surface — delete responses prove nothing — and any
-  survivor is named with a non-zero exit. Idempotent: run it again and it
-  reports already-gone; partial state converges.
+  sweep every A record in the zone that resolves to the box IP (by VALUE,
+  not name — the go-live sibling record leaks too; credential:
+  --dns-token > BARKPARK_DNS_HCLOUD_TOKEN > compute), delete the roster
+  row, and delete the control-plane row LAST. Then a census RE-READS every
+  surface — delete responses prove nothing — and any survivor is named
+  with a non-zero exit. Idempotent: run it again and it reports
+  already-gone; partial state converges.
 
 RELATED
   bp fleet roster        the fleet's presence table (who is online, with what)`

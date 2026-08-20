@@ -41,7 +41,7 @@ when scoping any audit). Layers, from instinct to specialty:
   is leaky).
 - Contract-shape changes: grep the whole `lib/` + `test/` tree — error emitters
   are duplicated (query_controller AND legacy_controller).
-- `.ex/.exs/.heex` changes wait for the Elixir Test gate before merge.
+- `.ex/.exs/.heex` changes wait for the `Elixir gate` check before merge.
 - Main checkout stays on `main`; branch work happens in worktrees.
 
 # Improvement doctrine — pristine, not show-off

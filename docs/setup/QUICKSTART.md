@@ -70,7 +70,7 @@ bp setup --target deploy --ssh-host root@VPS_IP --domain api.example.com --yes
 bp setup --target connect --server https://api.example.com --token $TOKEN
 ```
 
-Re-running connect with no `--server` reconnects to the active saved server. `bp servers` lists saved servers; `bp use <name>` switches; `--name` saves a handle.
+Re-running connect with no `--server` reconnects to the active saved server. `bp servers` lists saved servers; `bp use <name>` switches; `--name` saves a handle. A `.barkpark.json` at a repo's root (`{"server":"<saved-name-or-url>"}`, plus optional `workspace`/`project`/`dataset` — never a token) pins every `bp` command run inside that repo; flags and `BARKPARK_*` env still win.
 
 ## Provision
 

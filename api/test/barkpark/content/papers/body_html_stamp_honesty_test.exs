@@ -26,14 +26,16 @@ defmodule Barkpark.Content.Papers.BodyHtmlStampHonestyTest do
 
   @dataset "test"
 
-  # The classification rule pt-w1-reader-provenance-classification will apply,
-  # modelled here as a pure function so this slice can prove its remedy holds
-  # BEFORE that reader exists. Absent stamp is the fail-closed legacy class.
+  # The shipped classification rule (`Papers.cache_provenance/4`), modelled here
+  # as a pure function. Since pe-w2-reader-stamp-guard the ONLY stamp state that
+  # fails closed is the current digest: any other value — old digest, the
+  # renderer's pre-digest integer, or no stamp at all — claims nothing about
+  # this renderer, so a byte mismatch cannot contradict it and blocks stay
+  # canonical. Keep this mirror in step with the real guard.
   defp classify(content, current_version) do
     case Map.fetch(content, "body_html_sv") do
-      :error -> :unknown_fail_closed
       {:ok, ^current_version} -> :divergence_keep_422
-      {:ok, _other} -> :drift_serve_blocks_and_overwrite
+      _ -> :drift_serve_blocks_and_overwrite
     end
   end
 
@@ -107,7 +109,7 @@ defmodule Barkpark.Content.Papers.BodyHtmlStampHonestyTest do
       assert content["body_html"] =~ "Hand-authored"
     end
 
-    test "remedy survives a version bump: fail-closed at BOTH current and bumped version" do
+    test "remedy survives a version bump: never claims the CURRENT renderer, at either version" do
       slug = "stamp-bump-#{System.unique_integer([:positive])}"
       {_paper, _blocks} = seed_block_backed_paper!(slug)
 
@@ -121,12 +123,19 @@ defmodule Barkpark.Content.Papers.BodyHtmlStampHonestyTest do
       paper = Content.get_paper(slug, @dataset)
       current = Render.body_html_render_version()
 
-      assert classify(paper.content, current) == :unknown_fail_closed
-      assert classify(paper.content, bumped_version(current)) == :unknown_fail_closed
+      # The remedy is stamp HONESTY, and it holds across a version bump: a row
+      # whose body_html no renderer produced never claims the current digest, so
+      # it can never be read as divergence.
+      refute classify(paper.content, current) == :divergence_keep_422
+      refute classify(paper.content, bumped_version(current)) == :divergence_keep_422
 
-      # And the reader that exists TODAY still refuses to pick a source: the
-      # persisted body_html is not the render of the persisted blocks.
-      assert {:error, :ambiguous_source} = Content.Papers.reader_source(paper, @dataset)
+      # And what the reader DOES with it (pe-w2-reader-stamp-guard): blocks are
+      # canonical under the content-first doctrine and body_html is a derived
+      # cache, so a mixed row serves its blocks rather than 422ing. That is the
+      # deliberate trade — the previous fail-closed reading took 59 live papers
+      # dark for four weeks. A producer that wants its authored HTML served must
+      # not leave canonical blocks on the row.
+      assert {:blocks, _} = Content.Papers.reader_source(paper, @dataset)
     end
   end
 

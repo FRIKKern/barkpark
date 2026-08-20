@@ -701,13 +701,13 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "chat transport commands (charter bp-chat-tui, ct-bl-manifest-commands)" do
     # bp chat was invisible to the capabilities manifest — the MCP bridge
     # (--tools all), SDK codegen, and headless harnesses could not discover it.
-    # These pin the `chat` noun + the seven non-streaming admin verbs mapped to
+    # These pin the `chat` noun + the nine non-streaming admin verbs mapped to
     # the already-shipped /v1/chat routes (the eighth, SSE events, is a builtin
     # carve-out with no manifest verb). StudioChat is core-embedded, NOT a
     # Barkpark.Plugin, so the noun is declared in core_nouns/0, not plugin_nouns/2.
     @chat_commands ~w(
       chat.create_session chat.list_sessions chat.get_session chat.update_session
-      chat.send_message chat.interrupt chat.approve
+      chat.send_message chat.interrupt chat.approve chat.archive chat.unarchive
     )
 
     test "the `chat` noun is declared and names the SSE streaming carve-out", %{conn: conn} do
@@ -724,7 +724,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "chat noun summary must name the SSE streaming carve-out; got: #{inspect(noun["summary"])}"
     end
 
-    test "exactly the seven non-streaming chat verbs are registered (events stays absent)",
+    test "exactly the nine non-streaming chat verbs are registered (events stays absent)",
          %{conn: conn} do
       manifest = capabilities(conn)
 
@@ -767,7 +767,9 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         "chat.update_session" => {"PATCH", "/v1/chat/sessions/:id"},
         "chat.send_message" => {"POST", "/v1/chat/sessions/:id/messages"},
         "chat.interrupt" => {"POST", "/v1/chat/sessions/:id/interrupt"},
-        "chat.approve" => {"POST", "/v1/chat/sessions/:id/approval"}
+        "chat.approve" => {"POST", "/v1/chat/sessions/:id/approval"},
+        "chat.archive" => {"POST", "/v1/chat/sessions/:id/archive"},
+        "chat.unarchive" => {"POST", "/v1/chat/sessions/:id/unarchive"}
       }
 
       for {id, {method, path}} <- expected do
@@ -1160,6 +1162,190 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       assert resp.status == 200,
              "the non-views etag must not 304 the views body; got status #{resp.status}"
+    end
+  end
+
+  describe "root `chat` discovery block (charter D27, ?chat=1 opt-in)" do
+    # Opt-in by contract, exactly like ?build=1/?views=1: released bp binaries
+    # strict-decode the manifest ROOT with DisallowUnknownFields, so the
+    # DEFAULT response must NEVER grow a new root key. There is no
+    # whole-manifest root-key freeze elsewhere — these negative tests ARE the
+    # guard.
+    test "default manifest carries NO root chat key — byte-identical incl etag",
+         %{conn: conn} do
+      plain = caps_conn(conn)
+      body = json_response(plain, 200)
+
+      refute Map.has_key?(body, "chat"),
+             "default manifest leaked the root chat key — it must be withheld unless ?chat=1"
+
+      # The default body and its etag must be exactly what a chat-oblivious
+      # request gets — the chat gate must not perturb the ungated pipeline.
+      # etag is content-addressed off the final map (generated_at excluded), so
+      # etag equality IS body identity minus the per-request timestamp.
+      twin = caps_conn(build_conn())
+      twin_body = json_response(twin, 200)
+
+      assert Map.delete(body, "generated_at") == Map.delete(twin_body, "generated_at")
+      assert get_resp_header(plain, "etag") == get_resp_header(twin, "etag")
+    end
+
+    test "?chat=1 carries claude caps and empty-array codex (the degrade signal)",
+         %{conn: conn} do
+      body = caps_conn(conn, "?chat=1") |> json_response(200)
+
+      assert %{"providers" => providers} = body["chat"]
+
+      # claude: the transport-ACCEPTED vocabulary — Runtime.capabilities/1
+      # minus the danger mode (bypassPermissions is categorically rejected on
+      # /v1/chat, D22; advertising it would bait a guaranteed 400).
+      claude = providers["claude"]
+      caps = Barkpark.StudioChat.Runtime.capabilities("claude")
+
+      assert claude["modes"] == caps.modes -- [caps.danger_mode]
+      refute "bypassPermissions" in claude["modes"]
+      assert claude["models"] == caps.models
+      assert claude["efforts"] == caps.efforts
+
+      # codex ships all-empty TODAY — pickers must degrade, never invent.
+      assert providers["codex"] == %{"modes" => [], "models" => [], "efforts" => []}
+    end
+
+    test "anonymous ?chat=1 gets nothing (tier none — mirrors the build gate)", %{conn: conn} do
+      body =
+        conn
+        |> get("/v1/capabilities?chat=1")
+        |> json_response(200)
+
+      assert body["auth_tier"] == "none"
+
+      refute Map.has_key?(body, "chat"),
+             "an anonymous caller must not discover the chat surface via ?chat=1"
+    end
+
+    test "chat and non-chat bodies get DISTINCT etags; the plain etag does NOT 304 ?chat=1",
+         %{conn: conn} do
+      plain = caps_conn(conn)
+      with_chat = caps_conn(build_conn(), "?chat=1")
+
+      plain_etag = plain |> get_resp_header("etag") |> List.first()
+      chat_etag = with_chat |> get_resp_header("etag") |> List.first()
+
+      assert is_binary(plain_etag) and plain_etag != ""
+      assert is_binary(chat_etag) and chat_etag != ""
+
+      assert plain_etag != chat_etag,
+             "chat and non-chat manifests must have distinct etags (maybe_gate_chat sits BEFORE etag_for)"
+
+      # The body echoes the same etag the header carries.
+      assert json_response(with_chat, 200)["etag"] == chat_etag
+
+      # Presenting the plain etag against the chat request must re-render (200).
+      resp =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{@token}")
+        |> put_req_header("if-none-match", plain_etag)
+        |> get("/v1/capabilities?chat=1")
+
+      assert resp.status == 200,
+             "the non-chat etag must not 304 the chat body; got status #{resp.status}"
+    end
+  end
+
+  describe "`writes` honesty: no core mutator is advertised read-only (PDS-D302)" do
+    # `writes` is the ONE side-effect signal the MCP bridge sees:
+    # internal/cli/mcp_bridge.go derives `ReadOnlyHint` straight from it. It used
+    # to default to `false` at the builder (`Keyword.get(opts, :writes, false)`),
+    # and 16 non-GET core commands never passed it — so an MCP client was told
+    # `chat.send_message` and `auth.mfa-disable` were safe read-only calls. The
+    # builder now takes `Keyword.fetch!(opts, :writes)`, which can only catch a
+    # MISSING bit; a wrong `false` is caught here and nowhere else.
+    #
+    # Deliberately anchored on the SERVED manifest, not the source: what an MCP
+    # client is told is what matters.
+    @previously_mislabelled ~w(
+      auth.register auth.login auth.verify-email auth.request-reset auth.reset
+      auth.logout auth.mfa-enroll auth.mfa-verify auth.mfa-disable
+      chat.create_session chat.update_session chat.send_message chat.interrupt
+      chat.approve chat.archive chat.unarchive
+    )
+
+    test "every core command whose HTTP method is not GET carries writes == true",
+         %{conn: conn} do
+      liars =
+        capabilities(conn)["commands"]
+        |> Enum.filter(&(&1["source"] == "core"))
+        |> Enum.filter(&(&1["http"]["method"] != "GET"))
+        |> Enum.reject(&(&1["writes"] == true))
+        |> Enum.map(&{&1["id"], &1["http"]["method"], &1["writes"]})
+        |> Enum.sort()
+
+      assert liars == [],
+             """
+             These core commands mutate over a non-GET method but are advertised
+             read-only — an MCP client reads `writes` as ReadOnlyHint and will call
+             them without confirmation:
+
+                 #{inspect(liars, pretty: true)}
+             """
+    end
+
+    test "the 16 commands that shipped mislabelled are present and now honest",
+         %{conn: conn} do
+      commands = capabilities(conn)["commands"]
+
+      for id <- @previously_mislabelled do
+        cmd = Enum.find(commands, &(&1["id"] == id))
+        assert cmd != nil, "#{id} is missing from the manifest (admin token sees every tier)"
+        refute cmd["http"]["method"] == "GET", "#{id} is expected to be a non-GET mutator"
+
+        assert cmd["writes"] == true,
+               "#{id} is still advertised writes == #{inspect(cmd["writes"])}"
+      end
+    end
+
+    test "a GET command still reports writes == false (the flag stayed a signal)",
+         %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "doc.get")
+
+      assert cmd["http"]["method"] == "GET"
+      assert cmd["writes"] == false
+    end
+  end
+
+  describe "root `bpml` vocabulary block (BPML masterplan W0, ?bpml=1 opt-in)" do
+    test "default manifest carries NO root bpml key", %{conn: conn} do
+      body = caps_conn(conn) |> json_response(200)
+
+      refute Map.has_key?(body, "bpml"),
+             "default manifest leaked the root bpml key — it must be withheld unless ?bpml=1"
+    end
+
+    test "?bpml=1 serves the grammar with a derived digest", %{conn: conn} do
+      body = caps_conn(conn, "?bpml=1") |> json_response(200)
+
+      assert %{"blocks" => blocks, "inline" => inline, "formats" => formats, "digest" => digest} =
+               body["bpml"]
+
+      # the attribute contract agents generate types from
+      assert blocks["callout"] == ["id", "tone", "title"]
+      assert blocks["stat"] == ["label", "value", "denom"]
+      assert blocks["paper"] == ["slug", "title"]
+      # aliases ride the table — <strong> teaches nothing new
+      assert inline["b"] == "strong"
+      assert inline["strong"] == "strong"
+      assert formats == ["json", "bpml"]
+      # derived, stable, prefixed — clients echo it to detect stale types
+      assert String.starts_with?(digest, "bpml-")
+      assert body["bpml"]["digest"] == Barkpark.PortableDoc.Bpml.vocabulary()["digest"]
+    end
+
+    test "anonymous ?bpml=1 STILL gets the vocabulary (public format, not a capability)",
+         %{conn: conn} do
+      body = conn |> get("/v1/capabilities?bpml=1") |> json_response(200)
+
+      assert body["auth_tier"] == "none"
+      assert %{"digest" => "bpml-" <> _} = body["bpml"]
     end
   end
 end

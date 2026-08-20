@@ -6,7 +6,11 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
     1. **Advance notices.** Sends a T-3-day and a T-1-day heads-up via the
        notifications system (`:trial_expiring`). Each threshold is claimed with
        an atomic `UPDATE … WHERE <stamp> IS NULL` on the team ledger, so an
-       hourly cadence sends each notice EXACTLY ONCE — no spam.
+       hourly cadence sends each notice EXACTLY ONCE — no spam. A team that has
+       muted alerts entirely (`alerts_enabled: false`) claims NOTHING: the stamp
+       is a one-shot budget with no reader and no second chance, so spending it
+       on a notice that was never sent would silently cost the team its warning
+       (cch-w52-s2).
 
     2. **Expiry teardown.** For a trial whose window has closed
        (`current_period_end <= now`) and that did NOT convert, enqueues a
@@ -84,9 +88,11 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
   end
 
   # T-1 supersedes T-3: at <= 1 day we claim+send the 1-day notice AND silently
-  # claim the 3-day stamp so a late 3-day email can never fire afterward.
+  # claim the 3-day stamp so a late 3-day email can never fire afterward. The
+  # supersede is legitimate ONLY on a run that actually sends the 1-day notice,
+  # which is why the mute check gates the whole arm (see `receivable?/1`).
   defp maybe_notice(acc, team, sub, remaining, now) when remaining <= @one_day do
-    if claim_notice(team.id, :trial_notice_1d_sent_at, now) do
+    if receivable?(team) and claim_notice(team.id, :trial_notice_1d_sent_at, now) do
       _ = claim_notice(team.id, :trial_notice_3d_sent_at, now)
       notify(team, sub, 1)
       %{acc | noticed_1d: acc.noticed_1d + 1}
@@ -96,7 +102,7 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
   end
 
   defp maybe_notice(acc, team, sub, remaining, now) when remaining <= @three_days do
-    if claim_notice(team.id, :trial_notice_3d_sent_at, now) do
+    if receivable?(team) and claim_notice(team.id, :trial_notice_3d_sent_at, now) do
       notify(team, sub, 3)
       %{acc | noticed_3d: acc.noticed_3d + 1}
     else
@@ -105,6 +111,28 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
   end
 
   defp maybe_notice(acc, _team, _sub, _remaining, _now), do: acc
+
+  # cch-w52-s2 — READ BEFORE YOU SPEND. Each stamp is not a log line: it is the
+  # ENTIRE budget for that warning, claimed by an `UPDATE … WHERE <stamp> IS
+  # NULL` that can never match again. Claiming it before knowing whether the
+  # alert can even leave the building spends a warning on a notice nobody got,
+  # and nothing anywhere reads the stamp back, so no surface can show the loss.
+  #
+  # The mute arm is the silent one. `Notifications.should_send?/2` returns false
+  # for `alerts_enabled: false` BEFORE `dispatch_event/3` can raise, so the
+  # crash-rescue's `suppressed` Delivery row (the "Withheld" badge in the
+  # console) is never written either: a muted team burned both stamps and left
+  # zero rows at any status. Reading the team's settings HERE — through the same
+  # public accessor `dispatch_event/3` itself calls first, so the un-muted path
+  # sees an identical row and identical ordering — keeps the budget intact
+  # across the mute: un-mute and the next hourly run still delivers.
+  #
+  # This deliberately mirrors ONLY the master switch. `:trial_expiring` is on
+  # `@always_send`, so the per-event toggle cannot withhold it, and the crash
+  # arm (which DOES leave a row) is not ours to pre-empt.
+  defp receivable?(team) do
+    Notifications.get_or_create_settings(team).alerts_enabled != false
+  end
 
   # Atomically claim a per-threshold notice stamp: the UPDATE only matches while
   # the stamp is NULL, so exactly one run per threshold wins → the notice sends
@@ -119,16 +147,20 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorker do
 
   # One advance-notice alert. Rides the notifications system; `:trial_expiring`
   # is on the always-send allowlist (it still honours a team's global mute).
+  #
+  # cch-w42-s6: this used to compose the whole sentence here, as `:detail`, and
+  # it ended "Upgrade to keep your instance running" — an instruction only the
+  # team OWNER can follow, sent to every member, since the alert fan-out has no
+  # role predicate (by design: the teardown warning's reach must be maximal).
+  # A string authored HERE is authored per-TEAM, before any recipient exists, so
+  # no recipient-aware renderer could ever soften it. The payload now carries the
+  # FACTS — the day count and the team name — and both renderers compose their own
+  # body from them: `EventEmail` per recipient (owner keeps the imperative,
+  # everyone else gets the consequence plus who can act) and `Render` for chat,
+  # which has built the window from `:days` and prescribed nothing since
+  # cch-w32-s1.
   defp notify(team, _sub, days) do
-    detail =
-      "Your Barkpark free trial ends in #{days} #{if(days == 1, do: "day", else: "days")}. " <>
-        "Upgrade to keep your instance running — it's torn down automatically when the trial ends."
-
-    Notifications.dispatch_event(team, :trial_expiring, %{
-      days: days,
-      name: team.name,
-      detail: detail
-    })
+    Notifications.dispatch_event(team, :trial_expiring, %{days: days, name: team.name})
   end
 
   # Enqueue a deprovision through the EXISTING path for each of the team's boxes.

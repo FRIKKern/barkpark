@@ -25,12 +25,43 @@ function docBlocks(doc: GenericDoc): unknown[] {
   return [];
 }
 
+/** The server-rendered HTML body, for the ~2.5% of corpus papers that carry
+ * ONLY `body_html` (the API's own Walk render of the same PortableDocument
+ * grammar) and no `blocks` array. Returns null when absent/blank — blocks
+ * always win when both exist (the caller checks blocks first). */
+function docBodyHtml(doc: GenericDoc): string | null {
+  const html = doc.body_html;
+  return typeof html === "string" && html.trim().length > 0 ? html : null;
+}
+
+/**
+ * Defense-in-depth pass over the trusted corpus HTML before it reaches
+ * `dangerouslySetInnerHTML`. `body_html` is produced by the API's own
+ * server-side renderer (`Barkpark.PortableDoc.Render` behind its
+ * `HtmlSanitizer`) from the SAME published corpus the block arrays come from,
+ * so this is a belt-and-braces strip of active content — script elements,
+ * inline `on*` handlers, `javascript:` URLs — not a general-purpose sanitizer
+ * for untrusted input.
+ */
+function sanitizeTrustedHtml(html: string): string {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/<script\b[^>]*\/?>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "")
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "")
+    .replace(/(href|src)\s*=\s*(["']?)\s*javascript:[^"'\s>]*\2/gi, '$1="#"');
+}
+
 /**
  * Render the body for a resolved document. A document with a PortableDocument
  * body (the seed corpus's rich type, papers, …) renders through the canonical
- * `<PortableDoc>` in a centred reading column; a body-less type (author,
- * category, a media node clicked in the graph) falls back to the `MetaCard`
- * summary so every graph/finder click lands on real content, never a 404.
+ * `<PortableDoc>` in a centred reading column; a blocks-less doc that carries
+ * the server-rendered `body_html` renders that HTML into the SAME
+ * `.bp-paper-surface` column (paper-surface.css styles bare h1/p/li/pre/code
+ * descendants, so it reads with the identical paper typography); a body-less
+ * type (author, category, …) falls back to the `MetaCard` summary so every
+ * graph/finder click lands on real content, never a dead end.
  */
 function renderBody(doc: GenericDoc, type: string) {
   const blocks = docBlocks(doc);
@@ -40,6 +71,17 @@ function renderBody(doc: GenericDoc, type: string) {
         {/* `value` is the type-keyed Block[] grammar; the cast is the single
             narrowing boundary (the API returns it untyped off the index sig). */}
         <PortableDoc value={blocks as Parameters<typeof PortableDoc>[0]["value"]} />
+      </article>
+    );
+  }
+  const bodyHtml = docBodyHtml(doc);
+  if (bodyHtml) {
+    return (
+      <article className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-10">
+        <div
+          className="bp-paper-surface"
+          dangerouslySetInnerHTML={{ __html: sanitizeTrustedHtml(bodyHtml) }}
+        />
       </article>
     );
   }

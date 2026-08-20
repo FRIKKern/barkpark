@@ -1,0 +1,41 @@
+{
+  "_comment": "TERMINAL over a roster of NOBODY. Same shape as terminal-clean.json with `children` EMPTIED: zero live rows, zero considering rows, zero residue, so clause (a) passes on an empty population and the predicate prints its `Sealed 0 children of` sentence. The empty-roster FLOOR is live-only (`if (!fixture && children.length === 0)`), so this fixture is the ONLY hermetic way to reach that sentence \u2014 and unlike the live path it needs no git history, which is why it holds in a depth-1 clone.",
+  "successor": "TERMINAL",
+  "tasks": {},
+  "children": [],
+  "forwarded": [],
+  "gates": {
+    "gr-ops-platform-admin-emails": {
+      "_id": "gr-ops-platform-admin-emails",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "done",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "gr-backlog-qr-live-scan-proof": {
+      "_id": "gr-backlog-qr-live-scan-proof",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "done",
+      "parent_id": "cloud-console-hardening-epic"
+    },
+    "cch-hg-compose-network-recreation": {
+      "_id": "cch-hg-compose-network-recreation",
+      "_type": "task",
+      "status": "published",
+      "lifecycle_status": "done",
+      "parent_id": "cloud-console-hardening-epic"
+    }
+  },
+  "landed": [
+    "481d6f231",
+    "8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4",
+    "d157d098c78bc6604d00d84e22d038bdb176ef58",
+    "26acc7a91be0f0352efdb3e89b2017accb786367",
+    "58862f621"
+  ],
+  "unmeasuredWaivers": [
+    "CCH-D5-rate-limiter-sees-every-user-as-one"
+  ],
+  "defectCommits": {}
+}

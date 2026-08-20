@@ -31,6 +31,19 @@ defmodule Barkpark.Search.DocumentsRetrieverScopeTest do
     scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
     scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
 
+    # W10 schema-visibility gate: the searches below are anonymous (no
+    # caller_context), so "post" needs a PUBLIC schema row in each tenant for
+    # its docs to be searchable at all — the conflation under test is the
+    # dataset-scope filter, which stays fully exercised.
+    for scope <- [scope_a, scope_b] do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "post", "visibility" => "public"},
+          @ds,
+          scope
+        )
+    end
+
     {:ok, _} =
       Content.create_document(
         "post",

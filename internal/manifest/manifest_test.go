@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -169,6 +170,146 @@ func TestParseAcceptsComment(t *testing.T) {
 	if m.Comment != "hi" {
 		t.Errorf("Comment = %q, want \"hi\"", m.Comment)
 	}
+}
+
+// The root `chat` discovery block is a dormant additive field (charter D27,
+// the views/build precedent): a chat-PRESENT manifest parses with every nested
+// key typed (providers → modes/models/efforts), and a chat-ABSENT manifest
+// (every server today, and every server not asked with ?chat=1) parses with
+// Chat nil — the honest "discover nothing, degrade" signal. codex's all-empty
+// caps decode as empty slices, never an error.
+func TestParseChatPresentAndAbsent(t *testing.T) {
+	withChat := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"admin","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[],"chat":{"providers":{"claude":{"modes":["plan","auto"],"models":["sonnet","opus"],"efforts":["low","high"]},"codex":{"modes":[],"models":[],"efforts":[]}}}}`)
+	m, err := Parse(withChat)
+	if err != nil {
+		t.Fatalf("Parse rejected a chat-present manifest: %v", err)
+	}
+	if m.Chat == nil {
+		t.Fatal("chat-present manifest decoded with Chat nil")
+	}
+	claude, ok := m.Chat.Providers["claude"]
+	if !ok {
+		t.Fatal("chat.providers is missing claude")
+	}
+	if !reflect.DeepEqual(claude.Modes, []string{"plan", "auto"}) {
+		t.Errorf("claude.modes = %v, want [plan auto]", claude.Modes)
+	}
+	if !reflect.DeepEqual(claude.Models, []string{"sonnet", "opus"}) {
+		t.Errorf("claude.models = %v, want [sonnet opus]", claude.Models)
+	}
+	if !reflect.DeepEqual(claude.Efforts, []string{"low", "high"}) {
+		t.Errorf("claude.efforts = %v, want [low high]", claude.Efforts)
+	}
+	codex, ok := m.Chat.Providers["codex"]
+	if !ok {
+		t.Fatal("chat.providers is missing codex")
+	}
+	if len(codex.Modes) != 0 || len(codex.Models) != 0 || len(codex.Efforts) != 0 {
+		t.Errorf("codex caps = %+v, want all-empty (the degrade signal)", codex)
+	}
+
+	withoutChat := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[]}`)
+	m2, err := Parse(withoutChat)
+	if err != nil {
+		t.Fatalf("Parse rejected a chat-absent manifest: %v", err)
+	}
+	if m2.Chat != nil {
+		t.Errorf("chat-absent manifest decoded with Chat = %+v, want nil (dormant)", m2.Chat)
+	}
+
+	// The pre-chat fixtures must stay parseable untouched.
+	if parseFixture(t, "core-manifest.json").Chat != nil {
+		t.Error("core fixture unexpectedly carries a chat block")
+	}
+}
+
+// Strict decode recurses into the chat block: an unknown key inside it (or
+// inside one provider's caps) fails Parse. This is ALSO the mutation proof for
+// the D27 atomicity invariant: DisallowUnknownFields means a build whose
+// Manifest struct lacked the Chat field would reject a chat-bearing body
+// outright — so the field and fetch's ?chat=1 opt-in must ship together, and
+// this test pins the recursing strictness that makes that invariant bite.
+func TestParseRejectsUnknownChatKey(t *testing.T) {
+	badInChat := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"admin","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[],"chat":{"providers":{},"bogus":true}}`)
+	if _, err := Parse(badInChat); err == nil {
+		t.Fatal("Parse accepted an unknown key inside chat; want error")
+	}
+
+	badInCaps := []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"admin","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[],"chat":{"providers":{"claude":{"modes":[],"models":[],"efforts":[],"bogus":true}}}}`)
+	if _, err := Parse(badInCaps); err == nil {
+		t.Fatal("Parse accepted an unknown key inside a provider's chat caps; want error")
+	}
+}
+
+// Parse is a CLIENT-SIDE TRUST BOUNDARY against a remote-to-eval RCE: the
+// completion emitters bake manifest noun/verb NAMES raw into a shell script the
+// user is told to eval (`eval "$(bp completion bash)"`), so a hostile server
+// could plant a name like `x";touch /tmp/pwn;#` that executes on eval. Parse
+// must REJECT a manifest whose noun name or command verb leaves the shell-safe
+// identifier charset — before any name reaches an emitter. MUTATION PROOF:
+// deleting the safeName loop in manifest.Parse reds every subtest here.
+func TestParseRejectsUnsafeNounVerbNames(t *testing.T) {
+	// A well-formed manifest scaffold with one legit noun+command; each case
+	// swaps in a hostile noun name or verb and asserts Parse errors.
+	manifest := func(nounName, verb string) []byte {
+		return []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[{"name":` +
+			jsonStr(nounName) + `,"summary":"s"}],"commands":[{"id":"c","noun":` + jsonStr(nounName) +
+			`,"verb":` + jsonStr(verb) + `,"summary":"s","http":{"method":"GET","path_template":"/x"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"}]}`)
+	}
+
+	// The completion-eval RCE payload proven by verify (V3), plus a command-
+	// substitution variant and a single-quote break-out (breaks the fish emitter's
+	// single-quoted interpolation).
+	hostileNames := []string{
+		`x";touch /tmp/pwn;#`,
+		`$(touch /tmp/pwn)`,
+		`a'b`,
+		`a b`,        // whitespace splits the shell word list
+		`a;rm -rf /`, // command separator
+		`a$IFS`,      // shell variable
+		`Doc`,        // uppercase is outside the documented charset
+		`-lead`,      // a leading hyphen would read as a flag / option
+	}
+
+	for _, name := range hostileNames {
+		// Hostile NOUN name (verb kept legit) must be rejected.
+		if _, err := Parse(manifest(name, "get")); err == nil {
+			t.Errorf("Parse accepted hostile noun name %q; want rejection", name)
+		}
+		// Hostile VERB (noun kept legit) must be rejected.
+		if _, err := Parse(manifest("doc", name)); err == nil {
+			t.Errorf("Parse accepted hostile verb %q; want rejection", name)
+		}
+	}
+
+	// The Command.Noun path is distinct from the declared Noun.Name: Tree()
+	// synthesizes a node from cmd.Noun for a command whose noun was never declared
+	// in nouns[], and that name flows into the same eval'd emitter. So a manifest
+	// with an EMPTY nouns[] but a command carrying a hostile noun must also be
+	// rejected — a Noun.Name-only check would miss it.
+	cmdNounOnly := func(hostileNoun string) []byte {
+		return []byte(`{"manifest_version":"1","server":{"name":"x","version":"1","base_url":"http://x"},"auth_tier":"none","generated_at":"2026-01-01T00:00:00Z","etag":"e","nouns":[],"commands":[{"id":"c","noun":` +
+			jsonStr(hostileNoun) + `,"verb":"get","summary":"s","http":{"method":"GET","path_template":"/x"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"}]}`)
+	}
+	for _, name := range hostileNames {
+		if _, err := Parse(cmdNounOnly(name)); err == nil {
+			t.Errorf("Parse accepted hostile undeclared command noun %q; want rejection", name)
+		}
+	}
+
+	// A legit hyphenated noun+verb (workspace project-create is a real command)
+	// must STILL parse — the validation rejects metacharacters, not the safe
+	// charset the CLI actually uses.
+	if _, err := Parse(manifest("workspace", "project-create")); err != nil {
+		t.Errorf("Parse rejected a legit hyphenated noun/verb: %v", err)
+	}
+}
+
+// jsonStr encodes a Go string as a JSON string literal so a test payload
+// carrying quotes/backslashes embeds cleanly into a manifest body.
+func jsonStr(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // (b) Tree() from core-manifest.json yields the eight canonical core nouns plus

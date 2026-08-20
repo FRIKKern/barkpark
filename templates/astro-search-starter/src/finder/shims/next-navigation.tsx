@@ -25,14 +25,45 @@ function subscribe(onChange: () => void): () => void {
   if (typeof window === 'undefined') return () => {}
   window.addEventListener('popstate', onChange)
   window.addEventListener(LOCATION_EVENT, onChange)
+  // Astro's ClientRouter navigates with history.pushState, which fires NO
+  // popstate — so without this the finder would keep the URL it was mounted
+  // with after a client-side navigation, and the open row would highlight the
+  // wrong document (or none). `astro:page-load` fires after every swap.
+  document.addEventListener('astro:page-load', onChange)
   return () => {
     window.removeEventListener('popstate', onChange)
     window.removeEventListener(LOCATION_EVENT, onChange)
+    document.removeEventListener('astro:page-load', onChange)
   }
 }
 
+/** The site base, same derivation as `withBase` in the next-link shim. */
+const BASE = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '') // '' | '/sites/slug'
+
+/**
+ * Strip the site base and any trailing slash, so this returns the path in the
+ * SAME vocabulary the finder itself speaks: root-absolute, unprefixed, no
+ * trailing slash — e.g. `/d/paper/my-slug`, never `/sites/x/d/paper/my-slug/`.
+ *
+ * This is what makes the open row highlight. finder.tsx (byte-locked to the
+ * Next edition, so the fix has to live here) marks a row selected with
+ * `pathname === hit.href || pathname === '/d/<type>/<slug>'`, and `hit.href` is
+ * the raw unprefixed `/d/<type>/<slug>` — while a deployed static site serves
+ * `/sites/<slug>/d/<type>/<name>/`, base-prefixed AND directory-slashed. Those
+ * never compared equal, so on the Astro edition no result row ever showed as
+ * open. Normalising here restores the symmetry the shim already keeps
+ * everywhere else: the finder thinks in unprefixed app paths, and the shim adds
+ * the base at each boundary (`<Link>`, `router.push`, `router.replace`).
+ */
+export function normalizePathname(raw: string): string {
+  let path = raw || '/'
+  if (BASE && (path === BASE || path.startsWith(BASE + '/'))) path = path.slice(BASE.length) || '/'
+  if (path.length > 1) path = path.replace(/\/+$/, '') || '/'
+  return path
+}
+
 const getPathname = (): string =>
-  typeof window === 'undefined' ? '/' : window.location.pathname
+  typeof window === 'undefined' ? '/' : normalizePathname(window.location.pathname)
 const getSearch = (): string =>
   typeof window === 'undefined' ? '' : window.location.search
 
@@ -68,7 +99,12 @@ export function useRouter(): Router {
   }, [])
   const replace = useCallback((href: string, _opts?: { scroll?: boolean }) => {
     if (typeof window === 'undefined') return
-    window.history.replaceState(null, '', href)
+    // MUST base-prefix exactly like `push`: the finder calls this as
+    // `replace(`${pathname}?${qs}`)` with the pathname `usePathname()` handed
+    // it, and that value is now the DE-BASED app path (see normalizePathname).
+    // Without withBase here, the first keystroke would rewrite the URL to a
+    // base-less path and every subsequent relative asset/route read would miss.
+    window.history.replaceState(null, '', withBase(href))
     emit()
   }, [])
   const prefetch = useCallback(() => {}, [])

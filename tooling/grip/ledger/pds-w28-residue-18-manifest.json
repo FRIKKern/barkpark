@@ -1,0 +1,72 @@
+{
+  "_note": "PINNED MANIFEST for pds-w28-residue-18 (PDS-D352). ONE census run. Every count in the task, the recipe row and the PR is stated AGAINST THIS MANIFEST, not against a later board -- the live denominator moved 186 -> 196 -> 204 -> 205 during this wave while the numerator stood still, so an unpinned count is an average dressed as a snapshot.",
+  "census_tree": {
+    "materialized_by": "git archive origin/main | tar -x  (PDS-D397)",
+    "origin_main_sha": "7dd27bc9bbec29652019f3c699bff86feaa21b9c",
+    "not_used": [
+      "the primary checkout (behind origin/main; check-doc-budgets.sh there reports a 113-byte-stale figure)",
+      "git clone --shared + git checkout origin/main -- . (inside the clone, origin/main resolves to the CLONE's own origin and reproduces the same stale tree)"
+    ]
+  },
+  "census_invocation": "bash scripts/pds-ledger-census.sh --json --assert-round-done --anchor-from-paper pds-wave-28-2026-07-31",
+  "census_exit": 1,
+  "source": "https://guerrilla.barkpark.cloud",
+  "root": "task-2ac1f95237c4a8e5",
+  "lens": "closure",
+  "window": {
+    "started": "2026-07-31T13:34:54.015870Z",
+    "finished": "2026-07-31T13:35:08.890511Z",
+    "seconds": 14.87
+  },
+  "round_anchor": "2026-07-31T04:37:09.947319Z",
+  "round_anchor_source": "paper/pds-wave-28-2026-07-31 _createdAt 2026-07-31T04:37:09.947319Z",
+  "counts": {
+    "corpus_size": 4041,
+    "closure_size": 372,
+    "live": 205,
+    "live_adjudicated": 172,
+    "reasons_non_empty": 213,
+    "reason_hashes_distinct": 213,
+    "off_vocabulary_total": 0,
+    "live_bare_in_round": 18,
+    "live_bare_residue": 15
+  },
+  "live_bare_in_round": [
+    "pds-dedup-unavailable-503-is-still-a-409",
+    "pds-w26-bl-independent-review-owed-on-two-slices",
+    "pds-w27-bl-census-anchor-not-bound-to-its-round",
+    "pds-w27-bl-census-cannot-see-a-false-reason",
+    "pds-w27-bl-census-executes-stray-code-from-cwd",
+    "pds-w27-bl-drafts-in-ready-handoff-to-truth-grip",
+    "pds-w27-bl-hetzner-instance-verb-receipt-residue",
+    "pds-w27-bl-large-task-create-500-narrowed-to-create",
+    "pds-w27-bl-order-param-silently-ignored",
+    "pds-w27-bl-stage-adjudication-eats-the-lease",
+    "pds-w27-bl-stamp-guard-substring-false-positive",
+    "pds-w27-bl-support-run-registry-rows-vacuous",
+    "pds-w27-bl-task-next-and-all-corrupt-the-honest-shape",
+    "pds-w27-certify-the-round",
+    "pds-w27-realistic-tripwire-blind-to-disposition",
+    "pds-w27-round-bare-30",
+    "task-406343e4f378cbdf",
+    "task-cea8262194f05616"
+  ],
+  "live_bare_residue": [
+    "pds-bl-anchor-retirement-after-both-fences",
+    "pds-bl-board-tui-reader-honesty",
+    "pds-bl-census-runs-in-no-ci-gate",
+    "pds-bl-grip-adoption-governance",
+    "pds-bl-grip-screen-refuses-honest-read-commands",
+    "pds-bl-upsert-insert-branch-ungated-birth",
+    "pds-bl-w2-w5-product-ground-map",
+    "pds-bl-w7a-lifecycle-check-enum-drift",
+    "pds-w28-birth-fence",
+    "pds-w28-census-isolation",
+    "pds-w28-disposition-rerun-field",
+    "pds-w28-oscreate-real-sinks",
+    "pds-w28-reader-default-page-fence",
+    "pds-w28-rerun-adjudicator",
+    "pds-w28-residue-18"
+  ],
+  "round_done": false
+}

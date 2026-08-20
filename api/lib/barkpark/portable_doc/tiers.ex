@@ -111,6 +111,10 @@ defmodule Barkpark.PortableDoc.Tiers do
   # (charter D35): the same self-contained rows for the three INTERACTIVE cards —
   # the block is the read-time VISUAL, its answerability rides the message envelope.
   @widget [
+    # scaffy:classify-block-type route MARK:tier-route--widget
+    # `route` → :widget: one purposeful visualization over literal data (an
+    # encoded polyline), the same family as chart/heatmap/gauge-list.
+    "route",
     # scaffy:classify-block-type code-tabs MARK:tier-code-tabs--widget
     "code-tabs",
     # scaffy:classify-block-type api-endpoint MARK:tier-api-endpoint--widget
@@ -152,6 +156,8 @@ defmodule Barkpark.PortableDoc.Tiers do
     "stat-grid",
     "heatmap",
     "chart",
+    "duel",
+    "lineage",
     "gauge-list",
     "sheet",
     "embed",
@@ -171,7 +177,7 @@ defmodule Barkpark.PortableDoc.Tiers do
   @section ~w(section columns tabs)
 
   @by_tier %{element: @element, widget: @widget, section: @section}
-  @tier_of (for {tier, types} <- @by_tier, t <- types, into: %{}, do: {t, tier})
+  @tier_of for {tier, types} <- @by_tier, t <- types, into: %{}, do: {t, tier}
 
   @type tier :: :element | :widget | :section
 

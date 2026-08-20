@@ -186,7 +186,7 @@ Real, filed, and deliberately not papered over:
 - **No HTTP endpoint mints the per-install chat token.** `Auth.create_token/5`
   already mints workspace-bound `chat` tokens, but only from a console — the
   operator seals one into the install out of band. A self-serve mint endpoint is an
-  isolated Elixir slice behind the Elixir Test gate.
+  isolated Elixir slice behind the `Elixir gate` check.
 - **`CONNECTORS_CREDENTIAL_KEY` is instance-global.** One key seals every tenant's
   rows (the AAD, not the key, is what separates tenants). A per-workspace KEK would
   need D9's workspace-scoped secrets.

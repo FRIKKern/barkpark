@@ -1,0 +1,7 @@
+{
+    "error": {
+        "code": "not_found",
+        "message": "entity not found",
+        "details": null
+    }
+}

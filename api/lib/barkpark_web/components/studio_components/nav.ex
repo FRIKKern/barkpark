@@ -35,8 +35,9 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   @doc """
   Self-update bar for the Studio chrome — a slim strip pinned above the
-  topbar. Renders ONLY when the caller is an admin (`@admin?`, threaded
-  from the `shares_admin?` chrome flag) AND the running instance is behind
+  topbar. Renders ONLY when the caller is an INSTANCE admin (`@admin?`,
+  threaded from the HOST-level `instance_admin?` chrome flag, NOT the
+  workspace-scoped `shares_admin?`) AND the running instance is behind
   the latest published release (`Barkpark.SelfUpdate.status/0` reports
   `state: :behind`). Any other state — `:disabled` (Checker not running,
   e.g. test env), `:unknown`, `:current` — emits no update markup, so
@@ -273,14 +274,21 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   humans and smoke tests can read the running build at a glance.
   Version/commit come from `Barkpark.BuildInfo` (compile-time git data;
   "unknown" outside a git checkout — never raises).
+
+  The optional `:vitals` slot renders after the version span — the caller
+  passes either the live `BarkparkWeb.ServerVitalsLive` (live context) or a
+  static host-vitals snapshot (dead views). The `#bp-build-version` span is
+  left byte-identical so smoke tests still read the running build.
   """
+  slot :vitals
+
   def studio_footer(assigns) do
     ~H"""
     <div
       class="studio-footer"
       style="flex: none; padding: 4px 16px; font-size: 11px; color: var(--fg-dim); border-top: 1px solid var(--border);"
     >
-      <span id="bp-build-version">Barkpark v<%= Barkpark.BuildInfo.version() %> · <%= Barkpark.BuildInfo.commit() %></span>
+      <span id="bp-build-version">Barkpark v<%= Barkpark.BuildInfo.version() %> · <%= Barkpark.BuildInfo.commit() %></span><%= render_slot(@vitals) %>
     </div>
     """
   end

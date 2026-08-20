@@ -63,35 +63,61 @@ defmodule BarkparkCloud.DomainStatusTest do
     bp
   end
 
+  # A live box. Its stored `url` is the CLEAN form go-live actually reserves
+  # (`<slug>.barkpark.cloud`) — DELIBERATELY a DIFFERENT STRING from
+  # `Barkpark.provisioning_fqdn/1`'s suffixed `<slug>-<team_short_id>` form.
+  #
+  # This is the point of the fixture: the old harness stored the unrelated
+  # constant "https://x.barkpark.cloud" and then programmed every DNS/TLS/HTTP
+  # fake with `provisioning_fqdn(bp)` — feeding the fake exactly the name the
+  # code under test asked for, so it was structurally incapable of redding on
+  # WHICH name the console checks. Fakes are now programmed by `platform_fqdn/1`
+  # (the stored url's host), so probing the wrong name is a test failure.
   defp live_barkpark(team, attrs \\ %{}) do
-    team
-    |> barkpark_fixture()
-    |> Ecto.Changeset.change(Enum.into(attrs, %{host: @host, url: "https://x.barkpark.cloud"}))
+    bp = barkpark_fixture(team)
+
+    bp
+    |> Ecto.Changeset.change(Enum.into(attrs, %{host: @host, url: Barkpark.clean_url(bp.slug)}))
     |> Repo.update!()
   end
 
+  # The hostname the console must check: the host of the STORED url. Kept
+  # deliberately dumb (strip the scheme, nothing else) so it does not
+  # re-implement — and therefore cannot rubber-stamp — the production
+  # derivation. A row with no url falls back to the suffixed FQDN, which is the
+  # only name a pre-reservation row has.
+  defp platform_fqdn(%Barkpark{url: url}) when is_binary(url) and url != "",
+    do: String.replace_prefix(url, "https://", "")
+
+  defp platform_fqdn(bp), do: Barkpark.provisioning_fqdn(bp)
+
   # ── seam fakes (injected per call via opts) ──
 
-  # A DNS fake from a %{"host" => [ip_tuple, ...]} map: the list on :inet, [] on
-  # :inet6 (resolve_all unions both families and de-dupes), {:ok, []} for an
-  # unmapped host (an un-propagated record).
+  # A DNS fake from a %{"host" => [ip_tuple, ...]} map: the list on :inet, and
+  # `{:error, :nxdomain}` on the family that has no record — WHICH IS WHAT THE
+  # REAL TRANSPORT RETURNS. Re-measured at review on this host:
+  # `:inet.getaddrs(~c"definitely-not-a-real-host-zzz.example", :inet)` and the
+  # same on `:inet6` both return `{:error, :nxdomain}`, and an A-only name
+  # returns it on `:inet6`. A fake that answered `{:ok, []}` for a missing
+  # record would encode a shape production never produces — the device-oracle
+  # trap: a fixture that cannot produce the condition it is meant to police.
   defp dns_map(map) do
     fn charlist, family ->
       case {Map.get(map, to_string(charlist)), family} do
-        {nil, _} -> {:ok, []}
+        {nil, _} -> {:error, :nxdomain}
         {list, :inet} -> {:ok, list}
-        {_list, :inet6} -> {:ok, []}
+        {_list, :inet6} -> {:error, :nxdomain}
       end
     end
   end
 
-  # An inet6-family DNS fake (AAAA-only estates).
+  # An inet6-family DNS fake (AAAA-only estates). Same fidelity rule.
   defp dns_map_inet6(map) do
     fn charlist, family ->
       case {Map.get(map, to_string(charlist)), family} do
-        {nil, _} -> {:ok, []}
+        {nil, _} -> {:error, :nxdomain}
         {list, :inet6} -> {:ok, list}
-        {_list, :inet} -> {:ok, []}
+        {_list, :inet} -> {:error, :nxdomain}
       end
     end
   end
@@ -171,13 +197,17 @@ defmodule BarkparkCloud.DomainStatusTest do
     }
   end
 
-  # The three canonical scenarios, each a full REAL-server envelope with a frozen
+  # The four canonical scenarios, each a full REAL-server envelope with a frozen
   # checked_at: every-rung-green, mid-issuance (tls still pending → serving
-  # skipped), and cert-ok-but-app-down (serving FAILED, the [ok,ok,ok,failed]
-  # state the SPA keeps polling).
+  # skipped), cert-ok-but-app-down (serving FAILED, the [ok,ok,ok,failed] state
+  # the SPA keeps polling), and resolver_faulted — the control plane's own DNS
+  # lookup could not answer, so dns_found is `unknown` with NO remediation and
+  # the domain rolls up `unknown`. Without that fourth case the shared fixture
+  # structurally cannot produce the defect, and the cross-runtime drift gate
+  # cannot see the new rung state at all.
   defp fixture_cases do
     bp = fixture_barkpark()
-    dns = dns_map(%{Barkpark.provisioning_fqdn(bp) => [{91, 99, 1, 2}]})
+    dns = dns_map(%{platform_fqdn(bp) => [{91, 99, 1, 2}]})
 
     %{
       "all_serving" =>
@@ -197,6 +227,12 @@ defmodule BarkparkCloud.DomainStatusTest do
           dns: dns,
           tls: tls_const({:ok, frozen_cert()}),
           http: http_const({:ok, 502})
+        ),
+      "resolver_faulted" =>
+        DomainStatus.check(bp,
+          dns: fn _charlist, _family -> {:error, :timeout} end,
+          tls: tls_const({:ok, frozen_cert()}),
+          http: http_const({:ok, 200})
         )
     }
     |> Map.new(fn {name, env} -> {name, %{env | checked_at: @frozen_checked_at}} end)
@@ -220,7 +256,7 @@ defmodule BarkparkCloud.DomainStatusTest do
 
   # The all-green estate for a platform-only box at @host.
   defp green_seams(bp) do
-    fqdn = Barkpark.provisioning_fqdn(bp)
+    fqdn = platform_fqdn(bp)
 
     [
       dns: dns_map(%{fqdn => [{203, 0, 113, 10}]}),
@@ -235,6 +271,104 @@ defmodule BarkparkCloud.DomainStatusTest do
 
   # ── executor: happy path + envelope shape ──
 
+  # ── the estate's platform entry: WHICH hostname is the domain of record ──
+
+  # Live measurement that motivated this (N=6, the whole team-visible fleet):
+  # three instances returned ok:false with the platform domain stuck at
+  # `dns_found: pending` under "DNS records take up to a minute to propagate —
+  # give it a moment and re-check", for the SUFFIXED name — four of the six
+  # suffixed names do not resolve at all, because go-live reserved the clean
+  # form. The one row whose stored url happened to BE the provisioning_url
+  # returned ok:true on all four stages: the check passed exactly when the two
+  # names coincided. These tests pin the name apart from that coincidence.
+  describe "DomainStatus.check/2 — the platform domain is the STORED url's host" do
+    test "the console checks the url's hostname, NOT the suffixed provisioning_fqdn" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      stored = platform_fqdn(bp)
+      suffixed = Barkpark.provisioning_fqdn(bp)
+
+      # The premise of the whole test: these are two DIFFERENT names, and only
+      # the stored one exists in DNS.
+      assert stored != suffixed
+      assert stored == bp.slug <> ".barkpark.cloud"
+      assert suffixed =~ bp.slug <> "-"
+
+      result =
+        DomainStatus.check(bp,
+          dns: dns_map(%{stored => [{203, 0, 113, 10}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      dom = platform(result)
+      assert dom.host == stored
+      assert dom.overall == "ok"
+      assert result.ok == true
+    end
+
+    test "a fleet where ONLY the suffixed name resolves is not silently green" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      # The live defect, reproduced: the suffixed name is the one that answers
+      # (or, in the field, the one nothing ever creates). Checking it would make
+      # the console say "ok"; checking the name the plane serves says pending
+      # and never claims the instance is reachable.
+      result =
+        DomainStatus.check(bp,
+          dns: dns_map(%{Barkpark.provisioning_fqdn(bp) => [{203, 0, 113, 10}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      dom = platform(result)
+      assert dom.host == platform_fqdn(bp)
+      assert stage(dom, "dns_found").status == "pending"
+      assert dom.overall == "pending"
+      assert result.ok == false
+    end
+
+    test "POSITIVE CONTROL: a row whose url IS the provisioning_url still goes all-green" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+      bp = bp |> Ecto.Changeset.change(%{url: Barkpark.provisioning_url(bp)}) |> Repo.update!()
+
+      fqdn = Barkpark.provisioning_fqdn(bp)
+      assert platform_fqdn(bp) == fqdn
+
+      result =
+        DomainStatus.check(bp,
+          dns: dns_map(%{fqdn => [{203, 0, 113, 10}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      dom = platform(result)
+      assert dom.host == fqdn
+      assert Enum.map(dom.stages, & &1.status) == ~w(ok ok ok ok)
+      assert result.ok == true
+    end
+
+    test "a row with no url yet falls back to the suffixed FQDN (the only name it has)" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team) |> Ecto.Changeset.change(%{url: nil}) |> Repo.update!()
+
+      fqdn = Barkpark.provisioning_fqdn(bp)
+
+      result =
+        DomainStatus.check(bp,
+          dns: dns_map(%{fqdn => [{203, 0, 113, 10}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      assert platform(result).host == fqdn
+      assert result.ok == true
+    end
+  end
+
   describe "DomainStatus.check/2 — all green" do
     test "platform-only box: every stage ok, overall ok, exact envelope shape" do
       {_u, team} = user_with_team()
@@ -248,7 +382,7 @@ defmodule BarkparkCloud.DomainStatusTest do
 
       assert [dom] = result.domains
       assert dom.kind == "platform"
-      assert dom.host == Barkpark.provisioning_fqdn(bp)
+      assert dom.host == platform_fqdn(bp)
       assert dom.overall == "ok"
 
       assert Enum.map(dom.stages, & &1.stage) == ~w(dns_found points_here tls serving)
@@ -270,7 +404,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "attached custom_host adds a second domain (platform + custom)" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team, %{custom_host: "shop.barkpark.cloud"})
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       seams = [
         dns:
@@ -328,7 +462,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "points_here FAILS when the domain resolves somewhere else; tls/serving skip" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       # Resolves — but to a different box than @host.
       result =
@@ -357,7 +491,7 @@ defmodule BarkparkCloud.DomainStatusTest do
       {_u, team} = user_with_team()
       # A still-provisioning box: DNS record exists, but no reported host.
       bp = live_barkpark(team, %{host: nil})
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       result = DomainStatus.check(bp, dns: dns_map(%{fqdn => [{203, 0, 113, 10}]}))
       dom = platform(result)
@@ -370,7 +504,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "a hostname host is resolved and matched (not just IP literals)" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team, %{host: "box.example.net"})
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       # Both the domain and the host resolve to the same address.
       result =
@@ -394,7 +528,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "a timing-out TLS dial is a bounded pending, not a hang" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       result =
         DomainStatus.check(bp,
@@ -415,7 +549,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "a raising seam is caught (never escapes) — treated as unreachable" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       result =
         DomainStatus.check(bp,
@@ -429,13 +563,303 @@ defmodule BarkparkCloud.DomainStatusTest do
     end
   end
 
+  # ── an unreachable resolver is `unknown`, never a guess about the operator ──
+  #
+  # The defect these pin: `resolve_all/2` folded every resolver fault (raise,
+  # exit, {:error, :timeout}, no nameservers) into an empty
+  # address list, byte-identical to a GENUINE empty answer — so the control plane
+  # told the person "No A/AAAA record for <host> has propagated yet." with
+  # "give it a moment and re-check" attached, about a lookup it never made.
+
+  # The four fault modes, each a seam that cannot ANSWER. The last two are
+  # RETURNED errors; the first two are a raise and an exit through safe_call/1.
+  # `:nxdomain` is deliberately NOT here — it is an answer, and its own describe
+  # block above pins it as one.
+  defp fault_seams do
+    [
+      {"raise", fn _charlist, _family -> raise "resolver down" end},
+      {"exit", fn _charlist, _family -> exit(:killed) end},
+      {"timeout", fn _charlist, _family -> {:error, :timeout} end},
+      {"no nameservers", fn _charlist, _family -> {:error, :no_nameservers} end}
+    ]
+  end
+
+  # REVIEW DECISION (wave 28, superseding the letter of D332): `:nxdomain` is an
+  # ANSWER, not a fault. Re-measured on the real transport —
+  # `:inet.getaddrs(~c"no-such-host.example", :inet)` and the same on `:inet6`
+  # BOTH return `{:error, :nxdomain}` — which is precisely what a freshly
+  # attached, still-propagating domain looks like. Classified as a fault it
+  # would turn the MOST COMMON waiting state into "we could not check" and strip
+  # its propagation advice: one lie swapped for another in the rung this slice
+  # exists to make honest. This test is the guard on that classification.
+  describe "DomainStatus.check/2 — an authoritative NXDOMAIN is a measurement" do
+    test "nxdomain on BOTH families reads as propagation-pending, with its advice intact" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      dom = platform(DomainStatus.check(bp, dns: fn _c, _f -> {:error, :nxdomain} end))
+      dns = stage(dom, "dns_found")
+
+      assert dns.status == "pending"
+      assert dns.evidence =~ "has propagated yet"
+      refute dns.evidence =~ "Could not check whether"
+      assert is_binary(dns.remediation) and dns.remediation =~ "propagate"
+      assert dom.overall == "pending"
+
+      # BYTE-IDENTICAL to the empty-list answer: both are the same measurement.
+      assert dns == stage(platform(DomainStatus.check(bp, dns: dns_map(%{}))), "dns_found")
+    end
+
+    test "a REAL fault alongside nxdomain still reads unknown (nxdomain is not a fault mask)" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      dom =
+        platform(
+          DomainStatus.check(bp,
+            dns: fn _c, family ->
+              case family do
+                :inet -> {:error, :nxdomain}
+                :inet6 -> {:error, :timeout}
+              end
+            end
+          )
+        )
+
+      assert stage(dom, "dns_found").status == "unknown"
+      assert stage(dom, "dns_found").evidence =~ "timed out"
+      assert dom.overall == "unknown"
+    end
+  end
+
+  describe "DomainStatus.check/2 — resolver fault is unknown, not a propagation guess" do
+    test "all four fault modes are unknown and NAME the fault; a genuine empty answer stays pending" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      # The control: every family answers, and the answer is genuinely empty.
+      genuine_empty = platform(DomainStatus.check(bp, dns: dns_map(%{})))
+
+      assert stage(genuine_empty, "dns_found").status == "pending"
+      assert stage(genuine_empty, "dns_found").evidence =~ "has propagated yet"
+      assert stage(genuine_empty, "dns_found").remediation =~ "propagate"
+      assert genuine_empty.overall == "pending"
+
+      for {name, seam} <- fault_seams() do
+        dom = platform(DomainStatus.check(bp, dns: seam))
+        dns = stage(dom, "dns_found")
+
+        assert dns.status == "unknown", "#{name}: expected unknown, got #{dns.status}"
+
+        # It says WHOSE failure it was, and names the fault itself.
+        assert dns.evidence =~ "Could not check whether",
+               "#{name}: evidence must not claim anything about the operator's records"
+
+        assert dns.evidence =~ "DNS lookup failed"
+        refute dns.evidence =~ "has propagated yet"
+
+        # THE PIN: before the fix every one of these was BYTE-IDENTICAL to the
+        # genuine-empty control.
+        refute dns == stage(genuine_empty, "dns_found"),
+               "#{name}: a resolver fault must not be indistinguishable from an empty answer"
+
+        assert dom.overall == "unknown"
+      end
+    end
+
+    test "each fault mode names its OWN fault (they are not one collapsed string either)" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      evidence =
+        for {_name, seam} <- fault_seams() do
+          bp
+          |> DomainStatus.check(dns: seam)
+          |> platform()
+          |> stage("dns_found")
+          |> Map.get(:evidence)
+        end
+
+      assert length(Enum.uniq(evidence)) == length(evidence),
+             "the four fault modes collapsed back into one string: #{inspect(evidence)}"
+
+      assert Enum.any?(evidence, &(&1 =~ "timed out"))
+      assert Enum.any?(evidence, &(&1 =~ "no nameservers configured"))
+      assert Enum.any?(evidence, &(&1 =~ "resolver down"))
+      assert Enum.any?(evidence, &(&1 =~ "exit"))
+    end
+
+    test "an unknown stage carries NO remediation — the honest copy is the evidence, the fix is the absence of advice" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      for {name, seam} <- fault_seams() do
+        dns = bp |> DomainStatus.check(dns: seam) |> platform() |> stage("dns_found")
+
+        assert dns.status == "unknown"
+        assert is_nil(dns.remediation), "#{name}: an unmeasurable stage must carry no advice"
+      end
+
+      # The contrast, in the same file: an actionable pending rung still carries
+      # its server-owned copy (this fix removes advice ONLY where we did not look).
+      pending = bp |> DomainStatus.check(dns: dns_map(%{})) |> platform() |> stage("dns_found")
+      assert is_binary(pending.remediation) and pending.remediation != ""
+    end
+
+    test "overall ordering is failed > unknown > pending > ok — unknown never reads as a promise" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      result = DomainStatus.check(bp, dns: fn _c, _f -> {:error, :timeout} end)
+      dom = platform(result)
+
+      # The reachable shape: one unmeasurable rung, three skipped-pending ones.
+      assert Enum.map(dom.stages, & &1.status) == ~w(unknown pending pending pending)
+
+      # MUTATION PIN: drop the explicit `unknown` clause from overall/1 and this
+      # reads "pending" — a PROMISE that it will go green on its own, about a
+      # rung nobody measured.
+      assert dom.overall == "unknown"
+      refute dom.overall == "pending"
+
+      # And the envelope never seals over it.
+      assert result.ok == false
+    end
+
+    test "a failed rung still outranks unknown (the ordering is not just unknown-wins)" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+      fqdn = platform_fqdn(bp)
+
+      # The domain resolves elsewhere (points_here FAILS) while the box host's
+      # own lookup faults — a real misconfiguration outranks an unmeasured rung.
+      result =
+        DomainStatus.check(bp,
+          dns: fn charlist, family ->
+            case {to_string(charlist), family} do
+              {^fqdn, :inet} -> {:ok, [{198, 51, 100, 9}]}
+              _ -> {:ok, []}
+            end
+          end
+        )
+
+      dom = platform(result)
+      assert stage(dom, "points_here").status == "failed"
+      assert dom.overall == "failed"
+    end
+
+    test "CONTAINMENT: only an ATTEMPTED stage may be unknown — skipped stages stay pending" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      # (1) The faulted domain: the attempted rung is unknown, everything the
+      # chain SKIPPED behind it stays pending (never "unknown" by contagion).
+      dom = platform(DomainStatus.check(bp, dns: fn _c, _f -> {:error, :timeout} end))
+
+      for name <- ~w(points_here tls serving) do
+        s = stage(dom, name)
+        assert s.status == "pending", "#{name} was never attempted — it cannot be unknown"
+        assert s.evidence =~ "an earlier step couldn't be checked"
+        # …and nothing below an unmade check carries advice either: the
+        # stage-keyed copy would be the same guess, one rung down.
+        assert is_nil(s.remediation),
+               "#{name}: a rung skipped behind unknown must carry no advice"
+      end
+
+      # (2) A normally-pending domain (a fresh attach, records still
+      # propagating) must NOT flip: no rung anywhere reads unknown.
+      waiting = platform(DomainStatus.check(bp, dns: dns_map(%{})))
+
+      assert Enum.map(waiting.stages, & &1.status) == ~w(pending pending pending pending)
+      refute Enum.any?(waiting.stages, &(&1.status == "unknown"))
+      assert waiting.overall == "pending"
+
+      # (3) An all-green domain is untouched by any of this.
+      green = platform(DomainStatus.check(bp, green_seams(bp)))
+      assert green.overall == "ok"
+      refute Enum.any?(green.stages, &(&1.status == "unknown"))
+    end
+
+    test "the SECOND lie: a resolver that dies on the BOX host no longer says the instance never reported" do
+      {_u, team} = user_with_team()
+      # The box's host is a NAME, so expected_addrs/2 resolves it too (:358).
+      bp = live_barkpark(team, %{host: "box.example.net"})
+      fqdn = platform_fqdn(bp)
+
+      # The domain answers; the BOX host's lookup faults.
+      result =
+        DomainStatus.check(bp,
+          dns: fn charlist, family ->
+            case {to_string(charlist), family} do
+              {^fqdn, :inet} -> {:ok, [{203, 0, 113, 10}]}
+              {^fqdn, :inet6} -> {:ok, []}
+              _ -> {:error, :timeout}
+            end
+          end
+        )
+
+      dom = platform(result)
+      assert stage(dom, "dns_found").status == "ok"
+
+      ph = stage(dom, "points_here")
+      assert ph.status == "unknown"
+      # The instance DID report an address — never claim otherwise.
+      refute ph.evidence =~ "hasn't reported an address yet"
+      assert ph.evidence =~ "Could not check where"
+      assert ph.evidence =~ "timed out"
+      assert is_nil(ph.remediation)
+
+      assert dom.overall == "unknown"
+      assert result.ok == false
+
+      # The control, one field apart: the instance genuinely has no host yet.
+      no_host = live_barkpark(team, %{host: nil, url: "https://no-host.barkpark.cloud"})
+      no_host_fqdn = platform_fqdn(no_host)
+
+      unreported =
+        no_host
+        |> DomainStatus.check(dns: dns_map(%{no_host_fqdn => [{203, 0, 113, 10}]}))
+        |> platform()
+        |> stage("points_here")
+
+      assert unreported.status == "pending"
+      assert unreported.evidence =~ "hasn't reported an address yet"
+    end
+
+    test "a fault on ONE family while the other answers is still a MEASUREMENT (ok, not unknown)" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+      fqdn = platform_fqdn(bp)
+
+      result =
+        DomainStatus.check(bp,
+          dns: fn charlist, family ->
+            case {to_string(charlist), family} do
+              {^fqdn, :inet} -> {:ok, [{203, 0, 113, 10}]}
+              # The inet6 lookup genuinely FAULTS (a timeout, not an answer) —
+              # we still measured what we needed on the other family.
+              {_, :inet6} -> {:error, :timeout}
+              _ -> {:ok, []}
+            end
+          end,
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      dom = platform(result)
+      assert stage(dom, "dns_found").status == "ok"
+      assert dom.overall == "ok"
+      assert result.ok == true
+    end
+  end
+
   # ── TLS attribution: no-cert / self-signed / expired / valid ──
 
   describe "DomainStatus.check/2 — TLS stage attribution" do
     setup do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
       base = [dns: dns_map(%{fqdn => [{203, 0, 113, 10}]}), http: http_const({:ok, 200})]
       {:ok, bp: bp, base: base}
     end
@@ -530,7 +954,7 @@ defmodule BarkparkCloud.DomainStatusTest do
       {_u, team} = user_with_team()
       # Stored with leading zeros / uppercase — NOT :inet.ntoa's canonical form.
       bp = live_barkpark(team, %{host: "2001:0DB8:0000:0000:0000:0000:0000:0001"})
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       result =
         DomainStatus.check(bp,
@@ -618,6 +1042,30 @@ defmodule BarkparkCloud.DomainStatusTest do
       assert custom =~ "custom domain"
     end
 
+    # THE GUARD THAT CAN LOSE (wave 40 S6). `points_here` used to be
+    # `(_kind, "points_here")` — one sentence asserting "It's pointed
+    # automatically when the instance is provisioned", which is TRUE of the
+    # platform FQDN and FALSE of a custom host, where router.ex's own attach
+    # path says "external hosts: box wiring only — the customer owns DNS".
+    # Every SITE domain is "custom", so a site owner was told their DNS was
+    # handled for them and that support was the recourse.
+    test "platform vs custom pointing stories differ, and only platform claims it is automatic" do
+      platform = FailureCopy.domain_stage_remediation("platform", "points_here")
+      custom = FailureCopy.domain_stage_remediation("custom", "points_here")
+
+      assert platform != custom
+
+      # The platform FQDN's record IS ours to set.
+      assert platform =~ ~r/platform sets this record/i
+
+      # A custom host's is NOT — and the copy must name the record the owner
+      # actually controls rather than sending them to support.
+      refute custom =~ ~r/automatic/i
+      refute custom =~ ~r/contact support/i
+      assert custom =~ ~r/\bA record\b/
+      assert custom =~ ~r/stays with you/i
+    end
+
     test "every stage (and the terminal default) yields non-empty copy" do
       for kind <- ~w(platform custom),
           stage <- ~w(dns_found points_here tls serving anything_new) do
@@ -673,6 +1121,23 @@ defmodule BarkparkCloud.DomainStatusTest do
       # the SPA terminal fold keeps polling.
       failed = cases["serving_failed"]["domains"] |> hd()
       assert Enum.map(failed["stages"], & &1["status"]) == ~w(ok ok ok failed)
+
+      # The resolver-fault scenario the SPA + CLI folds read: the ATTEMPTED rung
+      # is unknown with NO advice attached, the skipped rungs stay pending, and
+      # the envelope does not seal.
+      faulted = cases["resolver_faulted"]["domains"] |> hd()
+      assert Enum.map(faulted["stages"], & &1["status"]) == ~w(unknown pending pending pending)
+      assert faulted["overall"] == "unknown"
+      assert cases["resolver_faulted"]["ok"] == false
+
+      dns = hd(faulted["stages"])
+      assert is_nil(dns["remediation"])
+      # Nothing in an unknown-fronted host advises: not the unmeasured rung, and
+      # not the rungs it skipped (the SPA renders one amber note per remediation
+      # string, so a single leak would put "give it a moment" under a guess).
+      assert Enum.all?(faulted["stages"], &is_nil(&1["remediation"]))
+      assert dns["evidence"] =~ "Could not check whether"
+      refute dns["evidence"] =~ "has propagated yet"
     end
   end
 
@@ -857,7 +1322,7 @@ defmodule BarkparkCloud.DomainStatusTest do
     test "returns the full green envelope for the owner" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      fqdn = Barkpark.provisioning_fqdn(bp)
+      fqdn = platform_fqdn(bp)
 
       __MODULE__.RouteFake.program(
         dns: %{fqdn => [{203, 0, 113, 10}]},

@@ -1,0 +1,202 @@
+{
+  "_readme": [
+    "SCRIPT-EMITTED. Do not hand-edit: regenerate with pds-live-hetzner-placement-group.sh --manifest-emit.",
+    "Every http_status/content_type/bytes below is DERIVED from the verbatim TAB-delimited curl -w",
+    "record captured when the body was fetched; every sha256 is computed from the bytes on disk and",
+    "is hyphen-chunked in 8-character groups so the committed-credential scanner (which reds any 32+",
+    "character unbroken alphanumeric run, this manifest included) stays UNWIDENED.",
+    "THE MARKER IS NON-ACCIDENTABILITY, NOT UNFORGEABILITY: status and content-type are TRANSPORT",
+    "facts absent from the committed bytes, so an honestly-computed digest over a MISLABELLED row",
+    "still verifies. What catches a mislabelled row is the coherence arm in",
+    "internal/cli/hetzner_live_fixtures_test.go, not anything in this file.",
+    "Rows with provenance wave-30-run predate the machine record: their bytes and sha256 are derived",
+    "from disk, their status and content-type are the wave-30 run's human transcription."
+  ],
+  "emitted_by": "scripts/pds-live-hetzner-placement-group.sh --manifest-emit",
+  "harvested_at": "2026-07-31T20:11:35Z",
+  "harvested_by": "scripts/pds-live-hetzner-placement-group.sh --run",
+  "api": "https://api.hetzner.cloud/v1",
+  "kind_coverage": {
+    "flat_kinds": [
+      "certificate",
+      "firewall",
+      "floating-ip",
+      "load-balancer",
+      "network",
+      "placement-group",
+      "primary-ip",
+      "volume",
+      "zone"
+    ],
+    "harvested": [
+      "certificate",
+      "firewall",
+      "floating-ip",
+      "load-balancer",
+      "network",
+      "placement-group",
+      "primary-ip",
+      "volume",
+      "zone"
+    ],
+    "pending": [],
+    "note": "flat_kinds is the hcloud subset of the receipt ledger whose 404 lives at a flat collection path. The segment is derived as replace(kind,'-','_')+'s' and pinned in the runner."
+  },
+  "refusals": [
+    {
+      "kind": "record",
+      "refused_by": "scripts/pds-live-hetzner-placement-group.sh --harvest-only",
+      "ground": "hcloud-go v2.44 has NO /records collection at all; records exist only under /zones/<zone>/rrsets/<name>/<type>. A flat probe would therefore 404 on a MISSING ZONE and be filed under kind=record — a fabricated fixture. A genuine rrset 404 needs a real zone, which routes data and is outside this runner's fence. NOT TO BE CONFLATED: record is still PAYABLE by a post-read (get_rrset_by_name_and_type / get_rrset_by_id both 404-swallow into the gone-read shape); this refusal is about HARVESTING a body, never about paying a receipt."
+    }
+  ],
+  "chain": "a6425794-d6c32bad-48292fd8-c7010b2b-49d83d99-796dfa7b-0261d25c-3c02bfdf",
+  "fixtures": [
+    {
+      "file": "pds_live_hetzner_certificate_404.json",
+      "kind": "certificate",
+      "segment": "certificates",
+      "request": "GET /v1/certificates/999999999",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 140,
+      "record": "404\tapplication/json\t140",
+      "provenance": "harvest-only",
+      "sha256_chunked": "cfc0bd7e-5a2ff6cc-ef93c2d0-891ad00d-ea061ffd-181f16fb-37843ba3-4223eac2",
+      "error_code": "not_found"
+    },
+    {
+      "file": "pds_live_hetzner_firewall_404.json",
+      "kind": "firewall",
+      "segment": "firewalls",
+      "request": "GET /v1/firewalls/999999999",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 138,
+      "record": "404\tapplication/json\t138",
+      "provenance": "harvest-only",
+      "sha256_chunked": "eba8f3d7-050ec4cc-00cb2ece-b86fd3ee-07dcc437-7e96e93d-7846ade7-3973266f",
+      "error_code": "not_found"
+    },
+    {
+      "file": "pds_live_hetzner_floating_ip_404.json",
+      "kind": "floating-ip",
+      "segment": "floating_ips",
+      "request": "GET /v1/floating_ips/999999999",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 139,
+      "record": "404\tapplication/json\t139",
+      "provenance": "harvest-only",
+      "sha256_chunked": "3a9262dc-1efca422-58b0e8f4-fe130c46-b0f55814-48c8421b-45bc995f-782b9273",
+      "error_code": "not_found"
+    },
+    {
+      "file": "pds_live_hetzner_load_balancer_404.json",
+      "kind": "load-balancer",
+      "segment": "load_balancers",
+      "request": "GET /v1/load_balancers/999999999",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 142,
+      "record": "404\tapplication/json\t142",
+      "provenance": "harvest-only",
+      "sha256_chunked": "f2c52462-bd0cc529-3b340528-b7f3909e-7077ff68-1a51f652-56064ecf-81940fe7",
+      "error_code": "not_found"
+    },
+    {
+      "file": "pds_live_hetzner_network_404.json",
+      "kind": "network",
+      "segment": "networks",
+      "request": "GET /v1/networks/999999999",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 116,
+      "record": "404\tapplication/json\t116",
+      "provenance": "harvest-only",
+      "sha256_chunked": "a766c17d-35fa01ff-af991c15-03e5b72b-12cf1c5c-37c3068b-da24f04f-0a30e020",
+      "error_code": "not_found",
+      "message_token_override": "entity",
+      "message_token_reason": "MEASURED 2026-08-01 by --harvest-only: the network 404's message is literally \"entity not found\" (116 bytes) — hcloud's network endpoint is the one flat kind that does not name its own kind in the message, so the derived token \"network\" is not present and no wording rule could predict it. The override is the measured constant, and it is a WEAKER check for this one row: it can no longer catch a wrong-collection harvest for network."
+    },
+    {
+      "file": "pds_live_hetzner_placement_group_200.json",
+      "kind": "placement-group",
+      "segment": "placement_groups",
+      "request": "GET /v1/placement_groups/1806023",
+      "http_status": 200,
+      "content_type": "application/json",
+      "bytes": 186,
+      "record": "",
+      "provenance": "wave-30-run",
+      "sha256_chunked": "9e1a8fcd-0324f1ae-bafc0be3-ab8aa93d-9e89c8b5-55d43145-1e05f800-5a6b9282",
+      "note": "the resource bp had just created through the real verb; its id/name/type were compared against bp's own create receipt and matched"
+    },
+    {
+      "file": "pds_live_hetzner_placement_group_404.json",
+      "kind": "placement-group",
+      "segment": "placement_groups",
+      "request": "GET /v1/placement_groups/1806023 (after DELETE)",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 100,
+      "record": "",
+      "provenance": "wave-30-run",
+      "sha256_chunked": "6c0d00e9-10acee6c-9b109105-c8ac1293-5d56f5d3-4bbb18e8-bf999571-9e62789b",
+      "error_code": "not_found",
+      "note": "THE GROUND TRUTH OF PDS-D401. hzResDestroyed's clean (nil,nil) arm depends on production answering a JSON 404 — hcloud-go's errorFromBody returns nil unless hasJSONBody(), so a text/plain 404 would land in the 'not confirmed' arm instead. Assumed for 29 waves; measured here."
+    },
+    {
+      "file": "pds_live_hetzner_primary_ip_404.json",
+      "kind": "primary-ip",
+      "segment": "primary_ips",
+      "request": "GET /v1/primary_ips/999999999",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 138,
+      "record": "404\tapplication/json\t138",
+      "provenance": "harvest-only",
+      "sha256_chunked": "a0630e5c-4bd742ff-c9796b8a-9513ecbc-a232c7f1-d835ab62-2a5c07e8-a4d7a43f",
+      "error_code": "not_found"
+    },
+    {
+      "file": "pds_live_hetzner_server_404.json",
+      "kind": "server",
+      "segment": "servers",
+      "request": "GET /v1/servers/999999999",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 91,
+      "record": "",
+      "provenance": "wave-30-run",
+      "sha256_chunked": "65d8cbef-ecebb54d-50bfb199-48aca237-4219e751-822c68ac-5685168c-56492854",
+      "error_code": "not_found",
+      "note": "a SECOND kind, harvested to prove the 404 shape is uniform across kinds while its LENGTH is not: 91 bytes here against the placement group's 100"
+    },
+    {
+      "file": "pds_live_hetzner_volume_404.json",
+      "kind": "volume",
+      "segment": "volumes",
+      "request": "GET /v1/volumes/999999999",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 98,
+      "record": "404\tapplication/json\t98",
+      "provenance": "harvest-only",
+      "sha256_chunked": "1cb52213-1c3e6705-c276e7e7-fefc31a3-f8bef126-94c7a25b-aba6536f-7476b45d",
+      "error_code": "not_found"
+    },
+    {
+      "file": "pds_live_hetzner_zone_404.json",
+      "kind": "zone",
+      "segment": "zones",
+      "request": "GET /v1/zones/999999999",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 114,
+      "record": "404\tapplication/json\t114",
+      "provenance": "harvest-only",
+      "sha256_chunked": "6fdade64-ff08a074-2a48fe07-055606ed-408734cb-75cc0a04-53d5cc8f-f1f0433a",
+      "error_code": "not_found"
+    }
+  ]
+}

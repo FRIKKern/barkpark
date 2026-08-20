@@ -1,0 +1,321 @@
+# pdf-p1-refire — transcript
+# tree: 5ccd9ad0adb3b2d2408a773fa37b98136e4fabdc (main) · host: darwin · 2026-07-28T02:22:51Z
+# command: scripts/pdf-p1-refire.sh
+
+──────────────────────────────────────────────────────────────────────────────
+PDF P1 REFIRE — run 20260728T022251Z-24622
+──────────────────────────────────────────────────────────────────────────────
+tree:     /Users/frikkjarl/Documents/GitHub/barkpark
+worktree: 5ccd9ad0adb3b2d2408a773fa37b98136e4fabdc (main)
+cp:       https://api.barkpark.cloud
+parent:   b2b81e69-c79c-4eff-b6d7-84507d15b925 (template-less Guerrilla, PDF-D98)
+main:     https://guerrilla.barkpark.cloud (dataset production)
+name:     p1refire-260728022251 · watch budget 1800s
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 0 — PRECONDITION — bearers, credential-empty law, CP route, money-safety, template-less parent (ABORT-only)
+──────────────────────────────────────────────────────────────────────────────
+      config bearers loaded (.token 41 bytes, .cloud_token 43 bytes — never printed)
+      credential-empty law holds: no HCLOUD_TOKEN in this shell (teardown = hcloud 'barkpark' context)
+      anon POST /v1/fleet/supports (control plane) -> HTTP 401
+      GET /v1/barkparks/b2b81e69-c79c-4eff-b6d7-84507d15b925/bootstrap -> HTTP 404 error=no_bootstrap
+      template-less parent PROVEN: 404 no_bootstrap → the claim pins workspace 'default' (router.ex:9471) and the bracket RUNS
+      GET /v1/barkparks/b2b81e69-c79c-4eff-b6d7-84507d15b925/credentials -> HTTP 200, admin_token present: yes (value never printed)
+      GET https://guerrilla.barkpark.cloud/v1/fleet/roster?dataset=production -> HTTP 200, documents-envelope: yes
+      building bp: go build -o $WORKDIR/bp ./cmd/barkpark …
+      bp built (52541202 bytes)
+      control plane knows 4 managed host(s) (the teardown project must intersect these)
+      teardown project (hcloud 'barkpark' context) lists 7 box(es); CP-managed ∩ teardown-project = 116.203.91.216,116.203.98.0,46.224.19.120,5.75.169.183
+      teardown-capability PROVEN: hcloud 'barkpark' context reaches the CP's provisioning project (shared host 116.203.91.216,116.203.98.0,46.224.19.120,5.75.169.183)
+      DNS census credential: hcloud 'main' context — leg 5 will sweep barkpark.cloud by value
+  PASS   0   bearers resolve; credential-empty (no HCLOUD_TOKEN); CP route answers its anon-401; template-less parent PROVEN via 404 no_bootstrap; parent admin token present; roster serves the envelope; bp fresh; and the teardown credential provably reaches the CP's provisioning project
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 1 — THE FIRE — exactly ONE POST /v1/fleet/supports {mode:provision} under the Guerrilla parent
+──────────────────────────────────────────────────────────────────────────────
+  $ POST https://api.barkpark.cloud/v1/fleet/supports {name:p1refire-260728022251, barkpark_id:b2b81e69-c79c-4eff-b6d7-84507d15b925, mode:provision}
+      receipt (HTTP 202):
+      | {"job_id":"4d7be1c2-5634-48b5-bef9-7d1eae7c23f3","barkpark":{"autoupdate_paused":false,"update_latest_release":null,"region":null,"provision_steps":[],"provider":"hetzner","verify_reachable":null,"host":null,"server_type":null,"fleet_parent_id":"b2b81e69-c79c-4eff-b6d7-84507d15b925","provision_console":[],"agent_status":"offline","update_running_release":null,"custom_host":null,"suspended_reason":null,"team_id":"506f035e-08f4-4b49-9038-86735eb4c0ef","channel":"prod","git_commit":null,"health_status":"unknown","slug":"p1refire-260728022251","last_verified_at":null,"suspended":false,"inserted_at":"2026-07-28T02:23:09.510820Z","fleet_role":"support","pinned_release":null,"version":null,"mode":"managed","autoupdate_enabled":true,"update_checked_at":null,"url":"https://p1refire-260728022251.barkpark.cloud","id":"c596c1bf-e363-41dd-bf7e-d82655c0cc2f","name":"p1refire-260728022251","update_state":"unknown","autoupdate_triggered_at":null,"fleet_token_id":null,"last_seen_at":null}}      SEALED: support_id=c596c1bf-e363-41dd-bf7e-d82655c0cc2f job_id=4d7be1c2-5634-48b5-bef9-7d1eae7c23f3 (the provision_support job the Go provisioner drains)
+  PASS   1   one fire, 202 accepted: support row registered host-nil (id c596c1bf-e363-41dd-bf7e-d82655c0cc2f), job 4d7be1c2-5634-48b5-bef9-7d1eae7c23f3 enqueued
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 2 — WATCH — poll the CP row's provision_steps to terminal (a RED is a recorded finding, not an abort)
+──────────────────────────────────────────────────────────────────────────────
+  watch  status=pending    host=—              steps=[—]
+  watch  status=claimed    host=—              steps=[create:started]
+  watch  status=claimed    host=—              steps=[create:started]
+  watch  status=claimed    host=—              steps=[create:started]
+  watch  status=claimed    host=—              steps=[create:started]
+  watch  status=claimed    host=—              steps=[create:started]
+  watch  status=claimed    host=—              steps=[create:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  watch  status=claimed    host=—              steps=[create:started,create:done,secure:started]
+  FAIL   2   the job reached NO terminal state within 1800s (last status=claimed, steps=[create:started,create:done,secure:started]) — an instrument failure; teardown still runs (money before verdicts)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 3 — THE D102 READ — the CP row's fleet_token_id + provision_steps, READ after terminal
+──────────────────────────────────────────────────────────────────────────────
+      CP row (read, verbatim fields — the discriminator for task-b9c0f988cd0019d4):
+      fleet_token_id:  NIL
+      provision_steps: [{"at": "2026-07-28T02:23:11.232057Z", "detail": "box warm-5cff5701 up at 46.225.61.223 \u2014 waiting for sshd", "status": "started", "step": "create"}, {"at": "2026-07-28T02:24:06.788877Z", "detail": "46.225.61.223", "status": "done", "step": "create"}, {"at": "2026-07-28T02:24:06.809589Z", "detail": "pointing p1refire-260728022251.barkpark.cloud at 46.225.61.223", "status": "started", "step": "secure"}]
+      host:            NIL
+  PASS   3   D102 read done: fleet_token_id=NIL read from the row (never inferred); provision_steps printed verbatim
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 4 — TEARDOWN — PDF-D68 order: row already read; token FIRST among deletes; box/roster/DNS; CP row LAST
+──────────────────────────────────────────────────────────────────────────────
+  4a token revoke: SKIPPED — fleet_token_id is NIL on the CP row (the D102 wound,
+      task-b9c0f988cd0019d4). If the chain reached its mint, a live ledger token is now
+      ORPHANED on the parent main with no recorded id to revoke it by — said plainly,
+      never upgraded to 'revoked'.
+  4b $ bp cloud support remove p1refire-260728022251 --dataset production   (teardown credential = hcloud 'barkpark' context)
+      | → cp-read: reading the support's control-plane record (GET /v1/barkparks on https://api.barkpark.cloud)
+      | ✓ cp-read — c596c1bf-e363-41dd-bf7e-d82655c0cc2f (token id none)
+      | → locate: listing boxes labeled barkpark-fleet-support=p1refire-260728022251
+      | ✓ locate — warm-5cff5701 at 46.225.61.223 (identity verified: barkpark-fleet-support=p1refire-260728022251)
+      | → locate: probe secret unavailable (box env unreadable) — the census token leg falls back to the revoke receipt
+      | ✓ token — no token id on record — nothing to revoke
+      | → server: deleting box warm-5cff5701 at 46.225.61.223
+      | ✓ server — warm-5cff5701 deleted
+      | ⚠ dns: no dedicated DNS credential (--dns-token / BARKPARK_DNS_HCLOUD_TOKEN) — riding the compute token; the fleet project's token sees ZERO zones, so the sweep may find nothing while records survive — the census below is the truth
+      | → dns: sweeping A records in barkpark.cloud that resolve to 46.225.61.223 — by VALUE, not name (a by-name delete leaves the go-live sibling standing)
+      | ⚠ dns: sweep failed: hcloud zone rrset list "barkpark.cloud": exit status 1: hcloud: Zone not found: barkpark.cloud — continuing; the census below is the truth
+      | → roster: deleting roster row listener-p1refire-260728022251 on https://guerrilla.barkpark.cloud (dataset production)
+      | ⚠ roster: the main answered 404: {"error":{"code":"not_found","message":"document not found","hint":"Check the document _id, type, and dataset in the URL — the resource does not exist in this scope.","request_id":"GMZUgkcvdU5XzmMACSAS"}} — continuing; the census below is the truth
+      | → cp-row: deleting control-plane row c596c1bf-e363-41dd-bf7e-d82655c0cc2f — LAST (sole durable holder of the token id)
+      | ✓ cp-row — c596c1bf-e363-41dd-bf7e-d82655c0cc2f removed
+      | → census: re-reading all five surfaces (delete responses prove nothing)
+      |   · token: no token id was on record
+      receipt:
+      | {"dataset":"production","dns":"dns verified by value","ok":false,"residue":["could not verify dns: hcloud zone rrset list \"barkpark.cloud\": exit status 1: hcloud: Zone not found: barkpark.cloud"],"support":"p1refire-260728022251"}
+      ASSERT-FAIL: bp cloud support remove exited 1 (the verb is itself under test this wave) — falling through to the raw reaper
+  4c raw label reaper (list-then-delete; hcloud server delete has no --selector):
+      raw reaper: label scan barkpark-fleet-support=p1refire-260728022251 through hcloud 'barkpark' context → no boxes (nothing to reap)
+  4d $ DELETE https://api.barkpark.cloud/v1/fleet/supports/c596c1bf-e363-41dd-bf7e-d82655c0cc2f   (CP row LAST)
+      CP row delete -> HTTP 404: {"error":"not_found"}
+  FAIL   4   teardown ran in PDF-D68 order: token skipped (nil id — the D102 wound); bp remove rc=1; CP row deleted last — 1 assertion(s) failed (see the ASSERT-FAIL lines above)
+
+──────────────────────────────────────────────────────────────────────────────
+RUNG 5 — FIVE-SURFACE CENSUS — re-reads, never receipts: token, box, roster, CP row, DNS-by-value
+──────────────────────────────────────────────────────────────────────────────
+      1. TOKEN: SKIPPED — fleet_token_id was NIL on the CP row (task-b9c0f988cd0019d4): there is
+         no recorded id to revoke or re-probe. If the chain minted, that token is an ORPHAN on
+         the parent main — a leak this census cannot close, only name.
+      2. BOX: hcloud label scan barkpark-fleet-support=p1refire-260728022251 (hcloud 'barkpark' context): empty
+      3. ROSTER: row for p1refire-260728022251 on https://guerrilla.barkpark.cloud: none
+      4. CP ROW: /v1/barkparks row for c596c1bf-e363-41dd-bf7e-d82655c0cc2f: gone
+      5. DNS: SKIPPED — the box never recorded a host IP on the CP row (the chain died before
+         create finished), so there is no VALUE to sweep by. The chain's own DNS write happens
+         after the IP exists, so no rrset can point at a box that never got one.
+  PASS   5   five-surface census: token skipped (nil id, named); box label scan; roster row; CP row; DNS swept by VALUE against <no ip>
+
+──────────────────────────────────────────────────────────────────────────────
+VERDICT — instrument: PASS=4 ABORT=0 FAIL=2
+P1 COLOR (the finding, first-class): TIMEOUT
+  → no terminal state within 1800s — an instrument failure, not a chain color.
+──────────────────────────────────────────────────────────────────────────────

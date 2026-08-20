@@ -3,17 +3,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
   Papers — the block-ops / write path, extracted from `Barkpark.Content.Papers`
   (Modularity decomposition: `papers.ex` was a god-module).
 
-  This module owns the four public write functions and their private helpers:
+  This module owns the five public write functions and their private helpers:
 
-    * `upsert_paper/2` — whole-paper upsert + whole-HTML broadcast, walled
-      by default (charter D26 — see the function doc).
+    * `upsert_blocks_doc/3` — whole-doc upsert + whole-HTML broadcast for any
+      type in the closed `["paper", "session"]` whitelist, walled by default
+      (charter D26 — see the function doc). `upsert_paper/2` is now a thin
+      `upsert_blocks_doc("paper", attrs, opts)` wrapper (session-handoff
+      Task 2 — the "generalized upsert" off the hardcoded `"paper"` type).
     * `apply_paper_block_op/4` — single portable-doc op + delta broadcast.
     * `apply_paper_block_ops/4` — atomic batch of ops + one delta broadcast.
     * `apply_document_block_op/5` — generalized block-op for any
       Expectation-bearing document (the Beta block editor's write path).
 
   `Barkpark.Content.Papers` keeps its public API byte-identical by delegating
-  these four functions here. The read-side helpers (`get_paper/3`,
+  these functions here. The read-side helpers (`get_paper/3`, `get_blocks_doc/4`,
   `resolve_blocks_for_edit/3`) stay in `Papers`; this module calls back to them.
   The extraction preserves the former public API. HTML-only papers additionally
   fail closed on BlockOps until an explicit revision-fenced conversion exists.
@@ -33,28 +36,53 @@ defmodule Barkpark.Content.Papers.BlockOps do
   @paper_default_dataset "production"
   @html_conversion_message "HTML-only papers are read-only until an explicit revision-fenced conversion preserves the authored HTML preimage."
 
+  # The closed blocks-type whitelist — the SOLE copy (compile-time module
+  # attribute, required so `upsert_blocks_doc/3`'s guard clause can pattern
+  # against it). `Barkpark.Content.Papers.blocks_types/0` /
+  # `Barkpark.Content.blocks_types/0` both delegate here rather than keeping
+  # an independent literal, so there is exactly one place to widen the list.
+  @blocks_types ["paper", "session"]
+
+  @doc "The closed whitelist of document types that ride the blocks-doc write path."
+  def blocks_types, do: @blocks_types
+
+  @doc "Whether `type` is in the blocks-doc whitelist (`blocks_types/0`)."
+  def blocks_type?(type), do: type in @blocks_types
+
   @doc """
-  Upsert a paper keyed by `{dataset, slug}` (as a type-"paper" document) and
-  broadcast a **whole-HTML** frame on the per-doc topic.
+  Upsert a blocks-doc keyed by `{dataset, slug}` — `type` must be in the
+  closed whitelist `["paper", "session"]` (`Content.blocks_types/0`), else
+  `{:error, :not_a_blocks_type}`. Generalized off the original paper-only
+  `upsert_paper/2` (session-handoff Task 2); `upsert_paper/2` below is now a
+  thin `upsert_blocks_doc("paper", attrs, opts)` wrapper, byte-identical to
+  its pre-generalization behavior.
 
   `attrs` accepts string or atom keys: `slug` (required), and either
-  `body_html` OR `blocks`. When `blocks` is given, `body_html` is (re)rendered
-  from it as the derived cache. Optionally `dataset`, `source_doc`, `goal_id`,
-  `event_type`, and the label spine's `tags` (weighted `[{tag, strength,
-  rationale}]`) + `description` — persisted into the paper's content so the
-  wall and search read them. The monotonic integer streaming rev
-  (`content["rev"]`) is bumped on every write.
+  `body_html` OR `blocks` (a "paper" write only — "session" and any future
+  non-paper type always normalizes a missing `blocks` to `[]`, no HTML-only
+  leg). When `blocks` is given, `body_html` is (re)rendered from it as the
+  derived cache. Optionally `dataset`, `source_doc`, `goal_id`, `event_type`,
+  and the label spine's `tags` (weighted `[{tag, strength, rationale}]`) +
+  `description` — persisted into a PAPER's content so the wall and search
+  read them (this fixed allowlist stays paper-only). A non-paper type instead
+  merges every OTHER caller-supplied attr straight into content as metadata
+  (a session's `status`, `harness`, `session_uuid`, … land as-is). The
+  monotonic integer streaming rev (`content["rev"]`) is bumped on every
+  write.
 
   ## The publish wall (authoring-excellence D26)
 
-  This path births PUBLISHED papers via direct Repo writes, so it mounts the
+  This path births PUBLISHED rows via direct Repo writes, so it mounts the
   SAME `Barkpark.Content.AuthoringWall` chain `Lifecycle.publish_document/4`
   runs — on a synthesized in-memory ref, BEFORE the row write. Enforcement is
   ON by default; wall rejections surface RAW (`{:error, {:label_spine, d}}`,
   `{:error, {:unknown_tag, p}}`, `{:error, {:duplicate_of, p}}` — never
   flattened into the plugin `{:halted, _}` shape). Pre-wall papers
   grandfather via the `(slug, dataset)` exemption ledger exactly like
-  Lifecycle publishes; fresh papers are never exempt (D6).
+  Lifecycle publishes; fresh papers are never exempt (D6). The wall's own
+  `@walled_types` (`~w(paper task)`) scopes label-spine/dedup enforcement — a
+  "session" write passes both as a no-op, the same posture any other
+  non-walled content type gets.
 
   `opts`:
 
@@ -67,7 +95,57 @@ defmodule Barkpark.Content.Papers.BlockOps do
   `paper_topic(slug, dataset)` and returns `{:ok, %Document{}}`. Returns
   `{:error, changeset}` on validation/constraint failure.
   """
-  def upsert_paper(attrs, opts \\ []) when is_map(attrs) and is_list(opts) do
+  def upsert_blocks_doc(type, attrs, opts \\ [])
+
+  def upsert_blocks_doc(type, _attrs, _opts) when type not in @blocks_types,
+    do: {:error, :not_a_blocks_type}
+
+  # PAPER leg — unchanged, unlocked, byte-identical to the pre-fix path.
+  def upsert_blocks_doc(@paper_type, attrs, opts) when is_map(attrs) and is_list(opts),
+    do: do_upsert_blocks_doc(@paper_type, attrs, opts)
+
+  # NON-PAPER leg (today: "session") — SERIALIZED against the OTHER writer of
+  # the same row, `Barkpark.Content.Sessions.append_event/5`.
+  #
+  # The race this closes: `do_upsert_blocks_doc/3` reads `existing` (its
+  # pre-write lookup), then builds `content` from `existing.content` as
+  # `base_content` and finally persists it. A session's `content["events"]`
+  # trail is never sent by an upsert caller ("events" is in
+  # `@blocks_doc_reserved_attrs`) — it survives ONLY by riding that
+  # `base_content` carry-over. So an `append_event/5` that COMMITS between the
+  # read and the write is silently overwritten: the checkpoint publishes and
+  # the just-logged milestone vanishes from the trail.
+  #
+  # `append_event/5` already serializes on `pg_advisory_xact_lock(hashtext(
+  # "session:" <> slug))`. Taking the SAME key here, and doing the `existing`
+  # read INSIDE that transaction, makes the two writers mutually exclusive: an
+  # append either lands before this upsert's read (and is carried over) or
+  # waits behind its commit (and appends to the freshly-written content).
+  # `pg_advisory_xact_lock` is released at commit/rollback — no unlock path to
+  # leak. A slug-less write (no row to race on) skips the lock entirely.
+  def upsert_blocks_doc(type, attrs, opts) when is_map(attrs) and is_list(opts) do
+    case attrs["slug"] || attrs[:slug] do
+      slug when is_binary(slug) and slug != "" ->
+        Repo.transaction(fn ->
+          _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["#{type}:#{slug}"])
+          do_upsert_blocks_doc(type, attrs, opts)
+        end)
+        |> case do
+          # The inner result IS the return value — errors are NOT rolled back
+          # because every failure leg returns before (or IS) the single Repo
+          # write, so there is nothing partial to undo, and rolling back would
+          # rewrite `{:error, reason}` into `{:error, reason}` via a different
+          # code path for no gain.
+          {:ok, inner} -> inner
+          {:error, reason} -> {:error, reason}
+        end
+
+      _ ->
+        do_upsert_blocks_doc(type, attrs, opts)
+    end
+  end
+
+  defp do_upsert_blocks_doc(type, attrs, opts) do
     attrs = normalize_paper_attrs(attrs)
     slug = attrs["slug"]
     dataset = attrs["dataset"] || @paper_default_dataset
@@ -82,7 +160,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # the explicit one in attrs, else the seeded Default — identical to the
     # write-stamp fallback below, so the lookup sees exactly the row the write
     # would update.
-    existing = slug && get_existing_paper_for_write(slug, dataset, attrs)
+    existing = slug && get_existing_blocks_doc_for_write(type, slug, dataset, attrs)
 
     # Tenancy scope for the row stamp, resolved BEFORE the content build so
     # the sheet-embed hydration below can fetch same-scope sheets (M0a). Same
@@ -92,18 +170,39 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # existing row's scope preserved) and hydration scopes by the existing row.
     scope_opts = paper_scope_opts(attrs)
 
-    scope_attrs =
+    # Fail-closed scope stamp (felix-w26): put_scope_attrs now returns
+    # {:ok, attrs} | {:error, reason} — a refused dataset resolution surfaces
+    # as the error (this fn is already error-shaped for every caller), never a
+    # silent dataset_id=NULL stamp. The UPDATE-without-explicit-scope arm
+    # stamps nothing, exactly as before.
+    scope_attrs_result =
       cond do
         scope_opts != [] ->
-          Map.delete(Content.put_scope_attrs(%{"dataset" => dataset}, scope_opts), "dataset")
+          stamped_scope_attrs(dataset, scope_opts)
 
         existing ->
-          %{}
+          {:ok, %{}}
 
         true ->
-          Map.delete(Content.put_scope_attrs(%{"dataset" => dataset}, []), "dataset")
+          stamped_scope_attrs(dataset, [])
       end
 
+    with {:ok, scope_attrs} <- scope_attrs_result do
+      upsert_blocks_doc_stamped(type, attrs, opts, dataset, slug, existing, scope_attrs)
+    end
+  end
+
+  # Stamp a one-key attrs map to harvest ONLY the resolved scope ids — the
+  # "dataset" key is the resolver's input, not part of the stamp.
+  defp stamped_scope_attrs(dataset, scope_opts) do
+    with {:ok, stamped} <- Content.put_scope_attrs(%{"dataset" => dataset}, scope_opts) do
+      {:ok, Map.delete(stamped, "dataset")}
+    end
+  end
+
+  # The post-stamp tail of do_upsert_blocks_doc/3 — body unchanged, split out
+  # so the fail-closed scope stamp above can error before any content build.
+  defp upsert_blocks_doc_stamped(type, attrs, opts, dataset, slug, existing, scope_attrs) do
     embed_scope =
       if scope_attrs == %{} and existing do
         %{
@@ -127,8 +226,29 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # M0a: hydrate `"sheet"` block snapshots from their referenced sheets at
     # ingest, BEFORE the body_html render below — a paper embedding an
     # EXISTING sheet shows its values on the first read.
+    #
+    # A non-paper type (session, …) carries no legacy HTML-only leg, so a
+    # missing "blocks" key on a BRAND-NEW doc is metadata-only content, not an
+    # opaque body_html write — it defaults to `[]` and rides the SAME
+    # normalization pipeline every paper block list gets. But that default
+    # must NOT fire on an UPDATE: a metadata-only upsert against an EXISTING
+    # session (e.g. a bare status change) supplies no "blocks" key meaning
+    # "leave the blocks alone", not "wipe them to []" — defaulting
+    # unconditionally would re-render body_html to "" and blank the stored
+    # blocks on every metadata-only save. So the `[]` default is scoped to
+    # `existing == nil` only; on an update the missing key stays `nil` and
+    # falls through to the `other -> other` branch below, whose carry-over
+    # legs (see `write_encrypted_blocks_doc/8`) preserve the existing
+    # blocks/body_html byte-for-byte. Papers keep the historical `nil`
+    # passthrough unconditionally (their `other -> other` branch is the
+    # legacy HTML-only leg, not a session-style carry-over).
+    raw_blocks =
+      if type != @paper_type and existing == nil,
+        do: attrs["blocks"] || [],
+        else: attrs["blocks"]
+
     blocks =
-      case attrs["blocks"] do
+      case raw_blocks do
         list when is_list(list) ->
           # Same chokepoint, two normalizers: `ensure_block_ids` fills id-less
           # blocks; `normalize_list_items` coerces legacy flat-STRING list items
@@ -137,9 +257,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
           # shape-flip patch on load). Both are additive + idempotent + recurse
           # into sections; both are render-preserving.
           list
-          |> Papers.Template.maybe_seed(existing, attrs)
+          |> maybe_seed_template(type, existing, attrs)
           |> ensure_block_ids()
-          |> normalize_list_items()
+          |> normalize_render_shapes()
           |> Sheets.hydrate_sheet_blocks(embed_scope, slug)
 
         other ->
@@ -174,16 +294,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # calls it), so there is no birth exemption: a machine POSTing a
     # title-only stub gets the honest hard stop instead of a hollow
     # published paper. HTML-only writes (no blocks list) stay exempt.
-    with [] <- Papers.Template.validate(blocks),
-         :ok <- reject_hollow_result(blocks),
+    with [] <- template_declaration_errors(type, blocks),
+         :ok <- validate_render_shapes_for_type(type, blocks),
+         :ok <- maybe_reject_hollow_result(type, blocks),
          :ok <- reject_new_field_loss(existing_paper_blocks(existing), blocks),
          {:ok, blocks} <-
-           encrypt_paper_blocks(
+           encrypt_blocks_for_type(
+             type,
              blocks,
              dataset,
              scope_attrs["workspace_id"] || (existing && existing.workspace_id)
            ) do
-      write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs, opts)
+      write_encrypted_blocks_doc(type, blocks, attrs, existing, dataset, slug, scope_attrs, opts)
     else
       errors when is_list(errors) ->
         {:error, {:halted, "paper template violated: " <> Enum.join(errors, "; ")}}
@@ -193,10 +315,40 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  # The persistence tail of upsert_paper/2, reached ONLY once bound blocks are
-  # sealed (or there was nothing to seal). Split out so the encryption chokepoint
-  # can fail closed without re-indenting the whole builder.
-  defp write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs, opts) do
+  @doc "The paper-only entry point — `upsert_blocks_doc(\"paper\", attrs, opts)`. See its @doc above."
+  def upsert_paper(attrs, opts \\ []), do: upsert_blocks_doc(@paper_type, attrs, opts)
+
+  # Paper-only: the locked title-heading template is a paper doctrine concern
+  # (D11/pdd-t4), not a generic blocks-doc one. Sessions (and any future
+  # non-paper blocks type) keep their caller-supplied block list byte-for-byte
+  # — no auto-seeded skeleton.
+  defp maybe_seed_template(list, @paper_type, existing, attrs),
+    do: Papers.Template.maybe_seed(list, existing, attrs)
+
+  defp maybe_seed_template(list, _type, _existing, _attrs), do: list
+
+  # Paper-only: `Papers.Template.paper_declarations()` (title/featured/ingress)
+  # is the paper doctrine's structural vocabulary — irrelevant to a session's
+  # blocks. Additive for non-paper types: no declarations, no errors.
+  defp template_declaration_errors(@paper_type, blocks), do: Papers.Template.validate(blocks)
+  defp template_declaration_errors(_type, _blocks), do: []
+
+  defp validate_render_shapes_for_type(@paper_type, blocks) when is_list(blocks),
+    do: validate_render_shapes(blocks)
+
+  defp validate_render_shapes_for_type(_type, _blocks), do: :ok
+
+  # Paper-only: the hollow-result quality gate (p-quality-gate, D3) enforces
+  # the PAPER doctrine's "title but no content" copy — not a generic
+  # metadata-bearing blocks-doc concern. A metadata-only session (no body
+  # blocks) is a legitimate write, not a hollow paper.
+  defp maybe_reject_hollow_result(@paper_type, blocks), do: reject_hollow_result(blocks)
+  defp maybe_reject_hollow_result(_type, _blocks), do: :ok
+
+  # The persistence tail of upsert_blocks_doc/3, reached ONLY once bound blocks
+  # are sealed (or there was nothing to seal). Split out so the encryption
+  # chokepoint can fail closed without re-indenting the whole builder.
+  defp write_encrypted_blocks_doc(type, blocks, attrs, existing, dataset, slug, scope_attrs, opts) do
     # Per-doc article marker. An ingest/POST may set `style: "article"` in
     # attrs; otherwise it sticks at whatever the existing doc already carries
     # (so a partial update never silently demotes an article paper). Threaded
@@ -262,12 +414,22 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # without tags never strips a labeled paper).
       |> maybe_put_paper("tags", attrs["tags"])
       |> maybe_put_paper("description", attrs["description"])
+      |> maybe_put_paper("reader_checks", attrs["reader_checks"])
+      # Session-handoff Task 2 ("generalized upsert"): the fixed known-key
+      # allowlist above stays PAPER-ONLY (byte-identical behavior). Sessions
+      # (and any future metadata-bearing blocks type) instead pass through
+      # every OTHER caller-supplied attr verbatim — the brief's "blocks body +
+      # metadata fields" contract (e.g. a session's status/harness/etc. land
+      # in content as-is). Reserved keys already handled explicitly above (or
+      # by the surrounding pipeline) are excluded so this never double-writes
+      # or clobbers a derived key.
+      |> maybe_put_blocks_doc_metadata(type, attrs)
       |> Map.put("rev", next_rev)
       # Project-on-write (Exp-P2): when this write carries a block list, project
       # the bound-field index + content["body"] from it. The SOLE writer of
       # content[fieldName]/content["body"], alongside apply_paper_block_op/3.
       # An HTML-only (legacy) write with no blocks skips projection untouched.
-      |> maybe_project(blocks, dataset, slug, paper_scope(existing, scope_attrs))
+      |> maybe_project(blocks, type, dataset, slug, paper_scope(existing, scope_attrs))
 
     title = paper_title(content, slug)
 
@@ -283,9 +445,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # gains the D7 main_tag stamp — ingest-born papers are denormalized like
     # any lifecycle publish. `bypass_wall: true` (audited call sites only)
     # skips both.
-    case enforce_paper_wall(content, title, existing, dataset, slug, scope_attrs, opts) do
+    #
+    # `AuthoringWall.enforce/5`'s gates are scoped to `@walled_types = ~w(paper
+    # task)` — a non-walled type (e.g. "session") passes the label-spine/dedup
+    # gates as a no-op catch-all, exactly like any other non-walled user
+    # content type. Threading `type` through here is safe by construction.
+    case enforce_blocks_wall(type, content, title, existing, dataset, slug, scope_attrs, opts) do
       {:ok, content} ->
-        persist_paper(content, attrs, existing, dataset, slug, scope_attrs, title)
+        persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title)
 
       {:error, _} = error ->
         error
@@ -294,10 +461,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   # The Repo write + broadcast tail, reached only once the wall passed (or an
   # audited caller bypassed it).
-  defp persist_paper(content, attrs, existing, dataset, slug, scope_attrs, title) do
+  defp persist_blocks_doc(type, content, attrs, existing, dataset, slug, scope_attrs, title) do
     doc_attrs = %{
       "doc_id" => slug,
-      "type" => @paper_type,
+      "type" => type,
       "dataset" => dataset,
       "title" => title,
       "status" => "published",
@@ -433,7 +600,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # additive + idempotent — they only fill a missing id / coerce a string
          # item, never disturb an op-supplied id or a canonical inline item. Run
          # BEFORE locate so the affected block + fragment_html see the final list.
-         new_blocks = patched |> ensure_block_ids() |> normalize_list_items(),
+         new_blocks = patched |> ensure_block_ids() |> normalize_render_shapes(),
          # Field-encryption CHOKEPOINT (Phase 2): encrypt marked bound block
          # values BEFORE locate/render/project, so the streaming editor stores
          # ciphertext-at-rest and the delta fragment + body_html cache redact the
@@ -541,9 +708,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_list(ops) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
-         :ok <- reject_implicit_html_conversion(doc),
-         :ok <- check_paper_if_rev(doc, Keyword.get(opts, :if_rev)),
-         blocks = get_in(doc.content || %{}, ["blocks"]) || [],
+         if_rev = Keyword.get(opts, :if_rev),
+         :ok <- check_paper_if_rev(doc, if_rev),
+         {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
          {:ok, folded, block_ids} <- fold_paper_ops(blocks, ops),
          # Same quality-gate RATCHET as the single-op path, applied to the
          # atomic batch RESULT: the whole batch is refused (paper unchanged)
@@ -557,7 +724,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # id is filled, and any flat-string list item is canonicalized, before
          # persistence. Both additive + idempotent, so a batch of well-formed
          # (id-bearing, canonical-item) ops is byte-identical through it.
-         normalized = folded |> ensure_block_ids() |> normalize_list_items(),
+         normalized = folded |> ensure_block_ids() |> normalize_render_shapes(),
          # Field-encryption CHOKEPOINT (Phase 2): same as the single-op path —
          # encrypt marked bound block values before render/project/persist so the
          # batch write stores ciphertext-at-rest. No-op for an unmarked schema;
@@ -647,7 +814,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
     constraints = Papers.Template.paper_declarations()
 
     Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, ids} ->
-      with {:ok, next} <- Patch.apply_patch(acc, op, constraints: constraints),
+      # HOIST (PDS-D458): `ensure_block_ids` runs PER OP, inside the fold, not
+      # once after it. Two defects share this one root — the batch used to read
+      # its receipt one step BEFORE the id existed, and to thread a still-id-less
+      # block into the next op:
+      #
+      #   1. RECEIPT. `locate_paper_affected` reads the id out of the post-op
+      #      list. Minting after the fold meant an id-less append/insert-after
+      #      located a `nil` block_id, the `nil -> ids` clause below dropped it,
+      #      and the batch answered `{"ok":true,…,"block_ids":[]}` about a block
+      #      it HAD minted and persisted — `ok: true` withholding the only
+      #      addressable identifier it created. The single-op path (:582) always
+      #      minted before locate and reported it correctly; the two shapes of
+      #      one route disagreed.
+      #   2. COLLISION. `Patch`'s duplicate guard is `id_exists?(blocks, block_id
+      #      (block))`, and `block_id/1` is a bare `Map.get` — so an id-less
+      #      block asks "does any block have id nil?". With minting deferred, the
+      #      FIRST id-less append left a nil-id block in the accumulator and the
+      #      SECOND one collided with it: 422 `duplicate_id` on a batch with no
+      #      duplicates. Minting per op leaves no nil-id block in `acc`, so the
+      #      real duplicate check (a literal id already present) still fires and
+      #      the phantom one cannot.
+      #
+      # Additive + idempotent, exactly as at the other chokepoints: a batch of
+      # id-bearing ops is byte-identical through it, and the post-fold
+      # `ensure_block_ids` at the caller is then a no-op that stays as the
+      # belt-and-braces chokepoint.
+      with {:ok, patched} <- Patch.apply_patch(acc, op, constraints: constraints),
+           next = ensure_block_ids(patched),
            {:ok, affected} <- locate_paper_affected(op, next) do
         new_ids =
           case affected.block_id do
@@ -681,6 +875,39 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp reject_implicit_html_conversion(_doc), do: :ok
+
+  # A small legacy cohort stores its authoritative PortableDoc list under
+  # content.body.blocks while also carrying the rendered body_html cache. That
+  # is block-bearing content, not opaque HTML-only authorship. Permit its
+  # one-time promotion to content.blocks only on the atomic batch path and only
+  # when the caller supplied an optimistic revision fence. True HTML-only rows
+  # remain read-only, and the single-op path remains unable to convert either
+  # legacy shape implicitly.
+  defp resolve_batch_paper_blocks(%Document{content: content}, if_rev) when is_map(content) do
+    top_blocks = Map.get(content, "blocks")
+    nested_blocks = get_in(content, ["body", "blocks"])
+
+    cond do
+      is_list(top_blocks) ->
+        {:ok, top_blocks}
+
+      is_list(nested_blocks) and not is_nil(if_rev) ->
+        {:ok, nested_blocks}
+
+      is_list(nested_blocks) ->
+        {:error,
+         {:halted,
+          "Legacy body.blocks papers require an explicit revision-fenced batch conversion."}}
+
+      is_binary(Map.get(content, "body_html")) ->
+        {:error, {:halted, @html_conversion_message}}
+
+      true ->
+        {:ok, []}
+    end
+  end
+
+  defp resolve_batch_paper_blocks(_doc, _if_rev), do: {:ok, []}
 
   # PROVENANCE tap for attributed batch writes (lvw-t2 accept-baseline, D4).
   # When the caller supplies `:revision_action`, record a revision row off the
@@ -871,7 +1098,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
              block: affected.block,
              block_id: affected.block_id,
              op_kind: Map.get(op, "op"),
-             position: affected.position
+             position: affected.position,
+             # Session-handoff (final review, F5): the row this path actually
+             # WROTE is the `drafts.<slug>` twin (see `attrs["doc_id"]` above),
+             # NOT the published `<slug>` row a reader resolves. Naming it in
+             # the result lets an HTTP receipt be honest about which document
+             # changed instead of echoing the requested slug.
+             written_doc_id: attrs["doc_id"]
            }}
 
         {:error, _} = err ->
@@ -885,16 +1118,22 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   # ── Papers — internal ──────────────────────────────────────────────────────
 
-  # The AuthoringWall mount for the direct paper write path (charter D26).
-  # Synthesizes an in-memory `%Document{}` ref carrying exactly what the wall
-  # reads — doc_id (the slug = the published id), title, the FINAL content
-  # (labels included), dataset and the resolved tenancy scope (the E3 registry
-  # read scopes workspace-or-global) — and runs the SAME chain Lifecycle
-  # delegates to. Returns `{:ok, content}` with the main_tag stamp applied, or
-  # a raw wall error tuple. `bypass_wall: true` short-circuits BOTH (an
-  # unwalled write must stay byte-identical to the pre-mount behaviour —
-  # no stamp, no ledger touch).
-  defp enforce_paper_wall(content, title, existing, dataset, slug, scope_attrs, opts) do
+  # The AuthoringWall mount for the direct blocks-doc write path (charter
+  # D26). Synthesizes an in-memory `%Document{}` ref carrying exactly what the
+  # wall reads — doc_id (the slug = the published id), title, the FINAL
+  # content (labels included), dataset and the resolved tenancy scope (the E3
+  # registry read scopes workspace-or-global) — and runs the SAME chain
+  # Lifecycle delegates to. Returns `{:ok, content}` with the main_tag stamp
+  # applied, or a raw wall error tuple. `bypass_wall: true` short-circuits
+  # BOTH (an unwalled write must stay byte-identical to the pre-mount
+  # behaviour — no stamp, no ledger touch).
+  #
+  # `type` threads straight into `AuthoringWall.enforce/5`, whose gates are
+  # scoped to its own `@walled_types = ~w(paper task)` — passing "session"
+  # here hits that module's catch-all clauses (no label-spine requirement, no
+  # dedup check), the same no-op posture every other non-walled content type
+  # gets. Only "paper" (and, elsewhere, "task") is ever actually walled.
+  defp enforce_blocks_wall(type, content, title, existing, dataset, slug, scope_attrs, opts) do
     if Keyword.get(opts, :bypass_wall, false) do
       {:ok, content}
     else
@@ -902,7 +1141,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
       ref = %Document{
         doc_id: slug,
-        type: @paper_type,
+        type: type,
         dataset: dataset,
         title: title,
         content: content,
@@ -910,7 +1149,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         project_id: scope[:project_id]
       }
 
-      AuthoringWall.enforce(ref, @paper_type, slug, dataset,
+      AuthoringWall.enforce(ref, type, slug, dataset,
         workspace_id: scope[:workspace_id],
         project_id: scope[:project_id]
       )
@@ -1012,9 +1251,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # Identical to the former Barkpark.Papers.locate_affected/2, except the
   # append/insert clauses now read the STORED block out of `new_blocks` rather
   # than trusting the op payload — so an op whose `block` carried no id reports
-  # the id `ensure_block_ids` just minted (the op-fold runs ensure_block_ids over
-  # `new_blocks` before this locate), keeping the broadcast frame's block_id and
-  # the persisted block in sync.
+  # the id `ensure_block_ids` just minted, keeping the broadcast frame's block_id
+  # and the persisted block in sync.
+  #
+  # CALLER CONTRACT (was falsified until PDS-D458, and this comment asserted the
+  # false half): a caller that wants a non-nil `block_id` for an id-less
+  # append/insert-after MUST run `ensure_block_ids` over `new_blocks` BEFORE
+  # calling this. `apply_paper_block_op/4` does so at :582; the BATCH fold did
+  # NOT — it minted once AFTER the fold, so this function was handed a list
+  # whose freshly-appended block was still id-less, which is exactly how the
+  # batch receipt came to withhold the id it had minted and persisted.
+  # `fold_paper_ops/2` now mints per op, so both paper paths honour it.
+  # `apply_document_block_op/5` still does not (its ids are minted downstream in
+  # `upsert_document`), so an id-less block op on a DOCUMENT reports block_id
+  # nil — a known, untouched gap on a different surface, not this contract.
   defp locate_paper_affected(%{"op" => "append-block", "block" => block}, new_blocks) do
     position = length(new_blocks) - 1
     stored = Enum.at(new_blocks, position) || block
@@ -1232,6 +1482,876 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   def normalize_list_items(other), do: other
 
+  @doc """
+  Canonicalize the lossless persisted block dialects that otherwise render
+  differently across Paper readers.
+
+  The transform is deliberately conservative: wrappers carrying metadata are
+  retained byte-for-byte for the tolerant readers, while unambiguous wrappers
+  are reduced to the canonical wire shape. It is recursive and idempotent.
+
+  Beyond the wrapper reductions, two rescue arms run here (the ONE write
+  chokepoint every producer path routes through — pe-w1-write-path-normalizer):
+
+    * `notes`/`cards` ITEMS that arrive as bare strings (or inline arrays)
+      become text maps, and `pipeline` NODES become TITLE maps (the key its
+      readers render) — the readers address item FIELDS
+      through `get/2`, which is nil on a binary, so the raw shape renders an
+      EMPTY row while the paper answers 200 (live: `heggemsnes-act`). The arm
+      is TYPE-KEYED, never generic over `items` — `byline` string items are
+      the canonical designed shape (compose.ex joins stringish items; 215
+      live papers) and pass through byte-identical.
+    * text-KEYED inline leaves (`%{"type" => "text", "text" => …}`, the
+      TipTap dialect) become value-keyed — the renderer reads ONLY `value`
+      (render/inline.ex), so a text-keyed leaf renders as the empty string
+      and a paragraph whose only leaf carries it VANISHES (live:
+      `deploy-reliability-wave-4-2026-08-06`). Leaves already carrying a
+      `value` are left byte-identical.
+  """
+  @spec normalize_render_shapes(list()) :: list()
+  def normalize_render_shapes(blocks) when is_list(blocks) do
+    blocks
+    |> normalize_list_items()
+    |> Enum.map(&normalize_render_block/1)
+    |> Enum.map(&normalize_inline_leaf_dialect/1)
+  end
+
+  def normalize_render_shapes(other), do: other
+
+  @doc """
+  Reject a Paper block tree that still contains a reader-incompatible shape
+  after normalization. Metadata-bearing wrappers are accepted when every
+  reader has a lossless fallback for their content field.
+  """
+  @spec validate_render_shapes(term()) :: :ok | {:error, {:invalid_paper_structure, map()}}
+  def validate_render_shapes(blocks) when is_list(blocks) do
+    case render_shape_errors(blocks, "blocks") do
+      [] -> :ok
+      errors -> {:error, {:invalid_paper_structure, %{"blocks" => errors}}}
+    end
+  end
+
+  def validate_render_shapes(_),
+    do:
+      {:error,
+       {:invalid_paper_structure,
+        %{"blocks" => ["must be an array when a Paper declares a block body"]}}}
+
+  defp render_shape_errors(blocks, prefix) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {block, index} when is_map(block) ->
+        render_block_errors(block, "#{prefix}[#{index}]")
+
+      {_block, index} ->
+        ["#{prefix}[#{index}] must be an object"]
+    end)
+  end
+
+  defp render_block_errors(%{"type" => "list"} = block, path) do
+    case Map.get(block, "items") do
+      items when is_list(items) ->
+        items
+        |> Enum.with_index()
+        |> Enum.flat_map(fn
+          {item, _index} when is_list(item) ->
+            []
+
+          {%{"content" => content}, _index} when is_list(content) ->
+            []
+
+          {%{"text" => text}, _index} when is_binary(text) ->
+            []
+
+          {_item, index} ->
+            ["#{path}.items[#{index}] has no renderable inline content"]
+        end)
+
+      _ ->
+        ["#{path}.items must be an array"]
+    end
+  end
+
+  defp render_block_errors(%{"type" => type}, path)
+       when type in [
+              "bulletList",
+              "bullet_list",
+              "bullet-list",
+              "bulletedList",
+              "bulleted_list",
+              "bulleted-list",
+              "orderedList",
+              "ordered_list",
+              "ordered-list"
+            ],
+       do: ["#{path}.type must be list before the block reaches readers"]
+
+  defp render_block_errors(%{"type" => "table"} = block, path) do
+    rows = Map.get(block, "rows")
+
+    cond do
+      not is_list(rows) ->
+        ["#{path}.rows must be an array"]
+
+      valid_record_table?(block, rows) ->
+        []
+
+      true ->
+        row_errors =
+          rows
+          |> Enum.with_index()
+          |> Enum.flat_map(fn {row, index} ->
+            render_table_row_errors(row, "#{path}.rows[#{index}]")
+          end)
+
+        head_errors =
+          case Map.get(block, "head") || Map.get(block, "header") do
+            nil -> []
+            [] -> []
+            head -> render_table_row_errors(head, "#{path}.head")
+          end
+
+        head_errors ++ row_errors
+    end
+  end
+
+  defp render_block_errors(block, path) do
+    Enum.flat_map(["blocks", "children"], fn key ->
+      case Map.get(block, key) do
+        children when is_list(children) -> render_shape_errors(children, "#{path}.#{key}")
+        _ -> []
+      end
+    end)
+  end
+
+  defp render_table_row_errors(%{"cells" => cells}, path) when is_list(cells),
+    do: render_table_cell_errors(cells, path)
+
+  defp render_table_row_errors(cells, path) when is_list(cells),
+    do: render_table_cell_errors(cells, path)
+
+  defp render_table_row_errors(_row, path), do: ["#{path} has no renderable cells"]
+
+  defp render_table_cell_errors(cells, path) do
+    cells
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {cell, _index} when is_list(cell) ->
+        []
+
+      {%{"content" => content}, _index} when is_list(content) ->
+        []
+
+      {%{"text" => text}, _index} when is_binary(text) ->
+        []
+
+      {_cell, index} ->
+        ["#{path}.cells[#{index}] has no renderable inline content"]
+    end)
+  end
+
+  defp valid_record_table?(%{"columns" => columns}, rows)
+       when is_list(columns) and columns != [] do
+    keys =
+      if Enum.all?(columns, &is_map/1),
+        do: Enum.map(columns, &Map.get(&1, "key")),
+        else: []
+
+    Enum.all?(columns, &is_map/1) and
+      Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
+      Enum.uniq(keys) == keys and
+      Enum.all?(columns, fn column ->
+        label = Map.get(column, "label")
+        is_nil(label) or is_binary(label)
+      end) and
+      Enum.all?(rows, fn row ->
+        is_map(row) and Map.keys(row) -- keys == [] and
+          Enum.all?(Map.values(row), &record_table_scalar?/1)
+      end)
+  end
+
+  defp valid_record_table?(_block, _rows), do: false
+
+  defp normalize_render_block(%{"type" => type} = block)
+       when type in [
+              "bulletList",
+              "bullet_list",
+              "bullet-list",
+              "bulletedList",
+              "bulleted_list",
+              "bulleted-list",
+              "orderedList",
+              "ordered_list",
+              "ordered-list"
+            ] do
+    normalize_legacy_list_shape(block, type in ["orderedList", "ordered_list", "ordered-list"])
+  end
+
+  defp normalize_render_block(%{"type" => "list", "content" => content} = block)
+       when is_list(content) do
+    normalize_legacy_list_shape(block, Map.get(block, "ordered") == true)
+  end
+
+  defp normalize_render_block(%{"type" => "list", "items" => items} = block)
+       when is_list(items) do
+    Map.put(block, "items", Enum.map(items, &normalize_wrapped_list_item/1))
+  end
+
+  defp normalize_render_block(%{"type" => "table", "content" => content} = block)
+       when is_list(content) or is_map(content) do
+    normalize_legacy_table_shape(block)
+  end
+
+  defp normalize_render_block(%{"type" => "table"} = block) do
+    normalize_table_shape(block)
+  end
+
+  defp normalize_render_block(%{"type" => "callout", "text" => text} = block)
+       when is_binary(text) do
+    content = Map.get(block, "content")
+    slots = Map.get(block, "slots")
+
+    if String.trim(text) != "" and content in [nil, []] and slots in [nil, %{}] do
+      block
+      |> Map.delete("text")
+      |> Map.put("content", [%{"type" => "text", "value" => text}])
+    else
+      block
+    end
+  end
+
+  # `notes`/`cards` items are addressed as MAPS by every reader
+  # (`components.ex` reads `label`/`title`/`text` through `get/2`, which is
+  # nil on a binary) — an agent raised on prose blocks hands them bare strings
+  # (or inline arrays) and the row renders EMPTY behind a 200. Rescue the two
+  # derivable shapes into the text-map dialect; canonical map items pass
+  # byte-identical (idempotent).
+  # TYPE-KEYED on purpose: `byline` string items are the DESIGNED shape
+  # (compose.ex:231-245 joins stringish items; 215 live papers = 28% of the
+  # corpus) — a generic items-must-be-maps arm is forbidden.
+  defp normalize_render_block(%{"type" => type, "items" => items} = block)
+       when type in ["notes", "cards"] and is_list(items) do
+    Map.put(block, "items", Enum.map(items, &normalize_widget_item/1))
+  end
+
+  # Pipeline nodes get their OWN rescue key: every pipeline reader renders
+  # `title` (components.ex pipeline_html, pdrender stageRenderer, the web
+  # projection's `title`/`detail`) and NONE reads `text` — a `%{"text" => s}`
+  # rescue here would rewrite stored bytes into a shape that still renders an
+  # empty node (proven against Components.pipeline_html/1 in the independent
+  # second review of #11616).
+  defp normalize_render_block(%{"type" => "pipeline", "nodes" => nodes} = block)
+       when is_list(nodes) do
+    Map.put(block, "nodes", Enum.map(nodes, &normalize_pipeline_node/1))
+  end
+
+  defp normalize_render_block(block) when is_map(block) do
+    Enum.reduce(["blocks", "children"], block, fn key, normalized ->
+      case Map.get(normalized, key) do
+        children when is_list(children) ->
+          Map.put(normalized, key, normalize_render_shapes(children))
+
+        _ ->
+          normalized
+      end
+    end)
+  end
+
+  defp normalize_render_block(block), do: block
+
+  # ONE widget item/node → the text-map dialect the readers understand. A map
+  # (the canonical shape) is untouched; a bare string becomes `%{"text" => s}`;
+  # an inline ARRAY flattens to its plain text. An inline array with NO
+  # derivable text — or any other scalar — is left as-is: this is a rescue
+  # arm, never a destroyer.
+  defp normalize_widget_item(item) when is_binary(item), do: %{"text" => item}
+
+  defp normalize_widget_item(item) when is_list(item) do
+    case inline_plain_text(item) do
+      "" -> item
+      text -> %{"text" => text}
+    end
+  end
+
+  defp normalize_widget_item(item), do: item
+
+  # ONE pipeline node → the title-map dialect the pipeline readers render.
+  # Same rescue discipline as normalize_widget_item, different key.
+  defp normalize_pipeline_node(node) when is_binary(node), do: %{"title" => node}
+
+  defp normalize_pipeline_node(node) when is_list(node) do
+    case inline_plain_text(node) do
+      "" -> node
+      text -> %{"title" => text}
+    end
+  end
+
+  defp normalize_pipeline_node(node), do: node
+
+  # Flatten an inline array (or one inline node) to concatenated PLAIN text,
+  # marks dropped: a leaf contributes its `value` (or TipTap `text`), a mark
+  # node its flattened `children`/`content`, a bare string itself.
+  defp inline_plain_text(nodes) when is_list(nodes),
+    do: nodes |> Enum.map(&inline_plain_text/1) |> Enum.join()
+
+  defp inline_plain_text(s) when is_binary(s), do: s
+  defp inline_plain_text(n) when is_number(n), do: to_string(n)
+
+  defp inline_plain_text(%{} = node) do
+    cond do
+      is_binary(Map.get(node, "value")) -> Map.get(node, "value")
+      is_binary(Map.get(node, "text")) -> Map.get(node, "text")
+      is_list(Map.get(node, "children")) -> inline_plain_text(Map.get(node, "children"))
+      is_list(Map.get(node, "content")) -> inline_plain_text(Map.get(node, "content"))
+      true -> ""
+    end
+  end
+
+  defp inline_plain_text(_), do: ""
+
+  # ── inline-leaf dialect (TipTap `text` → canonical `value`) ────────────────
+  #
+  # The renderer reads ONLY `value` on a text leaf (render/inline.ex — no
+  # `text` fallback), so a TipTap-dialect leaf renders as "" and a paragraph
+  # whose only leaf carries it VANISHES behind a 200. Normalize at the write
+  # chokepoint over every inline-bearing surface: block `content`, list
+  # `items`, table `rows`/`head` cells, and nested `blocks`/`children`
+  # containers. A leaf already carrying `value` is left byte-identical
+  # (`value` wins at render), as is everything that is not a text leaf.
+  defp normalize_inline_leaf_dialect(%{} = block) do
+    block
+    |> normalize_inline_under("content")
+    |> normalize_list_item_leaves()
+    |> normalize_table_leaves()
+    |> normalize_nested_block_leaves()
+  end
+
+  defp normalize_inline_leaf_dialect(other), do: other
+
+  defp normalize_inline_under(%{} = block, key) do
+    case Map.get(block, key) do
+      nodes when is_list(nodes) -> Map.put(block, key, normalize_inline_nodes(nodes))
+      _ -> block
+    end
+  end
+
+  defp normalize_list_item_leaves(%{"type" => "list", "items" => items} = block)
+       when is_list(items) do
+    Map.put(
+      block,
+      "items",
+      Enum.map(items, fn
+        item when is_list(item) -> normalize_inline_nodes(item)
+        item -> item
+      end)
+    )
+  end
+
+  defp normalize_list_item_leaves(block), do: block
+
+  defp normalize_table_leaves(%{"type" => "table"} = block) do
+    block =
+      case Map.get(block, "rows") do
+        rows when is_list(rows) ->
+          Map.put(block, "rows", Enum.map(rows, &normalize_table_row_leaves/1))
+
+        _ ->
+          block
+      end
+
+    case Map.get(block, "head") do
+      cells when is_list(cells) -> Map.put(block, "head", normalize_table_cells_leaves(cells))
+      _ -> block
+    end
+  end
+
+  defp normalize_table_leaves(block), do: block
+
+  defp normalize_table_row_leaves(row) when is_list(row), do: normalize_table_cells_leaves(row)
+
+  defp normalize_table_row_leaves(%{"cells" => cells} = row) when is_list(cells),
+    do: Map.put(row, "cells", normalize_table_cells_leaves(cells))
+
+  defp normalize_table_row_leaves(row), do: row
+
+  defp normalize_table_cells_leaves(cells) do
+    Enum.map(cells, fn
+      cell when is_list(cell) ->
+        normalize_inline_nodes(cell)
+
+      %{"content" => content} = cell when is_list(content) ->
+        Map.put(cell, "content", normalize_inline_nodes(content))
+
+      cell ->
+        cell
+    end)
+  end
+
+  defp normalize_nested_block_leaves(block) do
+    Enum.reduce(["blocks", "children"], block, fn key, acc ->
+      case Map.get(acc, key) do
+        children when is_list(children) ->
+          Map.put(acc, key, Enum.map(children, &normalize_inline_leaf_dialect/1))
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp normalize_inline_nodes(nodes), do: Enum.map(nodes, &normalize_inline_node/1)
+
+  defp normalize_inline_node(%{"type" => "text", "text" => text} = leaf) when is_binary(text) do
+    if Map.has_key?(leaf, "value") do
+      leaf
+    else
+      leaf |> Map.delete("text") |> Map.put("value", text)
+    end
+  end
+
+  defp normalize_inline_node(%{} = node) do
+    Enum.reduce(["children", "content"], node, fn key, acc ->
+      case Map.get(acc, key) do
+        list when is_list(list) -> Map.put(acc, key, normalize_inline_nodes(list))
+        _ -> acc
+      end
+    end)
+  end
+
+  defp normalize_inline_node(other), do: other
+
+  defp normalize_wrapped_list_item(%{"content" => content} = item)
+       when is_list(content) and map_size(item) == 1,
+       do: content
+
+  defp normalize_wrapped_list_item(%{"text" => text} = item)
+       when is_binary(text) and map_size(item) == 1,
+       do: [%{"type" => "text", "value" => text}]
+
+  defp normalize_wrapped_list_item(item), do: item
+
+  defp normalize_legacy_list_shape(block, ordered_default) do
+    source =
+      Enum.find_value(["items", "content", "children"], fn key ->
+        case Map.get(block, key) do
+          items when is_list(items) -> items
+          _ -> nil
+        end
+      end)
+
+    with items when is_list(items) <- source,
+         {:ok, normalized_items} <- map_legacy_inline_items(items) do
+      style =
+        String.downcase(to_string(Map.get(block, "style") || Map.get(block, "listStyle") || ""))
+
+      ordered =
+        ordered_default or Map.get(block, "ordered") == true or
+          style in ~w(ordered number numbered decimal)
+
+      block
+      |> Map.drop(["content", "children", "items", "style", "listStyle"])
+      |> Map.put("type", "list")
+      |> Map.put("ordered", ordered)
+      |> Map.put("items", normalized_items)
+    else
+      _ -> block
+    end
+  end
+
+  defp map_legacy_inline_items(items) do
+    Enum.reduce_while(items, {:ok, []}, fn item, {:ok, acc} ->
+      case normalize_legacy_list_item(item) do
+        {:ok, normalized} -> {:cont, {:ok, [normalized | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      :error -> :error
+    end
+  end
+
+  defp normalize_legacy_list_item(%{"id" => id} = item) when is_binary(id) do
+    if Map.keys(item) -- ["id", "content", "text"] == [] and
+         (is_list(Map.get(item, "content")) or is_binary(Map.get(item, "text"))) do
+      {:ok, item}
+    else
+      normalize_legacy_inline(item)
+    end
+  end
+
+  defp normalize_legacy_list_item(item), do: normalize_legacy_inline(item)
+
+  defp normalize_legacy_inline(value) when is_binary(value) do
+    case Jason.decode(value) do
+      {:ok, decoded} when is_list(decoded) or is_map(decoded) ->
+        normalize_legacy_inline(decoded)
+
+      _ ->
+        {:ok, [%{"type" => "text", "value" => value}]}
+    end
+  end
+
+  defp normalize_legacy_inline(nil), do: {:ok, []}
+
+  defp normalize_legacy_inline(value) when is_number(value) or is_boolean(value),
+    do: {:ok, [%{"type" => "text", "value" => to_string(value)}]}
+
+  defp normalize_legacy_inline(values) when is_list(values) do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, acc} ->
+      case normalize_legacy_inline(value) do
+        {:ok, inline} -> {:cont, {:ok, acc ++ inline}}
+        :error -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp normalize_legacy_inline(%{"type" => "text", "value" => value} = node)
+       when is_binary(value),
+       do: {:ok, [Map.delete(node, "text")]}
+
+  defp normalize_legacy_inline(%{"type" => type, "content" => content})
+       when type in [
+              "paragraph",
+              "listItem",
+              "list_item",
+              "tableCell",
+              "table_cell",
+              "tableHeader",
+              "table_header"
+            ] and is_list(content),
+       do: normalize_legacy_inline(content)
+
+  defp normalize_legacy_inline(%{"content" => content} = wrapper)
+       when is_list(content) and map_size(wrapper) == 1,
+       do: normalize_legacy_inline(content)
+
+  defp normalize_legacy_inline(%{"text" => text} = wrapper)
+       when is_binary(text) and map_size(wrapper) == 1,
+       do: {:ok, [%{"type" => "text", "value" => text}]}
+
+  defp normalize_legacy_inline(%{"type" => type} = inline) when is_binary(type) and type != "",
+    do: {:ok, [inline]}
+
+  defp normalize_legacy_inline(_value), do: :error
+
+  defp normalize_legacy_table_shape(%{"content" => content} = block) do
+    {head, rows} =
+      case content do
+        content when is_map(content) ->
+          {Map.get(content, "head") || Map.get(content, "header"), Map.get(content, "rows")}
+
+        content when is_list(content) ->
+          {nil, content}
+
+        _ ->
+          {nil, nil}
+      end
+
+    with rows when is_list(rows) <- rows,
+         {:ok, normalized_rows, header_flags} <- normalize_legacy_table_rows(rows),
+         {:ok, explicit_head} <- normalize_optional_legacy_head(head) do
+      {resolved_head, resolved_rows} =
+        cond do
+          is_list(explicit_head) -> {explicit_head, normalized_rows}
+          normalized_rows != [] and hd(header_flags) -> {hd(normalized_rows), tl(normalized_rows)}
+          true -> {nil, normalized_rows}
+        end
+
+      normalized =
+        block
+        |> Map.drop(["content", "head", "header", "rows"])
+        |> Map.put("type", "table")
+        |> Map.put("rows", resolved_rows)
+
+      if is_list(resolved_head), do: Map.put(normalized, "head", resolved_head), else: normalized
+    else
+      _ -> block
+    end
+  end
+
+  defp normalize_legacy_table_shape(block), do: block
+
+  defp normalize_legacy_table_rows(rows) do
+    Enum.reduce_while(rows, {:ok, [], []}, fn row, {:ok, row_acc, flag_acc} ->
+      case normalize_legacy_table_row(row) do
+        {:ok, cells, header?} ->
+          {:cont, {:ok, [cells | row_acc], [header? | flag_acc]}}
+
+        :error ->
+          {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, reversed_rows, reversed_flags} ->
+        {:ok, Enum.reverse(reversed_rows), Enum.reverse(reversed_flags)}
+
+      :error ->
+        :error
+    end
+  end
+
+  defp normalize_legacy_table_row(row) when is_list(row),
+    do: normalize_legacy_table_cells(row, false)
+
+  defp normalize_legacy_table_row(row) when is_map(row) do
+    cells =
+      if is_list(Map.get(row, "content")),
+        do: Map.get(row, "content"),
+        else: Map.get(row, "cells")
+
+    if is_list(cells) do
+      cell_headers =
+        Enum.map(cells, fn
+          %{"header" => true} -> true
+          %{"type" => type} when type in ["tableHeader", "table_header"] -> true
+          _ -> false
+        end)
+
+      header? = Map.get(row, "header") == true or (cells != [] and Enum.all?(cell_headers))
+      normalize_legacy_table_cells(cells, header?)
+    else
+      :error
+    end
+  end
+
+  defp normalize_legacy_table_row(_row), do: :error
+
+  defp normalize_legacy_table_cells(cells, header?) do
+    case map_legacy_inline_values(cells) do
+      {:ok, normalized} -> {:ok, normalized, header?}
+      :error -> :error
+    end
+  end
+
+  defp normalize_optional_legacy_head(nil), do: {:ok, nil}
+
+  defp normalize_optional_legacy_head(head) when is_list(head),
+    do: map_legacy_inline_values(head)
+
+  defp normalize_optional_legacy_head(_head), do: :error
+
+  defp map_legacy_inline_values(values) do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, acc} ->
+      case normalize_legacy_inline(value) do
+        {:ok, normalized} -> {:cont, {:ok, [normalized | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      :error -> :error
+    end
+  end
+
+  defp normalize_table_shape(%{"rows" => rows} = block) when is_list(rows) do
+    case normalize_record_table(block, rows) do
+      {:ok, record_table} ->
+        record_table
+
+      :not_record_table ->
+        normalize_array_table(block, rows)
+    end
+  end
+
+  defp normalize_table_shape(block), do: block
+
+  defp normalize_record_table(%{"columns" => columns} = block, rows)
+       when is_list(columns) and columns != [] do
+    keys =
+      if Enum.all?(columns, &is_map/1),
+        do: Enum.map(columns, &Map.get(&1, "key")),
+        else: []
+
+    valid? =
+      Enum.all?(columns, &is_map/1) and
+        Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
+        Enum.uniq(keys) == keys and
+        Enum.all?(columns, fn column ->
+          label = Map.get(column, "label")
+          is_nil(label) or is_binary(label)
+        end) and
+        Enum.all?(rows, fn row ->
+          is_map(row) and Map.keys(row) -- keys == [] and
+            Enum.all?(Map.values(row), &record_table_scalar?/1)
+        end)
+
+    if valid? do
+      head =
+        Enum.map(columns, fn column ->
+          [%{"type" => "text", "value" => Map.get(column, "label") || Map.get(column, "key")}]
+        end)
+
+      normalized_rows =
+        Enum.map(rows, fn row ->
+          Enum.map(keys, fn key ->
+            [%{"type" => "text", "value" => record_table_text(Map.get(row, key))}]
+          end)
+        end)
+
+      {:ok,
+       block
+       |> Map.delete("columns")
+       |> Map.put("head", head)
+       |> Map.put("rows", normalized_rows)}
+    else
+      :not_record_table
+    end
+  end
+
+  defp normalize_record_table(_block, _rows), do: :not_record_table
+
+  defp record_table_scalar?(value),
+    do: is_nil(value) or is_binary(value) or is_number(value) or is_boolean(value)
+
+  defp record_table_text(nil), do: ""
+  defp record_table_text(value), do: to_string(value)
+
+  defp table_head_or_header(block) do
+    case Map.get(block, "head") do
+      nil -> Map.get(block, "header")
+      [] -> Map.get(block, "header")
+      head -> head
+    end
+  end
+
+  defp normalize_array_table(block, rows) do
+    block =
+      if is_list(Map.get(block, "head")) and Map.get(block, "head") != [] and
+           Map.get(block, "header") == true,
+         do: Map.delete(block, "header"),
+         else: block
+
+    block =
+      case {table_head_or_header(block), Map.get(block, "columns")} do
+        {head, columns} when head in [nil, []] and is_list(columns) and columns != [] ->
+          cond do
+            Enum.all?(columns, fn
+              %{"text" => text} = column when is_binary(text) -> map_size(column) == 1
+              _ -> false
+            end) ->
+              block
+              |> Map.delete("columns")
+              |> Map.put(
+                "head",
+                Enum.map(columns, fn %{"text" => text} ->
+                  [%{"type" => "text", "value" => text}]
+                end)
+              )
+
+            Enum.all?(columns, &record_table_scalar?/1) ->
+              block
+              |> Map.delete("columns")
+              |> Map.put(
+                "head",
+                Enum.map(columns, fn value ->
+                  [%{"type" => "text", "value" => record_table_text(value)}]
+                end)
+              )
+
+            true ->
+              block
+          end
+
+        _ ->
+          block
+      end
+
+    {block, rows} =
+      case {table_head_or_header(block), rows} do
+        {true, [first | rest]} ->
+          case normalize_legacy_table_row(first) do
+            {:ok, cells, _header?} ->
+              {block |> Map.delete("header") |> Map.put("head", cells), rest}
+
+            :error ->
+              {block, rows}
+          end
+
+        {head, [%{"header" => true, "cells" => cells} = row | rest]}
+        when head in [nil, []] and is_list(cells) and map_size(row) == 2 ->
+          {Map.put(block, "head", Enum.map(cells, &normalize_wrapped_table_cell/1)), rest}
+
+        {head, [%{"cells" => cells} | rest]}
+        when head in [nil, []] and is_list(cells) ->
+          if cells != [] and Enum.all?(cells, &(is_map(&1) and Map.get(&1, "header") == true)) do
+            {Map.put(block, "head", Enum.map(cells, &normalize_header_table_cell/1)), rest}
+          else
+            {block, rows}
+          end
+
+        _ ->
+          {block, rows}
+      end
+
+    rows = Enum.map(rows, &normalize_wrapped_table_row/1)
+    block = Map.put(block, "rows", rows)
+
+    # An explicit `head` (one row of cells) gets the same per-cell rescue the
+    # body rows get — a bare-string head cell (`"head" => ["Name", "Age"]`)
+    # would otherwise refuse at the gate while its body twin publishes.
+    case Map.get(block, "head") do
+      head when is_list(head) ->
+        Map.put(block, "head", Enum.map(head, &normalize_wrapped_table_cell/1))
+
+      _ ->
+        block
+    end
+  end
+
+  defp normalize_wrapped_table_row(%{"cells" => cells} = row)
+       when is_list(cells) and map_size(row) == 1,
+       do: Enum.map(cells, &normalize_wrapped_table_cell/1)
+
+  defp normalize_wrapped_table_row(%{"cells" => cells, "header" => header} = row)
+       when is_list(cells) and header != true and map_size(row) == 2,
+       do: Enum.map(cells, &normalize_wrapped_table_cell/1)
+
+  defp normalize_wrapped_table_row(row) when is_list(row),
+    do: Enum.map(row, &normalize_wrapped_table_cell/1)
+
+  # A cells-map row carrying EXTRA keys (id, header flags, …) keeps its wrapper
+  # — the gate accepts the shape — but its CELLS still get the per-cell rescue,
+  # so a bare-string cell inside it publishes instead of refusing.
+  defp normalize_wrapped_table_row(%{"cells" => cells} = row) when is_list(cells),
+    do: Map.put(row, "cells", Enum.map(cells, &normalize_wrapped_table_cell/1))
+
+  defp normalize_wrapped_table_row(row), do: row
+
+  defp normalize_wrapped_table_cell(%{"content" => content} = cell)
+       when is_list(content) and map_size(cell) == 1,
+       do: flatten_table_cell_content(content)
+
+  defp normalize_wrapped_table_cell(%{"text" => text} = cell)
+       when is_binary(text) and map_size(cell) == 1,
+       do: [%{"type" => "text", "value" => text}]
+
+  # A bare-string cell becomes ONE canonical inline array — the renderer
+  # already tolerates the bare binary (render/inline.ex scalar clause), but the
+  # gate refused it ("has no renderable inline content") even though its text
+  # is fully derivable. Truly unrescuable cells (textless maps, numbers, nil)
+  # still fall through to the gate's existing refusal.
+  defp normalize_wrapped_table_cell(cell) when is_binary(cell),
+    do: [%{"type" => "text", "value" => cell}]
+
+  defp normalize_wrapped_table_cell(cell), do: cell
+
+  defp normalize_header_table_cell(%{"content" => content}) when is_list(content),
+    do: flatten_table_cell_content(content)
+
+  defp normalize_header_table_cell(%{"text" => text}) when is_binary(text),
+    do: [%{"type" => "text", "value" => text}]
+
+  defp normalize_header_table_cell(cell), do: cell
+
+  defp flatten_table_cell_content(content) do
+    Enum.flat_map(content, fn
+      %{"type" => "paragraph", "content" => inline} when is_list(inline) -> inline
+      item -> [item]
+    end)
+  end
+
   # Normalize ONE block. A `list` block has its `items` coerced item-by-item to
   # canonical inline arrays; every other block is untouched EXCEPT for recursion
   # into a nested `"blocks"` container (sections), mirroring ensure_block_ids.
@@ -1394,6 +2514,53 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp maybe_put_paper(map, _key, nil), do: map
   defp maybe_put_paper(map, key, value), do: Map.put(map, key, value)
 
+  # Keys the surrounding `write_encrypted_blocks_doc/8` pipeline already reads
+  # explicitly (as an upsert attr, a paper-only allowlisted content field, or a
+  # pipeline control opt) — excluded from the generic session-metadata
+  # passthrough below so it can never double-write or clobber a derived key.
+  # NOTE: "title" is deliberately NOT reserved here. For a paper, `title`
+  # never reaches `content` through this path at all (a paper clause below is
+  # a full no-op) — its row title instead comes from a PROJECTED bound title
+  # field-block or the first heading (see `paper_title/2`). For a non-paper
+  # type there is no such projection, so `content["title"]` — and therefore
+  # the Document row's `title` (`paper_title/2` reads `content["title"]`
+  # first) — has NO OTHER writer; reserving "title" here would silently drop
+  # every session's title on every write.
+  # "events" is reserved too (session-handoff Task 4 fix): a session's
+  # `content["events"]` trail is written ONLY through
+  # `Barkpark.Content.Sessions.append_event/5`'s advisory-lock + CAS path —
+  # never through this generic metadata passthrough. Without this reservation
+  # an in-process `upsert_blocks_doc("session", %{"events" => [...]})` (or a
+  # caller merely echoing a session's own read payload back as an update body)
+  # would silently overwrite the append-only trail via the same merge this
+  # function performs for every other unreserved key.
+  #
+  # "conversations" is reserved for the same reason (session-conversations
+  # slice): the harness-conversation registry is written ONLY through
+  # `Barkpark.Content.Sessions.touch_conversation/5`'s advisory-lock + CAS
+  # path — never through this generic metadata passthrough.
+  @blocks_doc_reserved_attrs ~w(
+    slug dataset blocks workspace_id project_id template style
+    source_doc goal_id event_type tags description body_html payload_html
+    branch bypass_wall events conversations
+  )
+
+  # Session-handoff Task 2 ("generalized upsert"): `write_encrypted_blocks_doc`'s
+  # known-key allowlist (`maybe_put_paper("source_doc", …)` etc.) stays
+  # PAPER-ONLY — byte-identical to the pre-Task-2 behavior, per the brief. A
+  # session (or any future metadata-bearing blocks type) instead gets every
+  # OTHER caller-supplied attr merged into content verbatim — the task's
+  # "blocks body + metadata fields" contract (a session's `status`,
+  # `harness`, `session_uuid`, … land in content as-is, no fixed allowlist to
+  # maintain per field).
+  defp maybe_put_blocks_doc_metadata(content, @paper_type, _attrs), do: content
+
+  defp maybe_put_blocks_doc_metadata(content, _type, attrs) do
+    attrs
+    |> Map.drop(@blocks_doc_reserved_attrs)
+    |> Enum.reduce(content, fn {k, v}, acc -> Map.put(acc, k, v) end)
+  end
+
   # Write a FRESHLY-rendered body_html into the content map along with the
   # renderer's version stamp (`body_html_sv`). Only the sites that render
   # body_html FROM blocks call this — a verbatim / carried-over HTML write has
@@ -1424,36 +2591,43 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  # The pre-write existing-paper lookup, SCOPED to this write's tenant so a
+  # The pre-write existing-doc lookup, SCOPED to this write's tenant so a
   # same-slug write in workspace B never finds (and clobbers) workspace A's row
   # (barkpark-w9dg). The scope mirrors the write-stamp fallback: an explicit
   # workspace in attrs wins; absent it, the seeded Default workspace — so the
-  # flat, unscoped paper ingest keeps upserting its own Default-scoped row.
-  defp get_existing_paper_for_write(slug, dataset, attrs) do
+  # flat, unscoped ingest keeps upserting its own Default-scoped row.
+  #
+  # `type`-generalized (session-handoff Task 2, off `Papers.get_paper/3`'s
+  # hardcoded "paper"): a session write must find its OWN prior session row,
+  # never a same-slug PAPER's — `Papers.get_blocks_doc/4` scopes the lookup by
+  # `type` exactly like `get_paper/3` did for the paper-only case.
+  defp get_existing_blocks_doc_for_write(type, slug, dataset, attrs) do
     case paper_scope_opts(attrs) do
       [_ | _] = opts ->
-        Papers.get_paper(slug, dataset, opts)
+        Papers.get_blocks_doc(slug, type, dataset, opts)
 
       [] ->
         case Barkpark.Tenancy.get_default_workspace() do
           %{id: ws_id} when is_binary(ws_id) ->
-            Papers.get_paper(slug, dataset, workspace_id: ws_id)
+            Papers.get_blocks_doc(slug, type, dataset, workspace_id: ws_id)
 
           # No seeded Default (fresh sandbox) — fall back to the prior unscoped
           # lookup so the very first single-tenant write still self-locates.
           _ ->
-            Papers.get_paper(slug, dataset)
+            Papers.get_blocks_doc(slug, type, dataset)
         end
     end
   end
 
   # The block-op doc load, SCOPED so a streaming op never resolves (and mutates)
   # a same-slug paper in another workspace (barkpark-af50). Mirrors the
-  # write-side scope contract (get_existing_paper_for_write / get_public_paper):
-  # an explicit workspace in opts wins; absent it, the seeded Default workspace
-  # — the deterministic public/ingest tenant. Only when no Default is seeded
-  # (fresh sandbox) does it fall back to the prior unscoped lookup so a first
-  # single-tenant op still self-locates.
+  # write-side scope contract (get_existing_blocks_doc_for_write /
+  # get_public_paper): an explicit workspace in opts wins; absent it, the
+  # seeded Default workspace — the deterministic public/ingest tenant. Only
+  # when no Default is seeded (fresh sandbox) does it fall back to the prior
+  # unscoped lookup so a first single-tenant op still self-locates. Paper-only
+  # — the streaming block-op functions (`apply_paper_block_op/4` and friends)
+  # are out of session-handoff Task 2's scope.
   defp get_block_op_paper(slug, dataset, opts) do
     case Keyword.get(opts, :workspace_id) do
       ws when is_binary(ws) and ws != "" ->
@@ -1477,14 +2651,28 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # HTML-only legacy paper write (no blocks) leaves content[fieldName]/body
   # untouched — projection is the SOLE writer, so a no-block write must not
   # invent an empty body.
-  defp maybe_project(content, blocks, dataset, slug, scope) when is_list(blocks) do
+  defp maybe_project(content, blocks, type, dataset, slug, scope) when is_list(blocks) do
     render_opts =
-      Map.put(Labels.render_opts(dataset, scope), :preview, paper_preview_opts(slug, scope))
+      Map.put(
+        Labels.render_opts(dataset, scope),
+        :preview,
+        blocks_doc_preview_opts(type, slug, scope)
+      )
 
     Projection.project(content, blocks, render_opts)
   end
 
-  defp maybe_project(content, _blocks, _dataset, _slug, _scope), do: content
+  defp maybe_project(content, _blocks, _type, _dataset, _slug, _scope), do: content
+
+  # Paper-only preview shape (a reader URL exists) vs. the generic non-paper
+  # blocks-doc shape (no canonical reader page — mirrors `doc_project_opts/3`,
+  # the same split `apply_document_block_op/5` already draws for arbitrary
+  # Expectation-bearing documents).
+  defp blocks_doc_preview_opts(@paper_type, slug, scope), do: paper_preview_opts(slug, scope)
+
+  defp blocks_doc_preview_opts(type, _slug, scope) do
+    %{media_resolver: Preview.media_resolver(scope), doc_type: type}
+  end
 
   # The :preview sub-map injected into render_opts so Projection.project derives a
   # rich content["preview"] card for a paper: the media resolver (bound to this
@@ -1527,34 +2715,43 @@ defmodule Barkpark.Content.Papers.BlockOps do
     ]
   end
 
-  # Field-encryption CHOKEPOINT for the paper write path. Encrypt the bound
+  # Field-encryption CHOKEPOINT, `type`-generalized (session-handoff Task 2)
+  # off the original paper-only `encrypt_paper_blocks/3`. Encrypt the bound
   # block values of any schema field marked `encrypted: true` by routing the
-  # block list through `Encryption.encrypt_marked/3` (its `encrypt_bound_blocks`
-  # half). This is the SAME chokepoint Writer uses; running it on the block list
-  # BEFORE render+projection means: (a) the body_html cache and delta fragments
-  # redact the encrypted field (Render redacts envelope values) instead of
-  # leaking plaintext, and (b) Projection copies the resulting envelope into
-  # content[fieldName], so content is ciphertext-at-rest by the changeset.
-  # Idempotent (re-encrypting an envelope is a no-op) and a byte-identical no-op
-  # when the "paper" schema marks nothing encrypted or this is an HTML-only
-  # (block-less) write.
+  # block list through `Encryption.encrypt_marked/4` (its `encrypt_bound_blocks`
+  # half), against `type`'s OWN schema — a session write checks the SESSION
+  # schema's `encrypted: true` fields (today: none — a byte-identical no-op),
+  # never silently checking the paper schema. This is the SAME chokepoint
+  # Writer uses; running it on the block list BEFORE render+projection means:
+  # (a) the body_html cache and delta fragments redact the encrypted field
+  # (Render redacts envelope values) instead of leaking plaintext, and (b)
+  # Projection copies the resulting envelope into content[fieldName], so
+  # content is ciphertext-at-rest by the changeset. Idempotent (re-encrypting
+  # an envelope is a no-op) and a byte-identical no-op when `type`'s schema
+  # marks nothing encrypted or this is an HTML-only (block-less) write.
   # Returns `{:ok, blocks}` (the encrypted block list) or `{:error, reason}` when
   # a marked-encrypted bound block cannot be sealed (HIGH-3, fail closed) — the
-  # paper write paths surface the error instead of persisting plaintext-at-rest.
-  # `workspace_id` attributes the DEK (charter D51-D54): it MUST be the paper
-  # row's workspace so a later `reveal_fields` resolves the same
+  # blocks-doc write paths surface the error instead of persisting
+  # plaintext-at-rest. `workspace_id` attributes the DEK (charter D51-D54): it
+  # MUST be the row's workspace so a later `reveal_fields` resolves the same
   # (workspace_id, scope) DEK that sealed the bound block. `nil` (an unscoped
   # write) → the NULL-workspace DEK.
-  defp encrypt_paper_blocks(blocks, dataset, workspace_id)
+  defp encrypt_blocks_for_type(type, blocks, dataset, workspace_id)
        when is_list(blocks) and is_binary(dataset) do
-    case Encryption.encrypt_marked(%{"blocks" => blocks}, @paper_type, dataset, workspace_id) do
+    case Encryption.encrypt_marked(%{"blocks" => blocks}, type, dataset, workspace_id) do
       {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
       {:ok, _} -> {:ok, blocks}
       {:error, _} = err -> err
     end
   end
 
-  defp encrypt_paper_blocks(blocks, _dataset, _workspace_id), do: {:ok, blocks}
+  defp encrypt_blocks_for_type(_type, blocks, _dataset, _workspace_id), do: {:ok, blocks}
+
+  # Paper-only alias, kept for the streaming block-op paths
+  # (`apply_paper_block_op/4`, `apply_paper_block_ops/4` — both out of this
+  # task's scope) that still call it by its original name/arity.
+  defp encrypt_paper_blocks(blocks, dataset, workspace_id),
+    do: encrypt_blocks_for_type(@paper_type, blocks, dataset, workspace_id)
 
   # Next monotonic streaming rev for a paper. Starts at 1 for a fresh paper;
   # increments the stored integer otherwise.

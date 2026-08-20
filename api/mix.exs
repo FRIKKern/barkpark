@@ -21,7 +21,9 @@ defmodule Barkpark.MixProject do
   def application do
     [
       mod: {Barkpark.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      # :os_mon powers the Studio bottom-bar host vitals (Barkpark.HostVitals.Sampler
+      # reads :cpu_sup / :memsup / :disksup). Starts OTP's OS monitors on boot.
+      extra_applications: [:logger, :runtime_tools, :os_mon]
     ]
   end
 
@@ -65,7 +67,7 @@ defmodule Barkpark.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:corsica, "~> 2.1"},
-      {:req, "~> 0.5"},
+      {:req, "~> 0.6.1"},
       # OIDC id_token (JWT/JWS) verification for enterprise SSO (era-w3-oidc-rp).
       {:jose, "~> 1.11"},
       # SAML 2.0 SP: vetted XML-dsig assertion verification (era-w3-saml).

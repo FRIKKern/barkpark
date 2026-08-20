@@ -93,9 +93,18 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
   def revoke_share(conn, %{"dataset" => dataset, "id" => id}) do
     with :ok <- require_write(conn),
-         {:ok, _} <- Share.revoke(id, dataset, scope_opts(conn)) do
+         {:ok, doc} <- Share.revoke(id, dataset, scope_opts(conn)) do
+      # RECEIPT LAW (pds w40): `Share.revoke/3` (share.ex:69-82) tail-calls
+      # `Content.upsert_document/4` and so returns `{:ok, %Document{}}` — the
+      # UPDATED row, not a literal. This used to discard it and echo the `:id`
+      # path param, which is true whether or not the flip landed. `shareEnabled`
+      # is read off the returned document's own persisted content, so a write
+      # that silently failed to flip the flag can no longer answer "revoked".
       json(conn, %{
-        result: %{revoked: id},
+        result: %{
+          revoked: doc.doc_id,
+          shareEnabled: get_in(doc.content, ["shareLink", "enabled"])
+        },
         syncTags: ["bp:ds:#{dataset}:media:collections:#{id}"]
       })
     end
