@@ -178,9 +178,30 @@ defmodule Barkpark.Content.Broadcast do
   end
 
   # Append a content-mutation row to the append-only audit log. Atomic with the
-  # mutation when tap_broadcast runs inside the mutate transaction. Defensive:
-  # an audit failure is logged but never breaks a document write (emit opens its
-  # own savepoint, so a failed insert rolls back only itself).
+  # mutation when tap_broadcast runs inside the mutate transaction.
+  #
+  # WHAT THE rescue/Logger.warning BELOW ACTUALLY BUYS YOU, said plainly. This
+  # comment used to claim "an audit failure is logged but never breaks a
+  # document write (emit opens its own savepoint, so a failed insert rolls back
+  # only itself)". Both halves were false. Ecto opens no savepoint for a nested
+  # Repo.transaction — Audit.emit/1 joins the mutate transaction, and its
+  # Repo.rollback/1 on an insert error dooms that transaction and the document
+  # write with it (mode: :savepoint is never passed; see the emit/1 doc in
+  # barkpark/audit.ex). Forcing an emit failure on the real mutate path does not
+  # produce a logged warning and a completed write: it produces
+  # "(DBConnection.ConnectionError) transaction rolling back" and kills the
+  # write downstream.
+  #
+  # So the case/rescue here is DECORATIVE for the in-transaction path: it does
+  # catch the {:error, changeset} and the crash, but the connection is already
+  # gone and nothing it does can bring the write back. Keep it — it still holds
+  # for any caller that emits outside a transaction — but do NOT add a new audit
+  # call site believing the log line makes an emit failure survivable. It does
+  # not, and unique_index(:audit_events, [:hash]) makes that reachable in prod.
+  #
+  # The behaviour is intended: an unauditable content mutation should fail loud.
+  # api/test/barkpark/audit_savepoint_claim_test.exs pins it and reds if the old
+  # savepoint sentence is ever made true.
   defp emit_audit(doc, type, dataset, action, actor_user_id, source) do
     {actor_type, actor_id} =
       if actor_user_id, do: {"user", actor_user_id}, else: {nil, nil}
