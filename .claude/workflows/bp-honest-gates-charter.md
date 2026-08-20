@@ -1,6 +1,13 @@
 # Honest Gates — epic charter
 
-Epic task: `auth-totp-tests-are-time-boundary-flaky` (priority 0)
+Epic task: `task-018046fbe07a2f0b` (priority 0)
+Former root: `auth-totp-tests-are-time-boundary-flaky`. That task's OWN goal completed
+(`totp_code_stable!` is live at `auth_controller_test.exs:37,199,235,268`) while this line
+still named it, so 76 rows hung off a done root — the exact false-state this epic exists to
+remove, in its own filing. Re-parented 2026-08-20. **Do not re-parent back to it, and do not
+reopen it to serve as a bucket**: resurrecting a genuinely-done row is the same lie inverted.
+Wave logs further down still name the old root; those are RECORDS of what was true when they
+were written, not instructions.
 Founding wave Paper: `gates-tell-the-truth-wave-2026-07-20`
 
 ## Vision
