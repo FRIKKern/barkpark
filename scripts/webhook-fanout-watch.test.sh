@@ -224,14 +224,48 @@ section "the reporting can lose"
 # continue-on-error at length as the thing they refuse to do, and an assertion
 # that cannot tell a prohibition from a use would force the reason to go
 # unwritten — which is how the next author reintroduces it.
-uncommented() { grep -vE '^[[:space:]]*#' "$1"; }
+#
+# The stripped text is MATERIALISED before it is searched — honest-gates D37, as
+# written at cloud-path-escape-check.test.sh:39. D37 exempts a match made
+# straight against a FILE, and that exemption is what let this file keep the bug:
+# `uncommented FILE | grep -q PAT` LOOKS like a file match but is a pipeline, and
+# its producer is exactly the writer D37 says must not exist.
+#
+# The obvious spelling, `uncommented FILE | grep -q PAT`, is a race: `grep -q`
+# exits at its FIRST match, closing the pipe while the stripping `grep -v` still
+# has bytes to write, so the producer takes SIGPIPE (141) or EPIPE (2). Under the
+# `set -o pipefail` at the top of this file the PIPELINE then reports that
+# non-zero — so a SUCCESSFUL match is read by the caller as a failure. Whether
+# the producer finishes first is pure scheduling, which is why it presented as a
+# flake on a loaded runner (`grep: write error: Broken pipe`, then a bogus FAIL).
+# The direction that flake took was the loud one. The same race in the two
+# "there is no continue-on-error here" assertions below flips the other way: a
+# file that really does carry one gets reported CLEAN, which is the exact false
+# green this whole section exists to prevent. Command substitution has no reader
+# to close early, and the status read below is then grep's own, not a pipeline's.
+#
+# `-a` is the second half of the fix and is NOT cosmetic. webhook-fanout-watch.sh
+# carries a literal NUL byte — the `^@` separator inside the jq group_by near its
+# meter — so grep classifies it as BINARY and, instead of the ~6.4 kB of stripped
+# text, emits the one line `Binary file … matches`. Without -a the script-side
+# assertion below therefore searched 38 bytes that can never contain the pattern:
+# it was not flaky, it was UNCONDITIONALLY blind, and it printed its ok over a
+# copy of the script with continue-on-error planted in it three times.
+uncommented() { grep -a -vE '^[[:space:]]*#' "$1"; }
 
-uncommented "$WATCH" | grep -qi "continue-on-error" \
+# uncommented_has PATTERN FILE [extra grep flags…] → 0 iff the stripped file matches.
+uncommented_has() {
+  local pat="$1" file="$2"; shift 2
+  local stripped; stripped="$(uncommented "$file")"
+  grep -q -a "$@" -e "$pat" <<<"$stripped"
+}
+
+uncommented_has "continue-on-error" "$WATCH" -i \
   && bad "continue-on-error used as a mechanism in the script" \
   || ok "no continue-on-error in the script (only the written-down reason it is refused)"
 
 if [ -f "$WF" ]; then
-  if uncommented "$WF" | grep -q "continue-on-error"; then
+  if uncommented_has "continue-on-error" "$WF"; then
     bad "shell-harnesses.yml carries a continue-on-error (a red would launder to a green job)"
   else
     ok "shell-harnesses.yml carries no continue-on-error"
@@ -251,10 +285,51 @@ if [ -f "$WF" ]; then
   # to prevent, so plant one in a copy and watch the detector fire.
   awk '{print} /run: bash scripts\/webhook-fanout-watch.test.sh/ {print "        continue-on-error: true"}' \
     "$WF" > "$TMP/laundered.yml"
-  if uncommented "$TMP/laundered.yml" | grep -q "continue-on-error"; then
+  if uncommented_has "continue-on-error" "$TMP/laundered.yml"; then
     ok "the detector FIRES on a planted continue-on-error (it can still lose)"
   else
     bad "the detector missed a planted continue-on-error — comment-stripping blinded it"
+  fi
+
+  # The SAME mutation, but padded past the pipe buffer. This is the shape that
+  # made the arm above a coin flip: with `… | grep -q …` the stripping grep takes
+  # SIGPIPE partway through the padding and pipefail reports the match as a
+  # failure. The padding is what makes the race certain instead of scheduling-
+  # dependent, so this case pins the fix rather than re-rolling the dice.
+  { cat "$TMP/laundered.yml"; yes "        key: padding past the pipe buffer" | head -n 3000; } \
+    > "$TMP/laundered-padded.yml"
+  if uncommented_has "continue-on-error" "$TMP/laundered-padded.yml"; then
+    ok "the detector still FIRES when the stripped text overruns the pipe buffer"
+  else
+    bad "the detector lost a planted continue-on-error to a SIGPIPE race (pipefail read the producer's 141 as 'no match')"
+  fi
+
+  # MUTATION-PROVE THE OTHER DIRECTION, which is the dangerous one. The two
+  # assertions above that report "no continue-on-error here" would, if blinded,
+  # print ok on a file that carries one — a false green indistinguishable from a
+  # real pass. Plant one in a copy of the SCRIPT and require the same predicate
+  # those assertions use to say so.
+  # The fixture is built with cat, NOT with awk/sed. awk silently drops the NUL
+  # byte in $WATCH, and a fixture without that NUL is a fixture without the very
+  # property that blinds the check — the arm would then pass while the real file
+  # stayed unreadable. Copy the bytes, append the plant, and assert BOTH the
+  # plant and the NUL survived before trusting the result.
+  { cat "$WATCH"; printf '        continue-on-error: true\n'; } > "$TMP/laundered-watch.sh"
+  if [ "$(grep -c -a "continue-on-error" "$TMP/laundered-watch.sh")" -gt \
+       "$(grep -c -a "continue-on-error" "$WATCH")" ]; then
+    ok "the script-side mutation fixture really carries the plant (the arm is not vacuous)"
+  else
+    bad "the script-side plant did not land in $TMP/laundered-watch.sh"
+  fi
+  if [ "$(tr -dc '\000' < "$WATCH" | wc -c)" = "$(tr -dc '\000' < "$TMP/laundered-watch.sh" | wc -c)" ]; then
+    ok "the fixture preserves \$WATCH's NUL bytes (it still reproduces the binary-blindness)"
+  else
+    bad "the fixture lost \$WATCH's NUL bytes — it no longer tests the condition that blinded this check"
+  fi
+  if uncommented_has "continue-on-error" "$TMP/laundered-watch.sh" -i; then
+    ok "the script-side predicate FIRES on a planted continue-on-error (the no-continue assertion can still lose)"
+  else
+    bad "the script-side predicate missed a planted continue-on-error — the 'no continue-on-error in the script' ok is a false green"
   fi
 else
   bad "shell-harnesses.yml not found at $WF"
