@@ -159,6 +159,9 @@ type Reason =
 const REGISTER_BLIND: Record<string, Reason> = {
   // ── dataviz (5) — dataviz.tsx header ruling, D56
   chart: 'dataviz-apparatus',
+  // route: the track paints as rotated Views; every string is the micro mono
+  // meta row / caption chrome — no prose measure to carry (dataviz.tsx §route).
+  route: 'dataviz-apparatus',
   'bar-chart': 'dataviz-apparatus',
   heatmap: 'dataviz-apparatus',
   'gauge-list': 'dataviz-apparatus',
@@ -394,7 +397,7 @@ describe('arm 3 — the register fingerprint (D50 REGISTER_BLIND)', () => {
     // on my own allowlist — growing it should cost a deliberate edit, because
     // every new row is a RULING that something legitimately ignores the
     // register. It cannot rot from the outside.
-    expect(Object.keys(REGISTER_BLIND)).toHaveLength(42)
+    expect(Object.keys(REGISTER_BLIND)).toHaveLength(43)
     // Derived from the map, never a second copy of the literal above: the
     // partition must be total, with no type both blind and sensitive.
     const sensitive = Object.keys(BLOCK_RENDERERS).filter((t) => REGISTER_BLIND[t] === undefined)

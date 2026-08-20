@@ -694,6 +694,60 @@ defmodule Barkpark.Accounts do
   wins; the loser sees zero rows updated and is rejected as a replay. The stamp
   is therefore also monotonic (a winner always moves it forward).
   """
+  # ── CITED SAFE — class A, and the ordering guard is UPSTREAM, not missing
+  # (clock-semantics wave, 2026-08-19). Read this before "fixing" the CAS.
+  #
+  # Provenance: swept as a candidate of the class-C bucket-key defect closed by
+  # #12628 (8598c4efe7) and the atomicity defect closed by #12579 (e45f1377bb).
+  # This site is neither: `last_totp_at` is an ABSOLUTE STORED INSTANT compared
+  # against a persisted column, which is precisely the case where wall clock is
+  # CORRECT and `System.monotonic_time` would be meaningless (process-local,
+  # gone on restart, incomparable across nodes).
+  #
+  # (a) STRUCTURAL, before any consequence argument: the CAS below
+  #     (`cas_last_totp/2`) is EQUALITY-only — `u.last_totp_at == ^seen` — with
+  #     no ordering predicate, and the doc above asserts the stamp is
+  #     monotonic. That assertion HOLDS, but not for the reason the code shape
+  #     suggests. Ordering is enforced BEFORE the write, by NimbleTOTP's reuse
+  #     gate: `reused?/3` (nimble_totp 1.0.0, lib/nimble_totp.ex:250-252) is
+  #     `Integer.floor_div(time, period) <= Integer.floor_div(to_unix(since),
+  #     period)` => reused => invalid. That is STRICT at step granularity, so
+  #     acceptance requires floor(now/30) > floor(since/30), which arithmetically
+  #     implies now > since. `totp_opts/1` below is what feeds `since:`.
+  #
+  # (b) PROVEN, not argued. An exhaustive sweep over a 3-step neighbourhood
+  #     (121 x 121 = 14641 (time, since) pairs, each with its own matching code)
+  #     found the accepted-with-time-<=-since set EMPTY. End to end: forcing
+  #     `last_totp_at` 600 s into the FUTURE — arithmetically identical to a
+  #     rewound host clock — makes `verify_totp/2` return `:error` with the
+  #     stored value byte-identical; the CAS never runs at all.
+  #     CLOCK STEP, both directions: BACKWARD fails CLOSED (the code is rejected
+  #     as reuse before any write). FORWARD also fails closed for replay — it
+  #     can only advance the consumed step, never rewind it. There is no
+  #     direction in which a step admits a replayed code.
+  #
+  # So the absent `u.last_totp_at < ^now` predicate is REDUNDANT, not
+  # absent-and-dangerous, and shipping it would be claiming a defect that does
+  # not exist.
+  #
+  # RESIDUAL — a DEPENDENCY COUPLING, and this is the durable value of the note:
+  # the ordering invariant is enforced by a third party's internals, not by
+  # anything in this file. A nimble_totp version bump that loosens `reused?/3`
+  # to `<`, anyone adding a `time:` option to the `valid?` call, or anyone
+  # dropping `since:` from `totp_opts/1`, silently converts this redundant CAS
+  # into the real defect — with no test here failing. If you touch any of those
+  # three, add the ordering predicate.
+  # CONTRAST, deliberately: cloud's twin does NOT rely on the dependency. It
+  # stores a step INDEX and guards it in SQL —
+  # `u.two_factor_last_step < ^step` in the WHERE at
+  # cloud/lib/barkpark_cloud/accounts.ex:2186 — a different mechanism that
+  # needs its own guard and has it.
+  #
+  # WHAT THIS VERDICT DOES NOT REST ON: the MEDIUM-6 / LOW red-team stamps
+  # recorded in the doc above. Those graded the read-then-write race between two
+  # concurrent verifiers; neither examined what a clock step does to the stamp.
+  # The two grounds above are the upstream strict inequality and an exhaustive
+  # sweep; neither leans on that history.
   @spec verify_totp(User.t(), String.t()) :: {:ok, User.t()} | :error
   def verify_totp(%User{totp_enabled: true, totp_secret: secret} = user, code)
       when is_binary(secret) and is_binary(code) do
@@ -725,6 +779,11 @@ defmodule Barkpark.Accounts do
     end
   end
 
+  # No ordering predicate here BY VERDICT, not by omission — clock-semantics
+  # wave 2026-08-19 classified this class A / CITED SAFE. NimbleTOTP's strict
+  # step gate makes `now > seen` a precondition of ever reaching this write; see
+  # the block above `verify_totp/2` for the proof and for the dependency
+  # coupling that is the residual.
   defp cas_last_totp(query, nil), do: where(query, [u], is_nil(u.last_totp_at))
   defp cas_last_totp(query, seen), do: where(query, [u], u.last_totp_at == ^seen)
 

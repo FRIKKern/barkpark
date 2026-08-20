@@ -310,12 +310,23 @@ func TestMomentumInFlightDenominatorCollapsed(t *testing.T) {
 	extras := primeExtras{counts: map[string]int{"in_progress": 3, "open": 1}}
 	st := UIState{Conn: ConnLive}
 
-	// MUTATION CONTROL — compose WITHOUT the collapse: the pre-D120 board.
+	// MUTATION CONTROL — the pre-D120 board: prime's RAW counts, uncollapsed.
 	// TaskCount(2, window only) < summed(4) fires the disclosure over a corpus
 	// that was never clamped, and the in-flight count paints the doubled 3.
 	// This is the exact lie D115 live-reproduced (11-vs-10); if the collapse
 	// seam ever regresses, the assertions below are what the operator would see.
+	//
+	// The verbatim Counts copy is DELIBERATE, not a shortcut. D124 (#11974) put a
+	// SECOND collapse inside BuildBoard itself — recomputeInProgress rewrites the
+	// in_progress bucket from s.Tasks — so BuildBoard can no longer compose an
+	// uncollapsed board: it collapses by construction. Left as it was, this
+	// control silently lost its teeth (it painted "1 in flight" with no
+	// disclosure at all, i.e. it stopped reproducing the lie it exists to
+	// reproduce). Restoring the pre-D124 contract — Counts copied verbatim from
+	// prime, the ONE line D124 changed on this path — is what keeps the
+	// assertions below honest instead of vacuous.
 	rawBoard := BuildBoard(composeSnapshot(window, extras, fixedNow), RepoContext{}, fixedNow)
+	rawBoard.Counts = map[string]int{"in_progress": 3, "open": 1} // prime verbatim, pre-D124
 	rawLine := ansi.Strip(momentumLine(rawBoard, st, 120))
 	if !strings.Contains(rawLine, "3 in flight") || !strings.Contains(rawLine, "showing 2 of 4") {
 		t.Fatalf("mutation control lost its teeth — uncollapsed counts no longer reproduce the twin-doubled lie:\n%s", rawLine)
@@ -323,6 +334,14 @@ func TestMomentumInFlightDenominatorCollapsed(t *testing.T) {
 
 	// The collapsed path, exactly as FetchSnapshotFull merges it.
 	merged, _ := mergeInflight(window, nil, inflight, nil)
+	// The FETCH seam's own teeth, asserted DIRECTLY. Since D124 the board
+	// re-derives in_progress from the rows it holds, so a regression in
+	// countInProgress (prime's raw 3, or len(third-fetch)) would be MASKED by
+	// recomputeInProgress before it ever reached the rendered line below.
+	// Pin the seam's output where nothing downstream can launder it.
+	if got := countInProgress(merged); got != 2 {
+		t.Fatalf("countInProgress must collapse the twin-doubled 3 to the deduped union 2, got %d", got)
+	}
 	extras.counts["in_progress"] = countInProgress(merged)
 	b := BuildBoard(composeSnapshot(merged, extras, fixedNow), RepoContext{}, fixedNow)
 	line := ansi.Strip(momentumLine(b, st, 120))

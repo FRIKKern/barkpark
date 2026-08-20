@@ -125,8 +125,14 @@ PY
 # "\tEXEMPT" column.
 extract_paths() {
   awk '
-    /^on:/                    { in_on = 1; next }
-    in_on && /^[a-z]/         { in_on = 0 }
+    # `on:` and its quoted spellings are the same key to GitHub (YAML 1.1
+    # resolves a bare `on` to the BOOLEAN true, which is why yamllint pushes
+    # authors to quote it). A `/^on:/` byte anchor reads a quoted workflow as
+    # having no `on.push.paths` at all and this gate then compares an EMPTY
+    # path set — a green earned over nothing. Same three spellings as
+    # scripts/required-checks-generate.sh build_workflow_index.
+    /^("on"|\047on\047|on)[ \t]*:/ { in_on = 1; next }
+    in_on && /^[A-Za-z"\047]/ { in_on = 0 }
     in_on && /^    paths:/    { in_paths = 1; exempt = 0; next }
     in_paths && /^    [a-z]/  { in_paths = 0 }
     in_paths && /^ *#/        { if ($0 ~ /deploy-filter-exempt:/) exempt = 1; next }

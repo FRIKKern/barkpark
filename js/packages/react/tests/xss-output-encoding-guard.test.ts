@@ -356,7 +356,11 @@ describe('React SDK XSS output-encoding regression guard', () => {
     const html = renderPortableDocument([block])
     // Sanity: the case actually rendered past the empty-guard early-returns.
     expect(html.length).toBeGreaterThan(0)
-    assertNoBreakout(html, { allowImgSvg })
+    // `allowImgSvg` is optional on CASES, so destructuring yields `boolean | undefined`.
+    // Under `exactOptionalPropertyTypes` an optional property must be ABSENT, not
+    // present-and-undefined, so omit the key entirely when it was not set. The sole
+    // read is `if (!opts.allowImgSvg)`, so absent and `false` are already equivalent.
+    assertNoBreakout(html, allowImgSvg === undefined ? {} : { allowImgSvg })
   })
 
   it('renders the whole hostile document in one pass with no breakout', () => {

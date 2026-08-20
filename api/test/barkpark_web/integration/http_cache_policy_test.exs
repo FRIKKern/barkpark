@@ -179,11 +179,18 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
     test "the 302 to a presigned blob URL is private and revalidated", %{conn: conn} do
       admin = "cache-policy-sl-" <> Integer.to_string(System.unique_integer([:positive]))
 
-      {:ok, _} =
+      {:ok, admin_tok} =
         Auth.create_token(admin, "cache-policy-sl", "production", ["read", "write", "admin"])
 
       ws = create_workspace!("cache-policy-ws-#{System.unique_integer([:positive])}")
       project = create_project!(ws, "cache-policy-proj-#{System.unique_integer([:positive])}")
+
+      # FIXTURE REPAIR (arpss-w8): minting a share link now requires an ADMIN
+      # MEMBERSHIP in the target workspace. `create_token/4` homes the token in
+      # the seeded `default` workspace and `create_workspace!/1` writes no
+      # membership, so this admin was a stranger to the workspace it mints into.
+      # Zero production change — this is a cache-header pin, not a tenancy test.
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, admin_tok.id, "admin")
       file = insert_media_file!(ws, project, "share-link")
 
       minted =

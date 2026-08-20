@@ -1271,6 +1271,76 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert length(parent_payload["dependents"]) == 1
       assert hd(parent_payload["dependents"])["doc_id"] == child_doc_id
     end
+
+    # `kind` is a FILTER: a shape we cannot filter on is refused loudly.
+    # `?kind[]=blocks` decodes to a list and used to fall off the case in
+    # edges/2 as a CaseClauseError → 500, raised BEFORE the task lookup.
+    test "list-valued kind returns 400, not a CaseClauseError 500",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("edges-kind-list"), scope)
+
+      resp = conn |> authed() |> get("/v1/tasks/#{task.doc_id}/edges?kind[]=blocks")
+
+      assert resp.status == 400
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == false
+      assert payload["reason"] == "bad_request"
+      assert payload["message"] =~ "kind"
+    end
+
+    test "the 400 fires before the task lookup, so a nonexistent doc_id also 400s",
+         %{conn: conn} do
+      resp = conn |> authed() |> get("/v1/tasks/no-such-task-at-all/edges?kind[]=blocks")
+
+      assert resp.status == 400
+    end
+
+    # The guard must not degrade the real filter.
+    test "happy path: kind=blocks still filters the edge graph",
+         %{conn: conn, scope: scope} do
+      parent = mk_task!(uniq("edges-kind-parent"), scope)
+      child = mk_task!(uniq("edges-kind-child"), scope)
+      {:ok, _} = Tasks.add_dep(child.id, parent.id, :blocks)
+
+      resp = conn |> authed() |> get("/v1/tasks/#{child.doc_id}/edges?kind=blocks")
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert Enum.map(payload["dependencies"], & &1["doc_id"]) == [parent.doc_id]
+    end
+  end
+
+  # `dataset` is a SCOPE SELECTOR with a documented default, so it fails SOFT —
+  # the deliberate opposite of the `kind` FILTER above. A list-valued dataset
+  # used to reach Tasks.Events.replay_since/3 (single is_binary clause, no
+  # fallback) and raise FunctionClauseError → 500 before any Repo call.
+  describe "GET /v1/tasks/events dataset selector" do
+    test "list-valued dataset falls back to production instead of 500ing",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("events-dataset"), scope)
+
+      resp = conn |> authed() |> get("/v1/tasks/events?dataset[]=production&since=0&limit=200")
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+      # Scoped to the production default: the just-written production task's
+      # events are in the feed, exactly as with no `dataset` param at all.
+      doc_ids = Enum.map(payload["events"], & &1["doc_id"])
+      assert task.doc_id in doc_ids
+    end
+
+    test "happy path: a binary dataset still scopes the feed", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("events-dataset-binary"), scope)
+
+      prod = conn |> authed() |> get("/v1/tasks/events?dataset=production&since=0&limit=200")
+      assert prod.status == 200
+      assert task.doc_id in Enum.map(Jason.decode!(prod.resp_body)["events"], & &1["doc_id"])
+
+      other = conn |> authed() |> get("/v1/tasks/events?dataset=staging&since=0&limit=200")
+      assert other.status == 200
+      refute task.doc_id in Enum.map(Jason.decode!(other.resp_body)["events"], & &1["doc_id"])
+    end
   end
 
   # ─── w7-08: new endpoints ──────────────────────────────────────────────
