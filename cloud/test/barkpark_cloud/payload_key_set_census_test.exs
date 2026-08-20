@@ -682,8 +682,6 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
     {"DeployLedger.census/3", :unread, "boundaries",
      "dr-w18-s5 — the vocabulary-boundary LIST. Emitted by census/3 as of dr-w18-s2; the Go decode and render ride the round-2 slice, which is fenced out of this file. Until then a reader of `bp cloud deployments` sees the refusal but not the instant that caused it."},
-    {"DeployLedger.census/3", :unread, "coalesced_attempts",
-     "dr-w18-s5 — the gauge for attempts that minted NO row, with its refusing coverage floor. Same round-2 fence as `boundaries`; the value is on the wire and in `-o json` (census.Raw is verbatim) before any struct field exists."},
     {"DeployLedger.census/3", :unread, "completeness",
      "dr-w18-s5 — the second independent count reconciled against volume + not_attempted. It reds IN THE ENVELOPE today; the Go reader must learn to print `unaccounted` rather than a balanced-looking number."},
     {"DeployLedger.census/3", :unread, "total_sites",
@@ -930,8 +928,31 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # name lost). The emitted floor does not move because this slice writes no new
   # Elixir serializer: it renders a menu `cloud/` already emits, which is again
   # the point of the pair.
+  #
+  # dr-w23-s4 (the deploy census renders its coalesced-attempt gauge) is the PR
+  # the merge hazard above named by number, and it landed after every delta
+  # listed here. The go-tag floor moves 271 -> 273 and the emitted floor HOLDS
+  # at 149 — BOTH re-measured by the 999-technique on this branch merged with
+  # main, never summed with the 225 -> 227 figure this slice measured against its
+  # own older base. That older number is stale by construction: it was taken
+  # before `deferral_wait`, the coverage envelope, `details` and `readable_types`
+  # moved the same union, which is precisely the failure mode the hazard note
+  # warns about. The slice declares SIX new json tag lines —
+  # `coalesced_attempts` on `DeployCensus` plus `value`, `refused`, `reason`,
+  # `since` and `basis` on the new `DeployCoalescedAttempts` — and the union
+  # grows by TWO (the 999-technique printed "273 json tag(s) found in
+  # internal/cloudclient, floor is EXACTLY 999" and "149 emitted key(s)
+  # collected"), because the refusal shape is deliberately the same shape a
+  # `DeployRate` refusal already declares. The emitted floor does not move: this
+  # slice writes no Elixir serializer, it DECODES one `cloud/` already emits.
+  #
+  # THE CO-EDIT IS NOT OPTIONAL. `coalesced_attempts` was a KNOWN OPEN :unread
+  # row above; the moment a Go field declares it, the census's "no longer unread
+  # — DELETE the allowlist row" arm reds. That arm is DESIGNED to force this
+  # co-edit in the same commit, and a Go-only PR never runs the Cloud job, so
+  # deferring it would have merged green and reddened main.
   @emitted_floor 149
-  @go_tag_floor 271
+  @go_tag_floor 273
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is

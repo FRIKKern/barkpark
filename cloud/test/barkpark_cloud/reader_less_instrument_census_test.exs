@@ -538,17 +538,13 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "GET /v1/deploy-ledger/census — emitted inside DeployLedger.census/3 (deploy_ledger.ex:893)",
       audience:
-        "NOBODY today. The default `-o table` render omits it, and no Go field, render or test names it; `-o json` prints the control plane's bytes verbatim, which is transport and not readership (D453).",
+        "the terminal, as of dr-w23-s4: internal/cloudclient/client.go decodes the node into `DeployCensus.CoalescedAttempts *DeployCoalescedAttempts` and internal/cli/cloud_deploy_census_cmd.go renders it on the basis line of every `-o table` deploy census. A WHOLE reader, unlike the queued_* legs below: this key has a real writer too (auto_deploy_worker.ex:412, ~31,697 rows), so the rendered number means something.",
       reason:
-        "D442 scored this key '1 reader hit'. That hit was the COMMENT at internal/cli/cloud_deploy_census_cmd.go:538 — 'coalesced_attempts now lands on the row but is not in this envelope' — which is FALSE on main, since deploy_ledger.ex:893 emits it inside census/3. The comment is deleted by this slice, not cited. The true reader count is 0.",
-      disposition: :stay,
-      # RIDER 2, and it is the whole reason this row is not the second deletion.
-      # #10811 names this key and is OPEN — and its stay FAILS the re-derived
-      # predicate (DIRTY, and its newest check predates the base movement), so
-      # rider 1 buys this row nothing. What protects it is DATA.
+        "RE-DECLARED (was `:stay`). THE CLOSER LANDED, which is the good direction this register exists to detect: dr-w23-s4 added the typed decode and the render, so the row derives 13 readers and correctly redded as :rot under `:stay`. The old reason is preserved as the record because it is the more interesting half — D442 scored this key \'1 reader hit\', and that hit was the COMMENT at cloud_deploy_census_cmd.go:538 asserting `coalesced_attempts` \'is not in this envelope\', which was FALSE on main (deploy_ledger.ex:893 emits it inside census/3). The true reader count was 0, a comment was being counted as readership, and the comment was wrong about the very fact it was being counted for. dr-w23-s4 deletes that comment and replaces the window-independent frozen sentence beside it with this window\'s own measured count — or, before @coalesced_counter_since, with the producer\'s own refusal rendered as a named absence and never as a 0.",
+      disposition: :has_reader,
       stay:
         {:data,
-         "the COLUMN is data, not an instrument: deployments.coalesced_attempts (deployment.ex:206) is written by auto_deploy_worker.ex:412 across ~31,697 rows. What is deletable here is the EMISSION plus this row plus the false comment. '`coalesced_attempts` is deletable' must never become 'drop the column'."}
+         "KEPT AS THE RECORD, not as a live stay (this row is now `:has_reader`, so the stay-validity test no longer reads it). The COLUMN is data, not an instrument: deployments.coalesced_attempts (deployment.ex:206) is written by auto_deploy_worker.ex:412 across ~31,697 rows. \'`coalesced_attempts` is deletable\' must never have become \'drop the column\' — and now nothing is deletable here at all, because the emission has a reader."}
     },
     %{
       key: "queued_self_seconds",
