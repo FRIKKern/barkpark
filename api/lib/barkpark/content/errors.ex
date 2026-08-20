@@ -314,6 +314,32 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :forbidden}),
     do: %{code: "forbidden", message: "token lacks required permission", status: 403}
 
+  # MEMBERSHIP refusal, deliberately distinct from the permission-tier refusal
+  # above (gyldendal field report #15). `ResolveWorkspace` halts here when the
+  # caller is simply not a member of the workspace named in the URL — a question
+  # about WHO the caller is, not about which permissions their credential
+  # carries. The generic arm's copy ("token lacks required permission", hinting
+  # "use a token with write/admin permission") names a tier this gate never
+  # consulted, and that one sentence is what filed a Studio AUTHENTICATION bug
+  # as a permission bug: the reporter went hunting for a token scope while the
+  # browser was in fact sending no credential at all.
+  #
+  # `code` stays "forbidden" (stable machine key, already in the OpenAPI enum —
+  # clients keying on it are unchanged) and the STATUS stays 403: a read denial
+  # surfaces as 403, never as a 404 not-found. `reason` discriminates for a
+  # client that wants it, exactly as the `:replay` arm does under
+  # "unauthorized", and the arm carries its OWN hint — `put_hint/1` only fills
+  # in the code-keyed default when a `build/1` arm has not spoken for itself.
+  defp build({:error, :forbidden_membership}),
+    do: %{
+      code: "forbidden",
+      message: "caller is not a member of this workspace",
+      status: 403,
+      reason: "not_a_member",
+      hint:
+        "This is a MEMBERSHIP check, not a permission tier: sign in as — or send a token belonging to — a member of this workspace. A browser session authenticates only on routes that read the session cookie; a Web Component needs a real data-token."
+    }
+
   # Per-workspace quota gate (perfect-plan-build W1, D11). Suspended = a hard
   # 403 write-block; over-quota = 402 Payment Required (the honest "you hit your
   # plan's write cap" semantic, distinct from a 429 rate limit that clears on
@@ -730,6 +756,12 @@ defmodule Barkpark.Content.Errors do
   defp schema_reason(reason), do: inspect(reason)
 
   defp humanize_atom(atom), do: atom |> to_string() |> String.replace("_", " ")
+
+  # Code-keyed DEFAULT hint. A `build/1` arm that already set its own `:hint`
+  # has spoken more precisely than the code-wide table can — two arms may share
+  # one `code` and still need different fixes (`:forbidden` vs
+  # `:forbidden_membership`) — so the arm's hint wins.
+  defp put_hint(%{hint: hint} = env) when is_binary(hint) and hint != "", do: env
 
   defp put_hint(env) do
     case @hints[env.code] do

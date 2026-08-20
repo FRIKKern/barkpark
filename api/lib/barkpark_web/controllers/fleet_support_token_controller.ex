@@ -3,7 +3,12 @@ defmodule BarkparkWeb.FleetSupportTokenController do
   Admin-gated mint + revoke of a per-SUPPORT ledger token (Personal Dev Fleet,
   Wave C — PDF-D57/D60).
 
-  Two endpoints, both mounted under `[:api, :require_admin]` (see `router.ex`):
+  Two endpoints, both mounted under `:flat_admin_api` (see `router.ex`) — the
+  flat admin pipeline that derives the caller's workspace FROM THEIR TOKEN
+  before the Default fallback. The old `[:api, :require_admin]` mount ran
+  `AssignDefaultScope` first, so `create/2` bound every minted token to the
+  seeded Default no matter who minted it (gyldendal field report; the Class A
+  remnant #12826 left behind):
 
     * `POST /v1/fleet/support-tokens` `{"name": string}` → `201 {token, token_id,
       name}` — mints a WRITE-capable `api_token` (label `fleet-support-<name>`)
@@ -49,8 +54,10 @@ defmodule BarkparkWeb.FleetSupportTokenController do
 
   OPERATOR CONTRACT (unchanged for the actor this route exists to serve, but
   worth stating because the CLI reads a 404 as "already gone"): `create/2` binds
-  the minted token to `conn.assigns[:current_workspace]`, which on this FLAT
-  route is the seeded Default (`AssignDefaultScope`). So the admin who can mint
+  the minted token to `conn.assigns[:current_workspace]`, which on this flat
+  route is the CALLER'S OWN workspace (`DeriveWorkspaceFromToken`), falling back
+  to the seeded Default only for a token with no `workspace_id` at all. So the
+  admin who can mint
   here can revoke here whenever it holds an admin/owner membership in that same
   workspace — which `Auth.create_token/5` writes for every admin token minted
   into it. A globally-`admin` token with NO membership in the target's workspace
