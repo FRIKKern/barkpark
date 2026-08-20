@@ -1045,13 +1045,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # THE REGISTER BELOW CLOSES IT, and the closure is a PARTITION, not a
   # sampling. Every tag site in internal/cloudclient falls in exactly one class:
   #
-  #   * a site of a name declared ONCE (175 of them) — deleting it deletes the
+  #   * a site of a name declared ONCE (172 of them) — deleting it deletes the
   #     NAME, so `@go_tag_floor`'s `==` already reds. Not registered here.
-  #   * a site of a name declared MORE THAN ONCE (98 names, 341 sites) — this is
+  #   * a site of a name declared MORE THAN ONCE (101 names, 348 sites) — this is
   #     the blind class, and each row pins the exact multiplicity, so losing ONE
   #     of twelve `status` sites reds BY NAME.
   #
-  # 175 + 341 = 516, and the two classes are asserted to reconstruct exactly
+  # 172 + 348 = 520, and the two classes are asserted to reconstruct exactly
   # that total from `@go_tag_floor` and this register, so a register edited
   # without the floor (or the reverse) reds rather than drifting. No tag site in
   # the package can be deleted without a red — that is the claim, and the
@@ -1062,7 +1062,29 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # NOT move `@go_tag_floor` (it rides free on the union) but DOES move a row
   # here — `team` and `scope` rode free in W19 S1, `sha`/`count`/`limit` in
   # W26 S3. Re-measure by the 999-technique after the other PR lands; never sum.
+  #
+  # AND IT FIRED ON THE VERY NEXT MERGE, which is why the numbers above are the
+  # SECOND set this arm has carried. #12769 (this arm) was measured against a
+  # base without #12763, which merged one commit earlier and declares `git_ref`,
+  # `artifact_url`, `image_tag` and `detail` on `SiteDeployment`. All four names
+  # ALREADY existed package-wide — declared by `Deployment`, `SiteStage` and
+  # `WebhookProxyError` — which is precisely the laundering #12763 exists to
+  # end, so `@go_tag_floor` correctly did NOT move (273, both before and after)
+  # and both PRs were green on their own bases. The SITE total went 516 -> 520
+  # and main went red on the second merge. Re-measured here, never summed:
+  # `artifact_url` 1 -> 2, `git_ref` 1 -> 2, `image_tag` 1 -> 2 (three names
+  # crossing OUT of the once-declared class and INTO this register, so the
+  # register grows by three ROWS as well as by sites) and `detail` 7 -> 8.
+  #
+  # Read that as the arm working rather than as the arm being fragile: a
+  # four-site change that `@go_tag_floor` structurally cannot see is exactly the
+  # population this register was built to measure, and the first real one it met
+  # it caught. The cost is real too and is not hidden: a name-union floor can be
+  # bumped by whichever PR lands first, and this register cannot — it must be
+  # re-measured on the MERGED tree. Two co-scoped PRs that are each green apart
+  # will red main together, and the fix is always the same: measure, never sum.
   @go_tag_sites %{
+    "artifact_url" => 2,
     "as_of" => 5,
     "at" => 2,
     "barkpark_id" => 4,
@@ -1082,7 +1104,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "delivered" => 2,
     "deployment" => 3,
     "deployments" => 2,
-    "detail" => 7,
+    "detail" => 8,
     "doc_type" => 2,
     "domains" => 3,
     "email" => 3,
@@ -1095,9 +1117,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "failure_reason" => 2,
     "framework" => 4,
     "from" => 2,
+    "git_ref" => 2,
     "headroom" => 2,
     "host" => 6,
     "id" => 13,
+    "image_tag" => 2,
     "in_flight" => 2,
     "inserted_at" => 8,
     "instance" => 3,
