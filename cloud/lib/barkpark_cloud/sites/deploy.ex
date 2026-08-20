@@ -334,9 +334,45 @@ defmodule BarkparkCloud.Sites.Deploy do
   # no-op was never correct in the first place. A future change that made `force`
   # idempotent again would silently take prebuilt with it.
   defp maybe_prebuilt_nonce(config, "prebuilt"),
-    do: Map.put(config, :prebuilt_nonce, System.unique_integer([:positive, :monotonic]))
+    do: Map.put(config, :prebuilt_nonce, prebuilt_nonce())
 
   defp maybe_prebuilt_nonce(config, _source), do: config
+
+  @doc """
+  The prebuilt nonce VALUE — a wall clock, deliberately (clock-semantics class D).
+
+  This is an identity token, not an elapsed duration: the only property it owes
+  is "never repeats, never goes backwards ACROSS A RESTART". The obvious reflex —
+  `System.unique_integer([:positive, :monotonic])` — is exactly wrong for that,
+  because it is a node-global counter that RESTARTS FROM 1 on every BEAM boot (a
+  separate sequence from bare `[:positive]`, so nothing else in the node consumes
+  it: the Nth prebuilt mint since boot deterministically gets nonce N). Since
+  `cloud/**` auto-deploys on merge, a control-plane restart is routine, so the
+  overlap is guaranteed rather than improbable — and a repeated nonce means a
+  repeated build_id, which the (site_id, build_id) partial unique index refuses,
+  which `recover_conflict/3` answers `{:duplicate, existing}`, which the router
+  answers HTTP 200 with the OLD row, while `record_audit` lives only in the
+  `{:ok, _}` arm: the freshly uploaded dist is discarded with ZERO trace.
+
+  `System.system_time()` is the idiom already used by `maybe_force_nonce/2` and
+  it survives a restart. Three in-repo moduledocs state this same rule and reject
+  `unique_integer` for this same fence (`Sheets.Session`, `StudioChat.FleetHub`,
+  `Studio.SheetGrid`).
+
+  SEVERITY, stated honestly: this is SILENT DATA LOSS on an AUTHENTICATED,
+  opt-in-gated tenant path — `POST /v1/sites/:id/deploy` with
+  `{"source":"prebuilt"}`, gated on `site.prebuilt_enabled` (422 otherwise) and
+  reached through `with_team_site(conn, {:ability, "write"})`. It is NOT
+  unauthenticated and NOT an authorization defect, no caller can influence the
+  nonce, and it ranks BELOW any auth finding in this wave.
+
+  Public only as a test seam: the nonce is otherwise invisible through
+  `build_id/5` (which returns a hash) and no restart can be staged in `mix test`,
+  so a difference assertion cannot fail on the unfixed code. The deciding proof
+  is on the VALUE DOMAIN — see `sites_deploy_test.exs`.
+  """
+  @spec prebuilt_nonce() :: integer()
+  def prebuilt_nonce, do: System.system_time()
 
   ## ---------------------------------------------------------------------------
   ## Prebuilt artifacts (charter D91)
@@ -1902,8 +1938,18 @@ defmodule BarkparkCloud.Sites.Deploy do
      }}
   end
 
+  # W70 (D847/D854) — MIGRATED onto `refusal_detail/1`, the extractor the deploy
+  # path already trusts. The box's REAL pre-poll refusal transport is NESTED —
+  # `SiteDeployController` answers every refusal `%{error: %{code, message}}`
+  # and `BoxRelay.HTTP` relays a non-2xx verbatim before it ever polls — so the
+  # old flat `body["error"] || body["detail"] || body["reason"]` chain bound a
+  # MAP, failed the `is_binary` guard below, and the box's own sentence died
+  # into the generic fallback. `refusal_detail/1` tries the nested arm first and
+  # composes "code — message"; its flat arm is a strict superset of the old
+  # chain (it also reads `failure_reason`), so every settle_* sentence and
+  # await-timeout body still passes through unchanged.
   defp rollback_refusal(body, fallback) when is_map(body) do
-    case body["error"] || body["detail"] || body["reason"] do
+    case refusal_detail(body) do
       d when is_binary(d) and d != "" -> rollback_copy(d, fallback)
       _ -> fallback
     end
@@ -1920,8 +1966,15 @@ defmodule BarkparkCloud.Sites.Deploy do
   # other detail — a box token like `not_supported`, or the transport's own
   # await-teardown timeout sentence — travels VERBATIM rather than being dressed
   # in another verb's prose.
+  # W70 (D847/D854) — same migration as `rollback_refusal/2` above: the nested
+  # envelope is the box's real pre-poll refusal transport, and `refusal_detail/1`
+  # is the one extractor that reads it. The one verb-neutral typed sentence
+  # (`lock_held`, an EXACT flat token) keeps its plain words; every other detail
+  # — a nested "code — message" composite, a box token, or the transport's own
+  # await-teardown timeout sentence — travels VERBATIM rather than being dressed
+  # in another verb's prose (the W68 rollback-copy leak stays fixed).
   defp teardown_refusal(body, fallback) when is_map(body) do
-    case body["error"] || body["detail"] || body["reason"] do
+    case refusal_detail(body) do
       "lock_held" -> "a deploy is running on the box — try again once it finishes"
       d when is_binary(d) and d != "" -> d
       _ -> fallback
@@ -1931,6 +1984,16 @@ defmodule BarkparkCloud.Sites.Deploy do
   defp teardown_refusal(_body, fallback), do: fallback
 
   # site-deploy.sh's typed rollback exits, in plain words.
+  #
+  # TYPED-TOKEN FATE (W70, decided): these clauses match EXACT bare tokens, which
+  # today's transports mint only as FLAT `%{"error" => token}` bodies — a shape
+  # that is fixture-only on the current wire (settle_* mints failure_reason
+  # sentences; pre-poll refusals are nested). They are KEPT as the friendly
+  # rendering for that flat shape, and they deliberately do NOT fire on a nested
+  # composite ("already_running — deploy already running for blog"): the box's
+  # own message travels verbatim instead of being replaced by canned prose. If a
+  # friendly sentence for a nested 409 is ever wanted, match `refusal_code/1` in
+  # the caller's 409 arm — never widen these token clauses.
   defp rollback_copy("no_previous", _fallback),
     do: "there is no previous build to roll back to — this site has only ever had one release"
 

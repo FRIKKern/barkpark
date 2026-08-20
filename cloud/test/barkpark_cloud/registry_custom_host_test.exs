@@ -90,15 +90,34 @@ defmodule BarkparkCloud.RegistryCustomHostTest do
         {"leading whitespace", fn h -> " \thttps://" <> h end}
       ]
 
-      for {{label, spell}, i} <- Enum.with_index(variants) do
-        host = "occupied#{i}.barkpark.cloud"
-        stored = spell.(host)
-        _victim = live_row_holding_url(stored)
-        thief = barkpark_fixture(team_fixture())
+      # `assert {:error, :taken} = expr, "#{label}…"` looks labelled but is NOT:
+      # the `=` is a bare match evaluated as assert/2's first argument, so a
+      # mismatch raises MatchError BEFORE the label string is ever built — the
+      # loop aborts on the first bad spelling and the message naming which one
+      # broke never prints. Bind the result, compare it as a VALUE, and collect
+      # the misses so ONE assertion names EVERY spelling that failed to hold its
+      # host, each with its actual result interpolated. (Fenced to this labelled
+      # loop: the unlabelled `assert … = …` twins in this file — :62 and the
+      # re-attach/free-host asserts below — carry no message for a match to
+      # swallow, so their MatchError IS the intended, already-legible failure.)
+      misses =
+        for {{label, spell}, i} <- Enum.with_index(variants) do
+          host = "occupied#{i}.barkpark.cloud"
+          stored = spell.(host)
+          _victim = live_row_holding_url(stored)
+          thief = barkpark_fixture(team_fixture())
 
-        assert {:error, :taken} = Registry.set_custom_host(thief, host),
-               "#{label}: stored url #{stored} did not hold #{host}"
-      end
+          {label, stored, host, Registry.set_custom_host(thief, host)}
+        end
+        |> Enum.reject(fn {_label, _stored, _host, result} ->
+          result == {:error, :taken}
+        end)
+
+      assert misses == [],
+             "these spellings did not hold their host:\n" <>
+               Enum.map_join(misses, "\n", fn {label, stored, host, result} ->
+                 "  #{label}: stored url #{stored} did not hold #{host} (got #{inspect(result)})"
+               end)
     end
 
     test "a row may still attach a custom host matching its OWN url (legitimate re-attach)" do

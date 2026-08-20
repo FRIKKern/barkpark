@@ -1336,7 +1336,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    indexed class — author data never carries color. */
 .bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
 
-.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 4px; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; margin: 1.4rem 0; vertical-align: top; }
+.bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 4px; min-width: 130px; background: var(--paper-bg-deep); padding: 13px 15px; margin: 1.4rem 0; vertical-align: top; }
 .bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; }
 .bp-paper-surface .bp-stat__l { font-size: 0.72rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; }
 .bp-paper-surface .bp-stat__bar { height: 6px; border-radius: 3px; background: var(--paper-rule); overflow: hidden; margin-bottom: 4px; }
@@ -1349,7 +1349,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    wider, it REFLOWS — 1040px fits 7 tiles across at the 140px floor, 1240px fits
    8. The component gains resolution with the screen instead of stacking tiles
    the reader then has to scroll past. */
-.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
+.bp-paper-surface .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--paper-rule); margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
 .bp-paper-surface .bp-stats .bp-stat { margin: 0; min-width: 0; display: flex; }
 
 .bp-paper-surface .bp-gauge { margin: 1.4rem 0; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
@@ -1451,7 +1451,12 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-kilde__word { text-transform: uppercase; letter-spacing: 0.06em; }
 .bp-paper-surface .bp-kilde__ref { word-break: break-word; }
 .bp-paper-surface .bp-kilde__ref a { color: inherit; }
-.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; }
+/* Inside the hairline grid the kilde is a grid item over the rule-colored
+   ground — without its own fill the whole footer line paints as a tinted band
+   (synth-proven pe-w3-hairline-grid-ground). Page ground restores flushness:
+   the 1px row gap above reads as the seam between slab and stamp, the
+   padding-top gives the stamp its air below that seam. */
+.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; background: var(--paper-bg); padding-top: 8px; }
 
 .bp-paper-surface .bp-duel { margin: 1.4rem 0; }
 .bp-paper-surface .bp-duel__table { width: 100%; border-collapse: collapse; }

@@ -250,6 +250,13 @@ function collectSynopses(line, out) {
     // leading-anchor match leaves ONE synopsis standing, and a single synopsis
     // makes its own flags look universally required — which reds every doc that
     // prints the other legitimate form.
+    // A CONCATENATION STUB — `"bp login --email " + email`, `"...--provider " + p`
+    // — is a hint template, NOT an authoritative usage synopsis. Its trailing
+    // whitespace is the runtime-value seam. Read as a synopsis it marks its
+    // dangling flag universally required (`bp login` then reds a valid
+    // `--device`-only invocation on a phantom "missing --email"). A real synopsis
+    // literal is authored complete, never with a trailing space, so drop those.
+    if (/\s$/.test(m[1])) continue;
     const s = m[1].replace(/^\s+/, "");
     if (!/^(usage:\s*)?(bp|barkpark)\s+[a-z]/.test(s)) continue;
     const body = s.replace(/^usage:\s*/, "").replace(/^(bp|barkpark)\s+/, "");

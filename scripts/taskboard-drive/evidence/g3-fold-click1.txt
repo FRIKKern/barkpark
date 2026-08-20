@@ -1,9 +1,9 @@
- ▎ The task TUI is glanceable, live, an… ··· 2/14│ │ The task TUI is glanceable, live, and never flickers                     │
- ├─ ⠹ The live tmux drive ships as a committed S…│ │ ✓ done · C3/7 · task · relevance-loop                                    │
- │    C5/7 · P1 · 3/5                            │ │                                                                          │
- ├─ ⠹ Wide-mode footer verbs become clickable ag…│ │ criteria 4/4                                                             │
- │    C5/7 · P2 · 4/5                            │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
- ├─ ⠹ The TUI card and cheatsheet finally speak …│ │     ↳ cache_test.go includes an intra-session out-of-order rollback gua… │
- │    C5/7 · P3 · 4/5                            │ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
- ├─ ⠹ The board discloses its 1000-row horizon —…│ │     constant motion.                                                     │
- │    C5/7 · P2 · 4/5                            │ │     ↳ board/components/anim tests cover in_progress ordering, claim fre… │
+ ▎ The task TUI is glanceable, live, a… ··· 15/23│ │ The task TUI is glanceable, live, and never flickers                     │
+ ├─ ⠋ The drive harness goes hermetic — fixture-…│ │ ✓ done · C3/7 · task · relevance-loop                                    │
+ │    C5/7 · P1 · 2/5                            │ │                                                                          │
+ ├─ ⠋ The wide panes overflow markers answer cli…│ │ criteria 4/4                                                             │
+ │    C5/7 · P3 · 4/5                            │ │   ✓ Snapshots cannot roll a task backward within one live session.       │
+ ├─ ⠋ The NOW band and the in-flight count tell …│ │   ✓ Active lifecycle and claim changes are visibly distinguished without │
+ │    C5/7 · P2 · 3/4                            │ │     constant motion.                                                     │
+ ├─ ⠋ Task-TUI wave 21 settlement paperwork: the…│ │   ✓ Mouse and keyboard operate the focused column consistently.          │
+ │    C5/7 · P1 · ✓○ 1/2 · w21-decide-fable · 13m│ │   ✓ The current taskboard regression suite is green.                     │

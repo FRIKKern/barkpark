@@ -19,7 +19,7 @@
       "cell": "hobby-hardening-capstone__light__1280",
       "file": "hobby-hardening-capstone__light__1280.jpeg",
       "scale": 2,
-      "bytes": 10276622,
+      "bytes": 10222131,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -283,18 +283,18 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 150,
+        "total": 142,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 139,
+          "1": 131,
           "2": 11
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 2119.3,
+            "y": 2117.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -304,7 +304,7 @@
           },
           {
             "px": 2,
-            "y": 4219.2,
+            "y": 4217.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -314,7 +314,7 @@
           },
           {
             "px": 2,
-            "y": 6620.7,
+            "y": 6618.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -324,7 +324,7 @@
           },
           {
             "px": 2,
-            "y": 15354.6,
+            "y": 15352.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -334,7 +334,7 @@
           },
           {
             "px": 2,
-            "y": 18879.2,
+            "y": 18877.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -344,7 +344,7 @@
           },
           {
             "px": 2,
-            "y": 22022.7,
+            "y": 22020.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -354,7 +354,7 @@
           },
           {
             "px": 2,
-            "y": 23906.9,
+            "y": 23904.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -364,7 +364,7 @@
           },
           {
             "px": 2,
-            "y": 25403,
+            "y": 25401,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -374,7 +374,7 @@
           },
           {
             "px": 2,
-            "y": 26892.5,
+            "y": 26890.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -384,7 +384,7 @@
           },
           {
             "px": 2,
-            "y": 29193.6,
+            "y": 29191.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -394,7 +394,7 @@
           },
           {
             "px": 2,
-            "y": 30712.3,
+            "y": 30710.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -410,7 +410,7 @@
       "cell": "hobby-hardening-capstone__light__1920",
       "file": "hobby-hardening-capstone__light__1920.jpeg",
       "scale": 2,
-      "bytes": 10825395,
+      "bytes": 10857273,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -674,18 +674,18 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 150,
+        "total": 142,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 139,
+          "1": 131,
           "2": 11
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 2100.9,
+            "y": 2098.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -695,7 +695,7 @@
           },
           {
             "px": 2,
-            "y": 4200.8,
+            "y": 4198.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -705,7 +705,7 @@
           },
           {
             "px": 2,
-            "y": 6371.9,
+            "y": 6369.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -715,7 +715,7 @@
           },
           {
             "px": 2,
-            "y": 14933,
+            "y": 14931,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -725,7 +725,7 @@
           },
           {
             "px": 2,
-            "y": 17852.9,
+            "y": 17850.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -735,7 +735,7 @@
           },
           {
             "px": 2,
-            "y": 20506.8,
+            "y": 20504.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -745,7 +745,7 @@
           },
           {
             "px": 2,
-            "y": 22247,
+            "y": 22245,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -755,7 +755,7 @@
           },
           {
             "px": 2,
-            "y": 23570.3,
+            "y": 23568.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -765,7 +765,7 @@
           },
           {
             "px": 2,
-            "y": 24915.8,
+            "y": 24913.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -775,7 +775,7 @@
           },
           {
             "px": 2,
-            "y": 27217,
+            "y": 27215,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -785,7 +785,7 @@
           },
           {
             "px": 2,
-            "y": 28735.7,
+            "y": 28733.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -801,7 +801,7 @@
       "cell": "hobby-hardening-capstone__dark__1280",
       "file": "hobby-hardening-capstone__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 10062146,
+      "bytes": 9988231,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -1065,18 +1065,18 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 150,
+        "total": 142,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 139,
+          "1": 131,
           "2": 11
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 2119.3,
+            "y": 2117.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1086,7 +1086,7 @@
           },
           {
             "px": 2,
-            "y": 4219.2,
+            "y": 4217.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1096,7 +1096,7 @@
           },
           {
             "px": 2,
-            "y": 6620.7,
+            "y": 6618.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1106,7 +1106,7 @@
           },
           {
             "px": 2,
-            "y": 15354.6,
+            "y": 15352.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1116,7 +1116,7 @@
           },
           {
             "px": 2,
-            "y": 18879.2,
+            "y": 18877.2,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1126,7 +1126,7 @@
           },
           {
             "px": 2,
-            "y": 22022.7,
+            "y": 22020.7,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1136,7 +1136,7 @@
           },
           {
             "px": 2,
-            "y": 23906.9,
+            "y": 23904.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1146,7 +1146,7 @@
           },
           {
             "px": 2,
-            "y": 25403,
+            "y": 25401,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1156,7 +1156,7 @@
           },
           {
             "px": 2,
-            "y": 26892.5,
+            "y": 26890.5,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1166,7 +1166,7 @@
           },
           {
             "px": 2,
-            "y": 29193.6,
+            "y": 29191.6,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1176,7 +1176,7 @@
           },
           {
             "px": 2,
-            "y": 30712.3,
+            "y": 30710.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1192,7 +1192,7 @@
       "cell": "hobby-hardening-capstone__dark__1920",
       "file": "hobby-hardening-capstone__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 10809384,
+      "bytes": 10841965,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 27,
@@ -1456,18 +1456,18 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 150,
+        "total": 142,
         "heavy": 11,
         "structuralHeavy": 11,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 139,
+          "1": 131,
           "2": 11
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 2100.9,
+            "y": 2098.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1477,7 +1477,7 @@
           },
           {
             "px": 2,
-            "y": 4200.8,
+            "y": 4198.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1487,7 +1487,7 @@
           },
           {
             "px": 2,
-            "y": 6371.9,
+            "y": 6369.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1497,7 +1497,7 @@
           },
           {
             "px": 2,
-            "y": 14933,
+            "y": 14931,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1507,7 +1507,7 @@
           },
           {
             "px": 2,
-            "y": 17852.9,
+            "y": 17850.9,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1517,7 +1517,7 @@
           },
           {
             "px": 2,
-            "y": 20506.8,
+            "y": 20504.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1527,7 +1527,7 @@
           },
           {
             "px": 2,
-            "y": 22247,
+            "y": 22245,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1537,7 +1537,7 @@
           },
           {
             "px": 2,
-            "y": 23570.3,
+            "y": 23568.3,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1547,7 +1547,7 @@
           },
           {
             "px": 2,
-            "y": 24915.8,
+            "y": 24913.8,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1557,7 +1557,7 @@
           },
           {
             "px": 2,
-            "y": 27217,
+            "y": 27215,
             "width": 580,
             "parts": 1,
             "structural": true,
@@ -1567,7 +1567,7 @@
           },
           {
             "px": 2,
-            "y": 28735.7,
+            "y": 28733.7,
             "width": 580,
             "parts": 1,
             "structural": true,

@@ -1758,15 +1758,31 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     if method == "" and path == "" do
       ""
     else
-      method_class = "bp-api-endpoint__method--" <> String.downcase(method)
-
       head =
         ~s(<div class="bp-api-endpoint__head">) <>
-          ~s(<span class="bp-api-endpoint__method #{method_class}">#{Util.escape_html(method)}</span>) <>
+          ~s(<span class="#{api_endpoint_method_class(method)}">#{Util.escape_html(method)}</span>) <>
           ~s(<code class="bp-api-endpoint__path">#{Util.escape_html(path)}</code>) <>
           ~s(</div>)
 
       ~s(<div class="bp-api-endpoint">) <> head <> api_endpoint_params_html(b) <> ~s(</div>)
+    end
+  end
+
+  # Fail-closed class for the method badge. `method` is user-controlled, so the
+  # modifier token is a lowercase [a-z0-9-] slug (never plain-escaped — that
+  # would leak &quot;-laden junk into the class attribute). The hyphen is kept
+  # so real IANA methods (VERSION-CONTROL, BASELINE-CONTROL) survive as
+  # version-control / baseline-control. Every stripped char just vanishes, so a
+  # `"><img …>` breakout collapses to an inert token and cannot escape the
+  # attribute. An empty slug (blank/all-stripped method) omits the modifier —
+  # base class only. Byte-identical to the old `--<downcase>` form for every
+  # legit HTTP method (POST → bp-api-endpoint__method--post).
+  defp api_endpoint_method_class(method) do
+    slug = method |> String.downcase() |> String.replace(~r/[^a-z0-9-]/, "")
+
+    case slug do
+      "" -> "bp-api-endpoint__method"
+      s -> "bp-api-endpoint__method bp-api-endpoint__method--" <> s
     end
   end
 

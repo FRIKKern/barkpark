@@ -351,7 +351,34 @@ type CloudRefusal struct {
 	Required   string // the ability/role the gate wanted
 	Scope      string // what Required is scoped over (team, instance, …)
 	Details    map[string]string
-	msg        string
+	// ReadableTypes is the STRUCTURED menu POST /v1/sites emits alongside a
+	// `content_binding_empty` refusal: the list of `{type, count?}` rows the
+	// site's own read token can actually see (router.ex maybe_put_menu →
+	// menu_row/1), `count` OMITTED when the site's probe reported no total. The
+	// console already renders this list (siteReadableTypesMenu); the CLI dropped
+	// it — cloudError decoded `detail` (which carries a PROSE copy of the menu)
+	// but never the machine-readable array, so a script consuming -o json got the
+	// slug and the sentence but no list it could parse. Decoded rows with an
+	// empty `type` are dropped, mirroring the console's junk-drop.
+	ReadableTypes []ReadableType
+	// ReadableTypesRaw is the readable-types array serialized for the -o json
+	// envelope's error.details.readable_types. It carries the SAME rows as
+	// ReadableTypes (junk rows already dropped) with the server's row ORDER intact
+	// and the `type`-before-`count` key order fixed by the struct tags — a stable
+	// fingerprint, never a Go map that would alphabetize the keys. Empty when the
+	// body sent no usable menu.
+	ReadableTypesRaw json.RawMessage
+	msg              string
+}
+
+// ReadableType is one row of the readable-types menu a `content_binding_empty`
+// refusal carries: the type a site's read token can see, with the box's published
+// TOTAL for it when a probe produced one. Count is a POINTER because absent and
+// zero are different facts — a type with no proven magnitude is listed bare, and a
+// fabricated 0 would be a lie the server deliberately declines to tell.
+type ReadableType struct {
+	Type  string `json:"type"`
+	Count *int   `json:"count,omitempty"`
 }
 
 func (e *CloudRefusal) Error() string { return e.msg }
@@ -416,6 +443,32 @@ func cloudError(status int, body []byte) error {
 		}
 		if json.Unmarshal(body, &dts) == nil && len(dts.Details) > 0 {
 			ref.Details = flattenDetails(dts.Details)
+		}
+		// The readable-types menu, in its OWN isolated Unmarshal for the same
+		// reason every field above is: a route that sends `readable_types` as an
+		// unexpected shape must cost that ONE field, never the whole decode. The
+		// raw array bytes are kept for the machine envelope (order-preserving) and
+		// the decoded rows drive the human menu; a row with an empty `type` is
+		// dropped, so a partly-malformed list still yields whatever is usable.
+		var rtm struct {
+			ReadableTypes json.RawMessage `json:"readable_types"`
+		}
+		if json.Unmarshal(body, &rtm) == nil && len(rtm.ReadableTypes) > 0 {
+			var rows []ReadableType
+			if json.Unmarshal(rtm.ReadableTypes, &rows) == nil {
+				clean := make([]ReadableType, 0, len(rows))
+				for _, r := range rows {
+					if strings.TrimSpace(r.Type) != "" {
+						clean = append(clean, r)
+					}
+				}
+				if len(clean) > 0 {
+					ref.ReadableTypes = clean
+					if b, mErr := json.Marshal(clean); mErr == nil {
+						ref.ReadableTypesRaw = b
+					}
+				}
+			}
 		}
 		if ev := ref.evidence(); ev != "" {
 			msg = msg + " (" + ev + ")"

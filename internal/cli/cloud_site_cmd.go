@@ -36,6 +36,7 @@ package cli
 // `bp cloud rollback` / `bp cloud verify`.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -230,7 +231,13 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 
 	site, cerr := cfg.CloudClient().CreateSpawnSite(cloudCtx(), req)
 	if cerr != nil {
-		return cloudFail(out, "create site", cerr)
+		// The create refusal rides the SAME #11784 ladder as delete/rollback — one
+		// dialect, never a second. POST /v1/sites emits no top-level 403 and no 409,
+		// so the exit families that land here are: 401 → cloudFail fallthrough (the
+		// shared `bp login` sentence, byte-identical "create site" label), no_team →
+		// 1 with the `bp team use` fix, barkpark_not_found 404 → 4, every 422 → 1,
+		// node_ports_exhausted 503 / read_token_mint_failed 502 → 8 relaying detail.
+		return siteRefusalFail(out, siteRefusedCreate, name, cerr)
 	}
 
 	// --deploy (D19) turns create into the one-motion: on a successful create the CLI
@@ -1289,52 +1296,74 @@ func renderSiteDeleted(out *writer, ref string, res cloudclient.SiteDeleteResult
 	out.outf("  the box teardown ran first (the control plane refuses to deregister a site whose teardown errored), but this envelope carries no measured box state — nothing here read the route, the slots or the tree, so the teardown itself is UNVERIFIED by this receipt.")
 }
 
-// siteRefusalKind names WHICH site verb was refused. The two share the exit
+// siteRefusalKind names WHICH site verb was refused. The three share the exit
 // ladder and the label, but not their sentences: a refused rollback flipped
-// nothing, while a refused teardown leaves a site that is BOTH still registered
-// and still serving — copy that blurs the two tells the reader the wrong thing
-// about what state their site is now in.
+// nothing, a refused teardown leaves a site that is BOTH still registered and
+// still serving, and a refused create never wrote a row at all — copy that blurs
+// them tells the reader the wrong thing about what state their site is now in.
 type siteRefusalKind int
 
 const (
 	siteRefusedRollback siteRefusalKind = iota
 	siteRefusedDelete
+	// siteRefusedCreate is `bp cloud site create`'s refusal arm (cch-w70). It joins
+	// the ONE #11784 dialect rather than minting a second ladder: POST /v1/sites
+	// emits no top-level 403 and no 409, so its refusals resolve on the SAME
+	// status-family exit map (401 → cloudFail, no_team → 1, 404 → 4, 422 → 1,
+	// 5xx → 8) — only its sentences differ, because a refused create wrote nothing.
+	siteRefusedCreate
 )
 
 // what is the cloudFail fallthrough label — byte-unchanged from the strings these
-// two verbs have always printed ("roll site back: …", "delete site: …"), so the
-// shared auth seam reads identically before and after this slice.
+// verbs have always printed ("roll site back: …", "delete site: …", "create
+// site: …"), so the shared auth seam reads identically before and after this slice.
 func (k siteRefusalKind) what() string {
-	if k == siteRefusedDelete {
+	switch k {
+	case siteRefusedDelete:
 		return "delete site"
+	case siteRefusedCreate:
+		return "create site"
+	default:
+		return "roll site back"
 	}
-	return "roll site back"
 }
 
 // noun is how a sentence refers to the refused act.
 func (k siteRefusalKind) noun() string {
-	if k == siteRefusedDelete {
+	switch k {
+	case siteRefusedDelete:
 		return "the deletion of"
+	case siteRefusedCreate:
+		return "the creation of"
+	default:
+		return "the rollback of"
 	}
-	return "the rollback of"
 }
 
 // verb is the bare action, for a sentence that already names the site ("not
 // allowed to delete site %q").
 func (k siteRefusalKind) verb() string {
-	if k == siteRefusedDelete {
+	switch k {
+	case siteRefusedDelete:
 		return "delete"
+	case siteRefusedCreate:
+		return "create"
+	default:
+		return "roll back"
 	}
-	return "roll back"
 }
 
 // nothingClause is the honesty tail: what did NOT happen, stated positively so a
 // deny path never reads like a partial action.
 func (k siteRefusalKind) nothingClause() string {
-	if k == siteRefusedDelete {
+	switch k {
+	case siteRefusedDelete:
 		return "Nothing was torn down and the site is still registered."
+	case siteRefusedCreate:
+		return "No site was created."
+	default:
+		return "Nothing was flipped."
 	}
-	return "Nothing was flipped."
 }
 
 // siteRefusalFail maps a refused site rollback / delete onto the unified `bp:`
@@ -1356,9 +1385,51 @@ func (k siteRefusalKind) nothingClause() string {
 func siteRefusalFail(out *writer, kind siteRefusalKind, ref string, err error) int {
 	var re *cloudclient.CloudRefusal
 	if errors.As(err, &re) && re.HTTPStatus != 401 {
-		return useError(out, siteRefusalLabel(re.Code), siteRefusalMessage(kind, ref, re), siteRefusalExit(re.HTTPStatus, re.Reason, re.Code))
+		return useErrorDetailed(out, siteRefusalLabel(re.Code), siteRefusalMessage(kind, ref, re),
+			siteRefusalExit(re.HTTPStatus, re.Reason, re.Code), siteRefusalDetails(re))
 	}
 	return cloudFail(out, kind.what(), err)
+}
+
+// siteRefusalDetails builds the machine-only `error.details` payload for a refused
+// site verb. Today its sole member is the readable-types menu a
+// `content_binding_empty` create refusal carries: the cleaned array (junk rows
+// with an empty `type` already dropped by cloudError) is nested under
+// `readable_types` so a script reading `bp cloud site create -o json` gets
+// `error.details.readable_types` — the SAME list the console renders. The bytes
+// are re-serialized from the decoded rows, NOT the server's raw bytes: row order
+// and `type`-before-`count` key order are fixed by the ReadableType struct tags
+// (never a Go map that would alphabetize), so the fingerprint is stable while
+// junk rows stay out of the machine channel. Returns nil when the refusal
+// carried no menu, so every other refusal emits a detail-less envelope
+// byte-identical to the pre-menu shape.
+func siteRefusalDetails(re *cloudclient.CloudRefusal) json.RawMessage {
+	if len(re.ReadableTypesRaw) == 0 {
+		return nil
+	}
+	return json.RawMessage(`{"readable_types":` + string(re.ReadableTypesRaw) + `}`)
+}
+
+// siteReadableTypesMenu renders the readable-types menu in the console's grammar
+// (cloud/priv/static/app.js siteReadableTypesMenu): `type (count)` when the row
+// carries a magnitude, the bare `type` when it does not, joined with ", ". A row
+// with an empty type is skipped (cloudError already drops those, so this is a
+// belt-and-braces guard). Empty when nothing usable survives — the caller's signal
+// to relay the server's own sentence rather than promise a menu it cannot fill.
+func siteReadableTypesMenu(types []cloudclient.ReadableType) string {
+	parts := make([]string, 0, len(types))
+	for _, t := range types {
+		name := strings.TrimSpace(t.Type)
+		if name == "" {
+			continue
+		}
+		if t.Count != nil {
+			parts = append(parts, fmt.Sprintf("%s (%d)", name, *t.Count))
+		} else {
+			parts = append(parts, name)
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // siteRefusalLabel is the `bp:` error-code label — the control plane's own code
@@ -1416,6 +1487,38 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 	}
 	detail := strings.TrimSpace(re.Detail)
 	switch re.Code {
+	case "content_binding_empty":
+		// The create door refused because the site's read token sees nothing at the
+		// bound dataset, and it shipped the STRUCTURED menu of types it CAN read.
+		// The console renders that menu from the array and STRIPS the CLI re-run
+		// line (it is CLI-voiced); the CLI is that line's home, so it keeps it.
+		// When the array survived, compose the receipt from the parts the CLI
+		// controls — the verdict, the menu rendered in the console grammar, and the
+		// re-run incantation the server built with the real dataset triple — so the
+		// menu the user reads is the machine-readable list, not a prose copy that a
+		// terser server might not send. With no usable array, the server's own
+		// sentence is the most specific true thing, so relay it whole.
+		if menu := siteReadableTypesMenu(re.ReadableTypes); menu != "" {
+			verdict := detail
+			if i := strings.Index(detail, ". "); i != -1 {
+				verdict = detail[:i+1]
+			}
+			reRun := ""
+			if i := strings.Index(detail, "Re-run naming a type"); i != -1 {
+				reRun = strings.TrimSpace(detail[i:])
+			}
+			msg := fmt.Sprintf("%s It can read: %s.", siteRefusalDetail(verdict, "this site would build from nothing."), menu)
+			if reRun != "" {
+				msg += " " + reRun
+			}
+			return msg + " " + kind.nothingClause()
+		}
+		if detail != "" {
+			return fmt.Sprintf("the control plane refused %s %q (%s): %s %s",
+				kind.noun(), ref, sanitizeCell(re.Code), sanitizeCell(detail), kind.nothingClause())
+		}
+		return fmt.Sprintf("the control plane refused %s %q (%s) — nothing there is readable by this site's token. %s",
+			kind.noun(), ref, sanitizeCell(re.Code), kind.nothingClause())
 	case "identity_refused":
 		// The box answered our stored admin credential with a 401, so nothing went
 		// on the wire at all — a CONFLICT with the box's verdict about our
@@ -1427,6 +1530,12 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 			ref, siteRefusalDetail(detail, "the box reported no reason."))
 	case "not_found":
 		return fmt.Sprintf("no such site %q (or it is not in your team)", ref)
+	case "barkpark_not_found":
+		// create-only: the 404 is about the INSTANCE named to host the site, never
+		// the site (which does not exist yet). Point the reader at --instance, not
+		// at a site slug they never typed.
+		return fmt.Sprintf("the instance named to host site %q is not in your team (or no longer exists) — list your fleet with `bp cloud status` and re-run with a valid --instance. %s",
+			ref, kind.nothingClause())
 	case "forbidden":
 		return fmt.Sprintf("your Cloud login is not allowed to %s site %q — %s %s",
 			kind.verb(), ref, siteRefusalDetail(detail, "it needs the `write` ability on the team that owns the site."), kind.nothingClause())
@@ -1434,12 +1543,22 @@ func siteRefusalMessage(kind siteRefusalKind, ref string, re *cloudclient.CloudR
 		// The plane crashed partway. For a delete that is the one genuinely
 		// ambiguous state (the box teardown runs FIRST), and saying so is the
 		// difference between a retry and a look.
-		if kind == siteRefusedDelete {
+		switch kind {
+		case siteRefusedDelete:
 			return fmt.Sprintf("the control plane errored while deleting %q: %s The box teardown runs BEFORE the row is deregistered, so the site may be torn down yet still registered — read `bp cloud site status %s` before retrying.",
 				ref, siteRefusalDetail(detail, "it gave no reason."), ref)
+		case siteRefusedCreate:
+			// create's real 5xx paths carry their own codes (node_ports_exhausted
+			// 503 / read_token_mint_failed 502, both handled by the default relay
+			// arm) — a bare server_error is an unexpected crash. The read token is
+			// minted BEFORE the row is inserted and no row is written unless the whole
+			// pipeline succeeds, so a crash leaves no site.
+			return fmt.Sprintf("the control plane errored while creating %q: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
+		default:
+			return fmt.Sprintf("the control plane errored while rolling %q back: %s %s",
+				ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
 		}
-		return fmt.Sprintf("the control plane errored while rolling %q back: %s %s",
-			ref, siteRefusalDetail(detail, "it gave no reason."), kind.nothingClause())
 	default:
 		// Every other code — including the flat `teardown_failed`/`rollback_failed`
 		// twins' detail, `not_rollbackable`, and `registration_not_removed` when it

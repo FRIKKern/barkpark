@@ -198,13 +198,33 @@ defmodule PDS.Census do
   # a NEWER engine than the wave-47 baseline's, printed live by report_engine/0.
   # command `elixir scripts/pds-elixir-receipt-census.exs` from the repo root,
   # 2026-08-14, in the SAME commit as the sync endpoint that moved the rows.
+  # RE-DERIVED AT THE CREATE-ON-PUSH WAVE (4 rows, rides #11934) — the tree moved,
+  # same lens: the create-on-push arm (sync_create/6 → sync_create_persist/6, the
+  # `ok: true, created: true` birth receipt after Content.upsert_paper) adds ONE
+  # `ok: true` receipt site on a route already in the write set.
+  #
+  #   textual   106 -> 107   one new occurrence; LENS-LOSES-NOTHING holds
+  #                          (107 == ast 98 + phantom 9).
+  #   ast        97 ->  98   the same one, as an AST-literal pair.
+  #   emitted    93 ->  94   the created receipt emits on the wire.
+  #   write      56 ->  57   sync_create_persist/6 routes off POST /papers/:slug/sync
+  #                          (already a routed write) — the depth-6 relation now
+  #                          reaches its Content.upsert_paper write.
+  #
+  # INHERITED UNCHANGED: phantom 9, consumer 4, read 14, unrouted 23 read `==`
+  # in the same run. Lens unchanged (build-free AST, :binary.matches/2, depth 6,
+  # @write_verbs without `transaction`, corpus api/lib/**/*.ex = 814 files); engine
+  # of this re-derivation: Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) ·
+  # aarch64-apple-darwin24.6.0, printed live by report_engine/0. command
+  # `elixir scripts/pds-elixir-receipt-census.exs` from the repo root, 2026-08-17,
+  # in the SAME commit as the create-on-push arm that moved the rows.
   @rederived %{
-    textual: 106,
-    ast: 97,
+    textual: 107,
+    ast: 98,
     phantom: 9,
     consumer: 4,
-    emitted: 93,
-    write: 56,
+    emitted: 94,
+    write: 57,
     read: 14,
     unrouted: 23
   }
@@ -1041,6 +1061,14 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED BY THE FALSIFIER'S OWN LENS, same shape as its apply_op siblings. The cycle test (bulldocs_bpml_api_test.exs:221) pushes, then re-PULLS the paper over the public HTTP read path and asserts the stored document byte-equals the receipt's canonical BPML — a real read-back the arm cannot see, because it keys on a `Repo.` read in the cited block. The row says what the lens can stand behind."},
+    # BPML create-on-push (masterplan W3 / charter D41, rides #11934) — the CREATED
+    # receipt: `ok: true, created: true` after Content.upsert_paper births the paper
+    # through the full publish wall on an absent slug.
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.sync_create_persist/6", "68602513", "127789733"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "A RECEIPT, not a phantom, but UNJUDGED by this lens — same shape as its sync_persist/6 sibling. The create test (bulldocs_ingest_controller_test.exs:1382) drives the create-on-push sync route AND reads the stored row back with `Content.get_paper(slug)`, asserting the persisted title, blocks, description and tags — a genuine receipt-vs-stored-row differential. But `Content.get_paper(` is not in @repo_tokens (`Repo.` · `Content.get_document(` · `Conflicts.list(`), so end_to_end's falsifier cannot see the second hop; the row says what the lens can stand behind, not more."},
     # barkpark_web/controllers/bulldocs_intents_controller.ex:50
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_intents_controller.ex",
             "BarkparkWeb.BulldocsIntentsController.mark_processed/2", "120960553", "126280052"},

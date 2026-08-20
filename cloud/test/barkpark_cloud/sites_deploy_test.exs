@@ -1760,6 +1760,63 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert detail =~ "deploy is running"
     end
 
+    # W70 (D847/D854) — THE NESTED ENVELOPE, the box's REAL pre-poll refusal
+    # transport. `SiteDeployController` answers EVERY refusal
+    # `%{error: %{code, message}}` (409 already_running, 409 box_at_capacity,
+    # 400, 404, 500, 503) and `BoxRelay.HTTP` relays a non-2xx VERBATIM before
+    # it ever polls (`other -> other`). The pre-fix chain
+    # `body["error"] || body["detail"] || body["reason"]` bound that MAP, failed
+    # `is_binary`, and the box's own sentence died into the generic fallback.
+    # Both refusal readers now ride `refusal_detail/1`, the extractor the deploy
+    # path already trusts, which composes "code — message".
+    #
+    # TYPED-TOKEN FATE (decided, on purpose): `rollback_copy/2`'s bare-token
+    # clauses (`no_previous` / `not_supported` / `lock_held`) match EXACT flat
+    # strings and deliberately do NOT fire on a nested composite — a nested
+    # refusal carries the box's own message, which travels VERBATIM instead of
+    # being replaced by canned prose. The bare tokens remain reachable only via
+    # the FLAT `%{"error" => token}` shape, which today's transports mint solely
+    # in fixtures (settle_* mints sentences, pre-poll refusals are nested) — the
+    # clauses are KEPT as the friendly rendering for that shape, not deleted.
+    test "a NESTED box refusal relays the box's own words — code and message both travel" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        rollback:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "already_running",
+               "message" => "deploy already running for blog"
+             }
+           }}
+      )
+
+      assert {:error, 409, detail} = Deploy.rollback(site, bp)
+      assert detail == "already_running — deploy already running for blog"
+    end
+
+    test "the settle-minted FLAT failure sentence still passes through untouched" do
+      {bp, site} = setup_site()
+
+      # The shape `settle_flip/1` mints from the poll's failure_reason.
+      FakeBoxRelay.program(
+        rollback:
+          {:ok, 422, %{"error" => "HEALTH gate failed (exit 14): bp-content-rev marker is empty"}}
+      )
+
+      assert {:error, 422, detail} = Deploy.rollback(site, bp)
+      assert detail == "HEALTH gate failed (exit 14): bp-content-rev marker is empty"
+    end
+
+    test "an undecodable body ({}) still falls to the honest status fallback" do
+      {bp, site} = setup_site()
+      FakeBoxRelay.program(rollback: {:ok, 500, %{}})
+
+      assert {:error, 422, detail} = Deploy.rollback(site, bp)
+      assert detail == "the instance could not roll this site back (HTTP 500)"
+    end
+
     test "an unreachable box is a 502, never a 200" do
       {bp, site} = setup_site()
       FakeBoxRelay.program(rollback: {:error, :instance_error})
@@ -1992,7 +2049,39 @@ defmodule BarkparkCloud.SitesDeployTest do
 
       assert {:error, status, detail} = Deploy.teardown(site, bp)
       refute status in 200..299
-      assert is_binary(detail)
+      # The settle-minted FLAT sentence passes through VERBATIM — this is
+      # transport shape (b), kept and proven, not merely "some binary".
+      assert detail == "caddy validate rejected the disarm"
+    end
+
+    # W70 (D847/D854) — same nested envelope, teardown verb. See the rollback
+    # twin above for the transport story and the typed-token fate decision;
+    # `teardown_refusal/2` rides the same `refusal_detail/1` extractor, keeping
+    # only its one verb-neutral typed sentence (`lock_held`, exact flat token).
+    test "a NESTED teardown refusal relays the box's own words — code and message both travel" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        teardown:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "already_running",
+               "message" => "deploy already running for blog"
+             }
+           }}
+      )
+
+      assert {:error, 422, detail} = Deploy.teardown(site, bp)
+      assert detail == "already_running — deploy already running for blog"
+    end
+
+    test "an undecodable teardown body ({}) still falls to the honest status fallback" do
+      {bp, site} = setup_site()
+      FakeBoxRelay.program(teardown: {:ok, 500, %{}})
+
+      assert {:error, 422, detail} = Deploy.teardown(site, bp)
+      assert detail == "the instance could not tear this site down (HTTP 500)"
     end
   end
 
@@ -2206,6 +2295,11 @@ defmodule BarkparkCloud.SitesDeployTest do
       {:ok, p2} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
       settle(p2)
 
+      # NOTE: this refute is NOT the proof of the restart-reset defect (clk-w4).
+      # It is same-VM, so the pre-fix `unique_integer([:positive, :monotonic])`
+      # counter never resets and this passes on the unfixed code too. It is kept
+      # only as a regression guard that prebuilt stays non-idempotent at all.
+      # The deciding assertion is the VALUE-DOMAIN one below.
       refute p1.build_id == p2.build_id
       assert p1.source == "prebuilt"
       assert p2.source == "prebuilt"
@@ -2216,6 +2310,32 @@ defmodule BarkparkCloud.SitesDeployTest do
       {:ok, b1} = Deploy.enqueue(site, bp)
       assert {:duplicate, dup} = Deploy.enqueue(site, bp)
       assert dup.id == b1.id
+    end
+
+    test "the prebuilt nonce is a WALL CLOCK, so a control-plane restart cannot repeat it" do
+      # The defect this pins: `System.unique_integer([:positive, :monotonic])` is
+      # a node-global counter that restarts from 1 on every BEAM boot, so after a
+      # restart the Nth prebuilt mint deterministically re-mints an earlier
+      # build_id — refused by the (site_id, build_id) partial unique index,
+      # answered `{:duplicate, _}` → HTTP 200 with the OLD row, and `record_audit`
+      # only runs in the `{:ok, _}` arm, so the uploaded dist is discarded with
+      # zero trace.
+      #
+      # A restart cannot be staged inside `mix test`, and a difference assertion
+      # passes on the unfixed code (same VM). So the assertion is on the VALUE
+      # DOMAIN instead: a boot-relative counter is a small integer (1, 2, 3…),
+      # while a wall clock is ~1.8e18. Unfixed this reads 1 and reds.
+      nonce = Deploy.prebuilt_nonce()
+
+      assert is_integer(nonce)
+
+      assert nonce > 1_000_000_000_000,
+             "prebuilt nonce #{nonce} is boot-relative, not wall-clock — it repeats after a restart"
+
+      # And it tracks the wall clock rather than merely being large.
+      assert_in_delta nonce,
+                      System.system_time(),
+                      System.convert_time_unit(60, :second, :native)
     end
   end
 

@@ -32,7 +32,7 @@ export function PortableDocSurface({ blocks, className }: Props) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (ref.current) void hydratePortableDoc(ref.current)
+    if (ref.current) void hydratePortableDoc(ref.current).catch(() => {})
   }, [blocks])
 
   const cls = className ? `bp-paper-surface ${className}` : 'bp-paper-surface'

@@ -170,8 +170,16 @@ function mapComposite(field: FieldDef, depth: number): string {
   // (only when 2+ subs make Array.sort actually invoke the comparator). Fail
   // loud with a locatable message instead, matching how the envelope validator
   // rejects a top-level field with no name.
+  //
+  // The null/non-object arm comes FIRST: zod's field body is
+  // `.object({name,type}).passthrough()`, so a nested `fields` entry is an
+  // unvalidated passthrough key and `[{name:'a',…}, null]` parses clean. Reading
+  // `sub.name` inside the guard's own test expression would then throw the very
+  // `TypeError: Cannot read properties of null (reading 'name')` this guard
+  // exists to eliminate. One error path, one message — a primitive sub (123,
+  // 'x') lands here too.
   for (const sub of subs) {
-    if (typeof sub.name !== 'string' || sub.name === '') {
+    if (sub == null || typeof sub !== 'object' || typeof sub.name !== 'string' || sub.name === '') {
       throw new Error(
         `codegen: a composite field${field.name ? ` ("${field.name}")` : ''} has a sub-field with no \`name\`; every composite sub-field needs a name to become a typed member`,
       )
@@ -269,6 +277,23 @@ export async function generateTypes(
   envelope: BarkparkSchemaJson,
   options: GenerateOptions = {},
 ): Promise<string> {
+  // A schema name becomes an `interface` identifier, so it MUST be non-empty:
+  // `pascalCase('')` is `''` and the envelope's `name: z.string()` carries no
+  // `.min(1)`, so an empty name emitted `export interface  extends …` and died
+  // downstream in prettier with `SyntaxError: Declaration or statement expected.
+  // (48:1)` — a line number in GENERATED output, pointing at nothing the author
+  // wrote. Fail here instead, naming the offending schema's position in the
+  // envelope (pre-sort, so it matches what the author sees). Deliberately not
+  // sanitized into an invented name: emitting a type nobody asked for is worse
+  // than refusing.
+  envelope.schemas.forEach((schema, i) => {
+    if (schema.name === '') {
+      throw new Error(
+        `codegen: schema #${i} has an empty \`name\`; every schema needs a name to become a typed interface`,
+      )
+    }
+  })
+
   const schemas = [...envelope.schemas].sort((a, b) => a.name.localeCompare(b.name))
   const dataset = options.dataset ?? 'unknown'
 

@@ -45,25 +45,92 @@
 # is backed up first and restored on exit, pass or fail. Two concurrent runs
 # would race on that file — run one at a time.
 #
-# FLAKINESS: asserts are row-scoped precisely so live SSE churn cannot red
-# them, but a board reorder landing inside a gesture's ~2s window can still
-# shift a located row. A red run against a healthy board is re-runnable; a
-# repeatable red is a finding.
+# ROW IDENTITY (D118): a row's identity is its rendered TITLE, never its
+# absolute line. The board reorders live (spineRows sorts, SSE refetches), so
+# every churn-coupled assert — G1 wheel-return, G2/G8 click-landing, G3 root
+# fold, narrow wheel — captures the target's title with row_ident() at
+# locate-time and re-verifies the SAME task after the gesture (re-locating by
+# title with line_of_ident() before each click). The slug/doc_id is the only
+# 1:1-unique key but is never painted (task rows and the reader heading render
+# Title only), and a 12-char title cut aliased 244/1000 live rows — so the full
+# rendered title is the strongest capture-pane identity available.
+#
+# FLAKINESS: title-anchored asserts survive reorder; the residual risk is two
+# visible rows sharing a full title (≤3 groups in a 1000-row census, none within
+# one ~40-row viewport in practice). A red run against a healthy board is
+# re-runnable; a repeatable red is a finding.
+#
+# MODES (charter D122, task ttw21-hermetic-drive)
+#   DRIVE_MODE=live (default) — the full assert matrix against the user's
+#     configured Barkpark server, exactly as before. Churn-coupled asserts
+#     (selection identity, fold state, click landing) belong here.
+#   DRIVE_MODE=hermetic — the churn-independent geometry/grammar/file-state
+#     subset (D118 class) against the committed fixture server
+#     (fixture/main.go): a stdlib-only HTTP server serving a fixed corpus over
+#     the board's LIVE-pinned surface (list + prime + a held-open SSE listen
+#     whose welcome frame pins ● live). The run is byte-deterministic: two
+#     consecutive hermetic runs produce identical assert transcripts
+#     (hermetic-proof.sh proves it). Hermetic runs point the board at the
+#     fixture via BARKPARK_SERVER/BARKPARK_API_TOKEN and redirect
+#     XDG_CONFIG_HOME into the run's tempdir, so the user's config and prefs
+#     are never read OR written — the G6 drag persistence proof runs against
+#     the hermetic prefs file instead.
+#   THE CONN MASK BECOMES AN ASSERT: live mode keeps normalize()'s conn-flap
+#     mask (offline|live|polling -> CONN); hermetic mode DROPS it and asserts
+#     the literal "● live" header glyph at boot and again at run end — the
+#     ttw19 conn-flap defect class now has a deterministic tripwire.
 #
 # USAGE
 #   bash scripts/taskboard-drive/drive.sh            # full run; exits 0 on all-pass
+#   DRIVE_MODE=hermetic bash .../drive.sh            # fixture-served deterministic subset
+#   bash scripts/taskboard-drive/hermetic-proof.sh   # two hermetic runs, empty-diff proof
 #   BP_DRIVE_BIN=/path/to/bp bash .../drive.sh       # skip the build step
 #   BP_DRIVE_KEEP=1 bash .../drive.sh                # keep tmux server for inspection
 set -u -o pipefail
 
+MODE="${DRIVE_MODE:-live}"
+case "$MODE" in
+  hermetic|live) ;;
+  *) echo "FATAL: DRIVE_MODE must be 'hermetic' or 'live' (got '$MODE')" >&2; exit 2 ;;
+esac
+
+# True when the churn-coupled (selection-identity) asserts should run — they
+# need a real, reordering board to mean anything and stay live-mode (D118).
+live_mode() { [ "$MODE" = live ]; }
+
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$SCRIPT_DIR" && git rev-parse --show-toplevel)
-EVID="$SCRIPT_DIR/evidence"
+# Evidence splits by mode so a hermetic run never clobbers the committed live
+# run's artifacts (and vice versa) — each dir is the last judged run OF THAT
+# MODE. Hermetic frames pass through normalize() with the conn mask dropped,
+# so they too are byte-stable across runs.
+if [ "$MODE" = hermetic ]; then
+  EVID="$SCRIPT_DIR/evidence-hermetic"
+else
+  EVID="$SCRIPT_DIR/evidence"
+fi
 REPORT="$EVID/report.md"
 SOCK="tbdrive-$$"
 WIDE=wide
 NARROW=narrow
 TMPD=$(mktemp -d)
+
+# Hermetic isolation happens BEFORE the prefs path is computed: the board
+# resolves its config dir from XDG_CONFIG_HOME (internal/cli/config.go), so
+# redirecting it into TMPD gives every hermetic run the same virgin config
+# state (no user server config, no persisted pane ratio) — determinism AND
+# zero side effects on the user's real files. BARKPARK_API_URL is set too
+# (envContext prefers it over BARKPARK_SERVER, cli.go envContext) so a value
+# inherited from the caller's shell can never re-point a hermetic run.
+FIXTURE_PORT="${BP_DRIVE_FIXTURE_PORT:-4799}"
+FIXTURE_PID=""
+if [ "$MODE" = hermetic ]; then
+  export XDG_CONFIG_HOME="$TMPD/xdg"
+  mkdir -p "$XDG_CONFIG_HOME/barkpark"
+  export BARKPARK_SERVER="http://127.0.0.1:$FIXTURE_PORT"
+  export BARKPARK_API_URL="$BARKPARK_SERVER"
+  export BARKPARK_API_TOKEN="drive-hermetic"
+fi
 PREFS="${XDG_CONFIG_HOME:-$HOME/.config}/barkpark/taskboard-preferences.json"
 PASS=0
 FAIL=0
@@ -75,6 +142,9 @@ cleanup() {
     TMX kill-server 2>/dev/null || true
   else
     echo "keeping tmux server: tmux -L $SOCK attach -t $WIDE"
+  fi
+  if [ -n "$FIXTURE_PID" ]; then
+    kill "$FIXTURE_PID" 2>/dev/null || true
   fi
   # Restore the user's pane-ratio prefs AFTER the sessions are gone (the app
   # writes the file on drag release only, so post-kill restore is safe).
@@ -121,14 +191,19 @@ hover() {
 }
 
 # Normalize the churn the live board legitimately produces: strip SGR, braille
-# spinner frames -> ⠿, the conn-state flap -> CONN (known live-channel defect,
-# filed ttw19-bl-conn-state-flap), elapsed stamps/now -> T. Full-frame evidence
-# is stored through this; row-scoped asserts compare located rows exactly.
+# spinner frames -> ⠿, elapsed stamps/now -> T. Full-frame evidence is stored
+# through this; row-scoped asserts compare located rows exactly.
+#
+# CONN MASK (live mode ONLY): the conn-state flap (✗ offline|● live|◐ polling
+# -> CONN) is masked against a real server, where transient SSE hiccups are the
+# network's business. In HERMETIC mode the mask is DROPPED — the fixture's
+# held-open welcome stream makes ● live deterministic, so the glyph is asserted
+# literally instead of hidden (the ttw19-bl-conn-state-flap tripwire).
 normalize() {
-  perl -CSD -Mutf8 -pe '
+  DRIVE_MASK_CONN="$([ "$MODE" = live ] && echo 1 || echo 0)" perl -CSD -Mutf8 -pe '
     s/\e\[[0-9;]*m//g;
     s/[\x{280B}\x{2819}\x{2839}\x{2838}\x{283C}\x{2834}\x{2826}\x{2827}\x{2807}\x{280F}]/\x{283F}/g;
-    s/\x{2717} offline|\x{25CF} live|\x{25D0} polling/CONN/g;
+    s/\x{2717} offline|\x{25CF} live|\x{25D0} polling/CONN/g if $ENV{DRIVE_MASK_CONN};
     s/\b\d+[smhdw]\b/T/g;
     s/\bnow\b/T/g;
   '
@@ -163,6 +238,49 @@ leaf_line() { snap "$1" | grep -n '^ *[├└]─' | head -1 | cut -d: -f1; }
 # 1-based line number of the first epic-root row (carries the "··· n/m" badge)
 root_line() { snap "$1" | grep -n '···.*[0-9]/[0-9]' | head -1 | cut -d: -f1; }
 
+# THE ROW-IDENTITY KEY (D118). The board reorders live — spineRows sorts, SSE
+# refetches — so a row's ABSOLUTE line is not its identity; the rendered TITLE
+# is. The doc_id/slug is the only 1:1-unique key (1000/1000 vs a 12-char title
+# cut that aliased 244/1000 live rows), but the slug is never PAINTED: a task
+# row renders Title only (components.go:89 rowTitle; DocID is the internal Ref)
+# and the reader heading renders Title only (detail_render.go:141). So from a
+# capture-pane frame the strongest available identity is the full rendered
+# title, and the churn-coupled asserts key on THAT — never an absolute line.
+# row_ident strips, in order: the reader pane (everything past the first │), the
+# leading gutter tokens (tree ├─└─, ▎ marker, braille spinner, ✓✕○●! status
+# glyph, and the ◆ reader-open marker a descended row wears), the "··· n/m"
+# section badge, any inline right-meta (a 2+-space gap),
+# and the trailing … truncation marker — leaving the task's visible title
+# prefix. Works for leaf and epic-root rows, wide and narrow.
+row_ident() { snap "$1" | sed -n "$2p" | perl -CSD -Mutf8 -ne '
+  s/\x{2502}.*$//;
+  s/^\s+//;
+  1 while s/^(?:[\x{251C}\x{2514}]\x{2500}|\x{258E}|[\x{2800}-\x{28FF}]|[\x{2713}\x{2715}\x{25CB}\x{25CF}\x{25C6}!\@])\s*//;
+  s/\s*\x{00B7}{2,}.*$//;
+  s/\s{2,}.*$//;
+  s/\s*\x{2026}\s*$//;
+  s/\s+$//;
+  print;
+'; }
+
+# 1-based line of the board row whose row_ident == $2 (empty if that task has
+# scrolled/reordered out of view). Re-locate a target by identity immediately
+# before each gesture — never reuse a stale absolute line across a reorder.
+line_of_ident() {
+  snap "$1" | IDENT_WANT="$2" perl -CSD -Mutf8 -ne '
+    BEGIN{ $w=$ENV{IDENT_WANT}; }
+    my $ln=$.;
+    s/\x{2502}.*$//;
+    s/^\s+//;
+    1 while s/^(?:[\x{251C}\x{2514}]\x{2500}|\x{258E}|[\x{2800}-\x{28FF}]|[\x{2713}\x{2715}\x{25CB}\x{25CF}\x{25C6}!\@])\s*//;
+    s/\s*\x{00B7}{2,}.*$//;
+    s/\s{2,}.*$//;
+    s/\s*\x{2026}\s*$//;
+    s/\s+$//;
+    if (length($w) && $_ eq $w){ print $ln; exit }
+  '
+}
+
 # characters of line $2 from character-column $3 on (UTF-8 safe — cut is not)
 line_tail() {
   snap "$1" | sed -n "$2p" | perl -CSD -Mutf8 -ne 'print substr($_, '"$(($3-1))"')'
@@ -186,6 +304,7 @@ rm -f "$EVID"/*.txt "$REPORT"
   echo "# taskboard-drive report"
   echo
   echo "- date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  echo "- mode: $MODE"
   echo "- tmux: $(tmux -V)"
   echo "- host: $(uname -sm)"
   echo
@@ -200,6 +319,32 @@ if [ -f "$PREFS" ]; then
   PREFS_EXISTED=yes
 else
   PREFS_EXISTED=no
+fi
+
+# Hermetic mode: build + start the fixture server and wait for it to answer
+# BEFORE the board launches — the board's first fetch must land on a live
+# fixture, never a race. The fixture is built to a temp binary (not `go run`)
+# so cleanup can kill the exact server pid, leaving no orphan child.
+if [ "$MODE" = hermetic ]; then
+  echo "building fixture (CC=/usr/bin/clang CGO_ENABLED=1 go build ./scripts/taskboard-drive/fixture)..."
+  (cd "$REPO" && CC=/usr/bin/clang CGO_ENABLED=1 go build -o "$TMPD/tbfixture" ./scripts/taskboard-drive/fixture) || {
+    echo "FATAL: fixture build failed" >&2; exit 1; }
+  "$TMPD/tbfixture" -addr "127.0.0.1:$FIXTURE_PORT" >"$TMPD/fixture.log" 2>&1 &
+  FIXTURE_PID=$!
+  # disown: cleanup's kill must not print bash's "Terminated: … $TMPD/…" job
+  # notice — it carries the pid and tempdir path, which would poison the
+  # byte-determinism proof's transcript diff.
+  disown "$FIXTURE_PID"
+  tries=0
+  until curl -fsS "http://127.0.0.1:$FIXTURE_PORT/v1/tasks?limit=1" >/dev/null 2>&1; do
+    tries=$((tries+1))
+    if [ "$tries" -ge 50 ]; then
+      echo "FATAL: fixture never answered on 127.0.0.1:$FIXTURE_PORT (log: $(cat "$TMPD/fixture.log" 2>/dev/null))" >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+  ok "hermetic fixture serving the live-pinned surface on 127.0.0.1:$FIXTURE_PORT"
 fi
 
 BP="${BP_DRIVE_BIN:-}"
@@ -225,6 +370,23 @@ if wait_ready "$WIDE"; then ok "wide board painted task rows (configured server 
   exit 1
 fi
 wait_ready "$NARROW" || bad "narrow board never painted task rows"
+
+# ── hermetic: the conn glyph is an ASSERT, not masked churn ──────────────────
+# The fixture's single welcome frame upgrades ◐ polling -> ● live (OnLivePulse)
+# and the held-open stream keeps it there. Wait for the upgrade (sub-second in
+# practice, budget 15s), then require the LITERAL glyph — the ttw19 conn-flap
+# class now reds deterministically instead of hiding behind the CONN mask.
+if [ "$MODE" = hermetic ]; then
+  tries=0
+  while [ "$tries" -lt 30 ] && ! snap "$WIDE" | grep -q '● live'; do
+    sleep 0.5; tries=$((tries+1))
+  done
+  if snap "$WIDE" | grep -q '● live'; then
+    ok "hermetic header pins the literal '● live' glyph (welcome frame upgraded polling->live; CONN mask dropped)"
+  else
+    bad "hermetic header never showed '● live' within 15s (header: '$(snap "$WIDE" | sed -n "1p")')"
+  fi
+fi
 
 save_frame "$WIDE" baseline-wide.txt
 HL=$(header_line "$WIDE")
@@ -278,39 +440,50 @@ else
 fi
 
 # ── G1: wheel down/up moves the board cursor and returns exactly ─────────────
-ML0=$(marker_line "$WIDE")
+# Selection-identity class (D118) — live mode only.
+if live_mode; then
+ML0=$(marker_line "$WIDE"); T0=$(row_ident "$WIDE" "$ML0")
 save_row "$WIDE" "$ML0" g1-wheel-before.txt
 wheel "$WIDE" 65 10 12 3
-ML1=$(marker_line "$WIDE")
+ML1=$(marker_line "$WIDE"); T1=$(row_ident "$WIDE" "$ML1")
 save_row "$WIDE" "$ML1" g1-wheel-after.txt
 wheel "$WIDE" 64 10 12 3
-ML2=$(marker_line "$WIDE")
+ML2=$(marker_line "$WIDE"); T2=$(row_ident "$WIDE" "$ML2")
 save_row "$WIDE" "$ML2" g1-wheel-return.txt
-if [ "$ML1" != "$ML0" ]; then
-  ok "G1 wheel down x3 moved ▎ selection: line $ML0 -> $ML1"
+if [ -n "$T1" ] && [ "$T1" != "$T0" ]; then
+  ok "G1 wheel down x3 moved ▎ selection to a different TASK (\"$T0\" -> \"$T1\")"
 else
-  bad "G1 wheel down x3 did not move the ▎ selection (line $ML0)"
+  bad "G1 wheel down x3 did not change the selected task (still \"$T0\")"
 fi
-if [ "$ML2" = "$ML0" ]; then
-  ok "G1 wheel up x3 returned ▎ selection to line $ML0"
+# Return asserts same-TASK by title, never same absolute line: the board
+# reorders live inside the gesture window, so ML2==ML0 is the documented flake.
+if [ -n "$T2" ] && [ "$T2" = "$T0" ]; then
+  ok "G1 wheel up x3 returned ▎ selection to the SAME task \"$T0\" (by title, not absolute line)"
 else
-  bad "G1 wheel up x3 did not return selection: line $ML2, want $ML0"
+  bad "G1 wheel up x3 did not return to task \"$T0\" (now \"$T2\")"
 fi
+fi  # live_mode G1
 
 # ── G2+G4: single click on a leaf = select + activate (descend, first click) ─
+# The GESTURE runs in both modes (the descend is what the hermetic G4 focus-
+# flip and esc-grammar asserts observe); the selection-identity (G2) and
+# reader-heading-title (G4 heading) asserts are churn-coupled -> live only.
 LL=$(leaf_line "$WIDE")
-TITLE=$(snap "$WIDE" | sed -n "${LL}p" | perl -CSD -Mutf8 -pe \
-  's/^ *[├└]─ *\S+ *//; s/\s+$//; s/^(.{0,12}).*$/$1/')
+# FULL rendered title as the row identity — NOT a 12-char cut (which aliased
+# 244/1000 live rows, D118). row_ident yields the whole visible title prefix.
+TITLE=$(row_ident "$WIDE" "$LL")
 save_frame "$WIDE" g2-leaf-click-before.txt
 A_BEFORE=$(arrow_col "$WIDE")
 click "$WIDE" 8 "$LL"
 save_frame "$WIDE" g2-leaf-click-after.txt
-MLC=$(marker_line "$WIDE")
 A_AFTER=$(arrow_col "$WIDE")
-if [ "$MLC" = "$LL" ]; then
-  ok "G2 click selected the clicked leaf row (▎ moved to line $LL) in ONE gesture"
-else
-  bad "G2 click did not move ▎ to clicked line $LL (marker at ${MLC:-none})"
+if live_mode; then
+  MLC=$(marker_line "$WIDE"); TSEL=$(row_ident "$WIDE" "$MLC")
+  if [ -n "$TSEL" ] && [ "$TSEL" = "$TITLE" ]; then
+    ok "G2 click selected the clicked leaf TASK \"$TITLE\" (▎ on its row, verified by title not absolute line) in ONE gesture"
+  else
+    bad "G2 click did not select leaf \"$TITLE\" (▎ on task \"${TSEL:-none}\")"
+  fi
 fi
 # descend proof: focus flips to reader (↔ shifts to the gutter's right cell)
 # AND the reading pane heading now carries the clicked row's title.
@@ -319,12 +492,14 @@ if [ "${A_AFTER:-0}" = "$((A_BEFORE+1))" ]; then
 else
   bad "G4 no reader-focus flip after leaf click (↔ col $A_BEFORE -> ${A_AFTER:-none})"
 fi
-RP1=$(line_tail "$WIDE" "$((HL+1))" "$((GUTL+2))")
-RP2=$(line_tail "$WIDE" "$((HL+2))" "$((GUTL+2))")
-if printf '%s\n%s\n' "$RP1" "$RP2" | grep -qF "$TITLE"; then
-  ok "G4 reading pane heading (right of the gutter) shows the clicked task (\"$TITLE\")"
-else
-  bad "G4 reading pane heading does not show \"$TITLE\""
+if live_mode; then
+  RP1=$(line_tail "$WIDE" "$((HL+1))" "$((GUTL+2))")
+  RP2=$(line_tail "$WIDE" "$((HL+2))" "$((GUTL+2))")
+  if printf '%s\n%s\n' "$RP1" "$RP2" | grep -qF "$TITLE"; then
+    ok "G4 reading pane heading (right of the gutter) shows the clicked task (\"$TITLE\")"
+  else
+    bad "G4 reading pane heading does not show \"$TITLE\""
+  fi
 fi
 TMX send-keys -t "$WIDE" Escape
 sleep 0.5
@@ -335,28 +510,47 @@ else
 fi
 
 # ── G3: clicking an epic root toggles its section fold state ─────────────────
+# Selection-identity class (D118) — live mode only.
 # The activate reducer's true grammar (charter D51/D54): a section showing ALL
 # children collapses to just the header; any other mode (the partial
 # focus/header default included) expands to the FULL list. So from the usual
 # partial baseline the sequence is: click1 -> full, click2 -> collapsed,
 # click3 -> full; from a fully-expanded baseline click1 collapses directly.
 # board_region: the board-pane side of rows RL..RL+8, normalized (churn-law).
+if live_mode; then
 board_region() {
   snap "$WIDE" | sed -n "$1,$2p" | normalize | perl -CSD -Mutf8 -ne \
     'print substr($_, 0, '"$((GUTL-1))"'), "\n"'
 }
 was_child() { printf '%s' "$1" | grep -q '^ *[├└]─'; }
+# Re-locate the SAME epic root by its title (never the first "··· n/m" badge via
+# head -1 — every root paints one, so head -1 is order-dependent and the board
+# reorders between clicks). Fall back to the first root only if that title has
+# scrolled out of view. Call immediately before each click and each row read.
+RTITLE=""
+relocate_root() {
+  local rl=""
+  [ -n "$RTITLE" ] && rl=$(line_of_ident "$WIDE" "$RTITLE")
+  [ -n "$rl" ] || rl=$(root_line "$WIDE")
+  echo "$rl"
+}
 RL=$(root_line "$WIDE")
+RTITLE=$(row_ident "$WIDE" "$RL")
+note "G3 anchored epic root by title: \"$RTITLE\""
 REGION0=$(board_region "$RL" "$((RL+8))")
 save_row "$WIDE" "$RL,$((RL+8))" g3-fold-before.txt
+RL=$(relocate_root)
 click "$WIDE" 8 "$RL"
+RL=$(relocate_root)
 S1=$(snap "$WIDE" | sed -n "$((RL+1))p")
 REGION1=$(board_region "$RL" "$((RL+8))")
 save_row "$WIDE" "$RL,$((RL+8))" g3-fold-click1.txt
 if ! was_child "$S1"; then
   # baseline was fully expanded: click1 collapsed the section to its header
   ok "G3 click on the epic root COLLAPSED it (row $((RL+1)) lost its ├─ child)"
+  RL=$(relocate_root)
   click "$WIDE" 8 "$RL"
+  RL=$(relocate_root)
   S2=$(snap "$WIDE" | sed -n "$((RL+1))p")
   save_row "$WIDE" "$RL,$((RL+8))" g3-fold-click2.txt
   if was_child "$S2"; then
@@ -373,7 +567,9 @@ else
   else
     bad "G3 root click changed nothing in the section region"
   fi
+  RL=$(relocate_root)
   click "$WIDE" 8 "$RL"
+  RL=$(relocate_root)
   S2=$(snap "$WIDE" | sed -n "$((RL+1))p")
   save_row "$WIDE" "$RL,$((RL+8))" g3-fold-click2.txt
   if ! was_child "$S2"; then
@@ -381,7 +577,9 @@ else
   else
     bad "G3 second root click did not collapse (row $((RL+1)): '$S2')"
   fi
+  RL=$(relocate_root)
   click "$WIDE" 8 "$RL"
+  RL=$(relocate_root)
   S3=$(snap "$WIDE" | sed -n "$((RL+1))p")
   save_row "$WIDE" "$RL,$((RL+8))" g3-fold-click3.txt
   if was_child "$S3"; then
@@ -390,6 +588,7 @@ else
     bad "G3 third root click did not expand (row $((RL+1)): '$S3')"
   fi
 fi
+fi  # live_mode G3
 
 # ── G6: divider drag moves the split, persists, survives kill+relaunch ───────
 RATIO_BEFORE=$(grep -o '"details_pane_ratio":[0-9.]*' "$PREFS" 2>/dev/null || echo none)
@@ -441,37 +640,50 @@ else
 fi
 
 # ── G8: M toggle — mouse off ignores clicks, on lands them ───────────────────
+# Click-landing identity class (D118) — live mode only.
+if live_mode; then
 sgr "$WIDE" "M"; sleep 0.4
 LL=$(leaf_line "$WIDE")
-MB=$(marker_line "$WIDE")
+LTITLE=$(row_ident "$WIDE" "$LL")
+MB=$(marker_line "$WIDE"); TB=$(row_ident "$WIDE" "$MB")
 save_row "$WIDE" "$LL" g8-m-off-target-row.txt
 click "$WIDE" 8 "$LL"
-MA=$(marker_line "$WIDE")
-if [ "$MA" = "$MB" ]; then
-  ok "G8 with mouse released (M), a click is ignored (▎ stayed on line $MB)"
+MA=$(marker_line "$WIDE"); TA=$(row_ident "$WIDE" "$MA")
+# "Ignored" means the SELECTED TASK is unchanged — by title, not absolute line
+# (SSE churn can shift the selected row's line without any click landing).
+if [ "$TA" = "$TB" ]; then
+  ok "G8 with mouse released (M), a click is ignored (selection stayed on task \"$TB\")"
 else
-  bad "G8 mouse-off click still moved ▎ ($MB -> $MA)"
+  bad "G8 mouse-off click still moved ▎ (task \"$TB\" -> \"$TA\")"
 fi
 sgr "$WIDE" "M"; sleep 0.4
+# Re-locate the same leaf by title before the re-enable click (the board may
+# have reordered while M was off).
+LL=$(line_of_ident "$WIDE" "$LTITLE"); [ -n "$LL" ] || LL=$(leaf_line "$WIDE")
 click "$WIDE" 8 "$LL"
-MA2=$(marker_line "$WIDE")
+MA2=$(marker_line "$WIDE"); TA2=$(row_ident "$WIDE" "$MA2")
 save_row "$WIDE" "$LL" g8-m-on-landed-row.txt
-if [ "$MA2" = "$LL" ]; then
-  ok "G8 after M re-enable, the same click lands (▎ moved to line $LL)"
+if [ "$TA2" = "$LTITLE" ]; then
+  ok "G8 after M re-enable, the same click lands (▎ moved to task \"$LTITLE\")"
 else
-  bad "G8 re-enabled click did not land (▎ at ${MA2:-none}, want $LL)"
+  bad "G8 re-enabled click did not land (▎ on task \"${TA2:-none}\", want \"$LTITLE\")"
 fi
+fi  # live_mode G8
 
 # ── narrow session: wheel, first-click descend, reading footer M note ────────
-NL=$(leaf_line "$NARROW")
-NM0=$(marker_line "$NARROW")
-wheel "$NARROW" 65 10 8 2
-NM1=$(marker_line "$NARROW")
-wheel "$NARROW" 64 10 8 2
-if [ "$NM1" != "$NM0" ]; then
-  ok "narrow wheel moved ▎ selection ($NM0 -> $NM1)"
-else
-  bad "narrow wheel did not move ▎ selection"
+# The wheel-identity assert is churn-coupled -> live only; the footer-shed,
+# reading-frame M note and esc-grammar asserts are geometry/grammar -> both.
+NL=$(leaf_line "$NARROW"); NLTITLE=$(row_ident "$NARROW" "$NL")
+if live_mode; then
+  NM0=$(marker_line "$NARROW"); NT0=$(row_ident "$NARROW" "$NM0")
+  wheel "$NARROW" 65 10 8 2
+  NM1=$(marker_line "$NARROW"); NT1=$(row_ident "$NARROW" "$NM1")
+  wheel "$NARROW" 64 10 8 2
+  if [ -n "$NT1" ] && [ "$NT1" != "$NT0" ]; then
+    ok "narrow wheel moved ▎ selection to a different TASK (\"$NT0\" -> \"$NT1\")"
+  else
+    bad "narrow wheel did not change the selected task (still \"$NT0\")"
+  fi
 fi
 save_frame "$NARROW" n-narrow-board.txt
 if snap "$NARROW" | grep -q 'M mouse'; then
@@ -479,6 +691,9 @@ if snap "$NARROW" | grep -q 'M mouse'; then
 else
   ok "narrow board footer sheds the M note (shed-ladder design, <102-col inner)"
 fi
+# Re-locate the same leaf by title before the descend click (the two wheel
+# passes and live SSE can have reordered the board since NL was first read).
+NL=$(line_of_ident "$NARROW" "$NLTITLE"); [ -n "$NL" ] || NL=$(leaf_line "$NARROW")
 click "$NARROW" 6 "$NL"
 save_frame "$NARROW" n-narrow-reading.txt
 if snap "$NARROW" | grep -q 'M mouse'; then
@@ -492,6 +707,23 @@ if snap "$NARROW" | grep -q '^ *[├└]─'; then
   ok "narrow esc ascended back to the board"
 else
   bad "narrow esc did not return to the board"
+fi
+
+# ── hermetic: ● live is STILL pinned at run end ──────────────────────────────
+# The wide session was killed and relaunched inside G6, so this re-assert
+# proves the relaunched board re-subscribed and the fixture stream held —
+# stability across the whole run, not a lucky boot-time read. (No export
+# endpoint exists on the fixture, so any silent fallback to polling reds here.)
+if [ "$MODE" = hermetic ]; then
+  tries=0
+  while [ "$tries" -lt 10 ] && ! snap "$WIDE" | grep -q '● live'; do
+    sleep 0.5; tries=$((tries+1))
+  done
+  if snap "$WIDE" | grep -q '● live'; then
+    ok "hermetic '● live' still pinned at run end (held-open stream survived the G6 relaunch; no polling fallback)"
+  else
+    bad "hermetic '● live' lost by run end (header: '$(snap "$WIDE" | sed -n "1p")')"
+  fi
 fi
 
 # ── verdict ──────────────────────────────────────────────────────────────────

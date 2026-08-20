@@ -1497,6 +1497,242 @@ func TestRunCloudSiteDeleteUnauthorizedKeepsTheCloudFailSeam(t *testing.T) {
 	}
 }
 
+// --- typed create refusals (cch-w70 round 1, D862) ---------------------------
+//
+// bp cloud site create now joins the ONE #11784 refusal dialect (siteRefusedCreate)
+// instead of the bare cloudFail(out, "create site", cerr) it used to hand every
+// refusal to. That old seam branched only on the substring "unauthorized": a
+// user-fixable 422, a transient 503 and a 404 that named the wrong instance all
+// exited 1, and `-o json` carried "failed" for each. POST /v1/sites emits no
+// top-level 403 and no reachable 409, so the exit families that land here are
+// 401 → 3 (cloudFail fallthrough), no_team → 1, 404 → 4, every 422 → 1, and
+// 502/503 → 8 — NEVER 6.
+//
+// RED BEFORE (reproducible by reverting cloud_site_cmd.go alone — the create arm
+// back to `return cloudFail(out, "create site", cerr)`): barkpark_not_found 404
+// exited 1 (want 4), node_ports_exhausted 503 exited 1 (want 8), and
+// read_token_mint_failed 502 exited 1 (want 8) — three families collapsed onto
+// exitGeneric. The VACUITY guard the verify run flagged is honoured: these assert
+// the EXIT CODE per family, not a detail substring (cloudError already folds
+// detail into Error(), so a substring check passes on pre-fix bytes too).
+
+// createRefused is the create-with-refusal harness: the create POST answers with
+// the given fixture and the mandatory --instance is a UUID (resolved with no
+// network call), so the POST is the only request that fires.
+func createRefused(t *testing.T, resp fakeResp) (string, string, int) {
+	t.Helper()
+	cp := newSiteCP(t)
+	cp.createResp = resp
+	cp.serve()
+	return runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
+}
+
+// no_team is a 422 whose CAUSE (not its status) sets the exit: a teamless login
+// stays exit 1 with the `bp team use` fix, never exit 3 — the credential is fine.
+func TestRunCloudSiteCreateNoTeamStaysGenericWithTheTeamFix(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{422, `{"error":"no_team"}`})
+	if code != exitGeneric {
+		t.Fatalf("a no_team refusal must stay exit %d, got %d\n%s", exitGeneric, code, stderr)
+	}
+	if !strings.Contains(stderr, "bp team use") {
+		t.Fatalf("a no_team refusal must point at `bp team use`:\n%s", stderr)
+	}
+}
+
+// barkpark_not_found is a 404 → exitNotFound, and the sentence points at
+// --instance (the thing that was not found), NOT a site slug the user never typed.
+// RED BEFORE: cloudFail exited 1 here.
+func TestRunCloudSiteCreateBarkparkNotFoundExitsNotFound(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{404, `{"error":"barkpark_not_found"}`})
+	if code != exitNotFound {
+		t.Fatalf("a 404 barkpark_not_found must exit %d (not-found), got %d\n%s", exitNotFound, code, stderr)
+	}
+	if !strings.Contains(stderr, "--instance") {
+		t.Fatalf("a create 404 must point at --instance, not a site slug:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "No site was created") == false {
+		t.Fatalf("a refused create must say no site was created:\n%s", stderr)
+	}
+}
+
+// Every 422 the create door emits (content_binding_empty, name_required,
+// content_binding_required, barkpark_required, invalid) is exit 1 — the ladder's
+// default family. A representative one stands in.
+func TestRunCloudSiteCreateInvalidBindingExitsGeneric(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{422, `{"error":"content_binding_empty","detail":"this site's token sees nothing at acme/blog/production for type post"}`})
+	if code != exitGeneric {
+		t.Fatalf("a 422 create refusal must exit %d (generic), got %d\n%s", exitGeneric, code, stderr)
+	}
+	if !strings.Contains(stderr, "token sees nothing") {
+		t.Fatalf("the default arm must relay the plane's detail:\n%s", stderr)
+	}
+}
+
+// --- readable-types menu on an empty-binding create refusal (cch-w70, D863) --
+//
+// content_binding_empty ships a STRUCTURED `readable_types` array (the site's own
+// token can see these types) alongside a `detail` that carries a PROSE copy of the
+// same menu + the CLI re-run line. The console renders the array (siteReadableTypesMenu)
+// and drops the CLI line; the CLI used to relay `detail` whole and never touched
+// the array, so a script got the sentence but no list to parse.
+//
+// The fixture ships THREE rows — two with counts, one WITHOUT (bare type) — so the
+// grammar `type (count)` / bare `type` is exercised on one payload, plus a JUNK
+// row (empty type) the render must drop.
+const emptyBindingBody = `{"error":"content_binding_empty",` +
+	`"detail":"this site would build from nothing — its token sees nothing at acme/blog/production. ` +
+	`This site CAN read: task (12), paper (40), note. ` +
+	"Re-run naming a type this site can read: `bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>`\"," +
+	`"readable_types":[{"type":"task","count":12},{"type":"paper","count":40},{"type":"note"},{"type":""}]}`
+
+// The HUMAN receipt renders the menu FROM THE ARRAY in the console grammar and
+// keeps the bp re-run line. ANTI-VACUITY: it asserts the CLI-COMPOSED line
+// (`It can read: task (12), paper (40), note`) which is NOT a substring of the
+// server prose (`This site CAN read: …`), and asserts the server prose menu
+// sentence is GONE — both red on pre-fix, where the whole detail is relayed
+// verbatim (the prose sentence is present and the composed line absent).
+func TestRunCloudSiteCreateEmptyBindingRendersReadableTypesMenu(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{422, emptyBindingBody})
+	if code != exitGeneric {
+		t.Fatalf("a 422 content_binding_empty must exit %d (generic), got %d\n%s", exitGeneric, code, stderr)
+	}
+	// The array-derived menu, in the console grammar: counts in parens, the
+	// count-less row bare, the empty-type junk row dropped.
+	if !strings.Contains(stderr, "It can read: task (12), paper (40), note") {
+		t.Fatalf("the receipt must render the menu FROM THE ARRAY in console grammar:\n%s", stderr)
+	}
+	// The server's PROSE menu sentence is replaced, not echoed — proving the CLI
+	// composed from the array rather than relaying detail whole (reds pre-fix).
+	if strings.Contains(stderr, "This site CAN read:") {
+		t.Fatalf("the CLI must compose from the array, not echo the server prose menu:\n%s", stderr)
+	}
+	// The bp re-run line is the CLI's home — kept, unlike the console which strips it.
+	if !strings.Contains(stderr, "--doc-type <type>") {
+		t.Fatalf("the CLI must KEEP the bp re-run line:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "No site was created") {
+		t.Fatalf("a refused create must say no site was created:\n%s", stderr)
+	}
+}
+
+// The MACHINE envelope carries the menu at error.details.readable_types with the
+// server's row ORDER and `type`-before-`count` key order preserved (re-serialized
+// from the decoded rows via struct tags — junk rows dropped, never a Go map that
+// would alphabetize). ANTI-VACUITY:
+// error.details did not exist for this refusal pre-fix, so a decode of
+// error.details.readable_types reds outright on pre-fix bytes.
+func TestRunCloudSiteCreateEmptyBindingJSONCarriesReadableTypes(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{422, emptyBindingBody}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("a 422 content_binding_empty must exit %d, got %d\n%s", exitGeneric, code, stdout)
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				ReadableTypes []struct {
+					Type  string `json:"type"`
+					Count *int   `json:"count"`
+				} `json:"readable_types"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json envelope: %v\n%s", err, stdout)
+	}
+	if env.OK || env.Error.Code != "content_binding_empty" {
+		t.Fatalf("want ok:false code:content_binding_empty:\n%s", stdout)
+	}
+	got := env.Error.Details.ReadableTypes
+	// Server row ORDER preserved, junk row (empty type) dropped upstream.
+	if len(got) != 3 || got[0].Type != "task" || got[1].Type != "paper" || got[2].Type != "note" {
+		t.Fatalf("error.details.readable_types must carry task,paper,note in order:\n%s", stdout)
+	}
+	if got[0].Count == nil || *got[0].Count != 12 || got[2].Count != nil {
+		t.Fatalf("counts must survive (task=12) and the count-less row stay bare (note):\n%s", stdout)
+	}
+	// KEY order preserved too — struct-tag order, not a Go map that would alphabetize.
+	if !strings.Contains(stdout, `"readable_types":[{"type":"task","count":12}`) {
+		t.Fatalf("the raw array bytes must carry the server's key order:\n%s", stdout)
+	}
+}
+
+// node_ports_exhausted is a 503 → exitServer: the box, not the caller, is out of
+// room. RED BEFORE: cloudFail exited 1. A script must be able to tell this
+// retry-elsewhere state from a user-fixable 422.
+func TestRunCloudSiteCreateNodePortsExhaustedExitsServer(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{503, `{"error":"node_ports_exhausted","detail":"this instance has no free node-slot port left — retire a node site or move to a larger box"}`})
+	if code != exitServer {
+		t.Fatalf("a 503 node_ports_exhausted must exit %d (server), got %d\n%s", exitServer, code, stderr)
+	}
+	if !strings.Contains(stderr, "no free node-slot port") {
+		t.Fatalf("the 503 must relay the plane's detail:\n%s", stderr)
+	}
+}
+
+// read_token_mint_failed is a 502 → exitServer, and the human receipt RELAYS the
+// plane's detail (the box that refused to mint the site's read token). RED
+// BEFORE: cloudFail exited 1.
+func TestRunCloudSiteCreateReadTokenMintFailedExitsServerRelayingDetail(t *testing.T) {
+	const detail = "acme refused to mint the site's read token (HTTP 403): forbidden"
+	_, stderr, code := createRefused(t, fakeResp{502, `{"error":"read_token_mint_failed","detail":"` + detail + `"}`})
+	if code != exitServer {
+		t.Fatalf("a 502 read_token_mint_failed must exit %d (server), got %d\n%s", exitServer, code, stderr)
+	}
+	if !strings.Contains(stderr, detail) {
+		t.Fatalf("the 502 human receipt must relay the plane's detail verbatim:\n%s", stderr)
+	}
+}
+
+// read_token_mint_failed in -o json names the plane's OWN code (not "failed") and
+// carries exit 8 — so a script can branch on the exact refusal.
+func TestRunCloudSiteCreateReadTokenMintFailedJSONCarriesThePlanesCode(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{502, `{"error":"read_token_mint_failed","detail":"acme refused to mint the read token"}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
+	if code != exitServer {
+		t.Fatalf("a 502 read_token_mint_failed must exit %d, got %d\n%s", exitServer, code, stdout)
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json envelope: %v\n%s", err, stdout)
+	}
+	if env.OK {
+		t.Fatalf("a refusal envelope must be ok:false:\n%s", stdout)
+	}
+	if env.Error.Code != "read_token_mint_failed" {
+		t.Fatalf("json must carry the plane's code, got %q\n%s", env.Error.Code, stdout)
+	}
+}
+
+// THE PRESERVED SEAM: a 401 whose message carries the "unauthorized:" prefix still
+// routes through cloudFail with the shared `bp login` sentence and the
+// byte-identical "create site" label — the ONE refusal that is never about the
+// site. This exit (3) is unchanged from the pre-fix behaviour, on purpose.
+func TestRunCloudSiteCreateUnauthorizedKeepsTheCloudFailSeam(t *testing.T) {
+	_, stderr, code := createRefused(t, fakeResp{401, `{"error":"invalid_token"}`})
+	if code != exitAuth {
+		t.Fatalf("a 401 must exit %d (auth), got %d\n%s", exitAuth, code, stderr)
+	}
+	if !strings.Contains(stderr, "bp login") {
+		t.Fatalf("the 401 seam must still tell the user to re-run `bp login`:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "create site") {
+		t.Fatalf("the 401 seam must keep the byte-identical `create site` label:\n%s", stderr)
+	}
+}
+
 // --- status ------------------------------------------------------------------
 
 func TestRunCloudSiteStatus(t *testing.T) {

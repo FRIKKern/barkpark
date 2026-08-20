@@ -16487,11 +16487,17 @@ test("cch-w30-s5: the router's own 500 envelope renders server-fault copy", () =
   const envelope = { error: "server_error", request_id: "0a1b2c3d4e5f6071" };
   assert.match(hooks.friendly(envelope, "Check the form and try again."),
     /broke on our side/i);
-  // The nested api/-style shape would read as NO slug at all and fall straight
-  // back to the blaming copy — this is why the envelope must stay flat.
+  // cch-w62 (D740) — THIS PIN IS INVERTED. It used to assert the nested
+  // api/-style shape fell back to the blaming copy, "because the envelope must
+  // stay flat" (router.ex:8627-8630's premise). That premise is false by 31
+  // nested emitters in the same router file — five route families (self-update,
+  // rollback, the webhook proxy, PATCH /autoupdate, PATCH /admin channel) send
+  // {error:{code}} today. friendly() now unwraps the object and resolves the
+  // slug through the normal ladder, so a nested server_error renders the
+  // server-fault sentence instead of blaming input nobody judged.
   const nested = { error: { code: "server_error" } };
-  assert.equal(hooks.friendly(nested, "Check the form and try again."),
-    "Check the form and try again.");
+  assert.match(hooks.friendly(nested, "Check the form and try again."),
+    /broke on our side/i);
 });
 
 test("cch-w30-s5: faultCopy swaps the validation fallback out on a 5xx only", () => {
@@ -18035,12 +18041,132 @@ test("cch-w38-s1: attachDomain stops blaming a teamless user's DOMAIN SYNTAX (it
     "a teamless caller's DOMAIN was never judged — do not tell them its syntax is wrong");
   assert.match(teamless.textContent, /team/i, "the sentence names the real obstacle");
 
-  // THE POSITIVE CONTROL: a genuine 422 about the domain keeps its sentence.
+  // THE POSITIVE CONTROL: a genuine 422 about the domain keeps a TRUE sentence.
+  // cch-w40-bl (D870) retired the false "Only <name>.barkpark.cloud …" claim —
+  // invalid_domain now reads as the honest syntax verdict.
   const badSyntax = await drive(422, { error: "invalid_domain" });
-  assert.equal(badSyntax.textContent, "Only <name>.barkpark.cloud domains are supported for now.",
-    "a real syntax refusal is unchanged — the fence is one code wide");
+  assert.equal(badSyntax.textContent, "That doesn't look like a valid domain name.",
+    "a real syntax refusal reads as a syntax refusal");
   const taken = await drive(409, { error: "taken" });
   assert.equal(taken.textContent, "That domain is already in use.");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w40-bl (D870): attachDomain STOPS LYING — the pure copy arm relays the
+// measured DNS evidence.
+//
+// THE DEFECT: attachDomain()'s inline 422 ternary answered EVERY 422 except
+// no_team with "Only <name>.barkpark.cloud domains are supported for now." That
+// sentence is FLATLY FALSE — external FQDNs ARE supported (router.ex:4237,
+// DomainOwnership.pointed_at?) — and on domain_not_pointed the console threw
+// away the whole remedy payload (expected_ip + observed) to tell the user the
+// feature does not exist.
+//
+// THE FIX: a pure attachDomainFailureCopy(status, data) in the *FailureCopy +
+// __bpTestHook pattern (peers siteCreateFailureCopy, siteDeleteFailureCopy),
+// node-pinned so a copy mutation can no longer sit undetected in a DOM handler.
+//
+// PRE-FIX RED (recorded here as the durable venue): the "domain_not_pointed
+// relays the measured IP" test below REDS on unmodified main — the pure function
+// did not exist there (hooks.attachDomainFailureCopy was undefined) and the
+// inline path rendered the false barkpark.cloud-only sentence, which carries no
+// expected_ip. Its own describe block, disjoint from cch-w72-s2's ERRORS/fence
+// edits.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("cch-w40-bl: attachDomainFailureCopy is exported (the extraction that made the copy pinnable)", () => {
+  assert.equal(typeof hooks.attachDomainFailureCopy, "function",
+    "attachDomainFailureCopy must be exported — without it the 422 copy is unpinnable inline");
+});
+
+test("cch-w40-bl: domain_not_pointed RELAYS the measured remedy — expected_ip always, observed when present", () => {
+  const f = hooks.attachDomainFailureCopy;
+  // The exact wire shape router.ex:4242 emits: expected_ip = the box IP, observed
+  // = the list the resolver actually returned (fail-closed empty on no answer).
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9"] }),
+    "That domain isn't pointed at this instance yet. Point an A record at 203.0.113.7 — right now it resolves to 198.51.100.9.",
+    "the measured target AND the observed answer both reach the user");
+  // Multiple observed answers join with ', '.
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9", "198.51.100.10"] }),
+    "That domain isn't pointed at this instance yet. Point an A record at 203.0.113.7 — right now it resolves to 198.51.100.9, 198.51.100.10.",
+    "an array of observed answers is joined, not stringified as [object]");
+  // Empty observed (the fail-closed no-answer case) → the target sentence, closed
+  // with a period, no dangling "resolves to".
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: [] }),
+    "That domain isn't pointed at this instance yet. Point an A record at 203.0.113.7.",
+    "no observed answer → just the target, no empty 'resolves to' clause");
+  // expected_ip is NULLABLE on the wire: pointed_at?(_host, nil, _opts) answers
+  // {:error, []} for a host-less instance and the route relays expected_ip:
+  // bp.host verbatim — the remedy clause must not render "at null".
+  assert.equal(
+    f(422, { error: "domain_not_pointed", expected_ip: null, observed: [] }),
+    "That domain isn't pointed at this instance yet.",
+    "a null expected_ip drops the remedy clause instead of pointing at 'null'");
+  // The false sentence is gone entirely from this arm.
+  const all = [
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9"] }),
+    f(422, { error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: [] }),
+    f(422, { error: "invalid_domain" }),
+  ].join(" | ");
+  assert.equal(all.indexOf("barkpark.cloud domains are supported"), -1,
+    "the false 'Only <name>.barkpark.cloud …' sentence must not survive anywhere in the attach arm");
+});
+
+test("cch-w40-bl: the per-slug truth table — every arm relays what the plane measured, nothing invents a cause", () => {
+  const f = hooks.attachDomainFailureCopy;
+  // 409s — the conflict sentences, unchanged.
+  assert.equal(f(409, { error: "taken" }), "That domain is already in use.");
+  assert.equal(f(409, { error: "already_attaching" }), "An attach is already running.");
+  // 422 invalid_domain — a TRUE syntax verdict now (the false claim died).
+  assert.equal(f(422, { error: "invalid_domain" }), "That doesn't look like a valid domain name.");
+  // 422 instance_no_origin — relay the server's own detail sentence verbatim
+  // (D870 routes it to THIS arm; one screen, one dialect).
+  assert.equal(
+    f(422, { error: "instance_no_origin", detail: "This instance has no origin yet, so DNS can't be pointed." }),
+    "This instance has no origin yet, so DNS can't be pointed.",
+    "instance_no_origin relays data.detail verbatim");
+  // 422 no_team — the w38 carve-out is untouched: it falls to friendly(), which
+  // owns the sentence that repairs a teamless caller. Never a domain-syntax verdict.
+  const noTeam = f(422, { error: "no_team" });
+  assert.equal(noTeam.indexOf("valid domain name"), -1, "a teamless caller's DOMAIN was never judged");
+  assert.equal(noTeam.indexOf("barkpark.cloud domains are supported"), -1, "…nor sold the false claim");
+  // 422 invalid (the enqueue changeset slug) and any unseen slug → friendly()
+  // generic. friendly({error:"invalid"}) resolves ERRORS.invalid.
+  assert.equal(f(422, { error: "invalid" }), "That didn't work — check your input.");
+  assert.equal(f(500, {}), "Something went wrong — please try again.",
+    "an unslugged/unknown failure falls to the curated generic");
+  // domain_required is MODAL-UNREACHABLE: attachDomain's empty-value guard returns
+  // before the POST, so the server never emits domain_required to this arm. It is
+  // classified in the source comment above attachDomainFailureCopy and given NO
+  // copy of its own — asserting a sentence for it would pin an unreachable path.
+});
+
+test("cch-w40-bl: domain_not_pointed is RENDERED via textContent on the live arm (server IPs never become markup)", async () => {
+  // The impure drive proves the wire → DOM path: the measured IP reaches the
+  // inline error through textContent, not the false sentence. This is the leg that
+  // REDS on pre-fix bytes (the old ternary rendered the barkpark.cloud claim).
+  const saved = { fetch: sandbox.fetch, document: sandbox.document };
+  const dom = recordingDom(["domain-input", "domain-error", "domain-go"]);
+  dom.els["domain-input"].value = "shop.example.com";
+  sandbox.fetch = fetchStub(422, {
+    error: "domain_not_pointed", expected_ip: "203.0.113.7", observed: ["198.51.100.9"],
+  });
+  sandbox.document = dom.document;
+  try {
+    hooks.attachDomain({ id: "bp1", name: "Production" });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally { Object.assign(sandbox, saved); }
+  const errEl = dom.els["domain-error"];
+  assert.equal(errEl.hidden, false, "the inline error shows");
+  assert.match(errEl.textContent, /Point an A record at 203\.0\.113\.7/,
+    "the measured target IP reaches the user through the DOM");
+  assert.match(errEl.textContent, /resolves to 198\.51\.100\.9/,
+    "the observed answer reaches the user too");
+  assert.equal(errEl.textContent.indexOf("barkpark.cloud domains are supported"), -1,
+    "the false sentence is gone from the rendered arm");
 });
 
 // cch-w37-s1 — THE SERVER'S EXACT PER-FIELD ERROR STOPS LOSING TO A GENERIC.
@@ -18276,11 +18402,12 @@ test("cch-w66-bl: the other four create refusals get console voice, and only the
   assert.ok(f(mint).indexOf("internal_error") === -1, "no mint goo in the modal");
   // barkpark_required (422) has NO arm on purpose: siteCreateBody() always
   // sends barkpark_id (grep -n 'function siteCreateBody' cloud/priv/static/app.js),
-  // so the slug is structurally unreachable
-  // from this modal. It keeps the caller's fallback, and this assertion is the
-  // record of that decision rather than an aspiration.
+  // so the slug is structurally unreachable from this modal. cch-w62 (D855)
+  // updated the record: friendly()'s fenced singular-detail rung now relays the
+  // server's own sentence for this slug, so if the unreachable ever arms the
+  // person reads the server's instruction instead of "create failed (422)".
   assert.equal(f({ ok: false, status: 422, data: { error: "barkpark_required", detail: "name the instance to host this site (barkpark_id)" } }),
-    "create failed (422)");
+    "name the instance to host this site (barkpark_id)");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -18481,6 +18608,21 @@ test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically 
     malformed_request: "We couldn't read that request — reload the page and try again.",
     unsupported_media_type: "We couldn't read that request — reload the page and try again.",
     request_too_large: "That's too large for us to accept. Try a smaller value or file.",
+    // cch-w72-s2 (D871) — the five new curated readers, pinned in the same commit
+    // that added them to the ERRORS map. Deleting any one from app.js reds this
+    // sweep BY NAME (the slug falls through to "a caller fallback").
+    checkout_failed: "Couldn't start checkout — the payment provider didn't accept the request. Please try again.",
+    portal_failed: "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.",
+    no_subscription: "This team doesn't have a subscription yet — start one from the Billing panel.",
+    live_twin: "A live instance with that name already exists — decommission it first.",
+    role_too_high: "You can't grant a role higher than your own.",
+    // cch-w72-bl (D878/D879) — the deploy arm's two curated cures, pinned in the
+    // same commit that registered them. instance_not_live is deliberately ABSENT
+    // from this sweep: it is the singular-detail fence's fifth slug and has NO
+    // ERRORS entry (the shadow law) — pinning it here would demand the entry
+    // that would break its relay.
+    deploy_not_started: "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.",
+    no_content_binding: "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy.",
   };
   for (const [slug, copy] of Object.entries(PINNED)) {
     assert.equal(hooks.friendly({ error: slug }, "a caller fallback"), copy, slug + " moved");
@@ -18511,6 +18653,14 @@ test("cch-w50-s2 THE BAN CAN LOSE: no curated console sentence names a support c
     "no_admin_token", "instance_unreachable", "network_error", "limit_reached",
     "billing_not_configured", "forbidden", "server_error", "malformed_body",
     "malformed_request", "unsupported_media_type", "request_too_large",
+    // cch-w72-s2 (D871) — the five new curated readers join the ban sweep in the
+    // same commit that registered them; each must stay free of a support-channel.
+    "checkout_failed", "portal_failed", "no_subscription", "live_twin", "role_too_high",
+    // cch-w72-bl (D878/D879) — the deploy arm's two curated cures join the ban
+    // sweep in the same commit. instance_not_live stays OUT: no ERRORS entry
+    // exists for it (the fence's shadow law), so listing it here would red the
+    // registered-slug assertion by design.
+    "deploy_not_started", "no_content_binding",
   ];
 
   // cch-w50-s2 — THE BAN, swept over the SAME enumeration the pin above uses,
@@ -20842,6 +20992,34 @@ test("cch-w67: siteDeleteFailureCopy — SEVEN typed arms, every one a DISTINCT 
   assert.match(bare.body, /still registered/);
 });
 
+test("cch-w70-s2: siteDeleteFailureCopy — the typed 500 registration_not_removed relays the plane's two-halves detail ABOVE the generic 5xx crash arm", () => {
+  // The route now answers a foreign-key-blocked delete with a TYPED 500:
+  // {"ok":false,"error":"registration_not_removed","detail":"the instance was
+  // torn down, but the registration could not be removed: … constraint …"}.
+  // This is a 5xx, so WITHOUT its own arm it would fall to the crash-envelope
+  // (arm 4), which refuses to state the outcome — but here the plane MEASURED
+  // both halves and named the constraint, so the reader must relay that detail.
+  const inverse = hooks.siteDeleteFailureCopy(500, {
+    ok: false,
+    error: "registration_not_removed",
+    detail:
+      "the instance was torn down, but the registration could not be removed: deleting the site row " +
+      "was refused by the foreign-key constraint site_artifacts_site_id_fkey. The site is no longer " +
+      "serving, yet it is still registered here — support must remove the row by hand.",
+  });
+  // The plane's own sentence — including the constraint name — is relayed verbatim.
+  assert.match(inverse.body, /site_artifacts_site_id_fkey/);
+  assert.match(inverse.body, /torn down/);
+  assert.match(inverse.body, /still registered/);
+  // It is NOT the crash-envelope arm: that one refuses to name the outcome and
+  // offers a re-check. This one states the outcome and sends the operator to
+  // support, because a retry cannot clear a constraint-held row.
+  const boom = hooks.siteDeleteFailureCopy(500, { error: "server_error", request_id: "F9-abc123" });
+  assert.notEqual(inverse.title, boom.title, "the typed inverse orphan must not wear the crash-envelope sentence");
+  assert.doesNotMatch(inverse.body, /doesn't say how far it got/);
+  assert.equal(inverse.recovery, "close");
+});
+
 test("cch-w67 + cch-w68-s5: the settle plan survives a modal dismissed mid-flight — a late FAILURE still speaks, and a late SUCCESS on this site's screen NOW navigates (D834)", () => {
   // Modal still ours: inline beside the ONE recovery; success navigates off the
   // dead site screen.
@@ -21416,4 +21594,454 @@ test("cch-w65: humanAction serves cloud/priv/audit-actions.json — every label,
   // The fallback is the whole reason a null row is honest rather than a hole: an
   // action the SPA has never heard of still renders instead of disappearing.
   assert.equal(hooks.humanAction("site.invented_by_a_future_slice"), "site.invented_by_a_future_slice");
+});
+
+// ── cch-w62: friendly() unwraps the nested envelope + the fenced detail rung ──
+// D740: five route families (31 emitters in router.ex — self-update, rollback,
+// the webhook proxy, PATCH /autoupdate, PATCH /admin channel) send
+// {error:{code}}, and friendly()'s humanized-slug return called key.replace on
+// that OBJECT — a TypeError in the one function whose job is to never crash.
+// D855: the server's singular `detail` STRING (the ladder reads only the
+// per-field `details` MAP) is relayed for EXACTLY three measured slugs whose
+// sentences are surface-neutral product copy; everything else keeps its
+// pre-existing rendering, because the fence is an enumerated allowlist keyed on
+// the slug by NAME — friendly() takes no status, and faultCopy passes
+// ERRORS.server_error AS the fallback on a 5xx, so an unfenced rung would
+// outrank the 5xx honesty law by construction.
+test("cch-w62: the shipped nested shapes render a sentence, never a TypeError", () => {
+  // Registered slug → curated copy, exactly as if the envelope were flat.
+  assert.match(hooks.friendly({ error: { code: "server_error" } }, "fb"), /broke on our side/i);
+  assert.equal(hooks.friendly({ error: { code: "suspended" } }, "fb"),
+    hooks.friendly({ error: "suspended" }, "fb"),
+    "a nested slug resolves through the SAME ladder as its flat twin");
+  // Unregistered slug → humanized, the flat shape's exact behavior.
+  assert.equal(hooks.friendly({ error: { code: "update_in_flight" } }),
+    hooks.friendly({ error: "update_in_flight" }));
+  // No code at all → the fallback, exactly like a missing slug.
+  assert.equal(hooks.friendly({ error: {} }, "fb"), "fb");
+  assert.equal(hooks.friendly({ error: { code: "" } }, "fb"), "fb");
+  // The arity pin's twin: the unwrap added no parameter.
+  assert.equal(hooks.friendly.length, 2, "friendly() still takes (data, fallback)");
+});
+
+test("cch-w62 (D855): barkpark_required relays the server's own sentence", () => {
+  const detail = "name the instance to host this site (barkpark_id)";
+  assert.equal(hooks.friendly({ error: "barkpark_required", detail: detail }, "create failed (422)"),
+    detail);
+  // Without the detail the slug keeps its pre-rung rendering: the fallback.
+  assert.equal(hooks.friendly({ error: "barkpark_required" }, "create failed (422)"),
+    "create failed (422)");
+});
+
+test("cch-w62 (D855): deploy_ability_required relays the server's own sentence", () => {
+  const detail = "this token can read sites but not deploy them — mint one with the deploy ability";
+  assert.equal(hooks.friendly({ error: "deploy_ability_required", detail: detail }, "Update failed."),
+    detail);
+  assert.equal(hooks.friendly({ error: "deploy_ability_required" }, "Update failed."),
+    "Update failed.");
+});
+
+test("cch-w62 (D855): nothing_to_update relays the server's own sentence", () => {
+  const detail = "the request named no settable field — nothing to update";
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: detail }, "Update failed."),
+    detail);
+  assert.equal(hooks.friendly({ error: "nothing_to_update" }, "Update failed."),
+    "Update failed.");
+});
+
+test("cch-w62 (D855): the fence holds — excluded slugs render EXACTLY as before, detail attached or not", () => {
+  // Each excluded slug is fed a real detail string and must render as if the
+  // rung did not exist: the caller's fallback when one is given, the humanized
+  // slug bare. CLI-voiced details embed bp flags/re-runs; the 5xx-borne pair
+  // rides under faultCopy's ERRORS.server_error fallback, where a relay would
+  // beat the honesty law.
+  const excluded = {
+    content_binding_required: "a static site builds FROM your content — bind it with `--dataset <workspace>/<project>/<dataset>` (missing: dataset)",
+    content_binding_empty: "this site would build from nothing — re-run naming a type this site can read: `bp cloud site create …`",
+    no_build_source: "nothing to build from — re-run with `--framework <name>` or bind content",
+    node_ports_exhausted: "this instance has no free node-slot port left — retire a node site or move to a larger box",
+    read_token_mint_failed: "acme-box-7 answered the token mint HTTP 500: internal_error",
+  };
+  for (const slug of Object.keys(excluded)) {
+    const withDetail = { error: slug, detail: excluded[slug] };
+    assert.equal(hooks.friendly(withDetail, "the caller's designed copy"),
+      hooks.friendly({ error: slug }, "the caller's designed copy"),
+      slug + ": a detail string must not change the rendering — the fallback stands");
+    assert.equal(hooks.friendly(withDetail),
+      slug.replace(/_/g, " "),
+      slug + ": bare, the humanized slug stands — the detail is never relayed");
+  }
+  // The 5xx path in one piece: faultCopy hands ERRORS.server_error down as the
+  // fallback, and the fence keeps the detail from outranking it.
+  assert.match(hooks.faultCopy(502, { error: "read_token_mint_failed", detail: excluded.read_token_mint_failed }, "fb"),
+    /broke on our side/i);
+  assert.ok(hooks.faultCopy(502, { error: "read_token_mint_failed", detail: excluded.read_token_mint_failed }, "fb")
+    .indexOf("acme-box-7") === -1, "no upstream goo leaks through the 5xx arm");
+});
+
+test("cch-w62 (D855): the rung relays only a non-empty STRING detail", () => {
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: "" }, "fb"), "fb");
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: 7 }, "fb"), "fb");
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: { text: "x" } }, "fb"), "fb");
+  // And the two rungs compose: a NESTED allowlisted slug still relays.
+  assert.equal(hooks.friendly({ error: { code: "nothing_to_update" }, detail: "nothing to update" }, "fb"),
+    "nothing to update");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w72-s2 (charter D871) — FIVE UNREAD REFUSALS GAIN CURATED CONSOLE SENTENCES,
+// AND THE SINGULAR-DETAIL FENCE ADMITS ITS FOURTH SLUG.
+//
+// (1) The billing trio + live_twin + role_too_high are typed wire codes the plane
+// measures that had no console reader (bl-124 census). Each now names its state,
+// and none relays the server's own reason string (the billing arms ship
+// `reason: inspect(...)` — a raw Elixir term, cch-w48-s2 class).
+test("cch-w72-s2: the five new refusals render their curated sentences through friendly()", () => {
+  assert.equal(hooks.friendly({ error: "checkout_failed" }, "fb"),
+    "Couldn't start checkout — the payment provider didn't accept the request. Please try again.");
+  assert.equal(hooks.friendly({ error: "portal_failed" }, "fb"),
+    "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.");
+  assert.equal(hooks.friendly({ error: "no_subscription" }, "fb"),
+    "This team doesn't have a subscription yet — start one from the Billing panel.");
+  assert.equal(hooks.friendly({ error: "live_twin" }, "fb"),
+    "A live instance with that name already exists — decommission it first.");
+  assert.equal(hooks.friendly({ error: "role_too_high" }, "fb"),
+    "You can't grant a role higher than your own.");
+});
+
+test("cch-w72-s2: the billing refusals NEVER relay the server's raw reason (cch-w48-s2 class)", () => {
+  // The server ships `reason: inspect(...)` — a raw Elixir term. The curated rung
+  // wins first in friendly(), so the term is structurally unreachable in copy.
+  const raw = '%Stripe.Error{code: :card_declined, message: "your card was declined"}';
+  assert.equal(hooks.friendly({ error: "checkout_failed", reason: raw }, "fb"),
+    "Couldn't start checkout — the payment provider didn't accept the request. Please try again.");
+  assert.equal(hooks.friendly({ error: "portal_failed", reason: raw }, "fb"),
+    "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.");
+});
+
+// (2) THE FENCE'S FOURTH SLUG. provisioning_in_progress relays its measured 409
+// detail verbatim — and gets NO ERRORS entry (THE SHADOW LAW): a curated entry
+// would win the earlier rung and silently disable this relay.
+// cch-w72-bl (D874) later admitted a FIFTH slug, instance_not_live — the fence
+// now carries five; its pair of tests is tail-appended in the cch-w72-bl deploy-
+// arm section below.
+test("cch-w72-s2: provisioning_in_progress is the fence's fourth slug — its detail relays verbatim", () => {
+  const detail = "This instance is still provisioning. Try removing it once it's up or has failed.";
+  assert.equal(hooks.friendly({ error: "provisioning_in_progress", detail: detail }, "Please try again."),
+    detail);
+  // Without a detail, the slug keeps its pre-rung rendering: the caller's fallback.
+  assert.equal(hooks.friendly({ error: "provisioning_in_progress" }, "Please try again."),
+    "Please try again.");
+});
+
+test("cch-w72-s2: THE SHADOW LAW — provisioning_in_progress has NO ERRORS entry", () => {
+  // If it had a curated ERRORS sentence, friendly() with no detail would return
+  // that sentence, not the caller's fallback — and the earlier curated rung would
+  // shadow the fence relay above. A bare slug returning the fallback proves the
+  // key is unregistered, so the fence is the ONLY thing that renders its state.
+  assert.equal(hooks.friendly({ error: "provisioning_in_progress" }, "the caller's fallback"),
+    "the caller's fallback");
+  // The two rungs compose: a NESTED provisioning_in_progress still relays.
+  assert.equal(hooks.friendly({ error: { code: "provisioning_in_progress" }, detail: "still provisioning" }, "fb"),
+    "still provisioning");
+});
+
+test("cch-w72-s2: the fence's three original slugs still relay, and an unfenced detail-bearing slug drops to the fallback", () => {
+  // Fence semantics otherwise unchanged: the pre-existing three still relay…
+  // (cch-w72-bl: the fence's full disjunction is FIVE slugs — the fourth,
+  // provisioning_in_progress, is proven above; the fifth, instance_not_live,
+  // in the deploy-arm section below.)
+  assert.equal(hooks.friendly({ error: "barkpark_required", detail: "name the instance" }, "fb"), "name the instance");
+  assert.equal(hooks.friendly({ error: "deploy_ability_required", detail: "mint a deploy token" }, "fb"), "mint a deploy token");
+  assert.equal(hooks.friendly({ error: "nothing_to_update", detail: "nothing to update" }, "fb"), "nothing to update");
+  // …and a detail-bearing slug OUTSIDE the allowlist still drops to the fallback.
+  assert.equal(hooks.friendly({ error: "some_other_slug", detail: "a raw upstream string" }, "fb"), "fb");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w72-bl — THE NINE NO-FALLBACK friendly() SITES STOP HUMANIZING SLUGS.
+//
+// A one-arg friendly(data) with an UNREAD typed slug renders key.replace(/_/g," ")
+// — gibberish like "write once" at a human. Nine live sites did this: four loader
+// empty-state cards (loadFleet/loadOverview/loadSites/loadActivity, each an
+// esc(friendly(r.data)) inside a Could-not-load card) and five action sites (the
+// session-revoke paint toast, confirmRevokeToken, confirmRevokeInvite,
+// confirmDeleteEnvVar, and the pure roleChangeFailureCopy). The loaders now speak
+// readFailureCopy(r, forbiddenCopy, fallback) — the existing loader dialect; the
+// action sites gained a truthy honest fallback. The fix is entirely at the CALL
+// SITES: friendly()'s humanizer tail is untouched (still pinned by 735/1009/1095),
+// which the negative control below re-proves. UNREAD_SLUG is unregistered in
+// ERRORS and outside the detail fence, so its humanized form is the exact string
+// the honest copy must displace.
+const CCHW72_UNREAD_SLUG = "unread_typed_slug";
+const CCHW72_HUMANIZED = "unread typed slug"; // what a bare one-arg friendly() would emit
+
+// ── the four loader cards, DRIVEN through the driveLoader/recordingDom rig ──
+// Each proves: an unread typed slug now reads the honest per-loader fallback (not
+// the humanized slug), a 403 read reads the read-scoped forbidden sentence, and
+// the "Couldn't load …" headline still stands.
+
+test("cch-w72-bl: loadFleet/loadSites/loadActivity are now hookable (RED on origin/main, where they are unexported)", () => {
+  assert.equal(typeof hooks.loadFleet, "function", "loadFleet must be drivable");
+  assert.equal(typeof hooks.loadSites, "function", "loadSites must be drivable");
+  assert.equal(typeof hooks.loadActivity, "function", "loadActivity must be drivable");
+  assert.equal(typeof hooks.loadOverview, "function", "loadOverview must be drivable");
+});
+
+test("cch-w72-bl: loadFleet — an unread typed slug reads the honest fallback, never the humanized slug", async () => {
+  const { html } = await driveLoader(() => hooks.loadFleet(), { status: 422, payload: { error: CCHW72_UNREAD_SLUG }, ids: ["fleet-body"] });
+  assert.match(html(), /Couldn't load fleet/, "the failure headline stands"); // the h2 title is not esc()-wrapped
+  assert.match(html(), /Your fleet couldn/, "the honest per-loader fallback is read");
+  assert.equal(html().indexOf(CCHW72_HUMANIZED), -1, "the humanized slug must never reach the person");
+});
+
+test("cch-w72-bl: loadFleet — a 403 read reads the read-scoped forbidden sentence", async () => {
+  const { html } = await driveLoader(() => hooks.loadFleet(), { status: 403, payload: { error: "forbidden" }, ids: ["fleet-body"] });
+  assert.match(html(), /access to this fleet/, "a refused read names WHICH read, not a screen the person isn't on");
+});
+
+test("cch-w72-bl: loadOverview — an unread typed slug reads the honest fallback, never the humanized slug", async () => {
+  const { html } = await driveLoader(() => hooks.loadOverview(), { status: 422, payload: { error: CCHW72_UNREAD_SLUG }, ids: ["overview-body"] });
+  assert.match(html(), /Couldn't load your fleet/);
+  assert.match(html(), /Your fleet couldn/, "the honest per-loader fallback is read");
+  assert.equal(html().indexOf(CCHW72_HUMANIZED), -1, "the humanized slug must never reach the person");
+});
+
+test("cch-w72-bl: loadOverview — a 403 read reads the read-scoped forbidden sentence", async () => {
+  const { html } = await driveLoader(() => hooks.loadOverview(), { status: 403, payload: { error: "forbidden" }, ids: ["overview-body"] });
+  assert.match(html(), /access to this fleet/);
+});
+
+test("cch-w72-bl: loadSites — an unread typed slug reads the honest fallback, never the humanized slug", async () => {
+  const { html } = await driveLoader(() => hooks.loadSites(), { status: 422, payload: { error: CCHW72_UNREAD_SLUG }, ids: ["sites-body"] });
+  assert.match(html(), /Couldn't load sites/);
+  assert.match(html(), /Your sites couldn/, "the honest per-loader fallback is read");
+  assert.equal(html().indexOf(CCHW72_HUMANIZED), -1, "the humanized slug must never reach the person");
+});
+
+test("cch-w72-bl: loadSites — a 403 read reads the read-scoped forbidden sentence", async () => {
+  const { html } = await driveLoader(() => hooks.loadSites(), { status: 403, payload: { error: "forbidden" }, ids: ["sites-body"] });
+  assert.match(html(), /access to these sites/);
+});
+
+test("cch-w72-bl: loadActivity — an unread typed slug reads the honest fallback, never the humanized slug", async () => {
+  const { html } = await driveLoader(() => hooks.loadActivity(), { status: 422, payload: { error: CCHW72_UNREAD_SLUG }, ids: ["activity-body"] });
+  assert.match(html(), /Couldn't load activity/);
+  assert.match(html(), /activity feed couldn/, "the honest per-loader fallback is read");
+  assert.equal(html().indexOf(CCHW72_HUMANIZED), -1, "the humanized slug must never reach the person");
+});
+
+test("cch-w72-bl: loadActivity — a 403 read reads the read-scoped forbidden sentence", async () => {
+  const { html } = await driveLoader(() => hooks.loadActivity(), { status: 403, payload: { error: "forbidden" }, ids: ["activity-body"] });
+  assert.match(html(), /access to this activity/);
+});
+
+// ── the five action sites ──
+// roleChangeFailureCopy is a pure exported function — driven directly. The 409
+// last_owner arm is untouched; the fallthrough now names a truthy honest sentence
+// for an unread typed slug rather than humanizing it.
+
+test("cch-w72-bl: roleChangeFailureCopy — an unread typed slug reads the honest fallback, never the humanized slug", () => {
+  assert.equal(hooks.roleChangeFailureCopy(422, { error: CCHW72_UNREAD_SLUG }),
+    "That role change didn't go through — please try again.");
+  assert.notEqual(hooks.roleChangeFailureCopy(422, { error: CCHW72_UNREAD_SLUG }), CCHW72_HUMANIZED);
+  // the reachable 409 last_owner arm is unchanged
+  assert.equal(hooks.roleChangeFailureCopy(409, { error: "last_owner" }),
+    "You're the last owner — promote another member to owner first.");
+});
+
+// The four toast handlers (session-revoke paint, confirmRevokeToken,
+// confirmRevokeInvite, confirmDeleteEnvVar) are click-driven modal callbacks that
+// emit friendly(r.data, "<honest>") inline. Each is proven the same way: locate
+// the exact call site by its toast title, PARSE its two argument texts (callArgs
+// throws if the site is gone or reformatted), then DRIVE the real exported
+// friendly() with that site's own literal against an unread slug. Reverting a site
+// to a one-arg friendly(r.data) drops args to length 1 → the length assertion reds
+// THAT site's test by name. The honest sentence must not be the humanized slug.
+const CCHW72_APP_SRC = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+function cchw72ActionSite(needle) {
+  const args = callArgs(CCHW72_APP_SRC, needle);
+  assert.equal(args.length, 2,
+    `friendly() at "${needle}" must pass a fallback second arg — a one-arg revert humanizes the slug`);
+  assert.equal(args[0], "r.data", `first arg is the server payload at "${needle}"`);
+  const fallback = JSON.parse(args[1]);
+  assert.ok(typeof fallback === "string" && fallback.length > 0, `the fallback is a truthy string at "${needle}"`);
+  // drive the SHIPPED friendly() with this site's own literal: an unread slug now
+  // reads the honest copy, never its humanized form.
+  assert.equal(hooks.friendly({ error: CCHW72_UNREAD_SLUG }, fallback), fallback);
+  assert.notEqual(hooks.friendly({ error: CCHW72_UNREAD_SLUG }, fallback), CCHW72_HUMANIZED);
+  return fallback;
+}
+
+test("cch-w72-bl: session-revoke paint — friendly() carries a truthy honest fallback", () => {
+  cchw72ActionSite('title: "Couldn\'t revoke", body: friendly');
+});
+
+test("cch-w72-bl: confirmRevokeToken — friendly() carries a truthy honest fallback", () => {
+  cchw72ActionSite('title: "Couldn\'t revoke token", body: friendly');
+});
+
+test("cch-w72-bl: confirmRevokeInvite — friendly() carries a truthy honest fallback", () => {
+  cchw72ActionSite('title: "Couldn\'t revoke invitation", body: friendly');
+});
+
+test("cch-w72-bl: confirmDeleteEnvVar — friendly() carries a truthy honest fallback", () => {
+  cchw72ActionSite('title: "Couldn\'t delete variable", body: friendly');
+});
+
+// ── the negative control: the humanizer tail is UNTOUCHED ──
+// The fix lives at the call sites, never in friendly(). A DIRECT one-arg
+// friendly() on an unknown slug still humanizes — proving the tail (735/1009/1095)
+// is byte-identical and only the missing fallbacks were the defect.
+test("cch-w72-bl: NEGATIVE CONTROL — a direct one-arg friendly() on an unknown slug still humanizes", () => {
+  assert.equal(hooks.friendly({ error: "totally_unknown_slug" }), "totally unknown slug");
+  assert.equal(hooks.friendly({ error: CCHW72_UNREAD_SLUG }), CCHW72_HUMANIZED);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// cch-w72-bl (wave 74, charter D874/D878/D879) — THE DEPLOY ARM STOPS
+// SWALLOWING WHAT THE PLANE PROVED. Three deploy_static_site refusals that a
+// member can reach through the Deploy button (runDeploy) or the create chain
+// (createAndDeploy) — both of which already hand the whole body to
+// friendly(r.data, …), so every cure lands in the copy layer with ZERO handler
+// edits:
+//
+//   instance_not_live  — the singular-detail fence's FIFTH slug (D874). Its 422
+//                        detail is static surface-neutral product copy; the
+//                        relay carries it verbatim. Shadow law: NO ERRORS entry.
+//   deploy_not_started — curated ERRORS entry (D879), because the 503 body's
+//                        own strings are unrelayable: `reason` is inspect()
+//                        noise and `detail`'s console spelling says "Retry the
+//                        deploy", a lie at the CLI prebuilt twin.
+//   no_content_binding — curated ERRORS entry (D878): the old fallback "Please
+//                        try again." was a measured transience lie for a
+//                        permanent-until-bound state, and the wire detail is
+//                        CLI-voiced ("--dataset …"), barred from relay.
+
+// (1) THE FIFTH SLUG RELAYS. The exact detail deploy_static_site mints (422,
+// single emit site) reaches the person verbatim through runDeploy's own
+// friendly(r.data, "Please try again.") shape.
+test("cch-w72-bl: instance_not_live is the fence's fifth slug — its measured detail relays verbatim", () => {
+  const detail = "the instance hosting this site has no URL yet — wait for it to finish provisioning";
+  assert.equal(hooks.friendly({ error: "instance_not_live", detail: detail }, "Please try again."),
+    detail);
+  // The two rungs compose: the NESTED envelope spelling still relays.
+  assert.equal(hooks.friendly({ error: { code: "instance_not_live" }, detail: "no URL yet" }, "fb"),
+    "no URL yet");
+});
+
+test("cch-w72-bl: THE SHADOW LAW — instance_not_live has NO ERRORS entry, and its near-twin not_live keeps its own", () => {
+  // A bare slug (no detail) MUST drop to the caller's fallback: if a curated
+  // ERRORS sentence existed, friendly() would return it here instead — the
+  // earlier curated rung would win and silently disable the fence relay above.
+  assert.equal(hooks.friendly({ error: "instance_not_live" }, "the caller's fallback"),
+    "the caller's fallback");
+  // THE NEAR-TWIN GUARD: `not_live` is a DIFFERENT code (the instance panel's
+  // 409) and is legitimately curated. It must keep its sentence — and
+  // instance_not_live must never inherit it "for symmetry": the bare-slug
+  // fallback above already proves it did not.
+  assert.equal(hooks.friendly({ error: "not_live" }, "fb"),
+    "The instance isn't live yet — wait for provisioning to finish.");
+});
+
+// (2) deploy_not_started — the D879 curated cure. The curated rung wins FIRST
+// in friendly(), so neither of the 503 body's unrelayable strings can reach
+// the person.
+test("cch-w72-bl: deploy_not_started renders the D879 sentence — no bare retry verb", () => {
+  const copy = hooks.friendly({ error: "deploy_not_started" }, "Please try again.");
+  assert.equal(copy,
+    "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.");
+  // D879: no bare retry verb. "Retry the deploy" / "try again" would be a lie
+  // at the CLI prebuilt twin, where a same-sha re-POST answers already_uploaded
+  // and builds nothing; "start a fresh deploy" is true at both emit sites.
+  assert.ok(!/\bretry\b|try again/i.test(copy), "the D879 copy must not carry a bare retry verb: " + copy);
+});
+
+test("cch-w72-bl: deploy_not_started NEVER relays the 503 body's reason or detail (cch-w48-s2 class)", () => {
+  // The real 503 body: `reason` is inspect() noise, `detail` is the router's
+  // console spelling whose "Retry the deploy" D879 refused. The curated rung
+  // wins before the details ladder and the fence, so neither string renders.
+  const body = {
+    error: "deploy_not_started",
+    detail: "the deployment row was created but the build driver could not be started" +
+      " — nothing is building. Retry the deploy; if it keeps failing the control" +
+      " plane is out of build capacity.",
+    reason: "{:error, {:already_started, #PID<0.123.0>}}",
+  };
+  const copy = hooks.friendly(body, "Please try again.");
+  assert.equal(copy,
+    "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.");
+  assert.equal(copy.indexOf("PID"), -1, "inspect() noise must never reach the person");
+  assert.equal(copy.indexOf("Retry the deploy"), -1, "the wire detail's retry spelling must never reach the person");
+});
+
+// (3) no_content_binding — the D878 curated cure for a measured transience lie.
+test("cch-w72-bl: no_content_binding renders the permanent-until-bound truth — no transience verb, no CLI incantation", () => {
+  const copy = hooks.friendly({ error: "no_content_binding" }, "Please try again.");
+  assert.equal(copy,
+    "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy.");
+  // The state is permanent until content is bound: a transience verb would be
+  // the exact lie this cure deletes.
+  assert.ok(!/try again|\bretry\b/i.test(copy), "no transience verb: " + copy);
+  // …and the wire detail is CLI-voiced (`--dataset <workspace>/<project>/<dataset>`).
+  // The curated rung wins first, so the incantation never renders — even when
+  // the real body carries it.
+  const wired = hooks.friendly({
+    error: "no_content_binding",
+    detail: "this site isn't bound to any content — create it with `--dataset <workspace>/<project>/<dataset>`",
+  }, "Please try again.");
+  assert.equal(wired, copy, "the CLI-voiced wire detail must never displace the curated sentence");
+  assert.equal(copy.indexOf("--dataset"), -1, "no CLI flag in console copy");
+});
+
+// (4) repo_not_in_installation — the D883 (cch-w75-s1) curated cure for a measured
+// transience lie. The connect 422 from connect_site_github fires when a repo was
+// revoked from the GitHub App installation between the picker's list call and the
+// connect submit — a permanent-until-regranted state that the bare fallback
+// "Please try again." painted as retryable. The curated rung wins first, so
+// submitSiteGithub's friendly(r.data, "Please try again.") renders the true copy.
+test("cch-w75-s1: repo_not_in_installation renders the permanent-until-regranted truth — no transience verb", () => {
+  const copy = hooks.friendly({ error: "repo_not_in_installation" }, "Please try again.");
+  assert.equal(copy,
+    "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect.");
+  // The state is permanent until access is re-granted: a transience verb would be
+  // the exact lie this cure deletes.
+  assert.ok(!/try again|\bretry\b/i.test(copy), "no transience verb: " + copy);
+});
+
+// ── cch-w74: an expired session stops accusing the user of a wrong password ──
+// SOURCE-TEXT, per the cch-w37-s6 loadOperator precedent: submitPasswordChange
+// is impure (it reads #pw-current/#pw-new, calls api(), and paints #pw-error),
+// and this sandbox's getElementById returns null, so a node "drive" would be
+// vacuous. What is pinned is the SHAPE of the 401 arm: the accusation is gated
+// on the proven slug, and every OTHER 401 renders non-accusatory session copy.
+//
+// THE DEFECT this replaces: the arm was `r.status === 401 ? "Current password
+// is wrong." : friendly(...)`. Because api() is called with noBounce:true (so
+// its login bounce is suppressed for THIS 401) and Auth.require_user ships a
+// slug-less `unauthorized` when the session token has died, an expired-session
+// 401 painted "Current password is wrong." at a user whose password was fine —
+// reachable by any authenticated non-admin whose token dies between page-load
+// and submit (sharpest: this feature's own "signed out everywhere" success
+// path). The pre-fix red below is the bare status-only conflation.
+test("cch-w74: the password 401 accusation keys on the invalid_current_password slug, not the bare status", () => {
+  const body = APP_SRC.match(/function submitPasswordChange\(e\) \{[\s\S]*?\n  \}\n/)[0];
+  // THE RED on pre-fix bytes: the bare status-only conflation is GONE. A
+  // status-keyed accusation accuses an expired session of a wrong password.
+  assert.ok(!/r\.status === 401 \? "Current password is wrong\."/.test(body),
+    "the bare `r.status === 401 ? \"Current password is wrong.\"` conflation must be gone");
+  // A slug-carrying 401 renders the accusation: the accusing copy exists ONLY
+  // behind the proven slug guard.
+  assert.match(body,
+    /r\.status === 401 && r\.data && r\.data\.error === "invalid_current_password"\s*\n\s*\? "Current password is wrong\."/,
+    "the accusation must be gated on r.data.error === \"invalid_current_password\"");
+  // A slug-less 401 renders non-accusatory session copy — it states only what is
+  // proven (the session is gone), never the password accusation.
+  assert.match(body, /: r\.status === 401\s*\n\s*\? "Your session has expired — sign in again\."/,
+    "a slug-less 401 must render honest session copy, never the password accusation");
+  // The accusation string appears EXACTLY once — no un-gated second copy leaks
+  // back the conflation this slice deletes.
+  assert.equal((body.match(/Current password is wrong\./g) || []).length, 1,
+    "the accusation copy exists once, only behind the slug guard");
 });

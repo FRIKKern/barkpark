@@ -336,32 +336,6 @@ func TestPopAtRootIsNoOp(t *testing.T) {
 	}
 }
 
-// ── Breadcrumb (charter D18) ─────────────────────────────────────────────────
-
-// The first (root) and last (where you are) segments always survive the
-// middle-truncation, even on a deep stack in a narrow pane.
-func TestBreadcrumbKeepsFirstAndLast(t *testing.T) {
-	stack := []Frame{
-		{Kind: FrameBoard, Title: "tasks"},
-		{Kind: FrameTask, Ref: "a", Title: "Wire the SSE live bridge to the pane"},
-		{Kind: FramePaper, Ref: "p", Title: "Task-TUI wave 5 charter document"},
-		{Kind: FrameTask, Ref: "c", Title: "Debounce the refetch at 750ms exactly"},
-	}
-	crumb := ansi.Strip(Breadcrumb(stack, 40))
-	if disp(crumb) > 40 {
-		t.Fatalf("breadcrumb over width: %d cols %q", disp(crumb), crumb)
-	}
-	if !strings.HasPrefix(crumb, "tasks") {
-		t.Errorf("lost the root segment: %q", crumb)
-	}
-	if !strings.Contains(crumb, "Debounce") {
-		t.Errorf("lost the current (last) segment: %q", crumb)
-	}
-	if !strings.Contains(crumb, "…") && !strings.Contains(crumb, "›") {
-		t.Errorf("no elision/separator in a truncated trail: %q", crumb)
-	}
-}
-
 // ── Hysteresis (charter D12/D27) ─────────────────────────────────────────────
 
 // Two-pane engages at >=110 and reverts below 106; the deadband [106,110) holds

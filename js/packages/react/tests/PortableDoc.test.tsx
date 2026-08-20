@@ -625,6 +625,39 @@ describe('PortableDoc — the type-keyed renderer', () => {
     expect(html).not.toContain('<script>')
   })
 
+  it('api-endpoint method never breaks out of the class attribute (XSS, fully-live surface)', () => {
+    // FULLY-LIVE surface: this emitter string is injected via
+    // dangerouslySetInnerHTML with no CSP and no sanitizer. The method-class
+    // modifier was raw `--${method.toLowerCase()}`; a quote+tag payload broke
+    // out of the class attribute into a live <img>. The fail-closed
+    // [a-z0-9-] slug neutralizes it. REDS if the slug fix is reverted.
+    const html = renderPortableDocument([
+      {
+        type: 'api-endpoint',
+        method: '"><img src=x onerror=alert(1)>',
+        path: '/x',
+      },
+    ])
+    // No attribute breakout — nothing escapes the class="…" quotes.
+    expect(html).not.toContain('"><img')
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('<script')
+    expect(html).not.toContain('onerror=')
+    // The badge text is HTML-escaped, not dropped (method is upper-cased first).
+    expect(html).toContain('&quot;&gt;&lt;IMG SRC=X ONERROR=ALERT(1)&gt;')
+    // The modifier slug keeps only [a-z0-9-] — no stray quote/angle bracket.
+    expect(html).toContain('bp-api-endpoint__method bp-api-endpoint__method--imgsrcxonerroralert1')
+  })
+
+  it('api-endpoint legit methods keep their byte-identical method--<m> class', () => {
+    for (const m of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+      const html = renderPortableDocument([{ type: 'api-endpoint', method: m, path: '/x' }])
+      expect(html).toContain(
+        `<span class="bp-api-endpoint__method bp-api-endpoint__method--${m.toLowerCase()}">${m}</span>`,
+      )
+    }
+  })
+
   // ── Elixir-fidelity regressions caught by the cross-surface parity harness ──
   // These three shapes are where the JS renderer silently diverged from the
   // walk.ex / data_viz.ex / figures.ex golden; the parity-proof slice's harness

@@ -919,8 +919,19 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # internal/cloudclient, so only `details` is new PACKAGE-WIDE. The emitted
   # floor does not move because this slice writes no Elixir serializer — it reads
   # a refusal `cloud/` already emits, which is the whole point of the pair.
+  #
+  # D863 (`bp cloud site create` renders the readable-types menu) moves the
+  # go-tag floor 269 -> 271; the emitted floor HOLDS at 149. Measured the same
+  # way as the `details` delta above, and with the same nuance: the diff adds
+  # THREE tag lines to internal/cloudclient (`type`, `count,omitempty`,
+  # `readable_types`) but the set difference against origin/main's own package is
+  # exactly TWO names — `readable_types` and `type` — because `count` is already
+  # declared elsewhere in the package. Removals: none (main 269, branch 271, no
+  # name lost). The emitted floor does not move because this slice writes no new
+  # Elixir serializer: it renders a menu `cloud/` already emits, which is again
+  # the point of the pair.
   @emitted_floor 149
-  @go_tag_floor 269
+  @go_tag_floor 271
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is

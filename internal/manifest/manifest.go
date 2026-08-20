@@ -15,7 +15,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 )
+
+// safeName constrains a manifest-supplied noun name and command verb to a
+// shell-safe identifier: an opening lowercase letter or digit, then any run of
+// lowercase letters, digits, underscores, or hyphens. No shell metacharacter,
+// quote, whitespace, or `$(...)` can match.
+//
+// This is a CLIENT-SIDE TRUST BOUNDARY, not cosmetics. `bp completion <shell>`
+// emits a script the user is told to eval — `eval "$(bp completion bash)"`,
+// `bp completion fish | source` — and the bash/zsh/fish emitters bake manifest
+// NOUN and VERB names into that script RAW (internal/cli/builtins.go). The same
+// unvalidated names also flow into argv/path construction elsewhere. A hostile
+// or compromised server the bp is pointed at could otherwise plant a noun named
+// `x";touch /tmp/pwn;#` (or a `$(...)` / single-quote variant) that materializes
+// verbatim in the emitted shell and executes the moment it is eval'd — a
+// remote-to-eval RCE. Rejecting any name outside this charset at Parse, before a
+// single name can reach an emitter, closes that chain at its true locus.
+// Emitter-side quoting is tracked separately as defense-in-depth
+// (bp-secgo-completion-emitter-quoting).
+var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // Manifest is the root capabilities document. Field names mirror
 // manifest.schema.json exactly; optional/additive fields use omitempty.
@@ -178,6 +198,28 @@ func Parse(body []byte) (*Manifest, error) {
 	// than be silently dropped.
 	if err := dec.Decode(new(struct{})); err != io.EOF {
 		return nil, fmt.Errorf("parse manifest: trailing data after document")
+	}
+	// Value validation at the trust boundary: reject the WHOLE manifest if any
+	// noun name or command verb carries a character outside the shell-safe
+	// identifier charset, so a hostile name can never reach the eval'd completion
+	// emitters (or argv/path construction). See safeName's doc comment.
+	for _, n := range m.Nouns {
+		if !safeName.MatchString(n.Name) {
+			return nil, fmt.Errorf("parse manifest: unsafe noun name %q (must match %s)", n.Name, safeName)
+		}
+	}
+	for _, c := range m.Commands {
+		// Command.Noun is validated alongside Verb: Tree() synthesizes a noun
+		// node from cmd.Noun for any command whose noun was not declared in
+		// m.Nouns (tree.go), and that synthesized node name flows into the same
+		// eval'd completion emitters — so a hostile Command.Noun would bypass a
+		// Noun.Name-only check.
+		if !safeName.MatchString(c.Noun) {
+			return nil, fmt.Errorf("parse manifest: unsafe command noun %q (must match %s)", c.Noun, safeName)
+		}
+		if !safeName.MatchString(c.Verb) {
+			return nil, fmt.Errorf("parse manifest: unsafe command verb %q (must match %s)", c.Verb, safeName)
+		}
 	}
 	return &m, nil
 }

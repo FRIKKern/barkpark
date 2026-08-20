@@ -296,7 +296,13 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
       assert after_rev == rev
     end
 
-    test "an unknown slug teaches publish-first", %{conn: conn} do
+    # Create-on-push (pe-w6 / charter D41): an absent slug is no longer a 404 —
+    # sync CREATES it through the full publish wall. What this pins instead:
+    # the two honest refusals of that arm — a path/document identity mismatch,
+    # and a wall refusal that names every violation and writes NOTHING (the
+    # deep create tests live in bulldocs_ingest_controller_test.exs).
+    test "an unknown slug whose document names a DIFFERENT slug refuses the identity mismatch",
+         %{conn: conn} do
       conn =
         authed(conn)
         |> post("#{@ingest_path}/nope-never/sync", %{
@@ -304,8 +310,25 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
           "baseRev" => "1"
         })
 
-      assert %{"error" => err} = json_response(conn, 404)
-      assert err["hint"] =~ "publish"
+      assert %{"error" => err} = json_response(conn, 422)
+      assert err["code"] == "slug_mismatch"
+      refute Content.get_paper("nope-never")
+      refute Content.get_paper("x")
+    end
+
+    test "an unknown slug with a wall-failing document is a create refusal that writes nothing",
+         %{conn: conn} do
+      conn =
+        authed(conn)
+        |> post("#{@ingest_path}/nope-never/sync", %{
+          "bpml" => "<paper slug=\"nope-never\" title=\"X\"><h1>X</h1></paper>",
+          "baseRev" => "1"
+        })
+
+      assert %{"error" => err} = json_response(conn, 422)
+      assert err["code"] == "create_wall"
+      assert is_list(err["errors"]) and err["errors"] != []
+      refute Content.get_paper("nope-never")
     end
   end
 
@@ -355,7 +378,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
           "type" => "paragraph",
           "content" => [
             %{"type" => "text", "value" => "run "},
-            %{"type" => "code", "value" => "mix test"}
+            %{"type" => "valueref", "ref" => "stats.total"}
           ]
         }
       ])
@@ -366,7 +389,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
                |> json_response(422)
 
       assert err["code"] == "bpml_unprintable"
-      assert err["message"] =~ ~s(inline node type "code")
+      assert err["message"] =~ ~s(inline node type "valueref")
       assert err["message"] =~ "kind: inline"
       assert err["hint"] =~ "format=json"
 
@@ -407,7 +430,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
           "type" => "paragraph",
           "content" => [%{"type" => "text", "value" => "Kept."}]
         },
-        %{"id" => "d1", "type" => "divider"}
+        %{"id" => "i1", "type" => "image"}
       ]
 
       paper = with_blocks!(slug, blocks)
@@ -426,7 +449,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
 
       assert %{"error" => err} = json_response(conn, 422)
       assert err["code"] == "bpml_unprintable"
-      assert err["message"] =~ ~s(block type "divider")
+      assert err["message"] =~ ~s(block type "image")
       assert err["hint"] =~ "block ops"
 
       # THE POINT: nothing was derived and nothing was applied — before the
@@ -444,7 +467,7 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
           %{
             "id" => "p1",
             "type" => "paragraph",
-            "content" => [%{"type" => "code", "value" => "unprintable"}]
+            "content" => [%{"type" => "valueref", "ref" => "stats.total"}]
           }
         ])
 
@@ -477,6 +500,77 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
 
       payload = %{ok: true, bpml: bpml}
       assert BarkparkWeb.BulldocsIngestController.maybe_mark_echo(payload, nil) == payload
+    end
+  end
+
+  # ── wave-6: byline map-item items no longer answer a RAW 500 ────────────────
+  #
+  # The wave-5/6 papers themselves stored byline items as maps
+  # (%{"value" => binary}); the printer's byline clause ran `esc(to_string(map))`
+  # → Protocol.UndefinedError → escaped the rescue as a raw HTTP 500
+  # (tooling/grip/ledger/pe-w6-byline-map-item-500-class-2026-08-17.md). The
+  # clause now coerces the map to its string; a non-binary item refuses 422.
+  describe "byline map-item items fail honestly (wave-6)" do
+    test "a byline whose items are maps prints (200), not a raw 500", %{conn: conn} do
+      slug = "bpml-byline-map-#{System.unique_integer([:positive])}"
+
+      with_blocks!(slug, [
+        %{
+          "id" => "by",
+          "type" => "byline",
+          "items" => [%{"value" => "Epic task-4792 · wave 6"}, "A plain author"]
+        }
+      ])
+
+      body = conn |> get("/papers/#{slug}/source", %{"format" => "bpml"}) |> response(200)
+      assert body =~ "<item>Epic task-4792 · wave 6</item>"
+      assert body =~ "<item>A plain author</item>"
+    end
+
+    test "a byline with a non-binary item is a labelled 422, not a 500", %{conn: conn} do
+      slug = "bpml-byline-bad-#{System.unique_integer([:positive])}"
+
+      with_blocks!(slug, [
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "A real paragraph."}]
+        },
+        %{"id" => "by", "type" => "byline", "items" => [%{"unexpected" => "shape"}]}
+      ])
+
+      assert %{"error" => err} =
+               conn
+               |> get("/papers/#{slug}/source", %{"format" => "bpml"})
+               |> json_response(422)
+
+      assert err["code"] == "bpml_unprintable"
+    end
+  end
+
+  # ── wave-6: the notes grid round-trips over the wire ────────────────────────
+  describe "notes grid over the wire (wave-6)" do
+    test "a dict-item notes grid reads back as BPML and re-parses to the same blocks",
+         %{conn: conn} do
+      slug = "bpml-notes-grid-#{System.unique_integer([:positive])}"
+
+      blocks = [
+        %{
+          "id" => "n1",
+          "type" => "notes",
+          "items" => [
+            %{"label" => "First", "lead" => "one", "text" => "The opening remark."},
+            %{"label" => "Second", "text" => "A follow-up."}
+          ]
+        }
+      ]
+
+      with_blocks!(slug, blocks)
+
+      out = conn |> get("/papers/#{slug}/source", %{"format" => "bpml"}) |> response(200)
+      assert out =~ ~s(<note label="First" lead="one">The opening remark.</note>)
+      assert {:ok, %{"blocks" => reparsed}} = Bpml.parse_paper(out)
+      assert reparsed == blocks
     end
   end
 

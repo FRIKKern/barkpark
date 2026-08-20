@@ -283,6 +283,73 @@ func usageSuggestNouns(out *writer, tree *manifest.Tree, typed string) {
 	out.errf("run `barkpark capabilities` for the full command list.")
 }
 
+// authHiddenNoun reports whether `typed` names a REAL command that the server
+// filtered out of this caller's tier-scoped manifest — the noun exists in the
+// product but is invisible to this caller because their AuthTier is too low — as
+// opposed to a genuine typo or an unsupported command.
+//
+// It is true only when ALL hold:
+//   - the caller is NOT admin: an admin's manifest is the whole tree, so a noun
+//     missing for them is genuinely unknown, never merely hidden (this is what
+//     keeps admin callers from ever receiving a false auth-hidden diagnosis);
+//   - `typed` is in the baked, non-secret noun catalog (completionNouns, owned by
+//     builtins.go) — the client's static knowledge of every command that CAN
+//     exist, independent of any one caller's tier;
+//   - `typed` is absent from the tier-filtered tree the server actually returned.
+//
+// This leaks nothing the server hides: it reports only that the non-secret noun
+// NAME exists (the baked catalog already ships that list in cleartext) — never a
+// hidden verb, arg, or route. The server's existence-hiding of the verbs stays
+// intact; the CLI only turns a misleading "unknown command" into "authenticate".
+func authHiddenNoun(tree *manifest.Tree, tier, typed string) bool {
+	if tier == "admin" {
+		return false
+	}
+	if _, visible := lookupNoun(tree, typed); visible {
+		return false
+	}
+	for _, n := range completionNouns {
+		if n == typed {
+			return true
+		}
+	}
+	return false
+}
+
+// authTierLabel renders an auth tier for a user-facing message, mapping the empty
+// tier (no credential presented) to the explicit word "none" so the diagnosis
+// never prints a bare "tier=".
+func authTierLabel(tier string) string {
+	if tier == "" {
+		return "none"
+	}
+	return tier
+}
+
+// suggestUnknownNoun renders the diagnosis for an unrecognised TOP-LEVEL noun,
+// distinguishing a tier-HIDDEN real command from a genuine typo. When `typed`
+// names a baked-catalog noun the server filtered out of this caller's tier tree
+// (authHiddenNoun), it reports the command as existing-but-hidden and points at
+// `bp login` / --token instead of emitting a misleading "did you mean?" — so a
+// hidden noun is also never offered as a typo target, and (because a hidden noun
+// is by definition absent from the tree) soleReadVerb up in the dispatch switch
+// never sees it to auto-infer its verb. Otherwise it falls back to the ordinary
+// noun typo suggestion (usageSuggestNouns / nounHint). Always returns exitUsage.
+//
+// This is the single classification point wired into every unknown-noun site in
+// cli.go's dispatch (help <noun>, bare noun, and noun+token), so the three paths
+// can never drift on how they treat a tier-hidden command.
+func suggestUnknownNoun(out *writer, tree *manifest.Tree, tier, typed string) int {
+	if authHiddenNoun(tree, tier, typed) {
+		label := authTierLabel(tier)
+		return usageErrHintf(out, func() {
+			out.errf("`barkpark %s` is a real command, but it is not available at your current auth tier (tier=%s).", typed, label)
+			out.errf("run `barkpark login` — or pass `--token <tok>` — with a credential that grants it, then retry.")
+		}, "barkpark login", "command %q exists but is hidden at your auth tier (tier=%s); run `barkpark login` (or pass --token <tok>) with a credential that grants it", typed, label)
+	}
+	return usageErrHintf(out, func() { usageSuggestNouns(out, tree, typed) }, nounHint(tree, typed), "unknown command %q", typed)
+}
+
 // usageSuggestVerb prints a "did you mean?" hint for the closest verb under a
 // known noun (when the typed verb looks like a typo), then the noun's full verb
 // list. It is usageSuggestNouns one level down the tree.

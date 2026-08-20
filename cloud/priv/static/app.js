@@ -248,7 +248,60 @@
     malformed_body: "We couldn't read that request — reload the page and try again.",
     malformed_request: "We couldn't read that request — reload the page and try again.",
     unsupported_media_type: "We couldn't read that request — reload the page and try again.",
-    request_too_large: "That's too large for us to accept. Try a smaller value or file."
+    request_too_large: "That's too large for us to accept. Try a smaller value or file.",
+    // cch-w72-s2 (charter D871) — FIVE typed refusals the plane measures that had
+    // no console reader (bl-124 census: ~171 typed wire codes, ~57 console
+    // literals). Each names the state; NONE relays the server's own reason string.
+    // The billing trio (checkout_failed/portal_failed) are 422s on
+    // POST /v1/billing/checkout|portal read via friendly(r.data, generic) in
+    // openCheckout/openBillingPortal — the server ships `reason: inspect(...)`, a
+    // raw Elixir term that must NEVER reach copy (cch-w48-s2 class); the curated
+    // rung wins first in friendly(), so the raw reason is structurally unreachable.
+    checkout_failed: "Couldn't start checkout — the payment provider didn't accept the request. Please try again.",
+    portal_failed: "Couldn't open the billing portal — the payment provider didn't accept the request. Please try again.",
+    // no_subscription — the billing screens' 422 when no Stripe subscription
+    // exists (router.ex portal + cancel arms both emit 422 {no_subscription}).
+    no_subscription: "This team doesn't have a subscription yet — start one from the Billing panel.",
+    // live_twin — the resurrect 422 (resurrectOutcome -> friendly(d, generic));
+    // the honest-generic fallback dropped the shipped name, this names the state.
+    live_twin: "A live instance with that name already exists — decommission it first.",
+    // role_too_high — the invitation-create arm (router.ex:5450); its no-fallback
+    // fall-through rendered a humanized "role too high" slug. The curated rung
+    // precedes any fallback in friendly(), so this covers every reader.
+    role_too_high: "You can't grant a role higher than your own.",
+    // cch-w72-bl (charter D878/D879) — the deploy arm's two curated cures. Both
+    // are read via friendly(r.data, …) in runDeploy/createAndDeploy; the curated
+    // rung wins first, so nothing else in either 4xx/5xx body can reach copy.
+    //
+    // deploy_not_started — the 503 from deploy_static_site (and its CLI prebuilt
+    // twin, start_prebuilt_deploy). The body ships `reason: inspect(reason)` — a
+    // raw Elixir term that must NEVER reach a person (cch-w48-s2 class) — and a
+    // `detail` whose console spelling says "Retry the deploy", which is a LIE at
+    // the CLI twin: settle_deployment_artifact answers a same-sha re-POST
+    // `200 already_uploaded` and builds nothing. D879 settles the copy with NO
+    // bare retry verb — "start a fresh deploy" is true at both emit sites
+    // (console: press Deploy again mints a new row; CLI: mint a new prebuilt
+    // deployment).
+    deploy_not_started: "The deployment was recorded, but the build engine couldn't be started — nothing is building. Start a fresh deploy.",
+    // no_content_binding — the 422 from deploy_static_site on a site with no
+    // bootstrap_dataset (the Deploy button renders on CLI-created unbound sites:
+    // the console create form guards only its own creates). The state is
+    // PERMANENT until content is bound — the old fallback "Please try again."
+    // was a measured transience lie (D878) — and the wire detail is CLI-voiced
+    // ("--dataset …"), so the fence's CLI-voiced exclusion bars relaying it.
+    // The sentence states permanence + the bind remedy; no transience verb, no
+    // CLI incantation.
+    no_content_binding: "This site has no content bound yet, so there is nothing to build. Bind content to it first, then deploy.",
+    // cch-w75-s1 (charter D883) — the github connect 422 from connect_site_github
+    // (POST /v1/sites/:id/github/connect) when a repo was revoked from the GitHub
+    // App installation between the picker's list call and the connect submit. The
+    // old fallback "Please try again." was a measured TRANSIENCE LIE: the state is
+    // permanent until access is re-granted on GitHub, so retrying the connect can
+    // never succeed. The curated rung wins first in friendly(), so it covers the
+    // reader (submitSiteGithub -> friendly(r.data, "Please try again.")) without
+    // relaying any server reason. It names the state and the ONE remedy — regrant
+    // then reconnect — with no transience verb.
+    repo_not_in_installation: "GitHub's app can no longer see that repository — grant it access on GitHub, then reconnect."
   };
   // cch-w35-s4 — THE ROLE SENTENCES, keyed by the server's own `required` label.
   // Auth.forbidden/2 (cloud/lib/barkpark_cloud/web/auth.ex) merges evidence AROUND
@@ -346,6 +399,15 @@
   function friendly(data, fallback) {
     if (!data) return fallback || "Something went wrong.";
     var key = data.error;
+    // cch-w62 (D740) — UNWRAP THE NESTED ENVELOPE before keying anything. Five
+    // route families (self-update 13, rollback 10, the webhook proxy 6, PATCH
+    // /autoupdate 1, PATCH /admin channel 1 — 31 emitters in router.ex) send
+    // `{error: {code}}`, not the flat shape. Without this line `key` is a
+    // truthy OBJECT and the humanized-slug return below calls `key.replace`
+    // — a TypeError, in copy code whose whole job is to never crash. A nested
+    // envelope with no `code` resolves to undefined and takes the fallback,
+    // exactly like a missing slug.
+    if (key && typeof key === "object") key = key.code;
     if (key === "forbidden") {
       var proved = forbiddenEvidenceCopy(data);
       if (proved) return proved;
@@ -384,6 +446,44 @@
         if (Array.isArray(msg)) msg = msg[0];
         return first.replace(/_/g, " ") + " " + msg;
       }
+    }
+    // cch-w62 (D855) — THE SINGULAR-DETAIL RUNG, fenced to an enumerated slug
+    // allowlist. The server sometimes writes its most specific true sentence
+    // into `detail` (a STRING — the ladder above reads only `details`, the
+    // per-field MAP), and for exactly three measured slugs that sentence is
+    // surface-neutral product copy worth relaying verbatim: barkpark_required
+    // (create 422 — deliberately no siteCreateFailureCopy arm; it reaches
+    // friendly()), deploy_ability_required (settings 403), nothing_to_update
+    // (settings 422). The fence is keyed on the SLUG SET by name, never on an
+    // HTTP status — friendly() takes no status argument — and that is load-
+    // bearing: faultCopy passes ERRORS.server_error AS the fallback on a 5xx,
+    // so an unfenced rung would let a 5xx-borne detail (node_ports_exhausted,
+    // or read_token_mint_failed's raw upstream slug — the cch-w48-s2 class)
+    // outrank the 5xx honesty law by construction. CLI-voiced details
+    // (content_binding_required/empty, no_build_source — they embed bp flags
+    // and re-run lines) stay with their per-route arms and are NOT relayed
+    // here.
+    // cch-w72-s2 (D855 -> D871) — provisioning_in_progress is the fence's FOURTH
+    // slug. Its 409 detail is measured, surface-neutral product copy ("This
+    // instance is still provisioning. Try removing it once it's up or has
+    // failed."), and its render path is already friendly(r.data, "Please try
+    // again.") in runDecommission. THE SHADOW LAW: it gets NO ERRORS entry on
+    // purpose — the curated rung above wins first and would silently disable this
+    // relay, so the specific measured sentence must reach the person through the
+    // fence, not a fixed console string.
+    // cch-w72-bl (D855 -> D874) — instance_not_live is the fence's FIFTH slug.
+    // Single emit site (router.ex deploy_static_site, 422), a STATIC surface-
+    // neutral detail ("the instance hosting this site has no URL yet — wait for
+    // it to finish provisioning"), read via friendly(r.data, …) in runDeploy and
+    // createAndDeploy. The SHADOW LAW holds here too: NO ERRORS entry — and
+    // beware the near-twin key `not_live` ALREADY in ERRORS above; adding
+    // instance_not_live "for symmetry" would win the curated rung first and
+    // silently disable this relay.
+    if ((key === "barkpark_required" || key === "deploy_ability_required" ||
+         key === "nothing_to_update" || key === "provisioning_in_progress" ||
+         key === "instance_not_live") &&
+        typeof data.detail === "string" && data.detail) {
+      return data.detail;
     }
     return fallback || (key ? key.replace(/_/g, " ") : "") || "Something went wrong.";
   }
@@ -1627,7 +1727,7 @@
               // dead "Revoking…" button the operator can never retry.
               b.disabled = false;
               b.textContent = "Revoke";
-              toast({ kind: "error", title: "Couldn't revoke", body: friendly(r.data) });
+              toast({ kind: "error", title: "Couldn't revoke", body: friendly(r.data, "That device is still signed in — please try again.") });
             }
           });
         });
@@ -1654,7 +1754,21 @@
           var n = $("#pw-new"); if (n) n.value = "";
           loadSessions();
         } else if (errEl) {
-          errEl.textContent = r.status === 401 ? "Current password is wrong." : friendly(r.data, "Couldn't update password.");
+          // cch-w74 — THE 401 ARM KEYS ON THE SLUG, NOT THE STATUS. Two distinct
+          // 401s reach here: invalid_current_password (the router's password
+          // check) and a slug-less `unauthorized` when Auth.require_user rejects
+          // an expired session — noBounce:true suppresses api()'s login bounce,
+          // so BOTH land in this else. A bare `r.status === 401` accusation told a
+          // user whose password is fine that it was wrong (sharpest on this
+          // feature's own "signed out everywhere" success path, whose new token
+          // can 401 the very next submit). Accuse only on the proven slug; any
+          // other 401 states only what is proven — the session is gone.
+          errEl.textContent =
+            r.status === 401 && r.data && r.data.error === "invalid_current_password"
+              ? "Current password is wrong."
+              : r.status === 401
+                ? "Your session has expired — sign in again."
+                : friendly(r.data, "Couldn't update password.");
           errEl.hidden = false;
         }
       });
@@ -4686,7 +4800,7 @@
         if (r.ok) {
           toast({ kind: "success", title: "Token revoked" });
         } else {
-          toast({ kind: "error", title: "Couldn't revoke token", body: friendly(r.data) });
+          toast({ kind: "error", title: "Couldn't revoke token", body: friendly(r.data, "That token is still active — please try again.") });
         }
         loadTokens();
       });
@@ -6257,7 +6371,8 @@
     api("GET", "/v1/barkparks").then(function (r) {
       if (!r.ok) {
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load fleet</h2><p>' +
-          esc(friendly(r.data)) + "</p></div>";
+          esc(readFailureCopy(r, "You don't have access to this fleet.",
+            "Your fleet couldn't be loaded, and the answer didn't say why.")) + "</p></div>";
         return;
       }
       absorbServerStepEstimates(r.data); // measured deploy-rail medians ride along
@@ -6784,7 +6899,8 @@
         // that never arrived. Mark the staleness; never blank the body.
         if (!full) { markRefreshStale(); return; }
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load your fleet</h2><p>' +
-          esc(friendly(r.data)) + "</p></div>";
+          esc(readFailureCopy(r, "You don't have access to this fleet.",
+            "Your fleet couldn't be loaded, and the answer didn't say why.")) + "</p></div>";
         return;
       }
       clearRefreshStale(); // the read landed — what's on screen is current again
@@ -7868,6 +7984,62 @@
     if (form) form.addEventListener("submit", function (e) { e.preventDefault(); attachDomain(bp); });
   }
 
+  // cch-w40-bl (D870): the domain-attach failure arm, extracted PURE so its copy
+  // is node-pinned via __bpTestHook instead of living inline in a DOM handler —
+  // where a mutation to a total fiction left the suite byte-identical (zero
+  // detection). POST /v1/barkparks/:id/domain emits, on failure:
+  //   409 taken / 409 already_attaching       — the attach conflicts on the wire
+  //   422 domain_not_pointed {expected_ip, observed}  — the ONE slug carrying a remedy
+  //   422 invalid_domain                       — bad domain syntax
+  //   422 instance_no_origin {detail}          — box has no origin yet; relay the sentence
+  //   422 no_team                              — teamless caller (w38 carve-out → friendly)
+  //   422 invalid / anything else              — friendly() generic
+  //   422 domain_required                      — MODAL-UNREACHABLE: attachDomain's empty
+  //        guard returns before the POST, so the server never emits this to this arm;
+  //        classified here, deliberately no copy written.
+  // The pre-fix code answered EVERY 422 except no_team with "Only
+  // <name>.barkpark.cloud domains are supported for now." — flatly false: external
+  // FQDNs ARE supported (DomainOwnership.pointed_at?, router.ex:4237), and the
+  // console discarded the whole domain_not_pointed remedy payload (the IP to point
+  // at, the IP it observed) to tell the user the feature doesn't exist. Peers:
+  // siteCreateFailureCopy, siteDeleteFailureCopy — same *FailureCopy + hook shape.
+  function attachDomainFailureCopy(status, data) {
+    data = data || {};
+    var code = data.error;
+    if (code && typeof code === "object") code = code.code;
+
+    if (code === "taken") return "That domain is already in use.";
+    if (code === "already_attaching") return "An attach is already running.";
+
+    if (status === 422) {
+      if (code === "domain_not_pointed") {
+        // Relay the MEASURED remediation — the A-record target the plane wants and,
+        // when the resolver returned any answer, the address it actually observed.
+        // Both are server-derived strings; the caller renders via textContent only.
+        // expected_ip CAN be null on the wire: pointed_at?(_host, nil, _opts)
+        // answers {:error, []} for a host-less instance, and the route relays
+        // expected_ip: bp.host verbatim — so the remedy clause renders only when
+        // there is a real target ("Point an A record at null." is a lie).
+        var msg = "That domain isn't pointed at this instance yet.";
+        if (typeof data.expected_ip === "string" && data.expected_ip) {
+          msg += " Point an A record at " + data.expected_ip;
+          var observed = data.observed;
+          if (Array.isArray(observed)) observed = observed.join(", ");
+          if (observed) msg += " — right now it resolves to " + observed;
+          msg += ".";
+        }
+        return msg;
+      }
+      if (code === "invalid_domain") return "That doesn't look like a valid domain name.";
+      if (code === "instance_no_origin" && typeof data.detail === "string" && data.detail) {
+        return data.detail;
+      }
+      // no_team (w38 carve-out), invalid, and any unseen slug fall through to
+      // friendly() — the teamless answer owns the sentence that repairs it.
+    }
+    return friendly(data, "Something went wrong — please try again.");
+  }
+
   function attachDomain(bp) {
     var value = (($("#domain-input") || {}).value || "").trim();
     var errEl = $("#domain-error");
@@ -7891,20 +8063,9 @@
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = "Attach domain"; }
-      var code = r.data && r.data.error;
-      var msg = code === "taken"
-        ? "That domain is already in use."
-        : code === "already_attaching"
-          ? "An attach is already running."
-          // cch-w38-s1: the 422 arm is about the DOMAIN, and `no_team` is not —
-          // require_primary_team_admin answers a teamless caller 422 {no_team},
-          // which used to be reported as bad domain syntax. It falls through to
-          // friendly(), which owns the sentence that actually repairs it.
-          : (r.status === 422 && code !== "no_team")
-            ? "Only <name>.barkpark.cloud domains are supported for now."
-            : friendly(r.data, "Something went wrong — please try again.");
-      // textContent, not innerHTML — the literal "<name>" (and any echoed input)
-      // must render as text, never as markup.
+      var msg = attachDomainFailureCopy(r.status, r.data);
+      // textContent, not innerHTML — server-derived strings (expected_ip, observed,
+      // instance_no_origin's detail) and any echoed input render as text, never markup.
       if (errEl) { errEl.hidden = false; errEl.textContent = msg; }
       else toast({ kind: "error", title: "Couldn't attach the domain", body: msg });
     });
@@ -12048,7 +12209,8 @@
       var r = res[0];
       if (!r.ok) {
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load sites</h2><p>' +
-          esc(friendly(r.data)) + "</p></div>";
+          esc(readFailureCopy(r, "You don't have access to these sites.",
+            "Your sites couldn't be loaded, and the answer didn't say why.")) + "</p></div>";
         return;
       }
       var sites = (r.data && r.data.sites) || [];
@@ -13555,6 +13717,23 @@
           "once a site is already deleted — the outcome you asked for — but it answers the same for a site " +
           "in another team, an id that never existed, and a session with no team. Go back to Sites to see " +
           "which one it is.",
+        recovery: "close",
+      };
+    }
+    // (3b) 500 registration_not_removed — the INVERSE ORPHAN, made typed (W70
+    // S2). Unlike the crash envelope below, this 500 MEASURED both halves: the
+    // instance IS torn down, and the registration was NOT removed because a
+    // foreign-key constraint refused the row delete. The plane wrote the whole
+    // sentence — including the constraint name — into `detail`, so relay it
+    // verbatim rather than re-guessing an outcome this console did not observe.
+    // A retry cannot fix a surviving row a constraint is holding, so the
+    // recovery is "close", not "recheck": this needs support, not another click.
+    if (code === "registration_not_removed") {
+      return {
+        title: "The site is torn down but still registered",
+        body: (detail ||
+          "The instance was torn down, but the control plane could not remove the registration.") +
+          " Contact support to have the leftover registration removed.",
         recovery: "close",
       };
     }
@@ -16780,17 +16959,17 @@
   // unknown action (a newly-added verb the SPA hasn't learned) falls back to the
   // raw action so it still renders rather than disappearing.
   //
-  // GENERATED from design/audit-actions.json — the SOLE authority for the audit
+  // GENERATED from cloud/priv/audit-actions.json — the SOLE authority for the audit
   // register's verbs. That one table also feeds the server's closed @actions
   // allowlist (AuditEvent reads it at compile time), so this object and the
   // vocabulary it labels can no longer drift apart: they are two OUTPUTS of one
   // file, and neither side greps the other's syntax. A hand edit inside the
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
-    /* BEGIN GENERATED: audit action labels (design/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 36 of the 56 declared verbs have no entry here: they render
+    /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
+    // 34 of the 56 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
-    // declared unlabelled ON PURPOSE with a reason in design/audit-actions.json
+    // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
     "member.invited": "invited a member",
     "member.role_changed": "changed a member's role",
@@ -16815,7 +16994,9 @@
     // instance write because the box answered our stored admin credential 401.
     // The actor tried; the request never left. The expanded detail carries the
     // wire word (reason: "identity_refused") and which write it was.
-    "barkpark.credentials_refused": "was refused — the instance rejected our access credential"
+    "barkpark.credentials_refused": "was refused — the instance rejected our access credential",
+    "twofa.enabled": "enabled two-factor authentication",
+    "twofa.disabled": "disabled two-factor authentication"
     /* END GENERATED: audit action labels */
   };
 
@@ -17079,7 +17260,8 @@
     api("GET", activityQuery(null)).then(function (r) {
       if (!r.ok) {
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load activity</h2><p>' +
-          esc(friendly(r.data)) + "</p></div>";
+          esc(readFailureCopy(r, "You don't have access to this activity.",
+            "The activity feed couldn't be loaded, and the answer didn't say why.")) + "</p></div>";
         toggleActivityMore(false);
         return;
       }
@@ -21345,7 +21527,7 @@
     if (status === 409 && data && data.error === "last_owner") {
       return "You're the last owner — promote another member to owner first.";
     }
-    return friendly(data);
+    return friendly(data, "That role change didn't go through — please try again.");
   }
 
   // Pure: honest copy for a failed member removal. The server's 409 last_owner is
@@ -21414,7 +21596,7 @@
       api("DELETE", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/invitations/" + encodeURIComponent(invId)).then(function (r) {
         closeModal();
         if (r.ok) toast({ kind: "success", title: "Invitation revoked" });
-        else toast({ kind: "error", title: "Couldn't revoke invitation", body: friendly(r.data) });
+        else toast({ kind: "error", title: "Couldn't revoke invitation", body: friendly(r.data, "That invitation is still active — please try again.") });
         loadMembers();
       });
     });
@@ -21682,7 +21864,7 @@
       api("DELETE", "/v1/env-vars/" + encodeURIComponent(id)).then(function (r) {
         closeModal();
         if (r.ok) toast({ kind: "success", title: "Variable deleted" });
-        else toast({ kind: "error", title: "Couldn't delete variable", body: friendly(r.data) });
+        else toast({ kind: "error", title: "Couldn't delete variable", body: friendly(r.data, "That variable is still stored — please try again.") });
         loadEnvVars();
       });
     });
@@ -23545,6 +23727,12 @@
       // fetch and a recording-innerHTML DOM rather than asserted from markup.
       loadInstanceSites: loadInstanceSites, loadTokens: loadTokens,
       readFailureCopy: readFailureCopy,
+      // cch-w72-bl — the four no-fallback loader empty-state cards, now routed
+      // through readFailureCopy so an unread typed slug reads honest copy instead
+      // of a humanized slug. Impure (fetch + paint), driven with the same
+      // driveLoader/recordingDom rig as loadInstanceSites/loadTokens above.
+      // (loadOverview is already exported below for the refetch-storm harness.)
+      loadFleet: loadFleet, loadSites: loadSites, loadActivity: loadActivity,
       overviewScopes: { full: OVERVIEW_FULL, fleet: OVERVIEW_FLEET, onboarding: OVERVIEW_ONBOARDING },
       overviewData: overviewData, // stable object identity — the harness resets its fields
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
@@ -23648,6 +23836,10 @@
       // Impure (it fetches and paints its inline error), driven the same way
       // loadMembers/loadEnvVars are.
       attachDomain: attachDomain,
+      // cch-w40-bl (D870): the domain-attach failure copy, pure now — the inline
+      // 422 ternary answered every slug "Only <name>.barkpark.cloud …", discarding
+      // the domain_not_pointed remedy the plane measured. Pinned per-slug below.
+      attachDomainFailureCopy: attachDomainFailureCopy,
       // cch-w46-s2: the decommission post-click arm had ZERO hook reach, so its
       // unconditional "Try again" into a permanent 403 could not be seen from the
       // harness at all. The terminality predicate is pure; runDecommission is the
@@ -24180,7 +24372,7 @@
       // email and the system's own verb share ONE text run.
       activityRow: activityRow,
       // cch-w65: the audit verb → sentence-fragment lookup, so the harness can
-      // pin the SHIPPED artifact against design/audit-actions.json — every
+      // pin the SHIPPED artifact against cloud/priv/audit-actions.json — every
       // labelled verb serves its label, every unlabelled one falls back to its
       // raw dotted slug (D582). Without this the generated region is proven only
       // against itself by the design gate.
