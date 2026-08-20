@@ -284,9 +284,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   `{:error, {:workspace_slug_conflict, %{slug, existing_id, bundle_id}}}`
   unless the squatting workspace is a provably EMPTY shell (0 documents,
   0 media_files), which is deleted in-transaction and replaced (PDS-D9).
+
+  In BOTH modes, a bundle whose `media_files` rows carry a `path` a RESIDENT
+  workspace (or an unscoped legacy row) already owns returns
+  `{:error, {:blob_path_conflict, %{workspace_id, count, sample}}}` and the whole
+  import rolls back. The blob keyspace is flat, so two owners at one path means
+  the loser's own scoped read streams the winner's bytes — see
+  `assert_no_foreign_blob_path_collision!/3` for why the refusal fires at
+  ROW-COPY time rather than at blob-push time.
   """
   @spec import_bundle(binary(), keyword()) ::
-          {:ok, stats()} | {:error, {:workspace_slug_conflict, map()} | term()}
+          {:ok, stats()}
+          | {:error, {:workspace_slug_conflict, map()} | {:blob_path_conflict, map()} | term()}
   def import_bundle(bundle, opts \\ []) when is_binary(bundle) do
     mode = import_mode!(opts)
     {manifest, dumps} = Archive.unpack(bundle)
@@ -314,7 +323,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   `bundle_path` — this function never deletes it.
   """
   @spec import_bundle_file(Path.t(), keyword()) ::
-          {:ok, stats()} | {:error, {:workspace_slug_conflict, map()} | term()}
+          {:ok, stats()}
+          | {:error, {:workspace_slug_conflict, map()} | {:blob_path_conflict, map()} | term()}
   # `dir` is derived from Plug's server-chosen upload path plus a unique suffix,
   # and Archive validates every tar member before extraction. No manifest member
   # can choose the directory removed by the `after` clause.
@@ -415,6 +425,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           manifest["tables"]
           |> Enum.reduce({%{}, 0}, fn entry, {acc, total} ->
             n = import_member(entry, Map.get(dumps, entry["name"], ""), mode)
+            # ROW-COPY TIME, deliberately: see
+            # assert_no_foreign_blob_path_collision!/3 for why a push-time
+            # refusal reproduces the very state it is meant to prevent.
+            assert_no_foreign_blob_path_collision!(entry["name"], n, manifest)
             {Map.put(acc, entry["name"], n), total + n}
           end)
           |> then(fn {tables, total} ->
@@ -1120,6 +1134,89 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
     document_count == 0 and media_count == 0
   end
+
+  # ── Cross-tenant blob-path refusal (task-918106d49c62563e) ──────────────────
+  #
+  # THE FAILURE MODE. The blob keyspace is FLAT: `Blobstore` resolves an object
+  # by the very string `media_files.path` holds (`Media.serve/2` →
+  # `Blobstore.serve_strategy(file.path)`), while `media_files` uniqueness is
+  # `(path, dataset_id)` — NOT path alone. Two workspaces can therefore hold a
+  # row at ONE path, and the loser's OWN scoped
+  # `GET /w/:ws/p/:proj/media/files/*path` answers 200 carrying the winner's
+  # bytes: a silent, cross-tenant, read-side substitution. `Media`'s
+  # `authorize_blob_key/2` is a WRITE-side predicate and structurally cannot
+  # close it — worse, it is what makes the state UNREPAIRABLE, because the
+  # loser's push to its own row's path is refused `:blob_key_not_owned`.
+  #
+  # WHY THE IMPORT. Import paths are copied VERBATIM from the source instance,
+  # so a bundle whose media paths already belong to a resident workspace
+  # CONSTRUCTS the collision rather than chancing it (`unique_filename/1` carries
+  # 32 bits — accidental collision is ~1 in 4.3e9 and was never the reachable
+  # case).
+  #
+  # WHY ROW-COPY TIME, not blob-push time. Push time is already where the
+  # failure SURFACES: by then the rows exist and the loser's row points at the
+  # winner's object, so refusing the push reproduces exactly the wedged,
+  # victim-unrepairable state the guard exists to prevent. This runs inside the
+  # import transaction the instant the `media_files` member's COPY completes, so
+  # `Repo.rollback/1` un-creates the row — nothing ever becomes visible to a
+  # reader and no blob is ever pushed.
+  #
+  # FAIL CLOSED on both foreign shapes, mirroring `authorize_blob_key/2`:
+  #   * a resident row at this path owned by a DIFFERENT workspace, and
+  #   * a resident row owned by NO workspace (`workspace_id IS NULL`) — the
+  #     legacy layer, which `Content.Scope.scope_to_workspace_or_global/3`
+  #     serves to EVERY tenant, so sharing its key is the same substitution with
+  #     a wider blast radius.
+  #
+  # The operator remedy is named in the error: the resident owner's row (or the
+  # incoming one) must be re-pathed before the import can proceed. Silently
+  # importing is the one outcome that is never acceptable.
+  #
+  # Only fires for the `media_files` member, and only when the bundle actually
+  # CARRIED rows into it — a 0-row member cannot construct a collision, and
+  # refusing an unrelated import over a pre-existing one would be a new failure
+  # of its own.
+  defp assert_no_foreign_blob_path_collision!("media_files", rows, manifest) when rows > 0 do
+    ws_id = manifest["workspace_id"]
+
+    # `count(*) OVER ()` is evaluated over the FULL result set before LIMIT, so
+    # one round trip yields both the exact total and a bounded sample — a
+    # thousand-file collision never materialises a thousand rows in the BEAM.
+    conflicts =
+      Repo.query!(
+        """
+        SELECT mine.path, other.workspace_id::text, count(*) OVER () AS total
+        FROM media_files mine
+        JOIN media_files other ON other.path = mine.path
+        WHERE mine.workspace_id = $1::text::uuid
+          AND (other.workspace_id IS NULL OR other.workspace_id <> $1::text::uuid)
+        ORDER BY mine.path
+        LIMIT 10
+        """,
+        [ws_id]
+      ).rows
+
+    case conflicts do
+      [] ->
+        :ok
+
+      [[_path, _owner, total] | _] = sample ->
+        Repo.rollback(
+          {:blob_path_conflict,
+           %{
+             workspace_id: ws_id,
+             count: total,
+             sample:
+               Enum.map(sample, fn [path, owner, _total] ->
+                 %{path: path, owner_workspace_id: owner}
+               end)
+           }}
+        )
+    end
+  end
+
+  defp assert_no_foreign_blob_path_collision!(_table, _rows, _manifest), do: :ok
 
   # ── COPY sources: a binary dump or a member file on disk ─────────────────────
   #

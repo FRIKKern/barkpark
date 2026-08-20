@@ -192,6 +192,13 @@ defmodule Barkpark.Content.Errors do
                          # non-PK unique index) — 409 naming constraint + table
                          # (task-63a199c0a0ce2a06; used to escape as a blind 500).
                          "import_constraint_violation",
+                         # A bundle carrying media blob paths a RESIDENT
+                         # workspace (or an unscoped legacy row) already owns
+                         # (409, task-918106d49c62563e). The blob keyspace is
+                         # flat, so two owners at one path make the loser's own
+                         # scoped media read serve the winner's bytes — refused
+                         # at row-copy time, never imported silently.
+                         "blob_path_conflict",
                          # The import engine returned an {:error, term} no
                          # clause names — a logged, NAMED 500 whose message
                          # carries the term, replacing the silent internal_error
