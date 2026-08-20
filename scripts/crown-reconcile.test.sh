@@ -1009,7 +1009,7 @@ fi
 RC2_ARM="$(grep '^            2)' "$WF" | head -1)"
 if [ -z "$RC2_ARM" ]; then
   bad "there is no rc=2 case arm to check — this assertion would be vacuous, so it fails instead"
-elif printf '%s' "$RC2_ARM" | grep -q 'exit 0'; then
+elif grep -q 'exit 0' <<<"$RC2_ARM"; then
   bad "the rc=2 arm still exits 0 — a SILENCE is being laundered into a green run conclusion"
 else
   ok "the rc=2 SILENCE arm exits non-zero"
@@ -1023,17 +1023,17 @@ RC4_ARM="$(grep '^            4)' "$WF" | head -1)"
 if [ -z "$RC4_ARM" ]; then
   bad "there is no rc=4 case arm — the NOT-YET-DUE deferral would fall to the catch-all and page, which is the false alarm being cured"
 else
-  if printf '%s' "$RC4_ARM" | grep -q 'exit 0'; then
+  if grep -q 'exit 0' <<<"$RC4_ARM"; then
     ok "the rc=4 NOT-YET-DUE arm exits 0 — a benign in-flight grace does not page"
   else
     bad "the rc=4 arm does not exit 0 — the deferral still pages, and five of the last six rc=2 firings were exactly this"
   fi
-  if printf '%s' "$RC4_ARM" | grep -q '::warning::'; then
+  if grep -q '::warning::' <<<"$RC4_ARM"; then
     ok "and it is a ::warning — the deferral is still SAID, not swallowed into a clean green"
   else
     bad "the rc=4 arm is silent or an error; a deferral must be announced as a warning"
   fi
-  if printf '%s' "$RC4_ARM" | grep -q '::error::'; then
+  if grep -q '::error::' <<<"$RC4_ARM"; then
     bad "the rc=4 arm is an ::error — that is the page this split exists to stop"
   else
     ok "the rc=4 arm does not raise an error annotation"

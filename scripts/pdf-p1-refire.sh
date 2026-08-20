@@ -883,7 +883,7 @@ if isinstance(con, list):
     # "default" workspace is not provably empty (0 documents, 0 media_files).
     # That is the engine doing its job (bp-pds-charter.md:86), and it must
     # NEVER be misread as "c65f517e2 did not take" (PDF-D99).
-    if printf '%s' "$LAST_ROW" | grep -q 'workspace_slug_conflict'; then
+    if grep -q 'workspace_slug_conflict' <<<"$LAST_ROW"; then
       P1_COLOR="LAWFUL-RED"
       say ""
       say "      CLASSIFICATION: LAWFUL RED (PDS-D9 fail-closed refuse) — the evidence carries"

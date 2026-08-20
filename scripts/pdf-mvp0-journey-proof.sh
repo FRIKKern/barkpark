@@ -1164,7 +1164,7 @@ for r in rows:
   # FAIL FAST on a failed chain — never burn the budget waiting on a job that
   # already reported terminal. Quote the job's own error + console (the honest
   # substrate evidence; the worker tears its half-built box down itself).
-  if [ "$PSTATUS" = "failed" ] || printf '%s' "$STEPS" | grep -q ':failed'; then
+  if [ "$PSTATUS" = "failed" ] || grep -q ':failed' <<<"$STEPS"; then
     say "      SUPPORT JOB FAILED (provision_status=$PSTATUS; steps=[$STEPS]) — quoting the job's own evidence:"
     SID="$SUPPORT_ID" python3 -c '
 import json, sys, os
