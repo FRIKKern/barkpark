@@ -3769,3 +3769,104 @@ func TestSiteWindowAccountsForEveryRowItRead(t *testing.T) {
 		}
 	}
 }
+
+// TestSiteStatusRendersTheBuildIdentity is dr-w23-s6's reader half, and it is
+// deliberately a test of RENDERED BYTES rather than of the struct.
+//
+// A struct assertion (`dep.GitRef == "…"`) would have passed the moment the tag
+// was declared, while `bp cloud site status` still printed nothing — which is
+// the exact failure this slice exists to end. So the test drives the real wire
+// through the real decoder into the real renderer: JSON bytes the control plane
+// actually sends -> json.Unmarshal -> spawnSiteStatusMap -> renderKV -> stdout.
+//
+// The four keys rode this payload all along; `SiteDeployment` simply declared no
+// field for them, so json.Unmarshal dropped them silently. See the struct comment
+// in internal/cloudclient/client.go for why the payload census could not say so.
+func TestSiteStatusRendersTheBuildIdentity(t *testing.T) {
+	// The WIRE, not a hand-built struct: site_deployment_json/3 pipes the narrow
+	// deployment_json/1, which is why the wide payload carries these at top level.
+	const wire = `{
+	  "id": "dep-abc",
+	  "site_id": "site-1",
+	  "status": "live",
+	  "stage": "serve",
+	  "git_ref": "refs/heads/main@9f2c1ab",
+	  "artifact_url": "https://cdn.example/builds/9f2c1ab.tar.zst",
+	  "image_tag": "barkpark/site-blog:9f2c1ab",
+	  "detail": "served from slot b after a health-gated switch"
+	}`
+
+	var dep cloudclient.SiteDeployment
+	if err := json.Unmarshal([]byte(wire), &dep); err != nil {
+		t.Fatalf("the wire payload must decode: %v", err)
+	}
+
+	// ANTI-VACUITY: prove the DECODE happened before asserting on the render. If
+	// the tags were dropped, every render assertion below would fail with the
+	// same message and blame the renderer for a decoder bug.
+	for _, tc := range []struct{ name, got, want string }{
+		{"GitRef", dep.GitRef, "refs/heads/main@9f2c1ab"},
+		{"ArtifactURL", dep.ArtifactURL, "https://cdn.example/builds/9f2c1ab.tar.zst"},
+		{"ImageTag", dep.ImageTag, "barkpark/site-blog:9f2c1ab"},
+		{"Detail", dep.Detail, "served from slot b after a health-gated switch"},
+	} {
+		if tc.got != tc.want {
+			t.Fatalf("SiteDeployment.%s did not DECODE: got %q, want %q — the json tag is missing, not the render", tc.name, tc.got, tc.want)
+		}
+	}
+
+	site := cloudclient.SpawnSite{ID: testSiteID, Name: "blog", Slug: "blog", Kind: "static", Framework: "astro"}
+	out, buf, _ := newTestWriter()
+	renderKV(out, spawnSiteStatusMap(site, &dep, &dep, []cloudclient.SiteDeployment{dep}))
+	stdout := buf.String()
+
+	// THE RENDER, which is the whole point: each key must reach the screen with
+	// its value beside it.
+	for _, want := range []string{
+		"git ref",
+		"refs/heads/main@9f2c1ab",
+		"image tag",
+		"barkpark/site-blog:9f2c1ab",
+		"artifact",
+		"https://cdn.example/builds/9f2c1ab.tar.zst",
+		"detail",
+		"served from slot b after a health-gated switch",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("`bp cloud site status` must render %q — the wide reader is still poorer than `bp sites`:\n%s", want, stdout)
+		}
+	}
+}
+
+// TestSiteStatusDetailDoesNotEchoTheReason pins the one judgment in the render
+// above: the top-level `detail` and the failure `reason` are the same string
+// family (both come from Sites.Deploy.stage_caption/2), so on a failed row they
+// are frequently byte-identical. Printing both would put one sentence on the
+// screen twice and teach a reader that one of the two rows is noise.
+//
+// It is suppressed ONLY when it duplicates; a detail that says something the
+// reason did not must still appear, which is the second half of this test and
+// the reason the guard is not simply "never print detail on a failed row".
+func TestSiteStatusDetailDoesNotEchoTheReason(t *testing.T) {
+	site := cloudclient.SpawnSite{ID: testSiteID, Name: "blog", Slug: "blog", Kind: "static", Framework: "astro"}
+	const same = "the build command exited non-zero"
+
+	dup := &cloudclient.SiteDeployment{ID: "dep-1", Status: "failed", FailureReason: same, Detail: same}
+	out, buf, _ := newTestWriter()
+	renderKV(out, spawnSiteStatusMap(site, dup, dup, nil))
+
+	if n := strings.Count(buf.String(), same); n != 1 {
+		t.Errorf("a detail identical to the reason must print ONCE, got %d occurrences:\n%s", n, buf.String())
+	}
+
+	differs := &cloudclient.SiteDeployment{
+		ID: "dep-2", Status: "failed", FailureReason: same,
+		Detail: "npm ERR! missing script: build",
+	}
+	out2, buf2, _ := newTestWriter()
+	renderKV(out2, spawnSiteStatusMap(site, differs, differs, nil))
+
+	if !strings.Contains(buf2.String(), "npm ERR! missing script: build") {
+		t.Errorf("a detail that differs from the reason must still be rendered:\n%s", buf2.String())
+	}
+}

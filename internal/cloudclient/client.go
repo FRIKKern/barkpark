@@ -1832,6 +1832,32 @@ type SiteDeployment struct {
 	BecameLiveAt string `json:"became_live_at"`
 	InsertedAt   string `json:"inserted_at"`
 	UpdatedAt    string `json:"updated_at"`
+	// dr-w23-s6: THE FOUR LAUNDERED KEYS. `site_deployment_json/3` pipes the
+	// narrow producer `deployment_json/1`, so the WIDE wire has always carried
+	// these four — and this struct did not declare them, so `json.Unmarshal`
+	// dropped every one of them on the floor.
+	//
+	// It was invisible to the payload census for a structural reason worth
+	// keeping: its UNREAD arm takes emitted keys against the FILE-GLOBAL union of
+	// json tags in this package, and all four names are declared by OTHER structs
+	// — `artifact_url`, `git_ref` and `image_tag` by the narrow `Deployment`,
+	// `detail` by `SiteStage` and `WebhookProxyError`. The union greened them
+	// while the struct that actually decodes this payload carried nothing. The
+	// per-struct OFF-STRUCT arm added by the same slice is what can say so.
+	//
+	// The human consequence was two deploy readers on one platform, one silently
+	// poorer: `bp sites` (the narrow path) printed the build identity and
+	// `bp cloud site status` (the wide page's only consumer) could not.
+	//
+	// Detail is NOT SiteStage.Detail. They share a name and nothing else: this is
+	// the DEPLOYMENT's own caption (`Sites.Deploy.stage_caption(d.status,
+	// d.detail)` at the payload's top level), while SiteStage.Detail is the
+	// PER-STAGE caption inside `stages[]`. A name-based union cannot tell those
+	// apart, which is precisely why it must not be the thing deciding.
+	GitRef      string `json:"git_ref"`
+	ArtifactURL string `json:"artifact_url"`
+	ImageTag    string `json:"image_tag"`
+	Detail      string `json:"detail"`
 }
 
 // SiteDeploymentPage is one keyset page of a site's deployments, newest first —
