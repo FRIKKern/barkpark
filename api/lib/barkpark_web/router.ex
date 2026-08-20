@@ -654,9 +654,13 @@ defmodule BarkparkWeb.Router do
     # This pipeline has no ResolveWorkspace, so it would fall to AssignDefaultScope
     # and meter EVERY flat media write against the singleton Default Workspace.
     # Derive :current_workspace from the just-assigned api_token BEFORE
-    # AssignDefaultScope (which no-ops once the assign is set) so the write meters
-    # to its OWN workspace. A nil-workspace_id token falls through untouched and
-    # keeps today's Default-Workspace behavior.
+    # AssignDefaultScope so the write meters to its OWN workspace. AssignDefaultScope
+    # does NOT simply no-op here: it skips the workspace assign (already set) but
+    # still evaluates its PROJECT branch, and a token carries no project binding.
+    # That branch is conditional on the resolved workspace BEING the Default one
+    # for exactly this reason — see AssignDefaultScope's moduledoc. A
+    # nil-workspace_id token falls through untouched and keeps today's
+    # Default-Workspace behavior.
     plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
@@ -779,8 +783,14 @@ defmodule BarkparkWeb.Router do
   # :api_token; ResolveWorkspace (in :scoped_api) sets :current_workspace and
   # already gates :read membership; RequireWorkspaceRole reads the per-grant
   # role — so a `member` of B with global admin perms is 403'd on admin ops.
-  # The FLAT admin routes keep :require_admin (global-perm gate) — the Default
-  # workspace + the dev token's owner/admin Default membership keep them green.
+  #
+  # THE FLAT ADMIN ROUTES DO NOT USE THIS PIPELINE, AND NO LONGER USE BARE
+  # `:require_admin` EITHER. They ride `:flat_admin_api` (defined ~40 lines
+  # above), which derives the workspace from the TOKEN before AssignDefaultScope
+  # can stamp Default. `:scoped_admin` is for the PATH-scoped
+  # /w/:ws/p/:project admin routes, where a resolver has already put the real
+  # workspace in `:current_workspace`. Adding a FLAT admin surface? Mount it on
+  # `:flat_admin_api`, not here and not on `[:api, :require_admin]`.
   pipeline :scoped_admin do
     plug(BarkparkWeb.Plugs.RequireToken)
     plug(BarkparkWeb.Plugs.RequireWorkspaceRole)
