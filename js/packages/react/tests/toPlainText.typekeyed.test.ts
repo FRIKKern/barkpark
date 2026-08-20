@@ -57,7 +57,7 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type ApiEndpoint MARK:typekeyed-corpus-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:typekeyed-corpus-code-tabs
     // scaffy:add-block-type Tabs MARK:typekeyed-corpus-tabs
-    expect(cases.length).toBe(62)
+    expect(cases.length).toBe(63)
   })
 
   it('every golden type is partitioned into EXACTLY ONE of PROSE / TEXTLESS', () => {
@@ -82,7 +82,7 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     }
   })
 
-  it('the partition is 26 prose + 34 textless = 60', () => {
+  it('the partition is 26 prose + 37 textless = 63', () => {
     // grown (pbw-stier-equation): tex source is reading content, the `code` precedent
     // grown (pbw-stier-tabs): each tab's label + nested blocks' prose, the `steps` precedent
     // grown (jarl-dogfood): expandable's summary + nested blocks are reading prose
@@ -96,7 +96,7 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type Video MARK:typekeyed-textless-video
     // scaffy:add-block-type ApiEndpoint MARK:typekeyed-textless-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:typekeyed-textless-code-tabs
-    expect(Object.keys(TEXTLESS_SKIP).length).toBe(36)
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe(37)
     expect(Object.keys(PROSE_GOLDEN).length + Object.keys(TEXTLESS_SKIP).length).toBe(cases.length)
   })
 
