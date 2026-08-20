@@ -227,6 +227,18 @@ defmodule BarkparkWeb.Router do
   # cookie-authorized request that can change state is header-checked above and
   # then re-gated by the route's own write pipeline. Same posture as
   # :shared_media_api / :media_mutate, both baselined.
+  #
+  # TWO DIVERGENCES from the OptionalToken arm, both checked rather than
+  # assumed. (1) `OptionalSessionToken` also honours `:dev_browser_token`, so on
+  # the cookie arm a dev machine's scoped GETs authenticate as the seeded dev
+  # token — config/dev.exs ONLY (grep: it is set nowhere in test.exs, runtime.exs
+  # or prod.exs), and it is the same convenience :scoped_media_mutate already
+  # grants. (2) `OptionalToken` refuses a scope-bound SHARE token presented off
+  # its surface and `OptionalSessionToken` has no such arm — a no-op here, not a
+  # hole: `RequireToken.share_token_off_surface?/2` is true only when
+  # `conn.path_params["workspace_slug"]` is absent, and EVERY :scoped_api route
+  # is mounted under /w/:workspace_slug, so the predicate is false on this
+  # pipeline by construction.
   defp scoped_api_optional_credential(%Plug.Conn{} = conn, _opts) do
     if cookie_credential_admissible?(conn) do
       conn
