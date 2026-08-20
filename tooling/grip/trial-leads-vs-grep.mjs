@@ -410,6 +410,27 @@ function grepLinesToAnswer(grepLines) {
   return null;
 }
 
+// ── `grep -c` was measured as a faster equivalent, and REJECTED on the data ──
+//
+// The obvious optimisation is to let grep do the counting (`-rIc`, one
+// `path:count` line per file) so the capture is kilobytes instead of hundreds of
+// megabytes. It IS exactly equivalent — measured with the real /usr/bin/grep
+// (BSD grep 2.6.0), never an interactive shell's, across six corpora and every
+// term tried, including the pathological one where a handful of multi-megabyte
+// single-line JSON files turn 5,819 matching lines into 340 MB of `-n` output:
+// zero divergence, every time.
+//
+// It is also NOT FASTER, which is why this still runs `-rIn`. On a clean
+// checkout the two forms are 1183 ms and 1187 ms — 1.00x. grep must read every
+// byte of every file either way; the output form is not where the time goes.
+// Adopting `-c` would therefore trade the command that DEFINES
+// `repo_wide_grep_lines` for a different one and buy nothing measurable.
+//
+// The runtime that motivated the question is a property of the TREE, not of this
+// harness: a clean checkout scans in ~1.2 s, and only a working checkout carrying
+// hundreds of megabytes of untracked agent state takes minutes. That is why the
+// test below bounds its own corpus instead.
+
 // The heavy directories a repo-wide grep must NOT count: vendored trees and
 // build output are not "the codebase an agent searches", and scanning them is
 // both noise and the run's slowest step. Named once.
@@ -421,7 +442,7 @@ export const REPO_WIDE_EXCLUDES = Object.freeze([
 // the STORE dir (so it grows with volume just as leads does); the repo-wide grep
 // targets the whole tree, as the context number leads trivially beats. `repoWide`
 // defaults on for the CLI; tests pass it off to skip the whole-tree scan.
-export function scoreQuery({ term, prefix }, storeDir, { exact = false, repoWide = true } = {}) {
+export function scoreQuery({ term, prefix }, storeDir, { exact = false, repoWide = true, repoWideDir = "." } = {}) {
   const { result } = runLeadsJson(term, storeDir);
   const { lines: renderLines } = runLeadsRender(term, storeDir);
   const rows = Array.isArray(result.rows) ? result.rows : [];
@@ -430,8 +451,13 @@ export function scoreQuery({ term, prefix }, storeDir, { exact = false, repoWide
 
   const scopedGrep = runGrep(term, storeDir);
   // COUNTED, not read: the repo-wide body is never consumed, and its SIZE is
-  // unbounded — see MAX_STRING_LENGTH for the read this replaces.
-  const repoWideGrep = repoWide ? runGrepCount(term, ".", { excludeDirs: REPO_WIDE_EXCLUDES }) : { count: null };
+  // unbounded — see MAX_STRING_LENGTH for the read this replaces. `repoWideDir`
+  // is "." for the CLI (the whole tree, which is the metric) and is overridable
+  // so a test can bound its own corpus rather than scan a developer's working
+  // checkout, where untracked state makes the same call take minutes.
+  const repoWideGrep = repoWide
+    ? runGrepCount(term, repoWideDir, { excludeDirs: REPO_WIDE_EXCLUDES })
+    : { count: null };
 
   const leadsAnswer = leadsLinesToAnswer(renderLines, prefix, exact);
   const grepAnswer = grepLinesToAnswer(scopedGrep.lines);
@@ -498,9 +524,10 @@ export function buildReport(storeDir, {
   subsystemQueries = SUBSYSTEM_QUERIES,
   filepathQueries = FILEPATH_QUERIES,
   repoWide = true,
+  repoWideDir = ".",
 } = {}) {
-  const subsystem = subsystemQueries.map((q) => scoreQuery(q, storeDir, { exact: false, repoWide }));
-  const filepath = filepathQueries.map((p) => scoreQuery({ term: p, prefix: p }, storeDir, { exact: true, repoWide }));
+  const subsystem = subsystemQueries.map((q) => scoreQuery(q, storeDir, { exact: false, repoWide, repoWideDir }));
+  const filepath = filepathQueries.map((p) => scoreQuery({ term: p, prefix: p }, storeDir, { exact: true, repoWide, repoWideDir }));
 
   const scorable = subsystem.filter((s) => s.bucket_class === "scorable");
   const singletons = subsystem.filter((s) => s.bucket_class === "singleton");
