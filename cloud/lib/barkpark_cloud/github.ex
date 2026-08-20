@@ -195,6 +195,48 @@ defmodule BarkparkCloud.GitHub do
     do: Vault.decrypt(ciphertext)
 
   @doc """
+  Mint a short-lived installation access token for `team`, for SERVER-SIDE use
+  only (dwb-webhook-deploy-artifact-gap: the builder's authenticated clone of a
+  PRIVATE connected repo).
+
+  Fails closed at three gates, in order, and the order matters:
+
+    1. `configured?/0` — if the App id + private key are absent, the resolved
+       `client/0` is the in-memory `Fake`, which happily mints a deterministic
+       `ghs_fake_…` string. Handing that to a builder in production would send
+       a bogus `Authorization` header to real github.com and turn a working
+       PUBLIC-repo clone into a 401. An unwired App yields NO token, never a
+       fake one.
+    2. no installation row for the team → `{:error, :no_installation}`.
+    3. a tampered stored handle → `{:error, :installation_unreadable}`.
+
+  Returns `{:ok, token}` or `{:error, reason}`. The token is a CREDENTIAL:
+  never log it, never put it on a tenant-facing response.
+  """
+  @spec installation_token_for(Team.t() | binary()) ::
+          {:ok, String.t()}
+          | {:error, :not_configured}
+          | {:error, :no_installation}
+          | {:error, :installation_unreadable}
+          | {:error, term}
+  def installation_token_for(team) do
+    if configured?() do
+      case installation_for(team) do
+        nil ->
+          {:error, :no_installation}
+
+        %Installation{} = inst ->
+          case reveal_installation_id(inst) do
+            {:ok, id} -> client().exchange_installation_token(id)
+            :error -> {:error, :installation_unreadable}
+          end
+      end
+    else
+      {:error, :not_configured}
+    end
+  end
+
+  @doc """
   The repos the team's GitHub App installation can access — the "Import Git
   Repository" picker's data source (gh-4). Resolves the team's installation,
   reveals its handle server-side, and lists through the client seam.
