@@ -56,7 +56,7 @@ prod-500 risk. Verify with `:ets.match_spec_compile/1` (raises without touching 
 ## 4. `insert_new` closes the empty-bucket branch; body may not change the key
 
     first insert_new: true / second insert_new (expect false): false / row untouched by the loser
-    D1 body changes the key: {:RAISED, "not a valid match specification"}
+    D70 body changes the key: {:RAISED, "not a valid match specification"}
 
 ## 5. The recommended guard (structural, zero timing)
 
