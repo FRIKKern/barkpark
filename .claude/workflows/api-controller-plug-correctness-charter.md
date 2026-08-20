@@ -164,9 +164,9 @@ and is contended by 13 open PRs. *Why: one charter per epic is the repo conventi
 (~90 siblings), and appending here would both clobber a concurrent session's work and
 guarantee the recurring 13-way conflict.*
 
-**D18 — Prior verdicts are NARROWED, never overturned.** The earlier wave's D20
+**D18 — Prior verdicts are NARROWED, never overturned.** D89
 ("both cloud limiters already increment atomically") examined the INCREMENT only and
-never looked at the preceding sweep. The crown is DISJOINT from D20. *Why: attacking
+never looked at the preceding sweep. The crown is DISJOINT from D89. *Why: attacking
 a correct verdict by name would put a false retraction on the ledger.*
 
 **D19 — Two findings are already OPEN ledger rows and this wave CLOSES them rather
