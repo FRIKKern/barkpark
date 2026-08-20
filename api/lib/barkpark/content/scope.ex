@@ -117,6 +117,20 @@ defmodule Barkpark.Content.Scope do
   # any further WHERE the caller adds.
   def scope_to_workspace(query, nil, _project_id), do: where(query, false)
 
+  # ── The empty-scope sentinel (task-3e2a70930c6df723) ────────────────────────
+  #
+  # `:shared_only` is what `BarkparkWeb.ScopeHelpers.scope_opts/1` emits when a
+  # REQUEST resolved no workspace. It means "the shared/global layer" —
+  # `workspace_id IS NULL` — and never "every tenant".
+  #
+  # ADDITIVE, deliberately: `nil` keeps its existing meaning in every arm below,
+  # so internal callers that pass nil (or omit the key) are untouched. Only a
+  # request can produce this value, which is what separates "no tenant resolved"
+  # from "an internal caller wants everything" — two intents that an absent key
+  # could not distinguish, with the permissive one winning for both.
+  def scope_to_workspace(query, :shared_only, _project_id),
+    do: where(query, [x], is_nil(x.workspace_id))
+
   def scope_to_workspace(query, workspace_id, nil) when is_binary(workspace_id) do
     where(query, [x], x.workspace_id == ^workspace_id)
   end
@@ -155,6 +169,11 @@ defmodule Barkpark.Content.Scope do
   def scope_to_workspace_or_global(query, nil, _project_id),
     do: scope_to_workspace_global(query)
 
+  # NO `:shared_only` clause here, deliberately. This function's catch-all
+  # below delegates to `scope_to_workspace/3`, which owns the sentinel arm —
+  # so an explicit clause here is DEAD CODE. It was written, and removed after
+  # a mutation could not make it fail: a clause no mutation can red is
+  # decoration, not coverage.
   def scope_to_workspace_or_global(query, workspace_id, project_id),
     do: scope_to_workspace(query, workspace_id, project_id)
 
@@ -173,6 +192,10 @@ defmodule Barkpark.Content.Scope do
           Ecto.Queryable.t()
   def scope_to_workspace_including_global(query, nil, _project_id),
     do: scope_to_workspace_global(query)
+
+  # See the sentinel note above scope_to_workspace/3.
+  def scope_to_workspace_including_global(query, :shared_only, _project_id),
+    do: where(query, [x], is_nil(x.workspace_id))
 
   def scope_to_workspace_including_global(query, workspace_id, _project_id)
       when is_binary(workspace_id) do

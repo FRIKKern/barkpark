@@ -203,6 +203,14 @@ defmodule Barkpark.Media.Delivery.Search do
 
   defp join_scope_workspace(query, nil, _project_id), do: query
 
+  # `:shared_only` — the request-side empty-scope sentinel
+  # (task-3e2a70930c6df723). A REQUEST that resolved no workspace sees the
+  # SHARED layer, never every tenant. Placed above the is_binary/1 clauses,
+  # which an atom matches none of: untranslated it is a FunctionClauseError (a
+  # 500), which is exactly how this consumer announced itself.
+  defp join_scope_workspace(query, :shared_only, _project_id),
+    do: where(query, [d], is_nil(d.workspace_id))
+
   defp join_scope_workspace(query, workspace_id, nil) when is_binary(workspace_id) do
     where(query, [d], d.workspace_id == ^workspace_id or is_nil(d.workspace_id))
   end

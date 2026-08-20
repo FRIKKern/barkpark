@@ -243,7 +243,19 @@ defmodule Barkpark.Content.WriteScope do
   # no projects, project_id stays nil (and dataset_id stays NULL) — the
   # yx7f NULL-tolerant read still finds the row.
   defp resolve_write_scope(opts) do
-    opt_ws = Keyword.get(opts, :workspace_id)
+    # `:shared_only` is the request-side empty-scope sentinel
+    # (task-3e2a70930c6df723). It is a READ instruction — "the shared layer" —
+    # and is meaningless as a workspace to WRITE into, so it collapses to nil
+    # here and the write keeps exactly today's unresolved-scope behaviour.
+    # Without this it would satisfy the `not is_nil` test below and be stamped
+    # onto the row as a workspace_id, which is an Ecto cast error (a 500) rather
+    # than a scope.
+    opt_ws =
+      case Keyword.get(opts, :workspace_id) do
+        :shared_only -> nil
+        other -> other
+      end
+
     opt_proj = Keyword.get(opts, :project_id)
 
     cond do

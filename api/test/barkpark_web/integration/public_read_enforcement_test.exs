@@ -567,7 +567,18 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
     test "ACTION-LEVEL: a public-read caller gets :not_found for a drafts. id", %{
       token_struct: token
     } do
-      conn = build_conn() |> Plug.Conn.assign(:api_token, token)
+      conn =
+        build_conn()
+        |> Plug.Conn.assign(:api_token, token)
+        # BARE CONN — no router, so no `:api` pipeline and no AssignDefaultScope.
+        # This test asserts the DRAFTS-PERSPECTIVE clamp (anon_pinned?-scoped),
+        # not tenancy; the fixture doc is created unscoped and therefore lands in
+        # the seeded Default. Stand in for what the pipeline would have assigned,
+        # so the clamp is what the assertion measures. Without it the sentinel
+        # (task-3e2a70930c6df723) fires on an unresolvable scope and the doc is
+        # hidden by TENANCY — which would fail the read-token arm and, worse,
+        # pass the public-read arm for the wrong reason.
+        |> Plug.Conn.assign(:current_workspace, Barkpark.Tenancy.get_default_workspace())
 
       # Sanity: this principal really is the pinned class the clamp keys on —
       # otherwise the assertion below could pass for the wrong reason.
@@ -583,7 +594,19 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
          %{ws: ws} do
       raw = mint!(ws, ["read"], "legacy clamp read")
       {:ok, token} = Auth.verify_token(raw)
-      conn = build_conn() |> Plug.Conn.assign(:api_token, token)
+
+      conn =
+        build_conn()
+        |> Plug.Conn.assign(:api_token, token)
+        # BARE CONN — no router, so no `:api` pipeline and no AssignDefaultScope.
+        # This test asserts the DRAFTS-PERSPECTIVE clamp (anon_pinned?-scoped),
+        # not tenancy; the fixture doc is created unscoped and therefore lands in
+        # the seeded Default. Stand in for what the pipeline would have assigned,
+        # so the clamp is what the assertion measures. Without it the sentinel
+        # (task-3e2a70930c6df723) fires on an unresolvable scope and the doc is
+        # hidden by TENANCY — which would fail the read-token arm and, worse,
+        # pass the public-read arm for the wrong reason.
+        |> Plug.Conn.assign(:current_workspace, Barkpark.Tenancy.get_default_workspace())
 
       refute AnonPerspective.anon_pinned?(conn)
 
