@@ -6,7 +6,8 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
   401 (no token) and 403 (non-admin) come for free from RequireToken +
   RequireAdmin — proving that here is proving there is no new auth surface.
   Then the status contract: 503 fail-closed, 400 on anything that would reach
-  argv or the child's env unvalidated, 409 per-slug single-flight, 202 started,
+  argv or the child's env unvalidated, 409 per-slug single-flight, 409
+  `box_at_capacity` when the box's one fleet build slot is taken, 202 started,
   500 runner_start_failed — and a GET that walks the six stages.
   """
   # async: false — mutates the DeployRunner singleton + Application env.
@@ -65,6 +66,60 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
   end
 
   defp stub(script), do: {"bash", ["-c", script]}
+
+  # Take over the Runner's registered name with a door that CANNOT answer a
+  # trigger — deterministically, on any machine, at any load.
+  #
+  # `DeployRunner.trigger/1` resolves the Runner by name and gives up on the
+  # call budget (`safe_call/3`). The interceptor sits on that name and:
+  #   * `{:trigger, _}` — forwards it to the real Runner off the loop, so the
+  #     deploy really is provisioned and spawned, and then DROPS the reply:
+  #     the caller is never answered, so its budget always expires;
+  #   * everything else — proxied verbatim, reply included, so status polling
+  #     still reads the real Runner's real state.
+  # Restored on exit. `async: false` (see the case header) is what makes
+  # borrowing a singleton's name safe here.
+  defp intercept_with_unanswering_door do
+    real = Process.whereis(DeployRunner)
+    assert is_pid(real), "the DeployRunner singleton must be alive to be intercepted"
+
+    door = spawn(fn -> unanswering_door_loop(real) end)
+    Process.unregister(DeployRunner)
+    Process.register(door, DeployRunner)
+
+    on_exit(fn ->
+      if Process.whereis(DeployRunner) == door, do: Process.unregister(DeployRunner)
+      Process.exit(door, :kill)
+
+      if Process.alive?(real) and is_nil(Process.whereis(DeployRunner)),
+        do: Process.register(real, DeployRunner)
+    end)
+
+    door
+  end
+
+  defp unanswering_door_loop(real) do
+    receive do
+      {:"$gen_call", _from, {:trigger, _req} = msg} ->
+        # Real work, no reply: the trigger lands on the box, the caller waits
+        # forever. Spawned so status calls stay answerable meanwhile.
+        spawn(fn ->
+          try do
+            GenServer.call(real, msg, 15_000)
+          catch
+            :exit, _ -> :ok
+          end
+        end)
+
+      {:"$gen_call", from, msg} ->
+        GenServer.reply(from, GenServer.call(real, msg, 15_000))
+
+      other ->
+        send(real, other)
+    end
+
+    unanswering_door_loop(real)
+  end
 
   defp body(slug, extra \\ %{}) do
     Map.merge(%{"slug" => slug, "build_id" => "b1", "mode" => "deploy"}, extra)
@@ -129,6 +184,91 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
                |> admin_conn()
                |> post("/v1/admin/site-deploy", %{"slug" => "../etc"})
                |> json_response(503)
+    end
+  end
+
+  # ── the Runner that did not answer (dr-w8-s2) ───────────────────────────
+
+  # THE CONFLATION, measured on the fleet: a 503 `feature_not_configured` at
+  # 5039ms on a box whose BEAM had carried BARKPARK_SITE_DEPLOY_APPLY=1 for 75
+  # minutes — and the build it names as never-configured RAN TO COMPLETION. The
+  # door's `GenServer.call/2` used the unstated 5_000ms default and converted the
+  # resulting exit into `{:error, :disabled}`, the same value the flag-off guard
+  # produces, rendered by the same renderer. 207 rows in 24h, wrong about the
+  # cause AND the outcome.
+  #
+  # HOW THE UNANSWERED TRIGGER IS PRODUCED (dr-w13-s4). This used to shrink the
+  # answer budget to 1ms against the REAL Runner and bet that provision + spawn
+  # would outrun it — a RACE, which lost at random inside a required gate (main
+  # was red on it at b00d793c, byte-identical to a green run). A guard that
+  # loses at random is worse than one that cannot lose: it teaches the fleet to
+  # re-run reds. So the timeout is now produced BY CONSTRUCTION, not by speed:
+  # `intercept_with_unanswering_door/0` puts an interceptor on the Runner's
+  # registered name that forwards the trigger to the real Runner (the deploy
+  # genuinely starts, and finishes — the second half of this test) but NEVER
+  # replies to the caller's `$gen_call`. No amount of machine speed can make
+  # that call answer, so the 503 below can only fail for the right reason.
+  describe "POST — the Runner did not answer" do
+    setup do
+      put_runner_cfg(
+        enabled: true,
+        # Any budget expires against a door that never answers; small only so
+        # the test is quick. Nothing here races the Runner's real work.
+        trigger_call_timeout_ms: 25,
+        command: stub("echo 'BPSTAGE name=PLAN status=ok build_id=b1'\nexit 0")
+      )
+    end
+
+    test "an unanswered trigger is its OWN 503 — it never blames a flag that is set", %{
+      conn: conn
+    } do
+      # The half that makes the old message a lie: the flag IS on.
+      assert DeployRunner.enabled?()
+
+      # And the door is guaranteed silent — not merely likely to be slow.
+      intercept_with_unanswering_door()
+
+      res =
+        conn
+        |> admin_conn()
+        |> post("/v1/admin/site-deploy", body("slow-blog"))
+
+      assert %{"error" => %{"code" => "deploy_runner_unavailable", "message" => message}} =
+               json_response(res, 503)
+
+      # The accusation is gone: this refusal says nothing about configuration.
+      refute message =~ "BARKPARK_SITE_DEPLOY_APPLY"
+      refute message =~ "not enabled"
+      assert message =~ "did not answer"
+      # And it is retryable, in the header a client actually honours.
+      assert [retry_after] = get_resp_header(res, "retry-after")
+      assert {n, ""} = Integer.parse(retry_after)
+      assert n > 0
+
+      # THE SECOND HALF, and the reason the old row was wrong twice: the deploy
+      # the door refused to admit to was ALREADY RUNNING, and it finishes.
+      done = await_done("slow-blog")
+      assert done["state"] == "done"
+      assert done["exit_code"] == 0
+    end
+
+    test "the flag-off refusal is untouched — the two paths are now distinguishable", %{
+      conn: conn
+    } do
+      # Same shrunken budget, flag off: the guard answers before the call, so
+      # this must still be the configuration message, byte for byte.
+      put_runner_cfg(enabled: false)
+      refute DeployRunner.enabled?()
+
+      assert %{"error" => %{"code" => "feature_not_configured", "message" => message}} =
+               conn
+               |> admin_conn()
+               |> post("/v1/admin/site-deploy", body("off-blog"))
+               |> json_response(503)
+
+      assert message ==
+               "site deploys are not enabled on this instance " <>
+                 "(set BARKPARK_SITE_DEPLOY_APPLY=1)"
     end
   end
 
@@ -329,6 +469,10 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       assert body["prebuilt"] == true
       assert body["artifact_sha256"] == sha
       assert body["status"]["slug"] == "pb-site"
+
+      # The box builds ONE site at a time, so a fire-and-forget run would refuse
+      # the NEXT test's deploy with `box_at_capacity`. Leave the slot free.
+      await_done("pb-site")
     end
 
     test "a BOX BUILD omits both keys — an absent field, never a bare prebuilt:false", %{
@@ -345,6 +489,8 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       assert body["ok"] == true
       refute Map.has_key?(body, "prebuilt")
       refute Map.has_key?(body, "artifact_sha256")
+
+      await_done("box-built")
     end
 
     test "400 invalid_artifact_digest — artifact_b64 alone is REFUSED, never silently dropped",
@@ -407,14 +553,59 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
 
       assert message =~ "busy"
 
-      # A second SITE is unaffected — this is the whole reason for a per-slug slot.
+      # A SECOND SITE draws a DIFFERENT typed 409: its own single-flight slot is
+      # free (it is still `idle`), but the box builds one site at a time, so the
+      # deploy is refused AT THE DOOR rather than queueing inside its own unit
+      # for 900s where an operator reads the queue as a hang. `code` is exactly
+      # "box_at_capacity" and the message is NON-EMPTY: the control plane
+      # renders a refusal as "<code> — <message>" and classifies on the head of
+      # that split, so an empty message lands the deferral unclassified.
+      assert %{"error" => %{"code" => "box_at_capacity", "message" => busy_message}} =
+               conn
+               |> admin_conn()
+               |> post("/v1/admin/site-deploy", body("not-busy"))
+               |> json_response(409)
+
+      assert String.trim(busy_message) != ""
+      assert busy_message =~ "1 of 1"
+
+      assert %{"state" => "idle"} =
+               conn
+               |> admin_conn()
+               |> get("/v1/admin/site-deploy", %{"slug" => "not-busy"})
+               |> json_response(200)
+
+      await_done("busy")
+
+      # The slot frees itself with the build — no operator action, no lock to
+      # clear — and the refused site deploys on a plain retry.
       assert conn
              |> admin_conn()
              |> post("/v1/admin/site-deploy", body("not-busy"))
              |> json_response(202)
 
-      await_done("busy")
       await_done("not-busy")
+    end
+
+    test "a ROLLBACK is never refused by the box door — it takes no build slot", %{conn: conn} do
+      put_runner_cfg(
+        enabled: true,
+        command: stub("sleep 0.6; exit 0"),
+        rollback_command: stub("exit 0")
+      )
+
+      assert conn
+             |> admin_conn()
+             |> post("/v1/admin/site-deploy", body("gate-busy"))
+             |> json_response(202)
+
+      assert conn
+             |> admin_conn()
+             |> post("/v1/admin/site-deploy", %{"slug" => "gate-rb", "mode" => "rollback"})
+             |> json_response(202)
+
+      await_done("gate-rb")
+      await_done("gate-busy")
     end
   end
 
@@ -516,5 +707,95 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
     test "a non-empty build_id against an idle run (nil build_id) is not_found" do
       assert :not_found = SiteDeployController.resolve_status_match(%{build_id: nil}, "b1")
     end
+  end
+
+  # ── the call budgets are PINNED, not merely configured (dr-w15-s1) ───────
+  #
+  # Every existing reference to `trigger_call_timeout_ms` OVERRIDES it (25ms,
+  # above) — so nothing observed the DEFAULT, and a regression from 30_000 back
+  # to the 5_000 that produced 265 wrong `feature_not_configured` rows would
+  # have shipped GREEN. These two tests are the guard that can lose: mutate the
+  # module attribute and they RED.
+  describe "call budgets — the defaults, observed without overriding them" do
+    test "the trigger budget default is 30_000ms, longer than the ctl round-trip it waits on" do
+      # The pin is meaningless if config is supplying the number: assert we are
+      # reading the ATTRIBUTE, then assert the attribute.
+      refute Keyword.has_key?(DeployRunner.config(), :trigger_call_timeout_ms),
+             "this test observes the DEFAULT — an override in config would make it vacuous"
+
+      assert DeployRunner.trigger_call_timeout_ms() == 30_000
+
+      # The invariant underneath the number: the caller's budget must outlast a
+      # control-plane systemctl round-trip (@default_ctl_cmd_timeout_ms, 15s),
+      # which the trigger's critical section is ALLOWED to make. The old 5_000
+      # violated this, and that is what made the door lie.
+      assert DeployRunner.trigger_call_timeout_ms() > 15_000
+    end
+
+    test "the status budget default is 20_000ms, and is the one `trigger/1` does NOT share" do
+      refute Keyword.has_key?(DeployRunner.config(), :status_call_timeout_ms),
+             "this test observes the DEFAULT — an override in config would make it vacuous"
+
+      assert DeployRunner.status_call_timeout_ms() == 20_000
+      # Same invariant as the trigger: longer than the ctl round-trip
+      # `{:status, slug}` may make. `status/1` used to take safe_call's unstated
+      # 5_000 default.
+      assert DeployRunner.status_call_timeout_ms() > 15_000
+    end
+  end
+
+  # ── status/1 no longer answers a silent :idle for a wedged Runner ────────
+  #
+  # A 5_000ms budget with an `idle_status/1` fallback meant a Runner wedged for
+  # >5s reported `state: :idle` — byte-identical to "this slug has never run",
+  # on the very read a control plane polls to decide a deploy finished. The
+  # wedge here is produced BY CONSTRUCTION (a process parked on a message nobody
+  # sends), so this can only fail for the right reason.
+  describe "status/1 — an unread status is not an empty one" do
+    test "a genuine idle and an unreachable Runner are DIFFERENT answers" do
+      genuine = DeployRunner.status("never-ran-anywhere")
+      assert genuine.state == :idle
+      assert genuine.log_state == :never_recorded
+      assert is_nil(genuine.failure_reason)
+
+      # Shrink the budget so the wedge is observed in milliseconds; the door is
+      # silent by construction, so no budget could have been long enough.
+      put_runner_cfg(status_call_timeout_ms: 100)
+      intercept_with_silent_door()
+
+      degraded = DeployRunner.status("never-ran-anywhere")
+
+      assert degraded.state == :unknown
+      refute degraded.state == genuine.state
+      assert degraded.log_state == :unknown
+      assert degraded.failure_reason =~ "did not answer"
+      assert degraded.failure_reason =~ "NOT idle"
+      # Same keys as every other status map — callers match the shape.
+      assert Map.keys(degraded) |> Enum.sort() == Map.keys(genuine) |> Enum.sort()
+      # And `running?/1` still answers false, never crashes, on that map.
+      refute DeployRunner.running?("never-ran-anywhere")
+    end
+  end
+
+  # A door that answers NOTHING — the same name takeover as
+  # `intercept_with_unanswering_door/0`, but it does not proxy status either, so
+  # `{:status, slug}` expires too.
+  defp intercept_with_silent_door do
+    real = Process.whereis(DeployRunner)
+    assert is_pid(real), "the DeployRunner singleton must be alive to be intercepted"
+
+    door = spawn(fn -> receive do: (:never -> :ok) end)
+    Process.unregister(DeployRunner)
+    Process.register(door, DeployRunner)
+
+    on_exit(fn ->
+      if Process.whereis(DeployRunner) == door, do: Process.unregister(DeployRunner)
+      Process.exit(door, :kill)
+
+      if Process.alive?(real) and is_nil(Process.whereis(DeployRunner)),
+        do: Process.register(real, DeployRunner)
+    end)
+
+    door
   end
 end

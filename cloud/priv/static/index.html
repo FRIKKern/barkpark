@@ -150,12 +150,16 @@
            shows exactly one from the parsed route (shellNavLayer). -->
       <aside class="sidebar" aria-label="Primary">
         <!-- workspace switcher + plan chip → opens the Account modal -->
-        <button class="ws-switch" id="ws-switch" type="button" aria-label="Workspace and account">
-          <span class="ws-avatar" id="account-avatar" aria-hidden="true">B</span>
-          <span class="ws-name" id="account-team">My team</span>
-          <span class="ws-plan" id="ws-plan" hidden></span>
-          <svg class="ws-caret" width="10" height="14" viewBox="0 0 10 14" aria-hidden="true"><polyline points="2,5.2 5,2.2 8,5.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="2,8.8 5,11.8 8,8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
+        <div class="ws-switch-wrap">
+        <button class="ws-switch" id="ws-switch" type="button" aria-label="Switch team"
+                    aria-haspopup="menu" aria-expanded="false">
+            <span class="ws-avatar" id="account-avatar" aria-hidden="true">B</span>
+            <span class="ws-name" id="account-team">My team</span>
+            <span class="ws-plan" id="ws-plan" hidden></span>
+            <svg class="ws-caret" width="10" height="14" viewBox="0 0 10 14" aria-hidden="true"><polyline points="2,5.2 5,2.2 8,5.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="2,8.8 5,11.8 8,8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="team-menu" id="team-menu" role="menu" hidden></div>
+        </div>
 
         <!-- Find / ⌘K → the EXISTING command palette (never a fork) -->
         <button class="nav-find" id="nav-find" type="button">
@@ -312,9 +316,13 @@
           <div id="fleet-body" class="fleet-body" aria-live="polite"></div>
 
           <!-- S14 portable archives: a team's archived-instance bundles, read
-               straight from object storage. The console shows each bundle + a
-               copy-paste `bp cloud instance resurrect` affordance (it does not
-               execute resurrect this wave). loadArchives() fills #archives-body. -->
+               straight from object storage. Every reader gets each bundle + a
+               copy-paste `bp cloud instance resurrect` affordance; a team admin
+               or owner ALSO gets a live Resurrect button that POSTs
+               /v1/resurrect. cch-w47-s3: that button used to render for anyone
+               who could see the row, including a plain member the route refuses
+               — it is now omitted unless /v1/me has confirmed the authority.
+               loadArchives() fills #archives-body. -->
           <section class="archives-panel" aria-labelledby="archives-heading">
             <h2 id="archives-heading" class="archives-title">Archives</h2>
             <p class="dim archives-sub">Portable bundles you can resurrect on Hetzner or Azure.</p>
@@ -369,12 +377,18 @@
           <!-- gr-p4 G-02: the connected roster (member-readable) + the inline
                hybrid connect card (admin-only, verify+save in a .set-save-row).
                loadProviders() paints both; a member sees the roster without any
-               Disconnect… affordance and no connect card at all. -->
+               Disconnect… affordance and no connect card at all. This sentence
+               speaks for loadProviders() ONLY — the GitHub card below is a
+               separate mount with its own authority arm (cch-w48-s3). -->
           <div id="provider-roster" aria-live="polite"></div>
           <div id="provider-connect"></div>
 
           <!-- gh-2: GitHub App connection card. Renders connected / connect /
-               not-configured from GET /v1/github/installation. -->
+               not-configured from GET /v1/github/installation.
+               cch-w48-s3 — AUTHORITY: both write affordances are team-admin-only
+               on the server, so githubCardHtml(g, providerCanWrite()) OMITS the
+               Disconnect button and the Connect anchor for a member (never a
+               disabled ghost); the read — state, account, badge — is unchanged. -->
           <div id="github-card" aria-live="polite"></div>
 
           <!-- gr-p4 G-03: the honest capability matrix (member-readable). -->
@@ -462,7 +476,11 @@
           <header class="view-head">
             <div>
               <h1>Environment variables</h1>
-              <p class="dim">Team-wide values injected into your instances at boot. Keys are visible; values are encrypted and never shown again.</p>
+              <!-- cch-w53-s1: this header renders BEFORE app.js paints and survives every
+                   panel error state, so it was a second, independent custody claim. It
+                   promised delivery to every instance; nothing on any instance consumes
+                   these values, so it now states storage only. -->
+              <p class="dim">Team-wide values, stored encrypted. They are not delivered to any instance yet — nothing running or newly provisioned reads them. Keys are visible; values are never shown again.</p>
             </div>
           </header>
 

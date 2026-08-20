@@ -74,6 +74,55 @@ defmodule BarkparkWeb.TelemetryTest do
     end
   end
 
+  describe "vm.memory breakdown — WHICH subsystem grows" do
+    test "each per-subsystem gauge renders under its expected NAME, present and non-zero" do
+      # The total answers "is memory climbing?"; these answer "climbing WHERE?".
+      # telemetry_poller already emits the full :erlang.memory/0 map on
+      # [:vm, :memory] every 10s — this asserts we actually SUBSCRIBE to the
+      # breakdown keys, and that the dot->underscore rendering is what we think
+      # it is (asserted, never assumed: Core derives the exposed name from the
+      # event + measurement, and the unit scaling adds NO suffix).
+      :telemetry.execute(
+        [:vm, :memory],
+        %{
+          total: 20_000_000,
+          processes: 8_000_000,
+          binary: 3_000_000,
+          ets: 2_000_000,
+          code: 5_000_000
+        },
+        %{}
+      )
+
+      scraped = scrape(Telemetry)
+
+      for name <- ~w(vm_memory_processes vm_memory_binary vm_memory_ets vm_memory_code) do
+        assert scraped =~ name,
+               "#{name} is not exposed — the memory breakdown cannot name the growing subsystem"
+
+        assert Regex.match?(~r/#{name}(?:\{[^}]*\})?\s+[1-9]/, scraped),
+               "#{name} gauge is zero or unparsable — no reading for that subsystem"
+      end
+    end
+
+    test "every BEAM memory gauge shares vm.memory.total's kilobyte unit (D64 unit discipline)" do
+      # Core scales by :unit but keeps the event-derived name, so NONE of these
+      # carry a _bytes/_kilobytes suffix on the wire. A byte-valued gauge beside
+      # a kilobyte-valued one — both unsuffixed — is a 1024x error that reads as
+      # a memory leak. Either all share the unit, or a gauge names its own.
+      for metric <- Telemetry.prometheus_metrics(),
+          metric.event_name == [:vm, :memory] do
+        rendered = Enum.map_join(metric.name, "_", &Atom.to_string/1)
+
+        # Telemetry.Metrics normalises `unit: {:byte, :kilobyte}` down to the
+        # TARGET unit (:kilobyte) and folds the ratio into :measurement.
+        assert metric.unit == :kilobyte or String.ends_with?(rendered, "_bytes"),
+               "#{rendered} is a BEAM memory gauge with neither the kilobyte unit of its " <>
+                 "neighbours nor an explicit _bytes suffix — a 1024x unit trap"
+      end
+    end
+  end
+
   # ── helpers ────────────────────────────────────────────────────────────────
 
   defp scrape(_), do: TelemetryMetricsPrometheus.Core.scrape(@aggregator)

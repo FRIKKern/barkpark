@@ -58,13 +58,64 @@
 #
 # THE PRICE UNIT (PDS-D648)
 # -------------------------
-# CPU = user + sys, LABELLED LOCAL, with the meter named. Never wall: a fixed
-# workload's wall spanned 5.8x at essentially constant load on this host, so a
-# wall second quotes the host's other tenants, not the door. Never user alone:
-# on the hetzner door `sys` EXCEEDS `user`, so user-only understates by 2.1x as
-# a pure CPU fact. No pds door has ever been measured on `ubuntu-latest`; every
-# figure below is a loaded 10-core Apple-Silicon mac and is labelled LOCAL so
-# the door's own first CI run can overwrite it.
+# CPU = user + sys, LABELLED WITH THE HOST IT WAS TAKEN ON, with the meter
+# named. Never wall: a fixed workload's wall spanned 5.8x at essentially
+# constant load on this host, so a wall second quotes the host's other tenants,
+# not the door. Never user alone: on the hetzner door `sys` EXCEEDS `user`, so
+# user-only understates by 2.1x as a pure CPU fact.
+#
+# THE HOST AXIS IS NOW REQUIRED AND HAS TWO VALUES (wave 48): LOCAL or FOREIGN.
+# `price_shape_error` refuses a price wearing NEITHER, and `--measure` DERIVES
+# the label from the host it actually ran on (GITHUB_ACTIONS/CI => FOREIGN) so
+# the label descends from the run rather than from whoever typed the row.
+#
+# WHAT IS TRUE ABOUT THIS COLUMN TODAY, STATED EXACTLY:
+#   * the INSTRUMENT exists — `--measure <basename>` meters a door and prints a
+#     pasteable row, so a price can descend from a meter this file drove;
+#   * the AXIS exists — a FOREIGN row is a legal, checked shape;
+#   * and NO FOREIGN PRICE HAS BEEN TAKEN. Every figure below is a loaded
+#     10-core Apple-Silicon mac, labelled LOCAL. Not "not yet": REFUSED, for a
+#     measured reason, below.
+#
+# THE FOREIGN PRICE IS REFUSED, AND THIS IS THE REASON (PDS-D689, wave 48)
+# -----------------------------------------------------------------------
+# A price is a fact a third party can RE-OPEN. Wave 48 measured the whole
+# citation surface a runner-taken row could cite, against live GitHub:
+#   * workflow LOGS are HTTP 403 to an unauthenticated caller at EVERY age
+#     (403 on a 23-day-old run and on a 100-day-old one alike), and 410 Gone at
+#     ~90 days even to an authenticated one;
+#   * the anon web per-step log URL that the job page itself embeds returns 404;
+#   * ARTIFACTS are 401 anon, and `.github/workflows/ci.yml:141` pins
+#     retention-days 14, so the receipt expires before the price does;
+#   * `git grep -nE 'nproc|loadavg|uptime|/usr/bin/time' origin/main -- .github`
+#     is EMPTY — no workflow emits a host measurement at all;
+#   * the durable anonymous surfaces (the run JSON and the run's jobs LIST, both
+#     still 200 at 100 days) carry WALL timings ONLY, which PDS-D648 forbids
+#     outright as a price.
+# So a runner-taken figure would cite an artifact NOBODY can re-open, and a
+# pasted figure and a metered one are IDENTICAL BYTES in this ledger —
+# `price_shape_error` matches bytes and can never see provenance. Taking the
+# price anyway would put exactly the fraud this epic files INTO the column the
+# epic built to end it. The row is not written. When a workflow emits a host
+# measurement onto a durable anonymous surface, `--measure` is already the
+# instrument that takes it.
+#
+# THE LOAD STAMPS BELOW ARE NOT AN ARTIFACT (PDS-D698, wave 48)
+# ------------------------------------------------------------
+# A doubt was filed that the four large stamps (41.63 / 79.23 / 24.26 / 26.44)
+# were `tr`-mangled decimals rather than measurements. RULED OUT ON TWO LEGS,
+# and the second is weaker than the first — said here rather than closed with
+# one sentence:
+#   (a) MECHANISM, decisive: the proposed `tr -d ,` mangling DESTROYS the
+#       decimal point (a true 33.64 comes out as the integer `3364`). All four
+#       suspect stamps carry a dot and exactly two decimals, so not one of them
+#       is that artifact. This leg closes all four.
+#   (b) PLAUSIBILITY, partial: the "implausible" premise was taken on a QUIET
+#       host. Under wave load this 10-CPU host sustained load1 47.43 / 46.84 /
+#       46.84 / 45.97 / 45.89, which brackets 41.63, 24.26 and 26.44 directly.
+#       It does NOT reach 79.23 — that stamp is only within 1.7x of anything
+#       observed here and was never itself observed. 79.23 stands on leg (a)
+#       alone.
 #
 # THE METER BLIND SPOT (PDS-D633 / D646) — printed by every run, see BLIND_SPOT.
 #
@@ -166,6 +217,8 @@
 #   pds-door-census.sh                 # the census (default) — fail-closed
 #   pds-door-census.sh --selftest      # the fraud + depth arms, no BEAM, no gate
 #   pds-door-census.sh --list-refs     # every classified test-side reference
+#   pds-door-census.sh --measure <basename> [arg...]   # meter a door, print a row
+#   pds-door-census.sh --measure <basename> --via '<cmd>'  # meter an arbitrary arm
 #   pds-door-census.sh --help
 
 set -euo pipefail
@@ -280,10 +333,10 @@ pds-idle-sampler.sh	ENVIRONMENT	samples a live host over ssh, twice a minute (sc
 # any other instrument is a price nobody pays and nothing reads —
 # `orphaned_price_error` below is what makes that say so instead of passing in
 # total silence.
-PDS_DOOR_PRICES='pds-door-census.sh	CPU=0.51+0.72=1.23s LOCAL meter=/usr/bin/time -p around bash -c load1=5.26 2026-08-04 (--check, rc=0; 3 trials gave 1.24/1.22/1.23s). Its gated arm is --selftest at CPU=0.41+0.66=1.07s at load1=5.54 (5 trials 1.10/1.08/1.05/1.04/1.07 — a 5.7% spread across stamps 5.54-5.57, which is what makes the figure quotable against its own stamp rather than against the host). RE-TAKEN IN THIS PR BECAUSE THE INSTRUMENT CHANGED UNDERNEATH IT: wave 47 took --selftest from 24 arms to 33, seven of the nine running the real run_census over the two-instrument fixture tree, and a price whose instrument changed underneath it is the exact rot this row exists to prevent. THE DELTA IS MEASURED, NOT ESTIMATED, and only because both sides were metered in the SAME window: the untouched origin/main export (49345a98c) ran its --selftest at 0.54/0.58/0.53s at load1 5.26-5.37, so the nine new arms cost +95% of the gated arm — nearly double, not the ~+44% this slice was briefed with. The earlier 1.07s/0.47s at load1=3.26 and the 3.32s/0.16s at load1=41.63 are NOT comparable and are quoted as neither a delta nor a baseline: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once.
+PDS_DOOR_PRICES='pds-door-census.sh	CPU=0.49+0.77=1.26s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=6.48 2026-08-05 (--check, rc=0; 3 trials gave 1.26/1.31/1.27s). Its gated arm is --selftest at CPU=0.58+1.01=1.59s at load1=5.19 (3 trials 1.59/1.53/1.62s — a 5.7% spread at one stamp, which is what makes the figure quotable against its own stamp rather than against the host). RE-TAKEN IN THIS PR BECAUSE THE INSTRUMENT CHANGED UNDERNEATH IT AGAIN: wave 48 took --selftest from 33 arms to 43 (the host axis in the grammar, the depth guard, the witness, the two LC_ALL pins, portability, writes-nothing), and a price whose instrument changed underneath it is the exact rot this row exists to prevent. AND THE METER ITSELF CHANGED — this is the first row in the column taken BY `--measure`, not by a hand-typed /usr/bin/time recipe, so it is quoted against the wave 47 figure only as a like-for-like re-take at a comparable stamp: 1.07s at load1=5.54 then, 1.59s at load1=5.19 now, i.e. the ten new arms cost ~+49% of the gated arm. The earlier 3.32s/0.16s at load1=41.63 is NOT comparable and is quoted as neither a delta nor a baseline: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once.
 pds-status-only-residue.exs	CPU=0.61+0.21=0.82s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 2026-08-03 (--selftest, 15/15 arms)
 pds-record-parity.test.sh	CPU=1.45+3.00=4.45s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 2026-08-03 (76 checks, 0 failures)
-pds-elixir-receipt-census.exs	CPU=26.47+2.26=28.73s LOCAL meter=/usr/bin/time -p around bash -c load1=2.93 2026-08-04 — the THREE GATED ARMS SUMMED, each metered separately: plain rc=0 at 11.81+0.94=12.75s, the one-token tl/1 mutant rc=1 at 11.53+0.91=12.44s (the mutant of api/test/barkpark/pds_elixir_census_test.exs:69-70, rebuilt in a tmp dir and run with cwd=repo root), the unknown-flag refusal rc=2 at 3.13+0.41=3.54s. THREE trials at load1 2.13 / 3.43 / 2.93 gave 29.20 / 28.61 / 28.73s total CPU — a 2% spread, so this row is quotable against its own load stamp and NOT against a busier host. Its `--selftest` is a DIFFERENT arm, separately disqualified at 210 s leaf CPU (D646), and is not what the gate runs.'
+pds-elixir-receipt-census.exs	CPU=39.16+3.14=42.30s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=5.50-7.61 2026-08-05 — the FOUR GATED ARMS SUMMED, each metered separately by `--measure`: plain rc=0 at 11.76+0.93=12.69s (load1=5.66), the one-token tl/1 mutant rc=1 at 12.71+0.85=13.56s (load1=5.50), the D448 population-baseline mutant rc=1 at 11.76+0.93=12.69s (load1=7.61), the unknown-flag refusal rc=2 at 2.93+0.43=3.36s (load1=5.71). THE ROW SAID THREE FOR TWO WAVES WHILE THE RIDER RAN FOUR: api/test/barkpark/pds_elixir_census_test.exs carries arms at :135 :145 :187 :210, and the baseline-mutant arm (PDS-D678, wave 47) was never priced. IT WAS RE-METERED, NOT RE-WORDED — a prose-only repair here is INVISIBLE to every gate in this repo (proven by mutation: editing THREE to SEVENTEEN leaves --check rc=0 ERRORS 0 and the rider 9 tests / 0 failures), which is why the count and the figure moved together. THE UNIT IS DECIDED IN WRITING (PDS-D633/D692): this is an OS meter around a SHELL that runs the four census invocations DIRECTLY, never a meter around the ExUnit rider. Measured, not assumed — `--measure ... --via "mix test test/barkpark/pds_elixir_census_test.exs"` reports 0.90+1.26=2.16s for the same four arms, 19.6x under this leaf sum, because a meter wrapped around a BEAM that fans out to child BEAMs is blind to the fan-out in exactly the direction a price column must not err: it makes an expensive thing look gate-able. The four stamps span 5.50-7.61 and the figure is quotable against that band only, NOT against a quiet or a busier host (PDS-D656). Its `--selftest` is a DIFFERENT arm, separately disqualified at 210 s leaf CPU (D646), and is not what the gate runs.'
 
 # ---------------------------------------------------------------------------
 # roots
@@ -839,10 +892,19 @@ price_shape_error() {
   esac
   # ANCHORED AT THE START, never floating: the old leading `*` admitted ANY
   # prefix in front of CPU=, which is how the retire costume walked through.
+  #
+  # THE HOST AXIS IS REQUIRED AND HAS EXACTLY TWO VALUES (wave 48, PDS-D648):
+  # LOCAL or FOREIGN. Widening the axis WITHOUT the refusal arm below would turn
+  # a pin into a hole — the token would become optional, and a price could then
+  # say nothing at all about where it was taken, which is the one thing a CPU
+  # figure cannot be quoted without. So the third arm is not decoration: it is
+  # the half that makes the widening safe, and `--selftest` reds when a price
+  # carrying NEITHER token passes.
   case "$2" in
     'CPU='*'LOCAL'*'meter='*) ;;
+    'CPU='*'FOREIGN'*'meter='*) ;;
     *)
-      printf '  %s: a price must carry CPU=<user>+<sys>=<total>s LOCAL meter=<name> (PDS-D648). It carries: %s' "$1" "$2"
+      printf '  %s: a price must carry CPU=<user>+<sys>=<total>s followed by its HOST AXIS — LOCAL or FOREIGN, one of the two, never neither — and meter=<name> (PDS-D648). A CPU second is not comparable across hosts, so a price that does not say which host it was taken on is a number nobody can re-take. It carries: %s' "$1" "$2"
       return 0
       ;;
   esac
@@ -1231,6 +1293,264 @@ MSG
   fi
 
   echo "OK: every scripts/pds-*.{sh,exs} program is disposed."
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# --measure — the instrument a price DESCENDS FROM (PDS-D663, PDS-D669)
+# ---------------------------------------------------------------------------
+# PDS-D663: "D648's directive that the door's own first CI run overwrite the
+# local figure remains law, and --measure is its instrument." A column whose
+# rows are typed by hand is a column of assertions; this is the meter that makes
+# them measurements.
+#
+# IT EMITS AND WRITES NOTHING. `--measure` prints ONE pasteable ledger row on
+# stdout and touches no file — the row is pasted into PDS_DOOR_PRICES by a human
+# in a reviewable diff. A meter that edited the ledger it feeds would be a
+# program that can silently re-price the column it is checked by.
+#
+# IT IS NEVER GATED, AND THAT RULE IS FALSIFIABLE RATHER THAN A COMMENT
+# (PDS-D669). Two mechanisms, both exercised by `--selftest`:
+#   * PDS_DOOR_MEASURE_DEPTH — `--measure` exports it into its own metering
+#     shell and REFUSES (rc=4) if it is already set. A meter inside a meter
+#     prices the meter, and that is how a gated `--measure` would look from the
+#     inside;
+#   * PDS_DOOR_MEASURE_WITNESS — when set, `run_measure` touches that path on
+#     entry. A `--check` run must leave it ABSENT. If anyone ever wires the
+#     meter into the census's verification path, the witness appears and the
+#     arm reds. Absence-from-the-code is not a guard; this is.
+# The converse holds by construction: `--measure` runs its subject with output
+# discarded and NEVER reads its verdict — the subject's rc is quoted in the
+# row's note as provenance and gates nothing.
+#
+# WHY `times` AND NOT `/usr/bin/time -p` (PDS-D669's exec-discard trap)
+# --------------------------------------------------------------------
+# `times` is a SHELL BUILTIN, so it is never exec'd, so no accumulated
+# RUSAGE_CHILDREN can be discarded by an exec — D669's trap is STRUCTURALLY
+# unreachable rather than avoided by a mandatory trailing no-op somebody can
+# delete. It also needs no time(1) binary on the host. It is the FINAL command
+# of the metering shell for the same reason. Recorded honestly: D669's trap did
+# NOT reproduce on this host's bash 3.2.57; that does not refute D669 on another
+# bash/libc, and is one more argument for structural immunity over empirical.
+# `times` reports the shell's OWN cpu and its WAITED-FOR CHILDREN's cpu, and
+# RUSAGE_CHILDREN accumulates grandchildren too — which is precisely the port
+# children PDS-D633 warns an in-BEAM meter is blind to.
+#
+# LC_ALL=C PINS THE WHOLE RECIPE, NOT JUST THE METER (PDS-D691)
+# -------------------------------------------------------------
+# Two pins, and BOTH are load-bearing — a meter-only pin is a hole whose new
+# failure mode reds nothing:
+#   * the METER pin (PDS_DOOR_MEASURE_METER_LC): under a comma-decimal locale a
+#     glibc `times` prints `0m0,724s`, and an unguarded summer reads that as
+#     zeroes;
+#   * the SUMMER pin (PDS_DOOR_MEASURE_SUM_LC): awk's `strtod` is locale-bound
+#     BOTH ways. Measured on this host: default-locale awk on `0.53 0.72` prints
+#     `0`, and `LC_ALL=C` awk on `0,53 0,72` prints `0`. Its `printf "%.2f"` is
+#     locale-bound too, which is how the fabricated `CPU=0+1=1,00s` shape gets
+#     its comma — a REAL measurement rendered 2.5x low, which census.sh's
+#     substring globs would have ACCEPTED.
+# Both variables default to C and exist ONLY so `--selftest` can remove a pin
+# and prove the arm reds. And the summer is FAIL-CLOSED on radix in both
+# directions: it refuses `times` fields that are not dot-decimal, and refuses
+# its own sum if it did not come out dot-decimal. That refusal is what holds on
+# a host with no comma-radix locale installed, where the fabrication cannot be
+# staged at all.
+PDS_DOOR_MEASURE_METER_LC="${PDS_DOOR_MEASURE_METER_LC:-C}"
+PDS_DOOR_MEASURE_SUM_LC="${PDS_DOOR_MEASURE_SUM_LC:-C}"
+
+# THE HOST AXIS, DERIVED FROM THE HOST — never typed. A hand-typed axis is the
+# same class of fact as a hand-typed price.
+measure_host_label() {
+  if [ -n "${GITHUB_ACTIONS:-}" ] || [ "${CI:-}" = 'true' ]; then
+    printf 'FOREIGN'
+  else
+    printf 'LOCAL'
+  fi
+}
+
+# THE FIRST COMMA-RADIX LOCALE THIS HOST ACTUALLY HAS, or nothing. `--selftest`
+# uses it to REMOVE a pin and prove the arm reds; a host with none (ubuntu-latest
+# ships C/C.UTF-8/en_US only) cannot stage the fabrication at all, and the arm
+# says so in words instead of passing quietly.
+# NOT `locale -a | grep -q`: `set -o pipefail` is on, `grep -q` closes the pipe
+# on its first match, and the SIGPIPE'd `locale` then decides the pipeline's rc —
+# so the lookup reported "no locale installed" on a host that has five. Matched
+# on an EXACT line inside a captured string instead, which no signal can flip.
+measure_comma_locale() {
+  local l avail
+  avail="$(locale -a 2>/dev/null || true)"
+  avail="$(printf '\n%s\n' "$avail")"
+  for l in nb_NO.UTF-8 nn_NO.UTF-8 da_DK.UTF-8 de_DE.UTF-8 fr_FR.UTF-8; do
+    case "$avail" in
+      *$'\n'"$l"$'\n'*)
+        printf '%s' "$l"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+# PORTABLE BY DESIGN: `nproc` does not exist on macOS and neither does
+# /proc/loadavg. Without these fallbacks the host axis is Linux-only by
+# accident, and a darwin row would carry no cpu count at all. Both refuse
+# rather than guess: an unknown cpu count or load stamp REDS the measurement.
+measure_cpus() {
+  local n=''
+  if [ -z "${PDS_DOOR_MEASURE_NO_NPROC:-}" ] && command -v nproc >/dev/null 2>&1; then
+    n="$(nproc 2>/dev/null || true)"
+  fi
+  if [ -z "$n" ]; then
+    n="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  fi
+  case "$n" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  printf '%s' "$n"
+}
+
+measure_load1() {
+  local l=''
+  if [ -z "${PDS_DOOR_MEASURE_NO_PROCLOAD:-}" ] && [ -r /proc/loadavg ]; then
+    l="$(LC_ALL=C awk '{print $1}' /proc/loadavg 2>/dev/null || true)"
+  fi
+  if [ -z "$l" ]; then
+    # linux `uptime`: "load average: 0.52, 0.58, 0.59"
+    # darwin `uptime`: "load averages: 4.31 4.51 4.66"
+    # LC_ALL=C throughout so a comma-decimal locale cannot turn the FIRST field
+    # into half a number the moment `tr` splits on commas.
+    l="$(LC_ALL=C uptime 2>/dev/null |
+      LC_ALL=C sed -e 's/.*load averages*: *//' |
+      LC_ALL=C tr ',' ' ' |
+      LC_ALL=C awk '{print $1}' || true)"
+  fi
+  case "$l" in
+    '' | *[!0-9.]*) return 1 ;;
+  esac
+  printf '%s' "$l"
+}
+
+# THE SUMMER — fail-closed on radix in BOTH directions (PDS-D691).
+measure_sum() {
+  # $1 = raw `times` output (two lines, four fields). Prints "<user> <sys> <total>".
+  local f n=0 bad='' out
+  for f in $(printf '%s\n' "$1"); do
+    n=$((n + 1))
+    case "$f" in
+      [0-9]*m[0-9]*.[0-9]*s) ;;
+      *) bad="$bad [$f]" ;;
+    esac
+  done
+  if [ "$n" -ne 4 ] || [ -n "$bad" ]; then
+    printf '%s: REFUSE — the meter did not emit four dot-decimal `times` fields; it emitted %d field(s)%s. That is the PDS-D691 fabrication: a comma-decimal `times` line parses as zeroes and yields a REAL measurement rendered LOW. No figure is printed.\n' \
+      "$SELF" "$n" "$bad" >&2
+    return 5
+  fi
+  out="$(LC_ALL="$PDS_DOOR_MEASURE_SUM_LC" awk '
+    { gsub(/[ms]/, " "); u += $1 * 60 + $2; s += $3 * 60 + $4 }
+    END { printf "%.2f %.2f %.2f\n", u, s, u + s }
+  ' <<EOF
+$1
+EOF
+  )"
+  # AND THE SUM ITSELF IS CHECKED: an unpinned summer both PARSES and PRINTS in
+  # the locale's radix, so `0,00` (or a silent `0`) is what a removed pin looks
+  # like on the way out. Refusing it is what makes the pin's absence LOUD on a
+  # host where the comma locale exists, and harmless where it does not.
+  case "$out" in
+    [0-9]*.[0-9][0-9]' '[0-9]*.[0-9][0-9]' '[0-9]*.[0-9][0-9]) ;;
+    *)
+      printf '%s: REFUSE — the summer produced "%s", which is not three dot-decimal figures. The LC_ALL pin on the SUMMER is missing or wrong: awk parses AND prints in the locale radix, so an unpinned summer turns a real measurement into a low or zero one (PDS-D691). No figure is printed.\n' \
+        "$SELF" "$out" >&2
+      return 5
+      ;;
+  esac
+  printf '%s' "$out"
+}
+
+run_measure() {
+  # $1 = basename of the instrument the row is FOR; the rest is either
+  # arguments to it, or `--via <command>` for a gated arm that is not a direct
+  # invocation of the instrument (an ExUnit rider, say).
+  local base="$1" cmd='' note='' path='' interp='' raw='' sums='' user='' sys='' total=''
+  local cpus='' load1='' host='' rcfile='' subject_rc='' stamp='' arg=''
+  shift
+
+  # THE DEPTH GUARD, FIRST — before the witness, before any work. PDS-D669.
+  if [ -n "${PDS_DOOR_MEASURE_DEPTH:-}" ]; then
+    printf '%s: REFUSE — PDS_DOOR_MEASURE_DEPTH=%s is already set, so this --measure is running INSIDE a metered subtree. A meter inside a meter prices the meter (PDS-D669: --measure is first-class and is NEVER gated). Nothing measured, nothing printed.\n' \
+      "$SELF" "$PDS_DOOR_MEASURE_DEPTH" >&2
+    return 4
+  fi
+  # THE WITNESS — the only file this mode ever touches, and only when a caller
+  # (i.e. `--selftest`) asks for it. It exists so "`--check` never invokes
+  # `--measure`" is a fact a run can DISPROVE.
+  if [ -n "${PDS_DOOR_MEASURE_WITNESS:-}" ]; then
+    : >"$PDS_DOOR_MEASURE_WITNESS"
+  fi
+
+  if [ "${1:-}" = '--via' ]; then
+    shift
+    [ $# -ge 1 ] || {
+      printf '%s: --via needs a command\n' "$SELF" >&2
+      return 2
+    }
+    cmd="$*"
+    note="via: $cmd"
+  else
+    path="$SCRIPT_DIR/$base"
+    if [ ! -f "$path" ]; then
+      printf '%s: REFUSE — no such instrument: %s. --measure prices a real file or nothing.\n' "$SELF" "$path" >&2
+      return 5
+    fi
+    case "$base" in
+      *.exs) interp='elixir' ;;
+      *) interp='bash' ;;
+    esac
+    cmd="$interp $(printf '%q' "$path")"
+    for arg in "$@"; do cmd="$cmd $(printf '%q' "$arg")"; done
+    note="$*"
+    [ -n "$note" ] || note='no arguments'
+  fi
+
+  cpus="$(measure_cpus)" || {
+    printf '%s: REFUSE — could not derive a cpu count from nproc or getconf _NPROCESSORS_ONLN. A CPU figure with no cpu count beside it is not re-takeable.\n' "$SELF" >&2
+    return 5
+  }
+  load1="$(measure_load1)" || {
+    printf '%s: REFUSE — could not derive load1 from /proc/loadavg or uptime. PDS-D656: CPU is not load-independent, so a figure with no load stamp is a number nobody can re-take.\n' "$SELF" >&2
+    return 5
+  }
+  host="$(measure_host_label)"
+  stamp="$(LC_ALL=C date +%Y-%m-%d)"
+
+  rcfile="$(mktemp "${TMPDIR:-/tmp}/pds-door-measure.XXXXXX")"
+
+  # THE RECIPE. `times` is the FINAL command of the metering shell; the subject's
+  # output is DISCARDED and its rc is stashed by a BUILTIN (printf) so that stays
+  # true. LC_ALL is pinned around the WHOLE recipe, not just the summer.
+  raw="$(
+    cd "$REPO_ROOT" &&
+      LC_ALL="$PDS_DOOR_MEASURE_METER_LC" PDS_DOOR_MEASURE_DEPTH=1 \
+        bash -c "$cmd >/dev/null 2>&1; printf '%s' \$? >'$rcfile'; times"
+  )"
+  subject_rc="$(cat "$rcfile" 2>/dev/null || printf '?')"
+  rm -f "$rcfile"
+
+  sums="$(measure_sum "$raw")" || return $?
+  user="${sums%% *}"
+  total="${sums##* }"
+  sys="${sums#* }"
+  sys="${sys%% *}"
+
+  # ONE PASTEABLE ROW ON STDOUT. Nothing else, nowhere else.
+  printf '%s\tCPU=%s+%s=%ss %s meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=%s load1=%s %s (%s, rc=%s)' \
+    "$base" "$user" "$sys" "$total" "$host" "$cpus" "$load1" "$stamp" "$note" "$subject_rc"
+  if [ "$host" = 'FOREIGN' ]; then
+    printf ' runner=%s run=%s sha=%s' \
+      "${RUNNER_OS:-unknown}" "${GITHUB_RUN_ID:-unknown}" "${GITHUB_SHA:-unknown}"
+  fi
+  printf '\n'
   return 0
 }
 
@@ -1742,6 +2062,214 @@ RETIRED-ENVIRONMENT"
   fi
   PDS_DOOR_CLASSES="$saved_classes"
 
+  # ---- THE HOST AXIS IN THE GRAMMAR (wave 48) -----------------------------
+  # THREE DIRECTIONS, and the third is the one that makes the widening safe. A
+  # LOCAL price passes (the CONTROL arm at the top of this block is that same
+  # direction), a FOREIGN price passes, and a price wearing NEITHER token REDS.
+  # Widening the glob without this last arm converts a pin into a hole: the
+  # mutation that proves the pin (relabel one price) would then pass silently.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 2026-08-04 (fixture)')"
+  census_arm "HOST AXIS: a LOCAL price PASSES" 0 \
+    'ERRORS                  : 0' 'THROUGH a required gate : 1 of 2'
+
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s FOREIGN meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 2026-08-04 (fixture)')"
+  census_arm "HOST AXIS: a FOREIGN price PASSES" 0 \
+    'ERRORS                  : 0' 'THROUGH a required gate : 1 of 2'
+
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 2026-08-04 (fixture)')"
+  census_arm "HOST AXIS: a price wearing NEITHER LOCAL NOR FOREIGN REDS, and is NAMED" 1 \
+    'LOCAL or FOREIGN, one of the two, never neither' 'pds-fx-through.sh' \
+    'THROUGH a required gate : 1 of 2'
+
+  # ---- THE METER (wave 48, PDS-D663/D669/D691) ----------------------------
+  # THE ARMS BELOW STAGE BOTH DEPTH STATES DELIBERATELY, and that is why three
+  # of them carry `PDS_DOOR_MEASURE_DEPTH=`. `--selftest` is itself a PRICED
+  # gated arm, so `--measure pds-door-census.sh --selftest` must be able to run
+  # it — and inside that metered subtree every arm here inherits DEPTH=1 and the
+  # guard would refuse the arms that are supposed to succeed, taking the census's
+  # own price with them. A harness staging a condition is not a meter nesting
+  # inside a meter: the guard arm SETS the depth explicitly, the arms that need a
+  # working meter CLEAR it explicitly, and both are visible in one place rather
+  # than inferred from an env var's history.
+  local self_path measure_out measure_rc witness comma_locale sum_ok sum_bad raw_fab
+  self_path="${BASH_SOURCE[0]}"
+
+  # THE DEPTH GUARD FIRES. `--measure` inside a metered subtree prices the
+  # meter, which is what a GATED --measure looks like from the inside. This is
+  # PDS-D669 as a runnable fact rather than a comment.
+  set +e
+  measure_out="$(PDS_DOOR_MEASURE_DEPTH=1 bash "$self_path" --measure pds-door-census.sh --via true 2>&1)"
+  measure_rc=$?
+  set -e
+  case "$measure_out" in
+    *'PDS_DOOR_MEASURE_DEPTH=1 is already set'*) sum_ok=yes ;;
+    *) sum_ok=no ;;
+  esac
+  if [ "$measure_rc" = '4' ] && [ "$sum_ok" = 'yes' ]; then
+    echo "  PASS  THE DEPTH GUARD FIRES: --measure inside a metered subtree refuses rc=4 and prints nothing"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  --measure under PDS_DOOR_MEASURE_DEPTH=1 exited $measure_rc (wanted 4): $measure_out"
+    fail=$((fail + 1))
+  fi
+
+  # IT IS NEVER GATED — the witness direction, both ways. A `--check` run must
+  # leave the witness ABSENT; a `--measure` run must create it. If anyone wires
+  # the meter into the census's verification path, the first leg reds.
+  witness="$tmp/measure-witness"
+  rm -f "$witness"
+  set +e
+  PDS_DOOR_MEASURE_WITNESS="$witness" PDS_DOOR_CENSUS_ROOT="$croot" \
+    bash "$self_path" --check >/dev/null 2>&1
+  set -e
+  if [ ! -e "$witness" ]; then
+    rm -f "$witness"
+    set +e
+    PDS_DOOR_MEASURE_WITNESS="$witness" PDS_DOOR_MEASURE_DEPTH= bash "$self_path" --measure pds-door-census.sh --via true >/dev/null 2>&1
+    set -e
+    if [ -e "$witness" ]; then
+      echo "  PASS  --check NEVER invokes --measure (witness absent), and --measure does (witness present)"
+      pass=$((pass + 1))
+    else
+      echo "  FAIL  the witness is not written by --measure either, so its absence after --check proves nothing"
+      fail=$((fail + 1))
+    fi
+  else
+    echo "  FAIL  a --check run touched the --measure witness: the meter is on the verification path (PDS-D669)"
+    fail=$((fail + 1))
+  fi
+  rm -f "$witness"
+
+  # THE SUMMER IS FAIL-CLOSED ON RADIX, and the fabrication is QUOTED beside the
+  # refusal so the arm shows what it is refusing. Host-independent: it needs no
+  # locale installed, because it feeds the summer the bytes a comma-radix meter
+  # would have produced.
+  raw_fab="$(LC_ALL=C awk '
+    { gsub(/[ms]/, " "); u += $1 * 60 + $2; s += $3 * 60 + $4 }
+    END { printf "%.2f", u + s }
+  ' <<'EOF'
+0m0,527s 0m0,820s
+0m0,000s 0m0,000s
+EOF
+  )"
+  set +e
+  measure_out="$(measure_sum "$(printf '0m0,527s 0m0,820s\n0m0,000s 0m0,000s')" 2>&1)"
+  measure_rc=$?
+  set -e
+  sum_ok="$(measure_sum "$(printf '0m0.527s 0m0.820s\n0m0.000s 0m0.000s')")"
+  if [ "$raw_fab" = '0.00' ] && [ "$measure_rc" = '5' ] && [ "$sum_ok" = '0.53 0.82 1.35' ]; then
+    echo "  PASS  THE SUMMER REFUSES COMMA-RADIX times OUTPUT (an unguarded awk fabricates ${raw_fab}s out of a real 1.35s), and sums dot-radix correctly"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  unguarded awk gave [$raw_fab] (wanted 0.00), the guarded summer exited $measure_rc (wanted 5)"
+    echo "        and the dot-radix control summed to [$sum_ok] (wanted 0.53 0.82 1.35) — a summer that"
+    echo "        returns a silent 0 instead of refusing is PDS-D691's fabrication, shipped"
+    fail=$((fail + 1))
+  fi
+
+  # THE SUMMER'S OWN PIN, REMOVED. awk's strtod is locale-bound in BOTH
+  # directions and so is its printf, so an unpinned summer misreads dot-radix
+  # input under a comma locale — measured here, not asserted: LC_ALL=nb_NO awk
+  # on `0.527 0.820` prints `0,00`.
+  comma_locale="$(measure_comma_locale || true)"
+  if [ -n "$comma_locale" ]; then
+    set +e
+    measure_out="$(PDS_DOOR_MEASURE_SUM_LC="$comma_locale" measure_sum "$(printf '0m0.527s 0m0.820s\n0m0.000s 0m0.000s')" 2>&1)"
+    measure_rc=$?
+    set -e
+    if [ "$measure_rc" = '5' ]; then
+      echo "  PASS  THE SUMMER PIN IS LOAD-BEARING: with LC_ALL=$comma_locale it fabricates and the guard reds it"
+      pass=$((pass + 1))
+    else
+      echo "  FAIL  with the summer pin removed (LC_ALL=$comma_locale) the summer exited $measure_rc, not 5: $measure_out"
+      echo "        a meter-only pin is a hole — the arithmetic reads the meter's output and is locale-bound too"
+      fail=$((fail + 1))
+    fi
+  else
+    echo "  PASS  THE SUMMER PIN: no comma-radix locale is installed on this host, so removing the pin"
+    echo "        cannot be staged HERE and this leg is degenerate — SAID rather than counted as proof."
+    echo "        The fail-closed refusal arm above is what holds on such a host."
+    pass=$((pass + 1))
+  fi
+
+  # THE METER'S OWN PIN. Under a comma-radix locale a glibc `times` prints
+  # `0m0,724s`; darwin's bash 3.2 ignores LC_NUMERIC there. The arm asserts the
+  # property that must hold on EITHER libc: no comma-decimal figure ever escapes
+  # into a row. Deleting the summer's radix guard reds this on glibc.
+  if [ -n "$comma_locale" ]; then
+    set +e
+    measure_out="$(PDS_DOOR_MEASURE_METER_LC="$comma_locale" PDS_DOOR_MEASURE_DEPTH= bash "$self_path" --measure pds-door-census.sh --via true 2>&1)"
+    measure_rc=$?
+    set -e
+    # THE FIGURE ITSELF, never the whole line: the row's trailing note carries
+    # commas of its own (`(--check, rc=0)`), and a naive `*','*` scan reds on
+    # them — a detector that fires on a legal row is not a detector.
+    local fig
+    fig="$(printf '%s' "$measure_out" | LC_ALL=C awk -F'\t' 'NF > 1 { split($2, a, " "); print a[1] }')"
+    case "$fig" in
+      *,*) sum_bad=yes ;;
+      *) sum_bad=no ;;
+    esac
+    if [ "$sum_bad" = 'no' ]; then
+      echo "  PASS  THE METER PIN: under LC_ALL=$comma_locale no comma-decimal figure escapes (rc=$measure_rc — refused on glibc, dot-radix on a libc that ignores LC_NUMERIC in \`times\`)"
+      pass=$((pass + 1))
+    else
+      echo "  FAIL  a comma-decimal CPU figure escaped the meter under LC_ALL=$comma_locale: $measure_out"
+      echo "        that is a REAL measurement rendered ~2.5x LOW, and the ledger's substring globs accept it"
+      fail=$((fail + 1))
+    fi
+  else
+    echo "  PASS  THE METER PIN: no comma-radix locale on this host, so the meter's pin cannot be"
+    echo "        removed observably here — degenerate leg, SAID rather than counted as proof."
+    pass=$((pass + 1))
+  fi
+
+  # THE HOST AXIS IS PORTABLE. Both fallbacks are FORCED, so the darwin leg is
+  # exercised on linux and vice versa: `nproc` and /proc/loadavg do not exist on
+  # macOS, and without these the axis would be linux-only by accident.
+  local cpus_fb load_fb cpus_nat load_nat
+  cpus_fb="$(PDS_DOOR_MEASURE_NO_NPROC=1 measure_cpus || printf 'REFUSED')"
+  load_fb="$(PDS_DOOR_MEASURE_NO_PROCLOAD=1 measure_load1 || printf 'REFUSED')"
+  cpus_nat="$(measure_cpus || printf 'REFUSED')"
+  load_nat="$(measure_load1 || printf 'REFUSED')"
+  case "$cpus_fb$cpus_nat" in
+    *[!0-9]*) sum_ok=no ;;
+    '') sum_ok=no ;;
+    *) sum_ok=yes ;;
+  esac
+  case "$load_fb" in
+    '' | *[!0-9.]*) sum_ok=no ;;
+  esac
+  case "$load_nat" in
+    '' | *[!0-9.]*) sum_ok=no ;;
+  esac
+  if [ "$sum_ok" = 'yes' ]; then
+    echo "  PASS  THE HOST AXIS IS PORTABLE: cpus=$cpus_nat (getconf fallback: $cpus_fb), load1=$load_nat (uptime fallback: $load_fb)"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  the host axis did not derive on both paths: cpus native=$cpus_nat fallback=$cpus_fb,"
+    echo "        load1 native=$load_nat fallback=$load_fb — a REFUSED leg means a price could ship"
+    echo "        without a cpu count or a load stamp on one of the two operating systems"
+    fail=$((fail + 1))
+  fi
+
+  # --measure WRITES NOTHING. The instrument that feeds the ledger must not be
+  # able to edit it: checksummed before and after a real metered run, together
+  # with the scripts directory listing, so a new file counts as a write too.
+  local snap_before snap_after
+  snap_before="$(cksum <"$self_path")|$(ls -1 "$SCRIPT_DIR" | cksum)"
+  set +e
+  PDS_DOOR_MEASURE_DEPTH= bash "$self_path" --measure pds-door-census.sh --via true >/dev/null 2>&1
+  set -e
+  snap_after="$(cksum <"$self_path")|$(ls -1 "$SCRIPT_DIR" | cksum)"
+  if [ "$snap_before" = "$snap_after" ]; then
+    echo "  PASS  --measure WRITES NOTHING: the census file and the scripts directory are byte-identical after a metered run"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  --measure changed the tree it prices: [$snap_before] -> [$snap_after]"
+    fail=$((fail + 1))
+  fi
+
   echo
   printf '%s\n' "$BLIND_SPOT"
   echo
@@ -1772,6 +2300,15 @@ case "$mode" in
   --list-refs)
     INSTRUMENT_LIST="$(instruments)"
     classify_refs
+    ;;
+  --measure)
+    shift
+    if [ $# -lt 1 ]; then
+      echo "$SELF: --measure needs the basename of the instrument the row is for" >&2
+      echo "usage: $0 --measure <basename> [arg...] | --measure <basename> --via '<command>'" >&2
+      exit 2
+    fi
+    run_measure "$@"
     ;;
   --help | -h)
     sed -n '3,60p' "${BASH_SOURCE[0]}"

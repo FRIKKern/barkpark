@@ -8,6 +8,22 @@
  *   <meta name="bp-content-rev" content="…">  the content revision it was cut against
  *   <meta name="bp-doc-id"      content="…">  a real content document id (content-truth)
  *
+ * …plus ONE conditional marker, emitted only when the third is EMPTY:
+ *
+ *   <meta name="bp-corpus-status" content="…"> which upstream condition stopped
+ *                                              the SSR from anchoring a document
+ *                                              (cause-truth)
+ *
+ * It does not rescue the deploy — an empty bp-doc-id still fails the gate closed,
+ * which is the one part of that story that always behaved correctly. It makes the
+ * refusal LEGIBLE: the recorded failure_reason names a 403, a 401, a wrong host or
+ * a genuinely empty corpus instead of collapsing all of them into "marker is
+ * empty". Its VALUE SHAPING lives here, beside the other markers and free of
+ * `server-only` / `next/cache`, so it can be pinned by a unit test — the marker
+ * text is an interface the deploy engine reads back with `sed`, and the shell
+ * self-test's fixture hard-codes it, so nothing else would catch the two drifting
+ * apart.
+ *
  * The gate boots the idle slot and probes ONE path (the site base under
  * `BARKPARK_SITE_HEALTH_PATH`), asserting bp-build-id EQUALS the build it ships,
  * bp-content-rev is non-empty (and matches CONTENT_REV when set), and bp-doc-id
@@ -41,4 +57,54 @@ export function siteMarkers(env: NodeJS.ProcessEnv = process.env): SiteMarkers {
       env.BARKPARK_CONTENT_REV?.trim() || env.CONTENT_REV?.trim() || "unknown",
     siteBase: env.BARKPARK_SITE_BASE?.trim() || "/",
   };
+}
+
+/* ── bp-corpus-status: the cause-truth marker ─────────────────────────────── */
+
+/**
+ * The marker value is read back out of served HTML by a shell `sed` on
+ * `content="…"` (`deploy/lib/site-deploy-common.sh` meta_value), so it must stay
+ * single-line and quote/angle-free, and bounded so one upstream error body
+ * cannot bloat the SSR head.
+ */
+export const CORPUS_STATUS_MARKER_MAX = 200;
+
+export function sanitizeMarkerValue(text: string): string {
+  const flat = text.replace(/[\r\n\t]+/g, " ").replace(/["'<>]/g, "").trim();
+  const collapsed = flat.replace(/\s{2,}/g, " ");
+  return collapsed.length > CORPUS_STATUS_MARKER_MAX
+    ? `${collapsed.slice(0, CORPUS_STATUS_MARKER_MAX - 1)}…`
+    : collapsed;
+}
+
+/**
+ * The corpus read, reduced to only what the marker needs. Structural on purpose:
+ * importing `CorpusGraph` from `lib/graph.ts` would drag `server-only` and
+ * `next/cache` in here and make this module untestable again.
+ */
+export interface CorpusStatusInput {
+  /** `graph <status>: <message>` when the read FAILED, null when it succeeded. */
+  upstreamReason: string | null;
+  /** How many nodes the read returned (0 on failure, and on an empty corpus). */
+  nodeCount: number;
+}
+
+/**
+ * The value of the `bp-corpus-status` marker: the upstream condition to RECORD
+ * when the SSR could not anchor a content document, and `""` when it could — a
+ * healthy render has nothing to record and emits no marker at all.
+ *
+ * It never fabricates a doc id to make HEALTH pass, and it never invents a
+ * cause: a read that SUCCEEDED and simply had nothing to anchor says exactly
+ * that.
+ */
+export function corpusStatusMarkerValue(
+  input: CorpusStatusInput,
+  docId: string,
+): string {
+  if (docId !== "") return "";
+  if (input.upstreamReason) return sanitizeMarkerValue(input.upstreamReason);
+  return sanitizeMarkerValue(
+    `graph 200: corpus read OK but carried ${input.nodeCount} node(s), none usable as a content anchor`,
+  );
 }

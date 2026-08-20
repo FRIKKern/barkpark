@@ -9,8 +9,19 @@ defmodule Barkpark.PluginFreeBootTest do
     1. The supervision tree has no `Barkpark.Plugins.OnixEdit.*` children.
     2. `GET /studio/production` (following the scoped-shell redirect)
        renders 200 with the `"Structure"` marker.
-    3. `GET /api/schemas` returns exactly the 9 seed schema names
-       (8 demo seeds + the CORE `tag` schema, charter D12).
+    3. `GET /api/schemas` returns exactly the 6 PUBLIC seed schema names
+       (5 public demo seeds + the CORE `tag` schema, charter D12).
+
+       AMENDED — api-read-path-security-sweep w2. This row asserted 9 names
+       (all 8 demo seeds + `tag`), which encoded the anon field-disclosure
+       defect as an invariant: the route is deliberately un-token-gated and
+       served full `fields` for the three `visibility: "private"` demo seeds
+       (`siteSettings`, `navigation`, `colors` — seeds/demo.ex:185/212/226) to
+       any anonymous reader. `LegacyController.schemas/2` now filters through
+       `Schema.public_schema?/1`, so those three drop out. The invariant is
+       UNWEAKENED in kind — still exact set equality over a fresh install,
+       still non-empty, and still derived from the seeds rather than a
+       hardcoded product list; only the anonymous-visible half is asserted now.
     4. Studio HTML contains no plugin-specific tokens
        (`OnixEdit`, `Bokbasen`, `book`).
     5. Host code under `lib/barkpark` + `lib/barkpark_web` couples to a
@@ -46,11 +57,18 @@ defmodule Barkpark.PluginFreeBootTest do
 
   @endpoint BarkparkWeb.Endpoint
 
-  # The 8 demo seed schemas PLUS the core `tag` schema (authoring-excellence
-  # charter D12 — registered by SchemaBootstrap from CORE, present even with
-  # every plugin off). Growing this list is a deliberate act: a 10th name must
-  # be added here explicitly, never drift in silently (Q6 locked).
-  @expected_seed_schemas ~w(post page author category project siteSettings navigation colors tag)
+  # The 5 PUBLIC demo seed schemas PLUS the core `tag` schema (authoring-
+  # excellence charter D12 — registered by SchemaBootstrap from CORE, present
+  # even with every plugin off; `tag_registry.ex:78` declares it public).
+  # Growing this list is a deliberate act: a 7th name must be added here
+  # explicitly, never drift in silently (Q6 locked).
+  #
+  # The three demo seeds NOT here — `siteSettings`, `navigation`, `colors` —
+  # are `visibility: "private"` (seeds/demo.ex:185/212/226) and are withheld
+  # from the anonymous `/api/schemas` index by the `Schema.public_schema?/1`
+  # filter in `LegacyController.schemas/2` (api-read-path-security-sweep w2).
+  # A private seed appearing here again means that filter regressed.
+  @expected_seed_schemas ~w(post page author category project tag)
 
   # ── Tier-5 allowlist: sanctioned host→removable-plugin code coupling ──────
   #
@@ -442,7 +460,7 @@ defmodule Barkpark.PluginFreeBootTest do
              "expected nav marker \"Structure\" in Studio HTML, got body of #{byte_size(body)} bytes"
     end
 
-    test "GET /api/schemas returns exactly the 9 seed schema names" do
+    test "GET /api/schemas returns exactly the 6 PUBLIC seed schema names" do
       conn = build_conn() |> get("/api/schemas")
       body = json_response(conn, 200)
 
@@ -498,6 +516,12 @@ defmodule Barkpark.PluginFreeBootTest do
           "production",
           scope
         )
+
+      # The root MUST be published: resolve_graph_root only matches published
+      # rows at the default perspective (draft-only id => 404, the sealed graph
+      # draft-title leak). A draft fixture here would 404 and misread as "route
+      # not core-mounted".
+      {:ok, _pub} = Barkpark.Content.publish_document(doc_id, "post", "production", scope)
 
       raw_token = "barkpark-plugin-free-graph-#{System.unique_integer([:positive])}"
 

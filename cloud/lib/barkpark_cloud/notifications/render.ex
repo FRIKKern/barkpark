@@ -32,6 +32,25 @@ defmodule BarkparkCloud.Notifications.Render do
   email's own `detail/1` has applied since wave 13 S2. `event_email.ex`'s comment
   that "`Render.render/2` never reads it" described the pre-wave-29 tree; the
   scrub boundary it protects is upheld here, not crossed.
+
+  ## The deployment failure names WHICH deployment (wave 15 S4)
+
+  `deployment_failed` used to render a site name and a cause and nothing else, on
+  both rails — so a team that got three alerts in an hour could not tell three
+  attempts at one push from three different pushes, and had no handle to look
+  anything up with. `deployment_identity/1` is the shared formatter both rails
+  render, so the identity line is byte-identical in the inbox and in Slack.
+
+  ## The trial teardown is a NAMED arm (cch-w32-s1)
+
+  `trial_expiring` is dispatched hourly in production and, as of charter D359,
+  fans to chat through `Notifications.@chat_always_send`. Without a named arm it
+  would fall to the catch-all below and ship "Event: trial_expiring for acme."
+  at `:info` — which Discord renders GREEN — for a message whose subject is an
+  instance being torn down. It renders at `:warning`. NOTE THE LIMIT so nobody
+  over-claims it: Pushover escalates priority only on `:error`, so `:warning`
+  raises no Pushover priority; what it buys is the Discord/severity colour and
+  an honest classification.
   """
 
   alias BarkparkCloud.FailureCopy
@@ -62,7 +81,8 @@ defmodule BarkparkCloud.Notifications.Render do
         {"Provisioning succeeded", "#{site} finished provisioning and is live.", :info}
 
       "deployment_failed" ->
-        {"Deployment failed", "A deployment for #{site} failed.#{cause(payload)}", :error}
+        {"Deployment failed",
+         "A deployment for #{site} failed.#{identity(payload)}#{cause(payload)}", :error}
 
       "agent_unreachable" ->
         {"Site unreachable", "#{site} stopped responding to health checks.", :warning}
@@ -74,13 +94,102 @@ defmodule BarkparkCloud.Notifications.Render do
         {"Subscription past due",
          "Your subscription is past due — hosted instances may be suspended.", :warning}
 
+      "trial_expiring" ->
+        {"Trial ending",
+         "Your free trial ends #{trial_window(payload)} — #{site} is torn down " <>
+           "automatically when it ends.", :warning}
+
       "test" ->
-        {"Test notification",
-         "This is a test from Barkpark Cloud. If you can read this, the channel works.", :info}
+        if muted?(payload) do
+          {"Test notification",
+           "This is a test from Barkpark Cloud. The channel works — but alerts are " <>
+             "currently OFF for this team, so no real notification will be delivered " <>
+             "until they are switched back on.", :warning}
+        else
+          {"Test notification",
+           "This is a test from Barkpark Cloud. If you can read this, the channel works.", :info}
+        end
 
       other ->
         {"Barkpark Cloud", "Event: #{other} for #{site}.", :info}
     end
+  end
+
+  @doc """
+  WHICH deployment this alert is about, as ONE line — `""` when the payload
+  carries no identity at all (wave 15 S4, charter D248).
+
+  It lives here, and the alert email calls it, so the inbox and the chat channels
+  can never disagree about the deployment they are naming — the same "one story,
+  two envelopes" property `render/2` itself exists for.
+
+  Every part is a real `deployments` column carried by the producer
+  (`Registry.dispatch_deployment_failed/3`) under its own name: the id (which
+  `GET /v1/sites/:id/deployments/:dep_id` answers), the nullable `stage`, and ONE
+  code identity — `git_ref` / `content_rev` / `build_id`. THERE IS NO DURATION
+  AND NO LINK: `deployments` has no started_at/finished_at to subtract, and the
+  notifications layer has no console base URL to link to. The id is the handle.
+
+  The payload reaching a chat shaper is the Oban args map, so every key is read
+  under both a string and an atom.
+  """
+  @spec deployment_identity(map()) :: String.t()
+  def deployment_identity(payload) when is_map(payload) do
+    [
+      {"Deployment", field(payload, :deployment_id)},
+      {"stage", field(payload, :stage)},
+      {"git_ref", field(payload, :git_ref)},
+      {"content_rev", field(payload, :content_rev)},
+      {"build_id", field(payload, :build_id)}
+    ]
+    |> Enum.filter(fn {_label, value} -> is_binary(value) and value != "" end)
+    |> Enum.map_join(" · ", fn {label, value} -> "#{label} #{value}" end)
+  end
+
+  # The identity as its own paragraph, or nothing — a payload without one keeps
+  # the bare lead sentence rather than growing a dangling blank line.
+  defp identity(payload) do
+    case deployment_identity(payload) do
+      "" -> ""
+      line -> "\n\n#{line}"
+    end
+  end
+
+  defp field(payload, key) do
+    Map.get(payload, Atom.to_string(key)) || Map.get(payload, key)
+  end
+
+  # cch-w32-s1 — the trial window, BUILT FROM THE INTEGER, never from `:detail`.
+  #
+  # `TrialExpiryWorker` used to supply both a `days` integer and a first-party
+  # `detail` sentence, and this arm read only the integer. As of cch-w42-s6 it
+  # supplies the FACTS ONLY (`%{days:, name:}`) — the sentence moved into the two
+  # recipient-aware `EventEmail` render arms, because a body authored per-TEAM
+  # could never soften an owner-only imperative for a member. This arm is
+  # unchanged, and that is the point: it never depended on the string. Had it
+  # done so, `detail` would have had to travel
+  # through `cause/1`, i.e. `FailureCopy.humanize/1` = `classify() |> scrub()` —
+  # a FAILURE taxonomy plus a credential redactor. There is nothing to classify
+  # in control-plane-authored prose and nothing to scrub in an integer, and a
+  # future `@scrub_rules` pattern would then silently rewrite customer copy.
+  # (Measured: `humanize/1` is a no-op on that sentence today, so this is design
+  # hygiene, not a live bug.) The payload is the Oban args map, so the key is
+  # read under both a string and an atom; a missing/odd value degrades to "soon"
+  # rather than rendering "in  days".
+  defp trial_window(payload) do
+    case Map.get(payload, "days") || Map.get(payload, :days) do
+      1 -> "in 1 day"
+      d when is_integer(d) and d > 1 -> "in #{d} days"
+      _ -> "soon"
+    end
+  end
+
+  # cch-w32-s1 — did the test fan out from a MUTED team? `send_test_chat/2` is a
+  # transport probe and fires regardless of `alerts_enabled`, which is right; it
+  # sets this flag so the message itself can say so, instead of the one button
+  # whose job is to answer "will I be told?" answering an unqualified yes.
+  defp muted?(payload) do
+    Map.get(payload, "alerts_muted") == true or Map.get(payload, :alerts_muted) == true
   end
 
   # The failure's HUMAN cause as its own paragraph, or "" when the trigger site

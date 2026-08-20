@@ -1,0 +1,1949 @@
+{
+  "_id": "paper-excellence-wave-2026-08-12",
+  "blocks": [
+    {
+      "id": "pew1-eyebrow",
+      "text": "PAPER EXCELLENCE · WAVE 1 · SURVEYING · 2026-08-12",
+      "type": "eyebrow"
+    },
+    {
+      "id": "pew1-h1",
+      "level": 1,
+      "text": "Twin and Close — the founding wave",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The Heggemsnes Act's second arc opens here: upgrade Barkpark Papers to the standard of an unconstrained Fable artifact, honestly, with screenshots as evidence. Wave 1 ports the Eight-Minute Erasure artifact into a real Paper, measures every pixel where the Paper loses, fixes what is systemic, and turns the friction log into the agent-authoring onramp."
+        }
+      ],
+      "id": "pew1-ingress",
+      "type": "ingress"
+    },
+    {
+      "id": "pew1-byline",
+      "items": [
+        "Epic task-4792223ca9eb5a7d",
+        "Benchmark: the Eight-Minute Erasure artifact",
+        "Strategy: Fable, 2026-08-12"
+      ],
+      "type": "byline"
+    },
+    {
+      "id": "pew1-stats",
+      "items": [
+        {
+          "label": "block types the renderer already speaks (asciicast, chart, diagram, diff, filetree among them)",
+          "value": "56"
+        },
+        {
+          "label": "published papers that inherit every systemic fix",
+          "value": "~747"
+        },
+        {
+          "label": "epic acceptance criteria this wave advances",
+          "value": "3"
+        },
+        {
+          "label": "survey lanes flying now",
+          "value": "16"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "id": "pew1-h2-wish",
+      "level": 2,
+      "text": "The wish",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "“We need every evidence — every detail — a true honest analysis — we will spend this time to upgrade our paper system to the next level — we will figure out how we can improve the aesthetics of the paper — by utilizing image analysis — comparing to what a Fable agent would make if it wasn't as constrained — we will call this the Heggemsnes Act — a declaration of humility in front of the people who want to help out. Also — we want to make sure that agents are a lot better at writing papers when they get into Barkpark — for example — I often see agents trying to create their own HTML etc — and not utilizing the system — the paper you just made should be something our Barkpark paper should learn from.”"
+        }
+      ],
+      "id": "pew1-wish-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "pew1-h2-saw",
+      "level": 2,
+      "text": "What the strategist saw",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The benchmark artifact is an editorial evidence page: a display serif title at enormous scale with one accent-colored italic word, a four-stop timeline strip under the ingress, dual serif/mono registers, a red/green accent discipline where color always means something (erasure vs. verification), labeled sequence-diagram and timeline SVGs, embedded replayable terminal casts, verdict tables, and stat tiles with per-trial dots — tuned in both light and dark."
+        }
+      ],
+      "id": "pew1-saw-1",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The current reader, screenshotted today on /papers/heggemsnes-act at 1200px, is competent but flat by comparison: the title renders small, the text column hugs the left with a dead right margin holding three floating mode buttons, body text is justified and hyphenated into a cramped measure, stat tiles are flat gray boxes, and the paper's 'notes' block — the five executed remedies, the heart of the Act — renders as blank lines: the ingest wall accepted plain-string items that the renderer silently drops. That is a live defect on the doctrine paper itself."
+        }
+      ],
+      "id": "pew1-saw-2",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The sharpest structural finding: the renderer's block vocabulary is far richer than anyone uses. Fifty-six types exist in the render modules — asciicast, terminal, chart, heatmap, diagram, diff, filetree, duel, pipeline, roadmap — while live papers use roughly ten. The gap to the artifact is therefore only partly missing capability; it is mostly (a) the aesthetic quality of what renders and (b) discoverability: agents cannot see the deck from where they author, so they hand-roll HTML instead."
+        }
+      ],
+      "id": "pew1-saw-3",
+      "type": "paragraph"
+    },
+    {
+      "id": "pew1-h2-dir",
+      "level": 2,
+      "text": "The direction — Twin and Close",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Wave 1 builds the instrument and spends it in the same motion. Port the Eight-Minute Erasure artifact into a genuine Paper — the twin — using only the existing block deck, logging every point where the deck cannot express the artifact or where the author is tempted toward raw HTML. Screenshot twin against artifact, both themes, two widths. Every pixel where the twin falls short of the artifact becomes a named, screenshotable defect in a ranked gap ledger — with each gap classified SYSTEMIC (typography scale, measure, palette, stat tiles — fixes every one of ~747 papers) or BESPOKE (a one-off device that becomes a block proposal for a later wave). Wave 1 builders close only the systemic half, through the token manifest, gated by the view-edit-parity audit and a fixed regression panel of existing papers re-screenshotted before and after."
+        }
+      ],
+      "id": "pew1-dir-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "pew1-dir-steps",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Author the erasure artifact as a Paper with today's deck; the friction log is a first-class deliverable."
+                }
+              ],
+              "id": "pew1-ds1",
+              "type": "paragraph"
+            }
+          ],
+          "title": "The twin"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Image analysis of twin vs. artifact: measured observations (type scale, measure, contrast, spacing), not vibes; every gap ranked and classified systemic vs. bespoke."
+                }
+              ],
+              "id": "pew1-ds2",
+              "type": "paragraph"
+            }
+          ],
+          "title": "The gap ledger"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Renderer/CSS fixes for the top systemic gaps — editorial type scale, column and measure, justification policy, stat tiles, notes defect, theme polish — with before/after screenshots."
+                }
+              ],
+              "id": "pew1-ds3",
+              "type": "paragraph"
+            }
+          ],
+          "title": "The systemic close"
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Turn the friction log into the first agent-authoring onramp: a canonical premium-paper guide and sharper bp CLI door copy, so the paper door beats hand-rolled HTML."
+                }
+              ],
+              "id": "pew1-ds4",
+              "type": "paragraph"
+            }
+          ],
+          "title": "The onramp seed"
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "id": "pew1-h2-debate",
+      "level": 2,
+      "text": "The debate",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Rival B — Door first: ship the agent onramp (bp paper scaffold, error copy, guide) before touching aesthetics. Rejected as the opener: an onramp that leads agents to papers which still lose to their own hand-rolled HTML teaches them the door is not worth taking; the incentive to bypass survives. The epic's own first acceptance criterion is the screenshot-grounded gap analysis, and the onramp gets strictly better material once the twin's friction log exists."
+        }
+      ],
+      "id": "pew1-deb-1",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Rival C — Direct glow-up: start restyling render.ex and the reader CSS by taste, no instrument. Fastest visible change, but it abandons the wish's spine — every evidence, true honest analysis, image analysis against the unconstrained benchmark — and leaves later waves nothing repeatable to measure against."
+        }
+      ],
+      "id": "pew1-deb-2",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Sharpest attack on the winner: overfitting. The erasure page is one bespoke incident record; optimizing until the twin matches it could bolt one-off devices onto the renderer and regress 747 papers built for the current look. The wave absorbs this three ways: the systemic/bespoke gate means wave 1 only ships changes that improve every paper; the regression panel re-screenshots a fixed sample of existing papers before merge; and the gap ledger demands measured observations so taste disputes resolve against numbers. A second attack — the ingest wall itself may refuse an artifact-scale paper (the 17th-heading and ~63KB 500s are already on file) — is absorbed by making wall limits a survey lane before any port begins."
+        }
+      ],
+      "id": "pew1-deb-3",
+      "type": "paragraph"
+    },
+    {
+      "id": "pew1-h2-survey",
+      "level": 2,
+      "text": "The survey plan — 16 lanes",
+      "type": "heading"
+    },
+    {
+      "header": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Lane"
+            }
+          ]
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Question"
+            }
+          ]
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Why"
+            }
+          ]
+        }
+      ],
+      "id": "pew1-survey-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "renderer-web-path"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Map /papers/:slug end to end: BulldocsLive, render.ex, render/* modules, bulldocs + root layout CSS — which file owns type, column, theme"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tells builders where a visual overhaul actually lands"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "block-deck-census"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "56 renderer types vs. what the ingest wall accepts vs. corpus usage histogram"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "separates capability gaps from discoverability gaps"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "notes-block-defect"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Why do plain-string notes items render blank on heggemsnes-act?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "live defect on the doctrine paper; wall/renderer contract"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "erasure-anatomy"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Inventory every visual device in erasure.html; classify: existing block / systemic CSS gap / missing block"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the raw material of the gap ledger"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "asciicast-terminal-reach"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Are asciicast/terminal blocks reachable through the non-admin ingest wall, and what renders on web/TUI/email?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the artifact's casts are its strongest evidence device"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "typography-baseline"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Computed-style audit of the reader, both themes, two widths: families, sizes, measure, leading, justification"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "hard numbers for the honest analysis"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ingest-wall-limits"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Exact publish wall: tag rules, heading-count 500, ~63KB 500, hollow-body guard status"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the twin must fit through the door, or the door is the finding"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "agent-friction-evidence"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Where do agents actually learn the paper door today; evidence of HTML bypasses; AXI manifest-brief-views finding"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "grounds the onramp in observed failure, not theory"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp-cli-paper-door"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "internal/cli bulldocs publish: flags, error copy, scaffold potential; doc create stdin trap status"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the door's ergonomics are the bypass's root cause"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "prior-art-doctrine"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Prior paper-quality waves, reader-owned spacing doctrine, legendary reader sweep: what is binding"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "do not relitigate settled law or repeat failed moves"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "parity-surfaces"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Email/TUI/editor render parity: which changes are web-only-safe; what view-edit-parity gates"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a web glow-up must not shatter three sibling surfaces"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "theme-token-manifest"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "palettes.ex, tokens_gen.ex, stylesheet.ex, Unified Aesthetic manifest: how tokenized is the reader"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "systemic fixes should ride the manifest, not fork it"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "corpus-regression-panel"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Choose and baseline-screenshot the fixed regression sample (showcase 91-block plus ordinary papers)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the anti-overfitting gate needs its before pictures now"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "figure-chart-capability"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Can data_viz/figures express an annotated timeline and a sequence diagram today?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "decides whether the artifact's figures are systemic or bespoke"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "screenshot-rig"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A repeatable screenshot harness: themes x widths, storage, before/after diffing"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "image analysis must be reproducible across waves"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "twin-port-preflight"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Chunk erasure.html into candidate blocks; name every inexpressible span"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "sizes the twin build and seeds the friction log"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "pew1-dg-h1",
+      "level": 2,
+      "text": "Survey digest — what sixteen lanes established",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The direction's description of today's reader is corrected in three places by measurement. The public paper column is CENTERED (.bp-paper-shell has margin: 0 auto; the article shell is 720px), nothing on the paper surface is justified (zero text-align: justify hits across the repo and the live pages), and only hyphenation is real (hyphens: auto on paragraphs, paper-surface.css:157). The left-hug impression comes from the Studio editor panel, which deliberately has no auto margins — a different surface. The gap ledger must name true causes, not inherited framing."
+        }
+      ],
+      "id": "pew1-dg-p1",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The crown candidate finding: the public reader almost certainly renders body prose at 16px while the token manifest says 18px. paper-surface.css defines --bp-body-size from the token but no rule in that file applies it to paragraphs; the only consumer of --bp-body-size is Studio's root.html.heex. Two surveyors' live measurements disagree — 16px/26.4 on a body paragraph versus 20.48px/30.72 — but 20.48px is exactly the ingress rule's 1.28rem, so the second measurement very likely landed on an ingress, not body prose. Verifier v1 settles the number; it is the before column of every typography row in the gap ledger."
+        }
+      ],
+      "id": "pew1-dg-p2",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The renderer's vocabulary is confirmed rich and unused: 754 published papers carry 79 block types, the top ten types are 96.1 percent of all 36,150 top-level blocks, and only three deck types (duel, lineage, field-number) appear in zero papers. The ingest wall has NO block-type allowlist anywhere — a live probe published asciicast + terminal end to end with ordinary credentials, and unknown types render a visible Unsupported placeholder (four published papers are broken that way today: spacer x13, code_block, codeBlock). The same permissiveness is the root of the notes defect."
+        }
+      ],
+      "id": "pew1-dg-p3",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Notes-defect anatomy is settled at file:line. The renderer drop site is Components.note_item_html (components.ex:495) — deliberately guard-free for byte-fidelity, so a plain-string item emits an empty 4px row. The wall's real shape gate is BlockOps.validate_render_shapes (block_ops.ex:1487), which is type-keyed with arms only for list and table; its catch-all recurses blocks/children and never looks at items, so every items-bearing widget (notes, cards, pipeline) is unguarded. The briefed attribution to the hollow guard was wrong — hollow.ex counts bare strings AS content. The fix is two-ended (wall arm plus renderer contract) and cross-surface: notes has TUI goldens. The wall/renderer key divergence (Hollow accepts text|value|title|caption; the inline renderer reads only value) is the same false-green class, proven live by a paper that published 200 with body_html_len=0."
+        }
+      ],
+      "id": "pew1-dg-p4",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Doctrine and wall state: the spacing doctrine has REVERSED — /papers/mechanical-spacing-doctrine is now the Reader-Owned Spacing Doctrine, empty-paragraph spacers are forbidden and 351 were purged; the user's global CLAUDE.md and this workflow's own boilerplate still carry the retired law, and this digest was authored spacer-free accordingly. The 17-heading 500 is FIXED on origin/main with a regression test. The ~63KB publish 500 has NO code source anywhere in api/lib (the only body limit is 100MB) — it is unlocated folklore until verifier v4 reproduces or refutes it. The epic-quality caps (80 blocks, 16 headings, 5000 words, no spacers) bind ONLY papers tagged epic-cycle-wave-paper; an untagged twin passes the wall with just description + registered weighted tags."
+        }
+      ],
+      "id": "pew1-dg-p5",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The agent-authoring door is measured and damning: bp onramp output mentions papers ZERO times across all four targets; the capabilities manifest has no paper noun and its single authoring line advertises an HTML payload — the bypass is invited, not merely permitted; bp paper is read-only with no pointer to the write door; the only authoring doc is a 32-line human-tier cheatsheet the router never loads. Two committed hand-rolled HTML spec deliverables (426KB and 17KB) are the fossil record of this failure."
+        }
+      ],
+      "id": "pew1-dg-p6",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "One live contradiction between lanes: erasure-anatomy classed the artifact's four-stop clock strip as a missing block, while figure-chart found that `lineage` is a purpose-built horizontal dated-node strip (auto-fit grid, overline/title/body/value/source slots) and that `chart` already carries a full verdict-annotation layer (regions, refLines, points, four tones) that nobody uses. Two of three lanes missed lineage entirely — itself evidence for the discoverability thesis. Verifier v3 renders the proof in pixels. Also established: font stacks already match the benchmark artifact; the real deltas are display scale (artifact h1 is 2.6x ours), the missing wide band (--wide 1040px has no counterpart — every block is capped at the 640px text column), verdict accent tokens, hyphenation, and numeric table discipline."
+        }
+      ],
+      "id": "pew1-dg-p7",
+      "type": "paragraph"
+    },
+    {
+      "id": "pew1-dg-h2",
+      "level": 2,
+      "text": "Coverage map — found, and pointedly not found",
+      "type": "heading"
+    },
+    {
+      "header": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Area"
+            }
+          ]
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Verdict"
+            }
+          ]
+        }
+      ],
+      "id": "pew1-dg-cov",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Reader CSS ownership"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FOUND: bulldocs.html.heex + paper-surface.css (compile-inlined via Stylesheet.css). root.html.heex is NOT on the reader path — Studio only."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Justified column"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND anywhere. Premise dead; do not build a justification policy slice."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Measure/column token"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND in tokens.json. The column is owned by two uncoordinated literals: shell 820/720px in bulldocs.html.heex and width 680 in palettes.ex."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Type-scale drift gate"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND: design/check.mjs Part E ratchets COLOR literals only — a type or measure regression is invisible to CI today."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Block-type allowlist at ingest"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND, proven by live probe publish. Unknown types degrade to a visible placeholder."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "~63KB publish ceiling"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND in code (only a 100MB Plug limit). Treated as unverified folklore pending v4."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Paper authoring in manifest/onramp"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND: zero paper mentions in bp onramp; no paper noun in capabilities; bulldocs publish help sells HTML."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Committed screenshot harness"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND. But a zero-dep CDP pattern runs in three CI workflows, and structural numeral gating (cssom-parity.mjs) is the house doctrine — no pixel-diff dependency exists."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Prior aesthetics baseline"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND: no earlier wave ever measured type scale or contrast on a Paper; the briefed prior-art slug paper-structure-rhythm-wave-2026-08-03 is a phantom (404)."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Notes defect mechanics"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FOUND at file:line on both ends (block_ops.ex:1487 arms; components.ex:495 drop site)."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Evidence-device capability"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FOUND unused: lineage, chart annotations, diagram (mermaid live on the reader), asciicast (src-only, CDN player)."
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Corners no surveyor reached: the Studio editor's rendering of malformed items (auth-gated), Media-plugin hosting for .cast files, the MCP tool naming for papers, DedupWall similarity thresholds, tokens.schema.json / validate.mjs internals, the true call sites of cards_email/fleet_email/panels_email, and nested-block counts (the census was top-level only). The 20 baseline PNGs and erasure.html itself live only in an ephemeral session scratchpad — verifier v6 makes them durable before they evaporate."
+        }
+      ],
+      "id": "pew1-dg-p8",
+      "type": "paragraph"
+    },
+    {
+      "id": "pew1-dg-h3",
+      "level": 2,
+      "text": "Verify plan — the last look before the plan is cut",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Ten verifiers fly before the plan is cut; after them there is no more looking. Each must PROVE with run output, not reading: v1 settles the reader's true body size; v2 mutation-proves the parity gates; v3 publishes a figure-fidelity probe and screenshots lineage/chart-annotations/diagram; v4 brackets the 63KB 500 and captures the epic-quality refusal payload; v5 censuses malformed items across the corpus; v6 copies the benchmark artifact and baselines into the shared checkout and pins guerrilla's deployed SHA; v7 tests hermetic (serverless) paper rendering and cache headers; v8 probes what adding a token family actually costs end to end; v9 (Fable) settles the twin's chunk plan, tag decision and wide-band strategy with a live container probe; v10 locates the manifest copy source and counts body_html-only papers."
+        }
+      ],
+      "id": "pew1-dg-p9",
+      "type": "paragraph"
+    },
+    {
+      "header": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Key"
+            }
+          ]
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Model"
+            }
+          ]
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Question"
+            }
+          ]
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Proof (run, not read)"
+            }
+          ]
+        }
+      ],
+      "id": "pew1-dg-verify",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "v1-reader-body-size"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Is reader body prose 16px (token says 18)? Reconcile the 16 vs 20.48 measurements."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "curl the served page + embedded CSS; computed styles on a body paragraph AND the ingress at devicePixelRatio 1, both themes."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v2-gate-mutation"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Can view_edit_parity and article_inline_allowlist actually fail? Is a one-sided rule ADD caught?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "worktree probe edit to paper-surface.css; CC=clang mix test on the two files; quote the red; revert."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v3-figure-fidelity"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Does lineage render the four-stop strip? Are chart annotations and mermaid sequence usable at 360/768/1440?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp bulldocs publish a probe paper; curl rendered HTML; CDP screenshots at three widths, both modes."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v4-wall-brackets"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Does a ~63.7KB publish still 500? Does the epic-quality 422 carry details.failures on the wire and in bp output?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "publish throwaway papers at 62.4KB and 63.7KB; publish a tagged 17-heading paper; capture raw HTTP + CLI output; also trace the spacing_norm miscount."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v5-malformed-census"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "How many published papers carry non-map items in notes/cards/pipeline (refuse vs normalize)? Does email drop them too?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "corpus query over /v1/data/query counting item shapes; trace cards_email string-item path."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v6-evidence-durability"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Make the benchmark + baselines durable; is guerrilla at origin/main?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "cp erasure.html, 4 jpegs, shot.mjs, 20 PNGs into the shared checkout; shasum manifest; compare deployed SHA vs origin/main."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v7-hermetic-render"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Can a paper render + screenshot without a live server? Is there a cache in front of /papers?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix run --no-start render attempt; scripts/pdrender-dump.sh; curl -D headers on guerrilla /papers."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v8-token-family-cost"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "What does adding a measure/type token family cost end to end — does the schema refuse, which 19 artifacts move?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "worktree probe: add a token, node design/emit.mjs --write + design/check.mjs; list changed files; quote refusals."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v9-twin-preflight"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fable"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Twin chunk plan: tag or untagged, section nesting vs 80-block cap, can container width=1040 escape the measure today, what fidelity is genuinely lost?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "publish a container-width probe; curl for max-width:1040px in served HTML; screenshot; rule on each loss class."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v10-door-copy-source"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Where does the bulldocs publish summary string live server-side? How many live papers are body_html-only?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "grep api/lib for the capability literal; corpus query counting body_html-only papers."
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "IN FLIGHT: wave 1 is VERIFYING — the survey is digested above and ten verifiers (nine Opus, one Fable) are proving the load-bearing claims with run output. Next: Decide cuts the wave plan from the verified ledger. The epic heartbeat lives on task-4792223ca9eb5a7d."
+        },
+        {
+          "type": "text",
+          "value": " [Correction, 2026-08-12 Review: this milestone is history — all ten verifiers reported, Decide cut the seven-slice plan below, six round-1 slices were built and reviewed; the wave's outcome lives in the Debrief section at the end.]"
+        }
+      ],
+      "id": "pew1-callout",
+      "type": "callout"
+    },
+    {
+      "id": "block-35",
+      "level": 2,
+      "text": "Verification results — ten probes, four refutations",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Ten verifiers ran between the digest and this plan; every assignment reported, so no deficit shapes the cut. Four premises died and each death reshaped a slice: the reader really renders body prose at 16px against an 18px token, the parity gate really is blind to one-sided CSS adds, lineage really is not a horizontal strip, and the 63KB ingest ceiling never existed."
+        }
+      ],
+      "id": "block-36",
+      "type": "paragraph"
+    },
+    {
+      "head": {
+        "cells": [
+          {
+            "text": "Probe"
+          },
+          {
+            "text": "Verdict, with the decisive number"
+          }
+        ]
+      },
+      "id": "block-37",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "v1 reader body size"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "SETTLED: body prose computes 16px/26.4px in both themes while --bp-body-size resolves 18px with ZERO reader consumers; the earlier 20.48px reading was the ingress (1.28rem). Trap proven live: applying the token alone collapses the ingress/body ratio 1.28x to 1.14x because every role size is root-relative rem. Body CPL averages 84 at the 640px measure."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v2 gate mutation"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "HOLE CONFIRMED: adding font-size to .bp-paper-surface p one-sided passed all 1,156 portable_doc tests, the paper-editor mirror and design/check.mjs — only a COLOR literal reds Part E. Shared-value changes and .bp-role-* adds DO red, so the gate architecture is asymmetric, and wave typography lands in the blind half."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v3 figure fidelity"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "lineage REFUTED as a strip: four stops wrap 3+1 at 720px with no spine element. Chart annotations all render, but tick text paints 4.26px at a 360 viewport, a last-index point label clips (bbox right 654 vs viewBox 640), and region tones are indistinguishable at opacity 0.08. Mermaid hydrates yet paints 3.73px labels at 360."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v4 wall brackets"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "63KB ceiling REFUTED: 62,405 B, 63,740 B and 252,360 B all publish HTTP 200. The real cap is 5,000 first-pass words (plus 80 blocks / 16 headings), scoped to the exact tag epic-cycle-wave-paper; closed expandables are exempt. The 17-heading 500 is fixed — 422 with details.failures, printed by bp."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v5 malformed census"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Exactly 2 papers carry malformed notes items, while 215 papers (28%) carry CANONICAL byline strings — so the wall arm must be type-keyed, never generic over items. 10 papers carry text-keyed inline leaves; 4 are 100% hollow behind 200s (deploy-reliability-wave-4 serves 226KB with 22 empty h2). Prior art cch-w57 is open and ADOPTED, not re-filed."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v6 evidence durability"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The 28-file benchmark archive sits at tooling/paper-excellence/evidence/, manifest-sealed and byte-identical to the originals; guerrilla equals origin/main (compile-time SHA plus verbatim-CSS containment). Caveat: the 20 baselines are fold-only 1x against the artifact full-page 2x."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v7 hermetic render"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A serverless, DB-less, networkless render is pixel-metric IDENTICAL to the live reader: 19/19 blocks byte-verbatim in the served page, CSS 154,732 B on both sides. The reader ETag is content plus a 7-day bucket — blind to renderer and CSS deploys — so any guerrilla-pointed rig must cold-fetch."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v8 token cost"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "New type/measure tokens are nearly free but INERT: emit.mjs hand-enumerates its reading vars, and a letterSpacing leaf already in tokens.json is emitted NOWHERE. Teaching emit costs ~5 lines and regenerates exactly 2 artifacts with the mirror automatic. A COLOR token is the expensive kind — Part F reds it on sight. The built editor CSS ships stale with green CI."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v9 twin preflight"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "An untagged twin passes the wall (caps are tag-scoped and would not bind: 11 headings, ~1,950 words). Nesting works on the reader — section grid 2-up, columns, expandable. container is NOT a block type: it renders Unsupported and silently DROPS its children. Grid span is a top-level child key; code blocks read only the value key."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "v10 door copy"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The or-HTML-payload string is authored at bulldocs.ex:316 and duplicated in 5 files, one CI-gated (openapi drift). bp onramp mentions papers ZERO times across all targets. 31 of 764 papers (4.1%) are body_html-only — four authored in August — and an HTML-only table collapses to run-together text in the terminal reader."
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Coverage: ten of ten verifiers reported — no deficit. Not-founds worth keeping: no prior Barkpark task or paper owns the reader-typography finding; no pixel-diff dependency or screenshot harness exists on main; no byte budget exists anywhere in the render path."
+        }
+      ],
+      "id": "block-38",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-39",
+      "level": 2,
+      "text": "Decisions",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The charter (PR #11568, .claude/workflows/bp-cloud-epic-charter.md) is the epic memory; until that PR merges, this list is the readable copy of wave-1 law."
+        }
+      ],
+      "id": "block-40",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-41",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "D1 Fix the 16px-vs-18px crown defect by consuming --bp-body-size on the reader surface — measured live, both themes."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D2 Convert rem-sized role classes to em in the SAME PR — the token alone flattens the type scale (proven 1.28x to 1.14x)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D3 Measure target 66-72 CPL (today 84); hyphens off; nothing was ever justified and the column was always centered — premise corrected."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D4 Gate before glow-up: harden view_edit_parity sections 2/5/6 to the View-exhaustive shape before any typography merges."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D5 Normalize at write, refuse only the unrescuable; the arm is type-keyed — byline strings are canonical for 215 papers."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D6 Adopt cch-w57 for the hollow-paper repair; corpus re-publish happens after the normalizer deploys."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D7 Plan with the real caps — 5,000 first-pass words tag-scoped, closed expandables exempt; the 63KB byte ceiling is retired folklore."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D8 The twin publishes UNTAGGED with registered tags and a dedup-differentiated title."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D9 Fix chart/mermaid narrow-width legibility, the point-annotation clamp and region tones now; the clock strip is a wave-2 block proposal."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D10 The merge instrument is the hermetic render+screenshot rig; content assertions, never HTTP status; cold fetches against guerrilla."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D11 Demote the HTML door in copy everywhere it is authored; add Papers to the agent onramp; point bp paper at the write door."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D12 Spacing is reader-owned — zero empty-paragraph spacers; both spacing_norm defects (text-key false positive, nested blindness) get fixed."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D13 Commit the benchmark evidence archive; reshoot full-page 2x before pinning thresholds."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D14 Rounds are law: typography is round 2, dispatched only after the gate slice merges."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D15 Color-token work (verdict loss/peace pair) is deferred to wave 2 — a color token drags the 5-theme derive contract."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-42",
+      "level": 2,
+      "text": "Wave plan — seven slices, two rounds",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Referent task paper-excellence-wave-1-log holds the charter-PR gate claim. Every slice below is a published child of task-4792223ca9eb5a7d carrying this Paper on its wave_paper field."
+        }
+      ],
+      "id": "block-43",
+      "type": "paragraph"
+    },
+    {
+      "head": {
+        "cells": [
+          {
+            "text": "Slice task"
+          },
+          {
+            "text": "Surface"
+          },
+          {
+            "text": "Model"
+          },
+          {
+            "text": "Round"
+          },
+          {
+            "text": "Local gate"
+          }
+        ]
+      },
+      "id": "block-44",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "pe-w1-parity-gate-one-sided-adds"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Elixir parity test"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix test view_edit_parity + article_inline_allowlist"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "pe-w1-write-path-normalizer"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ingest wall + authoring advisories"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fable"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix test test/barkpark/content/ + test/barkpark/portable_doc/"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "pe-w1-figure-legibility"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "chart/mermaid SVG + chart CSS"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fable"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix test test/barkpark/portable_doc/"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "pe-w1-erasure-twin"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "published Paper + guide + friction log"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fable"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "curl 200 + sentinel grep on /papers/eight-minute-erasure"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "pe-w1-hermetic-screenshot-rig"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tooling rig + evidence archive"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "gate.sh + shasum -c MANIFEST.sha256"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "pe-w1-paper-door-copy"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "manifest copy + Go CLI onramp"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "go build + go test ./internal/cli/..."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "pe-w1-reader-editorial-typography"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tokens + reader/editor CSS mirrors"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fable"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2 — AFTER the gate slice merges"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix test render/ + validate + check.mjs + mirror-check"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "HIGH-FLIP-RISK flag: pe-w1-write-path-normalizer carries refusal-blast-radius risk — the reviewer must independently re-derive that no canonical corpus shape is refused, and an independent second reviewer is warranted before merge. Backlog filed: pe-bl-clock-strip-block, pe-bl-verdict-accent-tokens, pe-bl-code-emphasis, pe-bl-asciicast-selfhost, pe-bl-stat-tile-dots, pe-bl-type-literal-ratchet, pe-bl-bp-paper-scaffold, pe-bl-container-child-guard, pe-bl-probe-paper-cleanup. The builders fly against these briefs; Review closes the story."
+        }
+      ],
+      "id": "block-45",
+      "type": "paragraph"
+    },
+    {
+      "id": "pew1-h-debrief",
+      "level": 2,
+      "text": "Debrief — the wave as it merges",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Review re-ran every slice gate green, mutation-proved the two guards (the parity gate reds on the exact one-sided add it was built to catch; the evidence manifest fails on a one-byte tamper), and merged all six branches onto origin/main in one conflict-free octopus — the integrated tree runs content + portable_doc at 2222/0. No review fixes were needed; the final branches are the builders' own. Grade: A-."
+        }
+      ],
+      "id": "pew1-deb-p1",
+      "type": "paragraph"
+    },
+    {
+      "header": [
+        [
+          {
+            "type": "text",
+            "value": "Slice"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Final branch"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Verdict"
+          }
+        ]
+      ],
+      "id": "pew1-deb-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "S1 parity gate"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/parity-gate-catches-one-sided-css-adds-v-0"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "§2/§5/§6 producer-exhaustive + 9-entry allowlist + rot guard; review mutation re-proved the red on the exact crown-fix shape. Mirror-side adds remain ungated (recorded)."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "S2 write-path normalizer"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/normalize-item-shapes-and-inline-leaf-di-1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Five defects fixed at one chokepoint; review independently re-derived the blast radius — 46 live corpus blocks byte-identical, byline strings untouched, refusals only more satisfiable. Independent second review before merge is warranted (high-flip-risk)."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "S3 figure legibility"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/charts-and-mermaid-legible-at-narrow-wid-2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Ticks 5.09→11.0px, mermaid labels 3.60→16.0px at 360; annotation clamp; region tone ladder. Every chart scrolls below ~670px containers — uniform floor, accepted trade-off."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "S4 erasure twin"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/the-eight-minute-erasure-twin-friction-l-3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "/papers/eight-minute-erasure (46 blocks, zero HTML, zero spacers) + /papers/paper-authoring-excellence live; 12-row residual table classifies every gap with an owner. The .cast assets are draft docs — purge hazard on pe-bl-asciicast-selfhost."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "S5 hermetic rig"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/hermetic-render-screenshot-rig-benchmark-4"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Rig green in a cold worktree: render → 6 full-page 2x shots → 30 content assertions; 27-file evidence manifest verifies and was tamper-proven. Baselines are macOS-face; numeric pins wait for pe-w2-rig-ci-image-baselines."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "S6 door copy"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "loop-epic/the-paper-door-stops-selling-html-manife-5"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Manifest, onramp and bp usage all sell blocks + the value-keyed leaf law + the guide slug; the openapi hand-edit re-verified byte-equal to the Elixir literal by the reviewer."
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Ledger audit: all six slice tasks in_progress with evidence stamped as work happened, only the lead-owned 'PR merged' criteria open — one omission found and fixed in review (pe-w1-erasure-twin criterion 3, the FRICTION.md residual table, was proven on the branch but never stamped). All nine charter backlog children exist and are open. The stale IN FLIGHT callout above carries a dated correction."
+        }
+      ],
+      "id": "pew1-deb-p2",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "What fell short of the wish, honestly: the reader still renders body prose at 16px — the crown defect is measured, gated, and UNFIXED this wave, by design (D14: the typography slice is round 2, dispatched only after the parity gate merges, so the fix cannot ship unverifiable). The twin lost the artifact's display scale, accent-italic, clock-strip geometry and per-trial dots — each loss is a named, owned residual, which is the Heggemsnes Act working as declared: humility recorded as tasks, not vibes."
+        }
+      ],
+      "id": "pew1-deb-p3",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "NEXT WAVE: merge the six round-1 PRs (any order; lead closes each task's 'PR merged' criterion on merge), then dispatch S7 pe-w1-reader-editorial-typography — the payoff slice (18px token, rem→em roles, 66–72 CPL, hyphens off). After S3 merges, refresh the rig baselines (chart CSS changed); after the normalizer deploys, corpus repair rides cch-w57-bl-eleven-papers-render-200-with-prose-the-reader-drops. Wave 2 candidates stay ranked in the charter backlog (pe-bl-*)."
+        }
+      ],
+      "id": "pew1-deb-callout",
+      "type": "callout"
+    }
+  ],
+  "source_rev": "c8170e3daa4c792a16afd6a678ffcd1a",
+  "style": "article",
+  "title": "Twin and Close — the founding wave"
+}

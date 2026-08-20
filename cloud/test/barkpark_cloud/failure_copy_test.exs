@@ -99,7 +99,8 @@ defmodule BarkparkCloud.FailureCopyTest do
   end
 
   test "auth/token jargon → human credentials copy" do
-    auth = "The hosting provider rejected our credentials. We're on it — try again shortly."
+    auth =
+      "A credential was rejected. This capture doesn't say whose credential it was — the raw error line names it."
 
     assert FailureCopy.humanize("hcloud: unauthorized (401)") == auth
     assert FailureCopy.humanize("provider returned invalid token") == auth
@@ -295,7 +296,7 @@ defmodule BarkparkCloud.FailureCopyTest do
     canned = [
       "A capacity or quota limit was reached at the hosting provider",
       "A network step timed out",
-      "The hosting provider rejected our credentials",
+      "A credential was rejected.",
       "Securing the domain failed"
     ]
 
@@ -421,7 +422,7 @@ defmodule BarkparkCloud.FailureCopyTest do
   @capacity "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
   @dns_copy "Securing the domain failed on the provider side."
   @network "A network step timed out. Retry usually fixes this."
-  @auth "The hosting provider rejected our credentials. We're on it — try again shortly."
+  @auth "A credential was rejected. This capture doesn't say whose credential it was — the raw error line names it."
 
   # internal/cli/cloud/provider.go:543-552 — HetznerCandidates' resilience
   # ladder: base plus four fallbacks, deduped.
@@ -707,11 +708,27 @@ defmodule BarkparkCloud.FailureCopyTest do
     refute FailureCopy.capability_gap_reason("azure", "resurrect") =~ "Azure has no archives"
   end
 
-  test "hetzner pause gap explains a stopped Hetzner box still bills → archive instead" do
+  test "hetzner pause gap names deletion — the only act that stops the charge (cch-w55-s2)" do
     reason = FailureCopy.capability_gap_reason("hetzner", "pause")
     assert reason =~ "Hetzner"
     assert reason =~ "bill"
-    assert reason =~ "Archive"
+    assert reason =~ "Deleting"
+
+    # WHY THE OLD ASSERTION WAS WRONG. This arm used to read `assert reason =~
+    # "Archive"`, pinning the copy "Archive it to stop paying and resurrect it
+    # later." It passed for the whole time the sentence was false: no archive
+    # path in this tree touches a server's power or existence (the portable
+    # `runNeutralArchive` SSH-collects a bundle and returns; the `--fast` path's
+    # `--stop` is "never a hard stop"), and Hetzner bills a server "for as long
+    # as it exists, regardless of whether it is turned on or not" AND bills
+    # snapshots "per gigabyte per month"
+    # (https://docs.hetzner.com/cloud/billing/faq/). The prescribed remedy
+    # therefore INCREASED the operator's bill. A substring assertion can only
+    # pin the words we chose, never their truth — so the retraction is pinned
+    # negatively too: archiving must never again be sold as a way to stop
+    # paying.
+    refute reason =~ "Archive"
+    refute reason =~ "stop paying"
   end
 
   test "catalog gap is generic across kinds and names the fixed-defaults fallback" do
@@ -754,6 +771,27 @@ defmodule BarkparkCloud.FailureCopyTest do
     @aws_key "AKIA" <> "Q7ZLMNPR" <> "4TV6WY2X"
     @bare_token "Kj8Xm2QpL9vR4tZ7" <> "wN1cB6yH3sD5" <> "fG0aQ2eR7uI9"
 
+    # BARKPARK'S OWN credential shapes, assembled for the same reason as above.
+    # `bppat_` is the self-service PAT (`Barkpark.Auth.create_personal_access_token/3`)
+    # and `bpcs_` the scoped chat/MCP session token — both are
+    # `<prefix> <> Base.url_encode64(32 random bytes, padding: false)`, so the
+    # body is 43 chars of `[A-Za-z0-9\-_]`. The `-`/`_` inside is exactly why the
+    # bare-token clause (contiguous alnum only) could not see them: measured over
+    # 2,000 freshly minted tokens against the pre-fix module, four of six carrier
+    # shapes leaked 93.6% and the rest redacted only by accident of the alphabet.
+    # A `-` and a `_` are kept IN the bodies here on purpose — a body without one
+    # is the ~6% lucky case and would pass even unfixed.
+    @bppat "bppat_" <> "9aB3xQ7z-LmNpR4tV" <> "6wY2_Kj8Xm2QpL9vR4tZ7wN1cB"
+    @bpcs "bpcs_" <> "Zx7Qm2Lp-9Vr4Tz8W" <> "n1Cb6Yh3_sD5fG0aQ2eR7uI9K"
+
+    # A Bearer credential that NO other clause can reach: no vendor prefix, no
+    # `key=`/`token=` separator, and 20 chars — under the bare-token clause's 32.
+    # Every pre-existing Bearer positive used `sk-live-…`, which the
+    # provider-prefix clause redacts on its own, so deleting the ENTIRE Bearer
+    # clause left the table fully green while `Bearer <token>` went 0.0% -> 94.2%
+    # leaked. This row is the only thing that reds on that mutation.
+    @unprefixed_bearer "nJq2LmT4vB" <> "7nR1zC8kW5"
+
     # POSITIVES: every shape a remote capture can carry a live credential in.
     # Each row is {label, input, must_not_survive}.
     @positives [
@@ -771,7 +809,36 @@ defmodule BarkparkCloud.FailureCopyTest do
        "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5"},
       {"slack webhook token", "notify failed: xoxb-9aB3xQ7zLmNpR4tV", "xoxb-9aB3xQ7zLmNpR4tV"},
       {"aws access key id", "s3 sync refused key " <> @aws_key, @aws_key},
-      {"bare mixed-case 40-char provider token", "provider rejected " <> @bare_token, @bare_token}
+      {"bare mixed-case 40-char provider token", "provider rejected " <> @bare_token,
+       @bare_token},
+
+      # OUR OWN credential, in the four shapes that leaked 93.6% before the
+      # provider-prefix clause learned `bppat_`/`bpcs_`. The clause matches the
+      # TOKEN, not the syntax around it, so all four close at once — which is the
+      # whole argument for fixing it there rather than at each carrier.
+      {"barkpark PAT in an env fold", "provisioner env: BARKPARK_TOKEN=" <> @bppat, @bppat},
+      {"barkpark PAT after export (no `\\b` before TOKEN)", "+ export BARKPARK_TOKEN=" <> @bppat,
+       @bppat},
+      {"barkpark PAT bare in prose (no key, no separator)", "using token " <> @bppat <> " ok",
+       @bppat},
+      {"barkpark PAT behind a colour code", "\e[31mtoken=" <> @bppat <> "\e[0m", @bppat},
+      {"barkpark PAT as a Bearer credential", "ssh: remote said Authorization: Bearer " <> @bppat,
+       @bppat},
+      {"barkpark chat/MCP session token (bpcs_)", "spawn failed: BARKPARK_API_TOKEN=" <> @bpcs,
+       @bpcs},
+      {"barkpark chat/MCP session token bare in prose",
+       "child inherited " <> @bpcs <> " and exited 1", @bpcs},
+
+      # The Bearer clause's ONLY independent pin — see @unprefixed_bearer.
+      {"Bearer with a token no other clause can reach",
+       "ssh: remote said Authorization: Bearer " <> @unprefixed_bearer, @unprefixed_bearer},
+
+      # Fix B's own reach: `(?<![A-Za-z0-9])` also opens the key clause to every
+      # other SCREAMING_SNAKE env var, not just ours.
+      {"generic SCREAMING_SNAKE env secret", "env: MY_SECRET=Qp9vR4tZ7wN1cB6yH3sD5fG0",
+       "Qp9vR4tZ7wN1cB6yH3sD5fG0"},
+      {"generic SCREAMING_SNAKE env token", "env: DEPLOY_TOKEN=Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3",
+       "Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3"}
     ]
 
     # NEGATIVES: shapes a person NEEDS to read. A redacted git SHA costs them the
@@ -796,7 +863,28 @@ defmodule BarkparkCloud.FailureCopyTest do
       {"prose after Bearer (capitalised)", "missing Bearer credentials"},
       {"prose in a token value", "token: expired"},
       {"prose in an api_key value", "no api_key: set in the config file"},
-      {"prose in a password value", "sftp refused: password: missing"}
+      {"prose in a password value", "sftp refused: password: missing"},
+
+      # The new `bppat_`/`bpcs_` arm's false-positive surface, pinned. Each of
+      # these is copy a person needs verbatim to act on the failure.
+      {"the bpcs mint-refused sentinel (hyphen, not a token)",
+       "chat spawn refused: bpcs-mint-refused"},
+      {"a provisioned site hostname (`bp-` is NOT a credential prefix)",
+       "dial tcp: bp-acme-ac4e1f2a.barkpark.cloud:443 connection refused"},
+      {"the prefix NAMED in prose, with no body after it",
+       "expected a token with the bppat_ prefix"},
+      {"a word merely ENDING in token (Fix B's lookbehind excludes alnum)",
+       "xtoken=cax11 is not a recognised flag"},
+
+      # Fix B widened the key clause's left edge to `_`, which put every
+      # `*_password`/`*_token` identifier in a stack trace or source echo inside
+      # its reach. A COMPARISON is not an assignment: `=` is not in the value
+      # clause's stop set, so without the `(?![=:])` guard the second `=` of
+      # `==` became "the value" and a captured source line rendered
+      # "hashed_password =[redacted] before" — copy loss where no secret was.
+      {"an Elixir comparison echoed from a stack trace, not an assignment",
+       "match failed: hashed_password == before"},
+      {"a guard clause echoed from the build log", "refused because deploy_token == nil"}
     ]
 
     for {label, input, secret} <- @positives do
@@ -840,6 +928,76 @@ defmodule BarkparkCloud.FailureCopyTest do
 
       assert FailureCopy.scrub("Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2") ==
                "Authorization: Bearer [redacted]"
+    end
+
+    # THE ORDER, for a path that does NOT classify. `classify/1` still runs FIRST
+    # wherever it runs at all (its prefixes are producer-anchored and an escape
+    # run can sit inside them), but the STRIP now precedes the SCRUB on every
+    # path — `raw/1` and `humanize/1` alike. Under the old tail the key clause redacts
+    # up to the next delimiter, and a colour code parks a non-delimiter byte
+    # (`m`) immediately before the key, so the clause never fires. Measured over
+    # 2,000 random values: `scrub |> strip_ansi` 2000/2000 leaked,
+    # `strip_ansi |> scrub` 0/2000.
+    #
+    # `bppat_`/`bpcs_` are order-INDEPENDENT (the provider-prefix clause matches
+    # the token itself), which is precisely why this test uses a NON-prefixed
+    # `api_key=` secret — otherwise the wrong order would look safe.
+    test "raw-log order: strip_ansi BEFORE scrub — the shipped order leaks a colourised api_key" do
+      secret = "Qp9vR4tZ7wN1cB6yH3sD5fG0"
+      line = "\e[31mapi_key=#{secret}\e[0m"
+
+      # dr-w22-s1: this assertion USED to be `assert … scrub() |> strip_ansi() =~
+      # secret` — a guard that PINNED the leak in place, and would have gone red
+      # on the fix. It is a refutation now, and the shipped entry point is
+      # `raw/1`: no display boundary composes these two by hand any more.
+      refute FailureCopy.raw(line) =~ secret
+      assert FailureCopy.raw(line) == "api_key=[redacted]"
+
+      # The bare pair still documents WHICH order is the safe one, and the wrong
+      # order is now recorded as the defect it is rather than asserted as truth.
+      refute line |> FailureCopy.strip_ansi() |> FailureCopy.scrub() =~ secret
+      assert line |> FailureCopy.strip_ansi() |> FailureCopy.scrub() == "api_key=[redacted]"
+    end
+
+    # THE GATE THAT COULD NOT LOSE (dr-w22-s1 / charter D386). The order above was
+    # asserted only over `scrub`/`strip_ansi` as BARE functions — nothing called
+    # `humanize/1` with a colourised input, so both orders were green and the
+    # shipped one leaked in clean cleartext on the unclassified terminal arm.
+    #
+    # FIXTURE RULE (D387), and it decides the verdict: the secret is NON-prefixed
+    # and the CSI sits immediately LEFT of the key. A CSI in the VALUE position
+    # (`api_key=\e[31m…`) or a provider-prefixed token (`sk-…`) is safe under BOTH
+    # orders, so either fixture yields a GREEN test over a LIVE hole.
+    test "humanize/1 itself redacts a colourised non-prefixed api_key — the order is pinned where it ships" do
+      secret = "Ab3xQ9zK1mP7vT"
+      line = "\e[31mapi_key=#{secret}\e[0m fetching graph corpus"
+
+      humanized = FailureCopy.humanize(line)
+
+      refute humanized =~ secret,
+             "humanize/1 shipped a live credential in cleartext: #{inspect(humanized)}"
+
+      assert humanized == "api_key=[redacted] fetching graph corpus"
+    end
+
+    # The residual, asserted rather than described, so the day someone closes it
+    # this file tells them which guard to move. An OSC leaves a non-delimiter
+    # byte flush against the key AFTER stripping, which re-blocks the lookbehind.
+    test "RESIDUAL (open): an OSC that abuts the key still leaks under the fixed order" do
+      secret = "Ab3xQ9zK1mP7vT"
+      line = "\e]0;t\ainapi_key=#{secret}"
+
+      assert FailureCopy.raw(line) == "inapi_key=#{secret}",
+             "the OSC residual closed — delete this test and claim it in the epic"
+    end
+
+    # Order-INDEPENDENCE of the prefix clause, stated as a test so the claim in
+    # the moduledoc is checkable: our own token closes under BOTH orders.
+    test "a bppat_ token is redacted under either order — the prefix clause sees the token itself" do
+      line = "\e[31mtoken=#{@bppat}\e[0m"
+
+      refute line |> FailureCopy.scrub() |> FailureCopy.strip_ansi() =~ @bppat
+      refute line |> FailureCopy.strip_ansi() |> FailureCopy.scrub() =~ @bppat
     end
   end
 
@@ -901,6 +1059,61 @@ defmodule BarkparkCloud.FailureCopyTest do
     test "nil and non-binaries still pass through" do
       assert FailureCopy.humanize(nil) == nil
       assert FailureCopy.humanize(42) == 42
+    end
+  end
+
+  describe "strip_ansi/1 — the terminal bytes nothing was removing" do
+    # A VERBATIM astro capture from the control plane (2026-08-05): a
+    # `BUILD failed (exit 12)` reason with real 0x1B bytes, exactly as the build
+    # PTY wrote them. 1,366 of 17,395 failed rows carry these, and until this
+    # helper NOTHING stripped them: not this module, not the CLI's siteFailure,
+    # not the console's failureCopy(). They render as literal `[31m[1m`.
+    @astro_build_12 "BUILD failed (exit 12): \e[31m\e[1m04:34:24\e[22m [ERROR] [build]\e[39m Caught error rendering /graph.json: Error: graph corpus fetch failed: 403"
+
+    test "a real astro BUILD-exit-12 reason emerges with no escape bytes and its words intact" do
+      # The bytes are genuinely there in the fixture — a test over a fixture that
+      # merely contains the four-character text `\\x1B` proves nothing (the
+      # literal text appears in ZERO rows; the bytes appear in 1,366).
+      assert String.contains?(@astro_build_12, "\e")
+
+      out = FailureCopy.strip_ansi(@astro_build_12)
+
+      refute String.contains?(out, "\e")
+      refute out =~ ~r/\[\d+m/
+
+      assert out ==
+               "BUILD failed (exit 12): 04:34:24 [ERROR] [build] Caught error rendering /graph.json: Error: graph corpus fetch failed: 403"
+    end
+
+    test "strips CSI, OSC and bare two-byte escapes; leaves ordinary brackets alone" do
+      assert FailureCopy.strip_ansi("\e[2Kclearing") == "clearing"
+      assert FailureCopy.strip_ansi("\e]0;title\atext") == "text"
+      assert FailureCopy.strip_ansi("a\e=b") == "ab"
+
+      # A square bracket is not an escape. Build logs are full of them.
+      assert FailureCopy.strip_ansi("[ERROR] [build] step [3/7] failed") ==
+               "[ERROR] [build] step [3/7] failed"
+    end
+
+    test "idempotent, and nil / non-binaries pass through" do
+      once = FailureCopy.strip_ansi(@astro_build_12)
+      assert FailureCopy.strip_ansi(once) == once
+      assert FailureCopy.strip_ansi(nil) == nil
+      assert FailureCopy.strip_ansi(42) == 42
+      assert FailureCopy.strip_ansi("") == ""
+    end
+
+    test "humanize/1 strips LAST, so the classifier still sees the raw prefix" do
+      # The escape run sits between the producer's template and the text, so
+      # stripping before classification would change what the cond reads.
+      out = FailureCopy.humanize(@astro_build_12)
+      refute String.contains?(out, "\e")
+      assert out =~ "BUILD failed (exit 12)"
+    end
+
+    test "a class-sentence arm is untouched by the strip" do
+      assert FailureCopy.humanize("exceeded max provision attempts (3)") ==
+               "This didn't finish after several attempts. Try again in a moment."
     end
   end
 end
@@ -1004,5 +1217,118 @@ defmodule BarkparkCloud.FailureCopyDeploymentDetailTest do
     deployment_row(site, %{status: "queued", detail: nil})
 
     assert [%{"detail" => nil}] = rendered(site, token)
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## THE CREDENTIAL ARM NAMES NO PARTY (wave 40 S6)
+  ## ---------------------------------------------------------------------------
+  ##
+  ## The auth arm was the capacity arm's untreated twin: a bare two-token
+  ## substring test whose copy named a provider ("the hosting provider"), whose
+  ## credential it was ("our credentials"), and an agent working the problem
+  ## ("We're on it — try again shortly"). `humanize/1` is arity 1; none of the
+  ## three is derivable from the string.
+  ##
+  ## This corpus is the guard that can lose. Three captures MUST NOT reach a
+  ## sentence that names a party, asserts an agent or prescribes a retry; the
+  ## fourth is the must-CLEAR control — the NARROWED Azure RBAC clause, which
+  ## already discriminates and must keep classifying exactly as it did.
+
+  # deploy/site-deploy.sh:968 (READ-ONLY) — the build's own FATAL line. The
+  # rejected credential is the USER'S site read token; no hosting provider is
+  # anywhere in this story.
+  @probe_site_token "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog — the site read token is invalid"
+
+  # A DISK-FULL build whose only crime is a framework error-page path. The word
+  # `unauthorized` is a PATH SEGMENT — the same self-satisfaction shape wave 25
+  # narrowed out of the DNS clause, and `typed_refusal?/1` does not cover it
+  # (no `E_*` code, no box-refusal prefix).
+  @probe_disk_full "BUILD failed (exit 1): copying dist/errors/unauthorized/index.html failed: no space left on device"
+
+  # A private npm registry rejecting the user's own npm token.
+  @probe_npm "npm ERR! 401 Unauthorized - GET https://registry.npmjs.org/@acme/private"
+
+  # THE MUST-CLEAR CONTROL: the narrowed Azure clause (failure_copy.ex, checked
+  # before the credential arm) owns this one and names the exact portal fix.
+  @probe_azure "az: AuthorizationFailed - invalid token for subscription"
+
+  # Added at review of cch-w40-s6. The path guard originally excluded ANY
+  # trailing dot, so a producer that simply ended a SENTENCE fell out of the
+  # class and passed through unclassified — a narrowing nobody asked for, in a
+  # shape at least as common as the path it was aimed at. These two must-FLAG
+  # beside the disk-full must-CLEAR: a dot before whitespace or end-of-capture is
+  # punctuation, a dot before a non-space is a filename.
+  @probe_sentence_dot "deploy step failed: the registry said Unauthorized."
+  @probe_mid_sentence_dot "release refused: unauthorized. re-run after rotating the token"
+
+  describe "humanize/1 — the credential arm names no party" do
+    test "the Azure RBAC control still classifies to its own copy" do
+      assert FailureCopy.humanize(@probe_azure) ==
+               "Your Azure service principal is missing a role. In the Azure Portal → Subscriptions → your subscription → Access control (IAM) → Add role assignment, grant it the Contributor role, then reconnect."
+    end
+
+    test "a rejected credential is reported WITHOUT naming a party, an agent or a retry" do
+      for probe <- [@probe_site_token, @probe_npm] do
+        out = FailureCopy.humanize(probe)
+
+        # It still classifies — the arm is narrowed, not deleted.
+        refute out == FailureCopy.scrub(probe), "#{probe} stopped classifying"
+        assert out =~ "credential", "#{probe} lost the credential class: #{out}"
+
+        # NO PARTY.
+        refute out =~ ~r/hosting provider/i, "names a party: #{out}"
+        refute out =~ ~r/\bHetzner\b/i, "names a party: #{out}"
+        refute out =~ ~r/\bAzure\b/i, "names a party: #{out}"
+
+        # NO AGENT — nobody in this seam is "on it".
+        refute out =~ ~r/we're on it/i, "asserts an agent: #{out}"
+        refute out =~ ~r/\bour credentials\b/i, "asserts whose credential: #{out}"
+
+        # NO REMEDY IT NEVER DETERMINED — a rejected token is not cleared by
+        # waiting, and this predicate cannot know whether a retry can work.
+        refute out =~ ~r/try again/i, "prescribes a retry: #{out}"
+        refute out =~ ~r/\bshortly\b/i, "prescribes a retry: #{out}"
+      end
+    end
+
+    test "a disk-full build is NOT a credential rejection because a PATH says unauthorized" do
+      out = FailureCopy.humanize(@probe_disk_full)
+
+      refute out =~ "credential", "a path slug satisfied the credential predicate: #{out}"
+
+      refute out =~ ~r/hosting provider/i,
+             "a path slug satisfied the credential predicate: #{out}"
+
+      # It lands where an unclassifiable capture belongs: through, verbatim.
+      assert out == FailureCopy.scrub(@probe_disk_full)
+      assert out =~ "no space left on device"
+    end
+
+    test "a sentence-final dot is punctuation, not a path segment" do
+      for probe <- [@probe_sentence_dot, @probe_mid_sentence_dot] do
+        out = FailureCopy.humanize(probe)
+
+        assert out =~ "credential",
+               "a producer that ended a sentence lost the credential class: #{out}"
+
+        refute out == FailureCopy.scrub(probe), "#{probe} stopped classifying"
+      end
+
+      # …and the guard it relaxes still holds: a dot followed by a NON-space is
+      # still a filename, and still not a credential rejection.
+      assert FailureCopy.humanize(
+               "BUILD failed: writing unauthorized.html failed: no space left on device"
+             ) ==
+               FailureCopy.scrub(
+                 "BUILD failed: writing unauthorized.html failed: no space left on device"
+               )
+    end
+
+    test "the classified copy is idempotent under a second pass" do
+      for probe <- [@probe_site_token, @probe_npm] do
+        once = FailureCopy.humanize(probe)
+        assert FailureCopy.humanize(once) == once, "second pass reclassified: #{once}"
+      end
+    end
   end
 end

@@ -1,0 +1,39 @@
+
+ barkpark · tasks                                         ⇄ 127.0.0.1  ● live · T↔  ────────────────────────────────────────
+ ▎ Harbor lights epic ························································· 1/4│ │ Mulch the seedling beds                │
+ ├─ ⠿ Dredge the north channel                                                     │ │ ⠿ in_progress · P2 · C4/7 · task · fi… │
+ │    C4/7 · P1 · 1/2 · fixture-worker · T · T                                   │ │                                        │
+ ├─ ○ Paint the pier bollards                                       C4/7 P2 0/1 T│ │ criteria 0/1                           │
+ ├─ ○ Replace the fog bell                                          C4/7 P3 0/1 T│ │                                        │
+ └─ ✓ Retire the old winch                                              C4/7 1/1 T│ │ purpose · derived                      │
+                                                                                   │ │   part of   fx-orchard                 │
+   Orchard rows epic ·························································· 0/3│ │   impact    blocks 0 · blocked by 0    │
+ ├─ ⠿ Mulch the seedling beds                                                      │ │   does      Mulch the seedling beds    │
+ │    C4/7 · P2 · 0/1 · fixture-worker-two · T · T                               │ │   why       Why this task is necessary │
+ ├─ ! Net the cherry rows                                   C5/7 P2 0/1 T blocked│ │             within fx-orchard is not   │
+ └─ ○ Graft the pear stock                                          C4/7 P1 0/2 T│ │             recorded.                  │
+                                                                                   │ │   endgame   Advance fx-orchard by      │
+   (no epic) ·································································· 1/2│ │             completing this task.      │
+                                                                                   │ │   important 75/100 — Derived from P2   │
+                                                                                   │ │             queue priority.            │
+                                                                                   │ │   relevant  90/100 — Derived from      │
+                                                                                   │ │             active in-progress status. │
+                                                                                   │ │   proof     Recorded task intent —     │
+                                                                                   │ │             Mulch the seedling beds —  │
+                                                                                   │ │             document.title             │
+                                                                                   │ │   proof     Mission placement — fx-    │
+                                                                                   │ │             orchard —                  │
+                                                                                   │ │             content.parent_id          │
+                                                                                   │ │   derived from recorded task facts · … │
+                                                                                   │ │                                        │
+                                                                                   │ │ created T ago (Aug 02, 09:02)        │
+                                                                                   │ │ updated T ago (Aug 09, 08:30)         │
+                                                                                   │ │                                        │
+                                                                                   │ │ ○ created (Aug 02) →                   │
+                                                                                   │ │   ⠿ claimed by fixture-worker-two (Au… │
+                                                                                   │ │                                        │
+                                                                                   │ │   Fixture leaf, claimed and in         │
+                                                                                   │ │   progress.                            │
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ │                                        │
+ ⠿ 2 in flight · ○ 4 ready · ✓ 2 done · 4/18 criteria · 9 stale                 18%│ │ claim  fixture-worker-two · epoch 1 ·… │
+ jk move · enter open · esc back · c claim · x close · o studio · M mouse          │ │                                        │

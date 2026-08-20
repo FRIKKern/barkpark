@@ -1,0 +1,275 @@
+name: compose-smoke
+# The self-host compose stack's gate (self-host-blessing epic, slice S6 —
+# charter D1/D17/D20/D23). This is the FIRST CI workflow that has ever built
+# api/Dockerfile. Both arms are mandatory and both drive
+# scripts/compose-smoke.sh (single script exit code = the gate):
+#
+#   * REFUSAL ARM — a short SECRET_KEY_BASE must make the api container exit
+#     non-zero at the migrate step with the runtime.exs refusal's anchor line
+#     in its logs. NEVER an HTTP probe: Plug's 64-byte floor is lazy and
+#     /api/schemas serves 200 on a short secret (measured).
+#   * GREEN ARM — generated secrets must reach healthcheck-healthy, then
+#     in-container wget of /api/schemas AND /login (the session route) both
+#     succeed via `docker compose exec` — never a host-port curl (a host beam
+#     on :4000 produced a measured false 200). The same job runs the env
+#     census over both runtime roots (D14/D15) and the D23 blessing-word grep.
+#
+# The D17 skip-the-image escape hatch is FORBIDDEN anywhere in this gate — by
+# name, which is why this file never spells it: skipping the image build would
+# be the D4 anti-pattern inside the D1 gate.
+#
+# Jobs:
+#   0. changes       — the DISPATCHER. Always runs. Computes the changed-path
+#                      set and emits the one boolean the arms are gated on.
+#   1. refusal-arm   — gated. `scripts/compose-smoke.sh refusal`.
+#   2. green-arm     — gated. census + blessing grep + `compose-smoke.sh green`.
+#   3. compose-gate  — the AGGREGATOR, literal name `Compose smoke`: the one
+#                      name that CAN be required. Registration itself is a
+#                      separate HUMAN GATE (task shb-bl-register-compose-smoke)
+#                      — this workflow only makes the name registrable-shaped.
+#
+# ── WHY THERE IS NO `on: … paths:` FILTER HERE ───────────────────────────────
+# A workflow-level paths filter emits NO check run at all on a non-matching PR,
+# so a required context pointing at this workflow would report "expected"
+# forever and DEADLOCK every unrelated PR (honest-gates D18). The filter lives
+# DOWN in the dispatcher instead: it always runs, the expensive arms carry a
+# job-level `if:`, every job publishes a check run on every PR, and the
+# aggregator decides whether a skip was legitimate. Same topology as cloud.yml.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: compose-smoke-${{ github.ref }}
+  # Cancel superseded PR runs, but NEVER cancel main (the cloud.yml lesson:
+  # fast push cadence otherwise starves the suite).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  changes:
+    # THE DISPATCHER. No `if:`, no matrix, no path filter — it runs on every
+    # event, always, so the jobs behind it always have a defined answer.
+    #
+    # It never emits `false` when it cannot tell. On an unresolvable base, a
+    # base with no common ancestor, or an uninterpretable verdict it FAILS; on
+    # an empty diff — rare but legal — it dispatches TRUE. Never a silent
+    # false: fail, or run everything. (Idiom copied from cloud.yml's
+    # dispatcher; the path set here is inline because this workflow's set is
+    # small and owned by this one gate.)
+    name: Dispatch (compose-smoke paths)
+    runs-on: ubuntu-latest
+    outputs:
+      smoke: ${{ steps.sets.outputs.smoke }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref: with no `ref:` the three-dot diff
+          # below sweeps in every commit main gained since the PR's stale base
+          # and a one-file PR dispatches as if it touched ten (honest-gates
+          # D34). This job ONLY — the arms keep the merge ref: they must test
+          # the merged result. `github.sha` is the fallback for push events.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history: the PR base sha must be resolvable locally for the
+          # three-dot diff.
+          fetch-depth: 0
+
+      - id: sets
+        name: Compute the changed-path set
+        run: |
+          set -euo pipefail
+
+          event="${{ github.event_name }}"
+          if [ "$event" != "pull_request" ]; then
+            # push-to-main (and anything else): NEVER skip. Main is the branch
+            # every other run is compared against.
+            echo "event '$event' is not a pull_request — the path set is true."
+            echo "smoke=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then
+            echo "::error::dispatcher: the PR carries no base sha. Refusing to guess — a guessed base skips the suite and reports green."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::error::dispatcher: PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base."
+            exit 1
+          fi
+
+          # No two-dot fallback, ever: `base HEAD` sweeps in the base's ENTIRE
+          # content and dispatches true for the wrong reason — exactly the
+          # "verdict from an unknown base" this job refuses.
+          if ! git merge-base "$base" HEAD >/dev/null 2>&1; then
+            echo "::error::dispatcher: PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Refusing to emit a path verdict. Rebase the branch onto its base branch."
+            exit 1
+          fi
+
+          echo "diff base: ${base} (three-dot against HEAD)"
+          # `-z` + `--no-renames` are BOTH load-bearing (cloud.yml wave-10
+          # measurements): plain --name-only quotes/escapes exotic paths past
+          # the matcher, and rename detection prints only the destination side.
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          echo "changed files:"
+          printf '%s\n' "$changed"
+
+          if [ -z "$changed" ]; then
+            echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching smoke=true and running the WHOLE suite rather than skipping it — a skip here would green a required context nothing measured."
+            echo "smoke=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The path set this gate answers for: the compose install surface,
+          # the image and everything it copies (api/**), and the gate's own
+          # files. Each alternative is fully anchored.
+          if printf '%s\n' "$changed" | grep -qE '^(docker-compose\.yml|\.env\.example|scripts/compose-smoke\.sh|scripts/env-census\.py|\.github/workflows/compose-smoke\.yml)$|^api/'; then
+            smoke=true
+          else
+            smoke=false
+          fi
+
+          case "${smoke}" in
+            true | false) ;;
+            *)
+              echo "::error::dispatcher: refusing to emit the uninterpretable verdict smoke=${smoke}."
+              exit 1
+              ;;
+          esac
+
+          echo "verdict: smoke=${smoke}"
+          echo "smoke=${smoke}" >> "$GITHUB_OUTPUT"
+
+  refusal-arm:
+    # THE MUTATION ARM: proves the boot refusal fires. A gate whose green arm
+    # is its only arm cannot fail on the trap it exists for (Plug's floor is
+    # lazy) — this arm is what makes the gate able to fail.
+    name: Refusal arm (short SECRET_KEY_BASE refuses at boot)
+    needs: changes
+    if: needs.changes.outputs.smoke == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refusal arm (container exit + log anchor, never HTTP)
+        run: bash scripts/compose-smoke.sh refusal
+
+  green-arm:
+    # Build → boot → healthy → in-container probes. Also carries the two cheap
+    # truth checks (they fail fast, before the ~2-5 min image build): the env
+    # census over both runtime roots and the D23 blessing-word grep.
+    name: Green arm (build, boot, in-container probes)
+    needs: changes
+    if: needs.changes.outputs.smoke == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Env census (both runtime roots)
+        run: bash scripts/compose-smoke.sh census
+      - name: Blessing-word grep (D23 — hedge word is "experimental")
+        run: bash scripts/compose-smoke.sh blessing-grep
+      - name: Green arm (compose up → healthy → exec wget /api/schemas + /login)
+        run: bash scripts/compose-smoke.sh green
+
+  compose-gate:
+    # ── THE AGGREGATOR — the one name that should carry branch protection ──
+    # Shape ported verbatim from cloud.yml's `cloud-gate` because the hazards
+    # are identical: NO matrix (the published name must be the constant below),
+    # `if: always()` (else an upstream failure skips this job and publishes a
+    # green required context), it ASSERTS on every upstream result instead of
+    # echoing them, and EVERY job in this workflow is in `needs` — none of
+    # them carries `continue-on-error`, so none can launder a failure into
+    # `needs.<job>.result == success`. If one ever gains it, it must come OUT
+    # of this needs set in the same commit.
+    #
+    # Registration as a required check is deliberately NOT done here — that is
+    # the human-gate task shb-bl-register-compose-smoke, after this name has
+    # rendered on ≥2 settled heads.
+    name: Compose smoke
+    if: always()
+    needs: [changes, refusal-arm, green-arm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide (fail-closed over every upstream result)
+        env:
+          R_CHANGES: ${{ needs.changes.result }}
+          R_REFUSAL: ${{ needs.refusal-arm.result }}
+          R_GREEN: ${{ needs.green-arm.result }}
+          O_SMOKE: ${{ needs.changes.outputs.smoke }}
+        run: |
+          set -euo pipefail
+
+          echo "dispatcher outputs: smoke='${O_SMOKE}'"
+          echo
+
+          bad=0
+          dispatched=0
+          not_dispatched=""
+
+          # decide <job-name> <result> <gate-value>
+          #   gate-value is the dispatcher output that gated the job, or the
+          #   literal string NEVER for jobs that must always run. A skip is
+          #   accepted only against a gate-value of exactly 'false'.
+          decide() {
+            local job="$1" result="$2" gate="$3"
+            case "$result" in
+              success)
+                echo "  ok      ${job}: success"
+                ;;
+              skipped)
+                if [ "$gate" = "false" ]; then
+                  echo "  ok      ${job}: skipped — dispatcher said this path set was not touched (gate='false')"
+                else
+                  echo "  FAIL    ${job}: skipped, but its gate is '${gate}', not 'false'."
+                  echo "          A skip here does NOT mean 'not needed'. It means the job never ran —"
+                  echo "          most often because an upstream FAILED. Refusing to green a required"
+                  echo "          context on it."
+                  bad=1
+                fi
+                ;;
+              failure | cancelled)
+                echo "  FAIL    ${job}: ${result}"
+                bad=1
+                ;;
+              '')
+                echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
+                echo "          or the run object is malformed. Cannot tell, therefore red."
+                bad=1
+                ;;
+              *)
+                echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
+                bad=1
+                ;;
+            esac
+            if [ "$gate" != "NEVER" ]; then
+              case "$result" in
+                success) dispatched=$((dispatched + 1)) ;;
+                skipped) not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
+          }
+
+          # The dispatcher itself may never skip: without it there are no gate
+          # values, so nothing downstream can be judged.
+          decide "changes (dispatcher)" "${R_CHANGES}" "NEVER"
+          decide "refusal-arm"          "${R_REFUSAL}" "${O_SMOKE}"
+          decide "green-arm"            "${R_GREEN}"   "${O_SMOKE}"
+
+          echo
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::Compose smoke: at least one upstream job is not in the allow-set (see above). This is the aggregator; it is RED on purpose."
+            exit 1
+          fi
+
+          # Say it where a person AND the check-run API can read it: a green
+          # from zero dispatched jobs means NOT APPLICABLE, never "passed".
+          if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=Compose smoke: green — nothing ran::NOTHING RAN on this head.%0ACompose smoke is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0ARead it as 'no compose-smoke job executed', never as 'the compose stack passed'."
+          fi
+          echo "Compose smoke: every upstream job either succeeded or was legitimately not dispatched."

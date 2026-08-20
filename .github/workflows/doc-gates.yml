@@ -1,8 +1,19 @@
 name: doc-gates
 
 # Documentation spine enforcement (docs-refactor wave 5).
-# Blocking: byte budgets + 7-card cap, routing/INDEX/anchor resolution,
+# Enforces: byte budgets + 7-card cap, routing/INDEX/anchor resolution,
 # G1 doc-tier headers, canonical-for uniqueness, ARCHIVED banners.
+#
+# WHAT THIS WORKFLOW'S RED ACTUALLY DOES, said plainly because this header used
+# to say "Blocking:" and that was a claim of authority the committed spec
+# denies. This file publishes ONE check-run context, the job name `Doc budgets
+# + anchors` below, and that context is not in
+# .github/required-checks.json's required set — it carries an S4 exclusion row
+# there (paths-filtered, so a PR touching none of the filtered paths never
+# renders it at all). Every step below fails THIS JOB when it trips, and the
+# job's red is visible on the PR; none of it stops a merge. The step names say
+# "(fails this job)" for exactly that reason — they said "(blocking)" for
+# twenty-one steps, which is the inverse of the rot advisory-prose guards catch.
 # See docs/ops/merge-gates.md §"Documentation review rules".
 
 on:
@@ -27,6 +38,11 @@ on:
       # exactly how the 2026-06-10 guard stayed at sample scope for 40 days.
       - ".github/workflows/**"
       - "scripts/never-cancel-main-check.sh"
+      # the two deploy.yml gates — their SUBJECT (.github/workflows/deploy.yml)
+      # already rides the `**` glob above; these two lines cover an edit to the
+      # gate scripts themselves, which no other glob matches.
+      - "scripts/check-deployyml-filters.sh"
+      - "scripts/check-deploy-smoke.sh"
       # connectors chat_bridge DDL drift gate — the .sh itself (the DDL sources
       # ride the **/*.ts + **/*.exs globs, but a .sh edit isn't covered by any).
       - "scripts/connectors-ddl-drift-check.sh"
@@ -72,6 +88,21 @@ on:
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
       # fence can still REFUSE an unattributed write.
       - "design/emit-fence.test.mjs"
+      # the attribution ledger itself (cch wave 68). A manifest-only edit — a
+      # hand-tampered digest, a dropped slot — matched NO glob here, so the one
+      # file the fence's memory lives in could change without the gate that
+      # reads it ever running.
+      - "design/emit-manifest.json"
+      # the audit verb table (cch-w65; moved into the image by cch-w69-s1 — its
+      # Elixir consumer compile-time-reads it inside the cloud image build, which
+      # only sees cloud/, so the design/ home broke every cp deploy) — the SOLE
+      # authority for BOTH the closed Elixir @actions vocabulary and the console's
+      # ACTION_LABELS region. Its two consumers ride globs above (audit_event.ex
+      # on **/*.ex, app.js on its own line below), but a JSON-ONLY edit — a new
+      # verb, a label reworded, a null's rationale deleted — matched nothing here,
+      # so the one file both vocabularies read could change without
+      # design/check.mjs Part 0 ever running.
+      - "cloud/priv/audit-actions.json"
       - "design/paper-editor-mirror.mjs"
       - "design/fixtures/**"
       - "cloud/priv/static/app.css"
@@ -157,6 +188,11 @@ on:
       # exactly how the 2026-06-10 guard stayed at sample scope for 40 days.
       - ".github/workflows/**"
       - "scripts/never-cancel-main-check.sh"
+      # the two deploy.yml gates — their SUBJECT (.github/workflows/deploy.yml)
+      # already rides the `**` glob above; these two lines cover an edit to the
+      # gate scripts themselves, which no other glob matches.
+      - "scripts/check-deployyml-filters.sh"
+      - "scripts/check-deploy-smoke.sh"
       # connectors chat_bridge DDL drift gate — the .sh itself (the DDL sources
       # ride the **/*.ts + **/*.exs globs, but a .sh edit isn't covered by any).
       - "scripts/connectors-ddl-drift-check.sh"
@@ -202,6 +238,21 @@ on:
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
       # fence can still REFUSE an unattributed write.
       - "design/emit-fence.test.mjs"
+      # the attribution ledger itself (cch wave 68). A manifest-only edit — a
+      # hand-tampered digest, a dropped slot — matched NO glob here, so the one
+      # file the fence's memory lives in could change without the gate that
+      # reads it ever running.
+      - "design/emit-manifest.json"
+      # the audit verb table (cch-w65; moved into the image by cch-w69-s1 — its
+      # Elixir consumer compile-time-reads it inside the cloud image build, which
+      # only sees cloud/, so the design/ home broke every cp deploy) — the SOLE
+      # authority for BOTH the closed Elixir @actions vocabulary and the console's
+      # ACTION_LABELS region. Its two consumers ride globs above (audit_event.ex
+      # on **/*.ex, app.js on its own line below), but a JSON-ONLY edit — a new
+      # verb, a label reworded, a null's rationale deleted — matched nothing here,
+      # so the one file both vocabularies read could change without
+      # design/check.mjs Part 0 ever running.
+      - "cloud/priv/audit-actions.json"
       - "design/paper-editor-mirror.mjs"
       - "design/fixtures/**"
       - "cloud/priv/static/app.css"
@@ -288,10 +339,10 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Doc byte budgets (blocking)
+      - name: Doc byte budgets (fails this job)
         run: bash scripts/check-doc-budgets.sh
 
-      - name: Doc anchors + headers (blocking)
+      - name: Doc anchors + headers (fails this job)
         run: bash scripts/docs-anchors-check.sh
 
       # Connectors chat_bridge DDL drift gate (connectors D54). The bridge OWNS
@@ -303,7 +354,7 @@ jobs:
       # OR a .exs-only change rides the **/*.ts + **/*.exs triggers above and trips
       # it). The bundled --selftest is a durable tripwire (distrust vacuous green):
       # it proves the gate REDs on a planted one-column drift, plants nothing.
-      - name: Connectors DDL drift gate (blocking)
+      - name: Connectors DDL drift gate (fails this job)
         run: |
           bash scripts/connectors-ddl-drift-check.sh --selftest
           bash scripts/connectors-ddl-drift-check.sh
@@ -321,7 +372,7 @@ jobs:
       # --selftest is a durable tripwire (distrust vacuous green): it proves the
       # gate REDs on a dropped connect member and plants nothing in the tree. The
       # static list in catalog.ex stays the fail-closed runtime fallback.
-      - name: Connectors catalog drift gate (blocking)
+      - name: Connectors catalog drift gate (fails this job)
         run: |
           bash scripts/connectors-catalog-drift-check.sh --selftest
           bash scripts/connectors-catalog-drift-check.sh
@@ -338,19 +389,44 @@ jobs:
       # reported as NOTE, never as a failure. The bundled --selftest is a durable
       # tripwire (distrust vacuous green): it proves the gate REDs on the
       # hazardous shape and greens on each safe one, and plants nothing.
-      - name: Never-cancel-main concurrency ratchet (blocking)
+      - name: Never-cancel-main concurrency ratchet (fails this job)
         run: |
           bash scripts/never-cancel-main-check.sh --selftest
           bash scripts/never-cancel-main-check.sh
 
-      - name: Paper-editor style mirror lockstep (blocking)
+      # ── the two deploy.yml gates get their FIRST CI caller ──────────────────
+      #
+      # Both gates over .github/workflows/deploy.yml ran in exactly ONE place:
+      # deploy.yml's own `changes` job, on push-to-main. So a PR that edited
+      # deploy.yml was never checked by them BEFORE merge, and neither
+      # --selftest had a caller at all — the tripwires proving the tripwires can
+      # lose were never run by anything. Both were disarmable by the job they
+      # police (wave 25, proven by mutation): a new job's own single-quoted
+      # `grep -qE '^(...)/'` was harvested as a dispatch filter, and an UNNAMED
+      # trailing `- run:` step was absorbed into the control-plane Smoke test
+      # step. This job already triggers on `.github/workflows/**` — the exact
+      # glob added for the never-cancel-main ratchet, and the same reasoning:
+      # the subject of these gates IS the workflow tree, so the file that
+      # reintroduces the hazard must run them. --selftest first (distrust
+      # vacuous green), then the real assertion.
+      - name: Deploy paths↔filters drift gate (fails this job)
+        run: |
+          bash scripts/check-deployyml-filters.sh --selftest
+          bash scripts/check-deployyml-filters.sh
+
+      - name: Control-plane smoke can-fail gate (fails this job)
+        run: |
+          bash scripts/check-deploy-smoke.sh --selftest
+          bash scripts/check-deploy-smoke.sh
+
+      - name: Paper-editor style mirror lockstep (fails this job)
         run: bash scripts/paper-editor-mirror-check.sh
 
       # Status vocabulary single-source (parity §2/§7). design/status-manifest.json
       # is the ONE source of the white ladder; the Elixir emitters read it at
       # compile time, and the --st-* CSS tone tokens are GENERATED from it. This
       # gate fails if any surface hand-drifts a tone or a glyph role away from it.
-      - name: Status manifest drift gate (blocking)
+      - name: Status manifest drift gate (fails this job)
         run: bash scripts/status-manifest-check.sh
 
       # Preview-contract cross-surface parity tripwire (preview-contract W4,
@@ -361,7 +437,7 @@ jobs:
       # carries no fields= projection that would strip `preview` off the wire
       # (D22), and D10 stays executable law — grep -ri oembed over the source
       # tree is ZERO, anywhere, ever.
-      - name: Preview parity + D10 no-oEmbed gate (blocking)
+      - name: Preview parity + D10 no-oEmbed gate (fails this job)
         run: bash scripts/preview-parity-check.sh
 
       # Unified-aesthetic design-token drift gate (unified-aesthetic W1.2).
@@ -371,7 +447,7 @@ jobs:
       # is well-formed; check re-emits into memory and byte-compares each committed
       # artifact, plus a §6 cross-surface parity assertion (Go lifecycle literals ==
       # CSS glyph tones == tokens) so a GUI/TUI divergence cannot slip through.
-      - name: Design-token drift gate (blocking)
+      - name: Design-token drift gate (fails this job)
         run: |
           node design/validate.mjs
           node design/check.mjs
@@ -397,7 +473,7 @@ jobs:
       # NEW inline color literal outside the lead-approved allowlist (the GENERATED
       # block, rgb() shadows, the paper-surface/Sheets skip region, and annotated
       # per-line resisters). See scripts/studio-literal-check.sh for the full list.
-      - name: Studio literal-color gate (blocking)
+      - name: Studio literal-color gate (fails this job)
         run: bash scripts/studio-literal-check.sh
 
       # Durable tripwire (spd-w19; mirrors the Go + link-gate self-tests): prove
@@ -418,7 +494,7 @@ jobs:
       # api/lib/barkpark_web outside Paths + the reviewed whitelist reds this —
       # that literal is how the deep-vs-shallow path drift (different breadcrumbs
       # / back-nav / scope per arrival) crept in. See scripts/studio-link-lint.sh.
-      - name: Studio link/path gate (blocking)
+      - name: Studio link/path gate (fails this job)
         run: bash scripts/studio-link-lint.sh
 
       # Tripwire (mirrors the Go literal self-test): prove the link gate actually
@@ -435,7 +511,7 @@ jobs:
       # on any NEW inline color literal outside the lead-approved allowlist (the
       # GENERATED block, rgb()/rgba() overlay tints, and annotated per-line
       # resisters). See scripts/web-literal-check.sh for the full list.
-      - name: Web literal-color gate (blocking)
+      - name: Web literal-color gate (fails this job)
         run: bash scripts/web-literal-check.sh
 
       # Go (CLI/TUI) literal-color gate (unified-aesthetic W4.10). The bp CLI/TUI
@@ -447,7 +523,7 @@ jobs:
       # #hex color literal outside the lead-approved chrome allowlist (annotated
       # per-line resisters earmarking au-w4-cli-chrome-tokens). See
       # scripts/go-literal-check.sh for the full list.
-      - name: Go literal-color gate (blocking)
+      - name: Go literal-color gate (fails this job)
         run: bash scripts/go-literal-check.sh
 
       # Durable tripwire (au-w4-cli-ratchet, AC5): prove the gate actually REDs on
@@ -466,7 +542,7 @@ jobs:
       #     never-cry-wolf control + the plant-catch checks (exit 1 on any miss).
       #   · retired-terms.mjs — never-worse vs the frozen baseline (exit 1 on any
       #     NOVEL dead-tech / live-assertion beyond the known backlog).
-      - name: Code-comment citation guard (blocking)
+      - name: Code-comment citation guard (fails this job)
         run: |
           node tooling/doc-truth/acceptance-code-comments.mjs
           node tooling/doc-truth/retired-terms.mjs
@@ -481,7 +557,7 @@ jobs:
       # (scripts/tenant-scope-baseline.txt) and REDs on a NEW one unless it carries
       # a reviewed `# global-read:` justification. Defense-in-depth against the next
       # w9dg. See scripts/tenant-scope-check.sh.
-      - name: Tenant fail-open read baseline gate (blocking)
+      - name: Tenant fail-open read baseline gate (fails this job)
         run: bash scripts/tenant-scope-check.sh
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs on a
@@ -498,7 +574,7 @@ jobs:
       # static grep gate is the fence. --selftest runs first (distrust vacuous
       # green): it proves the gate REDs on each planted fail-open shape and greens
       # on the fail-closed forms, planting nothing in the tree.
-      - name: Nil-polarity fail-closed gate (blocking)
+      - name: Nil-polarity fail-closed gate (fails this job)
         run: |
           bash scripts/nil-polarity-check.sh --selftest
           bash scripts/nil-polarity-check.sh
@@ -510,7 +586,7 @@ jobs:
       # AND restore the prior value in an `on_exit`. No baseline: an un-isolated
       # preview-env mutation is always a real bug. See
       # scripts/preview-env-isolation-check.sh.
-      - name: Preview-env isolation gate (blocking)
+      - name: Preview-env isolation gate (fails this job)
         run: bash scripts/preview-env-isolation-check.sh
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs
@@ -529,7 +605,7 @@ jobs:
       # block to compose.ex without seeding its golden (the drift #3514 + #3670
       # created, invisible until now) can no longer merge unnoticed. MUST run under
       # bash (its shebang); under zsh the coverage loop word-splits vacuously.
-      - name: PortableDoc render-parity completeness (blocking)
+      - name: PortableDoc render-parity completeness (fails this job)
         run: bash scripts/pd-parity-completeness.sh
 
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
@@ -545,7 +621,7 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Scaffy anchor-drift gate (blocking)
+      - name: Scaffy anchor-drift gate (fails this job)
         run: go run ./cmd/barkpark scaffy validate --repo . scaffy/commands/
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs

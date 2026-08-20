@@ -47,6 +47,8 @@ defmodule BarkparkCloud.Billing.StripeGateway do
   """
   @behaviour BarkparkCloud.Billing.Gateway
 
+  require Logger
+
   @api_base "https://api.stripe.com/v1"
 
   # Replay-protection window for webhook signatures: reject an event whose
@@ -277,9 +279,21 @@ defmodule BarkparkCloud.Billing.StripeGateway do
              %{^field => id} <- atomize_key(decoded, field) do
           {:ok, id}
         else
-          {:ok, %{status: status, body: body}} -> {:error, {:stripe_http_error, status, body}}
-          {:error, reason} -> {:error, reason}
-          other -> {:error, {:unexpected_stripe_response, other}}
+          {:ok, %{status: status, body: body}} ->
+            # Belt: keep the FULL Stripe diagnostic server-side (status + raw
+            # body) so operators can debug. The raw body can carry customer/PII
+            # internals (cus_… ids, request echoes), so it is redacted before it
+            # reaches the client — see `billing_reason/1` at the router. The tuple
+            # itself stays intact (http_client_test pins it); redaction is at the
+            # router seam only.
+            Logger.error("Stripe HTTP #{status} error: #{inspect(body)}")
+            {:error, {:stripe_http_error, status, body}}
+
+          {:error, reason} ->
+            {:error, reason}
+
+          other ->
+            {:error, {:unexpected_stripe_response, other}}
         end
 
       _ ->

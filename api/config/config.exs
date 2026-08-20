@@ -105,6 +105,17 @@ config :barkpark, :ticket_rate_limits,
   message: 60,
   attachment: 30
 
+# Per-IP abuse rails for UNAUTHENTICATED auth writes, per HOUR, billed in a
+# bucket of their own ON TOP of the shared 60/min anon-write meter
+# (BarkparkWeb.Plugs.AuthWriteRateLimit). `register` = POST /v1/auth/register,
+# which mails a third party on every call (confirmation for a fresh address,
+# re-notification for an existing account), so the meaningful ceiling is MAIL
+# volume, not request volume: 5/hour/IP fits a human signing up with retries and
+# bounds the mailbomb. Prod-tunable without a rebuild via
+# BARKPARK_AUTH_RATE_REGISTER (runtime.exs). Throttle only — invite codes /
+# allowlists / closing signup are the instance owner's policy call.
+config :barkpark, :auth_write_rate_limits, register: 5
+
 # The preview-JWT signing secret is env-specific and is NEVER a hardcoded
 # default in this shared base (closes Sobelow Config.Secrets, config.exs:64
 # at the source rather than the baseline):
@@ -193,6 +204,23 @@ config :barkpark, :audit_dispatch_async, true
 # `Barkpark.Webhooks.auto_disable_threshold/0` reads this (module default 20).
 config :barkpark, :webhook_auto_disable_threshold, 20
 
+# INBOUND GitHub webhook body cap (BYTES), read by `BarkparkWeb.Plugs.CacheBodyReader`.
+# The endpoint parses up to `length: 100_000_000` (100 MB) BEFORE the HMAC gate
+# runs, and CacheBodyReader tees the raw bytes on the webhook path — so an
+# unauthenticated, bogus-signature sender can force pre-auth buffering up to that
+# global bound. GitHub documents a hard 25 MB payload ceiling (larger events are
+# never delivered), so a per-route cap at 26 MB rejects zero legitimate deliveries
+# while bounding the pre-signature buffering. NOTE: this BOUNDS buffering (reads up
+# to the cap before the {:more} → 413 short-circuits), it does not PREVENT it.
+#
+# DESCOPE (felix-w27): the original slice also proposed a per-probe RATE LIMIT on
+# this route. That half is deliberately dropped — `Settings.webhook_secret_cached/0`
+# already memoizes the secret (short-TTL `:persistent_term`), so a burst of bogus
+# signatures no longer forces a DB read + audit row per request; the marginal cost
+# of an unauthenticated probe is now near-zero. The body cap is the load-bearing
+# resource bound; a rate limiter would add moving parts without a measured win.
+config :barkpark, :github_webhook_body_cap, 26_000_000
+
 # Config-gated media upload allowlist + per-upload size cap (SECURITY, PART 2).
 # Ships OFF: empty lists + nil cap = allow-all, i.e. accept every server-derived
 # MIME / extension and any size up to the endpoint's 100 MB body bound — today's
@@ -225,8 +253,13 @@ config :barkpark, :default_cors_origins, []
 # fallback); dev.exs/test.exs set a local default.
 config :barkpark, :ingest_token, nil
 
+# Plain STRING, not a ~r sigil: a compiled Regex in config cannot be
+# serialized into sys.config by `mix release` on Elixir 1.19 (the Dockerfile's
+# build stage), and 1.18 (CI) rejects invented workarounds. The consumer
+# (Barkpark.Search.Sanitizer.compile_pattern/1) compiles binaries with "i" at
+# runtime, so a string here is behavior-identical on both toolchains.
 config :barkpark, :search_query_exclude_patterns, [
-  ~r/^(test|asdf|qwerty|foo|bar)$/i
+  "^(test|asdf|qwerty|foo|bar)$"
 ]
 
 # Engine → retriever registry for the document search SEAM. The Indx plugin

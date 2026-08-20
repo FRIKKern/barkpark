@@ -523,4 +523,61 @@
 # wave-29 slice also adds a rule head, the merged total is NOT 1289 and must be
 # re-measured — never added up from two deltas (this file's own D302 lesson).
 # authored rule heads 1289 == CSSOM style rules 1289, MISSES 0, PARITY PASS.
-1289
+#
+# Re-measured 2026-08-06: 1304 authored heads, MISSES 0 — the +15 are the team
+# picker's own rules (.ws-switch-wrap/.team-menu/.team-item/…), added when the
+# sidebar workspace switcher stopped opening the account modal and grew its own
+# menu. MISSES 0 is what makes this an unrecorded ADD rather than a parity
+# defect — the distinction this ratchet's own failure text tells you to confirm
+# before bumping, and it was confirmed by run, not assumed.
+#
+# Re-measured 2026-08-06 after merging origin/main: 1305 authored heads,
+# MISSES 0 — the +1 is this slice's own never-reported rule. The baseline was
+# 1289 when this branch was cut and reached 1304 on main via the sidebar team
+# picker (#9775/#9777), so this is the ONE-HOLDER-PER-ROUND collision resolved
+# the prescribed way: merge main first, RE-RUN parity, and record the number the
+# run printed — never arithmetic over two deltas. MISSES 0 confirmed FIRST,
+# which is what makes it an unrecorded ADD rather than a parity defect.
+#
+# Re-measured 2026-08-07: 1307 authored heads, MISSES 0 — the +2 are the
+# account modal's sessions fold (.session-fold and its :hover), added when the
+# sessions list learned to collapse past five rows. Number recorded from the
+# parity run itself, MISSES 0 confirmed first.
+#
+# cch-w63-s5 MEASURED 2026-08-09 (the resting state stops asserting a check that
+# never happened): 1307 -> 1310, +3 authored rule heads, MISSES 0. WHY: the fleet
+# card's refused update chip. A box that answered our stored credential with a 401
+# rendered BYTE-IDENTICALLY to a box nobody had ever probed (measured over the
+# shipped bundle: fleetRow equal, both len 576 on a minimal fixture), so the chip
+# had to exist — and a chip whose class has no rule is an __css_check E2 red, while
+# one falling through to `--ready` would paint a credential refusal in the same
+# GREEN that elsewhere means "a newer release is waiting for you". The three heads
+# are the WARN role, stated explicitly: `.fleet-update-chip--refused`,
+# `.fleet-update-chip--refused .fleet-update-dot`, and
+# `[data-theme="dark"] .fleet-update-chip--refused` — each mirroring the `--ready`
+# and `--busy` trio directly above it, so the block stays symmetric.
+# MEASURED, NOT REASONED (D158), even though 1307 + 3 also equals 1310 and that
+# coincidence is not a measurement: cssom-parity.mjs was RUN against the stale 1307
+# and named the value in its own failure text — "!! BASELINE MISMATCH: 1310 authored
+# rule heads, sidecar baseline is 1307 (+3)" with "MISSES 0" on the same run, which
+# is what makes this an unrecorded ADD rather than a parity defect. That number was
+# written back verbatim and re-run to PARITY PASS.
+# FOR THE LEAD: this slice is the ROUND-1 SOLE HOLDER of app.css and this sidecar
+# (charter D774); three round-2 slices are sequenced behind it. D158 stands — re-run
+# the tool on the MERGED tree and write what it prints; never add deltas.
+# cch-w64-s6 MEASURED 2026-08-09 (the deferred pill stops reading calm): 1310 ->
+# 1311, +1 authored rule head, MISSES 0, flattened selectors 1256 -> 1257. WHY: ONE
+# rule, `.dep-deferred`. The deploy ladder emitted `dep-deferred` from the raw
+# server status with NO rule behind it, so it fell through to the `.dep-pill` base
+# — which app.css's own comment records as byte-identical to `.dep-queued` on
+# colour, background and border in both themes. A build the box REFUSED therefore
+# impersonated a build still waiting its turn. The rule keeps the warn hue but
+# gives up the filled chip (the `.dep-cancelled` precedent: a row no longer holding
+# a build slot), so it cannot be confused with `.dep-building` either.
+# MEASURED, NOT REASONED (D158): cssom-parity.mjs was RUN against the stale 1310 and
+# printed "!! BASELINE MISMATCH: 1311 authored rule heads, sidecar baseline is 1310
+# (+1)" with "MISSES 0" and "flattened selectors 1257 authored / 1257 CSSOM" on the
+# same run. Both numbers are copied from that printout, never from arithmetic.
+# ARM A OF THIS SLICE COST THIS FILE NOTHING, deliberately: the site-list pill
+# consumes `.fresh-badge--rebuild` and `.status-pill--warn`, which already exist.
+1311

@@ -101,20 +101,26 @@ defmodule Barkpark.Content.Writer do
         s -> s
       end)
       |> Map.put("rev", generate_rev())
-      |> WriteScope.put_scope_attrs(opts)
-      |> Sheets.maybe_recompute_sheet_formulas(type)
-      |> Sheets.hydrate_sheet_embed_snapshots()
-      # R2 chokepoint (id-less backfill, barkpark-obsidian): a Sanity-shaped
-      # mutation (`create`/`createOrReplace`/`replace`) or the legacy create
-      # controller can carry author-supplied `content["blocks"]` that lack ids.
-      # Route them through the SAME `ensure_block_ids` the paper upsert path uses
-      # so an id-less block can never reach storage from this entry either — the
-      # continuous canvas keys its diff on block id, and an id-less block
-      # projects to bpId:null → spurious insert-after → duplicate-block
-      # corruption on the next edit. Additive (present ids preserved), idempotent.
-      |> maybe_ensure_block_ids()
 
-    with :ok <- validate_task_kind(type, attrs) do
+    # Fail-closed scope stamp (felix-w26): put_scope_attrs returns
+    # {:ok, attrs} | {:error, reason} — a refused dataset resolution surfaces
+    # here instead of silently stamping dataset_id=NULL. The stamp stays BEFORE
+    # Sheets.hydrate_sheet_embed_snapshots (it reads the stamped scope keys).
+    with {:ok, attrs} <- WriteScope.put_scope_attrs(attrs, opts),
+         attrs =
+           attrs
+           |> Sheets.maybe_recompute_sheet_formulas(type)
+           |> Sheets.hydrate_sheet_embed_snapshots()
+           # R2 chokepoint (id-less backfill, barkpark-obsidian): a Sanity-shaped
+           # mutation (`create`/`createOrReplace`/`replace`) or the legacy create
+           # controller can carry author-supplied `content["blocks"]` that lack ids.
+           # Route them through the SAME `ensure_block_ids` the paper upsert path uses
+           # so an id-less block can never reach storage from this entry either — the
+           # continuous canvas keys its diff on block id, and an id-less block
+           # projects to bpId:null → spurious insert-after → duplicate-block
+           # corruption on the next edit. Additive (present ids preserved), idempotent.
+           |> maybe_ensure_block_ids(),
+         :ok <- validate_task_kind(type, attrs) do
       do_create_document(type, attrs, dataset, doc_id, opts)
     end
   end
@@ -475,27 +481,33 @@ defmodule Barkpark.Content.Writer do
         s -> s
       end)
       |> Map.put("rev", generate_rev())
-      |> WriteScope.put_scope_attrs(opts)
-      |> Sheets.maybe_recompute_sheet_formulas(type)
-      |> Sheets.hydrate_sheet_embed_snapshots()
-      # R2 chokepoint (id-less backfill, barkpark-obsidian): the Sanity-shaped
-      # `patch` mutation and the autosave/upsert path can carry id-less
-      # `content["blocks"]`. Fill ids BEFORE projection (projection reads block
-      # ids, it never mints them) so the persisted + projected blocks all carry
-      # a stable id — the canvas-diff prerequisite. Additive, idempotent.
-      |> maybe_ensure_block_ids()
-      # Project-on-write on the DOCUMENT path (Exp-P3.1): a whole-doc write that
-      # carries content["blocks"] re-derives content[fieldName]/content["body"]
-      # from those blocks — the same project-on-write the paper path runs.
-      # Projection stays the SOLE writer of those keys; a write WITHOUT blocks
-      # (legacy field-map save) skips it untouched.
-      |> maybe_project_document_content(dataset)
-      # XSS hardening (mirror of create_after_dedup): scrub a verbatim
-      # content["body_html"] on the patch/autosave path so poisoned markup
-      # never persists as a draft that publish later promotes unchanged.
-      |> maybe_sanitize_paper_body_html(type)
 
-    with :ok <- validate_task_kind(type, attrs) do
+    # Fail-closed scope stamp (felix-w26): mirror of create_document/4 — a
+    # refused dataset resolution errors out here, never a silent NULL stamp.
+    # The stamp stays BEFORE Sheets.hydrate_sheet_embed_snapshots and the
+    # body_html render path (both read the stamped scope keys).
+    with {:ok, attrs} <- WriteScope.put_scope_attrs(attrs, opts),
+         attrs =
+           attrs
+           |> Sheets.maybe_recompute_sheet_formulas(type)
+           |> Sheets.hydrate_sheet_embed_snapshots()
+           # R2 chokepoint (id-less backfill, barkpark-obsidian): the Sanity-shaped
+           # `patch` mutation and the autosave/upsert path can carry id-less
+           # `content["blocks"]`. Fill ids BEFORE projection (projection reads block
+           # ids, it never mints them) so the persisted + projected blocks all carry
+           # a stable id — the canvas-diff prerequisite. Additive, idempotent.
+           |> maybe_ensure_block_ids()
+           # Project-on-write on the DOCUMENT path (Exp-P3.1): a whole-doc write that
+           # carries content["blocks"] re-derives content[fieldName]/content["body"]
+           # from those blocks — the same project-on-write the paper path runs.
+           # Projection stays the SOLE writer of those keys; a write WITHOUT blocks
+           # (legacy field-map save) skips it untouched.
+           |> maybe_project_document_content(dataset)
+           # XSS hardening (mirror of create_after_dedup): scrub a verbatim
+           # content["body_html"] on the patch/autosave path so poisoned markup
+           # never persists as a draft that publish later promotes unchanged.
+           |> maybe_sanitize_paper_body_html(type),
+         :ok <- validate_task_kind(type, attrs) do
       do_upsert_document(type, attrs, dataset, doc_id, opts)
     end
   end
@@ -1077,7 +1089,9 @@ defmodule Barkpark.Content.Writer do
   # write. doc_type is the raw type; the media resolver is bound to the write's
   # tenancy scope. A paper (unusual on this generic path) also gets its reader
   # url; other doctypes leave manifest["url"] nil. Render.render_blocks ignores
-  # the extra key, so body_html is byte-unchanged.
+  # the extra key, so body_html is byte-unchanged. The row title is only the
+  # preview's final fallback; content["title"] and a role:title block remain
+  # stronger inside Preview.project/3.
   defp doc_render_opts(dataset, type, attrs) do
     scope = [
       workspace_id: Map.get(attrs, "workspace_id"),
@@ -1085,7 +1099,11 @@ defmodule Barkpark.Content.Writer do
     ]
 
     preview =
-      %{media_resolver: Preview.media_resolver(scope), doc_type: type}
+      %{
+        media_resolver: Preview.media_resolver(scope),
+        doc_type: type,
+        title: Map.get(attrs, "title")
+      }
       |> maybe_put_preview_url(type, attrs)
 
     Map.put(Labels.render_opts(dataset, scope), :preview, preview)

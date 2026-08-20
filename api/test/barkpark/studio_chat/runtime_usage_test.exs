@@ -943,6 +943,88 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
     end
   end
 
+  # Charter D115 / felix-w19 — observe/3 acquires FOR SHARE on the receipt's authority
+  # join (assignment -> wave -> binding -> runtime attempt -> task document -> dataset
+  # -> session) BEFORE inserting the Receipt row. The assignment row is the
+  # mutation-sensitive lock target: chat_runtime_usage_receipts carries NO foreign key
+  # on assignment_id (or cycle_id), so the insert's RI machinery never reaches
+  # epic_assignments on its own — while the task document row is independently
+  # FOR-SHAREd by Tasks.ClaimFence.verify and the session row is FOR-KEY-SHAREd by the
+  # receipt's session_id FK; both of those are false-green. Spike-proven 2026-08-17:
+  # lock present -> 55P03 at the authority SELECT; delete the `lock: "FOR SHARE"`
+  # clause from authoritative_join/1 and this same drive returns {:ok, :recorded}.
+  #
+  # Runs unboxed (two real Postgres connections that actually block each other), so it
+  # builds its own committed fixtures instead of the sandboxed setup context. Manual
+  # teardown via Tenancy.delete_workspace/1; the 55P03 rollback leaves no receipt row,
+  # so the append-only receipt ledger never blocks the teardown.
+  test "observe FOR SHARE serializes against a concurrent assignment-row lock (55P03)" do
+    Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+      workspace = TenancyFixtures.create_workspace!(unique("usage-lock-ws"))
+      project = TenancyFixtures.create_project!(workspace, unique("usage-lock-p"))
+
+      try do
+        authority = create_runtime_authority!(workspace, project, "usage-lock")
+        {:ok, attempt} = CycleFleet.prepare_runtime_attempt(authority.assignment, authority.claim)
+
+        {:ok, _session} =
+          StudioChat.set_provider_session_id(attempt.session_id, "provider-thread-1")
+
+        attribution = RuntimeAttempt.attribution(attempt)
+        parent = self()
+
+        # Connection A: a real second connection holds FOR UPDATE on the assignment
+        # row and rendezvous-signals the parent BEFORE releasing (holder-first).
+        holder =
+          Task.async(fn ->
+            Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
+              Repo.transaction(fn ->
+                Repo.query!("SELECT id FROM epic_assignments WHERE id = $1 FOR UPDATE", [
+                  Ecto.UUID.dump!(authority.assignment.id)
+                ])
+
+                send(parent, :assignment_row_locked)
+
+                receive do
+                  :release -> :ok
+                after
+                  10_000 -> :timeout
+                end
+              end)
+            end)
+          end)
+
+        assert_receive :assignment_row_locked, 5_000
+
+        # Connection B: drive the REAL observe/3 under a SESSION-level lock_timeout
+        # (SET LOCAL outside observe's own txn is a no-op); RESET to 0 in the
+        # after-block — the GUC persists on the pooled connection and would poison
+        # later tests.
+        try do
+          Repo.query!("SET lock_timeout = '750ms'")
+
+          error =
+            assert_raise Postgrex.Error, fn ->
+              RuntimeUsage.observe(
+                attribution,
+                :baseline,
+                event(attempt.session_id, "turn-authority-lock", 10)
+              )
+            end
+
+          assert error.postgres.code == :lock_not_available
+          assert error.postgres.pg_code == "55P03"
+        after
+          Repo.query!("SET lock_timeout = 0")
+          send(holder.pid, :release)
+          Task.await(holder, 10_000)
+        end
+      after
+        assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+      end
+    end)
+  end
+
   defp event(session_id, turn_id, total_tokens, counters \\ []) do
     total =
       counters

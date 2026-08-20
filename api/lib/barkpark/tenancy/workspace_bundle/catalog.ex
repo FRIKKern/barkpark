@@ -681,6 +681,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   @doc "A single-quoted, escaped Postgres text literal."
   def text_literal(value), do: "'#{escape_sql_string(value)}'"
 
+  # SAFETY ASSUMPTION: single-quote doubling is a COMPLETE escape ONLY when
+  # `standard_conforming_strings = on` (the Postgres default since 9.1, and never
+  # flipped in Barkpark). With it off, a backslash would begin a C-style escape
+  # sequence and `''` would no longer be the sole quote path — the doubling below
+  # would be defeated. This is the last line of defense for the COPY-FROM-STDIN
+  # import path, which bypasses the Ecto changeset guards entirely (unlike the
+  # POST /v1/data/mutate write path, where Dataset.changeset now validates slug
+  # format). Do not weaken this to a bare interpolation, and do not disable
+  # standard_conforming_strings.
   defp escape_sql_string(value) when is_binary(value), do: String.replace(value, "'", "''")
 
   # A bare SQL identifier from a catalog-derived table/column name. Every name

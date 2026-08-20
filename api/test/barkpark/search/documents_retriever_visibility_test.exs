@@ -19,11 +19,14 @@ defmodule Barkpark.Search.DocumentsRetrieverVisibilityTest do
       `visibility: "public"`; a SCHEMALESS type is excluded too (matching the
       query route's live 404 for it) and an empty allowlist yields an EMPTY
       result (fail closed);
-    * any authenticated principal (`:api_token` — including a public-read
-      token — or `:user`) BYPASSES the filter: EXACT parity with
-      `query_controller.ex`'s `preview? or authed? or schema_public?` gate,
-      never stricter on one route (tightening for public-read tokens must move
-      both routes together and is filed separately);
+    * an authenticated principal (`:api_token` or `:user`) BYPASSES the filter
+      — EXCEPT the public-read tier, which is clamped exactly like an anonymous
+      caller (dr-w2-s7). EXACT parity with `query_controller.ex`'s
+      `preview? or authed? or schema_public?` gate, whose `authed?/1` dropped
+      the same tier in the same commit: never stricter on one route. The gate
+      is keyed on the PERMISSION (`"public-read" in roles`, MEMBERSHIP and
+      never list equality), not on `principal_type` — "is authenticated" was
+      the bug, because the browser-shipped site credential IS an `:api_token`;
     * FACETS ARE NOT OPTIONAL: pre-fix, anonymous browse returned count=3879
       with facets naming `session 3 · document 4 · …` — a working existence
       DIRECTORY. The tests assert documents AND count AND facets.
@@ -152,17 +155,12 @@ defmodule Barkpark.Search.DocumentsRetrieverVisibilityTest do
 
   # ── authed bypass: EXACT parity with the query route ───────────────────────
 
-  test "an api_token caller — including a bare public-read token — still reads private types" do
+  test "a {read} api_token caller still reads private types (the bypass is intact for members)" do
     {scope, post_id, session_id} = mixed_corpus!()
 
-    # The query route's `authed?` admits ANY token, public-read included
-    # (query_controller.ex) — the search filter must not be silently stricter
-    # on one route. Tightening this moves BOTH routes together, filed separately.
-    public_read_ctx =
-      CallerContext.from_token(%{id: Ecto.UUID.generate(), permissions: ["public-read"]})
+    read_ctx = CallerContext.from_token(%{id: Ecto.UUID.generate(), permissions: ["read"]})
 
-    {hits, count, meta} =
-      Content.search_documents("", @ds, [caller_context: public_read_ctx] ++ scope)
+    {hits, count, meta} = Content.search_documents("", @ds, [caller_context: read_ctx] ++ scope)
 
     ids = Enum.map(hits, & &1.doc_id)
     assert post_id in ids
@@ -170,6 +168,53 @@ defmodule Barkpark.Search.DocumentsRetrieverVisibilityTest do
     assert count == 2
 
     assert "session" in (meta.facets |> Map.get("type", []) |> Enum.map(& &1["label"]))
+  end
+
+  # ── the public-read tier is NOT a bypass (dr-w2-s7) ────────────────────────
+  #
+  # This assertion is INVERTED from what it was: the gate used to key on
+  # `principal_type in [:api_token, :user]` — "is authenticated" — and a
+  # public-read token IS an `:api_token`, so the browser-shipped site credential
+  # read every private type through the scoped search door. It now keys on the
+  # PERMISSION, in lockstep with `QueryController.authed?/1`.
+
+  test "a bare public-read token is clamped to the public allowlist, like an anonymous caller" do
+    {scope, post_id, session_id} = mixed_corpus!()
+
+    public_read_ctx =
+      CallerContext.from_token(%{id: Ecto.UUID.generate(), permissions: ["public-read"]})
+
+    {hits, count, meta} =
+      Content.search_documents("", @ds, [caller_context: public_read_ctx] ++ scope)
+
+    ids = Enum.map(hits, & &1.doc_id)
+    assert post_id in ids, "the clamp is not a shutdown: public types must still return"
+    refute session_id in ids
+    assert count == 1, "count leaked the private-type row"
+
+    refute "session" in (meta.facets |> Map.get("type", []) |> Enum.map(& &1["label"])),
+           "the type facet leaked the private type's existence"
+  end
+
+  test "a MIXED [public-read, read] token is clamped too — membership, never list equality" do
+    {scope, post_id, session_id} = mixed_corpus!()
+
+    # TokenController allowlists ~w(public-read read) and returns the caller's
+    # list VERBATIM and UNORDERED, so this is a real minted shape. A
+    # `roles == ["public-read"]` equality pin would let it walk straight past.
+    mixed_ctx =
+      CallerContext.from_token(%{
+        id: Ecto.UUID.generate(),
+        permissions: ["public-read", "read"]
+      })
+
+    {hits, count, _meta} =
+      Content.search_documents("", @ds, [caller_context: mixed_ctx] ++ scope)
+
+    ids = Enum.map(hits, & &1.doc_id)
+    assert post_id in ids
+    refute session_id in ids
+    assert count == 1
   end
 
   test "a user-session caller still reads private types" do

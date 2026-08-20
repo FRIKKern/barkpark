@@ -327,3 +327,89 @@ func TestCloudDNSNoTokenUsesRunCapture(t *testing.T) {
 		t.Fatalf("expected runCapture to be used when no Token set")
 	}
 }
+
+// ── the by-value sweep's capability, pinned at RUNTIME ───────────────────────
+//
+// deprovisionDNS (warmpool.go) type-asserts its DNSProvider to RecordLister and
+// SILENTLY degrades to the old by-NAME delete when the assertion fails — the
+// exact shape the by-value sweep exists to prevent. The `var _ RecordLister`
+// assertions in dns.go / dns_cloud.go catch a dropped or renamed method at BUILD
+// time, but they cannot see a CONSTRUCTOR swap: change NewCloudDNS to return a
+// different provider (or wrap it in a decorator that forwards only DNSProvider)
+// and the build stays green while the whole fleet quietly tears down by name.
+// These tests run the real assertion against the real constructors production
+// wires, so that swap reds here.
+
+// productionDNSProvider is one production wiring site and the DNSProvider value
+// that site actually builds — typed as the INTERFACE, so each entry exercises
+// the same dynamic type assertion deprovisionDNS performs.
+type productionDNSProvider struct {
+	site     string
+	provider DNSProvider
+}
+
+// productionDNSProviders rebuilds each production DNS wiring exactly as its call
+// site does. Keep it in step with the sites named in the `site` fields.
+func productionDNSProviders() []productionDNSProvider {
+	// cmd/barkpark-provisioner/main.go:150 — `dns := cloud.NewCloudDNS()`, then
+	// optionally `dns.Token = BARKPARK_DNS_HCLOUD_TOKEN`; the value flows into
+	// Seams.DNS and on to deprovisionDNS via WarmPool.
+	mainDNS := NewCloudDNS()
+	mainDNSDualToken := NewCloudDNS()
+	mainDNSDualToken.Token = "token-from-BARKPARK_DNS_HCLOUD_TOKEN"
+	// internal/cli/cloud_support_cmd.go:100 — supportDNSFor builds the same type
+	// with the resolved DNS token for the remove-side sweep.
+	supportDNS := NewCloudDNS()
+	supportDNS.Token = "token-from---dns-token"
+
+	return []productionDNSProvider{
+		{"cmd/barkpark-provisioner/main.go:150 cloud.NewCloudDNS()", mainDNS},
+		{"cmd/barkpark-provisioner/main.go:151 NewCloudDNS()+Token (BARKPARK_DNS_HCLOUD_TOKEN)", mainDNSDualToken},
+		{"internal/cli/cloud_support_cmd.go:100 supportDNSFor → NewCloudDNS()+Token", supportDNS},
+	}
+}
+
+// TestProductionDNSProvidersSatisfyRecordLister asserts that every DNSProvider
+// production wires passes deprovisionDNS's RecordLister assertion — so teardown
+// takes the by-VALUE sweep, never the by-name degrade arm.
+func TestProductionDNSProvidersSatisfyRecordLister(t *testing.T) {
+	providers := productionDNSProviders()
+	if len(providers) == 0 {
+		t.Fatalf("no production DNS providers listed — the guard would pass vacuously")
+	}
+	for _, p := range providers {
+		t.Run(p.site, func(t *testing.T) {
+			if _, ok := p.provider.(RecordLister); !ok {
+				t.Fatalf("%s builds %T, which does NOT satisfy RecordLister: deprovisionDNS would "+
+					"silently degrade to the by-name delete and leave custom-domain A records on a "+
+					"recycled IP", p.site, p.provider)
+			}
+		})
+	}
+}
+
+// TestARecordNamesByValueRunsThroughProductionProvider drives the sweep helper
+// end-to-end through the constructor production uses (with only the exec seam
+// faked), proving the by-value leg actually LISTS rather than erroring with
+// "cannot list records" — the runtime consequence of losing RecordLister.
+func TestARecordNamesByValueRunsThroughProductionProvider(t *testing.T) {
+	c := NewCloudDNS()
+	rr := &recordedRun{outputs: []string{`[
+	  {"name":"acme","type":"A","records":[{"value":"203.0.113.7"}]},
+	  {"name":"acme-team","type":"A","records":[{"value":"203.0.113.7"}]},
+	  {"name":"other","type":"A","records":[{"value":"198.51.100.4"}]}
+	]`}}
+	c.Run = rr.run
+
+	var dns DNSProvider = c // the seam deprovisionDNS sees
+	names, err := ARecordNamesByValue(context.Background(), dns, "barkpark.cloud", "203.0.113.7")
+	if err != nil {
+		t.Fatalf("ARecordNamesByValue through the production provider: %v", err)
+	}
+	if !reflect.DeepEqual(names, []string{"acme", "acme-team"}) {
+		t.Fatalf("by-value sweep names = %v, want [acme acme-team]", names)
+	}
+	if len(rr.calls) != 1 || !strings.Contains(strings.Join(rr.calls[0], " "), "rrset") {
+		t.Fatalf("expected one `hcloud zone rrset list` call, got %v", rr.calls)
+	}
+}

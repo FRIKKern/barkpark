@@ -30,50 +30,147 @@ function upstreamHeaders(sid: string | undefined): HeadersInit {
   return h;
 }
 
+/** The receipt this route answers with — see `recordingReceipt`. */
+interface FindEventReceipt {
+  /** The proxy handled the request. Never a claim about the recording. */
+  ok: true;
+  /** Whether the upstream write actually happened. Descends from the write. */
+  recorded: boolean;
+  /** Why nothing was recorded — the measurement `recorded:false` came from. */
+  reason?: string;
+}
+
 /**
- * Fire-and-forget feedback recorder. Always answers 200 `{ ok: true }` so a
- * recording failure never blocks the user — a dropped signal is acceptable, a
- * blocked correction-accept or a delayed result navigation is not. Upstream
- * errors are logged server-side, not surfaced.
+ * Every exit of this route goes through here, so `recorded` can only ever be a
+ * value someone measured.
+ *
+ * The status line stays 200 at ALL exits, deliberately. A dropped analytics
+ * signal must not break search UX; and if the receipt rode the status line for
+ * some exits only, a caller reading `res.ok` would see RED for a body we could
+ * not parse and GREEN for an upstream 500 — the inversion this shape exists to
+ * prevent. `app/api/find/route.ts` answers 200-with-a-derived-field the same way.
+ */
+/** The shape the upstream signal endpoints answer with, as far as we read it. */
+interface UpstreamReceipt {
+  recorded?: boolean;
+  status?: string;
+  reason?: string;
+}
+
+/**
+ * The upstream's own receipt, or null when it did not send a readable one.
+ *
+ * Null is deliberately NOT treated as a failure: an endpoint that answers 2xx
+ * with an empty or unparsable body has told us nothing that contradicts the
+ * write, and inventing a `recorded:false` from our own parse failure would be
+ * the same fabrication in the opposite direction. Only an explicit
+ * `recorded:false` downgrades the receipt.
+ */
+async function readReceipt(res: Response): Promise<UpstreamReceipt | null> {
+  try {
+    const body: unknown = await res.json();
+    if (body && typeof body === "object") return body as UpstreamReceipt;
+  } catch {
+    // No readable body — see above.
+  }
+  return null;
+}
+
+function recordingReceipt(recorded: boolean, reason?: string): NextResponse {
+  const receipt: FindEventReceipt = { ok: true, recorded };
+  if (reason) receipt.reason = reason;
+  return NextResponse.json(receipt, { status: 200 });
+}
+
+/**
+ * Fire-and-forget feedback recorder — best-effort about DELIVERY, exact about
+ * REPORTING. Always answers 200 so a recording failure never blocks the user (a
+ * dropped signal is acceptable; a blocked correction-accept or a delayed result
+ * navigation is not), but the body's `recorded` field always descends from what
+ * actually happened: the upstream response status where a write was attempted,
+ * and an explicit false where none was. Upstream failures are logged
+ * server-side AND reported in the receipt — never laundered into a green.
  */
 export async function POST(request: Request): Promise<NextResponse> {
   let body: FindEventBody;
   try {
     body = (await request.json()) as FindEventBody;
   } catch {
-    return NextResponse.json({ ok: true });
+    // Nothing was parsed, so nothing was sent: not a failed write, no write.
+    return recordingReceipt(
+      false,
+      "unparsable request body: no upstream write was attempted",
+    );
   }
 
   const { kind, from, to, queryEventId, objectId, position, sid } = body;
-  const headers = upstreamHeaders(sid);
 
-  try {
-    if (kind === "correction") {
-      // The user accepted a "Did you mean <to>?" suggestion for <from>.
-      if (from && to) {
-        await fetch(`${API_URL}/v1/data/search/${DATASET}/correction`, {
-          method: "POST",
-          headers,
-          cache: "no-store",
-          body: JSON.stringify({ from, to }),
-        });
-      }
-    } else if (kind === "click") {
-      // The user clicked result <objectId> at <position> for query event
-      // <queryEventId> — the EXISTING interaction endpoint.
-      if (queryEventId && objectId) {
-        await fetch(`${API_URL}/v1/data/search/${DATASET}/interaction`, {
-          method: "POST",
-          headers,
-          cache: "no-store",
-          body: JSON.stringify({ queryEventId, objectId, position }),
-        });
-      }
-    }
-  } catch (err) {
-    // Best-effort: a recording failure must not break search UX.
-    console.error("find-event upstream error:", err);
+  // Resolve the signal to its upstream write FIRST: a signal that routes
+  // nowhere (unknown kind, a correction with no `to`, a click with no
+  // `queryEventId`) is a distinct outcome from a write that failed, and the
+  // receipt has to be able to say which one happened.
+  let url: string;
+  let payload: Record<string, unknown>;
+  if (kind === "correction" && from && to) {
+    // The user accepted a "Did you mean <to>?" suggestion for <from>.
+    url = `${API_URL}/v1/data/search/${DATASET}/correction`;
+    payload = { from, to };
+  } else if (kind === "click" && queryEventId && objectId) {
+    // The user clicked result <objectId> at <position> for query event
+    // <queryEventId> — the EXISTING interaction endpoint.
+    url = `${API_URL}/v1/data/search/${DATASET}/interaction`;
+    payload = { queryEventId, objectId, position };
+  } else {
+    // `kind` is caller-supplied and only TYPED as a union — at runtime it can
+    // be anything, so it is clamped before it rides back out in the receipt.
+    // Reflecting an unbounded request field verbatim is how a diagnostic
+    // string becomes an amplification surface.
+    const named =
+      typeof kind === "string" ? JSON.stringify(kind.slice(0, 32)) : "absent";
+    return recordingReceipt(
+      false,
+      `unroutable signal (kind=${named}): no upstream write was attempted`,
+    );
   }
 
-  return NextResponse.json({ ok: true });
+  try {
+    // Bind the response: fetch does NOT reject on 4xx/5xx, so an upstream 422
+    // or 500 reaches this line as a resolved value and would otherwise pass
+    // straight through the catch below unseen.
+    const res = await fetch(url, {
+      method: "POST",
+      headers: upstreamHeaders(sid),
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error(`find-event upstream refused ${kind}: HTTP ${res.status}`);
+      return recordingReceipt(false, `upstream responded ${res.status}`);
+    }
+    // A 2xx IS NOT THE WHOLE ANSWER. Both upstream endpoints deliberately
+    // answer 200 for outcomes that recorded nothing, and they say so in the
+    // BODY: `/interaction` returns `{ok:true, recorded:false,
+    // reason:"recording_disabled"}`, and `/correction` returns 200 for all
+    // five of its outcomes — including a LOST WRITE, as
+    // `{ok:false, status:"error", recorded:false}`.
+    //
+    // Reading only `res.ok` would therefore overwrite the upstream's honest
+    // `recorded:false` with a `true` of our own making — the same laundering
+    // this route was repaired to stop, re-entering one layer up because the
+    // upstream moved its news off the status line and into the body. The
+    // receipt descends from the strongest thing the upstream actually said.
+    const upstream = await readReceipt(res);
+    if (upstream && upstream.recorded === false) {
+      const why = upstream.status ?? upstream.reason ?? "no reason given";
+      console.error(`find-event upstream recorded nothing for ${kind}: ${why}`);
+      return recordingReceipt(false, `upstream recorded nothing: ${why}`);
+    }
+    return recordingReceipt(true);
+  } catch (err) {
+    // Best-effort delivery: a recording failure must not break search UX — but
+    // it is still reported, not swallowed.
+    console.error("find-event upstream error:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    return recordingReceipt(false, `upstream unreachable: ${message}`);
+  }
 }

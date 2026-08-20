@@ -120,6 +120,122 @@ defmodule Barkpark.Net.SafeOutboundTest do
     end
   end
 
+  describe "post/2 pins the checked IP (DNS-rebinding TOCTOU)" do
+    setup do
+      prev_allow = Application.get_env(:barkpark, :allow_private_outbound)
+      Application.put_env(:barkpark, :allow_private_outbound, false)
+
+      on_exit(fn ->
+        restore(:allow_private_outbound, prev_allow)
+        Application.delete_env(:barkpark, :safe_outbound_resolver)
+      end)
+
+      :ok
+    end
+
+    # THE REBINDING MUTATION PROOF. Fixture: the stub resolver answers PUBLIC
+    # (192.0.2.10, TEST-NET-1 — classifies as routable) at CHECK time for
+    # "localhost", while connect-time DNS resolves localhost -> 127.0.0.1,
+    # where a Bypass server plays the internal target.
+    #
+    # RED before the fix (origin/main safe_outbound.ex, this exact test):
+    #   the guard passed, Finch re-resolved, and the request REACHED the
+    #   internal server — got {:ok, %Req.Response{status: 200, body: "hit"}}
+    #   and the :internal_reached message. GREEN after: post/2 connects to the
+    #   pinned 192.0.2.10 (nothing listens there), errors at transport level,
+    #   and the internal Bypass is never touched.
+    test "a host that re-resolves to loopback at connect time never reaches the internal server" do
+      bypass = Bypass.open()
+      test_pid = self()
+
+      Bypass.stub(bypass, "POST", "/hook", fn conn ->
+        send(test_pid, :internal_reached)
+        Plug.Conn.resp(conn, 200, "hit")
+      end)
+
+      Application.put_env(:barkpark, :safe_outbound_resolver, fn "localhost" ->
+        {:ok, [{192, 0, 2, 10}]}
+      end)
+
+      result =
+        SafeOutbound.post("http://localhost:#{bypass.port}/hook",
+          body: "{}",
+          retry: false,
+          connect_options: [timeout: 250]
+        )
+
+      assert {:error, %Req.TransportError{}} = result
+      refute_received :internal_reached
+    end
+
+    test "pin_request/3 rewrites the URL host to the checked IP, preserving path/query and identity" do
+      uri = URI.new!("https://hooks.example.com/deliver?x=1")
+
+      {url, opts} =
+        SafeOutbound.pin_request(uri, {192, 0, 2, 7}, headers: [{"x-sig", "abc"}])
+
+      assert url == "https://192.0.2.7/deliver?x=1"
+      assert {"host", "hooks.example.com"} in Keyword.fetch!(opts, :headers)
+      assert {"x-sig", "abc"} in Keyword.fetch!(opts, :headers)
+      assert Keyword.fetch!(opts, :connect_options)[:hostname] == "hooks.example.com"
+      assert Keyword.fetch!(opts, :redirect) == false
+    end
+
+    test "pin_request/3 keeps a non-default port in the URL and the Host header" do
+      uri = URI.new!("http://hooks.example.com:8080/hook")
+      {url, opts} = SafeOutbound.pin_request(uri, {192, 0, 2, 7}, [])
+
+      assert url == "http://192.0.2.7:8080/hook"
+      assert {"host", "hooks.example.com:8080"} in Keyword.fetch!(opts, :headers)
+    end
+
+    test "pin_request/3 brackets an IPv6 pin and merges caller connect_options" do
+      uri = URI.new!("https://v6.example.com/hook")
+
+      {url, opts} =
+        SafeOutbound.pin_request(
+          uri,
+          {0x2606, 0x2800, 0x220, 0x1, 0x248, 0x1893, 0x25C8, 0x1946},
+          connect_options: [timeout: 100]
+        )
+
+      assert url == "https://[2606:2800:220:1:248:1893:25c8:1946]/hook"
+      assert Keyword.fetch!(opts, :connect_options)[:timeout] == 100
+      assert Keyword.fetch!(opts, :connect_options)[:hostname] == "v6.example.com"
+    end
+
+    test "pin_request/3 never overrides a caller-set Host header" do
+      uri = URI.new!("http://hooks.example.com/hook")
+
+      {_url, opts} =
+        SafeOutbound.pin_request(uri, {192, 0, 2, 7}, headers: [{"Host", "custom.example"}])
+
+      headers = Keyword.fetch!(opts, :headers)
+      assert {"Host", "custom.example"} in headers
+      refute Enum.any?(headers, fn {k, v} -> k == "host" and v != "custom.example" end)
+    end
+  end
+
+  describe "post/2 with the escape hatch on (no resolution, no pin)" do
+    setup do
+      prev = Application.get_env(:barkpark, :allow_private_outbound)
+      Application.put_env(:barkpark, :allow_private_outbound, true)
+      on_exit(fn -> restore(:allow_private_outbound, prev) end)
+      :ok
+    end
+
+    test "connects normally, so Bypass-at-loopback fixtures keep working" do
+      bypass = Bypass.open()
+      Bypass.expect_once(bypass, "POST", "/hook", &Plug.Conn.resp(&1, 200, "ok"))
+
+      assert {:ok, %Req.Response{status: 200}} =
+               SafeOutbound.post("http://127.0.0.1:#{bypass.port}/hook",
+                 body: "{}",
+                 retry: false
+               )
+    end
+  end
+
   defp restore(k, nil), do: Application.delete_env(:barkpark, k)
   defp restore(k, v), do: Application.put_env(:barkpark, k, v)
 end

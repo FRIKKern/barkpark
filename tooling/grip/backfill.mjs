@@ -244,7 +244,12 @@ export function writeBackfill(recipes, { now, dir = DEFAULT_LEDGER_DIR, screen =
  * none), and unreadable rows (there must be none).
  */
 export function auditLedger(dir = DEFAULT_LEDGER_DIR) {
-  const folded = foldLedger(dir);
+  // Inject the SAME two read-path bounds the write path admits against
+  // (`date -u` clock + screenCommand). Without them the audit's fold cannot fire
+  // FUTURE-OBSERVED-AT or REFUSED-COMMAND, so a composed-future or outage-capable
+  // row would fold clean here while writeLedgerRun refuses both (D66 read-path
+  // residual). shellNow() is defined below; screenCommand is imported above.
+  const folded = foldLedger(dir, { now: shellNow(), screen: screenCommand });
   const subjects = new Set();
   const leadsSubjects = new Set();
   for (const entry of folded.entries) {

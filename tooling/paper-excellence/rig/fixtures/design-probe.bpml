@@ -1,0 +1,30 @@
+<paper slug="design-probe-section-rhythm" title="Section Rhythm Probe">
+  <ingress>One page, three sections, every boundary the grammar cares about: eyebrow heads, prose at measure, evidence that breaks wide, and the gaps between them. If the section law changes, this page shows it first.</ingress>
+  <section>
+    <eyebrow>I · THE FIRST BOUNDARY</eyebrow>
+    <h2>Prose above, evidence below</h2>
+    <p>This paragraph exists to put honest prose ahead of an evidence block. The gap under this line is the <b>evidence beat</b> — thirty pixels against the paragraph's sixteen — and the gap above the next section head is the <b>section gap</b>, which today sits at fifty-one pixels against the artifact's ninety-two.</p>
+    <table>
+      <tr><th>boundary</th><th>today</th><th>target</th></tr>
+      <tr><td>evidence beat</td><td>29.9px</td><td>30px</td></tr>
+      <tr><td>section gap</td><td>51.3px</td><td>92px</td></tr>
+    </table>
+  </section>
+  <section>
+    <eyebrow>II · THE WIDE BAND</eyebrow>
+    <h2>Components that earn their width</h2>
+    <p>The strip below should ride the evidence band — 1040 at common widths, 1240 on a wide screen — while this paragraph holds the reading measure.</p>
+    <stats>
+      <stat value="18px" label="body, from the token"></stat>
+      <stat value="29.9px" label="evidence beat, measured"></stat>
+      <stat value="1240px" label="band at 1920"></stat>
+      <stat value="0" label="horizontal scroll, anywhere"></stat>
+    </stats>
+  </section>
+  <section>
+    <eyebrow>III · THE CLOSING BEAT</eyebrow>
+    <h2>A callout to end on</h2>
+    <p>Sections should end the way they open — with air proportional to their weight.</p>
+    <callout>The ratio is the law: evidence opens at one-and-a-half to two times the paragraph beat, and sections at four. Where this page disagrees with the shell, the shell is wrong.</callout>
+  </section>
+</paper>

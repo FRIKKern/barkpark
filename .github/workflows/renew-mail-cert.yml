@@ -34,8 +34,11 @@ jobs:
       # MONTHLY, so an unnoticed red here burns through the remainder of a ~90
       # day cert and outbound mail dies with no warning. Two more monthly
       # attempts would run before anyone looked.
+      # `cancelled()` too: `failure()` is FALSE on a cancelled run, and a
+      # MONTHLY job that was cancelled has burned the same month a failed one
+      # has. Both mean the cert did not renew.
       - name: Report failure to a human
-        if: failure()
+        if: failure() || cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_FAILURE_KEY: renew-mail-cert

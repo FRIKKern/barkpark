@@ -110,7 +110,14 @@ defmodule BarkparkCloud.NotificationsTransactionalDeliveryTest do
       assert d.status == "failed"
       assert d.event == "password_reset"
       assert is_nil(d.team_id)
-      assert d.last_error =~ "relay_down"
+      # wave 31 S1: `last_error` is PUBLISHED, so it carries a classified label
+      # from `DeliveryReason`'s closed vocabulary — never the raw transport term
+      # (which names the SMTP relay host). The raw term goes to the operator log.
+      # `{:relay_down, :econnrefused}` is not a gen_smtp shape, so it classifies
+      # as :unknown; the guard for the shapes that DO leak is
+      # test/barkpark_cloud/notifications/delivery_reason_test.exs.
+      refute d.last_error =~ "relay_down"
+      assert d.last_error == BarkparkCloud.Notifications.DeliveryReason.label(:unknown)
     end
   end
 end

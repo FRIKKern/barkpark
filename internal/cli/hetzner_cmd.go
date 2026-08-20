@@ -117,6 +117,17 @@ func runCloud(out *writer, g globals, args []string) int {
 		return runCloudDeploy(out, g, args[1:])
 	case "site", "sites":
 		return runCloudSite(out, g, args[1:])
+	// `deployments` (plural) is the FLEET deploy census — a rate over a pinned
+	// window. Deliberately NOT a sibling verb of `bp cloud deploy` (singular),
+	// which pushes ONE ref to ONE box: one acts, one measures.
+	case "deployments":
+		return runCloudDeployments(out, g, args[1:])
+	// `deliveries` is the PLATFORM delivery record for ONE sha — what happened
+	// to a merge. It is NOT `bp cloud webhook deliveries` (a tenant instance's
+	// webhook send log), which is why it sits at the top level under its own
+	// verb and why its header line names the population it read.
+	case "deliveries":
+		return runCloudDeliveries(out, g, args[1:])
 	case "domain", "domains":
 		return runCloudDomain(out, g, args[1:])
 	case "usage":
