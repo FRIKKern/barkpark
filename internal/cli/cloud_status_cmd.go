@@ -342,6 +342,66 @@ func behindDetail(b cloudclient.Barkpark) string {
 	return reason
 }
 
+// --- serving commit (dr-w21-s3) ----------------------------------------------
+//
+// The sha above is the FACT; the commit-distance block above it is the plane's
+// GRADE of that fact. Both ship, because they fail differently: the plane can
+// know what a box serves and still be unable to grade it (a rate-limited
+// compare), and it can grade nothing at all because the box's agent is offline
+// and never reported a sha.
+
+// commitCell renders one row's serving commit for the COMMIT column: the short
+// sha when the control plane knows it, the loud UNMETERED when it does not.
+//
+// It never fabricates and — unlike behindCell — it never returns "". Once the
+// column is on, every row says something. That is why the column's switch cannot
+// be read off this function (see fleetKnowsCommit): an empty sha is not the
+// older-CP signal here, because a single row cannot distinguish "this plane does
+// not emit commits" from "this box did not report one".
+//
+// It is a LABEL, not a verdict. A sha alone cannot say whether a box is behind —
+// that is the BEHIND column, computed on the control plane. Nothing here feeds
+// attentionStatus, attentionRank or the sort, so an unknown commit can neither
+// climb to the top of a bucket NOR be sorted as fresh; it stands there saying
+// UNMETERED.
+//
+// It reuses commitDistanceUnmetered rather than declaring a twin: UNMETERED is
+// this file's one refusal word and it means the same thing in both columns — we
+// asked, and we could not measure. A blank cell or an em dash would read as
+// "fine", which is the unearned green this whole line of work exists to kill.
+// The row that forces it is muscle-1: agent offline, git_commit "", and still
+// reading update_state `current`.
+func commitCell(b cloudclient.Barkpark) string {
+	sha := strings.TrimSpace(b.GitCommit)
+	if sha == "" {
+		return commitDistanceUnmetered
+	}
+	return sanitizeCell(shortSha(sha))
+}
+
+// fleetKnowsCommit reports whether ANY row in the whole fleet carries a serving
+// commit. It is the COMMIT column's switch, and it is the one conditional column
+// whose switch is measured over the FLEET rather than over the bucket being
+// rendered.
+//
+// That is deliberate, and it is the whole subtlety of this column. Per bucket, a
+// lone unknown box sitting by itself in ATTENTION — muscle-1's exact shape —
+// would turn the column OFF and silence the very row the column exists for.
+// Fleet-wide, one box that knows its commit makes every bucket accountable for
+// saying whether it knows its own.
+//
+// The older-CP honesty rule still holds at the other end: a control plane that
+// reports no commit for any box turns the column off entirely and renders
+// byte-identical to before, exactly as the neighbouring conditional columns do.
+func fleetKnowsCommit(fleet []rankedBarkpark) bool {
+	for _, r := range fleet {
+		if strings.TrimSpace(r.BP.GitCommit) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // round1 rounds to one decimal so a rendered load reads like an instrument, not
 // like a float dump.
 func round1(n float64) float64 { return math.Round(n*10) / 10 }
@@ -501,6 +561,28 @@ func rankBarkparks(list []cloudclient.Barkpark) []rankedBarkpark {
 // it didn't (an older CP) so a script never mistakes "unknown" for "off".
 func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 	row := map[string]any{
+		// dr-w21-s3: the SERVING COMMIT — the raw sha the box actually runs, the
+		// fact the commit_ancestry/commit_distance keys below are the plane's
+		// GRADE of. It was missing here for a plain reason: this map is hand-
+		// built and the key was simply never typed. The wire type decodes it
+		// (cloudclient.Barkpark.GitCommit), GET /v1/barkparks emits it, and
+		// cloudBarkparkRow (cloud12_cmd.go) — the SAME struct off the SAME
+		// endpoint — has always projected it, which is why `bp barkparks -o json`
+		// printed real shas while `bp cloud status -o json` printed no such key
+		// at all. A PROJECTION gap, not a decode gap and not a route gap.
+		//
+		// ALWAYS present (empty string when the plane has no commit for the box),
+		// the same honesty rule commit_ancestry follows: a consumer must be able
+		// to tell "we asked and the plane does not know" from "this CLI never
+		// asked". The table renders that empty as UNMETERED, never a blank.
+		//
+		// The registry `version` field is deliberately NOT here under any name.
+		// It is the AGENT BINARY version (internal/agent/report.go `const Version
+		// = "0.1.0"`), a compile-time constant reading 0.1.0 fleet-wide while the
+		// boxes serve 0.2.25.164 … 0.2.25.2628. A number that can never move,
+		// sitting beside one that does, would read as freshness. If it is ever
+		// wanted it ships as `agent_version`, named for what it is.
+		"git_commit":             r.BP.GitCommit,
 		"name":                   r.BP.Name,
 		"slug":                   r.BP.Slug,
 		"id":                     r.BP.ID,
@@ -669,6 +751,15 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 // renderStatusBucket prints one bucket section (header + painted table) when it
 // has rows, in the already-sorted order. Silent for an empty bucket so the view
 // stays lean.
+//
+// `ranked` is the WHOLE FLEET, not this bucket's rows — the filter happens here.
+// That matters for more than convenience: the COMMIT switch is measured off that
+// full slice (fleetKnowsCommit) and handed to the renderer, so every bucket
+// answers the same question and a bucket holding only unknown-commit rows still
+// prints UNMETERED instead of dropping the column and going quiet. Narrowing
+// `ranked` to pre-filtered rows here would silently turn that fleet-wide rule
+// into a per-bucket one; TestStatusCommitColumnIsFleetWideNotPerBucket is the
+// tripwire for exactly that regression.
 func renderStatusBucket(out *writer, title, bucket string, ranked []rankedBarkpark) {
 	rows := make([]rankedBarkpark, 0)
 	for _, r := range ranked {
@@ -681,7 +772,7 @@ func renderStatusBucket(out *writer, title, bucket string, ranked []rankedBarkpa
 	}
 	out.outf("")
 	out.outf("%s (%d)", title, len(rows))
-	renderStatusRows(out, rows)
+	renderStatusRowsWith(out, rows, fleetKnowsCommit(ranked))
 }
 
 // statusDash renders an empty status field as an em dash so columns stay
@@ -705,6 +796,12 @@ func statusDash(s string) string {
 // renders byte-identical to before:
 //
 //   - UPDATE  running → latest (the behind marker) — only when versions are known
+//   - COMMIT  the sha the box is actually serving (dr-w21-s3) — the one column
+//     whose switch is NOT read off this row-set. It is decided fleet-wide by the
+//     caller, because an empty sha cannot tell a plane that emits no commits from
+//     a box that reported none, and reading it per bucket would silence a lone
+//     unknown box in ATTENTION — the exact row the column exists for. Once on,
+//     every row says something: commitCell never returns "".
 //   - BEHIND  the plane's measured commit distance from main (dr-w24-s2) — only
 //     when the control plane emits an ancestry at all. Once on, every row says
 //     something: a number, `even`, or the loud UNMETERED. It is the column that
@@ -714,9 +811,20 @@ func statusDash(s string) string {
 //   - DETAIL  the control plane's own reason for a failure/suspension
 //
 // Column order keeps the urgent identity left (STATUS · NAME · UPDATE · CHANNEL ·
-// HEALTH · AGENT · POLICY) and the long URL + optional DETAIL last, so the common
-// case stays readable at 80 columns.
+// COMMIT · BEHIND · HEALTH · AGENT · POLICY) and the long URL + optional DETAIL
+// last, so the common case stays readable at 80 columns. COMMIT sits immediately
+// before BEHIND so the sha and the plane's grade OF that sha read as one phrase
+// — "serving c80168100e1a, 2493 behind" — rather than being split by CHANNEL.
 func renderStatusRows(out *writer, rows []rankedBarkpark) {
+	// No fleet context here, so the switch is measured over the rows given. Every
+	// production path goes through renderStatusBucket, which supplies the true
+	// fleet-wide answer; this fallback keeps the direct-call test helper honest.
+	renderStatusRowsWith(out, rows, fleetKnowsCommit(rows))
+}
+
+// renderStatusRowsWith is renderStatusRows with the COMMIT switch supplied by the
+// caller, so it can be decided over the whole fleet rather than over one bucket.
+func renderStatusRowsWith(out *writer, rows []rankedBarkpark, withCommit bool) {
 	// Decide which conditional columns this bucket needs.
 	withUpdate, withChannel, withPolicy, withDetail := false, false, false, false
 	withBehind := false
@@ -745,6 +853,9 @@ func renderStatusRows(out *writer, rows []rankedBarkpark) {
 	if withChannel {
 		headers = append(headers, "CHANNEL")
 	}
+	if withCommit {
+		headers = append(headers, "COMMIT")
+	}
 	if withBehind {
 		headers = append(headers, "BEHIND")
 	}
@@ -769,6 +880,12 @@ func renderStatusRows(out *writer, rows []rankedBarkpark) {
 		}
 		if withChannel {
 			row = append(row, statusDash(r.BP.Channel))
+		}
+		if withCommit {
+			// NOT statusDash: once the column is on, a box whose sha the plane
+			// does not know reads UNMETERED, never an em dash that would say
+			// "fine". commitCell already guarantees a non-empty cell.
+			row = append(row, commitCell(r.BP))
 		}
 		if withBehind {
 			// NOT statusDash on the VALUE: once the column is on, an ungradeable

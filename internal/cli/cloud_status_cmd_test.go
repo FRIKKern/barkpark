@@ -1102,3 +1102,238 @@ func TestBarkparkDecodesCommitDistance(t *testing.T) {
 		}
 	}
 }
+
+// --- the serving commit (dr-w21-s3) ------------------------------------------
+//
+// The defect these pin: `rankedBarkparkRow` hand-builds its map, and `git_commit`
+// was never typed into it — so `bp barkparks -o json` printed real shas while
+// `bp cloud status -o json` printed no such key at all, off the SAME struct and
+// the SAME GET /v1/barkparks response.
+
+// commitFleet is the shape that forced this column, in miniature: boxes that
+// report a serving sha, plus muscle-1 — agent offline, git_commit "", and STILL
+// reading update_state `current`. The unknown box is the one the column exists
+// for, so it must never render as a blank that reads "fine".
+func commitFleet() []cloudclient.Barkpark {
+	return []cloudclient.Barkpark{
+		{ID: "g", Name: "guerrilla", Host: "h", URL: "https://guerrilla.barkpark.cloud",
+			LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online", UpdateState: "current",
+			GitCommit: "2673eb009f67e81f06e247e5a1504a83de699d97"},
+		{ID: "d", Name: "dooodo", Host: "h", URL: "https://dooodo.barkpark.cloud",
+			LastSeenAt: seen, HealthStatus: "up", AgentStatus: "online", UpdateState: "current",
+			GitCommit: "e221e7dd5f1f6ad78216562d48c5f9c8f6e5dca9"},
+		{ID: "m", Name: "muscle-1", Host: "h", URL: "https://muscle-1.barkpark.cloud",
+			HealthStatus: "unknown", AgentStatus: "offline", UpdateState: "current",
+			GitCommit: ""},
+	}
+}
+
+// TestCommitCellVocabulary pins every cell the COMMIT column can print. The one
+// that matters: an absent sha is UNMETERED — never "", never the em dash
+// statusDash would otherwise supply, because a blank there reads as "fine" on
+// the one box already lying hardest.
+func TestCommitCellVocabulary(t *testing.T) {
+	cases := []struct {
+		name string
+		bp   cloudclient.Barkpark
+		want string
+	}{
+		{"a full sha is shortened to 12", cloudclient.Barkpark{GitCommit: "2673eb009f67e81f06e247e5a1504a83de699d97"}, "2673eb009f67"},
+		{"an already-short sha is untouched", cloudclient.Barkpark{GitCommit: "2673eb0"}, "2673eb0"},
+		{"an absent sha is UNMETERED", cloudclient.Barkpark{}, "UNMETERED"},
+		{"a whitespace-only sha is UNMETERED", cloudclient.Barkpark{GitCommit: "   "}, "UNMETERED"},
+	}
+	for _, c := range cases {
+		if got := commitCell(c.bp); got != c.want {
+			t.Errorf("%s: commitCell = %q, want %q", c.name, got, c.want)
+		}
+	}
+	// The property that makes the fleet-wide switch necessary: unlike behindCell,
+	// this function NEVER returns "". A per-row emptiness test could therefore
+	// never serve as the column's switch.
+	for _, c := range cases {
+		got := commitCell(c.bp)
+		if got == "" || got == "—" {
+			t.Errorf("%s: commitCell = %q — the COMMIT column has no blank and no em dash", c.name, got)
+		}
+	}
+}
+
+// TestStatusRowCarriesGitCommit is the projection gap itself, stated as a test.
+// MUTATION TARGET: delete the `"git_commit": r.BP.GitCommit,` line from
+// rankedBarkparkRow and this REDS — which is exactly what main renders today.
+func TestStatusRowCarriesGitCommit(t *testing.T) {
+	const sha = "2673eb009f67e81f06e247e5a1504a83de699d97"
+	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{commitFleet()[0]})[0])
+	if _, ok := row["git_commit"]; !ok {
+		t.Fatalf("`bp cloud status -o json` dropped git_commit — the hand-built projection lost the key again")
+	}
+	// The FULL sha, untouched: shortening belongs to the table, and a script that
+	// wants to compare against `git rev-parse` needs all 40 characters.
+	if row["git_commit"] != sha {
+		t.Fatalf("git_commit = %v, want the full sha %q untouched", row["git_commit"], sha)
+	}
+}
+
+// TestStatusRowCommitKeyPresentWhenUnknown is the honesty rule commit_ancestry
+// already follows: the key is ALWAYS emitted, empty when the plane does not know,
+// so a consumer can tell "we asked and the plane does not know" from "this CLI
+// never asked". Absent and empty are different facts.
+func TestStatusRowCommitKeyPresentWhenUnknown(t *testing.T) {
+	fleet := commitFleet()
+	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{fleet[2]})[0])
+	v, ok := row["git_commit"]
+	if !ok {
+		t.Fatalf("git_commit must be PRESENT (empty) for an unknown commit, not absent")
+	}
+	if v != "" {
+		t.Fatalf("git_commit = %v, want the empty string — never a fabricated sha", v)
+	}
+}
+
+// TestStatusRowKeySetIsPinned pins the exact always-present key set and fails
+// BOTH ways — a dropped key and an undeclared one. A hand-built map lost
+// git_commit once already; this is the tripwire that stops it happening quietly
+// a second time.
+func TestStatusRowKeySetIsPinned(t *testing.T) {
+	want := map[string]bool{
+		"git_commit": true, "name": true, "slug": true, "id": true, "host": true,
+		"url": true, "status": true, "bucket": true, "rank": true, "detail": true,
+		"health_status": true, "agent_status": true, "update_state": true,
+		"suspended": true, "update_running_release": true, "update_latest_release": true,
+		"update_checked_at": true, "commit_ancestry": true,
+		"commit_distance_checked_at": true, "autoupdate_paused": true,
+		"pinned_release": true, "channel": true,
+	}
+	// The two deliberate tri-states: emitted ONLY when the plane reported them,
+	// so their absence here is the contract, not a gap.
+	optional := map[string]bool{"autoupdate_enabled": true, "commit_distance": true}
+
+	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{commitFleet()[0]})[0])
+	for k := range want {
+		if _, ok := row[k]; !ok {
+			t.Errorf("missing key %q from the `bp cloud status -o json` row (the hand-built projection dropped it)", k)
+		}
+	}
+	for k := range row {
+		if !want[k] && !optional[k] {
+			t.Errorf("undeclared key %q in the `-o json` row — add it to this pin deliberately, or it is an accident", k)
+		}
+	}
+}
+
+// TestStatusRowNeverEmitsAgentVersion holds the line the brief drew. The registry
+// `version` is the AGENT BINARY version (internal/agent/report.go `const Version
+// = "0.1.0"`) — a compile-time constant that reads 0.1.0 fleet-wide while the
+// boxes serve 0.2.25.164 … 0.2.25.2628. A number that can never move, printed
+// beside one that does, would read as freshness.
+func TestStatusRowNeverEmitsAgentVersion(t *testing.T) {
+	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{commitFleet()[0]})[0])
+	for _, k := range []string{"version", "agent_version"} {
+		if v, ok := row[k]; ok {
+			t.Errorf("row emitted %q = %v — no agent version ships beside the serving commit", k, v)
+		}
+	}
+}
+
+// TestStatusTableCommitColumn is the same fact on RENDERED BYTES: the header
+// appears, known boxes print a short sha, and the unknown box prints UNMETERED.
+func TestStatusTableCommitColumn(t *testing.T) {
+	ranked := rankBarkparks(commitFleet())
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderStatusBucket(w, "HEALTHY", "healthy", ranked)
+	got := sout.String()
+
+	if !strings.Contains(got, "COMMIT") {
+		t.Fatalf("the COMMIT column must appear once any box reports a sha:\n%s", got)
+	}
+	if !strings.Contains(got, "2673eb009f67") {
+		t.Fatalf("the short sha must be printed:\n%s", got)
+	}
+	// The full sha never reaches the table — that is the -o json shape.
+	if strings.Contains(got, "2673eb009f67e81f06e247e5a1504a83de699d97") {
+		t.Fatalf("the table prints the SHORT sha, not all 40 characters:\n%s", got)
+	}
+	// The commit is a LABEL, not a verdict: it moves no box's classification.
+	for _, r := range ranked {
+		if r.BP.Name == "muscle-1" && r.Bucket != "attention" {
+			t.Fatalf("muscle-1 left the attention bucket (%q) — the commit column must change no verdict", r.Bucket)
+		}
+		if r.BP.Name == "guerrilla" && r.Status != "ok" {
+			t.Fatalf("guerrilla graded %q — reporting a sha must not change a verdict", r.Status)
+		}
+	}
+}
+
+// TestStatusCommitColumnIsFleetWideNotPerBucket is the whole subtlety of this
+// column, and the reasoning carried over from the original attempt.
+//
+// muscle-1 sits ALONE in ATTENTION with no sha; every box that knows its sha is
+// in HEALTHY. Were the switch read off the bucket being rendered — the way the
+// four neighbouring conditional columns are — ATTENTION would contain no row
+// with a commit, the column would switch OFF, and the one row the column exists
+// for would go silent in the one place an operator actually looks.
+//
+// MUTATION TARGET: change renderStatusBucket to pass fleetKnowsCommit(rows)
+// instead of fleetKnowsCommit(ranked) and this test REDS.
+func TestStatusCommitColumnIsFleetWideNotPerBucket(t *testing.T) {
+	ranked := rankBarkparks(commitFleet())
+
+	// The fixture only proves anything if it really is the isolating shape.
+	var attentionRows, attentionWithSha int
+	for _, r := range ranked {
+		if r.Bucket == "attention" {
+			attentionRows++
+			if strings.TrimSpace(r.BP.GitCommit) != "" {
+				attentionWithSha++
+			}
+		}
+	}
+	if attentionRows == 0 || attentionWithSha != 0 {
+		t.Fatalf("fixture is not the isolating shape: ATTENTION holds %d row(s), %d of which carry a sha — "+
+			"this test is only meaningful when NO attention row knows its commit", attentionRows, attentionWithSha)
+	}
+
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderStatusBucket(w, "ATTENTION", "attention", ranked)
+	got := sout.String()
+
+	if !strings.Contains(got, "COMMIT") {
+		t.Fatalf("the COMMIT column went dark in ATTENTION — the switch is being read per bucket, "+
+			"which silences the very row the column exists for:\n%s", got)
+	}
+	if !strings.Contains(got, "UNMETERED") {
+		t.Fatalf("muscle-1 must say UNMETERED, not go blank:\n%s", got)
+	}
+	if !fleetKnowsCommit(ranked) {
+		t.Fatalf("fleetKnowsCommit said no over a fleet where two boxes report a sha")
+	}
+}
+
+// TestStatusCommitColumnDarkForOlderCP is the compatibility rung at the other
+// end: a control plane that reports no commit for ANY box turns the column off
+// entirely and renders byte-identical to before — the same older-CP honesty the
+// neighbouring conditional columns follow.
+func TestStatusCommitColumnDarkForOlderCP(t *testing.T) {
+	fleet := commitFleet()
+	for i := range fleet {
+		fleet[i].GitCommit = ""
+	}
+	ranked := rankBarkparks(fleet)
+	if fleetKnowsCommit(ranked) {
+		t.Fatalf("fleetKnowsCommit said yes over a fleet where no box reports a sha")
+	}
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderStatusBucket(w, "HEALTHY", "healthy", ranked)
+	renderStatusBucket(w, "ATTENTION", "attention", ranked)
+	got := sout.String()
+	if strings.Contains(got, "COMMIT") || strings.Contains(got, "UNMETERED") {
+		t.Fatalf("an older control plane must render exactly as before — no column, no sentinel:\n%s", got)
+	}
+}
