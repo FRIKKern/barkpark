@@ -33,6 +33,7 @@ defmodule BarkparkWeb.WorkspaceController do
 
   require Logger
 
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
@@ -407,7 +408,7 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp clean_import(conn, path, receipt) do
-    case WorkspaceBundle.import_bundle_file(path) do
+    case WorkspaceBundle.import_bundle_file(path, grant_admin_to: operator_grant(conn)) do
       {:ok, stats} ->
         json(
           conn,
@@ -428,7 +429,10 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp merge_import(conn, path, receipt) do
-    case WorkspaceBundle.import_bundle_file(path, mode: :merge) do
+    case WorkspaceBundle.import_bundle_file(path,
+           mode: :merge,
+           grant_admin_to: operator_grant(conn)
+         ) do
       {:ok, stats} ->
         json(
           conn,
@@ -716,6 +720,51 @@ defmodule BarkparkWeb.WorkspaceController do
   # inside Postgres, on the SAME filesystem when the DB is local (guerrilla
   # carries `/`, `/tmp` and `/opt/barkpark` on one). Stated, not hidden.
   @disk_margin_bytes 268_435_456
+
+  # THE OPERATOR GRANT (task-ed7ae8110c7c8b41). An imported workspace arrives on
+  # this instance with ZERO valid administrators: the bundle carries only the
+  # SOURCE instance's `workspace_memberships` rows, naming principals that do
+  # not exist here. Nothing else on the import path writes one, so absent this
+  # the operator that just landed the workspace cannot push its blobs
+  # (`TenancyAuth.member?/2` -> 404 on PUT /media/blob/*path), re-export it or
+  # delete it (`TenancyAuth.workspace_admin?/2` on the two sibling routes) —
+  # `bp cloud workspace import --with-blobs` reports the import and then a wall
+  # of 404s.
+  #
+  # The gap PREDATES the tenancy binding (PRs #12824/#12826/#12827); the old
+  # workspace-blind `require_admin` was papering over it. NOT fixed with a
+  # global-admin bypass in `member?/2`, which would reinstate exactly the
+  # workspace-blind hole those PRs closed — this grants ONE principal ONE
+  # membership on ONE workspace, at the single moment that workspace enters the
+  # instance, and the engine writes it inside the import transaction so a failed
+  # import grants nothing.
+  #
+  # `:require_admin` runs `RequireToken`, so `:api_token` is always assigned on
+  # this route and the principal kind is always `"api_token"`; it is threaded
+  # explicitly anyway because the type is a discriminator column with an
+  # implicit default (see `TenancyAuth.create_membership/4`). The `nil` arm is
+  # unreachable through the router and exists so the grant fails CLOSED —
+  # granting nothing — rather than raising, if this action is ever mounted on a
+  # pipeline that does not resolve a token.
+  #
+  # DELIBERATELY ABOVE the spill block below, not between it and its `def`.
+  # A Sobelow skip annotation binds to the NEXT definition, so defining this
+  # function underneath one both STOLE `with_spilled_body`'s waiver (Sobelow
+  # then correctly flagged its `File.rm_rf`) and silently handed THIS function
+  # a Traversal.FileModule waiver it never needed and nobody had reasoned
+  # about. The second half is the dangerous one: an annotation migrating onto
+  # unrelated code is how a waiver ends up covering something no one weighed.
+  # Inserting a definition between a comment block and its `def` reassigns any
+  # annotation in that block — true for skip annotations, `@canonical
+  # capability:` markers and credo disable-for-next-line alike. This paragraph
+  # deliberately does not spell the annotation token literally, so it cannot be
+  # mistaken for one by a scanner or miscounted by a census grep.
+  defp operator_grant(conn) do
+    case conn.assigns[:api_token] do
+      %ApiToken{id: id} when is_binary(id) -> {id, "api_token"}
+      _ -> nil
+    end
+  end
 
   # Spill the raw tar body to a scratch directory, run `fun`, then always remove
   # the scratch. `fun` is `(conn, bundle_path, receipt_map) -> conn`.

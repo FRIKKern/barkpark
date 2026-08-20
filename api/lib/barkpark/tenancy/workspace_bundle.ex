@@ -175,7 +175,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   alias Barkpark.Repo
   alias Barkpark.Content.Scope
   alias Barkpark.Tenancy
-  alias Barkpark.Tenancy.{Dataset, Project, Workspace}
+  alias Barkpark.Tenancy.{Dataset, Membership, Project, Workspace}
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle.{Archive, Catalog, ExportScopeError, InvalidBundleError}
 
   @type stats :: %{
@@ -279,6 +280,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
     * `:mode` — `:clean` (default; byte-identical restore into a clean target)
       or `:merge` (PDS-D8; convergent upsert over a possibly-populated target).
+    * `:grant_admin_to` — the principal bringing this workspace onto this
+      instance, as `{principal_id, principal_type}`. It is granted an `admin`
+      membership on the imported workspace INSIDE the import transaction. See
+      `grant_operator_admin!/2` for why that is the completion of the import
+      rather than a widening. Defaults to `nil` (grant nothing).
 
   In `:merge` mode a same-slug/different-id root collision returns
   `{:error, {:workspace_slug_conflict, %{slug, existing_id, bundle_id}}}`
@@ -289,8 +295,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           {:ok, stats()} | {:error, {:workspace_slug_conflict, map()} | term()}
   def import_bundle(bundle, opts \\ []) when is_binary(bundle) do
     mode = import_mode!(opts)
+    grant = grant_admin_to!(opts)
     {manifest, dumps} = Archive.unpack(bundle)
-    import_unpacked(manifest, dumps, mode)
+    import_unpacked(manifest, dumps, mode, grant)
   end
 
   @doc """
@@ -321,13 +328,35 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # sobelow_skip ["Traversal.FileModule"]
   def import_bundle_file(bundle_path, opts \\ []) when is_binary(bundle_path) do
     mode = import_mode!(opts)
+    grant = grant_admin_to!(opts)
     dir = Path.join(Path.dirname(bundle_path), "members-#{System.unique_integer([:positive])}")
 
     try do
       {manifest, paths} = Archive.unpack_to_dir(bundle_path, dir)
-      import_unpacked(manifest, Map.new(paths, fn {t, p} -> {t, {:file, p}} end), mode)
+      import_unpacked(manifest, Map.new(paths, fn {t, p} -> {t, {:file, p}} end), mode, grant)
     after
       File.rm_rf(dir)
+    end
+  end
+
+  # The grant option is VALIDATED HERE, before the tar is touched — a caller
+  # that fumbles the shape learns it as an ArgumentError at the door rather
+  # than as a silently ungranted import an hour into a restore. `nil` (the
+  # default) means grant nothing, which is every non-HTTP caller: the engine is
+  # also driven by mix tasks and round-trip tests that have no operator.
+  defp grant_admin_to!(opts) do
+    case Keyword.get(opts, :grant_admin_to) do
+      nil ->
+        nil
+
+      {principal_id, principal_type}
+      when is_binary(principal_id) and principal_type in ["api_token", "user"] ->
+        {principal_id, principal_type}
+
+      other ->
+        raise ArgumentError,
+              "invalid :grant_admin_to #{inspect(other)} " <>
+                "(expected {principal_id, \"api_token\" | \"user\"} or nil)"
     end
   end
 
@@ -342,7 +371,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     mode
   end
 
-  defp import_unpacked(manifest, dumps, mode) do
+  defp import_unpacked(manifest, dumps, mode, grant) do
     # A readable tar whose manifest names a DIFFERENT format is a caller
     # mistake, not an engine fault — InvalidBundleError so the HTTP edge
     # answers 422 invalid_bundle instead of the opaque 500 the old
@@ -360,11 +389,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     # mocking the engine. `nil` in every non-test env.
     case Application.get_env(:barkpark, :import_fault) do
       {:error, _term} = fault -> fault
-      nil -> run_import(manifest, dumps, mode)
+      nil -> run_import(manifest, dumps, mode, grant)
     end
   end
 
-  defp run_import(manifest, dumps, mode) do
+  defp run_import(manifest, dumps, mode, grant) do
     Repo.transaction(
       fn ->
         # FIRST OF ALL: refuse any manifest table the export could never have
@@ -425,6 +454,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
         alter_user_triggers!(live, "ENABLE")
         restore_member_fks!(member_fks)
+
+        # LAST, and deliberately AFTER restore_member_fks!/1: the grant is the
+        # only row this transaction writes through Ecto rather than COPY, and
+        # writing it with the member FKs live means Postgres validates it
+        # against the workspace the import just landed. Written INSIDE the
+        # transaction, so anything that fails after this point takes the grant
+        # down with it — a failed import grants nothing.
+        grant_operator_admin!(manifest, grant)
 
         stats
       end,
@@ -1073,6 +1110,74 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # cascades and teardown triggers must all fire — hence pre-flight runs
   # before any trigger/constraint DDL) and proceed; otherwise refuse with a
   # clear named error.
+  # ── The operator grant (task-ed7ae8110c7c8b41) ───────────────────────
+  #
+  # AN IMPORTED WORKSPACE ARRIVES WITH ZERO VALID ADMINISTRATORS. The bundle
+  # carries only the SOURCE instance's `workspace_memberships` rows, and those
+  # name principals that do not exist here; `api_tokens` is `@pinned_e1` too,
+  # so the source's credentials land as rows nobody holds a secret for. Nothing
+  # else on the import path writes a membership —
+  # `Auth.insert_token_with_membership/3` is the token-MINT seam and stamps a
+  # membership for a token it is creating, which import never does.
+  #
+  # That gap PREDATES the tenancy binding of PRs #12824/#12826/#12827; the old
+  # workspace-blind `require_admin` was papering over it, so closing the hole
+  # did not create this — it made it visible. The remedy is the completion of
+  # an unfinished flow, not a policy change: the operator who brought the
+  # workspace onto this instance is by definition the party entitled to
+  # administer it, and absent this row nobody is.
+  #
+  # ROLE LEVEL IS LOAD-BEARING — `admin`, not `member`. The blob route binds on
+  # `TenancyAuth.member?/2`, but its two siblings bind on
+  # `TenancyAuth.workspace_admin?/2` (owner|admin only): DELETE
+  # /api/workspaces/:workspace_slug and GET /api/workspaces/:workspace_slug/
+  # export. A `member` grant would repair the blob push and leave the workspace
+  # with no administrator — the same hole, one route narrower, and an operator
+  # that can neither re-export nor remove what it just imported.
+  #
+  # ADDITIVE, and NARROW in three directions: the bundle's own membership rows
+  # are untouched; only the IMPORTING principal is granted, so a bystander
+  # holding the same global `admin` permission gains nothing; and only the
+  # IMPORTED workspace is granted, so the grant is never instance-wide.
+  #
+  # NEVER AN ESCALATION. An existing membership for this principal is left
+  # exactly as it is. A pre-existing `member` row is a relationship somebody
+  # chose, and a re-import is not consent to upgrade it.
+  defp grant_operator_admin!(_manifest, nil), do: :ok
+
+  defp grant_operator_admin!(manifest, {principal_id, principal_type}) do
+    ws_id = manifest["workspace_id"]
+
+    # Explicit map, not String.to_existing_atom/1: `grant_admin_to!/1` has
+    # already fixed the domain to these two, and `membership/3` guards on the
+    # ATOM (`principal_kind in [:user, :api_token]`) while `create_membership/4`
+    # takes the STRING. Spelling both out keeps the pair impossible to drift.
+    kind = if principal_type == "user", do: :user, else: :api_token
+
+    # `principal_type` is threaded EXPLICITLY end to end: it is a discriminator
+    # column with an implicit default, and `TenancyAuth.create_membership/4`
+    # documents omitting it as this repo's proven vacuous-green generator — a
+    # mis-typed row is invisible to `membership/2` while reading TRUE off the
+    # bare-id arm of `workspace_admin?/2`.
+    case TenancyAuth.membership(principal_id, ws_id, kind) do
+      %Membership{} ->
+        :ok
+
+      nil ->
+        case TenancyAuth.create_membership(ws_id, principal_id, "admin", principal_type) do
+          {:ok, _membership} ->
+            :ok
+
+          {:error, changeset} ->
+            # Inside the transaction, so this aborts the whole import rather
+            # than committing a workspace nobody can administer. Ecto needs the
+            # explicit rollback: a bare {:error, _} here would be the block's
+            # return value and COMMIT (the FK-abort scar).
+            Repo.rollback({:operator_grant_failed, changeset})
+        end
+    end
+  end
+
   defp adopt_or_refuse_root_slug!(manifest) do
     bundle_id = manifest["workspace_id"]
     slug = manifest["workspace_slug"]
