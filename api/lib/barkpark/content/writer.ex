@@ -1245,7 +1245,21 @@ defmodule Barkpark.Content.Writer do
   # `@reserved_in`. They are exempt HERE only; adding them to `@reserved_in`
   # would change what `from_envelope/1` folds on the flat branch, which is a
   # different question and not this refusal's to answer.
-  @collide_exempt @reserved_in ++ ~w(ifMatch ifRevisionID)
+  # The SCOPE COLUMNS. These are cast by `Document.changeset/2` exactly like
+  # `title` and `status`, so they are NOT discarded on the content-present
+  # branch — they land. Refusing them was a FALSE POSITIVE with teeth: it broke
+  # `Content.put_scope_attrs/…`'s own callers, which pass a content map plus a
+  # top-level `workspace_id`, and it was invisible to this slice's four gate
+  # files. `@reserved_in` is `from_envelope/1`'s FOLD list, not the column
+  # whitelist; the refusal must be keyed on the whitelist, because "would be
+  # silently discarded" is precisely a statement about `cast/3`.
+  #
+  # Kept as its own list rather than folded into `@reserved_in`: adding them
+  # there would change what the FLAT branch folds into `content`, which is a
+  # different question (see the note on ifMatch/ifRevisionID above).
+  @document_columns ~w(workspace_id project_id dataset_id owner_id)
+
+  @collide_exempt @reserved_in ++ ~w(ifMatch ifRevisionID) ++ @document_columns
 
   defp refuse_orphan_top_level_keys(%{} = attrs) do
     if is_map(Map.get(attrs, "content")) do

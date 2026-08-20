@@ -200,6 +200,26 @@ defmodule Barkpark.Content.WriterTest do
       assert opts[:fields] == "authorRef, publishedAt, slug"
     end
 
+    test "the SCOPE COLUMNS are not orphans — they are cast, so they land" do
+      # `workspace_id` / `project_id` / `dataset_id` / `owner_id` are in
+      # `Document.changeset/2`'s cast whitelist, so on the content-present
+      # branch they are NOT discarded. Refusing them was a false positive that
+      # broke `flat_write_scope_leak_test.exs` — a file outside this slice's
+      # gate, which is why only a merge caught it. The refusal is keyed on
+      # "would be silently discarded", and these never are.
+      attrs = %{
+        "_id" => "scoped-1",
+        "title" => "T",
+        "workspace_id" => Ecto.UUID.generate(),
+        "project_id" => Ecto.UUID.generate(),
+        "dataset_id" => Ecto.UUID.generate(),
+        "owner_id" => Ecto.UUID.generate(),
+        "content" => %{"body" => "hi"}
+      }
+
+      assert :passed_the_guard == guard_verdict(attrs)
+    end
+
     test "a reserved-keys-only payload is NOT refused" do
       # Every @reserved_in member is legitimately consumed by from_envelope/1 or
       # is a document column, so nothing is discarded and nothing is refused.
