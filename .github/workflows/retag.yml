@@ -76,6 +76,27 @@ jobs:
           fi
           npm config set //registry.npmjs.org/:_authToken "${NPM_TOKEN}"
 
+      - name: npm identity preflight (MEASURES the token)
+        # Presence of NPM_TOKEN proves only that a string is set. `npm whoami`
+        # is the cheapest call that asks the registry whether the credential is
+        # still alive, and it fails closed (E401 on a bogus token — measured
+        # 2026-08-05, in the same scratch dir where `npm publish --dry-run`
+        # exited 0 on that same bogus token). Without it the first real
+        # measurement of the token in this workflow is `npm dist-tag add`,
+        # i.e. a half-applied retag: HTTP 403 after the pre-state read already
+        # printed a reassuring green.
+        #
+        # DO NOT swap in `npm access list packages @barkpark`: it returns the
+        # same read-write map to a completely unauthenticated caller.
+        run: |
+          set -euo pipefail
+          if ! WHO="$(npm whoami 2>&1)"; then
+            echo "$WHO"
+            echo "::error title=NPM_TOKEN rejected by the registry::npm whoami failed — the token is missing, expired or revoked. Rotate NPM_TOKEN before retagging."
+            exit 1
+          fi
+          echo "npm whoami -> ${WHO} (registry accepted the token)"
+
       - name: Pre-state (informational)
         run: npm view "${{ inputs.package_name }}" dist-tags
 
