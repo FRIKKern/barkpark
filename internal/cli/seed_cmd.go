@@ -105,8 +105,11 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 		docs = append(docs, generateDoc(schema, n))
 	}
 
-	// 3. Prod write-guard — never silently seed a prod/cloud target.
-	if isProd(ctx, &manifest.Manifest{}) && !yes {
+	// 3. Prod write-guard — never silently seed a prod/cloud target. The empty
+	// manifest kills isProd's Server.Name leg, so the URL heuristic (fail-closed
+	// since onb-backlog-isprod-custom-host-write-confirm) is the whole decision
+	// here; a server advertising production:false on /v1/meta skips the confirm.
+	if isProd(ctx, &manifest.Manifest{}) && !yes && !serverDeclaredNonProd(ctx.Server) {
 		guardCmd := manifest.Command{Noun: "seed", Verb: typ}
 		if !confirmProdWrite(out, guardCmd, ctx) {
 			out.errf("aborted: prod write not confirmed")

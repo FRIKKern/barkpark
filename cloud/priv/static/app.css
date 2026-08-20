@@ -1091,6 +1091,14 @@ select.form-input {
 .fleet-update-chip--busy .fleet-update-dot { background: var(--info); }
 [data-theme="dark"] .fleet-update-chip--ready { background: hsl(var(--ok-hsl) / 0.2); }
 [data-theme="dark"] .fleet-update-chip--busy { background: hsl(var(--info-hsl) / 0.2); }
+/* cch-w63-s5: refused = WARN, and the role is deliberate. This chip says "we
+   could not check this box" — a failure to measure, not a danger and emphatically
+   not the ready GREEN, which on this row means "a newer release is waiting for
+   you". It is the same amber usageMeterDisplay's "Could not measure" already
+   carries for the same class of fact one card away. */
+.fleet-update-chip--refused { background: var(--warn-soft); border-color: hsl(var(--warn-hsl) / 0.28); color: var(--warn-strong); }
+.fleet-update-chip--refused .fleet-update-dot { background: var(--warn); }
+[data-theme="dark"] .fleet-update-chip--refused { background: hsl(var(--warn-hsl) / 0.2); }
 
 /* stw4-freshness (charter D24): the site-row deploy-freshness badge. Amber pulse
    while a content-auto rebuild is in flight; a settled status·trigger·when pill
@@ -1248,6 +1256,14 @@ select.form-input {
 .session-main { min-width: 0; }
 .session-device { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
 .session-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; font-family: var(--mono); }
+/* The sessions fold — one full-width quiet row that reads as "there is more
+   list", not as an action button competing with Revoke. */
+.session-fold {
+  width: 100%; padding: 8px 12px; cursor: pointer; font: inherit;
+  font-size: 12.5px; color: var(--muted-text); text-align: center;
+  background: none; border: 1px dashed var(--border); border-radius: 8px;
+}
+.session-fold:hover { color: var(--text); border-color: var(--muted-text); }
 .badge-current { background: var(--success); color: var(--primary-fg); }
 .pw-form { display: flex; flex-direction: column; gap: 4px; }
 .pw-form .field { margin-bottom: 10px; }
@@ -1934,6 +1950,31 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dep-failed  { color: var(--danger); background: hsl(var(--danger-hsl) / 0.10); border-color: hsl(var(--danger-hsl) / 0.30); }
 .dep-building, .dep-pushing { color: var(--warn-strong); background: hsl(var(--warn-hsl) / 0.12); border-color: hsl(var(--warn-hsl) / 0.35); }
 .dep-queued  { color: var(--muted-text); }
+/* cch-w64-s6: deferred is the SEVENTH status (registry/deployment.ex @statuses)
+   and, like cancelled before its rule existed, it had none — so it fell through
+   to the .dep-pill base, which the comment below records as byte-identical to
+   .dep-queued on colour AND background AND border in both themes. A build the
+   box REFUSED therefore impersonated a build still waiting its turn: the one
+   reading that costs a person the most, because it says "be patient" about a
+   round that did not run.
+   ONE ADDITIVE RULE under the GR11/D24 dep-pill freeze, on the wave-13 D157
+   shape (charter D787's carve-out is for THIS rule and nothing else): an ADD,
+   never a restyle — no other .dep-* rule and no .status-pill is touched.
+   THE VOICE: warn HUE, but NOT .dep-building's filled warn chip. Reusing that
+   would swap impersonating-queued for impersonating-building in the same pixel,
+   in the wave whose subject is states that impersonate each other. It follows
+   .dep-cancelled's precedent instead — a row no longer holding a build slot
+   gives up the filled chip — while keeping amber and a SOLID hairline, because
+   unlike a deliberate stop a deferral wants attention. Three-way distinct:
+   filled+muted (queued), filled+amber (building), open+amber (deferred),
+   open+dashed+dim (cancelled). Contrast is gated: --warn-strong on --surface is
+   declared in __css_check CONTRAST_PAIRS (the transparent ground is why this
+   rule owes a pair the tinted variant would not). */
+.dep-deferred {
+  color: var(--warn-strong);
+  background: transparent;
+  border-color: hsl(var(--warn-hsl) / 0.35);
+}
 /* cch-w13-s3: cancelled is a TERMINAL, deliberately-stopped deployment (the
    server's own sixth status — auto_deploy_worker.refuse/1 mints one on an
    ordinary content publish, Registry.cancel_preview/2 on a branch delete), and

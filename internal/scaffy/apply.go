@@ -782,12 +782,18 @@ func runAssert(cmd *Command, sub *substituter, tr *tree, opts RunOptions, index 
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), assertCmdTimeout)
 		defer cancel()
-		// D38: sh -c with the VERBATIM (substituted) command string from
-		// the repo root — never pre-cd, strings carry their own cd — and
-		// CC=/usr/bin/clang appended to the environment.
+		// D38+D101: sh -c with the VERBATIM (substituted) command string
+		// from the repo root — never pre-cd, strings carry their own cd.
+		// D101 (amends D38): default CC=/usr/bin/clang ONLY when the
+		// ambient env carries no CC — a stranger's CC (a real cross host,
+		// a node-gyp/NIF build that honors it) is preserved verbatim,
+		// never clobbered by our sentinel.
 		c := exec.CommandContext(ctx, "sh", "-c", text)
 		c.Dir = opts.RepoRoot
-		c.Env = append(os.Environ(), "CC=/usr/bin/clang")
+		c.Env = os.Environ()
+		if _, ok := os.LookupEnv("CC"); !ok {
+			c.Env = append(c.Env, "CC=/usr/bin/clang")
+		}
 		out, err := c.CombinedOutput()
 		if err != nil {
 			res.Status = AssertFail

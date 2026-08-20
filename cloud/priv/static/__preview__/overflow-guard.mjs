@@ -181,6 +181,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -629,39 +630,78 @@ async function main() {
   process.stdout.write(`>> serve      :${PORT} — served bytes == disk bytes (app.css, app.js, mock.js, scenarios.mjs, shell)\n`);
 
   // 3. Chrome.
-  profile = fs.mkdtempSync(path.join(os.tmpdir(), "overflow-guard-"));
-  chrome = spawn(
-    chromeBin,
-    [
-      "--headless=new",
-      "--disable-gpu",
-      "--no-sandbox",
-      "--disable-dev-shm-usage",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-extensions",
-      "--disable-background-networking",
-      // classic-macOS overlay parity: clientWidth == emulated width. Dropped
-      // only under OVERFLOW_GUARD_CLASSIC_SCROLLBARS=1 (see the header).
-      ...(CLASSIC_SCROLLBARS ? [] : ["--hide-scrollbars"]),
-      `--user-data-dir=${profile}`,
-      "--remote-debugging-port=0",
-      "about:blank",
-    ],
-    { stdio: "ignore" },
-  );
+  //
+  // D101 BRING-UP RETRY (deploy-reliability wave 8). Bounded, a FRESH profile
+  // dir per attempt (the dir used to be mkdtemp'd once, so a retry would
+  // re-race the same DevToolsActivePort path), and every failed attempt's
+  // Chrome stderr is printed — a refusal whose cause was discarded by
+  // `stdio: "ignore"` is a refusal nobody can audit.
+  //
+  // THE LINE THIS RETRY MUST NOT CROSS. cch-w19-bl-gr115's "do not paper over
+  // the race" ruling governs exit-1 MEASURED intermittency: the browser came
+  // up, the guard measured geometry, and it disagreed with itself between
+  // runs. Retrying THAT would discard a real observation. This retries only
+  // the exit-2 case where Chrome never came up — not one element was measured,
+  // so there is no claim about any screen for a retry to hide. Everything
+  // after `devPort` is a measurement and is never retried.
+  let attemptSpawnError = null;
+  const brought = await bringUpChrome({
+    label: "overflow-guard",
+    attempts: BRINGUP_ATTEMPTS,
+    newProfile: () => fs.mkdtempSync(path.join(os.tmpdir(), "overflow-guard-")),
+    launch: (dir) => {
+      attemptSpawnError = null;
+      const child = spawn(
+        chromeBin,
+        [
+          "--headless=new",
+          "--disable-gpu",
+          "--no-sandbox",
+          "--disable-dev-shm-usage",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-extensions",
+          "--disable-background-networking",
+          // classic-macOS overlay parity: clientWidth == emulated width. Dropped
+          // only under OVERFLOW_GUARD_CLASSIC_SCROLLBARS=1 (see the header).
+          ...(CLASSIC_SCROLLBARS ? [] : ["--hide-scrollbars"]),
+          `--user-data-dir=${dir}`,
+          "--remote-debugging-port=0",
+          "about:blank",
+        ],
+        { stdio: ["ignore", "ignore", "pipe"] },
+      );
+      child.on("error", (e) => { attemptSpawnError = e; });
+      return { child, readStderr: captureStderr(child) };
+    },
+    awaitDevToolsPort: async ({ profile: dir }) => {
+      const portFile = path.join(dir, "DevToolsActivePort");
+      for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+        if (attemptSpawnError) break;
+        try {
+          const raw = fs.readFileSync(portFile, "utf8").split("\n");
+          if (raw[0] && Number(raw[0])) return Number(raw[0]);
+        } catch { /* not written yet */ }
+        await sleep(100);
+      }
+      if (attemptSpawnError) {
+        throw new Error(`Chrome could not be executed (${attemptSpawnError.code || attemptSpawnError.message}): ${chromeBin}`);
+      }
+      return null;
+    },
+    abandon: async ({ profile: dir, child }) => {
+      await reap(child);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    },
+    log: (s) => process.stderr.write(s),
+  }).catch((err) => (err && err.refused ? { refusal: err } : Promise.reject(err)));
 
-  const portFile = path.join(profile, "DevToolsActivePort");
-  let devPort = null;
-  for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
-    try {
-      const raw = fs.readFileSync(portFile, "utf8").split("\n");
-      if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
-    } catch { /* not written yet */ }
-    await sleep(100);
-  }
-  // AUDITED (exit 2): the browser never started. Environment, not CSS.
-  if (!devPort) return die("Chrome never wrote DevToolsActivePort — it did not start");
+  // AUDITED (exit 2): the browser never started, on every bounded attempt.
+  // Environment, not CSS. `die` defaults to 2 — a refusal is not a defect.
+  if (brought.refusal) return die(brought.refusal.message);
+  chrome = brought.child;
+  profile = brought.profile;
+  const devPort = brought.devPort;
 
   let sessionId;
   try {

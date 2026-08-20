@@ -57,19 +57,40 @@
 # open PR passes through while any required check is in flight. So the verdict is
 # now REPORTED WITH ITS COVERAGE, and an evaluated set of zero is exit 2.
 #
+# AND A CANDIDATE THAT PROPOSES NOTHING NEW IS THE SAME FAILURE ONE BRANCH OVER.
+# The all-skip fix above hardened the path where PRs WERE listed. It left the
+# path where none ever are: when the candidate's context set already equals the
+# baseline's, this script short-circuits before the PR feed exists — no `gh`
+# call, no head, no counters — and returns 0. Measured on 2026-08-07 against
+# `main`'s own committed spec: rc 0, TWO lines of output, and `grep -c 'PARTIAL
+# COVERAGE\|evaluated'` on that output = 0. That is exactly the run a human
+# produces by executing the flip packet's steps OUT OF ORDER — sweeping AFTER
+# the spec PR has merged, when the candidate and the baseline are the same file
+# — and the exit-code channel cannot tell it apart from "I examined every head
+# and found no casualty". So the run now prints NO COVERAGE naming what was not
+# examined, and `--require-new-context` — which anyone authorizing a flip should
+# pass — turns it into a refusal. It is opt-in for the reason the coverage
+# refusal is partial: a bare sweep on a branch that did not touch the spec is a
+# legitimate no-op, and a guard that can never pass gets bypassed.
+#
 # EXIT CODES
 #   0  no casualty — every unblocked, mergeable PR this sweep could EVALUATE
-#      renders every newly proposed context (or the candidate proposes nothing
-#      new). When some PRs were skipped, the verdict says so on its own line.
+#      renders every newly proposed context. When some PRs were skipped, the
+#      verdict says so on its own line. ALSO 0: the candidate proposes nothing
+#      new, in which case NOTHING was examined and the run says NO COVERAGE —
+#      pass --require-new-context to make that case exit 2 instead.
 #   1  at least one casualty — registering now would newly deadlock a PR that
 #      GitHub would merge today
 #   2  the sweep could not be evaluated — including the case where every open PR
-#      was skipped, so the "no casualty" finding rests on no evidence at all
+#      was skipped, so the "no casualty" finding rests on no evidence at all, and
+#      the case where the candidate proposes no new context under
+#      --require-new-context
 #
 # USAGE
 #   scripts/registration-deadlock-sweep.sh
 #   scripts/registration-deadlock-sweep.sh --spec <candidate.json>
 #   scripts/registration-deadlock-sweep.sh --ref-rev origin/main
+#   scripts/registration-deadlock-sweep.sh --require-new-context   # authorizing a flip
 #   scripts/registration-deadlock-sweep.sh --ref-file <baseline.json>   # harness
 #   scripts/registration-deadlock-sweep.sh --prs <file.json> --fixture-dir <dir>
 
@@ -101,6 +122,11 @@ PRS_FILE=""
 FIXTURE_DIR=""
 UNKNOWN_RETRIES=6
 UNKNOWN_BACKOFF=5
+# OFF by default, and the default is the concession — see the header. ON is the
+# setting for the only caller that matters: a human about to authorize a
+# required-context flip, who needs "nothing new to sweep" to be a refusal rather
+# than the same green a full sweep prints.
+REQUIRE_NEW_CONTEXT=0
 
 fail() { echo "FAIL: $*" >&2; exit 2; }
 
@@ -121,6 +147,7 @@ main() {
       --unknown-retries) UNKNOWN_RETRIES="$2"; shift 2 ;;
       --unknown-backoff) UNKNOWN_BACKOFF="$2"; shift 2 ;;
       --fixture-dir) FIXTURE_DIR="$2"; shift 2 ;;
+      --require-new-context) REQUIRE_NEW_CONTEXT=1; shift ;;
       -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
       *) fail "unknown argument: $1" ;;
     esac
@@ -152,6 +179,16 @@ main() {
   echo "registration-deadlock-sweep: repo=$REPO candidate=$SPEC baseline=$ref_label"
   if [ -z "$new_ctx" ]; then
     echo "the candidate proposes no context that $REF_REV does not already require — nothing can be NEWLY deadlocked."
+    if [ "$REQUIRE_NEW_CONTEXT" -eq 1 ]; then
+      fail "the candidate proposes no context that $ref_label does not already require, so this sweep listed no PR, read no head's check runs, and evaluated 0 of them — side (B), does this head render the newly proposed context, was never asked. Under --require-new-context that is exit 2 and not a pass: 'nothing can be NEWLY deadlocked' is a statement about the candidate's shape, never a finding about the open PRs, and it is what this command prints when the spec has ALREADY merged and the sweep is being run after the registration it was supposed to authorize. Sweep the candidate BEFORE it merges, or authorize the flip on per-head check-run evidence gathered by hand and say in writing that this sweep did NOT support it."
+    fi
+    # THE COPY FENCE (D386, and this wave's D438): this line STATES the absence
+    # and stops. It does not tell the operator to re-run, to re-order the packet,
+    # or to pass the flag — advice attached to a diagnosis nobody asked for is
+    # the thing that gets skimmed past. The sentence exists so that there IS a
+    # line to quote, and so that quoting it is visibly the wrong thing to paste
+    # under an authorization.
+    echo "NO COVERAGE: this run listed no pull request, read no head's check runs, and evaluated 0 of them — side (B), does a head render the newly proposed context, was never asked about anything."
     exit 0
   fi
   echo "newly proposed context(s):"

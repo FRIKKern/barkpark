@@ -583,6 +583,57 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       allowed = build_conn() |> bearer(read) |> get(path) |> json_response(200)
       assert allowed["cycle_ledger"]["profile"] == "epic"
     end
+
+    # NON-VACUOUS mount proof (arpss-cycle-api-publicread-followup): the
+    # `code == "forbidden"` assertions above pass in BOTH states — the
+    # controller seal (`authorize_cycle/3`) AND the `Plugs.PublicRead` mount on
+    # `:cycle_api` each emit `forbidden`, so they cannot witness the mount. The
+    # mount's ONLY observable change is the FLAT-path 403 MESSAGE, which flips
+    # from the controller seal's "workspace access required" to the plug
+    # canonical string. Assert the FLAT path ONLY: the scoped mirror already
+    # rides `Plugs.PublicRead` (router.ex:187/:488) and its message never moves,
+    # so diffing it would look like the mount did nothing (a second vacuity
+    # trap). Unmount the plug from `:cycle_api` and EXACTLY this line reds.
+    flat_denied = build_conn() |> bearer(public_read) |> get(flat)
+
+    assert json_response(flat_denied, 403)["error"]["message"] ==
+             "public-read tokens may only read published public documents"
+  end
+
+  # The singleton arm above only pins `permissions == ["public-read"]`. A token
+  # minted `["public-read", "read"]` is the SAME tier but missed the old
+  # list-equality clause in `authorize_cycle/3` and read the flat ledger, because
+  # `:cycle_api` mounts `DeriveWorkspaceFromToken` and not `Plugs.PublicRead`.
+  # Mutation-checked (review2-11697): reverting `authorize_cycle/3` to the
+  # singleton pattern reds ONLY the FLAT-path 403 assertion below (200 leak).
+  # The scoped path is defense-in-depth — `Plugs.PublicRead` on `:require_token`
+  # (router.ex, `allowed_route?` whitelist) already 403s a public-read tier
+  # there, so that arm stays green under the revert and is NOT the proof.
+  test "a mixed-shape [public-read, read] token is refused exactly like the singleton", %{
+    workspace: workspace,
+    project: project,
+    token: write_token
+  } do
+    epic_id = "cycle-public-read-mixed-#{System.unique_integer([:positive])}"
+    flat = "/v1/cycles/#{epic_id}/wave-1"
+    scoped = "/w/#{workspace.slug}/p/#{project.slug}" <> flat
+    open_epic(flat, write_token, ["flat-unit"])
+    open_epic(scoped, write_token, ["scoped-unit"])
+
+    mixed = scoped_token!(workspace, ["public-read", "read"], "cycle-public-read-mixed")
+    read = scoped_token!(workspace, ["read"], "cycle-mixed-control-read")
+
+    for path <- [flat, scoped] do
+      denied = build_conn() |> bearer(mixed) |> get(path)
+      assert json_response(denied, 403)["error"]["code"] == "forbidden"
+
+      # Positive controls: the seal is a tier test, not a blanket denial.
+      allowed = build_conn() |> bearer(read) |> get(path) |> json_response(200)
+      assert allowed["cycle_ledger"]["profile"] == "epic"
+
+      admin = build_conn() |> bearer(write_token) |> get(path) |> json_response(200)
+      assert admin["cycle_ledger"]["profile"] == "epic"
+    end
   end
 
   test "immutable replay conflicts map the actual context atoms to 409", %{
@@ -1039,6 +1090,47 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       |> json_response(422)
 
     assert post_seal["error"]["details"]["reason"] =~ "experiment_phase_sealed"
+  end
+
+  test "release-gate open with no correction_of returns 422, not 500", %{
+    workspace: workspace,
+    project: project,
+    token: token
+  } do
+    epic_id = "gate-open-missing-#{System.unique_integer([:positive])}"
+    base = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}/wave-1"
+    open_epic(base, token, ["gate-unit"])
+
+    body =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/release-gates/open", %{"idempotency_key" => "k1"})
+      |> json_response(422)
+
+    assert body["error"]["code"] == "validation_failed"
+    assert body["error"]["details"]["reason"] =~ "correction_of_required"
+  end
+
+  test "release-paper stage with a non-object content returns 422, not 500", %{
+    workspace: workspace,
+    project: project,
+    token: token
+  } do
+    epic_id = "gate-stage-scalar-#{System.unique_integer([:positive])}"
+    base = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}/wave-1"
+    open_epic(base, token, ["gate-unit"])
+
+    body =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/release-gates/#{Ecto.UUID.generate()}/papers/author/stage", %{
+        "content" => "not-an-object",
+        "title" => "t"
+      })
+      |> json_response(422)
+
+    assert body["error"]["code"] == "validation_failed"
+    assert body["error"]["details"]["reason"] =~ "ambiguous_content"
   end
 
   defp open_epic(base, token, inventory) do

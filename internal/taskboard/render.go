@@ -269,14 +269,16 @@ func firstDNSLabel(server string) string {
 }
 
 // momentumLine is the spec §0 aggregate: `⟨spinner⟩ N in flight · ○ N ready ·
-// ✓ N done[ · N/M criteria][ · N stale]   NN%`. The spinner rides the same
-// heartbeat frame as the board (D38), done is teal, the criteria tally counts
-// the corpus's acceptance criteria (charter D11 — momentum at criterion
-// granularity, not just tasks; absent when the corpus has none), the stale
-// count (when > 0) is the warn instrument, and the % is right-aligned. Icons
-// carry state; the counts stay dim. On a tight pane the criteria segment sheds
-// first — the task counts + % are the primary instruments and must never be
-// mid-token truncated to make room for the richer tally.
+// ✓ N done[ · N/M criteria][ · N stale][ · showing N of M]   NN%`. The spinner
+// rides the same heartbeat frame as the board (D38), done is teal, the criteria
+// tally counts the corpus's acceptance criteria (charter D11 — momentum at
+// criterion granularity, not just tasks; absent when the corpus has none), the
+// stale count (when > 0) is the warn instrument, the "showing N of M" note
+// (charter D40) discloses the 1000-row list clamp when the fetch is short of the
+// true corpus total, and the % is right-aligned. Icons carry state; the counts
+// stay dim. On a tight pane the criteria segment sheds first, then the showing
+// note — the task counts + % are the primary instruments and must never be
+// mid-token truncated to make room for either richer segment.
 func momentumLine(b Board, st UIState, width int) string {
 	spin := infoStyle.Render(spinnerGlyph(st.Frame))
 	segs := []string{
@@ -285,7 +287,17 @@ func momentumLine(b Board, st UIState, width int) string {
 		doneStyle.Render("✓") + " " + dimStyle.Render(fmt.Sprintf("%d done", b.Counts["done"])),
 	}
 	right := boldStyle.Render(fmt.Sprintf("%d%%", progressPct(b)))
-	assemble := func(withCriteria bool) string {
+	// showing N of M: the 1000-row list-clamp horizon (charter D40 / D113a). The
+	// fetch returned TaskCount envelopes; the summed lifecycle Counts are the true
+	// corpus total the server reports. When the fetch falls short of the corpus
+	// the board is a partial queue, so it says so — dim, and on its own shed rung
+	// so it drops WHOLE (never a mid-token clip) rather than let the disclosure be
+	// half-truncated. Equal (or a zero fetch) means nothing was clamped: silent.
+	showing := ""
+	if total := summedLifecycleCounts(b); b.TaskCount > 0 && b.TaskCount < total {
+		showing = dimStyle.Render(fmt.Sprintf("showing %d of %d", b.TaskCount, total))
+	}
+	assemble := func(withCriteria, withShowing bool) string {
 		parts := segs
 		if withCriteria && b.CriteriaTotal > 0 {
 			parts = append(append([]string{}, segs...),
@@ -295,13 +307,35 @@ func momentumLine(b Board, st UIState, width int) string {
 		if b.Stale > 0 {
 			left += dimStyle.Render(" · ") + warnStyle.Render(fmt.Sprintf("%d stale", b.Stale))
 		}
+		if withShowing && showing != "" {
+			left += dimStyle.Render(" · ") + showing
+		}
 		return left
 	}
-	leftPart := assemble(true)
+	// Narrowing sheds one whole rung at a time: the criteria tally first (the
+	// richest, least load-bearing instrument), then the showing note drops WHOLE
+	// — the task counts + % are the primary instruments and are never mid-token
+	// truncated to keep either optional segment.
+	leftPart := assemble(true, true)
 	if disp(leftPart)+disp(right)+1 > width {
-		leftPart = assemble(false) // shed the criteria tally before anything clips
+		leftPart = assemble(false, true) // shed the criteria tally
+	}
+	if disp(leftPart)+disp(right)+1 > width {
+		leftPart = assemble(false, false) // shed the showing note whole
 	}
 	return leftRight(leftPart, right, width)
+}
+
+// summedLifecycleCounts is the true corpus total — every lifecycle bucket the
+// server reported, cancelled included. TaskCount counts every fetched envelope
+// regardless of lifecycle, so the "showing N of M" disclosure's denominator (the
+// M) must sum the same way, or the note would compare unlike populations.
+func summedLifecycleCounts(b Board) int {
+	total := 0
+	for _, v := range b.Counts {
+		total += v
+	}
+	return total
 }
 
 // progressPct is the overall completion percentage — done / (every counted task

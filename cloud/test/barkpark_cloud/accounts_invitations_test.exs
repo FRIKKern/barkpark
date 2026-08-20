@@ -344,6 +344,77 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
     end
   end
 
+  describe "the two member verbs DISAGREE — the law the console mirrors" do
+    # This describe pins the four cells the console's members row mirrors
+    # (cch-w42-s3, charter D492/D496) and that no other test in cloud/test/**
+    # asserts. The two verbs answer owner-on-peer-owner DIFFERENTLY, and that
+    # single disagreement is why the console needs TWO predicates, not one:
+    #
+    #   remove_member_as/3   carries an OWNER ESCAPE HATCH — accounts.ex:1722
+    #                        `actor_role == "owner" or outranks?(...)`
+    #   update_member_role_as/4 has NO such hatch — accounts.ex:1801 demands
+    #                        `outranks?(...)` outright (unless acting on SELF)
+    #
+    # Adding the hatch to :1801 (or removing it from :1722) must RED here, not
+    # ship green and silently turn the console's mirror into a lie.
+
+    test "owner on a PEER OWNER: role-change is forbidden, removal is allowed" do
+      {owner1, team} = owned_team()
+      owner2 = user_fixture()
+      {:ok, _} = Accounts.add_member(team, owner2, "owner")
+
+      # TWO owners on the team, so `last_owner` (a 409 STATE refusal) can never
+      # confound the AUTHORITY answer either verb gives.
+      assert {:error, :forbidden} = Accounts.update_member_role_as(owner1, team, owner2, "admin")
+      assert {:ok, :removed} = Accounts.remove_member_as("owner", team, owner2)
+    end
+
+    test "admin on THEMSELVES: removal is forbidden, self-demotion is allowed" do
+      {_owner, team} = owned_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+
+      # remove_member_as/3 has no `self?` branch at all — an admin does not
+      # outrank themselves, so leaving via DELETE is refused…
+      assert {:error, :forbidden} = Accounts.remove_member_as("admin", team, admin)
+      # …while update_member_role_as/4's `self?` bypass lets them demote
+      # themselves to "member" (can_grant? alone governs a self role-change).
+      assert {:ok, %TeamMembership{role: "member"}} =
+               Accounts.update_member_role_as(admin, team, admin, "member")
+    end
+
+    test "owner on THEMSELVES: BOTH verbs allow it — the cell the console knowingly under-offers" do
+      # The console withholds `Remove` on the self row (charter D492 variant B)
+      # because the pure authority mirror reds the merge-blocking members smoke,
+      # whose 3-row roster has the actor at row 0. That withholding is a CONSOLE
+      # RULING that contradicts the server, filed as
+      # cch-w44-bl-self-row-underoffers-three-server-legal-cells — and an
+      # under-offer, not this epic's offered-but-refused class.
+      #
+      # It is pinned HERE so the contradiction stays a decision rather than
+      # decaying into a belief. If this test ever reds, the server moved TOWARD
+      # the console and the withholding stopped being an under-offer — at which
+      # point the console's matrix cell and the backlog task must be revisited
+      # together, not silently.
+      {owner1, team} = owned_team()
+      owner2 = user_fixture()
+      {:ok, _} = Accounts.add_member(team, owner2, "owner")
+
+      # Two owners, so `last_owner` (a 409 STATE refusal) is not in play and the
+      # answer below is purely about AUTHORITY.
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role_as(owner1, team, owner1, "admin")
+
+      {owner3, team2} = owned_team()
+      owner4 = user_fixture()
+      {:ok, _} = Accounts.add_member(team2, owner4, "owner")
+      # remove_member_as/3 has no `self?` branch, so the OWNER ESCAPE HATCH at
+      # accounts.ex:1722 answers for the self row too: an owner may remove
+      # themselves. The console does not offer it.
+      assert {:ok, :removed} = Accounts.remove_member_as("owner", team2, owner3)
+    end
+  end
+
   describe "invite_member/4 — expired re-invite (M5)" do
     test "an EXPIRED unaccepted invite no longer blocks re-inviting the same email" do
       {owner, team} = owned_team()

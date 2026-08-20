@@ -105,30 +105,61 @@ defmodule Barkpark.Sync.Applier do
             {:ok, :applied}
 
           {:error, reason} ->
-            max = Map.get(ctx, :max_attempts, 5)
+            case error_class(reason) do
+              # TRANSIENT/retryable: an ENVIRONMENTAL failure — a schema not yet
+              # registered inside a deploy/migration window, a temporarily-failing
+              # plugin before_save gate — that can block a fully VALID mutation.
+              # The dead-letter path advances the cursor PAST the event, so routing
+              # a transient failure there would skip a recoverable write. Fail SAFE:
+              # halt + replay keeping the cursor (no advance), and never reach the
+              # bounded dead letter. It clears itself the moment the environment
+              # recovers (folds the w14 gap — HANDOFF.md P1b follow-up).
+              :transient ->
+                {:error, reason}
 
-            attempts =
-              DeadLetter.record_failure(ws_id, source, dataset, event_id, envelope, reason)
+              # TERMINAL: the event's CONTENT can never apply (a task-contract
+              # violation, a malformed changeset) — retrying identical bytes is
+              # futile, so quarantine it. Bounded dead-letter at max_attempts,
+              # then advance.
+              :terminal ->
+                max = Map.get(ctx, :max_attempts, 5)
 
-            if attempts >= max do
-              DeadLetter.mark_dead(source, dataset, event_id)
+                attempts =
+                  DeadLetter.record_failure(ws_id, source, dataset, event_id, envelope, reason)
 
-              Logger.error(
-                "[Sync] DEAD-LETTER event #{event_id} (#{source}/#{dataset}) after " <>
-                  "#{attempts} attempts: #{inspect(reason)} — recorded + advancing cursor past it"
-              )
+                if attempts >= max do
+                  DeadLetter.mark_dead(source, dataset, event_id)
 
-              # Advance ONLY after the durable DL write (write-then-advance, R1/R2):
-              # an inspectable quarantine, never a silent skip.
-              Cursor.put(ws_id, source, dataset, event_id)
-              {:ok, :dead_lettered}
-            else
-              # Below threshold → halt + replay; invariant #3 unchanged.
-              {:error, reason}
+                  Logger.error(
+                    "[Sync] DEAD-LETTER event #{event_id} (#{source}/#{dataset}) after " <>
+                      "#{attempts} attempts: #{inspect(reason)} — recorded + advancing cursor past it"
+                  )
+
+                  # Advance ONLY after the durable DL write (write-then-advance,
+                  # R1/R2): an inspectable quarantine, never a silent skip.
+                  Cursor.put(ws_id, source, dataset, event_id)
+                  {:ok, :dead_lettered}
+                else
+                  # Below threshold → halt + replay; invariant #3 unchanged.
+                  {:error, reason}
+                end
             end
         end
     end
   end
+
+  # Classify an apply failure at the dead-letter boundary. The allowlist is
+  # TERMINAL — a failure whose CAUSE IS THE CONTENT and can never be retried
+  # away: a task-kind contract violation (`{:invalid_task_content, _}`) or a
+  # schema-validation changeset. EVERYTHING ELSE defaults to `:transient`,
+  # deliberately: an unrecognized or environmental error (a plugin before_save
+  # `{:halted, _}` gate, a `{:dedup_unavailable, _}` scan blip) must NOT advance
+  # the cursor past a possibly-valid mutation. Fail-safe on the side of replay,
+  # not silent skip.
+  @spec error_class(term()) :: :terminal | :transient
+  defp error_class({:invalid_task_content, _}), do: :terminal
+  defp error_class(%Ecto.Changeset{}), do: :terminal
+  defp error_class(_reason), do: :transient
 
   defp apply_envelope(envelope, ws_id, source, dataset, scope) do
     result = envelope["result"] || envelope["document"]

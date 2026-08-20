@@ -31,9 +31,10 @@ seed: ## Re-seed the database
 seed-check: ## Audit the served scaffy catalog vs the main corpus (tokenless drift tripwire)
 	@# Tokenless: reads the PUBLISHED perspective with a plain GET — no creds.
 	@# Exits nonzero on ANY drift OR on a fetch failure (a check that cannot
-	@# check must never report clean). Remediation is a HUMAN re-seed, never a
-	@# CI mutation — see scaffy/seed/README.md. Mirrored by
-	@# .github/workflows/scaffy-catalog-drift.yml as an advisory CI tripwire.
+	@# check must never report clean). Remediation: re-seed per
+	@# scaffy/seed/README.md, or let the ACTING gate in
+	@# .github/workflows/scaffy-catalog-drift.yml auto-seed it (charter D100;
+	@# secret-gated — reds hard until BARKPARK_SEED_TOKEN is minted).
 	go run ./scaffy/seed --check
 
 migrate: ## Run database migrations

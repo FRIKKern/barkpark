@@ -21,6 +21,7 @@ package cli
 //	rotate     <instance> <webhook-id>                  (prints the new secret ONCE)
 //	deliveries <instance> <webhook-id>
 //	replay     <instance> <webhook-id> <event-id>
+//	reconcile  <instance>                  [--dry-run]  (re-assert the doc-type filter)
 //
 // Every verb takes `--dataset <ds>` (default "production") and the CLI-wide
 // `-o json|yaml|table|minimal`. `-o json` emits the proxy envelope VERBATIM —
@@ -87,6 +88,12 @@ func runCloudWebhook(out *writer, g globals, args []string) int {
 		return runWebhookDeliveries(out, cfg, rest)
 	case "replay":
 		return runWebhookReplay(out, cfg, rest)
+	case "reconcile":
+		// g rides along because --dry-run is a GLOBAL flag: parseGlobals strips it
+		// from args ANYWHERE on the line, so a verb that only looked at its own
+		// parsed flags would never see it — and would WRITE on a dry run. See
+		// runWebhookReconcile.
+		return runWebhookReconcile(out, g, cfg, rest)
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown webhook command %q (run `bp cloud webhook -h` for usage)", verb), exitUsage)
 	}
@@ -441,6 +448,305 @@ func runWebhookReplay(out *writer, cfg *Config, rest []string) int {
 	// for the endpoint being live.
 	out.outf("note: a replay is delivered even when the webhook is inactive (manual redelivery).")
 	return exitOK
+}
+
+// ---------------------------------------------------------------------------
+// reconcile — re-assert the doc-type filter on the site-autodeploy rows
+// ---------------------------------------------------------------------------
+
+// contentWebhookPrefix is the box-side identity of a spawned site's
+// content-publish webhook: the control plane names the row
+// `site-autodeploy-<site.id>` (Registry.content_webhook_name/1) and that name is
+// the ONLY key linking a box row back to its control-plane site. Reconcile reads
+// the site id straight out of the name for exactly that reason — matching on the
+// URL would re-derive an identity the control plane already publishes.
+const contentWebhookPrefix = "site-autodeploy-"
+
+// webhookReconcileRow is one row's verdict. It is both the human line and the
+// `-o json` element, so a scripted operator sees precisely what a human saw.
+type webhookReconcileRow struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	SiteID       string   `json:"site_id"`
+	CurrentTypes []string `json:"current_types"`
+	DesiredTypes []string `json:"desired_types,omitempty"`
+	// Action is one of: ok (already correct), updated, would-update (--dry-run),
+	// skipped (doc_type undeterminable — REPORTED, never guessed), failed (the
+	// write was refused).
+	Action string `json:"action"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// runWebhookReconcile re-asserts the DOC-TYPE FILTER on every `site-autodeploy-*`
+// endpoint of an instance, through the SAME partial-PUT path `edit` uses.
+//
+// Why a verb and not a hand-edit: the box treats `types = {}` as MATCH
+// EVERYTHING, so a site-autodeploy row with an empty filter rebuilds its site on
+// every mutation in a shared dataset. Measured on guerrilla 2026-08-07: 2,310
+// deliveries in 6 h across 5 endpoints (77.0/hr/endpoint); with the site's own
+// doc_type that is 5.3 — a 93.1% cut, because 90.3% of all writes on that box are
+// this repo's `task` ledger. A one-off `bp cloud webhook edit --types` fixes the
+// row until the next doc_type change drifts it back, with nothing re-asserting
+// it; this verb is the thing that re-asserts it, and it is safe to re-run.
+//
+// FAIL CLOSED, LOUDLY. The desired filter is the site's OWN doc_type read from
+// the control plane (the same value Registry.content_webhook_types/1 sends). A
+// row whose site cannot be read, or whose site carries no doc_type, is REPORTED
+// AND SKIPPED — never guessed, never quietly passed over — and any skip or
+// refused write makes the whole run exit non-zero.
+//
+// --dry-run is read from BOTH the globals and this verb's own flag set, and that
+// is not belt-and-braces: `--dry-run` is a GLOBAL flag (globals.go), so
+// parseGlobals lifts it out of the line before the verb ever sees its args —
+// a verb reading only `a.bools["dry-run"]` writes on a dry run, and a unit test
+// that calls the runner directly (bypassing parseGlobals) reports green while it
+// does. The local flag stays declared so the usage line and the help agree, and
+// so `--dry-run` keeps working if it is ever de-globalised.
+func runWebhookReconcile(out *writer, g globals, cfg *Config, rest []string) int {
+	const usage = "bp cloud webhook reconcile <instance> [--dry-run] [--dataset <ds>]"
+	a, err := parseHzArgs(rest, []string{"dataset"}, []string{"dry-run"}, usage)
+	if err != nil {
+		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	pos, ok := webhookPositionals(out, a, 1, usage)
+	if !ok {
+		return exitUsage
+	}
+	ref := pos[0]
+	id, rerr := resolveOpenBarkparkID(cfg, ref)
+	if rerr != nil {
+		return openResolveFail(out, rerr)
+	}
+	dataset := webhookDataset(a)
+	dryRun := g.dryRun || a.bools["dry-run"]
+	client := cfg.CloudClient()
+
+	list, err := client.WebhookList(cloudCtx(), id, dataset)
+	if err != nil {
+		return cloudFail(out, "list webhooks", err)
+	}
+	if !list.OK {
+		// A failed read is handled by the shared seam in BOTH shapes (envelope
+		// verbatim for machines, one honest line for humans) — and crucially it
+		// issues no writes: "I could not look" never authorizes a repair.
+		code, _ := webhookRespond(out, list, ref)
+		return code
+	}
+
+	all := webhookRowsOf(list.Data)
+	rows := make([]webhookReconcileRow, 0, len(all))
+	docTypes := map[string]docTypeLookup{}
+	other := 0
+	for _, wh := range all {
+		name := cellString(wh["name"])
+		if !strings.HasPrefix(name, contentWebhookPrefix) {
+			// Somebody else's endpoint. Reconcile owns the site-autodeploy rows
+			// and nothing else — it must never rewrite a hand-made webhook.
+			other++
+			continue
+		}
+		rows = append(rows, reconcileRow(client, id, dataset, wh, name, docTypes, dryRun))
+	}
+
+	summary := map[string]int{"updated": 0, "would_update": 0, "ok": 0, "skipped": 0, "failed": 0}
+	for _, r := range rows {
+		switch r.Action {
+		case "updated":
+			summary["updated"]++
+		case "would-update":
+			summary["would_update"]++
+		case "ok":
+			summary["ok"]++
+		case "skipped":
+			summary["skipped"]++
+		case "failed":
+			summary["failed"]++
+		}
+	}
+	code := exitOK
+	if summary["skipped"] > 0 || summary["failed"] > 0 {
+		code = exitGeneric
+	}
+
+	if out.emitStructured(map[string]any{
+		"instance":      ref,
+		"dataset":       dataset,
+		"dry_run":       dryRun,
+		"webhooks":      rows,
+		"other_rows":    other,
+		"summary":       summary,
+		"reconciled_ok": code == exitOK,
+	}) {
+		return code
+	}
+	renderWebhookReconcile(out, rows, other, summary, dataset, dryRun)
+	return code
+}
+
+// docTypeLookup is one site's resolved doc_type (or the reason it is unknown),
+// memoised so a run reads each site from the control plane at most once.
+type docTypeLookup struct {
+	docType string
+	err     string
+}
+
+// reconcileRow decides — and, unless --dry-run, performs — one row's repair.
+func reconcileRow(client *cloudclient.Client, id, dataset string, wh map[string]any, name string, cache map[string]docTypeLookup, dryRun bool) webhookReconcileRow {
+	whID := cellString(wh["id"])
+	siteID := strings.TrimPrefix(name, contentWebhookPrefix)
+	row := webhookReconcileRow{ID: whID, Name: name, SiteID: siteID, CurrentTypes: webhookTypes(wh)}
+
+	look, seen := cache[siteID]
+	if !seen {
+		look = lookupSiteDocType(client, siteID)
+		cache[siteID] = look
+	}
+	// FAIL CLOSED: no readable site, or a site with no doc_type, is reported and
+	// skipped. Guessing here would filter a site's real content away.
+	if look.err != "" {
+		row.Action, row.Detail = "skipped", look.err
+		return row
+	}
+	row.DesiredTypes = []string{look.docType}
+	if sameTypes(row.CurrentTypes, row.DesiredTypes) {
+		row.Action = "ok"
+		return row
+	}
+	if dryRun {
+		row.Action = "would-update"
+		return row
+	}
+	// The SAME partial PUT `edit --types` issues: only `types` enters the body,
+	// so name/url/events/active keep their stored values.
+	res, err := client.WebhookUpdate(cloudCtx(), id, dataset, whID, map[string]any{"types": row.DesiredTypes})
+	if err != nil {
+		row.Action, row.Detail = "failed", err.Error()
+		return row
+	}
+	if !res.OK {
+		row.Action, row.Detail = "failed", webhookFailureLine(res)
+		return row
+	}
+	row.Action = "updated"
+	return row
+}
+
+// lookupSiteDocType reads the site's OWN doc_type from the control plane — the
+// value its build reads (BARKPARK_DOC_TYPE) and the exact array
+// Registry.content_webhook_types/1 would send. Both failure shapes carry a
+// reason, because a skip the operator cannot explain is a silent failure.
+func lookupSiteDocType(client *cloudclient.Client, siteID string) docTypeLookup {
+	if strings.TrimSpace(siteID) == "" {
+		return docTypeLookup{err: "webhook name carries no site id after \"" + contentWebhookPrefix + "\" — cannot determine a doc type"}
+	}
+	site, err := client.GetSpawnSite(cloudCtx(), siteID)
+	if err != nil {
+		return docTypeLookup{err: "control plane could not read site " + siteID + ": " + err.Error()}
+	}
+	docType := strings.TrimSpace(site.DocType)
+	if docType == "" {
+		return docTypeLookup{err: "site " + siteID + " has no doc_type on the control plane — refusing to guess a filter"}
+	}
+	return docTypeLookup{docType: docType}
+}
+
+// renderWebhookReconcile prints the human report: one line per site-autodeploy
+// row with its before → after, then a summary. A skip is printed on STDERR as
+// well, so a piped run cannot lose the one line that says a row was not fixed.
+func renderWebhookReconcile(out *writer, rows []webhookReconcileRow, other int, summary map[string]int, dataset string, dryRun bool) {
+	if len(rows) == 0 {
+		out.outf("no %s* webhooks in dataset %q — nothing to reconcile", contentWebhookPrefix, dataset)
+		if other > 0 {
+			out.outf("(%d other webhook(s) left untouched — reconcile only owns the site-autodeploy rows)", other)
+		}
+		return
+	}
+	if dryRun {
+		out.outf("DRY RUN — nothing will be written.")
+	}
+	out.outf("reconciling the doc-type filter on %d %s* webhook(s) in dataset %q:", len(rows), contentWebhookPrefix, dataset)
+	for _, r := range rows {
+		switch r.Action {
+		case "ok":
+			out.outf("  %s  %s  already correct (types %s)", r.Name, r.ID, typesLabel(r.CurrentTypes))
+		case "updated":
+			out.outf("  %s  %s  types %s → %s  UPDATED", r.Name, r.ID, typesLabel(r.CurrentTypes), typesLabel(r.DesiredTypes))
+		case "would-update":
+			out.outf("  %s  %s  types %s → %s  (would update)", r.Name, r.ID, typesLabel(r.CurrentTypes), typesLabel(r.DesiredTypes))
+		case "skipped":
+			out.outf("  %s  %s  SKIPPED — %s", r.Name, r.ID, r.Detail)
+			out.errf("skipped %s: %s", r.Name, r.Detail)
+		case "failed":
+			out.outf("  %s  %s  FAILED — %s", r.Name, r.ID, r.Detail)
+			out.errf("could not update %s: %s", r.Name, r.Detail)
+		}
+	}
+	out.outf("summary: %d updated, %d would update, %d already correct, %d skipped, %d failed",
+		summary["updated"], summary["would_update"], summary["ok"], summary["skipped"], summary["failed"])
+	if other > 0 {
+		out.outf("(%d other webhook(s) left untouched — reconcile only owns the site-autodeploy rows)", other)
+	}
+	if summary["skipped"] > 0 || summary["failed"] > 0 {
+		out.outf("some rows were NOT repaired (see above) — exiting non-zero.")
+	}
+}
+
+// typesLabel renders a filter array for a human: the empty array is the box's
+// MATCH-EVERYTHING sentinel and is labelled as such, because "[]" reads like
+// "nothing is delivered" when it means the exact opposite.
+func typesLabel(types []string) string {
+	if len(types) == 0 {
+		return "{} (match everything)"
+	}
+	return "[" + strings.Join(types, ",") + "]"
+}
+
+// webhookRowsOf decodes the {"webhooks":[…]} list payload.
+func webhookRowsOf(data json.RawMessage) []map[string]any {
+	var body struct {
+		Webhooks []map[string]any `json:"webhooks"`
+	}
+	_ = json.Unmarshal(data, &body)
+	return body.Webhooks
+}
+
+// webhookTypes reads a row's doc-type filter. A missing/null key and an empty
+// array are the same thing on the box (match everything) and both decode to an
+// empty slice; a non-string element is kept verbatim so a surprising value is
+// visible rather than silently dropped.
+func webhookTypes(wh map[string]any) []string {
+	raw, _ := wh["types"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		out = append(out, cellString(v))
+	}
+	return out
+}
+
+// sameTypes reports whether the stored filter already IS the desired one, in the
+// same order the control plane would write it (a single element today).
+func sameTypes(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// webhookFailureLine renders a FAILURE envelope as one line for a per-row report
+// (renderWebhookError owns the whole-command path; this one has to fit a row).
+func webhookFailureLine(res cloudclient.WebhookProxyResult) string {
+	if res.Err == nil {
+		return "the instance refused the update"
+	}
+	if res.Err.Code == "upstream_error" {
+		return fmt.Sprintf("upstream_error (instance status %d): %s", res.Err.Status, upstreamDetail(res.Err.Detail))
+	}
+	return res.Err.Code
 }
 
 // ---------------------------------------------------------------------------
@@ -818,15 +1124,23 @@ VERBS
   rotate     <instance> <webhook-id>       new signing secret (shown ONCE)
   deliveries <instance> <webhook-id>       recent delivery attempts
   replay     <instance> <webhook-id> <event-id>   re-deliver one stored event
+  reconcile  <instance>                    re-assert the doc-type filter on the
+                                           site-autodeploy-* rows  [--dry-run]
 
 FLAGS
   --dataset <ds>   the dataset to scope to (default "production")
   --yes, -y        skip the delete confirmation (scripts)
+  --dry-run        (reconcile) print what would change and write NOTHING
   -o json          emit the proxy envelope verbatim (the contract)
 
 NOTES
   edit is a PARTIAL update — only the flags you pass are sent; omitted fields keep
     their stored value. It needs at least one of --name/--url/--events/--types.
+  reconcile sets each site-autodeploy-<site-id> endpoint's types to the site's OWN
+    doc_type (an empty filter means MATCH EVERYTHING on the box, so an unfiltered
+    row rebuilds its site on every write in the dataset). It is idempotent — a
+    second run reports "already correct" and writes nothing — and it FAILS CLOSED:
+    a site whose doc_type it cannot read is reported, skipped, and exits non-zero.
   rm asks you to type the webhook id (or URL) back — it drops delivery history.
   replay works even when the webhook is inactive (a manual redelivery).
   An unreachable or too-old instance degrades honestly, never hangs.`

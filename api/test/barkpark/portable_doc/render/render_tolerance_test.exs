@@ -85,6 +85,48 @@ defmodule Barkpark.PortableDoc.Render.RenderToleranceTest do
     end
   end
 
+  # ── raw-tree entry: a PRESENT `children` key with a non-list value ────────────
+  # render_blocks/2 (above) is the COMPOSE-FIRST path; render_html/2 is the RAW Pd
+  # tree entry (reachable by the TUI, plugins, and tests ahead of any compose
+  # coercion). Every children-bearing kind piped `Map.get(node, "children", [])`
+  # straight into Enum.map — a default that fires ONLY on an ABSENT key. A PRESENT
+  # `"children": null` (→ nil) or a bare scalar therefore hit Enum.map(non_list)
+  # and RAISED, 500-ing every reader of the document. children_of/1 (walk.ex)
+  # coerces any non-list to [] so the render degrades to empty instead.
+  #
+  # Mutation proof (origin/main, WITHOUT the walk.ex fix): all 11 kinds raise on
+  # both shapes — Enum.map(nil) → Protocol.UndefinedError. Crucially the 5 INLINE
+  # kinds (PdText, PdParagraph, PdHeading, PdLink, PdWikilink) bypass BOTH shared
+  # helpers, so a two-helper guard on render_children/paragraph_inner alone would
+  # leave them raising — proving the full children_of/1 coercion is required.
+  @children_bearing_kinds ~w(
+    PdContainer PdBox PdCallout PdList PdListItem PdBlockquote
+    PdText PdParagraph PdHeading PdLink PdWikilink
+  )
+
+  describe "render_html/2 tolerates a non-list `children` on the raw-tree entry" do
+    for kind <- @children_bearing_kinds do
+      test "#{kind} with children: null degrades instead of raising" do
+        node = %{"kind" => unquote(kind), "children" => nil}
+        html = Render.render_html(node, @opts)
+        assert is_binary(html)
+      end
+
+      test "#{kind} with children: a bare scalar degrades instead of raising" do
+        node = %{"kind" => unquote(kind), "children" => 5}
+        html = Render.render_html(node, @opts)
+        assert is_binary(html)
+      end
+    end
+
+    # Regression: the compose-first path stays green for the same poisoned key.
+    test "render_blocks/2 on a children: null paragraph still returns ok" do
+      block = %{"type" => "paragraph", "children" => nil}
+      html = Render.render_blocks([block], @opts)
+      assert is_binary(html)
+    end
+  end
+
   # ── junk generators ─────────────────────────────────────────────────────────
   # Top-level blocks are always maps (the documented shape render_block/2 guards
   # on); the junk lives in their fields (content / items / text / children) and

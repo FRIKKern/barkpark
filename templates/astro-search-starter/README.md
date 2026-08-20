@@ -9,8 +9,8 @@ per-keystroke live search that talks to Barkpark **straight from the browser**
 
 What a deploy produces:
 
-- `/` — the corpus graph (zero-dependency Canvas2D, 3218 lines of hand-written
-  force simulation) with the live-search bar floating over it
+- `/` — the corpus graph (zero-dependency Canvas2D, hand-written force
+  simulation) with the live-search bar floating over it
 - `/d/<type>/<slug>/` — one static page per published document, full
   PortableDoc block rendering, `paper-surface.css` design system
 - `graph.json` — the whole corpus baked at build: the landing draws instantly,
@@ -44,9 +44,12 @@ visitors' own picker choices still win.
 
 ## The finder is THE finder — proving it (`parity-check`)
 
-This edition ships the same dual-engine search as the original Next finder:
-**indx** (typo-tolerant) and **Postgres FTS**, per keystroke, straight from
-the browser. The acceptance bar is not a vibe — it is **measured** and
+This edition ships the same dual-engine finder as the original Next finder:
+**indx** and **Postgres FTS**, per keystroke, straight from the browser. On a
+headless/managed deploy indx is unprovisionable, so the default served engine
+is Postgres — misspellings are widened server-side by its trigram similarity
+(not a full fuzzy engine, and not client-side); `?engine=indx` still opts in
+where indx exists. The acceptance bar is not a vibe — it is **measured** and
 re-runnable with `scripts/parity-check.mjs` (Node stdlib, zero deps).
 
 The bar is **cross-EDITION parity, per engine**: the Next finder and the Astro

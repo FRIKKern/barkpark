@@ -372,7 +372,24 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
 
   if (!resp.ok) await decodeAndThrow(resp, input.url)
 
-  return (await resp.json()) as T
+  // Ok-path body decode — mirror core transport (js/packages/core/src/transport.ts
+  // ok-path): a 204 or an empty/non-JSON 2xx body must NOT reach resp.json(), which
+  // would throw a raw SyntaxError that escapes the Barkpark error taxonomy. 204 and
+  // empty bodies resolve to undefined (core treats them as success); a non-JSON body
+  // throws BarkparkAPIError so callers filtering on `instanceof BarkparkError` catch it.
+  if (resp.status === 204) return undefined as T
+  const text = await resp.text()
+  if (text.length === 0) return undefined as T
+  try {
+    return JSON.parse(text) as T
+  } catch (err) {
+    throw new BarkparkAPIError(`barkparkFetch: unexpected non-JSON response ${input.url}`, {
+      status: resp.status,
+      body: text,
+      url: input.url,
+      cause: err,
+    })
+  }
 }
 
 /**

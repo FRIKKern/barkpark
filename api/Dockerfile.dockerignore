@@ -1,0 +1,44 @@
+# Per-Dockerfile BuildKit ignore for `docker build -f api/Dockerfile .`.
+#
+# BuildKit prefers `<dockerfile>.dockerignore` over the root `.dockerignore`
+# when it exists — which is the whole point: the root file excludes `api`
+# WHOLESALE (it is tuned for the web image), so building the api image from the
+# repo root with that file yields an empty api/ and every COPY fails.
+#
+# Keep this list additive-safe: the api image needs api/ (minus build output),
+# design/ and nothing else.
+.git
+.claude
+.github
+.beads
+.turbo
+.paperflow
+
+# Elixir build output / fetched deps — rebuilt inside the image.
+api/_build
+api/deps
+api/priv/static/cache_manifest.json
+
+# Out-of-scope subtrees for the api image.
+js
+web
+cloud
+tooling
+docs-site
+obsidian_example
+IndxData
+scaffy
+
+**/node_modules
+**/.next
+**/coverage
+**/*.beam
+**/erl_crash.dump
+
+# Logs, OS junk, local env files.
+**/*.log
+.DS_Store
+.env
+.env.local
+**/.env
+**/.env.local

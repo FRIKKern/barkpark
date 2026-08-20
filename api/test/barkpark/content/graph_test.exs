@@ -515,6 +515,60 @@ defmodule Barkpark.Content.GraphTest do
     end
   end
 
+  # ════════════════════════════════════════════════════════════════════════
+  # dangling/1 vs the /v1/graph corpus opt-out
+  #
+  # /v1/graph's corpus derivation now passes `dangling: :skip` into
+  # `extract_edges/2` because it discards the boolean. `Graph.dangling/1` — the
+  # /v1/graph/dangling report — reads through the UNCHANGED default and must
+  # keep naming exactly the same rows. It filters on `& &1.dangling`, so a
+  # default flip would EMPTY the report silently; the second assertion below is
+  # that mutation, run in-suite, proving the first assertion can actually fail.
+  # ════════════════════════════════════════════════════════════════════════
+  describe "dangling/1 (the /v1/graph/dangling report) is unaffected by the corpus opt-out" do
+    setup do
+      # One genuinely dangling reference (target never existed) and one live
+      # reference, so the report has both a row to name and a row to exclude.
+      publish!("gd-live-target")
+
+      for {id, target} <- [{"gd-broken", "gd-nope"}, {"gd-ok", "gd-live-target"}] do
+        {:ok, _} =
+          Content.create_document(
+            "linker",
+            %{"_id" => id, "title" => id, "rel" => target},
+            @dataset
+          )
+
+        {:ok, _} = Content.publish_document(id, "linker", @dataset)
+      end
+
+      :ok
+    end
+
+    test "names the dangling row and only that row" do
+      rows = Graph.dangling(dataset: @dataset)
+
+      assert Enum.any?(rows, fn r ->
+               r.from_id == "gd-broken" and r.to_id == "gd-nope" and r.via_field == "rel"
+             end),
+             "the broken reference must still be reported: #{inspect(rows)}"
+
+      refute Enum.any?(rows, &(&1.from_id == "gd-ok")),
+             "a resolvable reference must never be reported dangling"
+    end
+
+    test "MUTATION: disabling dangling resolution on THIS route empties the report" do
+      # The mutant — what a DEFAULT flip in extract_edges/2 would do to this
+      # route. `dangling: nil` is falsy, so the filter drops every row and the
+      # report goes silently blind. This RED is what makes the green above mean
+      # something.
+      assert Graph.dangling(dataset: @dataset, dangling: :skip) == []
+
+      # …and the real route (no flag) is not the mutant.
+      refute Graph.dangling(dataset: @dataset) == []
+    end
+  end
+
   describe "orphans/1" do
     test "returns docs with zero inbound and zero outbound edges" do
       _orphan = publish!("orph-1")

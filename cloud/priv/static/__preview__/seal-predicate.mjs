@@ -415,23 +415,128 @@ function q(params) {
 }
 // NEVER bare ?parent_id= — proven at Decide to silently return 500 unfiltered rows.
 //
-// AND NEVER AN UNCHECKED PAGE. `result.count` is the PAGE SIZE, not a total; the response
-// carries no total and no `hasMore`, so a parent with more children than the limit returns
-// exactly `limit` rows with NOTHING to say it was cut. Measured: lower this to 3 and the
-// predicate printed `VERDICT: SEAL  orphans=0` at exit 0 over a roster of 288 carrying 57
-// orphans — a DRIVEN false seal, exit 0, from one number. A real parent in this ledger
-// today has 521 children and returns exactly 500 with `count=500` and no signal. A page
-// that is FULL is indistinguishable from a page that is COMPLETE, so a full page is
-// refused rather than counted.
+// AND NEVER AN UNCHECKED PAGE. `result.count` is the PAGE SIZE, not a total. Waves 29–63
+// read ONE page of 500 and REFUSED whenever it came back full, because a full page cannot
+// be told from a complete one: measured, lower the limit to 3 and the predicate printed
+// `VERDICT: SEAL  orphans=0` at exit 0 over a roster of 288 carrying 57 orphans — a DRIVEN
+// false seal, exit 0, from one number. The refusal was right. What it was NOT is a read:
+// this epic passed 500 children in wave ~40 and has 850 today, so the instrument that
+// certifies this epic could no longer read this epic, and every Law-0 figure the waves
+// quoted came from a raw `curl limit=1000` with NO truncation guard of its own — 150 rows
+// from failing SILENTLY the exact way the predicate failed loudly.
+//
+// SO: PAGINATE, AND NAME THE AFFORDANCE. The endpoint is not mute about paging; the old
+// read simply never asked. `docs/api-v1.md` §4 documents `offset` and `count=true`, and
+// both were re-measured against the live ledger on 2026-08-09 before a line of this was
+// written:
+//
+//   …/v1/data/query/production/task?filter[parent_id]=cloud-console-hardening-epic
+//     &limit=500&offset=0&count=true   -> {count:500, offset:0, limit:500, total:850}
+//     &limit=500&offset=500&count=true -> {count:350, offset:500, limit:500, total:850}
+//
+// `offset` MOVES THE WINDOW and `count=true` ADDS `result.total`. So the "no total and no
+// hasMore" clause of the old refusal was never a property of the endpoint — it was a
+// property of the request.
+//
+// ORDER IS `_createdAt:asc`, AND IT IS LOAD-BEARING. The default order is
+// `_updatedAt:desc`, which MUTATES under a live wave: every pulse, stamp and close
+// re-sorts the population mid-walk, so offset paging over it hands back one row twice and
+// drops another for good. `_createdAt` never changes after insert, so pages cannot
+// re-shuffle beneath the walk, and rows created DURING it sort to the tail where the walk
+// has not been yet. Also measured on 2026-08-09: an order the endpoint does not honour is
+// IGNORED SILENTLY, not refused — `order=_id:asc` came back in `_updatedAt:desc` with no
+// error and no signal — so the walk VERIFIES the ordering it asked for instead of
+// trusting it.
+//
+// THE REFUSAL SURVIVES, RE-AIMED. `ROSTER-TRUNCATED` is no longer "a page came back full";
+// it is "PAGINATION COULD NOT TERMINATE", which has exactly two shapes and both are
+// refusals, never warnings: the window stopped advancing (a full page repeating the
+// previous page's first id — the signature of an `offset` the server ignored), or the page
+// ceiling was reached with the walk still unfinished. A pagination fix that left the
+// instrument unable to refuse would have traded one silence for another.
 const ROSTER_PAGE_LIMIT = 500;
+// The walk terminates or it refuses. 40 pages x 500 = 20,000 rows — two orders of
+// magnitude above the largest parent in this ledger, so reaching it is a broken endpoint
+// or a broken loop, never a big epic.
+const ROSTER_MAX_PAGES = 40;
+// Immutable after insert. See the ORDER paragraph above: this is why, and it is verified
+// rather than assumed because an unhonoured order is dropped in silence.
+const ROSTER_ORDER = '_createdAt:asc';
 const fetchRoster = (parentId) => {
-  const docs = q([['filter[parent_id]', parentId], ['limit', String(ROSTER_PAGE_LIMIT)]]).result.documents;
-  if (!Array.isArray(docs)) throw new Infra(`the roster of ${parentId} is not an array of documents`, 'ROSTER-NOT-AN-ARRAY');
-  if (docs.length >= ROSTER_PAGE_LIMIT)
+  const rows = [];
+  const seen = new Set();
+  let offset = 0;
+  let total = null;
+  let prevFirstId = null;
+  let highWater = '';
+  for (let page = 1; ; page += 1) {
+    if (page > ROSTER_MAX_PAGES)
+      throw new Infra(
+        `the roster of ${parentId} could not be paginated to the end — ${ROSTER_MAX_PAGES} pages of ${ROSTER_PAGE_LIMIT} were read (${rows.length} rows) and the walk was still not finished${total === null ? '' : `, against a reported total of ${total}`}. Pagination that cannot terminate is a roster this program could not read WHOLE, and every row beyond the ceiling is invisible: clause (a) would count orphans over a population it silently truncated and report orphans=0 as evidence. Nothing is asserted about clause (a).`,
+        'ROSTER-TRUNCATED');
+
+    const result = q([
+      ['filter[parent_id]', parentId],
+      ['limit', String(ROSTER_PAGE_LIMIT)],
+      ['offset', String(offset)],
+      ['order', ROSTER_ORDER],
+      ['count', 'true'],
+    ]).result || {};
+    const docs = result.documents;
+    if (!Array.isArray(docs)) throw new Infra(`the roster of ${parentId} is not an array of documents`, 'ROSTER-NOT-AN-ARRAY');
+    if (typeof result.total === 'number') total = result.total;
+
+    // THE WINDOW MUST MOVE. A full page whose first id repeats the previous page's is an
+    // `offset` the server ignored, and the walk would read page 1 forever.
+    //
+    // FIRST, BEFORE THE ORDER CHECK, and that ordering is the diagnosis. A repeated page
+    // also reads as OUT OF ORDER — the same rows, the same stamps, going backwards — so
+    // whichever check runs first NAMES the fault. "Your offset did nothing" is the true
+    // sentence; "your rows came back out of order" is a symptom of it.
+    const firstId = docs.length ? docs[0]._id : null;
+    if (docs.length >= ROSTER_PAGE_LIMIT && firstId !== null && firstId === prevFirstId)
+      throw new Infra(
+        `the roster of ${parentId} STOPPED ADVANCING at offset ${offset} — a FULL page of ${ROSTER_PAGE_LIMIT} rows came back whose first id (${firstId}) is the first id of the page before it, so \`offset\` did not move the window and every row beyond this page is invisible. Pagination that cannot terminate is a roster this program could not read WHOLE: clause (a) would count orphans over a population it silently truncated and report orphans=0 as evidence. Nothing is asserted about clause (a).`,
+        'ROSTER-TRUNCATED');
+    prevFirstId = firstId;
+
+    // THE ORDER THE SERVER ACTUALLY USED, read off the rows rather than off a parameter
+    // it may have dropped without saying so. A descending or absent `_createdAt` means
+    // the walk is paging over a sequence that is not the one it asked for, and offset
+    // paging over a re-sorting population skips rows.
+    for (const d of docs) {
+      const at = d && d._createdAt;
+      if (typeof at !== 'string' || at === '')
+        throw new Infra(
+          `the roster of ${parentId} carries a row with no _createdAt (${(d && d._id) || 'id absent'}) at offset ${offset}. The walk pages by \`order=${ROSTER_ORDER}\` and verifies it; a row with no sort key cannot be placed, so the completeness of this roster is unknown and nothing is asserted about clause (a).`,
+          'ROSTER-UNORDERED');
+      if (at < highWater)
+        throw new Infra(
+          `the roster of ${parentId} came back OUT OF ORDER at offset ${offset}: ${d._id} carries _createdAt=${at}, before ${highWater} which was already read. \`order=${ROSTER_ORDER}\` was requested and this endpoint IGNORES an order it does not honour SILENTLY, so the walk verifies it — offset paging over a sequence that re-sorts mid-walk repeats rows and drops others, and a roster read that way is not a roster this program read. Nothing is asserted about clause (a).`,
+          'ROSTER-UNORDERED');
+      highWater = at;
+    }
+
+    // Dedupe by `_id`: a row created mid-walk sorts to the tail under `_createdAt:asc`,
+    // but a row that lands exactly on a page boundary can still be served twice, and a
+    // roster counted with a double in it is not the population it claims to be.
+    for (const d of docs) if (!seen.has(d._id)) { seen.add(d._id); rows.push(d); }
+
+    // A SHORT PAGE IS THE END — the only termination this walk has, and it is the one
+    // the old single-shot read could not distinguish from a truncation.
+    if (docs.length < ROSTER_PAGE_LIMIT) break;
+    offset += ROSTER_PAGE_LIMIT;
+  }
+
+  // THE COUNT THE SERVER ITSELF REPORTED. Fewer unique rows than `total` means the walk
+  // MISSED some — a row unpublished or reparented mid-walk shifts the window left and
+  // takes a row with it. More is fine and is not a miss: rows created after the count
+  // was taken land at the tail and were read.
+  if (typeof total === 'number' && rows.length < total)
     throw new Infra(
-      `the roster of ${parentId} came back FULL — ${docs.length} rows against a page limit of ${ROSTER_PAGE_LIMIT}, and this endpoint returns no total and no hasMore. A full page cannot be told from a complete one, so every row beyond it is invisible: clause (a) would count orphans over a population it silently truncated and report orphans=0 as evidence. Nothing is asserted about clause (a).`,
-      'ROSTER-TRUNCATED');
-  return docs;
+      `the roster of ${parentId} came back SHORT — ${rows.length} unique rows paginated against a server-reported total of ${total} (${total - rows.length} missing). The population shifted underneath the walk, so this is a roster this program could not read whole and clause (a) would report orphans=0 over the part of it that survived. Nothing is asserted about clause (a).`,
+      'ROSTER-INCOMPLETE');
+  return rows;
 };
 const fetchById = (id) => q([['filter[_id]', id]]).result.documents[0] || null;
 

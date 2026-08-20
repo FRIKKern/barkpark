@@ -961,12 +961,15 @@ defmodule Barkpark.Tasks.CloseTest do
       assert gate["criterion"] == "MERGE GATE: PR merged to origin/main"
       assert gate["merge_gate"] == true
 
+      # cch-w66-s2: the sentence names what was SUPPLIED (a caller-asserted land
+      # digest), never a lead or a merge — nothing on this path observed either.
       assert String.starts_with?(
                gate["evidence"],
-               "auto: lead-closed on merge by lead-w (epoch 5)"
+               "auto: UNVERIFIED merge-gate autostamp — no merge observed; " <>
+                 "caller-asserted land digest from worker \"lead-w\" (epoch 5)"
              )
 
-      assert gate["evidence"] =~ "landed PR #456"
+      assert gate["evidence"] =~ "naming PR #456"
 
       # One atomic write — persisted row matches the returned struct.
       reloaded = Repo.get!(Document, task.id)
@@ -1004,7 +1007,7 @@ defmodule Barkpark.Tasks.CloseTest do
       gate = Enum.at(closed.content["acceptance_criteria"], 1)
       assert gate["met"] == true, "the merge gate is still auto-stamped"
       assert gate["criterion"] == "MERGE GATE: PR merged to origin/main"
-      assert gate["evidence"] =~ "landed PR #3157"
+      assert gate["evidence"] =~ "naming PR #3157"
     end
 
     # A merge_gate criterion with no wording is UNGUARDABLE: rather than stamp it
@@ -1155,6 +1158,230 @@ defmodule Barkpark.Tasks.CloseTest do
 
       gate = Enum.at(closed.content["acceptance_criteria"], 1)
       assert gate["met"] == false, "cancel is not a merge — the gate stays open"
+    end
+  end
+
+  # ─── (8b) The autostamp records what it ACTUALLY observed (cch-w66-s2) ────
+  #
+  # THE FABRICATION, reproduced before it was fixed: `landed` reaches close/3 as
+  # a RAW, unvalidated client body field (tasks_controller close/2,
+  # `Params.put_opt(:landed, params["landed"])` on the ordinary :token_root
+  # tier). `autostamp_merge_gate` guards ONLY on status=="done" plus a non-empty
+  # map — no lead check, no PR verification, no check that the PR belongs to this
+  # task — and the evidence was composed entirely from those caller bytes as
+  # "auto: lead-closed on merge by <worker>". Meanwhile `unmet_after_autostamp/2`
+  # deducts the stamped index from the D289 unmet set, so `check_criteria_proven`
+  # returns {:ok, nil} and NO close_override is minted: the deduction erased its
+  # own trace. A scratch worker paid a merge gate citing PR #11435 — a foreign
+  # epic's PR it never touched — and the ledger read exactly like an honest lead
+  # seal.
+  #
+  # Neither refused shape is built here: an authority check keyed on `worker_id`
+  # is VACUOUS (it is a client-supplied body param — close.ex:26-31), and a
+  # GitHub round-trip cannot run under `pg_advisory_xact_lock`. What is built is
+  # PROVENANCE: the sentence stops asserting a lead and a merge, and the
+  # deduction leaves a durable, machine-readable receipt.
+  describe "close/3 — the merge-gate autostamp records what it actually observed" do
+    @fabrication_criteria [
+      %{"criterion" => "work built", "met" => true, "evidence" => "local run"},
+      %{
+        "criterion" => "MERGE GATE: PR merged to origin/main",
+        "met" => false,
+        "merge_gate" => true
+      }
+    ]
+
+    test "a scratch worker citing a FOREIGN PR still stamps the gate — but the ledger no longer claims a lead or a merge, and the deduction leaves a trace",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("fabrication"), scope, %{
+          "acceptance_criteria" => @fabrication_criteria,
+          "claim" => %{"worker" => "scratch-w", "epoch" => 1}
+        })
+
+      # PR #11435 belongs to a DIFFERENT epic; this task never touched it.
+      assert {:ok, closed} =
+               Close.close(task.id, "scratch-w",
+                 observed_epoch: 1,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [11_435]},
+                 caller_token_id: "tok-42"
+               )
+
+      gate = Enum.at(closed.content["acceptance_criteria"], 1)
+
+      # The stamp itself is UNCHANGED — 76 of 2,064 recorded closes are foreign
+      # lead seals (D288/D289) and deleting close-time autostamp would break the
+      # seal ritual. What changed is what the ledger SAYS about it.
+      assert gate["met"] == true
+
+      refute gate["evidence"] =~ "lead-closed",
+             "the evidence must not assert a LEAD nothing authenticated"
+
+      refute gate["evidence"] =~ "on merge",
+             "the evidence must not assert a MERGE nothing observed"
+
+      assert gate["evidence"] =~ "UNVERIFIED merge-gate autostamp"
+      assert gate["evidence"] =~ "caller-asserted land digest"
+      assert gate["evidence"] =~ "naming PR #11435"
+
+      # THE TRACE. A reviewer tells an autostamped criterion from a proven one by
+      # READING ONE KEY — never by parsing the evidence prose.
+      record = closed.content["merge_gate_autostamp"]["close"]
+
+      assert record["verified"] == false
+      assert record["source"] == "close_landed_digest"
+      assert record["indices"] == [1], "the trace names the exact rows it deducted"
+      assert record["landed"] == "PR #11435"
+      assert is_binary(record["ts"])
+
+      # Both actors, labelled for what they are: the name the caller CLAIMED and
+      # the token the server actually AUTHENTICATED.
+      assert record["asserted_worker"] == "scratch-w"
+      assert record["authenticated_token_id"] == "tok-42"
+
+      # One atomic write — the stamp and its confession land together.
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["merge_gate_autostamp"] == closed.content["merge_gate_autostamp"]
+      assert reloaded.rev == closed.rev
+    end
+
+    test "an internal caller (no api_token) records a NULL authenticated actor rather than borrowing the asserted one",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("autostamp-internal"), scope, %{
+          "acceptance_criteria" => @fabrication_criteria
+        })
+
+      assert {:ok, closed} =
+               Close.close(task.id, "lead-w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [7]}
+               )
+
+      record = closed.content["merge_gate_autostamp"]["close"]
+      assert Map.has_key?(record, "authenticated_token_id")
+      assert record["authenticated_token_id"] == nil
+      assert record["asserted_worker"] == "lead-w"
+    end
+
+    test "a close that autostamps NOTHING writes no trace (an honest close has nothing to confess)",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("autostamp-none"), scope, %{
+          "acceptance_criteria" => @fabrication_criteria
+        })
+
+      # No land digest → nothing autostampable → nothing deducted → no receipt.
+      assert {:ok, closed} =
+               Close.close(task.id, "builder-w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria_override: "pre-merge close; the merge gate is the lead's to stamp"
+               )
+
+      refute Map.has_key?(closed.content, "merge_gate_autostamp")
+    end
+
+    test "SIDE BY SIDE: the unverified close-time sentence and the webhook-verified one are distinguishable, and so are their traces",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      # (1) The webhook-verified path — a real merge event was observed.
+      verified_task =
+        mk_task!(uniq("autostamp-verified"), scope, %{
+          "acceptance_criteria" => @fabrication_criteria
+        })
+
+      assert {:ok, :stamped, [1]} =
+               Close.reconcile_merge_gate(
+                 verified_task.id,
+                 %{"prs" => [456], "commit" => "abc123"}
+               )
+
+      verified = Repo.get!(Document, verified_task.id)
+      verified_evidence = Enum.at(verified.content["acceptance_criteria"], 1)["evidence"]
+
+      # (2) The close-time path — only caller bytes.
+      asserted_task =
+        mk_task!(uniq("autostamp-asserted"), scope, %{
+          "acceptance_criteria" => @fabrication_criteria
+        })
+
+      assert {:ok, closed} =
+               Close.close(asserted_task.id, "lead-w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [456], "commit" => "abc123"}
+               )
+
+      asserted_evidence = Enum.at(closed.content["acceptance_criteria"], 1)["evidence"]
+
+      # Same land digest, two sentences that cannot be mistaken for each other.
+      assert asserted_evidence != verified_evidence
+      assert verified_evidence =~ "auto: merge-reconciled by github-merge"
+      refute verified_evidence =~ "UNVERIFIED"
+      assert asserted_evidence =~ "auto: UNVERIFIED merge-gate autostamp"
+      refute asserted_evidence =~ "merge-reconciled"
+
+      # And the traces carry the same distinction as a boolean, not as prose.
+      assert verified.content["merge_gate_autostamp"]["merge_event"]["verified"] == true
+
+      assert verified.content["merge_gate_autostamp"]["merge_event"]["source"] ==
+               "github_merge_event"
+
+      assert closed.content["merge_gate_autostamp"]["close"]["verified"] == false
+      refute Map.has_key?(closed.content["merge_gate_autostamp"], "merge_event")
+    end
+
+    test "a later verified merge event does NOT erase the earlier unverified assertion",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      unstamped = [
+        %{"criterion" => "work built", "met" => true, "evidence" => "local run"},
+        %{"criterion" => "MERGE GATE: PR merged", "met" => false, "merge_gate" => true},
+        %{"criterion" => "MERGE GATE: release tagged", "met" => false, "merge_gate" => true}
+      ]
+
+      task = mk_task!(uniq("autostamp-both"), scope, %{"acceptance_criteria" => unstamped})
+
+      # A close asserts gate #1 only (the caller's own explicit update wins #2's
+      # index, so the autostamp leaves it for the merge event).
+      assert {:ok, _} =
+               Close.close(task.id, "lead-w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [11_435]},
+                 criteria_override: "sealing over the untouched second gate",
+                 criteria: [
+                   %{
+                     "index" => 2,
+                     "met" => false,
+                     "evidence" => "",
+                     "criterion" => "MERGE GATE: release tagged"
+                   }
+                 ]
+               )
+
+      # Later, the real merge lands and reconciles the remaining gate.
+      assert {:ok, :stamped, [2]} =
+               Close.reconcile_merge_gate(task.id, %{"prs" => [999], "commit" => "deadbee"})
+
+      record = Repo.get!(Document, task.id).content["merge_gate_autostamp"]
+
+      assert record["close"]["verified"] == false
+      assert record["close"]["indices"] == [1]
+      assert record["close"]["landed"] == "PR #11435"
+      assert record["merge_event"]["verified"] == true
+      assert record["merge_event"]["indices"] == [2]
     end
   end
 

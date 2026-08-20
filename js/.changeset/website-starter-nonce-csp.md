@@ -1,0 +1,5 @@
+---
+'create-barkpark-app': patch
+---
+
+website-starter: ship a per-request-nonce Content-Security-Policy as defense-in-depth. New `lib/csp.ts` exports a pure `buildCspPolicy(nonce)` (default-src 'self'; script-src nonce + 'strict-dynamic', NO 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; connect-src 'self') plus a Web-Crypto `generateNonce()`. New `middleware.ts` (Next 15 convention) mints a nonce per request, sets the CSP + `x-nonce` on the forwarded request headers so Next stamps its own hydration scripts, and sets the CSP on the response so the browser enforces it; the matcher skips `_next/static`, `_next/image`, `favicon.ico` and `api`. The scaffold renders every document through an auto-escaping PortableText React tree (zero innerHTML sinks), so this is pure hardening — any injected inline `<script>` is blocked because it cannot carry the per-request nonce. `layout.tsx` and `next.config.mjs` are untouched, so routes stay static-eligible.

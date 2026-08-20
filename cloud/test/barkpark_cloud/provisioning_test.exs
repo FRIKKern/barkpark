@@ -2631,6 +2631,77 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert swapless["swap_total_bytes"] == 0
     end
 
+    # THE DENOMINATOR AND ITS LATENCY (charter D103). An error RATE without the
+    # request volume it came out of cannot be read: the same 5xx/s is a 7x range
+    # of severity across the traffic levels actually observed on the fleet. Both
+    # values are already on the wire (the agent posts them on every beat) and
+    # already stored in the raw beat payload — this asserts they reach the row.
+    test "the request rate and its p95 ride the row — the denominator a share needs" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          Map.merge(pre_vitals_report(), %{
+            "req_per_s" => 1.75,
+            "p95_ms" => 32_777,
+            "err_5xx_per_s" => 0.22
+          })
+        )
+
+      pressure = pressure_for(user, bp)
+
+      assert pressure["req_per_s"] == 1.75
+      assert pressure["p95_ms"] == 32_777
+      # The pairing is the whole point: 0.22 5xx/s against 1.75 req/s is 12.6%
+      # of traffic. The same 0.22 against 11 req/s is 2.0%. Only the row that
+      # carries both can tell those apart.
+      assert pressure["err_5xx_per_s"] == 0.22
+
+      # A genuinely idle box is a MEASURED zero and must survive as one — the
+      # guard is `< 0`, not `falsy`, or "serving nothing" collapses into
+      # "nobody measured".
+      :ok = beat(bp, Map.merge(pre_vitals_report(), %{"req_per_s" => 0.0, "p95_ms" => 0}))
+
+      idle = pressure_for(user, bp)
+      assert idle["req_per_s"] == 0.0
+      assert idle["p95_ms"] == 0
+    end
+
+    test "req_per_s and p95_ms unmetered: the -1 sentinel AND an absent key both read nil" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      # ARM 1 — the sentinel. Three of the five boxes in the field emit -1 here
+      # today (probe unwired, or the instance predates the request-stats route).
+      # A 0 would make the least-instrumented box read as the fastest and the
+      # quietest in the fleet.
+      :ok = beat(bp, Map.merge(pre_vitals_report(), %{"req_per_s" => -1, "p95_ms" => -1}))
+
+      sentinel = pressure_for(user, bp)
+      assert sentinel["req_per_s"] == nil, "the -1 req/s sentinel must render unmetered"
+      assert sentinel["p95_ms"] == nil, "the -1 p95 sentinel must render unmetered"
+
+      # ARM 2 — the key is absent entirely (an agent predating the fields). The
+      # key must still be PRESENT on the block so a consumer can destructure,
+      # and its value must still be nil.
+      :ok = beat(bp, pre_vitals_report())
+
+      assert [%{type: "health", payload: payload} | _] = Registry.recent_events(bp, 5)
+      refute Map.has_key?(payload, "req_per_s")
+      refute Map.has_key?(payload, "p95_ms")
+
+      absent = pressure_for(user, bp)
+
+      for key <- ~w(req_per_s p95_ms) do
+        assert Map.has_key?(absent, key), "the pressure block must always carry #{key}"
+
+        assert absent[key] == nil,
+               "#{key} must be unmetered (nil), got #{inspect(absent[key])}"
+      end
+    end
+
     test "a box that has NEVER beaten renders the all-unmetered block (no key, no zeros)" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)

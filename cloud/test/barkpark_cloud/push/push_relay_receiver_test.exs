@@ -9,8 +9,8 @@ defmodule BarkparkCloud.Push.PushRelayReceiverTest do
 
     * signature contract (the box's Webhooks.Dispatcher scheme —
       `t=<unix>,v1=<hex>` = HMAC-SHA256 over "<t>.<raw-body>", ±300s):
-      valid → 202; forged / stale / tampered-body-under-valid-sig / missing →
-      401, nothing enqueued;
+      valid → 202; forged / stale / FUTURE-dated / tampered-body-under-valid-sig
+      / missing → 401, nothing enqueued;
     * TRUE replay dedupe (mob-bl-push-hardening): an identical signed re-send
       inside the window still 202s but enqueues ZERO new jobs
       (PushDeliveryWorker args-uniqueness); a fresh `blocked_since` — a
@@ -160,6 +160,26 @@ defmodule BarkparkCloud.Push.PushRelayReceiverTest do
       refute_enqueued(worker: PushDeliveryWorker)
     end
 
+    # clk-w4 (TESTABILITY, not a defect). This route shares
+    # `InboundSignature.verify` with the content-publish receiver, whose future
+    # arm covers the verifier itself — this arm covers THIS route's own wiring,
+    # which is the second anonymously-reachable HMAC-only leg in cloud. The
+    # offset only has to clear the 300s tolerance; a wide one makes the arm
+    # immune to a test-host clock step between this line and the server's read.
+    test "a FUTURE-dated timestamp 401s too — the replay window is two-sided" do
+      team = team_fixture()
+      {bp, secret} = relay_barkpark(team)
+      register_device(member_fixture(team))
+
+      body = Jason.encode!(@payload)
+      future_ts = System.system_time(:second) + 3600
+      conn = deliver(bp.id, body, sign(secret, future_ts, body))
+
+      assert conn.status == 401
+      assert json_body(conn)["error"] == "bad_signature"
+      refute_enqueued(worker: PushDeliveryWorker)
+    end
+
     test "a TAMPER (a valid signature over a different body) 401s" do
       team = team_fixture()
       {bp, secret} = relay_barkpark(team)
@@ -196,6 +216,40 @@ defmodule BarkparkCloud.Push.PushRelayReceiverTest do
       assert json_body(replay)["enqueued"] == 0
 
       assert length(all_enqueued(worker: PushDeliveryWorker)) == 1
+    end
+
+    test "a replay arriving AFTER the first job COMPLETED still enqueues ZERO new jobs" do
+      # The pin on PushDeliveryWorker's bare `unique: [period: 600]`, which
+      # inherits Oban's default state set — :completed INCLUDED. The test above
+      # replays while the first job is still :available, a state BOTH that set
+      # and the incomplete-only set dedupe, so it cannot tell them apart:
+      # narrowing :68 to an incomplete-states list leaves the whole push suite
+      # green. :completed is the ONLY state that separates them, and this is
+      # the test that reaches it — a webhook redelivered minutes after the
+      # push already went out must not ping the device a second time.
+      team = team_fixture()
+      {bp, secret} = relay_barkpark(team)
+      register_device(member_fixture(team))
+
+      body = Jason.encode!(@payload)
+      sig = sign(secret, System.system_time(:second), body)
+
+      first = deliver(bp.id, body, sig)
+      assert first.status == 202
+      assert json_body(first)["enqueued"] == 1
+
+      # The job ran and finished before the replay landed.
+      assert {1, _} =
+               Repo.update_all(Oban.Job,
+                 set: [state: "completed", completed_at: DateTime.utc_now()]
+               )
+
+      replay = deliver(bp.id, body, sig)
+      assert replay.status == 202
+      assert json_body(replay)["enqueued"] == 0
+
+      # Counted over ALL states — the deduped row is :completed, not enqueued.
+      assert Repo.aggregate(Oban.Job, :count) == 1
     end
 
     test "a genuinely NEW event for the same session (fresh blocked_since) is NOT deduped" do

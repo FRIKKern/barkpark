@@ -381,7 +381,8 @@ func TestScaffyHelpTexts(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{nil, []string{"usage: bp scaffy <validate|fmt|run|remove|discover>", "validate <path>...", "fmt [--check] <path>...", "run <command.scaffy> --var K=V...", "remove <command.scaffy> --var K=V...", "examples:", "exit codes:", "SCAFFY-DRIFT"}},
+		{nil, []string{"usage: bp scaffy <validate|fmt|run|remove|describe|discover>", "validate <path>...", "fmt [--check] <path>...", "run <command.scaffy> --var K=V...", "remove <command.scaffy> --var K=V...", "describe <command.scaffy|name>", "examples:", "exit codes:", "SCAFFY-DRIFT"}},
+		{[]string{"describe"}, []string{"usage: bp scaffy describe <command.scaffy|name>", "synthesized kind", "opaque shape:<name>", "in.<verb_snake>", "{kind, tier, text}", "-o json", "exit codes:"}},
 		{[]string{"validate"}, []string{"usage: bp scaffy validate [--repo <root>] [--var K=V...] <path>...", "file:line: RULE-ID message", "--repo <root>", "R-001 missing-file", "exit codes:", "-o json"}},
 		{[]string{"fmt"}, []string{"usage: bp scaffy fmt [--check] <path>...", "--check", "exit codes:", "fixpoint"}},
 		{[]string{"run"}, []string{"usage: bp scaffy run <command.scaffy> --var K=V...", "--var K=V", "--dry-run", "duration_ms", "examples:", "exit codes:", "5  validation findings"}},

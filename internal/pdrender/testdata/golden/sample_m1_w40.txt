@@ -31,14 +31,14 @@ Knut Hamsun · 2026-06-08 · Terminal desk
 │ composed through the full registry,  │
 │ exactly like a section child, then   │
 │ captioned below.                     │
-│ Figure 1. A nested paragraph         │
-│ rendered through the registry.       │
+│ A nested paragraph rendered through  │
+│ the registry.                        │
 ╰──────────────────────────────────────╯
                                         
 ╭──────────────────────────────────────╮
 │ Second figure body.                  │
-│ Figure 2. A second figure to prove   │
-│ the counter increments.              │
+│ A second figure to prove the counter │
+│ increments.                          │
 ╰──────────────────────────────────────╯
                                         
  Read the full paper                    

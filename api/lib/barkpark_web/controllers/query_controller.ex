@@ -549,12 +549,27 @@ defmodule BarkparkWeb.QueryController do
   # workspace_id filter decides WHICH rows come back.
 
   # Resolve the type's schema (for field-visibility redaction in Envelope.render)
-  # under the SAME tenant scope as the document read. Nil on miss — redaction
-  # then falls back to the schema-free encrypted-field guard only.
+  # under the SAME tenant scope as the document read. On a scoped miss, fall back
+  # to the GLOBAL schema (mirroring content/papers.ex value_schema/3) so a
+  # globally-declared non-encrypted private field still redacts — without this
+  # fallback the schema misses at the render site and the private field renders
+  # PUBLIC (Envelope.render is lenient on a nil schema). Nil on miss otherwise.
+  #
+  # TENANCY GUARD (LOAD-BEARING): the stripped-scope query reads cross-tenant
+  # rows, so accept the fallback ONLY when its workspace_id is nil — the global
+  # schema. Any non-nil workspace_id would substitute a FOREIGN tenant's schema.
   defp fetch_schema(conn, type, dataset) do
-    case Content.get_schema(type, dataset, scope_opts(conn)) do
-      {:ok, schema} -> schema
-      _ -> nil
+    opts = scope_opts(conn)
+
+    case Content.get_schema(type, dataset, opts) do
+      {:ok, schema} ->
+        schema
+
+      _ ->
+        case Content.get_schema(type, dataset, Keyword.drop(opts, [:workspace_id, :project_id])) do
+          {:ok, %{workspace_id: nil} = schema} -> schema
+          _ -> nil
+        end
     end
   end
 

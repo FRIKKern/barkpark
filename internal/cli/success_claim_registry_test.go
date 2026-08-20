@@ -283,7 +283,11 @@ func successClaimRegistry() []claimSite {
 			// only on the team the control plane says the token belongs to.
 			Name: "emitDeviceLoginSuccess",
 			Render: func(out *writer, resp any) {
-				emitDeviceLoginSuccess(out, deviceLoginBase, resp.(cloudclient.LoginResp).TeamID)
+				// The account-identity widening (deviceAccount) is best-effort chrome
+				// on TOP of the team-id contract this row probes: the probe holds it
+				// at the zero value so the receipt still varies ONLY on TeamID, the
+				// post-condition the disposition pins.
+				emitDeviceLoginSuccess(out, deviceLoginBase, resp.(cloudclient.LoginResp).TeamID, deviceAccount{})
 			},
 			Backed:       cloudclient.LoginResp{Token: "tok-1", TeamID: "team-a"},
 			Contradicted: cloudclient.LoginResp{Token: "tok-1", TeamID: "team-b"},

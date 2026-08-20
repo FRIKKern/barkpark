@@ -345,6 +345,54 @@ const arg = (argv, i) => (i < argv.length ? argv[i] : null);
 const firstNonFlag = (argv, from = 1) => argv.slice(from).find((t) => !t.startsWith("-")) ?? null;
 const hasFlag = (argv, ...flags) => argv.some((t) => flags.includes(t));
 
+// ── VALUE-TAKING GLOBALS — the token a global option EATS is not the sub-verb ──
+//
+// `firstNonFlag` skips flag TOKENS but does not model that some globals consume
+// their NEXT token as a value. `git -C log push` is `git push` run in a
+// directory named `log` — `-C` eats `log`, and the real sub-verb is `push`. The
+// original `firstNonFlag` returned `log`, so `gitRule` judged a WRITE as the
+// read-verb `log` and ADMITTED it. The same hole rode `go -C env run main.go`
+// (code execution) and `npm --prefix ls install` (postinstall code execution)
+// because `goRule`/`npmRule` derive their sub-verb the same way.
+//
+// The fix is ONE normaliser, not a per-tool hand-copy of the grammar (five
+// hand-copies of one grammar drifting apart is this epic's own named defect
+// class). It consumes value-taking globals — and, in the SEPARATE-value
+// spelling, the value token they eat — ONLY in the PRE-VERB region, then stops
+// at the first bare token and preserves everything from the sub-verb onward
+// verbatim. The pre-verb restriction is load-bearing: the same letters mean
+// different things AFTER the verb (`git branch -C old new` COPIES a branch — a
+// write — and `-C` there must reach the write-flag guard, not be stripped). The
+// `--flag=value` spelling is a single token that already starts with `-`, so it
+// stays a flag token that `firstNonFlag` skips; only the separate spelling
+// leaves a bare value that needs eating. The head at argv[0] is preserved so the
+// `<head> <verb> <sub-verb>` positions the sub-verb guards read are unchanged.
+
+/**
+ * @param {string[]} argv
+ * @param {Set<string>} valueGlobals global option tokens that eat their next token
+ * @returns {string[]}
+ */
+function dropValueGlobals(argv, valueGlobals) {
+  if (!argv.length) return argv;
+  const out = [argv[0]];
+  let i = 1;
+  for (; i < argv.length; i++) {
+    const t = argv[i];
+    if (valueGlobals.has(t)) {
+      i++; // eat this global AND the separate value token it consumes
+      continue;
+    }
+    if (t.startsWith("-")) {
+      out.push(t); // some other pre-verb flag (incl. the `--flag=value` spelling)
+      continue;
+    }
+    break; // first bare token — the sub-verb; everything from here is verbatim
+  }
+  for (; i < argv.length; i++) out.push(argv[i]);
+  return out;
+}
+
 /** A head whose sub-verb must appear in `verbs`. */
 const verbRule = (verbs, label) => ({
   verbs: new Set(verbs),
@@ -381,8 +429,19 @@ const GIT_SUBVERB_GUARDS = new Map([
 // Branch/tag deletion flags are a write in any position.
 const GIT_WRITE_FLAGS = ["-d", "-D", "--delete", "-m", "-M", "--move", "-c", "-C", "--copy", "--edit-description"];
 
+// git's value-taking GLOBAL options — the ones that precede the sub-verb and eat
+// their next token. `git -C log push` is a WRITE whose sub-verb is `push`, not
+// the eaten value `log`. `-c` is included though the brief's set is 8 without it:
+// `git -c log push` eats `log` identically, and `git -c core.pager=cat log` was
+// FALSELY REFUSED before (its bare `core.pager=cat` value read as the sub-verb).
+const GIT_VALUE_GLOBALS = new Set([
+  "-C", "-c", "--git-dir", "--work-tree", "--namespace",
+  "--exec-path", "--super-prefix", "--attr-source", "--config-env",
+]);
+
 const gitRule = {
-  check(argv) {
+  check(rawArgv) {
+    const argv = dropValueGlobals(rawArgv, GIT_VALUE_GLOBALS);
     const verb = firstNonFlag(argv);
     if (verb === null) return "git without a sub-verb";
     if (!GIT_READ_VERBS.includes(verb)) {
@@ -611,8 +670,14 @@ const GO_WRITE_FLAGS = new Set([
 /** `-coverprofile=/tmp/x` → "coverprofile"; `./...` → null. */
 const goFlagName = (t) => (/^--?[^-]/.test(t) ? t.replace(/^-+/, "").split("=")[0] : null);
 
+// go's only PRE-verb global is `-C dir` (go 1.20+): `go -C env run main.go` runs
+// `go run` — code execution — in directory `env`, and the eaten `env` read as the
+// sub-verb. Build flags like `-c`/`-o` come AFTER the verb and are NOT globals.
+const GO_VALUE_GLOBALS = new Set(["-C"]);
+
 const goRule = {
-  check(argv) {
+  check(rawArgv) {
+    const argv = dropValueGlobals(rawArgv, GO_VALUE_GLOBALS);
     const verb = firstNonFlag(argv);
     const allowed = new Set(["test", "vet", "list", "version", "env", "doc", "fmt"]);
     if (verb === null) return "go without a sub-verb";
@@ -669,8 +734,19 @@ const NPM_READ_VERBS = new Map([
   ["version", null],
 ]);
 
+// npm's value-taking globals that precede the command. `npm --prefix ls install`
+// runs `npm install` (postinstall code execution) with the prefix set to a
+// directory named `ls`, and the eaten `ls` read as the sub-verb. `-C` is npm's
+// own alias for `--prefix`; the rest are the config paths/names that also eat a
+// value. Booleans (`-g`, `--json`, `--long`) are NOT here — eating their neighbour
+// would falsely refuse an honest read.
+const NPM_VALUE_GLOBALS = new Set([
+  "--prefix", "-C", "-w", "--workspace", "--userconfig", "--globalconfig", "--cache",
+]);
+
 const npmRule = {
-  check(argv) {
+  check(rawArgv) {
+    const argv = dropValueGlobals(rawArgv, NPM_VALUE_GLOBALS);
     const verb = firstNonFlag(argv);
     const names = [...NPM_READ_VERBS.keys()].sort().join(", ");
     if (verb === null) return `npm without a sub-verb — npm requires one of: ${names}`;

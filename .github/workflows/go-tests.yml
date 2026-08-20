@@ -32,12 +32,44 @@ on:
       # these JSON mirrors with NO .go source change, so the Go realization leg must
       # run on THIS PR to catch a TUI divergence from the new projection.
       - "internal/pdrender/testdata/**"
+      # Taskboard TUI golden frames (internal/taskboard/testdata/*.txt). The
+      # compose/render/glyph-budget suites assert the committed frames byte-for-byte
+      # and inventory every glyph in them; a golden REGEN (or a hand-added fixture)
+      # carries NO .go diff, so without this the Go suite runs on ZERO taskboard
+      # fixture-only PRs — the same #963->#969-class gap the pdrender carve-out above
+      # closes, which whitelisted its testdata but not the board's.
+      - "internal/taskboard/testdata/**"
       # CLI manifest fixtures (docs/cli/fixtures/*.json). The capsbrief protective
       # kit (ratio tripwire, invoke-completeness) and the mcp/tickets/cli suites all
       # pin behaviour against full-manifest.json; a fixture regen carries NO .go
       # diff, so the suite must run on THIS PR — same #963→#969-class gap as the
       # templates/** carve-out above.
       - "docs/cli/fixtures/**"
+      # Cloud attention/deploy-health fixtures (cloud/priv/static/__fixtures__/*.json).
+      # Six Go tests read five fixtures under this directory, so a FIXTURE-ONLY
+      # edit changes what the Go suite asserts with no .go diff — and today that
+      # edit runs no Go job at all (merged PR #10521 touched only cloud/ +
+      # scripts/ and rendered 32 check names, none of them `go vet + test`).
+      # Same #963->#969-class gap as the carve-outs above; amends charter D57,
+      # which prescribed a manual workaround instead.
+      - "cloud/priv/static/__fixtures__/**"
+      # Scaffy census trap: scaffy/** PRs skip the Go gate, so a catalog- or
+      # fixture-only edit runs NO Go job today. corpus_test.go corpus guards read
+      # the catalog in place (D30) and the lint/parse/format/apply/jsassert suites
+      # read the testdata fixtures, so those edits change what the Go suite asserts
+      # with no .go diff — same #963->#969-class gap as the carve-outs above. Closes
+      # it at the trigger. scaffy/seed/** is excluded: no Go test reads it.
+      - "scaffy/commands/**"
+      - "internal/scaffy/testdata/**"
+      # Onramp teach-block parity (docs/setup/CODEX.md, docs/setup/AGENTS-MD.md).
+      # TestOnrampAgentsMdWrapperParity reads CODEX.md from DISK and asserts it
+      # embeds the canonical AGENTS.md body verbatim — but an md-only edit
+      # carries NO .go diff, so before this carve-out no md-triggered workflow
+      # ran the Go suite and the parity gate was vacuously green on the exact
+      # PRs it exists to catch (paper-excellence charter D42). Same
+      # #963->#969-class gap as above.
+      - "docs/setup/CODEX.md"
+      - "docs/setup/AGENTS-MD.md"
   pull_request:
     paths:
       - "**/*.go"
@@ -46,7 +78,15 @@ on:
       - ".github/workflows/go-tests.yml"
       - "templates/**"
       - "internal/pdrender/testdata/**"
+      - "internal/taskboard/testdata/**"
       - "docs/cli/fixtures/**"
+      - "cloud/priv/static/__fixtures__/**"
+      # Scaffy census trap (mirrors the push list): catalog + testdata fixtures
+      # gate the Go suite though scaffy/** PRs otherwise skip it; seed/** excluded.
+      - "scaffy/commands/**"
+      - "internal/scaffy/testdata/**"
+      - "docs/setup/CODEX.md"
+      - "docs/setup/AGENTS-MD.md"
 
 concurrency:
   # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded

@@ -606,13 +606,17 @@ const chart: Emit = (block) => {
   const capHtml = caption === '' ? '' : `<div class="bp-chart__t">${escapeHtml(caption)}</div>`
   const plot = kind === 'bars' ? plotBars(series, minV, maxV, n) : plotLine(series, minV, maxV, n)
 
+  // The svg rides its own scroll container, mirroring data_viz.ex: CSS pins
+  // the svg at its viewBox width so tick/label text never paints below its
+  // authored px at narrow viewports — the figure scrolls instead of shrinking.
   return (
     `<div class="bp-chart">${capHtml}` +
+    `<div class="bp-chart__scroll">` +
     `<svg viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" role="img">` +
     gridSvg(minV, maxV) +
     plot +
     xLabelsSvg(xLabels) +
-    `</svg>${legendHtml(series)}</div>`
+    `</svg></div>${legendHtml(series)}</div>`
   )
 }
 

@@ -103,6 +103,36 @@ defmodule BarkparkWeb.OidcControllerTest do
     assert conn |> get("/v1/auth/oidc/no-such-org/start") |> json_response(404)
   end
 
+  # acpc-w1-sso-list-param-guard: reachable as a SAME-SESSION REPLAY — the
+  # callback is behind a `state == get_session(conn, :oidc_state)` check, but
+  # the session cookie is signed-only (endpoint.ex has signing_salt and NO
+  # encryption_salt), so a caller who started the flow can read its own
+  # oidc_state out of the cookie and replay it with `code[]=`. Before the
+  # `when is_binary(code)` head guard, that raised FunctionClauseError inside
+  # Barkpark.Sso.Oidc.handle_callback/3 — below the action frame, so Phoenix's
+  # ActionClauseError→400 conversion never applied and the caller got a 500.
+  test "GET callback with a LIST-valued code is 400, not a 500", %{conn: conn} do
+    conn =
+      conn
+      |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+      |> get("/v1/auth/oidc/octrl/callback?code[]=abc&state=s1")
+
+    assert json_response(conn, 400)
+  end
+
+  # The missing-param fallback clause (oidc_controller.ex callback/2 second
+  # head) is what the guarded head falls through to — pin it so the guard can
+  # never be "fixed" by deleting the fallback.
+  test "GET callback with no code at all is still 400", %{conn: conn} do
+    body =
+      conn
+      |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+      |> get("/v1/auth/oidc/octrl/callback?state=s1")
+      |> json_response(400)
+
+    assert body["error"] == "code and state are required"
+  end
+
   test "org-require-MFA: a governed factor-less user is refused a session at the callback (era-w8)",
        %{conn: conn, org: org} do
     # Make octrl govern: require MFA + give the org a workspace, so the

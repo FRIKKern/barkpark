@@ -24,11 +24,22 @@ defmodule BarkparkWeb.ErrorRenderIntegrationTest do
     decoded = Jason.decode!(body)
 
     # Canonical v1 envelope shape (same as FallbackController) — SDK/CLI key on
-    # error.code. NO exception detail is leaked: message is the generic text.
+    # error.code, which stays byte-identical whatever the fault was.
     assert %{"error" => %{"code" => "internal_error", "message" => message}} = decoded
-    assert message == "unknown error"
+    assert message =~ ~r/\Aunknown error \(.+\)\z/
     refute message =~ "boom"
+    assert message == "unknown error (RuntimeError)"
     refute Map.has_key?(decoded, "errors")
+
+    # ORDER IS LOAD-BEARING, and the looseness above is deliberate.
+    #
+    # The shape assertion admits ANY "unknown error (<something>)" so that the
+    # leak guard on the line after it is the assertion that decides. This file
+    # previously asserted `message == "unknown error"` there, which meant a
+    # renderer swapped to Exception.message/1 aborted the test on the equality
+    # and the leak guard NEVER RAN — a guard that could not lose. Now that
+    # mutation reaches the guard and reds it ("Refute with =~ failed"), and the
+    # exact-family equality that follows still pins WHICH family is spoken.
   end
 
   @tag :capture_log
