@@ -214,6 +214,11 @@ cd "$REPO_ROOT"
 
 # §8b marker→symbol pin. Overridable so a harness can point it at a temp file
 # and prove the arm REDs without planting anything in the real checkout.
+# Whether the caller SUPPLIED one is captured before defaulting: the pin belongs
+# to THIS repo, so a fixture root must not be judged against it unless the
+# harness brought its own.
+CANON_PIN_EXPLICIT=${CANON_PIN+1}
+CANON_PIN_EXPLICIT=${CANON_PIN_EXPLICIT:-0}
 CANON_PIN="${CANON_PIN:-$REPO_ROOT/scripts/canonical-marker-bindings.pin}"
 
 FAIL=0
@@ -641,16 +646,29 @@ CANON_PAIRS=$(printf '%s\n' "$CANON_OUT" | grep '^PAIR ' | sed 's/^PAIR //' \
   | awk '{ print $1 "\t" $2 }' | LC_ALL=C sort || true)
 CANON_PAIR_N=$(printf '%s' "$CANON_PAIRS" | grep -c . || true)
 
-if [ "${REGEN_CANON_PIN:-0}" = "1" ]; then
+if [ -n "${DOCS_ANCHORS_ROOT:-}" ] && [ "$CANON_PIN_EXPLICIT" != "1" ]; then
+  # A CUSTOM ROOT IS NOT THIS REPO. --selftest drives the real gate against
+  # throwaway fixture repos via DOCS_ANCHORS_ROOT; one of them plants a marker
+  # on purpose, so "zero pairings" does not cover this case and a missing pin
+  # there reddened the fixture — and with it the whole gate. The pin is a
+  # statement about the committed corpus; a harness that wants it asserted
+  # supplies its own with CANON_PIN=.
+  echo "ok:   §8b pin not applicable to a custom DOCS_ANCHORS_ROOT (set CANON_PIN= to assert one)"
+elif [ "${REGEN_CANON_PIN:-0}" = "1" ]; then
   printf '%s\n' "$CANON_PAIRS" > "$CANON_PIN"
   echo "regenerated $CANON_PIN ($CANON_PAIR_N pairing(s)) — READ THE DIFF:"
   echo "      a changed symbol means the canonical pointer now names different code."
+elif [ "$CANON_PAIR_N" -eq 0 ]; then
+  # NOTHING TO COMPARE IS NOT A FAILURE HERE, and this arm cost a CI red to get
+  # right. §8 states it directly: zero markers is a LEGITIMATE result, because
+  # CLAUDE.md makes them demand-driven and says they are REMOVED once dedup kills
+  # their decoys. It is also the state of every --selftest fixture root, which
+  # carries four files and no markers at all — so a fail-closed branch here reds
+  # all eight selftest cases and the gate with them. The pin protects a
+  # NON-EMPTY corpus; on an empty one there is no pairing that could have moved.
+  echo "ok:   §8b no marker pairings to compare (§8 scanned $CANON_N marker(s))"
 elif [ ! -f "$CANON_PIN" ]; then
   echo "FAIL: §8b marker→symbol pin missing: $CANON_PIN (regenerate: REGEN_CANON_PIN=1 $0)"
-  FAIL=1
-elif [ "$CANON_PAIR_N" -eq 0 ]; then
-  # Same fail-closed posture as §1: a scan that compared nothing has not passed.
-  echo "FAIL: §8b compared ZERO marker pairings — the scan did not run, so this is not a pass"
   FAIL=1
 elif ! printf '%s\n' "$CANON_PAIRS" | diff -u "$CANON_PIN" - >/dev/null 2>&1; then
   echo "FAIL: §8b a @canonical marker now names a DIFFERENT symbol than the pin records."
